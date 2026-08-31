@@ -55,15 +55,27 @@ An actor holds Care because they hold a live `CARE` role assignment, never
 because of anything an LTI or OIDC claim says, since the platform administrator
 controls what a claim says.
 
-**Every read here goes through a view, and none of them can reach identity.**
-SPEC §8: "instructor/leadership read paths go through views that structurally
-cannot join to `user` identity columns — enforced in the database, not just the
-application." The connection this module is handed is `pulse_app`, which holds
-`SELECT` on five views and on no base table at all, so a query *written here* that
-named `public.person` would be refused by the server rather than by review.
+**No read here can reach identity, and every read that could goes through a
+view.** SPEC §8: "instructor/leadership read paths go through views that
+structurally cannot join to `user` identity columns — enforced in the database,
+not just the application." The connection this module is handed is `pulse_app`,
+which holds `SELECT` on the read views and on `public.person` and `public.user`
+not at all, so a query *written here* that named either would be refused by the
+server rather than by review.
 `tests/unit/test_no_service_reads_an_identity_table_directly.py` is the
 application-side half of that, and it reaches the two tables no grant stops:
 `person` holds a name outright (§2.1) and `user` holds the LMS key.
+
+**One read here names a base table, and it is `public.enrollment`.** E1-13's
+student predicate (`_enrolled_today`) asks whether a user has a live enrollment
+window, over the `SELECT` E1-11 granted `pulse_app` in
+`roster_sync_grants_v001.sql`. This module's sentence used to say `pulse_app`
+held "`SELECT` on five views and on no base table at all"; E1-11's grants on
+`enrollment` and `nrps_call` had already made that false, and this read is what
+made the correction due (`docs/MISTAKES.md` entry 1). The guarantee the sentence
+was standing in for is unchanged and is stated above: `enrollment` carries a
+`user_id`, a `section_id` and two dates, no name and no LMS key, and the
+predicate answers a boolean.
 
 **The grant does not protect the views themselves, and this ticket added three.**
 Measured on the pinned Postgres: all five views are owned by `pulse_admin` with
@@ -83,17 +95,20 @@ session it is handed and never chooses a pool. A caller that could choose one
 could choose the one that reaches identity.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum, StrEnum, auto
 from typing import Final
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import RowMapping, text
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import TextClause
 
 from app.config import Settings
-from app.models.identity import AssignmentRole
+from app.models.identity import LEADERSHIP_ROLES, AssignmentRole
 from app.views_sql.queries import (
     SectionEnrollmentCount,
     SectionRosterRow,
@@ -102,22 +117,34 @@ from app.views_sql.queries import (
 )
 
 __all__ = [
+    "LANDING_FOR_ROLE",
+    "LANDING_PRECEDENCE",
     "LMS_OWNED_TABLES",
+    "SANCTIONED_WRITERS",
     "ActorScope",
     "AuthzError",
     "CareIsNotComposableError",
+    "Door",
+    "LandingRole",
     "LmsOwnedWriteRefused",
     "NoReportingPurviewError",
     "OutOfPurviewError",
     "Purview",
     "ScopedReader",
     "UnknownAssignmentError",
+    "UnknownSanctionedWriterError",
+    "WriteSanction",
+    "chosen_landing",
     "guard_write",
     "holds_care",
+    "holds_leadership",
     "own_grant",
     "raw_comments_permitted",
+    "resolve_landing",
     "resolve_scope",
+    "sanction_for",
     "scoped_reader",
+    "teaching_instructor_assigned",
     "transitive_purview",
 ]
 
@@ -195,6 +222,19 @@ class LmsOwnedWriteRefused(AuthzError):  # noqa: N818
     is not rejected by the LMS and does not error, it is overwritten at the next
     hourly roster sync, so the symptom is a value that changes back by itself and
     reads as a sync bug.
+    """
+
+
+class UnknownSanctionedWriterError(LookupError):
+    """`sanction_for` was asked for a writer `SANCTIONED_WRITERS` does not name.
+
+    **Deliberately outside `AuthzError`.** Every member of that family is a
+    refusal an entry point turns into an answer for a caller, and this is not
+    one: the argument is a writer's name written in the source, so an unknown
+    name is a bug in the calling module rather than a decision about a request.
+    Inside the family it would be caught by somebody's `except AuthzError` and
+    reported as "you may not do that", which is a wrong answer to a question
+    nobody asked.
     """
 
 
@@ -359,6 +399,43 @@ _HOLDS_A_LIVE_CARE_ASSIGNMENT = text(
     " SELECT 1 FROM public.assignment_scope AS acting"
     " WHERE acting.person_id = :person_id"
     " AND acting.role = CAST(:care AS public.assignment_role)"
+    ")"
+)
+
+# Whether this person holds a live assignment in SPEC §2's reporting chain
+# (E1-12). The same shape as the predicate above and here for the same reason it
+# is: `public.assignment_scope` is read through this module and nowhere else, and
+# `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` is what holds
+# that. §7.3 authorizes a roster sync on "an instructor **or any leadership
+# role**", and the leadership half is a `role_assignment` row rather than anything
+# a launch says — `app.services.provisioning` asks it through `holds_leadership`
+# below.
+#
+# The set is bound and cast, so a role name this schema does not have is a
+# database error rather than a silent no-match. It carries "live" in the same
+# sense the Care predicate does, and gains end-dating with it.
+_HOLDS_A_LEADERSHIP_ASSIGNMENT = text(
+    "SELECT EXISTS ("
+    " SELECT 1 FROM public.assignment_scope AS held"
+    " WHERE held.person_id = :person_id"
+    " AND held.role = ANY(CAST(:roles AS public.assignment_role[]))"
+    ")"
+)
+
+# Whether one person already holds the teaching-instructor grant over one section.
+# **A grant question rather than a purview question**, and it is here rather than
+# in the caller because `public.assignment_scope` is this module's view to read:
+# E0-41 fails any module under `backend/app/` outside this one that runs SQL
+# naming it, on the ground that a second reader is a second place the scoping rule
+# can be got wrong. The caller is `app.services.roster_sync`, which holds `INSERT`
+# on `role_assignment` and deliberately no `SELECT` — so this is also the only way
+# it can ask.
+_HOLDS_THE_TEACHING_INSTRUCTOR_GRANT = text(
+    "SELECT EXISTS ("
+    " SELECT 1 FROM public.assignment_scope AS granted"
+    " WHERE granted.person_id = :person_id"
+    " AND granted.role = CAST(:role AS public.assignment_role)"
+    " AND granted.section_id = :section_id"
     ")"
 )
 
@@ -678,6 +755,78 @@ def holds_care(session: Session, *, person_id: UUID) -> bool:
     return bool(answer)
 
 
+def holds_leadership(session: Session, *, person_id: UUID) -> bool:
+    """Does this person hold a live assignment in SPEC §2's reporting chain? (E1-12)
+
+    SPEC §7.3 authorizes a roster sync on a launch "by an instructor **or any
+    leadership role**", and §2.1 makes a role a `role_assignment` row rather than
+    anything a launch says — the administrator of a platform writes what its
+    launches claim, and a limb read out of the roles claim would let them hand
+    themselves a section's whole roster of names and email addresses.
+    `app.services.provisioning` asks this once a launch's subject has resolved to
+    a person, and only when the claim-based half has already said no.
+
+    **Here rather than at the caller**, and that placement is the rule rather than
+    a preference: `public.assignment_scope` is unfiltered — nothing in the
+    database narrows it — so every read of it goes through this module, where
+    §2.1's scope rules are written. `tests/unit/test_the_org_views_are_read_only_
+    through_the_grant.py` is the invariant that holds it, and it names this file
+    as where a new predicate belongs.
+
+    **It is a predicate about a role and not a purview**, which is why it sits
+    beside `holds_care` rather than inside `resolve_scope`. It answers whether a
+    launch may trigger a write of the tool's own; it scopes no read and returns no
+    node. `LEADERSHIP_ROLES` is the enumerated set, and `CARE`, `ADMIN` and
+    `INSTRUCTOR` are outside it deliberately — the first two hold no rank in the
+    supervision chain (§2.1), and an instructor is §7.3's other limb, authorized
+    by the launch's own LIS role against a different source.
+
+    Both directions cost something and they are not symmetric. A false *no* is a
+    dean's section discovered late, which is what E1-10 shipped on purpose. A
+    false *yes* points a scheduled sync at a roster §7.3 does not authorize, and
+    that roster is names and email addresses.
+    """
+    answer = session.execute(
+        _HOLDS_A_LEADERSHIP_ASSIGNMENT,
+        {"person_id": person_id, "roles": [role.value for role in LEADERSHIP_ROLES]},
+    ).scalar_one()
+    return bool(answer)
+
+
+def teaching_instructor_assigned(session: Session, *, person_id: UUID, section_id: UUID) -> bool:
+    """Does this person already hold the `INSTRUCTOR` grant over this section?
+
+    Asked by E1-11's roster sync before it writes one, so that an hourly run does
+    not add a second identical grant every hour. SPEC §2.1 puts no uniqueness rule
+    on `role_assignment` — two chairs of one department is a shape no ticket rules
+    out — so nothing in the database refuses the duplicate, and the writer has to
+    ask.
+
+    **It lives here because the view does.** E0-41's rule is that
+    `public.assignment_scope` is read through this module and nowhere else, and
+    `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` enforces it.
+    The sync also holds `INSERT` on `role_assignment` and no `SELECT` — E1-11's D8
+    withholds it deliberately — so this view is not merely the tidy way for it to
+    ask, it is the only way.
+
+    **Not an authorization decision**, and the difference matters for how it fails.
+    `guard_write` is what decides whether the sync may write the row at all; this
+    only says whether the row is already there. A false *yes* leaves a real
+    instructor without the section's report, and a false *no* writes a duplicate
+    grant to somebody who already had it — neither widens anybody's purview, which
+    is why this is a plain predicate and not a `ScopedReader` method.
+    """
+    answer = session.execute(
+        _HOLDS_THE_TEACHING_INSTRUCTOR_GRANT,
+        {
+            "person_id": person_id,
+            "role": LMS_OWNED_ASSIGNMENT_ROLE.value,
+            "section_id": section_id,
+        },
+    ).scalar_one()
+    return bool(answer)
+
+
 def resolve_scope(
     session: Session,
     *,
@@ -865,7 +1014,104 @@ LMS_OWNED_ASSIGNMENT_ROLE: Final[AssignmentRole] = AssignmentRole.INSTRUCTOR
 ROLE_ASSIGNMENT_TABLE: Final[str] = "role_assignment"
 
 
-def guard_write(*, table: str, assignment_role: AssignmentRole | None = None) -> None:
+@dataclass(frozen=True)
+class WriteSanction:
+    """One writer's permission to pass this chokepoint for a named set of tables.
+
+    A value rather than a handle onto the catalog, and frozen rather than merely
+    conventional: a caller holding a mutable sanction could add a table to the
+    very object `sanction_for` handed it, and if that object shared the catalog's
+    own `frozenset` the widening would reach every later caller in the process
+    with nothing recording it.
+
+    **Holding one is not the permission.** `guard_write` reads
+    `SANCTIONED_WRITERS` and never `sanction.tables`, so a hand-built sanction
+    naming an uncatalogued writer — or naming more tables than the catalog grants
+    its writer — is refused exactly as no sanction at all would be. That is the
+    difference between this and a bypass flag, and ADR 0090 is the record.
+    """
+
+    writer: str
+    tables: frozenset[str]
+
+
+# Every writer sanctioned to pass this chokepoint, and the tables each may write.
+# **The authority, not the argument** (ADR 0090): `guard_write` consults this
+# mapping, so a caller cannot authorize itself by constructing the sanction it
+# wants.
+#
+# **Two entries, and adding a third is the conversation.** `launch_provisioning`
+# is `app.services.provisioning`, E1-10's launch-time ingestion: SPEC §2.1 gives
+# courses and sections two arrival paths, "hourly roster sync + launch-time
+# ingestion", and §7.3 makes the first staff launch of a section the only thing
+# that discovers it at all. `user` is here because ADR 0045 already named "the
+# launch path that creates a `user` row" as a sanctioned writer when it put `user`
+# in the guarded set.
+#
+# **`enrollment` is deliberately absent from the launch writer**, and so is the
+# `INSTRUCTOR` `role_assignment` row: a launch proves one person's presence, not a
+# roster.
+#
+# `roster_sync` is `app.services.roster_sync`, E1-11's hourly NRPS pull — §2.1's
+# other arrival path. It takes three: `user`, because a member this deployment has
+# never seen needs a row before anything can be enrolled; `enrollment`, which is
+# what §3.4's participation windows are computed from; and `role_assignment`, for
+# the teaching instructor's row, which is the first entry in this catalog that is a
+# row-grain rule rather than a table (see `guard_write` below).
+#
+# **`course` and `section` are deliberately not in the sync's entry**, and the
+# absence is the load-bearing part: SPEC §7.3 gives a section exactly one way to be
+# discovered — the staff launch that stores its roster address — so a sync able to
+# write `section` would be inventing a section from a roster it could only fetch
+# because that section already existed.
+#
+# **The inventory is pinned in a test, not here** (`docs/MISTAKES.md` entry 35).
+# `tests/unit/test_a_sanctioned_writer_satisfies_the_chokepoint.py` compares this
+# mapping against a hand-written copy as an equality, so a writer or a table added
+# here is a visible diff in a test file this module cannot shrink.
+SANCTIONED_WRITERS: Final[Mapping[str, frozenset[str]]] = {
+    "launch_provisioning": frozenset({"course", "section", "user"}),
+    "roster_sync": frozenset({"user", "enrollment", "role_assignment"}),
+}
+
+
+def sanction_for(writer: str) -> WriteSanction:
+    """The catalogued sanction for `writer`, or a failure naming it.
+
+    Raises `UnknownSanctionedWriterError` for a name the catalog does not hold,
+    rather than answering with an empty sanction: a lookup that handed out
+    something for every name would make `SANCTIONED_WRITERS` a comment, and an
+    empty sanction would fail at the first `guard_write` call with a message
+    about a table instead of about the name that was wrong.
+    """
+    tables = SANCTIONED_WRITERS.get(writer)
+    if tables is None:
+        raise UnknownSanctionedWriterError(
+            f"{writer!r} is not a sanctioned writer. `SANCTIONED_WRITERS` in app/services/authz.py "
+            f"names {sorted(SANCTIONED_WRITERS)}, and a writer is added to it in the pull request "
+            "that needs it, with the sentence it rests on (ADR 0090)."
+        )
+    return WriteSanction(writer=writer, tables=tables)
+
+
+def _catalog_grants(sanction: WriteSanction | None, table: str) -> bool:
+    """Whether the catalog grants `sanction`'s writer this table.
+
+    The catalog is read here and the sanction is read only for the name it was
+    issued under. A sanction whose `tables` a caller widened, or whose `writer`
+    a caller invented, grants nothing.
+    """
+    if sanction is None:
+        return False
+    return table in SANCTIONED_WRITERS.get(sanction.writer, frozenset())
+
+
+def guard_write(
+    *,
+    table: str,
+    assignment_role: AssignmentRole | None = None,
+    sanction: WriteSanction | None = None,
+) -> None:
     """Refuse a write to data the LMS owns. SPEC §8: "never hand-edited in Pulse."
 
     Called by every application write path before it writes. It answers nothing
@@ -876,21 +1122,43 @@ def guard_write(*, table: str, assignment_role: AssignmentRole | None = None) ->
     `assignment_role` is read only for `role_assignment` and is `None` everywhere
     else, because no other table in this schema carries a row whose ownership
     depends on a column value.
+
+    **With no `sanction` the answer is unconditional refusal on the guarded set**,
+    which is the behaviour every caller in this project that is not a catalogued
+    writer gets and the property ADR 0090 was designed around. With one, the
+    *catalog* decides: `sanction_for` is how a writer obtains it, and a sanction
+    the catalog does not back refuses exactly as none would.
+
+    **The teaching-instructor row below reads the catalog the same way**, and E1-11
+    is why. That branch was an unconditional refusal while no catalogued writer was
+    granted `role_assignment`; SPEC §2.1 makes the teaching instructor LMS-owned and
+    the roster is where Pulse learns who teaches a section, so the sync has to be
+    able to pass it — and the alternative to passing the guard is a writer that does
+    not call it, which is exactly the bypass ADR 0045 names. It mirrors the branch
+    above exactly: the catalog is the authority, `sanction.tables` is never read,
+    and any role but `INSTRUCTOR` on this table is Pulse's own to write.
     """
-    if table in LMS_OWNED_TABLES:
+    if table in LMS_OWNED_TABLES and not _catalog_grants(sanction, table):
+        sanctioned = "" if sanction is None else f" `{sanction.writer}` is not sanctioned for it."
         raise LmsOwnedWriteRefused(
             f"public.{table} holds LMS-owned data and Pulse never hand-edits it (SPEC 2.1, 8). An "
             "edit here is not rejected by the LMS and does not error: it is overwritten at the "
             "next hourly roster sync, so the symptom is a value that changes back by itself."
+            f"{sanctioned}"
         )
 
-    if table == ROLE_ASSIGNMENT_TABLE and assignment_role is LMS_OWNED_ASSIGNMENT_ROLE:
+    if (
+        table == ROLE_ASSIGNMENT_TABLE
+        and assignment_role is LMS_OWNED_ASSIGNMENT_ROLE
+        and not _catalog_grants(sanction, ROLE_ASSIGNMENT_TABLE)
+    ):
+        sanctioned = "" if sanction is None else f" `{sanction.writer}` is not sanctioned for it."
         raise LmsOwnedWriteRefused(
             f"a {LMS_OWNED_ASSIGNMENT_ROLE.value} row on public.{ROLE_ASSIGNMENT_TABLE} is SPEC "
             "2.1's teaching-instructor link, which the LMS owns. It is not a stale attribute but "
             "a purview grant — 2.1 computes purview from exactly these rows — so writing one "
             "grants somebody oversight of a section. Every other role on this table is Pulse's "
-            "own, built top-down in the admin console."
+            f"own, built top-down in the admin console.{sanctioned}"
         )
 
 
@@ -917,4 +1185,298 @@ def raw_comments_permitted(*, response_count: int, n_threshold: int) -> bool:
         "4's rule is a batching rule rather than the comparison this signature suggests — "
         "under-threshold comments feed the summary and surface later, batched so that timing "
         "cannot identify an author — and 4.1 item 3 makes what it gates an invariant."
+    )
+
+
+# ---------------------------------------------------------------------------
+# What a session may act as: the door, the landing, and the rows that decide it.
+#
+# One section rather than pieces distributed among the sections above, and the
+# two statements below sit here rather than with the others: a reader asking
+# "which screen does this person open on" gets the whole rule — the enums, the
+# map, the ordering, the SQL and the two functions — without leaving it (E1-13,
+# ADR 0098).
+# ---------------------------------------------------------------------------
+
+
+class Door(Enum):
+    """Which entry door somebody arrived at, and so which assignments may admit them.
+
+    SPEC §2.1's table is authoritative and states the rule as a property of the
+    role: every reporting role can enter through an LTI launch, leadership
+    included; every role except instructor and student can *also* enter by web
+    login; Care and Admin are web login only, "their work has no launch context";
+    and students enter by launch only. ADR 0026 puts that on `role_assignment` as
+    two stored generated columns, so entering a door is a filter over rows rather
+    than a branch in Python — and this enum is what names which filter.
+
+    A two-member enum rather than a boolean or a column name, so a router cannot
+    ask for a column that does not exist and cannot pass the wrong one by getting
+    an argument the wrong way round. `app/api/lti.py` passes `LAUNCH` and
+    `app/api/auth.py` passes `WEB`, and those two lines are the whole of what
+    either router knows about which door it is.
+
+    **The member names are a contract with `app.services.session`**, which writes
+    a session's door by name and reads it back as `Door[...]`. Renaming a member
+    invalidates every session already sitting in somebody's browser.
+    """
+
+    LAUNCH = auto()
+    WEB = auto()
+
+
+class LandingRole(StrEnum):
+    """The five views a door can land somebody on, by the testid each carries.
+
+    The value *is* the `data-testid` the SPA's landing route puts on the page, so
+    the contract a Playwright spec addresses and the contract the frontend
+    implements are the same string rather than two strings that have to agree.
+    `mock-idp/app/pages.py` names its own controls the same way and for the same
+    reason.
+
+    The **name**, lowercased, is the route segment — `fragment_redirect` builds
+    `/app/<name>#session=` out of it and `frontend/src/router.tsx` mounts the same
+    segments (ADR 0086). So both halves of this enum are a contract with the
+    frontend: the name addresses the route and the value addresses the page. The
+    name is also what `app.services.session` writes into a session and reads back
+    as `LandingRole[...]`, so it may not be renamed without invalidating every
+    session in flight.
+
+    **Five views and eight assignment roles**, which is what `LANDING_FOR_ROLE`
+    below is for: §2.1's five leadership roles differ in *purview*, which E9
+    computes over the supervision graph, and not in which screen they arrive at.
+    """
+
+    STUDENT = "pulse-landing-student"
+    INSTRUCTOR = "pulse-landing-instructor"
+    LEADERSHIP = "pulse-landing-leadership"
+    CARE = "pulse-landing-care"
+    ADMIN = "pulse-landing-admin"
+
+
+# Which view each assignment role opens on. All eight members of `AssignmentRole`
+# are spelled out, and the five in `LEADERSHIP_ROLES` share one view because SPEC
+# §2 gives leadership one entry point: what separates a chair from a dean is the
+# purview E9 computes, not the screen they arrive at.
+#
+# **`STUDENT` is deliberately unreachable from here.** ADR 0028: "A student holds
+# no `role_assignment` row, and one cannot be written: the enum has no label for
+# it." A student's access is resolved from `enrollment`, which is the whole reason
+# `resolve_landing` below asks two questions rather than one.
+#
+# **A role this mapping does not name contributes no landing**, which is the
+# fail-closed direction and the same shape as `_OWN_GRANT_ROOT` above and ADR
+# 0026's positive door lists: a ninth role added to the enum by a later migration
+# gets no view until somebody decides which one, and the failure reports itself
+# the first time that person tries to enter rather than landing them on whichever
+# screen a default happened to name.
+LANDING_FOR_ROLE: Final[Mapping[AssignmentRole, LandingRole]] = {
+    AssignmentRole.INSTRUCTOR: LandingRole.INSTRUCTOR,
+    AssignmentRole.LEAD_FACULTY: LandingRole.LEADERSHIP,
+    AssignmentRole.CHAIR: LandingRole.LEADERSHIP,
+    AssignmentRole.ASSISTANT_DEAN: LandingRole.LEADERSHIP,
+    AssignmentRole.DEAN: LandingRole.LEADERSHIP,
+    AssignmentRole.VP_ACADEMICS: LandingRole.LEADERSHIP,
+    AssignmentRole.CARE: LandingRole.CARE,
+    AssignmentRole.ADMIN: LandingRole.ADMIN,
+}
+
+# Which view a person holding more than one hat opens on, highest first (ADR
+# 0098). One total ordering at both doors: SPEC §2 says a launch shows the
+# person's full purview rather than the launch context, so the higher-standing
+# hat's screen is the useful one, and leadership over Care over admin is what
+# E0-18 wrote down and nothing held — `docs/tickets/e1/carried-from-e0.md`'s
+# second entry measured that reversing it left 424 tests green.
+#
+# **`STUDENT` is not in it, and that absence is the second half of the rule.**
+# Enrollment is a fallback consulted only when no assignment lands, so an
+# assignment always beats an enrollment. Inside this ordering a student landing
+# would be something an assignment could lose to, and the teaching assistant
+# enrolled in the course she grades would open on her own results page instead of
+# her section's.
+#
+# E9's role switcher is §2's real answer for people with several hats and
+# supersedes this ordering when it lands. Until then this is the minimal recorded
+# rule, and it is pinned over every ordered pair in the unit suite and again over
+# rows and real doors in the integration suite.
+LANDING_PRECEDENCE: Final[tuple[LandingRole, ...]] = (
+    LandingRole.LEADERSHIP,
+    LandingRole.INSTRUCTOR,
+    LandingRole.CARE,
+    LandingRole.ADMIN,
+)
+
+# Which generated column each door is a filter over (ADR 0026). A mapping keyed by
+# `Door` and written in this module, never a name a caller supplies: the template
+# below is interpolated with these two values and with nothing else, so the only
+# thing a caller contributes to the statement is a bound `person_id`
+# (`docs/MISTAKES.md` entry 17).
+_DOOR_PERMISSION_COLUMN: Final[Mapping[Door, str]] = {
+    Door.LAUNCH: "permits_launch",
+    Door.WEB: "permits_web_login",
+}
+
+# The roles on one person's live assignments, filtered by the door they entered
+# at. Built from one template over the mapping above so the projection is written
+# once, exactly as `_DESCENDANTS` is. `assignment_scope_v002.sql` is what publishes
+# the two columns, and E0-41's rule — this view is read from this module and
+# nowhere else — is why the filter is here rather than at the door.
+#
+# "Live" reads as "the row exists", as it does for the three predicates above:
+# `role_assignment` carries no validity dates, so a revoked assignment is a
+# deleted row. The one dated boundary in this module is the enrollment window
+# below.
+_ASSIGNED_ROLES_TEMPLATE = (
+    "SELECT held.role AS role"
+    " FROM public.assignment_scope AS held"
+    " WHERE held.person_id = :person_id"
+    " AND held.{column}"
+)
+
+_ASSIGNED_ROLES_AT: Final[Mapping[Door, TextClause]] = {
+    door: text(_ASSIGNED_ROLES_TEMPLATE.format(column=column))
+    for door, column in _DOOR_PERMISSION_COLUMN.items()
+}
+
+# Whether this user is enrolled in anything on a given day — the whole of a
+# student's access (ADR 0028), and the one read in this module that names a base
+# table rather than a view. See the module docstring on why that is safe here and
+# on the sentence it corrects.
+#
+# **The window is inclusive at both ends.** ADR 0020's `'[]'` convention makes an
+# end date the last *included* day, so somebody whose enrollment ends today is
+# still enrolled today and somebody whose enrollment ended yesterday is not. A
+# NULL `ended_on` is the open window a roster sync leaves on a member it is still
+# seeing (ADR 0023), and the `IS NULL` arm is what stops three-valued logic
+# answering "unknown" for every current student.
+#
+# `EXISTS` rather than a count: the question is whether there is any live
+# enrollment at all, and a count over somebody in nine sections reads nine rows to
+# answer a boolean.
+_A_LIVE_ENROLLMENT = text(
+    "SELECT EXISTS ("
+    " SELECT 1 FROM public.enrollment AS enrolled"
+    " WHERE enrolled.user_id = :user_id"
+    " AND enrolled.started_on <= :today"
+    " AND (enrolled.ended_on IS NULL OR enrolled.ended_on >= :today)"
+    ")"
+)
+
+
+def chosen_landing(
+    roles: Collection[AssignmentRole],
+    *,
+    enrolled_today: bool,
+    door: Door,
+) -> LandingRole | None:
+    """Which view this set of roles opens on, or `None` if none of them does.
+
+    **Pure: no session, no configuration, no IO.** `resolve_landing` below does
+    the reads and this makes the decision, and the split is what lets the ordering
+    be proved over inputs rather than over rows.
+
+    `roles` is the set of roles on the person's live assignments **already
+    filtered by the door's permission column**. The filtering is ADR 0026's
+    column's job and this function takes its answer as given: writing the door
+    rule a second time here would be one rule with two authorities, and the one an
+    operator can read off the row is the one that stops being consulted
+    (`docs/MISTAKES.md` entry 13).
+
+    A role `LANDING_FOR_ROLE` does not name is **skipped** — not defaulted, which
+    would land somebody on whichever screen came last in somebody's `if`, and not
+    raised, which would turn an unfinished migration into a 500 on a real
+    person's launch. Skipping is also why an unknown role beside a real one leaves
+    the real one standing.
+
+    `enrolled_today` is consulted only when no assignment lands, and only at the
+    launch door: §2.1's table gives the student row one entry point, so somebody
+    whose only claim on a view is an enrollment has none at the web login, and the
+    honest answer there is the calm page rather than their results.
+    """
+    landings = {LANDING_FOR_ROLE[role] for role in roles if role in LANDING_FOR_ROLE}
+    for landing in LANDING_PRECEDENCE:
+        if landing in landings:
+            return landing
+    if door is Door.LAUNCH and enrolled_today:
+        return LandingRole.STUDENT
+    return None
+
+
+def _enrolled_today(session: Session, *, user_id: UUID, settings: Settings) -> bool:
+    """Is this user enrolled in anything on the institution's current day?
+
+    **The institution's day, never UTC's and never `CURRENT_DATE`** — Todd's
+    ruling on E1-11, applied to a second read. SPEC §8 makes the institution
+    timezone a deployment-level setting, and a boundary evaluated in UTC puts
+    everybody who launches in the evening a calendar day out.
+
+    The expression is the one `app.services.provisioning` uses to decide which
+    term contains a launch (`_term_containing_the_launch_day`); the two copies are
+    named at both ends so that a change to one is a change somebody can find. A
+    shared helper is the right answer and is *proposed* rather than taken here,
+    because it moves a function across a module boundary.
+    """
+    today = datetime.now(ZoneInfo(settings.institution_timezone)).date()
+    answer = session.execute(_A_LIVE_ENROLLMENT, {"user_id": user_id, "today": today}).scalar_one()
+    return bool(answer)
+
+
+def resolve_landing(
+    session: Session,
+    *,
+    door: Door,
+    person_id: UUID | None,
+    user_id: UUID | None,
+    settings: Settings,
+) -> LandingRole | None:
+    """Which view this session's own identity opens on at this door, or `None`.
+
+    E1-13, and authorization's first question: what may this session act as. The
+    answer comes from the app-owned assignment model and from `enrollment`, and
+    never from what a token said — the person who administers an LMS writes what
+    its launches state, which is E0-09 criterion 10's whole argument.
+
+    Two reads, in this order, and the order is the recorded decision (ADR 0098):
+
+    1. the person's live assignments, filtered by `door`'s permission column, run
+       through `chosen_landing`'s precedence;
+    2. only if that lands nothing, and only at the launch door, whether the user
+       holds an enrollment window containing today — ADR 0028's student.
+
+    Assignments before enrollment is what makes staff who are also enrolled act as
+    staff.
+
+    **Only the session's own identity is ever resolved here.** Both ids come from
+    `app.services.identity`, which resolved them out of the door's verified token,
+    and no router passes another person's. Whether a *caller* may ask this about
+    an arbitrary id is the rule `resolve_scope` still does not enforce, and E9
+    owns it (`docs/tickets/e1/carried-from-e0.md`).
+
+    **Each absent id skips its own read.** A launch by a student resolves no
+    `person`, a web login resolves no `user` at all, and both absent is a session
+    with nothing to look up — which is the calm no-access page rather than an
+    error.
+
+    **This does IO**, so both `async def` handlers reach it through
+    `run_in_threadpool` (ADR 0013): the session is synchronous and reading it on
+    the event loop would block every other request on the process.
+    """
+    roles: list[AssignmentRole] = []
+    if person_id is not None:
+        roles = [
+            AssignmentRole(role)
+            for role in session.execute(
+                _ASSIGNED_ROLES_AT[door], {"person_id": person_id}
+            ).scalars()
+        ]
+
+    landed = chosen_landing(roles, enrolled_today=False, door=door)
+    if landed is not None:
+        return landed
+    if door is not Door.LAUNCH or user_id is None:
+        return None
+    return chosen_landing(
+        roles,
+        enrolled_today=_enrolled_today(session, user_id=user_id, settings=settings),
+        door=door,
     )

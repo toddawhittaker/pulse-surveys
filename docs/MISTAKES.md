@@ -179,7 +179,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 8. Prescribing a fix without probing it
 
-**Caught: 6** · [the incidents, the root cause, and the whole rule](mistakes/08-prescribing-a-fix-without-probing-it.md)
+**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/08-prescribing-a-fix-without-probing-it.md)
 
 ## 15. A property test's generator excluded the case its own docstring named
 
@@ -187,7 +187,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 19. A test held its expectation in a copy of the thing it was checking
 
-**Caught: 5** · [the incidents, the root cause, and the whole rule](mistakes/19-a-test-held-its-expectation-in-a-copy-of.md)
+**Caught: 6** · [the incidents, the root cause, and the whole rule](mistakes/19-a-test-held-its-expectation-in-a-copy-of.md)
 
 ## 14. An enumeration was reported as an impossibility
 
@@ -195,7 +195,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
+**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
 
 **Rule.** When a guard enumerates mechanisms, require it to *find* each one on a
 subject that certainly has it, as a control. A guard that only ever reports
@@ -204,7 +204,7 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 5** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 17. An unqualified table name let the caller choose which table a guard read
 
@@ -212,7 +212,7 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 ## 34. A pipeline discarded a non-zero exit and printed a line that read as success
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
+**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
 
 **Rule.** Never read a gate's result through a pipe. `cmd | tail` reports the
 exit status of `tail`, so a failing gate prints a passing line. Redirect to a
@@ -272,7 +272,7 @@ file and check the status, or run the gate bare.
 
 ## 31. "Running it twice is safe" was tested only against a database the loader itself had filled
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/31-running-it-twice-is-safe-was-tested-only-against.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/31-running-it-twice-is-safe-was-tested-only-against.md)
 
 ## 27. A guard that reads a command as text refused a command that was only reading
 
@@ -323,3 +323,40 @@ part of the guard: pass `--` before any list that came from a diff or a glob, an
 refuse leading-dash arguments in the script too. A decision made before your logic
 runs is still your decision. Test the near miss that distinguishes the fix from
 doing nothing.
+
+## 39. A gate run was invalidated by edits that landed while it ran
+
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/39-a-gate-run-was-invalidated-by-edits-that.md)
+
+**Rule.** While a gate runs, the tree it runs in is read-only — no edits, no
+checkouts, no restores. A verdict is valid only for the tree it started on; if
+the tree moved mid-run, the verdict is void and the run is repeated, whatever it
+printed.
+
+## 40. The suite ran under an environment nobody chose, and it was a different one in CI
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/40-the-suite-ran-under-an-environment-nobody-chose.md)
+
+**Rule.** A test whose subject reads the process environment states the value it
+runs under, in its own fixture chain. Anything a fixture runs in process brings
+its whole startup with it — a tool that loads `.env` loads it for every test
+that follows — so wrap such a run in a full snapshot-and-restore of the state it
+mutates, not an enumerated one: the names that need undoing are exactly the ones
+the fixture was never told. And when a suite is green locally and red in CI,
+probe what each process actually holds at the failing call; do not infer it from
+the fixtures that should have set it.
+
+## 41. A request path inherited a background job's dependency, at that dependency's default retry policy
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/41-a-request-path-inherited-a-background-dependency.md)
+
+**Rule.** A request path may not be able to fail because a background dependency
+was unavailable, and it may not wait to find out. When a handler enqueues work,
+publish with retries off, keep the result backend out of it for a task whose
+answer nobody reads, and catch broadly — the request has already done its own job
+by then, and the scheduled run covers the gap. A client library's defaults are
+written for the context that library is usually called from, and a worker's
+defaults on a request path turn a dependency that is *down* into a request that is
+*hanging*. And the corollary: a change that adds a call to a shared entry point is
+not verified by the suites of the ticket that made it — run the whole suite, and
+read its timing as well as its result.

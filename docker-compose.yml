@@ -356,7 +356,7 @@ services:
   # actually ships. What keeps it out of a deployment is not this file: see
   # docs/adr/0038-the-mock-platform-ships-in-the-base-compose-file.md.
   #
-  # **No `env_file:`, deliberately.** This service needs five addresses and none
+  # **No `env_file:`, deliberately.** This service needs six addresses and none
   # of the application's configuration surface, and `env_file:` is
   # all-or-nothing — it would hand a fake platform the database credentials,
   # which ADR 0009 spends two rules keeping out of containers that have no use
@@ -369,7 +369,7 @@ services:
     # with one correct value, so there is nothing for an operator to set per
     # deployment — and the epic README's rule is that an `.env.example` entry is
     # earned by a `Settings` field or a Compose interpolation, so interpolating
-    # here would add five entries to the application's documented configuration
+    # here would add six entries to the application's documented configuration
     # surface for a service that is not the application. See
     # docs/adr/0037-the-mock-platform-is-configured-by-compose-literals.md.
     #
@@ -389,6 +389,13 @@ services:
       # two steps of the protocol and a mock that conflated them would let a tool
       # conflate them too.
       MOCK_LMS_TOOL_LAUNCH_URL: http://api:8000/lti/launch
+      # Where the tool publishes the key set this platform verifies a
+      # `client_assertion` against (E1-06). The third fact this platform holds
+      # about the tool it serves, and the one a real LMS is given when a tool is
+      # registered with it: the assertion is signed by the tool, so the platform
+      # has to fetch the tool's public half to check it. A container address like
+      # the two above, because this container is what resolves it.
+      MOCK_LMS_TOOL_JWKS_URL: http://api:8000/lti/jwks
     # Documentation, not publishing: reachable from `api` on this network, and
     # from nothing on the host. The development override publishes it.
     expose:

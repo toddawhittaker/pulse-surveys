@@ -1,0 +1,49 @@
+-- What the application may do to the in-flight launch handshake store — ticket
+-- E1-08, SPEC §7.3, SPEC §9.1, ADR 0001, ADR 0089.
+--
+-- E1-08 holds the launch handshake's `state` -> `nonce` mapping in
+-- public.lti_launch_state rather than in a cookie, because a launch runs inside
+-- the LMS's cross-site iframe where a third-party cookie is blocked whatever its
+-- attributes say (ADR 0089). Both `/lti/login` and `/lti/launch` run on the
+-- connection pulse_app holds, and until this file it held nothing here — so the
+-- login's remember and the launch's look-up would be refused by Postgres with
+-- 42501 rather than by anything the ticket is about.
+--
+-- **SELECT, INSERT and DELETE, and nothing else.**
+--
+--   - INSERT is `app.lti.in_flight.remember_launch`, at login.
+--   - SELECT is `look_up_launch`, at launch, reading the expected `nonce` back —
+--     the one runtime read grant this store needs, and why it is not INSERT-only
+--     like the nonce ledger beside it.
+--   - DELETE is `consume_launch` (single-use: a `state` is deleted on a refusal so
+--     it cannot be retried) and `purge_expired_launch_states` (the daily beat
+--     reclaiming the tail).
+--   - UPDATE stays withheld: a handshake row is written once at login and read
+--     once at launch, never rewritten, and a role that could rewrite `nonce` or
+--     `expires_at` could keep a stale handshake alive. The verb withheld is the
+--     assertion.
+--
+-- **A base table rather than a read view, the same exception the grants before it
+-- took** (`lti_registration_grants_v001.sql`, `tool_signing_key_grants_v001.sql`,
+-- `lti_launch_nonce_grants_v001.sql`). SPEC §4.1 routes an *identity* read path
+-- through a view; this table holds a `state`, a `nonce` and an expiry, and no
+-- person. A view over it would select every column of its source and exist only
+-- to satisfy the shape of the rule.
+--
+-- **pulse_care is granted nothing.** The Care queue reaches a threat comment and
+-- the audited reveal; a launch handshake is no part of that surface (ADR 0001,
+-- SPEC §6.2).
+--
+-- **USAGE ON SCHEMA public is not granted again here.** identity_grants_v001.sql
+-- grants it to pulse_app and identity_grants_v002.sql restates it; an ACL entry
+-- records no history, so a third grant would be indistinguishable from those and
+-- any matching revoke would remove all of them.
+--
+-- **The downgrade drops the table** (this revision creates it), so there is
+-- nothing left to revoke — the privileges go with the relation.
+-- `RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py`
+-- is the hand-written record this widening is measured against; E1-08 adds its
+-- three entries there in the same change (ADR 0043), raised as
+-- `docs/disputes/E1-08-05.md`.
+
+GRANT SELECT, INSERT, DELETE ON public.lti_launch_state TO pulse_app;

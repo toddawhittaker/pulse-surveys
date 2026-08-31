@@ -166,6 +166,25 @@ today only because nothing under `backend/app/` calls `guard_write` at all. Todd
 decision, 2026-08-19: **write it down and leave the mechanism to E1**, which
 arrives with a real writer to design against. ADR 0069 carries the "done when".
 
+**Closed by [ADR 0090](0090-a-sanctioned-writer-passes-the-chokepoint-by-being-in-a-catalog.md),
+E1-10 (2026-08-26).** A sanctioned writer still calls `guard_write` and passes a
+`WriteSanction` that a catalog in the same module has to back: with no sanction the
+answer is exactly the unconditional refusal the paragraph above describes, and with
+one the catalog decides — never the sanction the caller is holding, which is what
+keeps it from being the flag that paragraph says does not exist.
+`app.services.provisioning` is the first such writer. The paragraph stands as the
+record of what was true until then; its first two sentences no longer are.
+
+**The grant this record wanted arrived with it, narrowed.** "Refusing the
+*application role* `INSERT`/`UPDATE` on these tables" is still unavailable, for
+exactly the reason given below — the launch path and E1-11's sync are one
+connection — so E1-10 spent the smallest grant its writer needs instead
+(`backend/app/views_sql/launch_provisioning_grants_v001.sql`), with `UPDATE` at
+column grain so the connection cannot reach a section's derived calendar or a
+course's number. It is a second instrument beside the chokepoint rather than a
+replacement for it: the guard knows which writer is asking and the database does
+not, and the database holds for callers that never ask the guard at all.
+
 **A typo in the set refuses nothing.** `LMS_OWNED_TABLES` holds table *names*, so
 `"courses"` would refuse writes to a table that does not exist while leaving the
 real one writable, and it would read as correct in review.

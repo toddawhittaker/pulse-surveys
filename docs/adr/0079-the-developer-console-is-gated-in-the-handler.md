@@ -9,6 +9,31 @@ Written after the fact. `GET /dev` reached the tool without a ticket and without
 record, and it is a become-any-user surface, which is the last kind of thing that
 should exist only in a docstring.
 
+**Amended 2026-08-25 by E1-05, in the context below and nowhere else.** Where
+this record says the page offers "a link to the mock LMS launcher", it now
+offers one launcher link per **registered platform**, at the origin of that
+registration's `authorization_endpoint`, and an honest line naming `make seed`
+when no platform is registered at all. The origin used to come from a
+process-wide setting, which rendered a link whatever the database held —
+including when it held nothing, which sent a developer to a port that answers
+nothing. The gate this record decides is untouched: the router is still included
+unconditionally and the handler still answers `404` outside development, and the
+page is a larger become-any-user surface for the change rather than a smaller
+one, since it now enumerates the registered platforms too.
+
+**Amended 2026-08-26 by E1-14, settling what the decision and consequences
+sections below flagged as open.** The decision section's "belongs with
+whatever decision settles `/healthz`, which E1 owns" and the consequences
+section's "nothing in the suite asserts anything about another method on this
+route ... whoever closes it adds the assertion with the fix" are both now
+answered: [ADR 0087](0087-healthz-and-dev-keep-disclosing-the-environment.md)
+keeps the `/healthz` environment field, and the same verdict reaches here — the
+`405` this record measured is kept, as accepted disclosure, and is no longer
+unguarded in either direction. `tests/unit/test_dev_console_exposure.py` now
+asserts `POST /dev` → `405` with `Allow: GET` outside development, alongside a
+control asserting an unregistered path answers `404` to both methods. The gate
+itself is unchanged — this note closes the open observation, not the decision.
+
 ## Context
 
 E0-18 put both entry doors on the tool, and walking either one by hand means

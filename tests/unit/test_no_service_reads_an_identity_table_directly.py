@@ -87,12 +87,39 @@ SQL_MUST_CATCH = (
     "select * from PUBLIC . USER_IDENTITY",
 )
 
+# A relation nothing polices, which is what the samples below are written over.
+# The name matches the control in
+# `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` on purpose and
+# is repeated rather than imported, for the reason that file gives: a test module
+# importing its sibling depends on where pytest put `tests/` on `sys.path`, and an
+# import error is not a red.
+UNPOLICED_RELATION = "widget_ledger"
+
+# **This list was rewritten twice in E1's boundary fix round (finding M8), and
+# what left it is the point.**
+#
+# First, two samples went: `SELECT * FROM section_roster WHERE section_id =
+# :section_id` and `SELECT * FROM section_enrollment_count WHERE course_id =
+# :course_id`. They said something true of *this* sweep — neither names an
+# identity table — in a shape that read as the suite sanctioning the query. It is
+# not sanctioned. `pulse_app` holds an unfiltered read on both relations, and
+# `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` now polices
+# them — along with base `enrollment`, which they are defined over — outside four
+# locations: `services/authz.py`, ADR 0100's development console, the `views_sql/`
+# package where the statements live, and `services/safety.py`, which revalidates
+# the holds-Care rule on the Care credential.
+#
+# Then the round's own review found the same defect in what remained: the two
+# surviving samples were written over `role_assignment` and
+# `lead_faculty_mapping`, which that closure polices too — an allow-list teaching
+# the bypass two lines under the comment saying it must not. They are written over
+# `UNPOLICED_RELATION` now. **Nothing was lost**: the property these samples exist
+# for is that a *column* named `person_id` is not read as the table `person`, and
+# the relation the column sits on is free.
 SQL_MUST_ALLOW = (
-    "SELECT * FROM section_roster WHERE section_id = :section_id",
-    "SELECT * FROM section_enrollment_count WHERE course_id = :course_id",
-    "SELECT role, person_id FROM role_assignment WHERE person_id = :person_id",
+    f"SELECT role, person_id FROM {UNPOLICED_RELATION} WHERE person_id = :person_id",  # noqa: S608
     "SELECT * FROM public.reveal_student_identity(:actor, :subject, NULL)",
-    "SELECT course_id FROM lead_faculty_mapping WHERE person_id = :person_id",
+    f"SELECT course_id FROM {UNPOLICED_RELATION} WHERE person_id = :person_id",  # noqa: S608
     # Prose, which is where the identity tables are *supposed* to be named.
     "This never joins to user_identity; the grant refuses it anyway.",
 )
@@ -103,10 +130,22 @@ MODEL_QUERY_MUST_CATCH = (
     "names = session.execute(select(User.id, UserIdentity.email)).all()",
 )
 
+# `counts = session.execute(select(SectionEnrollmentCount)).all()` left this list
+# in the same round and for the same reason as the samples above: it named a
+# relation the org-view closure polices, and holding it up as permitted text
+# contradicted that rule. What it was doing for *this* sweep — showing that a
+# mapped class which is not an identity model passes — `RoleAssignment` still
+# does.
+#
+# **`RoleAssignment` stays, and the difference is worth a sentence** so the next
+# reader does not read the two as inconsistent. The org-view closure reads SQL
+# *strings*; an ORM query carries no text for it, which that file states plainly
+# in what it cannot see. So `select(RoleAssignment)` is not a statement any sweep
+# in this repository forbids, and it is a mapped class this one has to allow.
+# `SELECT … FROM role_assignment` is a different thing and is caught next door.
 MODEL_QUERY_MUST_ALLOW = (
     "rows = session.execute(select(RoleAssignment)).all()",
     "person_id: UUID = scope.person_id",
-    "counts = session.execute(select(SectionEnrollmentCount)).all()",
 )
 
 
@@ -197,11 +236,21 @@ def test_the_sweeps_in_this_file_catch_what_they_claim_to_and_allow_what_they_mu
 
     `docs/MISTAKES.md` entry 3's rule for a pattern searched against text: "run it
     against the text you claim it catches *and* against the text you claim it
-    allows". The allow side is the one that costs something here. Every read path
-    E0-11 builds runs SQL naming `role_assignment`, `lead_faculty_mapping` and the
-    E0-10 views, and half of those statements carry `person_id` in a `WHERE`
-    clause — a sweep that fired on the column would be red against every correct
-    implementation, and the fix somebody reaches for is to delete the sweep.
+    allows". The allow side is the one that costs something here. Every purview
+    query E0-11 builds is written over `person_id`, and half of those statements
+    carry it in a `WHERE` clause — a sweep that fired on that column would be red
+    against every correct implementation, and the fix somebody reaches for is to
+    delete the sweep. **The near miss is the column**, and the samples carry it.
+
+    **The relation those samples sit on is a name nothing polices**, which is a
+    correction the E1 boundary round made twice (finding M8; the comments on the
+    two lists below say what left them and why). An allow-list is read as a list
+    of things it is fine to write, so a sample naming a relation the org-view
+    closure forbids outside four locations was teaching the bypass this suite
+    exists to stop — whether the relation was an E0-10 read view or
+    `role_assignment`. Since the property under test is about the column, the
+    relation underneath it is free, and `UNPOLICED_RELATION` is the honest choice.
+    Nothing about this test's reach changed in either correction.
     """
     for sample in SQL_MUST_CATCH:
         assert identity_relations_named(sample), (

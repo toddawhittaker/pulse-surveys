@@ -75,6 +75,39 @@ PARSED_DOCUMENTS = frozenset(
         # that switches the build off. E0-38's security review raised it and
         # ADR 0070 records the reversal.
         "README.md",
+        # The second file to make that move, on the same two properties, and it
+        # holds both more strongly than the readme does. E1-04 landed the frontend
+        # and made this a build input twice over:
+        #
+        #   * `frontend/src/styles.css` opens with
+        #     `@import '../../design/tokens.css'`, so the palette, the type scale,
+        #     the spacing ramp, the radii, the focus ring and the reduced-motion
+        #     kill switch are compiled into `frontend/dist/assets/*.css` and served
+        #     to every person who lands on a view. The readme is *packaged* and
+        #     never rendered; this file is rendered to everybody.
+        #   * `backend/Dockerfile`'s frontend stage carries
+        #     `COPY design/tokens.css ./design/tokens.css`, so deleting or
+        #     renaming it breaks the image build — the same sentence as the readme
+        #     entry above.
+        #
+        # Called inert, a palette edit built no bundle, measured no budget and
+        # built no image, all reporting success, and a deletion surfaced on some
+        # later unrelated pull request instead of on the one that caused it.
+        # SPEC §7.6's "single source" forecloses the change that would have kept it
+        # inert — a copy of the token definitions under `frontend/src/`.
+        #
+        # The coverage given up is tokens-only pull requests short-circuiting,
+        # which is a saving this repository has never taken: `git log --follow`
+        # over this file reports one commit in the whole history, the initial
+        # prototype export. What it buys is the same thing the readme entry buys —
+        # no declared build input sitting in the set that switches the build off.
+        #
+        # Ruled in `docs/disputes/E1-04-01.md`; ADR 0070 is the precedent, applied
+        # rather than extended. **Only this path moves.** The rest of `design/` is
+        # genuinely inert — nothing imports a `.dc.html` prototype canvas or a
+        # usage note, and no `COPY` names one — and the `design/` entry in
+        # `INERT_DIRECTORIES` above is unchanged.
+        "design/tokens.css",
     }
 )
 

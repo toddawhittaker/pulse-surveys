@@ -30,6 +30,18 @@ superuser, and the owner's grants are exactly the four its job needs. Neither
 names the role or the function, because E10 replaces the door and a rule
 spelled with its name would retire with it.
 
+**Since E1-12 there is a fifth role and a second kind of definer function**, and
+the two are not the same kind of thing. `pulse_resolve_definer` (ADR 0094) owns
+three point-resolution functions that turn a subject the caller already holds into
+a row id: a uuid out, five column reads behind them, no identity column among
+those and no `user_identity` read at all. `pulse_app` may execute those three and
+may execute the Care door's halves *not at all*, which is now two assertions rather
+than one — a door (`test_the_application_role_may_not_execute_the_reveal_function`)
+and an inventory (`test_the_application_role_may_execute_only_the_point_resolvers`).
+The second definer's grants are pinned exactly, like the first's, and for a
+sharper reason: the connection that may call its functions is the one every screen
+in the product runs on.
+
 **Denial, never absence.** Every confidentiality assertion here is that the
 server *refused* a statement, with the SQLSTATE that says why. "The name was not
 in the result" is satisfied by a query that returned nothing for an unrelated
@@ -104,14 +116,25 @@ a `CARE` assignment — needs the session factory's symbol, which E0-10 does not
 spell. The structural half of it is in the unit test named above; the runtime
 half waits on the interface.
 
-**The last section is E0-33's**, and it is a different question from every rule
-above: not "is this rule stated" but "was anything *else* stated". Asserting a
-refusal proves the refusal and proves nothing about what a later migration
-granted beside it, and `alembic check` reads no ACL, no `pg_roles` row and no
-`pg_proc` entry in either direction. Its sibling for generated columns, check
-constraints and exclusion constraints is
-`test_objects_the_drift_gate_cannot_compare.py`, and the view set is in
-`test_identity_separated_views.py`.
+**The E0-33 section** is a different question from every rule above it: not "is
+this rule stated" but "was anything *else* stated". Asserting a refusal proves the
+refusal and proves nothing about what a later migration granted beside it, and
+`alembic check` reads no ACL, no `pg_roles` row and no `pg_proc` entry in either
+direction. Its sibling for generated columns, check constraints and exclusion
+constraints is `test_objects_the_drift_gate_cannot_compare.py`, and the view set
+is in `test_identity_separated_views.py`.
+
+**The last section is E1-01's**, and it is a third question again: not which
+relations a role may read, but which *columns* it may read out of the views it is
+allowed to read at all. Every rule above is relation-grained, so none of them can
+see what a granted view returns — and a view runs with its owner's privileges, so
+the grant on it is the whole of the exposure. The carried entry
+`docs/tickets/e1/carried-from-e0.md` measured the disclosure that follows:
+`user.lms_user_id` is the LTI `sub`, matched by no identity rule anywhere in this
+repository, and a view returning it beside a comment resolves a named student at
+the platform in one step. The set of columns `pulse_app` may select is therefore
+enumerated as an equality, with the candidates read out of the catalog and the
+sanctioned set written down here.
 """
 
 import re
@@ -141,6 +164,16 @@ RUNTIME_ROLES = (APPLICATION_ROLE, CARE_ROLE)
 # name and email." E0-08 built it that way and `test_identity_schema.py` asserts
 # the split.
 IDENTITY_TABLE = "user_identity"
+
+# The name `seed_identity` below writes onto the student it seeds. **This file's
+# choice, and stated rather than borrowed since E1-11**: the helper's non-vacuity
+# guard used to ask only that the seeded row carry some string, which it did
+# because `identity_name` was `NOT NULL`. E1-11's D7 makes that column nullable
+# (ADR 0050 — the roster exposes an address and no name), so the value is named
+# here and the reveal's answer is recognised by it. One constant rather than a
+# generator: each of the four tests using it seeds one student, and none compares
+# two.
+SEEDED_IDENTITY_NAME = "Robin Reveal-Me"
 
 # SPEC §8's log, which "is append-only and includes all re-identifications". Named
 # here because E0-26 item 1 made it a table this file provokes a refusal on: the
@@ -207,6 +240,119 @@ REVEAL_DEFINER_PRIVILEGES = frozenset(
         ("role_assignment", "SELECT"),
         ("audit_log", "INSERT"),
         ("audit_log", "SELECT"),
+    }
+)
+
+# ---------------------------------------------------------------------------
+# E1-12 — the second definer, and the first `EXECUTE` the application role holds.
+# ---------------------------------------------------------------------------
+#
+# Until this ticket the answer to "what may `pulse_app` execute" was **nothing**,
+# and that was the whole of the rule. E1-12 needs a launch subject and a web
+# subject resolved to row ids on the application connection, and the column that
+# answers the launch half — `user.lms_user_id` — is the one E1-10's round-3 review
+# revoked from `pulse_app` precisely because a connection able to read it can
+# enumerate every subject that ever launched. A view cannot help: a view can only
+# be filtered on a column it exposes. So resolution goes through the third
+# mechanism this file already recognises, `EXECUTE` on a `SECURITY DEFINER`
+# function, and the inventory below is what keeps that door the size it was
+# argued for (ADR 0094).
+#
+# **These are hand-written inventories and they move deliberately**
+# (`docs/MISTAKES.md` entry 35). Each entry carries the sentence that admits it,
+# from the ADR and the ticket rather than from the SQL it is policing, so the next
+# person to add one has to be able to say what makes it legitimate.
+
+# The role that owns the point-resolution functions. Named here where the reveal's
+# owner is deliberately not: that one is discovered from the catalog because E10
+# replaces the function it owns, while this one is spelled by ADR 0094 as part of
+# the decision — "a NOLOGIN role that exists for nothing else, so 'the definer's
+# privileges' is a list you can read in this file against these bodies".
+RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
+
+# Every `SECURITY DEFINER` function `pulse_app` may call, by name, and why.
+#
+# **Four entries, from two tickets, and one inventory rather than two.** E1-12 and
+# E1-11 opened this door in the same epic and from opposite ends — the first so a
+# verified subject reaches its stored identity, the second so a roster member
+# reaches its `user` row — and each ticket's branch wrote the equality over its own
+# set. Two rival closed sets over one fact is not an inventory; the merge is the
+# union, and every entry keeps the sentence that admits it.
+#
+#   - `resolve_platform_user(lti_platform_id, lms_user_id) -> uuid` — E1-12's
+#     launch door holds a `sub` from a token it has verified and needs the `user`
+#     row it names. It returns a uuid or NULL and reads no identity column. The
+#     caller can resolve a subject it already holds and can never enumerate the
+#     subjects it does not, which is the property the revocation bought. **E1-11's
+#     roster sync spends the same function for the same reason**: it matches an
+#     NRPS member against `user.lms_user_id`, the column E1-10's round-3 review
+#     revoked from this role because "a connection able to read it can enumerate
+#     every subject that ever launched and join a response back to the person who
+#     gave it".
+#   - `resolve_person_for_user(user_id) -> uuid` — the second hop, ADR 0024's
+#     `person.user_id` link read in the direction a door needs it. NULL is a
+#     defined answer, not an error: ADR 0028 gives a student a `user` row and no
+#     person, and E1-12's D1 makes "no person" a state the session carries.
+#     **E1-11's D5 spends it on the other side of that same NULL**: the sync writes
+#     the teaching instructor's `INSTRUCTOR` assignment only where the member's
+#     `user` row already resolves to a `person`, and `pulse_app` holds no privilege
+#     on `person` at all, which carries a name.
+#   - `resolve_web_person(idp_issuer, idp_subject) -> uuid` — the web door's half,
+#     over the linkage table `pulse_app` holds no grant on at all. A merge is never
+#     inferred from a mutable claim, so this is the only route from a verified
+#     `id_token` to an identity.
+#   - `record_roster_email(user_id, identity_email)` — E1-11's D7, and one of the
+#     two that **write**. ADR 0050 has the roster expose "an address and no name",
+#     and E0-10 gives this role "no grant of any kind" on `user_identity` — so an
+#     address reaches that table through one function, owned by a role holding two
+#     of its columns and never `identity_name`, rather than through a grant.
+#   - `record_teaching_instructor(person_id, section_id)` — the security round's F2,
+#     and the same argument arriving on a second table. E1-11 first spent a
+#     table-wide `INSERT` on `role_assignment` for the teaching instructor's row;
+#     `guard_write` refuses only an `INSTRUCTOR` row and that is a Python rule, so a
+#     **`CARE`** assignment — the row the reveal definers check for before they
+#     return a name — passed unconditionally. A grant cannot bound a column's value,
+#     so the write moved into a function whose body writes `'INSTRUCTOR'` and whose
+#     signature is two uuids with nowhere to put a role. The grant is gone.
+#
+# What is *not* here is the point of the list: the two halves of the Care door.
+# `pulse_app` is refused those by name in an `invariant`-marked test below, and a
+# sixth entry appearing here is a new door into identity that some later ticket
+# opened without arguing for it.
+SANCTIONED_APPLICATION_EXECUTE = (
+    "resolve_platform_user",
+    "resolve_person_for_user",
+    "resolve_web_person",
+    "record_roster_email",
+    "record_teaching_instructor",
+)
+
+# What the resolve definer may reach at table grain, and the whole of it.
+# `web_login_subject` is E1-12's own table and this grant is the only read of it
+# anywhere: the rows are written by the seed and by an administrator, and every
+# reader goes through `resolve_web_person`.
+RESOLVE_DEFINER_PRIVILEGES = frozenset({("web_login_subject", "SELECT")})
+
+# And at column grain, which is where the interesting half is. ADR 0094: the owner
+# "holds SELECT on exactly five columns and no identity-bearing column among them:
+# ids, the platform reference, and the subject key being matched. It never reads
+# `user_identity`, and neither function can return anything but a uuid."
+#
+#   - `user.id`, `user.lti_platform_id`, `user.lms_user_id` — the three
+#     `resolve_platform_user` needs to match a subject at a registration and answer
+#     with a row id.
+#   - `person.id`, `person.user_id` — ADR 0024's link, read in one direction.
+#
+# A sixth entry — `person.identity_name`, say — would be a name reachable through a
+# function `pulse_app` may call, which is ADR 0001's scheme undone in one line and
+# is invisible to every other gate in this build.
+RESOLVE_DEFINER_COLUMN_PRIVILEGES = frozenset(
+    {
+        ("user", "id", "SELECT"),
+        ("user", "lti_platform_id", "SELECT"),
+        ("user", "lms_user_id", "SELECT"),
+        ("person", "id", "SELECT"),
+        ("person", "user_id", "SELECT"),
     }
 )
 
@@ -354,15 +500,50 @@ RESOLVE_BOTH = text("SELECT to_regclass(:bare)::oid, to_regclass(:qualified)::oi
 # exists because a test cannot be written against an interface that does not exist.
 # So the guessing machinery is gone and the names are constants.
 #
-# **The rules in this file are still spelled without them.** No `SECURITY DEFINER`
-# function in `public` may be owned by a superuser; the definer's grants are
-# exactly what its job needs; `pulse_app` may execute nothing. Those sweep over
-# whatever is there, because E10 replaces this door and a rule carrying its name
-# would retire with it. What is named below is only how a *test calls* the door,
-# which is a different thing from what a rule is about.
+# **Most rules in this file are still spelled without them.** No `SECURITY
+# DEFINER` function in `public` may be owned by a superuser, and the definer's
+# grants are exactly what its job needs: both sweep over whatever is there, because
+# E10 replaces this door and a rule carrying its name would retire with it.
+#
+# **One rule stopped being spellable as emptiness, and E1-12 and E1-11 are why.**
+# "`pulse_app` may execute nothing" needed no name at all while the answer was
+# zero; the answer is now five functions that return no identity (ADR 0094, E1-11's
+# D7, and the security round's F2), so the rule is an equality over
+# `SANCTIONED_APPLICATION_EXECUTE` at
+# the head of this file. The **door** it may not open is still spelled without a
+# name — `test_the_application_role_may_not_execute_the_reveal_function` discovers
+# it as whatever `pulse_care` may execute — so when E10 replaces the door that
+# refusal follows it rather than retiring with these two constants.
 RECORD_FUNCTION = "record_identity_reveal"
 REVEAL_FUNCTION = "reveal_student_identity"
 CARE_DOOR_HALVES = 2
+
+# The `EXECUTE` inventory for the application role is
+# `SANCTIONED_APPLICATION_EXECUTE` at the head of this file, and it is one list.
+# E1-11's branch carried a second constant over the same fact — a closed set of the
+# three functions *that* ticket granted — and the merge folded its entries and its
+# sentences into that one rather than leaving two equalities to disagree.
+#
+# The owners those five functions run as: NOLOGIN roles that exist for nothing
+# else, so that "the definer's privileges" is a list you can read in one file
+# against one body (ADR 0043's pattern, ADR 0094 and E1-11's D7).
+# `pulse_resolve_definer` owns the three point resolvers, `pulse_roster_definer`
+# the email write, and `pulse_instructor_definer` the teaching-instructor write the
+# security round's F2 moved off a table grant. They are named here because the
+# grantee sweep below asks *who* is named in an ACL anywhere in `public` and would
+# otherwise report the grants they hold on `user`, `person`, `web_login_subject`,
+# `user_identity` and `role_assignment` as roles no ticket sanctioned. What each
+# may reach is pinned separately —
+# `test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answers`
+# below for the first, and
+# `tests/integration/test_the_roster_definers_answer_a_point_query_and_nothing_more.py`
+# for the other two — and what is asserted here is only that they are expected to
+# exist.
+IDENTITY_DEFINER_ROLES = (
+    RESOLVE_DEFINER_ROLE,
+    "pulse_roster_definer",
+    "pulse_instructor_definer",
+)
 
 # How the two halves are called. The record's third argument is a null case id:
 # there is no case model until E10, and E0-10 shipped its reveal the same way.
@@ -626,9 +807,20 @@ def seed_identity(committed_rows: Any) -> dict[str, Any]:
     this module with the argument-guessing machinery that needed it. The copy in
     `tests/integration/test_care_service_reveal.py` stays: the *service*'s
     `reveal_identity` keeps its own signature, which E0-26 does not change.
+
+    **The name is stated here since E1-11, and was borrowed before it.** The
+    non-vacuity guard below asks the seeded row to carry a recognisable value, and
+    got one only because `user_identity.identity_name` was `NOT NULL` and
+    `seed_row` fills what the schema requires. E1-11's D7 makes the column nullable
+    — the roster sync stores an address for a member it has no name for (ADR 0050),
+    and `record_roster_email`'s owner holds no privilege on the name column at all
+    — so the helper leaves it and four tests here failed inside their own seeding
+    (dispute E1-11-02, `docs/MISTAKES.md` entry 22). Passing the value makes this
+    helper state its own premise instead of resting on a constraint two tickets
+    away, and it is what the reveal's answer is now recognised by.
     """
     chain: dict[str, Any] = {}
-    identity = committed_rows.seed(IDENTITY_TABLE, chain)
+    identity = committed_rows.seed(IDENTITY_TABLE, chain, identity_name=SEEDED_IDENTITY_NAME)
     committed_rows.commit()
 
     user = chain.get("user")
@@ -643,11 +835,14 @@ def seed_identity(committed_rows: Any) -> dict[str, Any]:
         for key, value in identity.items()
         if isinstance(value, str) and value and not key.endswith("_id")
     }
-    assert values, (
-        f"The seeded `{IDENTITY_TABLE}` row carries no non-key string value: {dict(identity)}. "
-        "There is then nothing for a reveal to return that could be recognised, and the test "
-        "below would be asserting that a function returned something rather than that it returned "
-        "the identity."
+    assert SEEDED_IDENTITY_NAME in values, (
+        f"The seeded `{IDENTITY_TABLE}` row does not carry the name this helper asked it to "
+        f"({SEEDED_IDENTITY_NAME!r}): {dict(identity)}. There is then nothing for a reveal to "
+        "return that could be recognised, and the tests below would be asserting that a function "
+        "returned something rather than that it returned this student's identity.\n\n"
+        "Until E1-11 this asked only for *some* non-key string and got one from the `NOT NULL` "
+        "constraint on `identity_name`, which D7 legitimately removes; the value is stated in this "
+        "file now."
     )
     user_key = next(
         (key for key in user if key in {"id", "user_id"}),
@@ -947,9 +1142,43 @@ def test_the_application_role_may_not_execute_the_reveal_function(db_session: An
     that to be true. Revoking it is a line somebody has to write, and nothing
     else in this suite would notice its absence (`docs/MISTAKES.md` entry 2).
 
+    **This was "`pulse_app` may execute nothing" until E1-12 and E1-11, and the
+    narrowing is what those tickets had to argue for rather than a relaxation.**
+    `pulse_app` now holds `EXECUTE` on the three point-resolution functions ADR
+    0094 ships — a verified subject reaching its stored identity is E1-12's whole
+    subject, and E1-11's roster sync matches a member to its `user` row through the
+    same two — and on `record_roster_email`, which writes an address into a table
+    this role holds no grant on at all (E1-11's D7, ADR 0050). Each answers a point
+    question and returns no identity, so a rule phrased as emptiness would be red
+    against the correct schema.
+
+    **What this test asserts is the door, and it identifies the door by discovery.**
+    Whatever `pulse_care` may execute is what `pulse_app` may not — never by name,
+    because E10 replaces the Care door and a rule spelled with its name would
+    retire with it. That is E0-10's sentence, and the reason `pulse_app` reaching
+    either half is a §4.1 breach rather than an untidy grant:
+    `reveal_student_identity` returns a name, and `record_identity_reveal` writes
+    the audit row that makes the name accountable.
+
+    **The inventory half is next door**, in
+    `test_the_application_role_may_execute_only_the_point_resolvers`: that the four
+    sanctioned functions are the only other thing this role may call. Two tests
+    because they are two facts — this one is a door, that one is a closed set — and
+    a merge that folded them into one would have lost whichever fact it phrased
+    second.
+
+    **What the four permitted functions can reach is pinned elsewhere, as
+    equalities over their owners' grants**:
+    `test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answers`
+    below, and
+    `tests/integration/test_the_roster_definers_answer_a_point_query_and_nothing_more.py`.
+    That is where "what could this door possibly reach" is answered, and it is a
+    question about the owner rather than about the body.
+
     **The mutation it exists to survive**: dropping
-    `REVOKE ALL ON FUNCTION … FROM PUBLIC` from the migration, which leaves every
-    other test in this file green.
+    `REVOKE ALL ON FUNCTION … FROM PUBLIC` from any of the migrations, which puts
+    every definer function in this schema — the Care door included — in this
+    role's reach and leaves every other test in this file green.
     """
     functions = security_definer_functions(db_session, APPLICATION_ROLE)
     assert functions, (
@@ -959,13 +1188,233 @@ def test_the_application_role_may_not_execute_the_reveal_function(db_session: An
         "its absence."
     )
 
-    reachable = [row["signature"] for row in functions if row["executable"]]
+    door = {row["signature"] for row in the_care_door(db_session)}
+    reachable = [
+        row["signature"] for row in functions if row["executable"] and row["signature"] in door
+    ]
     assert not reachable, (
-        f"`{APPLICATION_ROLE}` may execute {reachable}. A `SECURITY DEFINER` function runs with "
-        "its owner's privileges, so one that reads `user_identity` hands identity to whoever may "
-        "call it — and Postgres grants `EXECUTE` to `PUBLIC` by default, which means this is the "
-        "state a migration reaches by *not* saying anything. E0-10 gives the `EXECUTE` to "
-        "`pulse_care` alone."
+        f"`{APPLICATION_ROLE}` may execute {reachable}, which is the door `{CARE_ROLE}` opens to "
+        "identity. A `SECURITY DEFINER` function runs with its owner's privileges, so one that "
+        "reads `user_identity` hands identity to whoever may call it — and Postgres grants "
+        "`EXECUTE` to `PUBLIC` by default, which means this is the state a migration reaches by "
+        "*not* saying anything. E0-10 gives that `EXECUTE` to `pulse_care` alone, and every screen "
+        "in the product runs on this connection."
+    )
+
+
+def an_inventoried_execute(row: Any) -> bool:
+    """Is this `EXECUTE` grant one a ticket argued for, by grantee *and* by function?
+
+    Two entries, and the asymmetry between them is the design. `pulse_care` holds
+    the Care door and the door is discovered rather than named, because E10
+    replaces it and a rule spelled with its name would retire with it. `pulse_app`
+    holds ADR 0094's point resolvers and E1-11's one writer, and those *are* named,
+    because the argument that admits each is an argument about that function's body
+    — a uuid out and no identity column read, or an address in and never a name —
+    and neither generalises to the next function somebody wants to grant.
+    """
+    if row["grantee"] == CARE_ROLE:
+        return True
+    return (
+        row["grantee"] == APPLICATION_ROLE
+        and routine_name(row["routine"]) in SANCTIONED_APPLICATION_EXECUTE
+    )
+
+
+def routine_name(routine: str) -> str:
+    """The bare function name out of a `regprocedure` rendering.
+
+    `oid::regprocedure::text` prints `resolve_web_person(text,text)`, and prints a
+    schema qualification where the schema is not on the search path. Both are
+    stripped, so an inventory can be written as names — which is what the ADR that
+    admits each entry writes.
+    """
+    return routine.split("(", 1)[0].strip().rsplit(".", 1)[-1].strip('"')
+
+
+@pytest.mark.invariant
+def test_the_application_role_may_execute_only_the_point_resolvers(db_session: Any) -> None:
+    """E1-12 and E1-11: the inventory of doors this connection may open, as an equality.
+
+    `EXECUTE` on a `SECURITY DEFINER` function is a privilege held in a different
+    currency — the caller spends the *owner's* grants — and it is the currency this
+    file's own sweep missed once already, in the worst possible place. Until this
+    epic the rule was that `pulse_app` held none of it. ADR 0094 opens three point
+    resolvers, each answering one question with a uuid; E1-11's D7 opens one writer
+    that takes an address and never a name; and the security round's F2 opens a
+    second writer that takes a person and a section and writes the one role its own
+    body names. This is the assertion that those five are the only five.
+
+    **Two of the five write, and that is not a widening of this rule but the
+    instrument it now has to carry.** A grant bounds a table and its columns and
+    cannot bound a column's *value*: there is no `GRANT INSERT (role =
+    'INSTRUCTOR')`. So where a writer must be restricted to one value — an address
+    and never a name, an `INSTRUCTOR` and never a `CARE` — the restriction lives in
+    a function body and the caller holds `EXECUTE` rather than the grant. Each such
+    door is a door, and each is here by name.
+
+    **One equality over both tickets' grants, not one per ticket.** E1-12 and E1-11
+    opened this door from opposite ends in the same epic and each branch pinned its
+    own set; two closed sets over one fact is not an inventory, because each is
+    satisfied by the other's grants being present. The merged list is
+    `SANCTIONED_APPLICATION_EXECUTE` at the head of this file, where every entry
+    carries the sentence that admits it.
+
+    **Why an equality rather than a ceiling.** A sixth function granted to
+    `pulse_app` is a sixth door into whatever its owner can read, and nothing else
+    in this build would mention it: `alembic check` reads no `pg_proc` entry in
+    either direction, the grantee sweep below asks *who* holds something rather
+    than *how many things*, and the refusal above is scoped to the Care door. A
+    convenience wrapper that returned "the person and their name" would satisfy
+    every other test in this file.
+
+    **Each sanctioned name must be *found*, not merely permitted**
+    (`docs/MISTAKES.md` entry 35). A sweep that reported nothing for `pulse_app` —
+    the wrong catalog, a filter that matches no function, a role that does not
+    exist — satisfies "nothing beyond the inventory" perfectly, and would go on
+    satisfying it after the grants were dropped and the doors stopped working.
+
+    **The mutation it exists to survive**: `GRANT EXECUTE ON FUNCTION public.<a
+    sixth definer function> TO pulse_app`, and its quieter sibling, a migration
+    that omits `REVOKE ALL … FROM PUBLIC` on a new definer function — `PUBLIC`
+    includes `pulse_app`, so both arrive here.
+    **The near miss it tolerates**: a sixth `SECURITY DEFINER` function that
+    `pulse_app` may not execute. That is somebody else's door and
+    `test_no_role_outside_this_scheme_is_granted_anything_in_public` is where its
+    grantee is judged.
+    """
+    functions = security_definer_functions(db_session, APPLICATION_ROLE)
+    assert functions, (
+        "This project defines no `SECURITY DEFINER` function in `public` at all, so this "
+        "inventory is being compared against a sweep that looked at nothing."
+    )
+
+    executable = sorted({row["name"] for row in functions if row["executable"]})
+    missing = [name for name in SANCTIONED_APPLICATION_EXECUTE if name not in executable]
+    assert not missing, (
+        f"`{APPLICATION_ROLE}` may execute {executable}, and {missing} are missing from it. Those "
+        "are ADR 0094's point-resolution functions and E1-11's `record_roster_email`: without the "
+        "first a verified subject reaches no stored identity on either door — E1-12's whole "
+        "subject — and without the last the roster sync can store no address at all, while every "
+        "refusal in this file stays green. It also means this sweep has not been seen finding an "
+        "`EXECUTE` on a role that certainly holds one, so the equality below would be satisfied by "
+        "an instrument that reports nothing for anybody."
+    )
+
+    beyond = [name for name in executable if name not in SANCTIONED_APPLICATION_EXECUTE]
+    assert not beyond, (
+        f"`{APPLICATION_ROLE}` may execute {beyond}, which no ticket sanctioned. The inventory is "
+        f"{list(SANCTIONED_APPLICATION_EXECUTE)} and each entry carries the sentence that admits "
+        "it, beside the constant at the top of this file. A `SECURITY DEFINER` function runs as "
+        "its owner, so `EXECUTE` on one is a privilege on everything that owner can read — held by "
+        "the connection every screen in the product runs on. If a fifth is genuinely needed, add "
+        "it there with its sentence and say in the pull request what the caller can now reach that "
+        "it could not before."
+    )
+
+
+def test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answers(
+    db_session: Any,
+) -> None:
+    """E1-12: the second definer is small, and its size is the whole of what the door opens.
+
+    The same rule `test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs`
+    holds over the Care door's owner, applied to the owner ADR 0094 introduces —
+    and it matters more here, because `pulse_app` may call this one and `pulse_app`
+    is the connection every request in the product runs on. What that connection
+    can reach through these functions is exactly the set of grants this role holds.
+
+    **Both grains, because the interesting half is at column grain.** Five of the
+    six entries are `GRANT SELECT (…)` on `user` and `person`, which
+    `has_table_privilege` does not report at all — the mechanism `COLUMN_GRANTEES`
+    above was added for, and the one ADR 0001 rejects by name for `pulse_app`
+    precisely because somebody always reaches for it. A whole-table `SELECT` on
+    `person` granted here instead of five columns would look identical from the
+    outside and would put `person.identity_name` behind a function `pulse_app` may
+    call.
+
+    **Exactly, not at least**, in both directions: the second list means the doors
+    cannot answer and some other test is about to fail for a reason that reads as
+    unrelated.
+
+    **What it cannot see** (`docs/MISTAKES.md` entry 14): a change *within* those
+    six. The functions could come to return a different shape over the same columns,
+    or to match on something else, and nothing here moves. The grant is the outer
+    bound on the blast radius rather than a description of the body;
+    `tests/unit/test_no_service_reads_an_identity_table_directly.py` and the SQL
+    file's own review are what read the bodies.
+    """
+    require_role(db_session, RESOLVE_DEFINER_ROLE)
+    relations = [row[0] for row in db_session.execute(text(PUBLIC_RELATIONS))]
+    assert relations, (
+        "There is no table or view in `public`, so this sweep has nothing to ask about and the "
+        "comparison below would be between an empty set and six expected members."
+    )
+
+    held_tables = {
+        (relation, privilege)
+        for relation in relations
+        for privilege in TABLE_PRIVILEGES
+        if db_session.execute(
+            text(HAS_TABLE_PRIVILEGE),
+            {
+                "role": RESOLVE_DEFINER_ROLE,
+                "relation": f"public.{relation}",
+                "privilege": privilege,
+            },
+        ).scalar_one()
+    }
+    held_columns: set[tuple[str, str, str]] = set()
+    for relation in relations:
+        for column, _ in public_table_columns(db_session, relation):
+            for privilege in COLUMN_PRIVILEGES:
+                on_column = db_session.execute(
+                    text(HAS_COLUMN_PRIVILEGE),
+                    {
+                        "role": RESOLVE_DEFINER_ROLE,
+                        "relation": f"public.{relation}",
+                        "column": column,
+                        "privilege": privilege,
+                    },
+                ).scalar_one()
+                if on_column and (relation, privilege) not in held_tables:
+                    held_columns.add((relation, column, privilege))
+
+    unexpected = sorted(
+        [
+            f"{relation}:{privilege}"
+            for relation, privilege in held_tables - RESOLVE_DEFINER_PRIVILEGES
+        ]
+        + [
+            f"{relation}.{column}:{privilege}"
+            for relation, column, privilege in held_columns - RESOLVE_DEFINER_COLUMN_PRIVILEGES
+        ]
+    )
+    missing = sorted(
+        [
+            f"{relation}:{privilege}"
+            for relation, privilege in RESOLVE_DEFINER_PRIVILEGES - held_tables
+        ]
+        + [
+            f"{relation}.{column}:{privilege}"
+            for relation, column, privilege in RESOLVE_DEFINER_COLUMN_PRIVILEGES - held_columns
+        ]
+    )
+    assert not unexpected and not missing, (
+        f"`{RESOLVE_DEFINER_ROLE}` owns the point-resolution functions `{APPLICATION_ROLE}` may "
+        f"call, so what it holds is what those functions can reach. Beyond what its job needs: "
+        f"{unexpected}. Missing from what its job needs: {missing}.\n\n"
+        "The first list is the one to read first, and a whole-table entry on `user` or `person` "
+        "where a column entry was expected is the quietest way for it to be wrong: it reads as "
+        "tidier SQL and it puts every column of those tables — `person.identity_name` among them — "
+        "behind a function the application connection may call. ADR 0094 fixes the set at five "
+        "columns and one table, and says of them: 'no identity-bearing column among them: ids, the "
+        "platform reference, and the subject key being matched'.\n\n"
+        "The second list means resolution cannot answer: without the column reads a subject "
+        "resolves to nothing on either door, and without `web_login_subject:SELECT` the web door "
+        "lands every person on the no-account page.\n\n"
+        "If the owner has come to *own* a relation rather than to be granted on it, that shows up "
+        "here as every privilege on that relation at once."
     )
 
 
@@ -1002,11 +1451,16 @@ def test_neither_runtime_role_holds_any_privilege_on_user_identity(db_session: A
     added there reaches both without anybody remembering this test exists.
 
     **The execute mechanism is filtered out here and nowhere else**, and that is
-    the asymmetry rather than an exemption. `pulse_care` holds `EXECUTE` on the
-    reveal *by design* — §4 and §6.2 require that door to be open — so a rule that
-    reported it would fail against the correct schema. It is asserted separately
-    and in both directions instead: `test_the_application_role_may_not_execute_the_
-    reveal_function` says `pulse_app` may call nothing, and
+    the asymmetry rather than an exemption. Both runtime roles hold `EXECUTE` on a
+    definer function *by design* — `pulse_care` on the Care door, because §4 and
+    §6.2 require that door to be open, and since E1-12 and E1-11 `pulse_app` on
+    five functions that return no identity (ADR 0094, E1-11's D7 and the security
+    round's F2) — so a rule
+    that reported either would fail against the correct schema. It is asserted
+    separately instead, and on each side by an equality beside a refusal:
+    `test_the_application_role_may_execute_only_the_point_resolvers` says which
+    five `pulse_app` may call, `test_the_application_role_may_not_execute_the_
+    reveal_function` says it may not open the Care door, and
     `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door` says
     `pulse_care` may call exactly those two. Asked about a role a runtime role can
     *become*, the same mechanism is dangerous and is not filtered.
@@ -2459,6 +2913,14 @@ def test_the_downgrade_completes_when_a_role_it_revokes_from_is_absent(
 # member nobody sanctioned — which is a precondition for the doors being the only
 # doors rather than an instance of §4.1 itself.
 #
+# **E1-12 and E1-11 add a marked test on the inventory side of that line, and it
+# is deliberate rather than a drift.** `test_the_application_role_may_execute_only_
+# the_point_resolvers` is an equality over the five functions `pulse_app` may call,
+# which by the rule above would be unmarked — but from the moment that set stopped
+# being empty, "the doors are the only doors" is the assertion that the set has not
+# grown, and there is no separate route-test that would notice a fifth door. The
+# mark follows the guarantee rather than the shape.
+#
 # **E0-26 item 1 added two marks by that same line, and they are doors.**
 # `test_the_care_door_refuses_an_actor_with_no_live_care_assignment` guards the
 # route through the door itself — the acting person's `CARE` assignment is the only
@@ -2658,6 +3120,65 @@ MEMBER_OF_ROLES = """
 #     Recorded here because widening this constant is exactly the conversation
 #     this equality exists to force — a grant file may not justify its own grant.
 #     Decided by the orchestrator on 2026-08-21, on E0-18 PR 1.
+#   - `pulse_app` **reads** `tool_signing_key`, and holds nothing else on it.
+#     E1-06 publishes the tool's key set at `/lti/jwks` and E1-11 signs a
+#     `client_assertion` with the same row, both on the application connection, so
+#     without `SELECT` the tool cannot present its own identity to any platform.
+#     Three things make this the narrowest grant that does the job, and they are
+#     worth stating because this is the only entry in this set that names a
+#     **private key**.
+#     **The grant is deliberately late.** ADR 0082 left the table grantless in
+#     E1-05 — "a runtime role holding read access to a private key it never opens
+#     is a credential at rest with no owner" — and put the grant in the ticket
+#     whose code spends it, which is this one. Nothing before E1-06 could have
+#     needed it, and a grant that had arrived with the schema would have sat
+#     unused for a ticket.
+#     **`SELECT` alone.** The seed writes the row and the seed runs as the
+#     superuser (ADR 0009, ADR 0063), so `INSERT` and `UPDATE` stay withheld — an
+#     application connection that could write this column could rotate the tool's
+#     identity, which ADR 0082 forbids outright, and could do it invisibly because
+#     a fresh key signs perfectly.
+#     **It carries no personal data.** ADR 0082's own consequence section answers
+#     the §4.1 question: "`tool_signing_key` is not a person table. It holds no
+#     subject, no name and no address, so SPEC §4.1's `PERSON_TABLES` does not
+#     change." What this grant widens is the credential surface rather than the
+#     confidentiality one — the application role can now read the tool's private
+#     signing key, which is the cost ADR 0082 accepts and records.
+#     Decided in ADR 0082 and spent in E1-06.
+#   - `pulse_app` **inserts and deletes** on `lti_launch_nonce`, and holds nothing
+#     else on it. E1-08's replay guard (`app.lti.replay_guard.claim_nonce`) spends
+#     a launch's nonce with `INSERT` on the application connection as the last
+#     step of every valid launch — SPEC §9.1's single-use replay requirement — and
+#     `purge_expired_nonces` reclaims the expired tail with `DELETE`, the
+#     Celery-beat housekeeping ADR 0089 gives the Postgres-backed ledger in place
+#     of a TTL Redis would have supplied for free.
+#     **`INSERT` and `DELETE` only, no `SELECT` and no `UPDATE`.** The claim
+#     reads single-use off a unique-constraint violation on the nonce column
+#     rather than a targeted read, and the primary key is generated in Python
+#     rather than read back with `RETURNING` — so nothing on this connection ever
+#     needs to select the table. A spent nonce is never rewritten, so `UPDATE`
+#     stays withheld too.
+#     **It carries no personal data.** The table holds a nonce, a consumed-at
+#     timestamp and an expiry — no subject, no name, no address — so SPEC §4.1's
+#     `PERSON_TABLES` does not change and no identity-separated view is owed.
+#     Decided and spent in E1-08.
+#   - `pulse_app` **reads, inserts and deletes** on `lti_launch_state`, and holds
+#     nothing else on it. This is the server-side handshake store dispute
+#     E1-08-01 resolved E1-08 onto: `app.lti.in_flight.remember_launch` records
+#     the handshake at `/lti/login` (`INSERT`), `look_up_launch` reads the
+#     expected `nonce` back at `/lti/launch` to validate the token against it
+#     (`SELECT`), and `consume_launch`/`purge_expired_launch_states` enforce
+#     single-use and reclaim the expired tail (`DELETE`) — ADR 0089 records the
+#     decision. Unlike `lti_launch_nonce` above, this table needs `SELECT`: the
+#     nonce ledger only ever checks for a conflict, but the handshake is a
+#     look-up the launch reads an answer out of.
+#     **`SELECT`, `INSERT`, `DELETE`, no `UPDATE`.** A handshake row is written
+#     once at login and read once at launch; nothing on this connection ever
+#     rewrites one, so `UPDATE` stays withheld.
+#     **It carries no personal data.** The table holds a `state`, a `nonce` and
+#     an expiry — no subject, no name, no address — so SPEC §4.1's
+#     `PERSON_TABLES` does not change and no identity-separated view is owed.
+#     Decided and spent in E1-08.
 #
 # **Hand-written and derived from the record, not read out of the grant files**
 # (`docs/MISTAKES.md` entry 19), which is the same decision
@@ -2677,6 +3198,119 @@ MEMBER_OF_ROLES = """
 # The definer is not here: it is not a connection role, and
 # `test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs`
 # pins its four grants as an equality already.
+#   - `pulse_app` **reads** `prefix`, `term`, `start_letter_map`, `course` and
+#     `section`, and **inserts** `course`, `section`, `user` and `launch_defect`.
+#     On `user` it holds no table-wide `SELECT` at all — only `SELECT (id)`, in the
+#     column set below. This is E1-10's launch-time provisioning, and it is the
+#     first grant in this set that lets the application write a relation SPEC §2.1
+#     puts on the *LMS's* side — so it is the entry that most needs its sentence.
+#     **What it is for.** §2.1 gives courses and sections two arrival paths,
+#     "hourly roster sync + launch-time ingestion", and §7.3 makes the first staff
+#     launch of a section the thing that discovers it at all: "it has no way of its
+#     own to learn that a section exists. So the first staff launch of a section
+#     bootstraps every later sync of it." The reads are the look-ups that launch
+#     has to make before it may write anything — the prefix the context label
+#     names, the term whose dates contain the day of the launch, that term's
+#     start-letter map row, and the course and section rows an upsert has to find
+#     before it decides to insert.
+#     **`user` is not one of those look-ups, and this entry used to say it was.**
+#     The sentence above read "the course, section and user rows an upsert has to
+#     find", which was false: the writer inserts a `user` row and never reads the
+#     table, by design — `lms_user_id` is the `sub` claim verbatim and E1-01 keeps
+#     it out of every view, so a connection able to `SELECT` it can enumerate every
+#     launching subject this deployment has ever seen and join responses to people.
+#     The round-3 security review found the grant and the false justification
+#     together. What the writer actually needs is the primary key back from an
+#     insert, which Postgres checks `SELECT` against per returned column — so the
+#     grant is `SELECT (id)`, and `lms_user_id` is refused.
+#     `tests/integration/test_the_application_role_writes_only_the_granted_columns.py`
+#     provokes both halves.
+#     **This is the grant ADR 0045 deferred, arriving narrowed rather than
+#     widened.** That record wanted the opposite instrument — "refusing the
+#     *application role* `INSERT`/`UPDATE` on these tables would be structural
+#     rather than a convention" — and could not have it, because "the launch path
+#     and E1's roster sync are the same connection, so the grant would have to
+#     distinguish a sanctioned writer from an unsanctioned one, and no such
+#     separation exists in E0." E1-10 does not solve that: one connection still
+#     serves both. What it does is spend the smallest grant its writer needs, so
+#     that the *database* refuses everything outside it and `guard_write`'s
+#     sanction catalog (ADR 0090) is what refuses the rest in Python. The two are
+#     different instruments and neither replaces the other.
+#     **No `DELETE`, no `TRUNCATE`, and no table-wide `UPDATE` anywhere.** The
+#     verbs withheld are the assertion here as they are on `classification`: a
+#     launch discovers rows and never removes them, so a connection that could
+#     delete a `course` could take a term's reports with it. `UPDATE` is granted
+#     only at column grain, below.
+#     **`user` has no `UPDATE` at all**, which is the narrowest entry in the group
+#     and deliberate: ADR 0045 puts `user` in the guarded set because
+#     "`user.lms_user_id` is the `sub` claim verbatim … and §4 keys every response
+#     to it", so the row is insert-if-absent and never rewritten. Withholding
+#     `UPDATE` makes that a property of the database rather than a rule the next
+#     writer has to remember, in exactly the shape §8's append-only
+#     `classification` grant takes.
+#     **What these tables carry, for §4.1.** `prefix`, `term`, `start_letter_map`,
+#     `course` and `section` are org and calendar configuration and hold no
+#     personal data. `user` does not either: E0-10 separates identity onto
+#     `user_identity`, which this role holds no privilege on by any mechanism —
+#     the three `invariant`-marked refusals above are what say so — and `user`
+#     itself carries the `sub` claim, which E1-01 keeps out of every view and which
+#     no grant here makes readable through one. `launch_defect` is E1-10's own
+#     append-only record, and its field set is enumerated and asserted in
+#     `tests/integration/test_launch_provisioning_defects.py`: a defect kind, an
+#     issuer, a deployment, a context id and a timestamp, and never a subject, a
+#     name or an email.
+#     Decided and spent in E1-10.
+#   - `pulse_app` **reads and inserts** `enrollment` and `nrps_call`, and
+#     **inserts** `role_assignment`. This is E1-11's roster sync, and it is the
+#     second grant in this set that lets the application write a relation SPEC §2.1
+#     puts on the LMS's side — the two relations of ADR 0045's four that nothing in
+#     this project had written before.
+#     **What each one is for.** §2.1's other arrival path is the "hourly roster
+#     sync", and §3.4 reads what it writes: "Late adds: denominator starts at the
+#     student's first enrolled week (from NRPS enrollment data)." The `SELECT` on
+#     `enrollment` is the lookup that decides insert-or-update — a member already
+#     enrolled must not be enrolled twice, and ADR 0023's exclusion constraint would
+#     refuse the second row rather than answer the question. `nrps_call` is E1-11's
+#     own record (its work order, D9): one row per NRPS HTTP call, which is §6.1's
+#     "NRPS and AGS call logs with response codes", the discriminator between a
+#     never-synced section and a synced-empty one, and the memory the launch
+#     trigger's debounce is measured against — so the sync both writes it and reads
+#     it back.
+#     **`role_assignment` is not in this set, and the security round's F2 is why.**
+#     E1-11 first granted `pulse_app` a table-wide `INSERT` on it, for the teaching
+#     instructor's row — §2.1's fifth owned item, and a *purview grant*: the whole
+#     oversight surface is computed from these rows. The review measured what that
+#     bought: `guard_write` refuses only an `INSTRUCTOR` row and that is a Python
+#     rule, so a **`CARE`** assignment — the row E0-10's reveal definers check for
+#     before they return a name — passed unconditionally, on the connection every
+#     screen in the product runs on. A grant cannot bound a column's *value*; there
+#     is no `GRANT INSERT (role = 'INSTRUCTOR')`. So the grant is gone and the one
+#     legitimate write goes through `public.record_teaching_instructor`, whose body
+#     chooses the role and whose signature has nowhere to put another one — the
+#     same instrument, and the same argument, as the email write one entry down.
+#     The sync still asks `public.assignment_scope` (E0-11's view, already granted)
+#     whether it has already written one, so no read on the table is spent either.
+#     `pulse_care` holds `SELECT` on this table for the reveal's own assignment
+#     check, one entry above, and that entry is now the only `role_assignment`
+#     privilege in this inventory.
+#     **No `DELETE`, no `UPDATE` on `nrps_call`, and no table-wide `UPDATE` on
+#     `enrollment`.** The verbs withheld are the assertion,
+#     as they are on `classification` and on E1-10's group. A drop is a *closed
+#     window* rather than a deleted row (ADR 0023, and E1-11's D3: "the open/closed
+#     window rows ARE the recorded transition"), so a connection able to delete an
+#     enrollment could erase the record a participation figure is computed from; a
+#     connection able to delete a `role_assignment` could revoke a dean's purview;
+#     and `nrps_call` is an append-only log, which is only true if the grant says
+#     so. `enrollment`'s `UPDATE` is granted at column grain, below.
+#     **What these tables carry, for §4.1.** `enrollment` holds two foreign keys and
+#     four dates and no identity of any kind; `role_assignment` holds a person
+#     reference, a role and a scope, which is the graph §2.1 computes purview from
+#     and which `pulse_care` already reads; `nrps_call` holds a section reference, a
+#     URL, an HTTP status, a count and a timestamp — no subject, no name, no email.
+#     E1-11's own review question ("does this ticket add a person table?", deferred
+#     E1-01 item 2) is answered no on exactly this ground: `nrps_call` references
+#     `section` and nothing else.
+#     Decided and spent in E1-11.
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -2684,6 +3318,100 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "classification", "INSERT"),
         (APPLICATION_ROLE, "lti_platform", "SELECT"),
         (APPLICATION_ROLE, "lti_deployment", "SELECT"),
+        (APPLICATION_ROLE, "tool_signing_key", "SELECT"),
+        (APPLICATION_ROLE, "lti_launch_nonce", "INSERT"),
+        (APPLICATION_ROLE, "lti_launch_nonce", "DELETE"),
+        (APPLICATION_ROLE, "lti_launch_state", "SELECT"),
+        (APPLICATION_ROLE, "lti_launch_state", "INSERT"),
+        (APPLICATION_ROLE, "lti_launch_state", "DELETE"),
+        (APPLICATION_ROLE, "prefix", "SELECT"),
+        (APPLICATION_ROLE, "term", "SELECT"),
+        (APPLICATION_ROLE, "start_letter_map", "SELECT"),
+        (APPLICATION_ROLE, "course", "SELECT"),
+        (APPLICATION_ROLE, "course", "INSERT"),
+        (APPLICATION_ROLE, "section", "SELECT"),
+        (APPLICATION_ROLE, "section", "INSERT"),
+        (APPLICATION_ROLE, "user", "INSERT"),
+        (APPLICATION_ROLE, "launch_defect", "INSERT"),
+        (APPLICATION_ROLE, "enrollment", "SELECT"),
+        (APPLICATION_ROLE, "enrollment", "INSERT"),
+        (APPLICATION_ROLE, "nrps_call", "SELECT"),
+        (APPLICATION_ROLE, "nrps_call", "INSERT"),
+    }
+)
+
+# The column-scoped grants, as `(role, relation, column, privilege)`. **A second
+# constant rather than a fourth member on the one above**, because the two are
+# read out of different catalogs — `pg_class.relacl` and `pg_attribute.attacl` —
+# and `has_table_privilege` reports nothing at all about the entries here.
+#
+# **This set was empty until E1-10, and it says so.** Every grant this scheme
+# wrote before then was table-level, which is why
+# `test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_own`
+# below could treat a runtime role named in *any* column ACL as a widening by
+# definition. That is no longer true, and the change is deliberate rather than a
+# convenience: the alternative was `UPDATE` on `course` and `section` table-wide,
+# which is strictly more than E1-10's writer needs and which would have handed the
+# application connection the ability to rewrite a section's derived calendar —
+# ADR 0021's four columns, whose whole rule is that `apply_section_code` is the
+# only thing that writes them.
+#
+# The three entries, and why each is the narrowest that does the job:
+#
+#   - `course(lms_title)` — a launch corrects a fallback title once the platform
+#     supplies a real one, and follows the platform when it renames a course. SPEC
+#     §2.1 makes the title the LMS's, so following it is the rule rather than an
+#     edit.
+#   - `course(title_is_fallback)` — Pulse's own record of which of those two the
+#     stored title is (ADR 0091), written by the same statement.
+#   - `section(lms_context_memberships_url)` — SPEC §7.3's stored roster service
+#     address, updated when a later staff launch advertises a different one.
+#   - `user(id)` — **`SELECT`, not `UPDATE`**, and the round-3 security review's
+#     LOW. The writer inserts a `user` row and reads the table never; what it needs
+#     is the row's own key back, and Postgres checks `SELECT` per returned column
+#     on an `INSERT … RETURNING`. Table-wide `SELECT` would have been read access to
+#     `lms_user_id`, which is the `sub` claim verbatim (ADR 0045) and the stable
+#     join key E1-01 keeps out of every view — so a connection holding it can
+#     enumerate every subject that has ever launched and join a response to a
+#     person, on the connection every screen in the product runs on. The narrowest
+#     grant that does the job is one column, and it is the column that identifies
+#     nobody.
+#
+# What is *not* here is the assertion: no `UPDATE` on `course.lms_number`, on
+# `section.lms_section_code`, on the binding columns E1-10 adds to `section`, on
+# any of ADR 0021's four calendar columns, or on `user` in any form. A launch
+# discovers those and never revises them, and the database is what says so.
+#
+# **E1-11 spends three more, all on `enrollment`, and for the same reason E1-10
+# spent its three**: the alternative is `UPDATE` on `enrollment` table-wide, which
+# is strictly more than the sync needs and which would hand the application
+# connection the ability to rewrite `started_on`, `user_id` and `section_id`.
+#
+#   - `enrollment(ended_on)` — a drop closes the window. SPEC §3.4: "Drops: scores
+#     stop updating", which the tool can only act on once the row says when the
+#     student left.
+#   - `enrollment(lms_window_start)` / `enrollment(lms_window_end)` — the ADR 0048
+#     extension's values, which a platform may revise between syncs (a drop dated
+#     after the fact, a start corrected). `lms_`-prefixed because the platform owns
+#     them (E0-05's rule), and updatable for the same reason `course.lms_title` is:
+#     following the platform is the rule rather than an edit.
+#
+# **`started_on`, `user_id` and `section_id` are deliberately absent**, and that is
+# the load-bearing half of this group. They are first-seen facts — which member,
+# which section, and the day Pulse first saw them, which §3.4's fallback for an
+# undated late add is computed from — so a connection that could rewrite them could
+# re-date a student's whole term, and a re-add is a second row rather than an edit
+# to the first (ADR 0023, E1-11's D3). No `UPDATE` anywhere on `nrps_call` or
+# `role_assignment` either: an append-only log and a purview grant.
+RUNTIME_COLUMN_PRIVILEGES = frozenset(
+    {
+        (APPLICATION_ROLE, "course", "lms_title", "UPDATE"),
+        (APPLICATION_ROLE, "course", "title_is_fallback", "UPDATE"),
+        (APPLICATION_ROLE, "section", "lms_context_memberships_url", "UPDATE"),
+        (APPLICATION_ROLE, "user", "id", "SELECT"),
+        (APPLICATION_ROLE, "enrollment", "ended_on", "UPDATE"),
+        (APPLICATION_ROLE, "enrollment", "lms_window_start", "UPDATE"),
+        (APPLICATION_ROLE, "enrollment", "lms_window_end", "UPDATE"),
     }
 )
 
@@ -2925,10 +3653,27 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     public.<the reveal> TO pulse_reporting` also writes nothing to any `relacl`,
     and the role is not `pulse_app`, so neither this sweep as first written nor the
     `invariant`-marked refusal above would mention it — while the grantee may call
-    the one function whose job is to return a name. The allowed grantee on a
-    definer function is `pulse_care` and nothing else, which is E0-10's own
-    sentence: `pulse_care` "gets `EXECUTE` on a **single** `SECURITY DEFINER`
-    function".
+    the one function whose job is to return a name.
+
+    **The allowed grantees on a definer function are `pulse_care`, and — since
+    E1-12, E1-11 and that ticket's security round — `pulse_app` on the five
+    functions `SANCTIONED_APPLICATION_EXECUTE` names.** E0-10's own sentence still governs
+    the door that returns identity: `pulse_care` "gets `EXECUTE` on a **single**
+    `SECURITY DEFINER` function". What this epic adds is a different kind of
+    function — three point lookups answering with a uuid, owned by a role that
+    reads five columns and no identity among them; one writer that takes an address
+    and can never write a name; and one that takes a person and a section and
+    writes the single role its body names — and each is admitted here **by name**,
+    out of that constant at the top of this file, rather than by widening the rule
+    to "the application role may execute definer functions". A sixth grant to
+    `pulse_app` therefore still appears below, which is the whole point of writing
+    the inventory down.
+
+    Which five they are is *not* this test's question. This sweep owns the grantee
+    axis — who is named in an ACL anywhere — and the count and contents are
+    `test_the_application_role_may_execute_only_the_point_resolvers`'s, one
+    equality in one place. E0-10's count for `pulse_care` is likewise
+    `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door`'s.
 
     **`PUBLIC` is in both sweeps and is the sharpest case, and it means different
     things on the two.** On a relation Postgres grants nothing to `PUBLIC` by
@@ -2971,7 +3716,7 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     on the third read view.
     """
     definer = the_reveal_definer(db_session)
-    expected = {APPLICATION_ROLE, CARE_ROLE, definer}
+    expected = {APPLICATION_ROLE, CARE_ROLE, definer, *IDENTITY_DEFINER_ROLES}
     granted = db_session.execute(text(RELATION_GRANTEES)).mappings().all()
     on_columns = db_session.execute(text(COLUMN_GRANTEES)).mappings().all()
     executable = db_session.execute(text(SECURITY_DEFINER_GRANTEES)).mappings().all()
@@ -3007,18 +3752,22 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     beyond_on_functions = [
         f"{row['grantee']} holds {row['privilege']} on {row['routine']}"
         for row in executable
-        if row["grantee"] != CARE_ROLE and row["grantee"] != row["owner"]
+        if row["grantee"] != row["owner"] and not an_inventoried_execute(row)
     ]
     unexpected = sorted(beyond_on_relations + beyond_on_columns + beyond_on_functions)
     assert not unexpected, (
         f"{unexpected}. On a relation, the roles this scheme names are {sorted(expected)} — the "
-        "two connection roles of ADR 0001 and the reveal function's own owner from ADR 0043 — plus "
-        "whoever owns it, which is the migration identity ADR 0009 sanctions. On a `SECURITY "
-        f"DEFINER` function it is `{CARE_ROLE}` and the owner, and nothing else: E0-10 gives the "
-        "Care role `EXECUTE` on the door and E0-26 item 1 made that door two halves, and "
-        "`pulse_app` is refused both by name in an "
-        "`invariant`-marked test above. Anything else holds a privilege that no ticket in this "
-        "epic granted and that nothing in this repository will ever revoke.\n\n"
+        "two connection roles of ADR 0001, the reveal function's own owner from ADR 0043, and the "
+        f"three definer owners this epic adds ({', '.join(IDENTITY_DEFINER_ROLES)} — ADR 0094, "
+        "E1-11's D7 and that ticket's security round) — plus whoever owns the relation, which is "
+        "the migration identity ADR 0009 "
+        f"sanctions. On a `SECURITY DEFINER` function it is `{CARE_ROLE}`, the owner, and "
+        f"`{APPLICATION_ROLE}` on the functions `SANCTIONED_APPLICATION_EXECUTE` names, and "
+        "nothing else: E0-10 gives the Care role `EXECUTE` on the door and E0-26 item 1 made that "
+        f"door two halves, and `{APPLICATION_ROLE}` is refused that door in an `invariant`-marked "
+        "test above, with the five functions it *may* call pinned as an equality beside it. "
+        "Anything else holds a privilege that no ticket in this epic granted and that nothing in "
+        "this repository will ever revoke.\n\n"
         "`PUBLIC` appearing here is the worst case and reads like the mildest, and it reads "
         "differently on the two kinds. On a relation it is always deliberate, because Postgres "
         "grants no table privilege to `PUBLIC` by default. On a function it is what a migration "
@@ -3037,6 +3786,7 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     )
 
 
+@pytest.mark.invariant
 def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_own(
     db_session: Any,
 ) -> None:
@@ -3101,14 +3851,23 @@ def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_
     hands over `SELECT` on `user_identity`.
 
     **And through `COLUMN_GRANTEES` beside it, because `has_table_privilege` is
-    blind to a column grant.** The expected set at column level is *empty*: every
-    grant this scheme writes is table-level — ADR 0043's enumeration and E0-13's
-    `SELECT, INSERT` on `classification` alike — so a runtime role named in any
-    column ACL on a base table is a widening by definition. Without this,
+    blind to a column grant.** `RUNTIME_COLUMN_PRIVILEGES` is the expected set at
+    column level, compared as an equality in both directions exactly as the table
+    set is. **It was empty until E1-10**, because every grant this scheme wrote
+    before then was table-level — ADR 0043's enumeration and E0-13's
+    `SELECT, INSERT` on `classification` alike — and a runtime role named in any
+    column ACL was therefore a widening by definition. E1-10 spends four
+    column-scoped grants deliberately — three `UPDATE`s, in preference to the
+    table-wide `UPDATE` on `course` and `section` that would otherwise have been
+    needed, and one `SELECT` on `user(id)`, in preference to the table-wide read of
+    `lms_user_id` the round-3 review found; the constant carries the sentence for
+    each. Without this half,
     `GRANT UPDATE (verdict) ON public.classification TO pulse_app` would leave the
     append-only property broken with this test green, which is the same shape as
     the identity finding one table over and would have been left open by fixing
-    only that one.
+    only that one. And the *missing* half of the column comparison is what stops a
+    later ticket quietly dropping one of E1-10's three, which would leave a launch
+    unable to correct a fallback title and nothing saying why.
 
     **The mutation it exists to survive**: `GRANT SELECT ON public.enrollment TO
     pulse_app` — the convenience grant E0-33 names, added to make one query work,
@@ -3175,20 +3934,29 @@ def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_
 
     held = privileges_held(db_session, RUNTIME_ROLES, tables)
     on_columns = db_session.execute(text(COLUMN_GRANTEES)).mappings().all()
+    held_on_columns = {
+        (row["grantee"], row["relation"], row["column_name"], row["privilege"])
+        for row in on_columns
+        if row["grantee"] in RUNTIME_ROLES and row["relation"] in tables
+    }
     beyond_on_tables = [
         f"{role} holds {privilege} on public.{relation}"
         for role, relation, privilege in held - RUNTIME_BASE_TABLE_PRIVILEGES
     ]
     beyond_on_columns = [
-        f"{row['grantee']} holds {row['privilege']} on public.{row['relation']}"
-        f".{row['column_name']}"
-        for row in on_columns
-        if row["grantee"] in RUNTIME_ROLES and row["relation"] in tables
+        f"{role} holds {privilege} on public.{relation}.{column}"
+        for role, relation, column, privilege in held_on_columns - RUNTIME_COLUMN_PRIVILEGES
     ]
     beyond = sorted(beyond_on_tables + beyond_on_columns)
     missing = sorted(
-        f"{role} should hold {privilege} on public.{relation}"
-        for role, relation, privilege in RUNTIME_BASE_TABLE_PRIVILEGES - held
+        [
+            f"{role} should hold {privilege} on public.{relation}"
+            for role, relation, privilege in RUNTIME_BASE_TABLE_PRIVILEGES - held
+        ]
+        + [
+            f"{role} should hold {privilege} on public.{relation}.{column}"
+            for role, relation, column, privilege in RUNTIME_COLUMN_PRIVILEGES - held_on_columns
+        ]
     )
     assert not beyond and not missing, (
         f"Beyond what this scheme grants: {beyond}. Missing from it: {missing}. The connection "
@@ -3204,14 +3972,16 @@ def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_
         "**An entry naming a column** — `…public.classification.verdict` rather than "
         "`…public.classification` — is a grant `has_table_privilege` does not report at all, so "
         "it is read out of `pg_attribute.attacl` instead. The expected set at column level is "
-        "empty: every grant this scheme writes is table-level, so a runtime role named in any "
-        "column ACL is a widening by definition, and on an append-only table it is the whole of "
-        "how append-only stops being true.\n\n"
+        "`RUNTIME_COLUMN_PRIVILEGES`, which held nothing until E1-10 and now holds three "
+        "column-scoped `UPDATE`s and one column-scoped `SELECT`, each with its sentence. Anything "
+        "else at column grain is a "
+        "widening by definition, and on an append-only table it is the whole of how append-only "
+        "stops being true.\n\n"
         "The second list means this scheme has lost a grant it needs: without `SELECT` on "
         "`role_assignment` the Care path cannot resolve the actor whose assignment it is about, "
         "and without `INSERT` on `classification` the moderation classifier cannot record a "
         "verdict. Each entry in `RUNTIME_BASE_TABLE_PRIVILEGES` carries the sentence it comes "
-        "from.\n\n"
+        "from, and so does each entry in `RUNTIME_COLUMN_PRIVILEGES` beside it.\n\n"
         "**How to tell a legitimate new grant from a widening**, because this test cannot and the "
         "reader has to. Four questions, in order:\n"
         "  1. Does anything in the tree issue it? If no `.sql` file under `backend/app/views_sql/` "
@@ -3649,4 +4419,774 @@ def test_downgrading_the_committed_record_revision_takes_back_the_definers_read_
         "halves rather than E0-10's single three-argument function. A downgrade that leaves the "
         "two-call door standing beside the restored one leaves both callable, and the old one "
         "takes its subject from its caller."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1-01 — what the application role may read from a view, column by column.
+# ---------------------------------------------------------------------------
+#
+# Every rule above is about *relations*: which role may read `user_identity`,
+# which may execute the door, who else is named in an ACL. None of them can see
+# what a view a role is allowed to read actually returns, and that is the gap the
+# carried entry measured: "the set of columns `pulse_app` may read from a view is
+# enumerated so a new grant on a join key fails the sweep rather than passing it"
+# (`docs/tickets/e1/carried-from-e0.md`).
+#
+# It is a third question, not a restatement of the two next door.
+# `test_identity_column_marker.py` asks what a view *reads*, out of `pg_depend`;
+# `test_identity_separated_views.py` asks what a view *file says*, out of the
+# text. This one asks what the application connection is *granted*, and the three
+# disagree in both directions: a view can read a column it does not return, and a
+# view whose column list is faultless can be granted to a role nobody sanctioned.
+#
+# **A `GRANT SELECT` on a view is the whole of the exposure.** A view runs with
+# its owner's privileges, so the grant is not filtered by anything the reader
+# holds; the columns of a view `pulse_app` may select are exactly the columns
+# every instructor and leadership screen can put on a page.
+
+# Every `(view, column, grantee)` a relation-level `SELECT` grant reaches, in
+# `public`. Relation-level grants carry no column list, so the columns come from
+# `pg_attribute` — a grant on the view is a grant on all of them.
+#
+# `aclexplode` rather than a text match on the `aclitem`, for the reason
+# `RELATION_GRANTEES` above gives: the rendered form carries the grantor's name,
+# which is `.env`'s choice. Grantee oid 0 is `PUBLIC`, which has no `pg_roles`
+# row and is named here rather than dropped by the join — every role in the
+# cluster is a member of it, `pulse_app` included, so a view granted to `PUBLIC`
+# is a view `pulse_app` may read without being named anywhere.
+APPLICATION_READABLE_VIEW_COLUMNS = """
+    SELECT c.relname AS relation,
+           a.attname AS column_name,
+           coalesce(r.rolname, 'PUBLIC') AS grantee
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    CROSS JOIN LATERAL aclexplode(c.relacl) AS g
+    LEFT JOIN pg_roles r ON r.oid = g.grantee
+    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+    WHERE n.nspname = 'public'
+      AND c.relkind IN ('v', 'm')
+      AND g.privilege_type = 'SELECT'
+    ORDER BY 1, 2, 3
+"""
+
+# The grantees whose `SELECT` puts a column within the application connection's
+# reach. Two, and the second is the one that reads as mild: `PUBLIC` is the
+# pseudo-role every role belongs to, so one `GRANT SELECT ON <a view> TO PUBLIC`
+# is a grant to `pulse_app` that names no role at all.
+#
+# **A privilege reaching `pulse_app` by *membership* in another role is
+# deliberately not counted here**, and that is not an oversight: it is the whole
+# subject of `test_neither_runtime_role_can_become_a_role_that_may_read_identity`
+# above, which asks `pg_has_role` in `'MEMBER'` mode because a membership granted
+# `WITH INHERIT FALSE` appears in no ACL and in no `has_table_privilege` answer.
+# Asking that question again here would report the same hole twice and would make
+# this enumeration's expected set depend on the role graph rather than on what
+# each view returns.
+APPLICATION_READERS = (APPLICATION_ROLE, "PUBLIC")
+
+# What the application connection may read from a view, and the whole of it:
+# every `(view, column)` pair, written out by hand.
+#
+# **Hand-written and derived from the record, never read out of the view files**
+# — the same decision `RUNTIME_BASE_TABLE_PRIVILEGES` and
+# `REVEAL_DEFINER_PRIVILEGES` make above, for the same reason
+# (`docs/MISTAKES.md` entry 19). A set assembled from `backend/app/views_sql/*.sql`
+# at run time, or copied out of them without a sentence per entry, can be checked
+# only against the SQL it is supposed to police: the file says select it, the
+# catalog says granted, the test says fine, and a later ticket's column — which
+# is exactly how `lms_user_id` would arrive — justifies itself on the way past.
+#
+# The cost is honest and is the point: a ticket that legitimately adds a column to
+# a read view turns this red, and the pull request that adds it adds the entry and
+# says why. That is a loud failure on a legitimate change, and the alternative is
+# a silent pass on a widening.
+#
+# **`section_roster.user_id` is expected and allowed**, and it is worth saying
+# outright because it looks like the thing this rule is against. The
+# Pulse-internal uuid is the design — the carried entry on the reveal's
+# composition calls it "the whole point of the view", since "the key is what makes
+# a de-identified response addressable". `lms_user_id` is the one that must never
+# appear: it is the LTI `sub`, it resolves a named student at the platform in one
+# step, and ADR 0014's `lms_` prefix marks where the value came from rather than
+# what it holds.
+#
+# **Per view, because the sanction is per view.** Each entry below carries the
+# sentence that admits it, and the sentences come from the ticket, SPEC and the
+# ADR rather than from the SQL: the five views are E0-10's two and ADR 0046's
+# three, and what each is *for* is written down in those records.
+SANCTIONED_VIEW_COLUMNS: dict[str, tuple[str, ...]] = {
+    # E0-10's scope, in its own words: "a section-roster view and an
+    # enrollment-count view that expose section membership and counts with **no**
+    # identity columns reachable". This is the membership half, one row per
+    # enrolment — `enrollment_id` is the row's key.
+    #
+    # **`user_id` is the Pulse-internal key and is the design**, not an oversight.
+    # The carried entry on the reveal's composition states it as the view's
+    # purpose: `section_roster` "hands instructor-scoped code the `user_id` of
+    # every enrolled student — that is the whole point of the view, and the key is
+    # what makes a de-identified response addressable". It names a `user` row and
+    # resolves to a name nowhere: every path from it to `user_identity` is shut by
+    # ADR 0001's grants, which the `invariant`-marked refusals earlier in this file
+    # assert. `lms_user_id` is the value that is different in kind — SPEC §4 keys
+    # responses "to the **LMS user ID** (`sub` from the launch)", so it is the one
+    # identifier here that means something outside this database — and it is
+    # absent, and must stay absent.
+    #
+    # **`lms_section_code` is an LMS key that resolves to a section**, never to a
+    # person: ADR 0014 puts the `lms_` prefix on `section.lms_section_code` as an
+    # ownership marker, and SPEC §8 derives `length_weeks` and the section's start
+    # and end dates from that code through `start_letter_map`. Those three travel
+    # with it for that reason. `started_on` and `ended_on` are the other two dates
+    # on the roster row; every one of the four is a date rather than an
+    # identifier.
+    "section_roster": (
+        "enrollment_id",
+        "user_id",
+        "section_id",
+        "course_id",
+        "term_id",
+        "lms_section_code",
+        "length_weeks",
+        "section_start_date",
+        "section_end_date",
+        "started_on",
+        "ended_on",
+    ),
+    # The counts half of the same E0-10 sentence. It carries no person key at all,
+    # and the contrast with `section_roster` above is the point rather than a
+    # detail: membership has to name the row it is about, and a count does not, so
+    # the two views differ by exactly the column that needed arguing for.
+    "section_enrollment_count": (
+        "section_id",
+        "course_id",
+        "term_id",
+        "lms_section_code",
+        "enrolled_count",
+    ),
+    # ADR 0046's first view: "one assignment, its scope node, its edge". SPEC §8
+    # spells the scope exactly — an assignment carries "its **scope as one
+    # nullable foreign key per containment level** — `institution_id`,
+    # `college_id`, `department_id`, `course_id`, `section_id` — of which exactly
+    # one is non-null" — so the five scope columns are that sentence, and
+    # `reports_to` is the edge, which ADR 0046's consequences say is carried now
+    # because "E9 walks that edge".
+    #
+    # **There is deliberately no `prefix_id` here and there is one in
+    # `containment_path` below**, which reads like an inconsistency and is not:
+    # SPEC §8 says "there is deliberately no `prefix_id`, because no role in
+    # §2.1's table is scoped to a prefix", while containment has six levels and a
+    # prefix is one of them. The two views answer different questions.
+    #
+    # `person_id` names a `person` row and nothing else. `person.identity_name` is
+    # marked identity (ADR 0022) and stays behind the view boundary; the key does
+    # not carry it.
+    #
+    # **`permits_launch` and `permits_web_login` arrived with E1-13**, and this
+    # enumeration going red on them is E1-01's guard doing its job rather than a
+    # widening slipping past. They are ADR 0026's two stored generated columns on
+    # `role_assignment`, each derived from `role` and from nothing else: "Derived,
+    # so no write path can contradict the role; stored as columns, so the fact is
+    # on the row where a view, a seed script or a psql session can read it." The
+    # view withheld them until a ticket needed them — its own header said a later
+    # `_v002` would add them — and E1-13 is that ticket: the landing resolution
+    # filters a person's assignments by the entered door's permission column, so
+    # "a Care assignment is unreachable from a launch" is a property of the row
+    # rather than of a Python branch. Neither column carries anything about a
+    # person: each is a boolean function of one enum value, so nothing here
+    # narrows toward an identity, and what they widen is a fact SPEC §2.1's table
+    # already states in public.
+    "assignment_scope": (
+        "assignment_id",
+        "person_id",
+        "role",
+        "reports_to",
+        "institution_id",
+        "college_id",
+        "department_id",
+        "course_id",
+        "section_id",
+        "permits_launch",
+        "permits_web_login",
+    ),
+    # ADR 0046's second: "which courses a person leads". SPEC §8:
+    # "`lead_faculty_mapping` maps a person to the courses they lead (one lead per
+    # course)". The pair is the whole answer, and ADR 0046 says why the courses
+    # come from the mapping rather than from the assignment — the mapping carries
+    # `UNIQUE (course_id)` and has exactly one answer per course.
+    "lead_faculty_course": ("person_id", "course_id"),
+    # ADR 0046's third: "every org node with the chain of ancestors above it",
+    # emitting "one row per node at every level". Six columns for SPEC §2.1's six
+    # containment levels, which is the same six `Purview` holds a set for. No
+    # person table appears anywhere in it.
+    "containment_path": (
+        "institution_id",
+        "college_id",
+        "department_id",
+        "prefix_id",
+        "course_id",
+        "section_id",
+    ),
+}
+
+EXPECTED_APPLICATION_READABLE_COLUMNS: frozenset[tuple[str, str]] = frozenset(
+    (view, column) for view, columns in SANCTIONED_VIEW_COLUMNS.items() for column in columns
+)
+
+# The views E1-01's controls plant. Named for the ticket so that one surviving a
+# fixture change is traceable to it.
+#
+# The last two are the mutation battery's: a view granted to a role that is not an
+# application reader, and a view granted one *column* at a time. Each covers a
+# half of the candidate sweep that the first two left untouched — an ungranted
+# view has a `NULL` `relacl` and so exercises no filter at all, and a
+# table-granted view never reaches `pg_attribute.attacl`.
+PLANTED_GRANTED_VIEW = "e1_01_planted_granted_view"
+PLANTED_UNGRANTED_VIEW = "e1_01_planted_ungranted_view"
+PLANTED_CARE_GRANTED_VIEW = "e1_01_planted_care_granted_view"
+PLANTED_COLUMN_GRANTED_VIEW = "e1_01_planted_column_granted_view"
+
+# The join key the carried entry names, and the table ADR 0001 puts it on. Spelled
+# here rather than discovered, because the control's whole job is to stand up the
+# exact disclosure that entry measured: "`user.lms_user_id` is a stable per-person
+# join key (the LTI `sub`), and it is flagged by nothing".
+LMS_USER_KEY = "lms_user_id"
+USER_TABLE = "user"
+
+
+def mentions(message: str, word: str) -> bool:
+    """Does `message` name `word` as a whole word?
+
+    A whole word rather than a substring, because the control below asks whether a
+    *failure message* names a column, and the pair this rule is about is exactly
+    the pair a substring check gets wrong: `user_id` occurs inside `lms_user_id`,
+    so a message naming only the harmless key would satisfy a substring test for
+    the dangerous one. `\\b` refuses that — `_` is a word character — and it is the
+    difference between "the guard named the leak" and "the guard said something
+    that contained the right letters".
+
+    A second copy of a three-line regex, and deliberately: `test_identity_
+    separated_views.py` has the other. A test module importing a sibling test
+    module resolves only because of where pytest puts `tests/` on `sys.path`, so
+    borrowing costs a file loader — that module's `identity_marker_module` is what
+    it takes — and a loader for this is more machinery than the duplication.
+    `IDENTITY_NAME_FRAGMENTS` next door records the same trade for the same
+    reason.
+    """
+    return re.search(rf"\b{re.escape(word)}\b", message) is not None
+
+
+def columns_the_application_role_may_read(session: Any) -> set[tuple[str, str]]:
+    """Every `(view, column)` the application connection may `SELECT`, out of the catalog.
+
+    **Two ACLs, because a `SELECT` on a column is not recorded where a `SELECT` on
+    a relation is.** `pg_class.relacl` carries the grant on the view and says
+    nothing about columns, so every column of the view is reachable through it;
+    `pg_attribute.attacl` carries a grant on one column of it, appears in no
+    `relacl` anywhere, and is invisible to `has_table_privilege` — measured on
+    this stack during a security review of PR #40, and `COLUMN_GRANTEES` above
+    carries the measurement. A view granted at column level to `pulse_app` is a
+    view this sweep would miss entirely if it read only the first.
+
+    **The candidate set comes from the catalog and not from a list in this file**,
+    which is E1-01's scope in as many words: "the enumeration's inventory comes
+    from somewhere the guarded structure cannot shrink". A hand-kept list of views
+    would answer for the views somebody remembered, and the grant this rule exists
+    to catch is one nobody wrote down.
+    """
+    views = set(read_views(session))
+    granted = {
+        (row["relation"], row["column_name"])
+        for row in session.execute(text(APPLICATION_READABLE_VIEW_COLUMNS)).mappings()
+        if row["grantee"] in APPLICATION_READERS
+    }
+    granted |= {
+        (row["relation"], row["column_name"])
+        for row in session.execute(text(COLUMN_GRANTEES)).mappings()
+        if row["relation"] in views
+        and row["privilege"] == "SELECT"
+        and row["grantee"] in APPLICATION_READERS
+    }
+    return granted
+
+
+@pytest.mark.invariant
+def test_the_columns_the_application_role_may_read_from_a_view_are_exactly_the_enumerated_set(
+    db_session: Any,
+) -> None:
+    """E1-01 criterion 2: an equality, so that a new column is a decision and not a diff.
+
+    Every other grant rule in this file is about relations, and a relation-grained
+    rule cannot see what a view returns. This one is the column enumeration the
+    carried entry asks for: the set of `(view, column)` pairs `pulse_app` may
+    select is compared, both directions, against a set written down in this file
+    — so a column added to a read view, or a grant on a view nobody sanctioned,
+    fails here rather than passing everything.
+
+    **Views only, and base tables keep their table-grained equality.** They are
+    different questions and the answers are shaped differently: a base table's
+    rule is that the connection holds *no* privilege, which
+    `test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_own`
+    states exactly, and a view's rule is that it holds `SELECT` on precisely the
+    columns somebody sanctioned. Widening the base-table test to column grain
+    would compare an empty set against an empty set, which is a rule that cannot
+    fail; narrowing this one to relations would say nothing about `lms_user_id`,
+    which is the point of it.
+
+    **Marked `invariant` because it is a door rather than an inventory**, by the
+    line this file's E0-33 section draws: a marked test guards one route into
+    identity, and a column list a screen may read is that route at its last
+    possible moment — after the view text, after the dependency graph, in the
+    grant that decides what the application connection can put on a page.
+
+    **The mutation it exists to survive**: `GRANT SELECT ON <a view exposing
+    lms_user_id> TO pulse_app`, which is the carried entry's second finding and
+    which every other test in this suite is green against — the marked-column
+    sweeps say nothing, because `lms_` is ADR 0014's ownership marker rather than
+    an identity one, and the relation-grained grant rules say nothing, because
+    reading a view is what `pulse_app` exists to do. Also `GRANT SELECT (<a
+    column>) ON <a view> TO pulse_app`, which is recorded in a third catalog, and
+    `GRANT SELECT ON <a view> TO PUBLIC`, which names no role.
+    **The near miss it tolerates**: none by construction — a new column on a
+    granted view is a red, deliberately, and the entry that answers it is one line
+    with the sentence that sanctions it.
+
+    **Which is also how this test is defeated, so it is not defeated alone.**
+    Writing the entry is the cheap repair for any red here, including the one red
+    that must never be repaired that way, and no equality can tell a sanctioned
+    column from a sanctioned mistake. The guards that stand behind it are
+    `test_no_sanctioned_view_column_is_an_lms_join_key` below, which refuses that
+    entry by name, and the two lineage rules, which refuse the *read* whatever the
+    view calls the column: `test_identity_column_marker.py`'s strict rule at
+    column grain, and `test_identity_separated_views.py`'s file-text sweep for a
+    whole-row read. That split is measured rather than tidy, and the docstring on
+    the name guard below says what it rests on.
+
+    Two non-vacuity guards. There must be views, or the catalog sweep has nothing
+    to enumerate; and the candidate set must be non-empty, or "the columns
+    `pulse_app` may read are exactly these" is equally true of a connection that
+    may read nothing at all and every screen in the product is shut.
+    """
+    views = read_views(db_session)
+    assert views, (
+        "There is no view in `public`, so this enumeration is over an empty set and would report "
+        "success against any grant at all. `test_identity_separated_views.py` diagnoses that."
+    )
+
+    candidates = columns_the_application_role_may_read(db_session)
+    assert candidates, (
+        f"`{APPLICATION_ROLE}` may read no column of any of {views}. Either the grants are missing "
+        "— in which case every read path in the product is shut, and "
+        "`test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_own` reads "
+        "the same fact from the other side — or this sweep is reading the wrong catalog, in which "
+        "case the comparison below is between an empty set and a hand-written one and says nothing "
+        "about the database."
+    )
+
+    sanctioned = EXPECTED_APPLICATION_READABLE_COLUMNS
+    surplus = sorted(f"{view}.{column}" for view, column in candidates - sanctioned)
+    missing = sorted(f"{view}.{column}" for view, column in sanctioned - candidates)
+
+    # **The operand is a bool on purpose, and it is a repair rather than a
+    # style.** Written as `assert not surplus and not missing`, pytest's assertion
+    # rewriting appends the *repr of the lists* to the exception, so the offending
+    # column appears in `str(failure.value)` whatever this message says — and
+    # `test_a_granted_view_exposing_the_lms_join_key_fails_the_enumeration`, whose
+    # whole job is to establish that the message names it, passed against a
+    # version of this message that printed only counts. Measured by the mutation
+    # battery, not reasoned about; `docs/MISTAKES.md` entry 3 in the place a
+    # control was supposed to close.
+    #
+    # With a plain bool there is nothing for the rewriter to expand — the
+    # explanation is `assert False` — so the names below are the only names in the
+    # failure, and the control that reads them is load-bearing. Nothing is lost to
+    # a human reader: the message prints both lists in full, which the rewriter's
+    # own output does less legibly.
+    agrees = not surplus and not missing
+    assert agrees, (
+        f"Granted and not sanctioned: {surplus}. Sanctioned and not granted: {missing}.\n\n"
+        "The first list is the one to read first. A view is read with its **owner's** privileges, "
+        "so a `GRANT SELECT` on one hands every column it returns to the grantee whatever the "
+        "grants on the tables underneath say — SPEC §8's separation is 'enforced in the database, "
+        "not just the application', and this is the last place in the database where what an "
+        "instructor's connection may see is decided. Nothing else in this build looks at it: "
+        "`alembic check` reads no ACL and no `pg_class` entry for a view (E0-20 item 3b), the "
+        "marked-column sweeps ask what a view *reads* rather than what it *returns*, and every "
+        "other grant rule in this file is about relations.\n\n"
+        f"**`{LMS_USER_KEY}` in that first list is the disclosure this rule was written for.** It "
+        "is the LTI `sub`: a stable per-person key at the platform, marked `lms_` for ownership by "
+        "ADR 0014 and by nothing for identity, matching no identity fragment and carrying no "
+        "marker. A view returning it beside a comment lets an instructor resolve a named student "
+        "in the LMS in one step with every §4.1 guard green, which is what "
+        "`docs/tickets/e1/carried-from-e0.md` measured. A Pulse-internal `user_id` is a different "
+        "thing and is expected: it names a row here and nothing anywhere else.\n\n"
+        "The second list means a column this project sanctioned is not readable, which shuts a "
+        "read path rather than opening one — a view replaced by a `_v002.sql` that dropped a "
+        "column, or a grants file a revision stopped executing.\n\n"
+        "If a column in the first list is legitimate, `EXPECTED_APPLICATION_READABLE_COLUMNS` at "
+        "the head of this section is the one place it is recorded, with the sentence that "
+        "sanctions it rather than just its name, and the pull request says which screen needs it. "
+        "That constant is deliberately not read out of `backend/app/views_sql/`: a set derived "
+        "from the files it polices lets every grant justify itself (`docs/MISTAKES.md` entry 19)."
+    )
+
+
+@pytest.mark.invariant
+def test_no_sanctioned_view_column_is_an_lms_join_key() -> None:
+    """The repair this enumeration invites, refused: an entry rather than a fix.
+
+    An equality fails in two directions and only one of them has an honest repair.
+    A column granted and not sanctioned is either a widening to undo or a decision
+    to record — and recording it is one line in the constant above, which is
+    exactly what somebody under time pressure would write for the column this
+    whole ticket is about. So the constant is held to the one name the carried
+    entry measured: `lms_user_id` may not appear in it, on any view, ever.
+
+    **What this does not do, said plainly, because it would be easy to read as
+    more.** It reads names, and a view may call a column anything: `SELECT
+    u.lms_user_id AS platform_key` sanctioned as `platform_key` passes here. That
+    case is not this test's, and the guard that owns it depends on how the view
+    reached the column:
+
+      - **a column-grain read** — `u.lms_user_id`, aliased or not, in a select
+        list or a `WHERE` — is caught by
+        `test_identity_column_marker.py`'s `test_no_view_reads_a_column_of_a_
+        person_table_outside_the_join_keys`, which reads the lineage out of
+        `pg_depend` and does not care what the view called it;
+      - **a whole-row read** — `to_jsonb(u)` and its spellings — is caught by
+        `test_identity_separated_views.py`'s file-text sweep, and **not**
+        reliably by the catalog. Measured by a security re-pass: Postgres drops
+        the `refobjsubid = 0` row as soon as the same view also names a column of
+        that table, so `SELECT to_jsonb(u) … JOIN public."user" u ON u.id =
+        e.user_id` records only `(1, id)` and the catalog's whole-row closure
+        does not fire on it.
+
+    That second one rests on every live view shipping as a file under
+    `views_sql/`, which is a rule with a test behind it rather than a convention:
+    `test_every_read_view_is_created_from_a_sql_file_under_views_sql`. A view
+    created by an `op.execute` in a revision would be outside the text sweep, and
+    that test is what makes it impossible to have one.
+
+    So the three are a chain rather than a pair: this one refuses the cheap
+    repair, the catalog refuses the aliased column read, the file sweep refuses
+    the whole-row read, and none of them covers another's case.
+
+    **The mutation it exists to survive**: adding `("<any view>", "lms_user_id")`
+    to `SANCTIONED_VIEW_COLUMNS` to make the enumeration green.
+    **The near miss it tolerates**: `section_roster.user_id`, which is sanctioned
+    above with the sentence that admits it and is a different identifier —
+    Pulse-internal, and resolving to a name nowhere.
+    """
+    assert SANCTIONED_VIEW_COLUMNS, (
+        "`SANCTIONED_VIEW_COLUMNS` is empty, so this test reads nothing and reports success. The "
+        "enumeration it belongs to would be failing on every granted column at the same time; "
+        "that test is where an empty constant is diagnosed."
+    )
+
+    named = sorted(
+        f"{view}.{column}"
+        for view, columns in SANCTIONED_VIEW_COLUMNS.items()
+        for column in columns
+        if column == LMS_USER_KEY
+    )
+    assert not named, (
+        f"{named} — `{LMS_USER_KEY}` is sanctioned as readable by `{APPLICATION_ROLE}`.\n\n"
+        "That is the LTI `sub`: a stable per-person key at the platform, which resolves a named "
+        "student in the LMS in one step. SPEC §4 keys responses to it, ADR 0014's `lms_` prefix "
+        "marks only where the value came from, and no identity rule in this repository matches it "
+        "— which is what `docs/tickets/e1/carried-from-e0.md` measured and what E1-01 exists to "
+        "close.\n\n"
+        "If this entry was added to make the enumeration green, that is the repair this test "
+        "refuses: the column comes out of the view, in a `_v002.sql` under ADR 0041, rather than "
+        "into this constant. If a read path genuinely needs to identify a person at the platform, "
+        "it is a decision for the spec and for Todd rather than for a grant list."
+    )
+
+
+@pytest.mark.invariant
+def test_a_granted_view_exposing_the_lms_join_key_fails_the_enumeration(db_session: Any) -> None:
+    """The enumeration seen *finding* something, on the exact grant the carried entry names.
+
+    `docs/MISTAKES.md` entry 35: a guard that enumerates and only ever reports
+    absence cannot tell you which of its mechanisms it can still see. So the grant
+    is stood up rather than reasoned about — a view returning `user.lms_user_id`,
+    granted `SELECT` to the application role, which is two statements a later
+    ticket writes to make one screen work.
+
+    **Everything is planted inside `db_session`'s transaction and rolled back with
+    it.** Postgres puts DDL *and* a `GRANT` inside the transaction, so `public` is
+    unchanged at the end and no other connection ever sees either. The assertions
+    run in the same transaction as the plant, which is what makes them mean
+    anything: a mutation a fixture undoes before the assertion is a control that
+    cannot fail (`docs/MISTAKES.md` entry 20).
+
+    **Three assertions, in order, and the middle one is the control on the
+    control.** The column has to exist — otherwise the plant is a view of
+    something else. The enumeration's *candidate* set has to contain it —
+    otherwise the failure below is the empty-expectation failure rather than this
+    grant. And the guard's message has to name the *entry* — the view and the
+    column together, as a whole word — because a red that does not name what
+    leaked is repaired by whatever is cheapest, and on this file the cheapest
+    repair is an entry in the sanctioned set. The bare column name would not do:
+    the guard's message explains in prose what `lms_user_id` is, so a check for
+    that word passes whatever the granted set contains.
+
+    **That third assertion was measured guarding nothing, and the repair is in the
+    guard rather than here.** The mutation battery changed the guard's message to
+    print `len(surplus)` instead of the names and this control stayed green:
+    pytest's assertion rewriting appends the repr of the compared lists to the
+    exception, so the entry was in `str(failure.value)` no matter what the message
+    said, and `mentions` was reading the rewriter's output rather than anything
+    anybody wrote. The guard now compares a bool, so the explanation is
+    `assert False` and the authored message is the whole of the text — which is
+    what makes the check below load-bearing. `docs/MISTAKES.md` entry 3, found
+    inside a control written to close entry 35.
+
+    **The mutation it exists to survive**: narrowing the candidate sweep to a
+    hand-kept list of views, which is the shape E1-01's scope forbids and which
+    would leave a planted view invisible; and dropping either ACL from
+    `columns_the_application_role_may_read`.
+    **The near miss it tolerates**: the same view left ungranted, which is the
+    other control below.
+    """
+    session = db_session
+    columns = {name for name, _ in public_table_columns(session, USER_TABLE)}
+    assert LMS_USER_KEY in columns, (
+        f"`public.{USER_TABLE}` has no `{LMS_USER_KEY}` column; it has {sorted(columns)}. ADR 0001 "
+        f"puts the LMS key and the platform reference on that table and ADR 0014 prefixes an "
+        "LMS-owned column `lms_`, so if the key has been renamed this constant follows it — the "
+        "control cannot plant the disclosure the carried entry measured without the column that "
+        "carries it."
+    )
+
+    # One statement per line with its own suppression, the convention this file
+    # already uses for interpolated DDL (`READ_IDENTITY` above, and the planted
+    # objects in `test_identity_column_marker.py`). Every name interpolated is a
+    # module constant declared beside `PLANTED_GRANTED_VIEW`; nothing reaches
+    # these from outside the file, and the transaction is rolled back.
+    planted = f'CREATE VIEW public.{PLANTED_GRANTED_VIEW} AS SELECT u.{LMS_USER_KEY} FROM public."{USER_TABLE}" u'  # noqa: S608
+    session.execute(text(planted))
+    session.execute(text(f'GRANT SELECT ON public.{PLANTED_GRANTED_VIEW} TO "{APPLICATION_ROLE}"'))
+
+    candidates = columns_the_application_role_may_read(session)
+    assert (PLANTED_GRANTED_VIEW, LMS_USER_KEY) in candidates, (
+        f"`{APPLICATION_ROLE}` was granted `SELECT` on a view returning `{LMS_USER_KEY}` and the "
+        f"candidate sweep does not report it. It reported {sorted(candidates)}. The sweep is "
+        "blind — to `pg_class.relacl`, to `pg_attribute`, or to views in `public` — and the "
+        "enumeration above is then an equality between a hand-written set and whatever a broken "
+        "query returns."
+    )
+
+    with pytest.raises(AssertionError) as failure:
+        test_the_columns_the_application_role_may_read_from_a_view_are_exactly_the_enumerated_set(
+            session
+        )
+
+    # **The column's name alone would not do**, and that is `docs/MISTAKES.md`
+    # entry 3 caught in the act: the guard's own failure message explains what
+    # `lms_user_id` is, in prose, so a check for the bare word passes whatever the
+    # granted set contains. What is asked for is the *entry* — the view and the
+    # column together, as the surplus list spells it — which nothing but a real
+    # finding can put in that message.
+    #
+    # **And the text read here is the authored message and nothing else**, which
+    # is the second half of the same lesson: while the guard asserted on the lists
+    # themselves, pytest's rewriter appended their repr and this check passed
+    # against a message that had stopped naming anything. The guard asserts a bool
+    # now for that reason, and the comment above `agrees` carries the measurement.
+    reported = f"{PLANTED_GRANTED_VIEW}.{LMS_USER_KEY}"
+    assert mentions(str(failure.value), reported), (
+        f"The enumeration failed on the planted grant and its message does not name `{reported}`. "
+        f"What it said: {failure.value}\n\n"
+        "The message is the criterion rather than a courtesy: a reader who is told only that the "
+        "granted set differs from the sanctioned one has two lists to diff, and the repair that "
+        "presents itself for either is an entry in the sanctioned set. It is also possible this "
+        "caught a *different* failure inside the guard — an empty candidate set, no views at all — "
+        "in which case the planted grant was never enumerated and this control would otherwise "
+        "have passed for a reason unrelated to what it asserts (`docs/MISTAKES.md` entry 3)."
+    )
+
+
+@pytest.mark.invariant
+def test_a_column_grant_on_a_view_reaches_the_enumeration(db_session: Any) -> None:
+    """The other ACL, stood up: a grant on one column, on a view granted to nobody.
+
+    `columns_the_application_role_may_read` reads two catalogs, and until now only
+    one of them had a subject. `pg_class.relacl` carries a grant on the whole
+    view; `pg_attribute.attacl` carries a grant on a single column of it, appears
+    in no `relacl` anywhere, and is invisible to `has_table_privilege` — measured
+    on this stack during a security review of PR #40, which `COLUMN_GRANTEES`
+    above records. Deleting that half of the union left every test green, because
+    both plants beside this one use a relation grant. So this one does not.
+
+    **Three assertions, and the middle one is the finding rather than bookkeeping.**
+    The granted column must be enumerated. The view's *other* column must **not**
+    be — that is what makes this a column grant rather than a table grant, and it
+    is the reviewer's own measurement reproduced: `SELECT *` on such a view is
+    refused while the granted column reads fine. And the guard must fail naming
+    the entry, because a candidate the enumeration never compares is a candidate
+    that changes nothing.
+
+    **Why this matters beyond covering a branch.** A column grant is the quietest
+    way to widen this surface: it leaves the view ungranted as far as every
+    relation-level rule in this file can see, and ADR 0001 rejects column grants
+    by name — which is exactly why somebody reaches for one when a screen needs a
+    single value.
+
+    Everything is planted inside `db_session`'s transaction and rolled back with
+    it (`docs/MISTAKES.md` entry 20: the plant and the assertions are in one
+    transaction).
+
+    **The mutation it exists to survive**: deleting the `COLUMN_GRANTEES` half of
+    the union in `columns_the_application_role_may_read`, or narrowing it to base
+    tables.
+    **The near miss it tolerates**: the ungranted column of the same view, which
+    must stay out — asserted here rather than assumed.
+    """
+    session = db_session
+    columns = [name for name, _ in public_table_columns(session, USER_TABLE)]
+    assert LMS_USER_KEY in columns, (
+        f"`public.{USER_TABLE}` has no `{LMS_USER_KEY}` column; it has {sorted(columns)}. The "
+        "planted view below selects it beside a key, and the column grant is made on it."
+    )
+
+    # Two columns, so that the grant can be narrower than the view.
+    planted = f'CREATE VIEW public.{PLANTED_COLUMN_GRANTED_VIEW} AS SELECT u.id, u.{LMS_USER_KEY} FROM public."{USER_TABLE}" u'  # noqa: S608
+    session.execute(text(planted))
+    session.execute(
+        text(
+            f"GRANT SELECT ({LMS_USER_KEY}) ON public.{PLANTED_COLUMN_GRANTED_VIEW} "
+            f'TO "{APPLICATION_ROLE}"'
+        )
+    )
+
+    candidates = columns_the_application_role_may_read(session)
+    assert (PLANTED_COLUMN_GRANTED_VIEW, LMS_USER_KEY) in candidates, (
+        f"`{APPLICATION_ROLE}` holds `SELECT` on the `{LMS_USER_KEY}` column of "
+        f"`public.{PLANTED_COLUMN_GRANTED_VIEW}` and the candidate sweep does not report it; it "
+        f"reported {sorted(candidates)}.\n\n"
+        "The sweep is reading `pg_class.relacl` only. A column grant is recorded in "
+        "`pg_attribute.attacl`, which no relation-level query and no `has_table_privilege` answer "
+        "reads — so the enumeration would be blind to the one shape ADR 0001 rejects by name, "
+        "while every other rule in this file goes on passing."
+    )
+    assert (PLANTED_COLUMN_GRANTED_VIEW, "id") not in candidates, (
+        f"The sweep reports `id` as readable on `public.{PLANTED_COLUMN_GRANTED_VIEW}`, and the "
+        f"grant was `SELECT ({LMS_USER_KEY})` on that column alone. Then it is expanding a column "
+        "grant to the whole view, the assertion above is satisfied by the wrong mechanism, and the "
+        "enumeration would report columns nobody may read — which fails in the direction that gets "
+        "a guard widened until it stops discriminating."
+    )
+
+    with pytest.raises(AssertionError) as failure:
+        test_the_columns_the_application_role_may_read_from_a_view_are_exactly_the_enumerated_set(
+            session
+        )
+
+    reported = f"{PLANTED_COLUMN_GRANTED_VIEW}.{LMS_USER_KEY}"
+    assert mentions(str(failure.value), reported), (
+        f"The enumeration failed and its message does not name `{reported}`. What it said: "
+        f"{failure.value}\n\nA candidate the comparison never mentions is a candidate that changes "
+        "nothing: the sweep would be finding the column grant and the equality would be failing "
+        "for some other reason. The comment in the sibling control above says why this reads the "
+        "authored message and why the guard asserts a bool."
+    )
+
+
+@pytest.mark.invariant
+def test_a_view_the_application_role_cannot_read_is_outside_the_enumeration(
+    db_session: Any,
+) -> None:
+    """The allow side: a view is the enumeration's business only once it is granted.
+
+    The same view as the control above, planted without the `GRANT`. A view
+    `pulse_app` cannot read exposes nothing to any screen, whatever its column
+    list says — that is what a grant model is *for* — so an enumeration that
+    reported it would be red on every internal view anybody ever adds, and would
+    be repaired by narrowing it back to the views somebody remembered.
+
+    **The grant is then made, in the same transaction, and the same sweep is asked
+    again.** Without that second half, the silence asserted first is equally the
+    silence of a sweep that has gone blind (`docs/MISTAKES.md` entry 3) — the two
+    halves together say that the *grant* is what moved the answer and not the
+    view's existence.
+
+    **A third view carries the grantee filter, and it is here because the pair
+    above does not.** The mutation battery deleted
+    `if row["grantee"] in APPLICATION_READERS` from the candidate sweep and every
+    test stayed green: an ungranted view has a `NULL` `relacl`, `aclexplode`
+    returns no row for it at all, and a filter over rows that do not exist is a
+    filter nothing runs. So a view granted to `pulse_care` is planted beside it —
+    a real ACL entry, a real grantee, and one this enumeration must not count.
+    `pulse_care` is the honest choice rather than an invented role: it exists, it
+    is a runtime role, and the reason it is excluded is the design (ADR 0001 gives
+    it one door and no read paths) rather than an accident of who was named.
+
+    **The mutation it exists to survive**: dropping the grantee filter from
+    `columns_the_application_role_may_read`, so that every ACL entry on every view
+    in `public` is enumerated whoever holds it.
+    **The near miss it tolerates**: none; the three plants are the test.
+    """
+    session = db_session
+    planted = f'CREATE VIEW public.{PLANTED_UNGRANTED_VIEW} AS SELECT u.{LMS_USER_KEY} FROM public."{USER_TABLE}" u'  # noqa: S608
+    session.execute(text(planted))
+
+    assert PLANTED_UNGRANTED_VIEW in read_views(session), (
+        f"`{PLANTED_UNGRANTED_VIEW}` is not a view in `public` at all, so the absence asserted "
+        "below would be a fact about a view that was never created rather than about a grant that "
+        "was never made."
+    )
+    ungranted = columns_the_application_role_may_read(session)
+    assert not [view for view, _ in ungranted if view == PLANTED_UNGRANTED_VIEW], (
+        f"`{PLANTED_UNGRANTED_VIEW}` is enumerated as readable by `{APPLICATION_ROLE}` and no "
+        f"grant on it was ever made. The sweep reported {sorted(ungranted)}. It is therefore "
+        "reporting views rather than grants, and the equality above would go red on any view this "
+        "project creates for its own use — after which the cheapest repair is a list of the views "
+        "that count, which is what E1-01's scope forbids."
+    )
+
+    session.execute(
+        text(f'GRANT SELECT ON public.{PLANTED_UNGRANTED_VIEW} TO "{APPLICATION_ROLE}"')
+    )
+    granted = columns_the_application_role_may_read(session)
+    assert (PLANTED_UNGRANTED_VIEW, LMS_USER_KEY) in granted, (
+        f"The same view, now granted `SELECT` to `{APPLICATION_ROLE}`, is still not enumerated; "
+        f"the sweep reported {sorted(granted)}. Then the silence asserted above was the sweep "
+        "failing to see a grant rather than the grant's absence, and this control establishes "
+        "nothing about either."
+    )
+
+    # The third plant: a view with a real ACL entry naming somebody who is not an
+    # application reader. Its own non-vacuity comes first — the ACL row has to
+    # exist, or this is the ungranted case again under another name, which is
+    # exactly how the grantee filter came to be uncovered.
+    care_view = f'CREATE VIEW public.{PLANTED_CARE_GRANTED_VIEW} AS SELECT u.{LMS_USER_KEY} FROM public."{USER_TABLE}" u'  # noqa: S608
+    session.execute(text(care_view))
+    session.execute(text(f'GRANT SELECT ON public.{PLANTED_CARE_GRANTED_VIEW} TO "{CARE_ROLE}"'))
+
+    acl = [
+        dict(row)
+        for row in session.execute(text(APPLICATION_READABLE_VIEW_COLUMNS)).mappings()
+        if row["relation"] == PLANTED_CARE_GRANTED_VIEW
+    ]
+    assert any(row["grantee"] == CARE_ROLE for row in acl), (
+        f"`public.{PLANTED_CARE_GRANTED_VIEW}` was granted `SELECT` to `{CARE_ROLE}` and the "
+        f"relation-ACL query reports {acl} for it. With no row there, the grantee filter below has "
+        "nothing to filter and its absence asserts nothing — which is the defect this plant was "
+        "added for: an *ungranted* view carries a `NULL` `relacl`, `aclexplode` returns no row at "
+        "all, and deleting the filter left the whole suite green."
+    )
+    reachable = columns_the_application_role_may_read(session)
+    assert not [view for view, _ in reachable if view == PLANTED_CARE_GRANTED_VIEW], (
+        f"`{PLANTED_CARE_GRANTED_VIEW}` is granted to `{CARE_ROLE}` and to nobody else, and the "
+        f"candidate sweep counts it as readable by `{APPLICATION_ROLE}`; it reported "
+        f"{sorted(reachable)}.\n\n"
+        "The sweep is reporting every ACL entry rather than the entries that put a column within "
+        "the application connection's reach. `APPLICATION_READERS` is the filter — the application "
+        f"role and `PUBLIC`, which every role is a member of — and `{CARE_ROLE}` is neither: ADR "
+        "0001 gives it one `SECURITY DEFINER` door and no read path, so a view it alone may read "
+        "is outside this enumeration by design.\n\n"
+        "With the filter gone, the sanctioned set would have to grow to cover grants made to other "
+        "roles entirely, and the equality would stop saying anything about what an instructor's "
+        "connection can put on a page."
     )

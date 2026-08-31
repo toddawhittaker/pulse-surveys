@@ -93,3 +93,10 @@ correctness.
 Report: what you changed, which tests now pass, anything you refactored, and
 anything you are *proposing* rather than doing. If you escalated instead of
 finishing, say so plainly and name the objection file.
+
+## Lanes
+
+You are the heavy lane's implementer (CLAUDE.md, "How a ticket is built: two
+lanes"): tests exist before you and the wall on `tests/**` is the lane's
+point. A ticket whose header says `**Lane:** light` is built by `builder`,
+which writes its own tests; if you are handed one, say so and stop.

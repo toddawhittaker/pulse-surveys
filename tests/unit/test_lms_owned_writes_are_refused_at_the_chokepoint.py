@@ -42,8 +42,30 @@ notices, by sweeping the source for a module that writes one of these relations
 without calling the guard. It is a tripwire on the obvious way to write the wrong
 thing and not a proof
 ([ADR 0069](../../docs/adr/0069-three-rules-held-by-a-docstring-are-swept-out-of-the-source.md)):
-the proof-shaped instrument is a grant refusing the application role `INSERT` and
-`UPDATE` on these tables, which ADR 0045 records as unavailable until E1.
+the proof-shaped instrument is a grant, which ADR 0045 records as unavailable
+until E1.
+
+**E1-10 spends that grant, and it is not the one ADR 0045 imagined.** That record
+wanted the application role *refused* `INSERT` and `UPDATE` on these tables
+outright, and said why it could not have that: "the launch path and E1's roster
+sync are the same connection, so the grant would have to distinguish a sanctioned
+writer from an unsanctioned one, and no such separation exists in E0." One
+connection still serves both, so what arrived on 2026-08-26 is the narrowest grant
+launch-time provisioning needs — `SELECT` and `INSERT` on `course` and `section`,
+`INSERT` on `user` with `SELECT` on its key column alone, column-scoped `UPDATE`
+on three columns, no `DELETE` and no table-wide `UPDATE` anywhere — with
+everything outside it refused by the server for every caller on that connection,
+guard or no guard. The `user` half is at column grain because a table-wide read
+would have been read access to `lms_user_id`, the `sub` claim verbatim and the
+join key E1-01 keeps out of every view; E1-10's round-3 security review found it,
+and `test_identity_grants.py` carries the sentence.
+`tests/integration/test_the_application_role_writes_only_the_granted_columns.py`
+provokes both halves and `tests/integration/test_identity_grants.py` pins the set
+as an equality. It is a real instrument and it is narrower than a proof: inside
+the granted columns the database permits what `guard_write` is the only thing
+refusing, which is why the sanction catalog
+(`tests/unit/test_a_sanctioned_writer_satisfies_the_chokepoint.py`) is not
+redundant with it.
 
 **"Per column rather than once" is the last sweep below**, and it is the one that
 keeps working after today: every `lms_`-prefixed column on `Base.metadata` is

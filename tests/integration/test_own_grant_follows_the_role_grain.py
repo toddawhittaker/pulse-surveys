@@ -692,6 +692,7 @@ def test_an_assistant_deans_own_grant_stays_empty_when_a_chair_reports_to_it(
     )
 
 
+@pytest.mark.invariant
 def test_a_person_with_an_assistant_dean_and_a_lead_assignment_resolves_to_their_led_course(
     authz: Any, committed_rows: Any, application_session: Any
 ) -> None:

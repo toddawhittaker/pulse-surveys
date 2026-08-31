@@ -1,6 +1,6 @@
 ---
 name: lti-oidc
-description: Narrow protocol specialist for LTI 1.3, LTI Advantage, and OIDC. Launch validation, nonce and state, clock skew, AGS score semantics, NRPS paging, cookieless iframe behavior. Fires on lti, mock-lms, mock-idp, and session or auth code.
+description: Narrow protocol specialist for LTI 1.3, LTI Advantage, and OIDC. Launch validation, nonce and state, clock skew, AGS score semantics, NRPS paging, cookieless iframe behavior. Fires on lti, mock-lms, mock-idp, and session or auth code. Always run before an epic merges to main.
 model: opus
 effort: high
 tools: Read, Grep, Glob, Bash

@@ -1,12 +1,25 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 5**
+**Caught: 7**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*5 instances recorded; the 3 most recent are below, newest first — except the
+*6 instances recorded; the 4 most recent are below, newest first — except the
 E0-18 PR 2 one, which sits further down beside the consequence it illustrates.
 The 2 earliest are in this file's git history and in the pull requests they cite.*
+
+*(Writing E1-06's tests (2026-08-25), found by this entry's prescribed sweep —
+`grep -rn 'auth_token_url' tests/` before anything was written. E1-05 seeded the
+mock registration's `auth_token_url` as NULL on purpose, and two merged modules
+assert that fact: `test_demo_seed_script.py` requires the column NULL in as many
+words, and `test_registration_address_constraints.py` carries the NULL in its
+`DEVELOPMENT_REGISTRATION` fixture beside three docstrings calling it
+deliberate. E1-06 fills the column with the mock's token endpoint, so the first
+module goes red on its assertion and the second quietly stops describing the row
+the seed writes — the second is the sharper catch, because nothing would ever
+have turned red. Both repairs are inside `tests/`, in modules the ticket does
+not otherwise edit, and landed in the ticket's own test round rather than as a
+surprise the implementer meets in a runner and cannot repair.)*
 
 *(Found while building E0-39 (Batch I, 2026-08-22; that ticket has not merged),
 and it is the largest blast radius this entry has recorded. E0-39 makes five
@@ -145,3 +158,36 @@ module fixed. An exact-set assertion is the kind whose silence looks like
 agreement.
 
 ---
+
+**Instance, 2026-08-26 (E1-10, dispute E1-10-01).** E1-10 added
+`course.title_is_fallback`, and E0-11's migration tests went red inside their
+own seeding: `seed_row` ends `.returning(*table.columns)` — every column
+`Base.metadata` declares — while the test seeds a database pinned eight
+revisions back, so no definition of the new column avoided it. The module's own
+docstring stated the premise that had expired ("seeding at `RANK_REVISION`
+keeps their columns the ones today's models declare"). The repair was on the
+other side of the test wall, exactly this entry's shape: the test author moved
+seeding to head with a walk back down, closing the class — any table a future
+revision touches — rather than the one column. Not counted as a catch; the
+entry describes what happened, it did not prevent it.
+
+**Instance, 2026-08-27 (E1-12, caught before it landed).** E1-12's rule that a
+verified web login whose subject has no `web_login_subject` linkage lands on
+the no-account page turns roughly fifty merged E1-09 web-door tests into calm
+no-account landings inside their own flow — a module the ticket does not
+otherwise edit, and one the implementer may not touch. The test author ran
+`grep -rn 'oidc_callback' tests/` before writing anything, found the class,
+and repaired it at the `provider` fixture in the same tests-first round, so
+the reds never existed. Counted as a catch: the entry's rule — go looking for
+the earlier ticket's tests your new rule breaks, from the side of the wall
+that can fix them — is what found it.
+**Instance, 2026-08-27 (E1-11, dispute E1-11-02).** D7 made
+`user_identity.identity_name` nullable, and seventeen merged Care-door tests —
+eleven of them invariant-marked — errored inside their own seeding:
+`seed_row`'s documented rule leaves a nullable column to the database, and the
+helpers' non-vacuity guard had been leaning on the NOT NULL constraint to fill
+a value they never named. Found by the implementer's full-suite run, repaired
+on the test side after a ruling: each helper now states the identity it seeds.
+Not counted as a catch; the entry describes what happened, it did not prevent
+it — the pre-write sweep that caught E1-12's instance looked for route
+consumers, not schema-constraint dependents.

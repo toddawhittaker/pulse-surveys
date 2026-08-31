@@ -1,15 +1,28 @@
 # 0075 — The two doors' addresses are settings, and every default is the development stack
 
 **Status:** Accepted; the five `OIDC_*` fields superseded 2026-08-22 by
-[ADR 0077](0077-the-web-doors-identity-provider-is-named-explicitly.md)
+[ADR 0077](0077-the-web-doors-identity-provider-is-named-explicitly.md), and the
+LTI platform's authorization endpoint superseded 2026-08-25 by E1-05 — it is a
+column on the registration now, not a setting. The per-value horizon rule this
+record introduced governs that column and is the reason its development value is
+`http://localhost:8080/oidc/authorize` rather than the container spelling the
+mock's own `/registration` document publishes.
 **Date:** 2026-08-21
 **Ticket:** [E0-18](../tickets/e0/E0-18-e0-exit-smoke.md)
 
-**What still holds.** `PUBLIC_BASE_URL` and
-`LTI_PLATFORM_AUTHORIZATION_ENDPOINT` are settings, defaulted to this
+**What still holds.** `PUBLIC_BASE_URL` is a setting, defaulted to this
 repository's development stack, and the per-value horizon rule below governs
-every address either record names. So do the notes that `OIDC_ISSUER` is compared
-against a claim rather than fetched, and that the client is public with no secret.
+every address either record names — and now the two registration columns as well.
+So do the notes that `OIDC_ISSUER` is compared against a claim rather than
+fetched, and that the client is public with no secret.
+
+**What the last consequence below predicted, and what happened.** This record
+ends by saying that E1's registration columns have to make the authorization
+endpoint per-platform. E1-05 did that on 2026-08-25, and it deleted the setting
+rather than leaving it as a default the column falls back to — a surviving
+default would have been the same finding reached through an `or`. What a
+legitimate value for that column is, is decided by
+[ADR 0081](0081-a-registrations-addresses-are-refused-at-one-write-time-chokepoint.md).
 
 **What no longer holds**, for the five `OIDC_*` fields only: "The defaults are
 not the 'working literal default' that docstring refuses. `http://mock-idp:8000`

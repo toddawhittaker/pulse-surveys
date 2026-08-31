@@ -35,11 +35,18 @@ changed file, add its reviewer:
 | Reviewer | Fires when a changed path matches |
 |---|---|
 | `privacy-authz` | `backend/app/views_sql/`, `backend/app/services/authz`, `backend/app/models/identity`, `backend/app/models/org`, `scripts/db-init/`, `scripts/seed.py`, `*audit*`, `*care*`, `*safety*`, or any test marked `invariant` |
-| `app-security` | `backend/app/api/`, `backend/app/lti/`, `mock-lms/`, `mock-idp/`, `scripts/`, `Dockerfile*`, `docker-compose*`, `pyproject.toml`, `frontend/package.json`, `.github/workflows/` |
-| `data-model` | `backend/migrations/`, `backend/app/models/`, `backend/app/views_sql/` |
-| `lti-oidc` | `backend/app/lti/`, `mock-lms/`, `mock-idp/`, session or auth code |
-| `a11y-copy` | `frontend/src/`, `design/` |
-| `prompt-eval` | `backend/app/ai/prompts/`, `backend/app/ai/contracts.py`, `tests/evals/` |
+| `app-security` | `backend/app/api/`, `backend/app/lti/`, `mock-lms/`, `mock-idp/`, `scripts/`, `Dockerfile*`, `docker-compose*`, `pyproject.toml`, `frontend/package.json`, `.github/workflows/`, `tests/evals/`, `backend/app/ai/` |
+
+`app-security`'s trigger reaches `tests/evals/` and `backend/app/ai/` because
+its checklist now includes the eval-floor-decrease check, and a floor is only
+diffable where it and its prompts live.
+
+`data-model`, `lti-oidc`, `a11y-copy`, and `prompt-eval` no longer run here —
+they run at the epic boundary alongside `epic-exit`, `invariant-coverage`,
+`adr-docs-completeness`, and `threat-model` (ADR 0004). Exception: during an
+epic whose declared subject is a moved reviewer's specialty (an epic
+integrating real LTI platforms re-lists `lti-oidc`, say), that reviewer runs
+per-PR for that epic's tickets — the epic README says so at breakdown.
 
 A docs-only diff triggers `spec-conformance` alone. That is correct, not a
 misconfiguration.
@@ -76,13 +83,18 @@ Each reviewer returns a `### <name>` block containing either `Nothing found.` or
 findings ranked HIGH → MED → LOW. Concatenate them in this order — most
 consequential first, so the top of the comment is worth reading:
 
-`privacy-authz`, `app-security`, `lti-oidc`, `spec-conformance`, `data-model`,
-`prompt-eval`, `a11y-copy`
+`privacy-authz`, `app-security`, `spec-conformance`
 
-Then list every reviewer that did **not** run, with the reason:
+Then list every reviewer that did **not** run, with the reason. This includes
+the four reviewers moved to the epic boundary (`data-model`, `lti-oidc`,
+`a11y-copy`, `prompt-eval`, unless step 2's exception re-lists one for this
+epic) — a reviewer deleted from this file's table must never just vanish from
+the silence accounting; it moved, and the comment says where.
 
 ```
-_Not triggered: a11y-copy (no frontend changes), prompt-eval (no AI changes)._
+_Not triggered: privacy-authz (no read-path or authz changes)._
+_Not triggered: data-model, lti-oidc, a11y-copy, prompt-eval (run at the epic
+boundary, not per-PR)._
 ```
 
 Silence must never be ambiguous. A reviewer that did not run and a reviewer that

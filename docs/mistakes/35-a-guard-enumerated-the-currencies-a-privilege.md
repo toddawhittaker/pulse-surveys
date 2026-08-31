@@ -1,10 +1,25 @@
 # Entry 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 3**
+**Caught: 4**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*8 occurrences recorded; three of them are catches.*
+*9 occurrences recorded; four of them are catches.*
+
+*(**A catch**, writing the E1 re-review fix's closure sweep, 2026-08-31. The
+re-review had found M6's own defect recurring — three new confidentiality-denial
+test modules outside the isolated §4.1 pass — and the sweep written to close it
+was about to enumerate the currencies a module can hold the `invariant` marker
+in: module-level `pytestmark` and per-test decorator, both accepted. That
+enumeration reads `test_the_dev_console_names_nobody.py` as compliant while only
+one of its tests sits inside the pass, and it goes on approving the module as
+undecorated denial tests accrue to it — the role the scheme is built around,
+holding its privilege the unusual way. The entry's rule turned the enumeration
+around: pin the single currency the design uses — the module-level form — and
+refuse the rest, so a module holding its marker any other way is red until it
+adopts the form, never silently approved. The control corollary is applied too:
+the sweep's planted tree carries a module for each currency, including the
+per-test-only one, and asserts exactly which are demanded and which are found.)*
 
 *(**A catch**, writing E0-19's tests — the Compose credential surface, two readers
 at once. The first enumerates the currencies a host bind mount can be declared

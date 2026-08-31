@@ -96,6 +96,18 @@ GUARDED_TABLE_FLOOR = ("course", "section", "enrollment", "user")
 # belongs in a pull request that says which record it rests on — it is not the
 # place to quiet a failure.
 PULSE_OWNED_COLUMNS: dict[str, dict[str, str]] = {
+    "course": {
+        "title_is_fallback": (
+            "ADR 0091 (E1-10): `course.lms_title` is the LMS's, and this flag is Pulse's record "
+            "of whether that column currently holds a platform-supplied title or the "
+            "'PREFIX NUMBER' fallback provisioning wrote when a launch carried a context label "
+            "and no title. The platform never sends it and no sync can overwrite it — it is what "
+            "lets a later real title replace a fallback while a titleless launch never overwrites "
+            "a real title, which is E1-10's own scope: 'the fallback value is distinguishable "
+            "from a platform-supplied title (the ADR says how, so a later sync does not "
+            '"correct" a real title into a fallback or vice versa)\'.'
+        )
+    },
     "section": {
         "length_weeks": (
             "ADR 0021: the four derived calendar columns are computed in Pulse by "

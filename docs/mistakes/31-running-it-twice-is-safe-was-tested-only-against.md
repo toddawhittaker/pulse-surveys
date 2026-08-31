@@ -1,6 +1,6 @@
 # Entry 31. "Running it twice is safe" was tested only against a database the loader itself had filled
 
-**Caught: 0**
+**Caught: 1**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -44,3 +44,24 @@ The design half, which is cheaper than the test half and catches it earlier:
 loader invented.** Walk the list and classify each one. A key that is neither —
 a globally unique column holding a name the outside world also uses — is an
 adoption waiting to happen, and it does not look like one in a table of keys.
+
+---
+
+**2026-08-25, E1-05 (`e1/registration-columns`).** The ticket adds
+`authorization_endpoint` to `lti_platform` and the seed's upsert has to write it
+on a **matched** row, not only on an insert — every development database already
+holds the mock's registration from before the column existed, and a launch from
+the mock is refused until it is filled. My own verification was going to be:
+run the seed, read the column back. That proves nothing, for this entry's exact
+reason — the row I would have found is the row I had just written, and an upsert
+that never touches a matched row passes it.
+
+What I did instead: planted an old-shape row as the superuser, with
+`authorization_endpoint` NULL and `lti_platform` otherwise empty, and only then
+ran `python scripts/seed.py`. The column came back filled **and the row kept its
+id**, which is the second half — `user` and `lti_deployment` both key to that
+row, so a seed that completed the registration by replacing it would have taken
+a development database's launches with it.
+
+Without this entry I would have reported the matched-row path verified having
+never exercised it, in a ticket whose whole upgrade story is that path.

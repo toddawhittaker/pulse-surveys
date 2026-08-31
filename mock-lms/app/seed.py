@@ -40,12 +40,20 @@ back onto the platform side. Two roles are carried rather than one because a rea
 platform sends several, and a mock that sent exactly one would let E1's ingestion
 quietly assume a singleton array.
 
-**The launch page offers the users enrolled everywhere, and that is computed.**
-`launch_users()` answers the users enrolled in every seeded context, because the
-page offers a user and a placement independently and every combination of the two
-has to be a launch that works. E0-14 held that as a convention — "every user is
-enrolled in every context" — which stopped being true the moment this seed grew a
-student who takes one course.
+**The launch page offers a named cast, paired with their own sections.**
+`LAUNCH_PAGE_CAST` says who a browser picks from and `placements_for()` says
+which sections each of them can launch from; the page renders one form per
+person, so every combination it publishes is a launch this platform signs. Until
+E1-15 the page offered the users enrolled in *every* context and paired them with
+every placement — one rule doing both jobs, which worked only while everybody was
+enrolled everywhere. The leadership subject E1-12's deferral 1 asks for cannot
+be: enrolling him in `NURS-8100-Q2FF` would spill the five-member roster that
+section's single-page container fixture rests on.
+
+**One person is here so a browser can drive §7.3's leadership limb.** `DEAN` is
+enrolled in `MATH-140-E1FF` and nowhere else, with a roles claim carrying no
+Instructor URN — see the constant for why that claim is the learner pair rather
+than something invented.
 
 **One enrollment window ends, and it is the same person the roster reports as
 gone.** SPEC §3.4 has the tool learn about a drop from NRPS enrollment data, and
@@ -120,9 +128,9 @@ DROP_CLOSES = f"2026-10-19T00:00:00{EASTERN_DAYLIGHT}"
 # The section is the choice, not the number: it is away from the add-and-drop
 # assertions, which read one section's windows against each other and would
 # quietly lose an input to a member carrying none. The number only has to be a
-# student rather than one of the two people the launch page offers — those are
-# reached by name from the launch suite and from every AGS fixture, and none of
-# those tests is about a member with no window.
+# student rather than the instructor or the learner — those two are reached by
+# name from the launch suite and from every AGS fixture, and none of those tests
+# is about a member with no window.
 WINDOWLESS_STUDENT_ORDINAL = 3
 
 
@@ -205,8 +213,22 @@ class MockEnrollment:
 LEARNER_ROLES = (f"{MEMBERSHIP_ROLE}Learner", f"{INSTITUTION_ROLE}Student")
 INSTRUCTOR_ROLES = (f"{MEMBERSHIP_ROLE}Instructor", f"{INSTITUTION_ROLE}Instructor")
 
-# The two people the launch page offers, enrolled in every section so that every
-# combination of the page's two selectors is a launch that works.
+# What the dean's enrollment claims, and the point is what it does not claim.
+#
+# SPEC §7.3 authorizes the roster-address trigger on the launching person's
+# **role in Pulse** — a `role_assignment` row (§2.1) — and never on a claim, so a
+# launch that stores the address while carrying no Instructor URN is the only
+# shape in which the leadership limb can be the thing that decided. That is the
+# shape `tests/integration/test_the_leadership_limb_of_a_staff_launch.py` mints,
+# and it mints it as the learner pair: a claim this repository's tool already
+# reads, rather than a role URI invented here for one person and exercised
+# nowhere. A platform administrator controls what a claim says, which is exactly
+# why Pulse does not read one for this — so what this tuple *is* matters far less
+# than the URN it omits.
+NO_INSTRUCTOR_URN_ROLES = LEARNER_ROLES
+
+# The two people who are in every section, and so the two every suite that wants
+# an arbitrary section launches as.
 LEARNER = MockUser(
     user_id="mock-lms-user-learner",
     label="A student enrolled in every section",
@@ -217,6 +239,32 @@ INSTRUCTOR = MockUser(
     label="The instructor of every section",
     email=f"instructor@{FACULTY_MAIL_DOMAIN}",
 )
+
+# **The leadership subject** (E1-12 deferral 1, closed by E1-15). Pulse's own
+# `scripts/seed.py` links `mock-lms-user-dean` to a person holding a live `DEAN`
+# assignment so that SPEC §7.3's leadership limb — a staff launch that stores the
+# section's roster address on the strength of the launching person's role rather
+# than of a claim — is demonstrable. The matching person never existed here, so
+# that limb could be driven from the integration suite, which signs its own
+# launches, and not from a browser.
+#
+# **He is enrolled in `MATH-140-E1FF` and in nothing else.** Not a convenience:
+# `NURS-8100-Q2FF` holds exactly five members, which is exactly one page, and
+# `test_a_single_page_roster_advertises_first_last_and_current_and_no_next` is
+# written against that boundary. A sixth member spills it.
+DEAN = MockUser(
+    user_id="mock-lms-user-dean",
+    label="A dean, enrolled in one section and teaching none",
+    email=f"dean@{FACULTY_MAIL_DOMAIN}",
+)
+
+# Who the launch page offers, and the whole of it. The per-section students below
+# are seeded so a roster has members and pages; they are not people a browser
+# picks from, and offering all twenty-one would bury the three that every other
+# suite reaches by name. `launch_users()` filters this by enrollment, so a name
+# added here without an enrollment is left off the page rather than published as
+# an option `resolve_launch` refuses.
+LAUNCH_PAGE_CAST = (INSTRUCTOR, LEARNER, DEAN)
 
 # The three sections. Course numbers are read off SPEC §8's table: `215` and
 # `140` are undergraduate three-digit numbers inside `000`-`799`, and `8100` is a
@@ -294,18 +342,43 @@ class SeededPlatform:
         )
 
     def launch_users(self) -> tuple[MockUser, ...]:
-        """The users the launch page may offer: those enrolled in every context.
+        """The cast the launch page offers: `LAUNCH_PAGE_CAST`, minus anyone unenrolled.
 
-        Computed rather than listed. The page offers a user and a placement
-        independently, so every combination has to be a launch that works — a
-        user enrolled in one section and not another would put a dead option on
-        the page, and a `400` at the end of it reads as a broken platform.
+        In seeded order, so the page's first offer stays the instructor's — six
+        suites take `require_offers()[0]`.
+
+        **It was "the users enrolled in every context" until E1-15**, which is a
+        rule that both selects and protects: it named the small cast a browser
+        picks from, *and* it guaranteed no dead option, because the page chose a
+        user and a placement independently and every combination had to be a
+        launch this platform signs. The dean is enrolled in one section, so the
+        second half had to move: the page pairs each user with
+        `placements_for(user)` now, and a dead option is impossible whoever is
+        offered.
+
+        That leaves only the first half, and it is a choice rather than a
+        derivation — "every seeded person" would put eighteen anonymous students
+        on the page and make the two people every other suite launches as hard to
+        find. So the cast is written down, and this filter is what keeps the old
+        guarantee: a cast member the seed never enrolled has no placement to
+        offer and is not offered.
         """
-        context_ids = [context.context_id for context in self.contexts]
         return tuple(
-            user
-            for user in self.users
-            if all(self.roles(user.user_id, context_id) is not None for context_id in context_ids)
+            user for user in self.users if user in LAUNCH_PAGE_CAST and self.placements_for(user)
+        )
+
+    def placements_for(self, user: MockUser) -> tuple[MockPlacement, ...]:
+        """The placements `user` is enrolled to launch from, in seeded order.
+
+        The other half of the pairing rule: every combination the launch page
+        offers has to be one `resolve_launch` will sign, and it refuses a (user,
+        context) pair the seed does not hold. So the page asks this rather than
+        publishing the product of its two lists.
+        """
+        return tuple(
+            placement
+            for placement in self.placements
+            if self.roles(user.user_id, placement.context.context_id) is not None
         )
 
 
@@ -362,10 +435,12 @@ def seeded_platform() -> SeededPlatform:
     each is a case rather than a number picked to look plausible:
 
       - `BIOL-215-R3WW` holds twelve, which is two full pages and a short one;
-      - `MATH-140-E1FF` holds seven, which is one full page and a short one;
+      - `MATH-140-E1FF` holds eight — the dean included — which is one full page
+        and a short one;
       - `NURS-8100-Q2FF` holds five, which is exactly one page and no more — the
         boundary where a platform that advertises a next page whenever the page
-        it just served was full serves an empty one.
+        it just served was full serves an empty one. This is the section the dean
+        is kept out of, and the reason he is.
 
     Two rewrites are applied over the uniform sections at the end: the late add
     and the drop in `BIOL-215-R3WW`, and the one windowless enrollment in
@@ -382,7 +457,7 @@ def seeded_platform() -> SeededPlatform:
         for context in contexts
     )
 
-    # How many students each section holds beyond the two the launch page offers,
+    # How many students each section holds beyond the instructor and the learner,
     # and when its enrollments open.
     sections = (
         (CELL_BIOLOGY, 10, R_SECTIONS_OPEN),
@@ -390,7 +465,7 @@ def seeded_platform() -> SeededPlatform:
         (NURSING_INQUIRY, 3, Q_SECTIONS_OPEN),
     )
 
-    users: list[MockUser] = [INSTRUCTOR, LEARNER]
+    users: list[MockUser] = [INSTRUCTOR, LEARNER, DEAN]
     enrollments: list[MockEnrollment] = []
     for context, class_size, opens in sections:
         enrollments.append(enrolled(INSTRUCTOR, context, INSTRUCTOR_ROLES, opens))
@@ -399,6 +474,12 @@ def seeded_platform() -> SeededPlatform:
             person = student(context, ordinal)
             users.append(person)
             enrollments.append(enrolled(person, context, LEARNER_ROLES, opens))
+
+    # The dean's one enrollment, appended after every section rather than inside
+    # the loop, so he joins the *end* of `MATH-140-E1FF`'s roster. A membership
+    # container divides its pages in seeded order, and putting him third would
+    # shift five students across a page boundary for no reason.
+    enrollments.append(enrolled(DEAN, COLLEGE_ALGEBRA, NO_INSTRUCTOR_URN_ROLES, E_SECTIONS_OPEN))
 
     return SeededPlatform(
         users=tuple(users),

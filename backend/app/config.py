@@ -32,9 +32,17 @@ been right every time. They carry it alone now.
 
 **A credential never reaches a log through this class**, and there are two ways
 in, so there are two guarantees. `DATABASE_URL`, `CARE_DATABASE_URL` and
-`REDIS_URL` carry passwords today; the AI provider key, the SMTP password, and
-the LTI private key are coming (§6.3), and SPEC §10 puts secrets in the
-environment precisely so they stay out of logs.
+`REDIS_URL` carry passwords today; the AI provider key and the SMTP password are
+coming (§6.3), and SPEC §10 puts secrets in the environment precisely so they
+stay out of logs.
+
+**The tool's LTI private key is not on that list, and was until E1-05.** It is a
+`tool_signing_key` row rather than a setting, because the `api` container and the
+celery worker have to sign with one key and a per-process or per-container key
+gives them two (`docs/adr/0082`). So no field here will ever hold it, and
+`.env.example` gains no placeholder for it — which matters more than it looks: a
+placeholder for a private key is a line somebody replaces with a real one and
+commits.
 
 *When the configuration is refused*, no value is quoted back. The failure names
 the variables at fault and says what is wrong with each, and it happens at
@@ -125,7 +133,7 @@ def is_development(settings: "Settings") -> bool:
     **One place deliberately does not call this, and it is not an oversight**
     — plus one that cannot.
 
-    * `_is_a_deployment` below runs *during* `Settings` validation, deciding
+    * `is_a_deployment` below runs *during* `Settings` validation, deciding
       whether a mock address may be configured. There is no `Settings` object to
       hand it at that point — the value being judged is the raw one the validator
       was given — so it takes the environment itself and stays separate.
@@ -236,7 +244,7 @@ def _blank_is_absent(value: object) -> object:
     return value
 
 
-def _is_on_this_machine(host: str | None) -> bool:
+def is_on_this_machine(host: str | None) -> bool:
     """Whether a URL's host names this machine, so nothing crosses a network.
 
     `localhost` by name, and any address in a loopback range by value —
@@ -253,19 +261,39 @@ def _is_on_this_machine(host: str | None) -> bool:
         return False
 
 
-def _url_host(value: str) -> str | None:
-    """A URL's host, read the way a resolver reads it, for every comparison below.
+def canonical_host(host: str | None) -> str | None:
+    """One host name, in the single spelling everything here compares and keys on.
 
-    `urlsplit(...).hostname` already does most of it: it strips an IPv6 literal's
-    brackets and lower-cases the name, which is what makes `MOCK-IDP` and
-    `mock-idp` one host (RFC 4343).
+    Three normalisations, and each answers a way the same host can be written
+    twice:
 
-    What it leaves is the **one trailing dot** that makes a name fully qualified.
-    `mock-idp.` and `mock-idp` reach the same container, and `localhost.` and
-    `localhost` reach the same interface, so a catalog that compares strings is
-    defeated by a one-character edit.
+      - **case**, which `urlsplit(...).hostname` already folds and which this
+        repeats for a host that did not come out of a URL (RFC 4343);
+      - **one trailing dot**, the root anchor — `mock-idp.` and `mock-idp` reach
+        the same container, and `localhost.` and `localhost` the same interface,
+        so a catalog comparing strings is defeated by a one-character edit;
+      - **the IDNA form**, so that `röster.example` and
+        `xn--rster-jua.example` are one name rather than two. A transport
+        encodes a non-ASCII host before it dials, so those two spellings are
+        already one host by the time a packet exists — and code that keyed on
+        the unencoded one would be filing something under a name the connection
+        never uses.
 
-    **What must not follow the strip is a loose comparison.**
+    **The IDNA step is the transport's own, not a second implementation of it.**
+    `urllib3` — which every outbound request in this process goes through —
+    lower-cases an ASCII host and IDNA-encodes only a host that is not ASCII,
+    with its own flags; so that is exactly what is asked of it here, through
+    `parse_url`, and only for a host that is not ASCII. Writing the rule again
+    would be `docs/MISTAKES.md` entry 13 in the place that entry was already
+    quoted about, and the two implementations would agree until the first name
+    the two IDNA standards disagree on. **An ASCII host never reaches it**, so
+    every host this repository has ever compared is byte-for-byte what it was.
+
+    A name the transport refuses to encode falls back to the folded form. That is
+    a name nothing can dial — `requests` raises before a socket exists — so the
+    fallback exists to keep a comparison total, not to permit anything.
+
+    **What must not follow the trailing-dot strip is a loose comparison.**
     `mock-idp.example.edu.` normalises to `mock-idp.example.edu`, which is not the
     mock however many trailing dots come off — but a rule that went on to compare
     by *prefix* would refuse it, and it is a perfectly ordinary institutional
@@ -274,17 +302,58 @@ def _url_host(value: str) -> str | None:
     `mock-idp..`, a name with an empty label that resolves nowhere, which is more
     than normalising and buys nothing.
 
-    Written once and called by all three rules below rather than at each
-    comparison, because a normalisation applied at one site and not another
-    closes half of the hole it was written for (`docs/MISTAKES.md` entry 13).
+    Written once and called by every rule that compares a host, by `url_host`
+    below, and by the roster sync's pin — which writes its key under this and
+    looks it up under this — because a normalisation applied at one site and not
+    another closes half of the hole it was written for (`docs/MISTAKES.md` entry
+    13; the pin was that half, and E1's Batch C security review found it).
     """
-    host = urlsplit(value).hostname
-    if host is None:
+    if not host:
         return None
-    return host[:-1] if host.endswith(".") else host
+    folded = host.strip().strip("[]").lower()
+    if folded.endswith("."):
+        folded = folded[:-1]
+    if folded.isascii():
+        return folded
+    return _the_form_the_transport_dials(folded) or folded
 
 
-def _is_a_loopback_host(host: str | None) -> bool:
+def _the_form_the_transport_dials(host: str) -> str | None:
+    """`host` as `urllib3` will spell it on the wire, or `None` if it refuses it.
+
+    A composed URL rather than the bare name, because `urllib3` normalises a host
+    only for a scheme it knows — asked about a bare authority it hands the name
+    straight back, unencoded, which is the answer this exists to avoid. Imported
+    inside the call the way `urllib3` imports `idna` inside its own, so nothing
+    is added to this module's import graph for a step only a non-ASCII host takes.
+    """
+    try:
+        from urllib3.exceptions import LocationParseError
+        from urllib3.util import parse_url
+    except ImportError:  # pragma: no cover - urllib3 arrives with `requests`
+        return None
+    try:
+        dialed = parse_url(f"https://{host}/").host
+    except LocationParseError:
+        return None
+    if dialed is None:
+        return None
+    return dialed[:-1] if dialed.endswith(".") else dialed
+
+
+def url_host(value: str) -> str | None:
+    """A URL's host, read the way a resolver reads it, for every comparison below.
+
+    `urlsplit(...).hostname` strips an IPv6 literal's brackets and lower-cases the
+    name; `canonical_host` above is the rest of it, and is where the reasoning
+    lives. This is the entry point for a value that is a whole URL, and that one
+    is the entry point for a value that is already a host — the roster sync's pin
+    adapter holds one of those, and it must key on exactly what the rules keyed on.
+    """
+    return canonical_host(urlsplit(value).hostname)
+
+
+def is_a_loopback_host(host: str | None) -> bool:
     """Whether this host names the machine the *reader* of the URL is sitting at.
 
     A class, not a list of spellings, and that is the whole point: a three-entry
@@ -302,7 +371,7 @@ def _is_a_loopback_host(host: str | None) -> bool:
     answer for every address, keeps both halves live, and stops the rule
     depending on a library behaviour that has moved between versions.
 
-    **This is a wider set than `_is_on_this_machine` above, and the two are
+    **This is a wider set than `is_on_this_machine` above, and the two are
     deliberately not merged.** That one governs an *exemption* — cleartext is
     permitted because nothing crosses a network — and widening an exemption
     permits more; this one governs a *refusal*, and widening it refuses more. A
@@ -322,7 +391,7 @@ def _is_a_loopback_host(host: str | None) -> bool:
     return address.is_loopback
 
 
-def _is_a_deployment(environment: object) -> bool:
+def is_a_deployment(environment: object) -> bool:
     """Whether this process is running anywhere other than a development stack.
 
     An exact comparison against the one development name, so `staging`,
@@ -408,8 +477,9 @@ class Settings(BaseSettings):
     # copied into inherits it.
     #
     # Each URL below carries a password in the same position. The AI provider
-    # key (§6.3, E0-13), the SMTP password, and the LTI private key belong in
-    # this group when they land.
+    # key (§6.3, E0-13) and the SMTP password belong in this group when they
+    # land. The tool's LTI private key does not: E1-05 put it in a
+    # `tool_signing_key` row rather than a setting (`docs/adr/0082`).
     #
     # The cost is that reading one is `settings.database_url.get_secret_value()`
     # rather than `settings.database_url`. That is the point: extracting a
@@ -444,6 +514,22 @@ class Settings(BaseSettings):
         description="SQLAlchemy URL for the Care queue's database connection (SPEC §6.2).",
     )
     redis_url: SecretStr = Field(description="Redis URL for the Celery broker and result backend.")
+    # The key both entry doors sign the session JWT with (E1-08, ADR 0089).
+    # `SecretStr` for the reason the block above gives — it is a symmetric HMAC
+    # secret, so a leak forges any session — and required with no default, because
+    # a defaulted signing secret is a key every deployment shares and every reader
+    # of this repository knows. Generate one per deployment with
+    # `secrets.token_urlsafe(32)`; `.env.example` carries an obvious placeholder.
+    #
+    # Unlike the tool's LTI private key (a `tool_signing_key` row, ADR 0082), this
+    # one is a single-line symmetric secret the api container and any future
+    # replica must share so a restart does not invalidate a sitting session — the
+    # exact case ADR 0082's "keep the key out of settings" reasons do not reach,
+    # since none of them is about a one-line shared secret. ADR 0089 records the
+    # split.
+    session_secret: SecretStr = Field(
+        description="Key the session JWT is signed with (SPEC §7.3, ADR 0089)."
+    )
     # The AI provider credential (§6.3: "AI provider (base URL, model, masked
     # key)"). `SecretStr` for the reason the block above gives, and it is the
     # field that reason was written for: `app.ai.gateway` hands this value to a
@@ -500,9 +586,8 @@ class Settings(BaseSettings):
     # starts `mock-idp` in every deployment, so an operator who deployed per
     # §7.2 and set none of these had a signing oracle for fake CARE and ADMIN
     # identities, which this application then verified correctly and trusted.
-    # ADR 0077 reverses that half of ADR 0075; `PUBLIC_BASE_URL` and
-    # `LTI_PLATFORM_AUTHORIZATION_ENDPOINT` keep their defaults for the reasons
-    # at their own block below.
+    # ADR 0077 reverses that half of ADR 0075; `PUBLIC_BASE_URL` keeps its
+    # default for the reason at its own block below.
     #
     # The development values did not disappear, they moved: `docker-compose.yml`
     # gives all three `Settings`-building services `${OIDC_ISSUER:-...}` and the
@@ -580,44 +665,42 @@ class Settings(BaseSettings):
     # The reason is on the field. It is not the same reason twice, and no
     # heading here summarizes it — see the module docstring for why not.
 
-    # --- the launch door's addresses (E0-18) ----------------------------------
+    # --- the tool's own address (E0-18) ---------------------------------------
     #
-    # Two values, both of them addresses a browser is sent to. They are
-    # defaulted, and the reason is the third of the three this module keeps
-    # apart: **the spec never spoke to them.** §6.3's configuration surface names
-    # no LTI endpoint, §7.3 leaves the platform's addresses to the registration,
-    # and E0-23 decided that `lti_platform` gains service-address columns in E1,
-    # with the code that reads them. So the values below are E0's stand-in and
-    # the ADR says so (docs/adr/0075).
+    # One value, an address a browser is sent to. It is defaulted, and the reason
+    # is the third of the three this module keeps apart: **the spec never spoke
+    # to it.** §6.3's configuration surface names no such value.
     #
-    # **Each default is this repository's own development stack**, spelled the
-    # way `docker-compose.override.yml` publishes it — a browser-facing horizon
-    # in both cases, per the note at the identity provider above. That is
-    # deliberate and it is not the "working literal default" the module docstring
-    # refuses: neither address can resolve in a deployment, and neither names
-    # anything the base Compose file starts, so a deployment that forgets one
-    # gets a launch that fails at its first hop rather than a system that is
-    # quietly wrong. What a required field would buy instead is a startup
-    # refusal, and what it would cost is that `docker compose up` from a clean
-    # checkout — E0's own exit criterion (§14.3) — stops working without an
-    # `.env` nobody has written yet.
+    # **The default is this repository's own development stack**, spelled the way
+    # `docker-compose.override.yml` publishes it — a browser-facing horizon, per
+    # the note at the identity provider above. That is deliberate and it is not
+    # the "working literal default" the module docstring refuses: the address
+    # cannot resolve in a deployment and names nothing the base Compose file
+    # starts, so a deployment that forgets it gets a launch that fails at its
+    # first hop rather than a system that is quietly wrong. What a required field
+    # would buy instead is a startup refusal, and what it would cost is that
+    # `docker compose up` from a clean checkout — E0's own exit criterion (§14.3)
+    # — stops working without an `.env` nobody has written yet.
     #
     # **The five `oidc_*` settings used to be in this block and are not any
     # more** (ADR 0077). The argument above did not hold for them: `mock-idp` is
     # a service every deployment starts, so their default *did* resolve.
+    #
+    # **The LTI platform's authorization endpoint used to be in this block too,
+    # and it is not a setting at all any more** (E1-05, docs/adr/0075's
+    # amendment). It was E0's stand-in while `lti_platform` had no column for it,
+    # and one process-wide address is wrong the moment two platforms are
+    # registered: a launch from the second resolved the second registration and
+    # then sent the browser to the first's address. It is a column on the
+    # registration now, and the deletion is a deletion rather than a demotion —
+    # a surviving default the column fell back to would be the same finding
+    # reached through an `or`.
     public_base_url: str = Field(
         default="http://localhost:8000",
         description=(
             "Browser-facing base URL of this tool. `/lti/launch` and "
             "`/auth/oidc/callback` are derived from it, and both mocks compare "
             "the result exactly against what they were registered with."
-        ),
-    )
-    lti_platform_authorization_endpoint: str = Field(
-        default="http://localhost:8080/oidc/authorize",
-        description=(
-            "Browser-facing OIDC authorization endpoint of the LTI platform. A settings "
-            "field because `lti_platform` has no column for it until E1 (E0-23)."
         ),
     )
     # The spec never spoke to this one. §6.3 enumerates the configuration
@@ -736,7 +819,7 @@ class Settings(BaseSettings):
         No value is quoted, as in every validator here.
         """
         parsed = urlsplit(value)
-        if parsed.scheme == "https" or _is_on_this_machine(parsed.hostname):
+        if parsed.scheme == "https" or is_on_this_machine(parsed.hostname):
             return value
         raise ValueError(
             "would send the comment being classified, and any provider credential configured "
@@ -776,8 +859,8 @@ class Settings(BaseSettings):
         The message does not quote the value it rejected, and no validator in
         this class ever should. `__init__` already keeps validator messages out
         of the startup log, but a validator on a future secret-bearing field —
-        the SMTP password, the LTI private key — would otherwise put the value
-        one bypassed code path away from a log line. Cheaper to never write it.
+        the SMTP password, say — would otherwise put the value one bypassed code
+        path away from a log line. Cheaper to never write it.
         """
         try:
             ZoneInfo(value)
@@ -813,7 +896,7 @@ class Settings(BaseSettings):
         is asked to trust.
 
         **The host component, compared exactly**, and normalised once by
-        `_url_host` — the port, the scheme and the path are not part of the
+        `url_host` — the port, the scheme and the path are not part of the
         question, since a container reaching `mock-idp` on any port reaches the
         mock, and neither is the case nor a trailing dot. A substring search for
         the service name would read as the same rule and would refuse
@@ -825,9 +908,9 @@ class Settings(BaseSettings):
         `_describe_invalid_settings`, which is what says *which* of the five is
         wrong without echoing what it holds.
         """
-        if not _is_a_deployment(info.data.get("environment")):
+        if not is_a_deployment(info.data.get("environment")):
             return value
-        if _url_host(value) == MOCK_IDENTITY_PROVIDER_HOST:
+        if url_host(value) == MOCK_IDENTITY_PROVIDER_HOST:
             raise ValueError(
                 "addresses the mock identity provider this repository ships for development — "
                 f"the Compose service {MOCK_IDENTITY_PROVIDER_HOST}, which signs an id_token for "
@@ -861,7 +944,7 @@ class Settings(BaseSettings):
         login page asking for the credentials the real provider would have asked
         for.
 
-        **A class, not a catalog** — `_is_a_loopback_host` carries why. The
+        **A class, not a catalog** — `is_a_loopback_host` carries why. The
         `127.0.0.0/8` and IPv4-mapped spellings are the ones a list of three
         misses, and the review that raised this arrived with a fourth spelling
         already in it.
@@ -873,9 +956,9 @@ class Settings(BaseSettings):
         what it is sent over. An exemption that returned early would leave the
         finding open with every other row green.
         """
-        if not _is_a_deployment(info.data.get("environment")):
+        if not is_a_deployment(info.data.get("environment")):
             return value
-        if _is_a_loopback_host(_url_host(value)):
+        if is_a_loopback_host(url_host(value)):
             raise ValueError(
                 "sends the browser to the machine it is running on rather than to an identity "
                 "provider — this value is resolved by the end user's computer, never by this "
@@ -920,16 +1003,16 @@ class Settings(BaseSettings):
         configuration `.env.example` ships and CI copies to `.env`, and takes
         SPEC §14.3's exit criterion with it.
 
-        **The exemption is `_is_on_this_machine`, not the wider loopback class.**
+        **The exemption is `is_on_this_machine`, not the wider loopback class.**
         A provider beside the application is reached over the loopback interface
         where there is no wire to read, so refusing it would turn away a
         deployment while protecting nothing. Widening *that* set permits more
         cleartext; widening the refusal above refuses more addresses. They are
         two catalogs on purpose.
         """
-        if not _is_a_deployment(info.data.get("environment")):
+        if not is_a_deployment(info.data.get("environment")):
             return value
-        if urlsplit(value).scheme == "https" or _is_on_this_machine(_url_host(value)):
+        if urlsplit(value).scheme == "https" or is_on_this_machine(url_host(value)):
             return value
         raise ValueError(
             "would fetch or redirect over plain http to an address off this machine, where "
@@ -958,7 +1041,7 @@ class Settings(BaseSettings):
 
         No value is quoted, for the reason the validator above gives.
         """
-        if _is_a_deployment(info.data.get("environment")) and value == (
+        if is_a_deployment(info.data.get("environment")) and value == (
             MOCK_IDENTITY_PROVIDER_CLIENT_ID
         ):
             raise ValueError(

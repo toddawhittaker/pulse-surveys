@@ -18,6 +18,11 @@ The routes are closures over the settings, the seed and the key for the same
 reason. Nothing reaches a key through a global, so there is no arrangement of
 imports that lets two applications share one.
 
+**Since E1-07, the authorization endpoint also mints deliberately wrong
+launches**, chosen by an optional `?defect=` query parameter — additive only:
+a request that omits it runs the two lines it always ran, and everything about
+what a named defect does lives in `app.wrong_launches`, not here. See ADR 0088.
+
 **Configuration is read here, at build time**, not in a lifespan handler and not
 per request. The test fixture in `tests/fixtures/app_imports.py` sets the
 environment around the import and the factory call and restores it before
@@ -74,10 +79,14 @@ filter and the paging as well as the path.
 """
 
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated, Any
 from urllib.parse import parse_qsl, unquote
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.ags import (
@@ -104,11 +113,13 @@ from app.config import (
     LINE_ITEM_PATH,
     LINE_ITEMS_PATH,
     MEMBERSHIPS_PATH,
+    MOCK_DEFECTS_PATH,
     MOCK_POSTED_SCORES_PATH,
     REGISTRATION_PATH,
     RESULT_PATH,
     RESULTS_PATH,
     SCORES_PATH,
+    TOKEN_PATH,
     PlatformSettings,
 )
 from app.launch import (
@@ -116,25 +127,46 @@ from app.launch import (
     id_token_claims,
     resolve_launch,
 )
-from app.nrps import MEMBERSHIP_CONTAINER_MEDIA_TYPE, membership_page
+from app.nrps import MEMBERSHIP_CONTAINER_MEDIA_TYPE, MEMBERSHIP_SCOPE, membership_page
 from app.pages import authorization_response_page, launch_page, registration_values
 from app.paging import (
+    FIRST_PAGE,
     PAGE_PARAMETER,
     PageOutOfRangeError,
     link_header,
     page_count,
+    page_number,
     page_size,
     window,
 )
 from app.seed import MockContext, SeededPlatform, seeded_platform
 from app.signing import SIGNATURE_ALGORITHM, IssuerKey
+from app.tokens import (
+    ADVERTISED_SCOPES,
+    CLIENT_CREDENTIALS_GRANT,
+    INVALID_REQUEST,
+    TOKEN_ENDPOINT_AUTH_METHOD,
+    ServiceTokenError,
+    TokenRequestError,
+    authorised_token,
+    granted_token,
+)
+from app.wrong_launches import ALL_SELECTORS, DEFECT_QUERY_PARAM, WrongLaunchMinter
 
 SERVICE_NAME = "mock-lms"
 
 SUMMARY = "A development-only LTI 1.3 platform to launch Pulse from (SPEC §9.2)."
 
-# How an OIDC authorization request arrives when a tool posts it.
+# How an OIDC authorization request arrives when a tool posts it, and how an
+# OAuth 2.0 token request does (RFC 6749 §4.4.2).
 FORM_MEDIA_TYPE = "application/x-www-form-urlencoded"
+
+# How long this platform waits on the one fetch it makes: the tool's key set,
+# when it verifies a `client_assertion`. Bounded rather than left to httpx's
+# default because the address is configured, so a wrong one is a request that
+# hangs rather than one that fails — and a token endpoint that hangs is a tool
+# that hangs. The backend sets the same bound on its own client.
+OUTBOUND_TIMEOUT_SECONDS = 5.0
 
 # How many path segments come before the user identifier in `RESULT_PATH`.
 # Counted off `RESULTS_PATH` rather than written as a number, so that moving
@@ -241,11 +273,28 @@ async def json_object(request: Request, subject: str) -> dict[str, Any]:
 # gradebook is built per application exactly as the issuer key is, so two
 # platforms started in one process hold two gradebooks (ADR 0049).
 #
-# None of them is authenticated. A real platform puts its Advantage services
-# behind an OAuth 2.0 client-credentials grant; E0-14 built no token endpoint
-# and E0-15 specifies none, and the ticket's out-of-scope list says whichever
-# of E1 and E3 needs a token first is where that grant belongs. An endpoint
-# that answered 401 today would answer it to a tool with nothing to present.
+# **NRPS is authenticated and AGS is not, and the split is deliberate.** A real
+# platform puts both behind an OAuth 2.0 client-credentials grant. E0-14 built no
+# token endpoint and E0-15 specified none, so an endpoint that answered 401 then
+# would have answered it to a tool with nothing to present; E1-06 built the grant
+# (`app.tokens`) and ruled that enforcement pairs with the first conformant
+# client, because a service refusing before one exists would be refusing this
+# repository's own tests.
+#
+#   - **The roster requires a token now.** E1-11 built the conformant client, so
+#     that argument has expired for NRPS: `memberships` below refuses a call that
+#     presents no token this platform issued for the membership scope, and
+#     `tests/integration/test_mock_lms_nrps_requires_a_token.py` holds the
+#     contract. Landed in E1-11's fix round, which E1-15's exit clause 5 needs.
+#   - **AGS still answers without one, and that is the same argument still
+#     standing.** No grade-passback client exists: §3.4 is the passback rule and
+#     SPEC §14.3 gives the work to **E3 — Grade passback**, which is where the
+#     first AGS client is built and therefore where this ends. E3 owns the
+#     enforcement; it is recorded with that owner and its "done when" in
+#     `docs/tickets/e1/deferred.md`. Until then a token is presentable at every
+#     AGS route below and required at none.
+#
+# See `docs/adr/0099-the-mock-enforces-a-token-on-nrps-and-not-on-ags.md`.
 
 
 def require_context(platform: SeededPlatform, context_id: str) -> MockContext:
@@ -308,26 +357,39 @@ def _register_oidc_metadata(app: FastAPI, settings: PlatformSettings, key: Issue
     def discovery() -> dict[str, Any]:
         """What a tool reads to find the endpoints, rather than guessing paths.
 
-        Only what this platform actually serves is advertised. There is still no
-        `token_endpoint` here, and E0-15 did not add one: its Advantage services
-        answer unauthenticated, because no ticket yet says what a tool would sign
-        a client assertion with. An advertised endpoint that answers nothing is a
-        record asserting something untrue.
+        Only what this platform actually serves is advertised. **E1-06 adds the
+        `token_endpoint` and the service scopes**, in the same change as the
+        endpoint that answers there and the `auth_token_url` the registration
+        document states — parts 1, 2 and 3 of the four the carried entry moves
+        together, because a token endpoint with no scopes, or scopes with no
+        registered address, still leaves `ServiceConnector` unable to make a
+        single call and looks finished from here.
 
-        The Advantage services are not advertised here either, and that is the
-        protocol rather than an omission: NRPS and AGS are announced per launch,
-        in the claims of the `id_token`, because both are scoped to the context
-        the launch came from. There is no institution-wide roster URL to publish.
+        `scopes_supported` is **extended** rather than replaced. The launch flow
+        already asks for `openid`, and a platform that swapped it for the service
+        scopes would break the door it already serves — `app.tokens` composes the
+        list from the services' own constants for that reason, and the token
+        endpoint answers off the same tuple, so nothing is advertised that no
+        token can be had for.
+
+        The Advantage services are not advertised here, and that is the protocol
+        rather than an omission: NRPS and AGS are announced per launch, in the
+        claims of the `id_token`, because both are scoped to the context the
+        launch came from. There is no institution-wide roster URL to publish.
         """
         return {
             "issuer": settings.issuer,
             "authorization_endpoint": settings.authorization_url,
+            "token_endpoint": settings.token_url,
             "jwks_uri": settings.jwks_url,
             "response_types_supported": ["id_token"],
             "response_modes_supported": ["form_post"],
+            "grant_types_supported": ["implicit", CLIENT_CREDENTIALS_GRANT],
+            "token_endpoint_auth_methods_supported": [TOKEN_ENDPOINT_AUTH_METHOD],
+            "token_endpoint_auth_signing_alg_values_supported": [SIGNATURE_ALGORITHM],
             "subject_types_supported": ["public"],
             "id_token_signing_alg_values_supported": [SIGNATURE_ALGORITHM],
-            "scopes_supported": ["openid"],
+            "scopes_supported": list(ADVERTISED_SCOPES),
             "claims_supported": ["iss", "sub", "aud", "exp", "iat", "nonce"],
         }
 
@@ -354,7 +416,11 @@ def _register_oidc_metadata(app: FastAPI, settings: PlatformSettings, key: Issue
 
 
 def _register_authorization(
-    app: FastAPI, settings: PlatformSettings, platform: SeededPlatform, key: IssuerKey
+    app: FastAPI,
+    settings: PlatformSettings,
+    platform: SeededPlatform,
+    key: IssuerKey,
+    wrong_launches: WrongLaunchMinter,
 ) -> None:
     """The authorization endpoint, which is where a launch is actually signed."""
 
@@ -382,6 +448,13 @@ def _register_authorization(
         obligation to it: the value is the tool's, and a platform that
         re-encoded it breaks the tool's cross-site request forgery check in a way
         that reads as a bug in the tool.
+
+        **E1-07's whole surface is one `if` below.** `?defect=` is read from the
+        URL's query string regardless of `request.method`, because a defect
+        selector is this suite's own instruction to the mock rather than
+        anything an OIDC authorization request carries — it never reaches
+        `resolve_launch`, and a request naming no defect at all runs the exact
+        two lines it ran before this module existed. See ADR 0088.
         """
         if request.method == "POST":
             media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
@@ -407,28 +480,114 @@ def _register_authorization(
             # redirector is built.
             raise HTTPException(status_code=400, detail=str(refusal)) from refusal
 
-        id_token = key.compact_jws(id_token_claims(resolved, settings))
+        defect = request.query_params.get(DEFECT_QUERY_PARAM)
+        if defect is None:
+            id_token = key.compact_jws(id_token_claims(resolved, settings))
+            response_state = resolved.state
+        else:
+            try:
+                minted = wrong_launches.mint(defect, resolved, settings)
+            except AuthorizationRequestError as refusal:
+                raise HTTPException(status_code=400, detail=str(refusal)) from refusal
+            id_token = minted.id_token
+            response_state = minted.state
+
         return HTMLResponse(
             authorization_response_page(
                 id_token=id_token,
-                state=resolved.state,
+                state=response_state,
                 redirect_uri=resolved.redirect_uri,
             )
         )
 
 
-def _register_nrps(app: FastAPI, settings: PlatformSettings, platform: SeededPlatform) -> None:
-    """Names and Role Provisioning 2.0: one section's roster, paged."""
+def _register_token(app: FastAPI, settings: PlatformSettings, key: IssuerKey) -> None:
+    """The token endpoint: where a tool exchanges a signed assertion for a token."""
+
+    @app.post(
+        TOKEN_PATH, summary="OAuth 2.0: a client-credentials grant for the Advantage services"
+    )
+    async def token(request: Request) -> JSONResponse:
+        """Answer a client-credentials grant, or refuse it with an RFC 6749 code.
+
+        Every rule is in `app.tokens`; this reads the form and turns a refusal
+        into the response §5.2 describes. **400 rather than 401** even for
+        `invalid_client`: §5.2's 401 clause is scoped to a client authenticating
+        through the `Authorization` header, and a `client_assertion` in the body
+        is RFC 7523's profile instead.
+
+        `parse_qsl` rather than `Form(...)`, for the reason `authorize` above
+        gives: Starlette's form parsing asserts on `python-multipart`, which this
+        project does not lock.
+
+        **The verification runs in a threadpool** because it fetches the tool's
+        key set over a synchronous client and then does RSA arithmetic, and both
+        would block every other request on this process. The client comes off
+        `app.state.http` at request time rather than being closed over, so a test
+        that installs its own after startup is the one this reads.
+        """
+        try:
+            media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+            if media_type != FORM_MEDIA_TYPE:
+                # Raised rather than answered here, so that every RFC 6749 §5.2
+                # body this endpoint sends is built in one place. Two
+                # construction sites is one place to forget when the shape
+                # changes (`docs/MISTAKES.md` entry 13).
+                raise TokenRequestError(
+                    INVALID_REQUEST,
+                    f"The token request was posted as {media_type!r}. RFC 6749 §4.4.2 makes an "
+                    f"access token request {FORM_MEDIA_TYPE!r}.",
+                )
+            body = (await request.body()).decode("utf-8", errors="replace")
+            form = dict(parse_qsl(body, keep_blank_values=True))
+            granted = await run_in_threadpool(
+                granted_token, form, settings, key, request.app.state.http
+            )
+        except TokenRequestError as refusal:
+            return JSONResponse(refusal.response(), status_code=400)
+        return JSONResponse(granted.response())
+
+
+def _register_nrps(
+    app: FastAPI, settings: PlatformSettings, platform: SeededPlatform, key: IssuerKey
+) -> None:
+    """Names and Role Provisioning 2.0: one section's roster, paged and authenticated."""
 
     @app.get(MEMBERSHIPS_PATH, summary="NRPS 2.0: one section's roster, one page at a time")
     def memberships(
+        request: Request,
         context_id: str,
-        page: Annotated[int, Query(alias=PAGE_PARAMETER, ge=1)] = 1,
+        page: Annotated[str | None, Query(alias=PAGE_PARAMETER)] = None,
         role: Annotated[str | None, Query()] = None,
         limit: Annotated[str | None, Query()] = None,
         rlid: Annotated[str | None, Query()] = None,
     ) -> JSONResponse:
         """One page of a membership container, and a `Link` header to the next.
+
+        **The credential is checked before anything else about the request**, and
+        the order is the decision rather than an accident: a caller with no token
+        learns that it needs one, and learns nothing about which contexts this
+        platform seeds, which query parameters it implements, or where its cursor
+        starts. Answering the `role` refusal or the context 404 first would make
+        an unauthenticated request a way to enumerate the first two.
+
+        **That is why `page` is typed here as a string with no bound.** It
+        carried `ge=1`, which FastAPI enforces before the handler is entered at
+        all, so `?page=0` answered 422 to a caller who had presented nothing —
+        the one exception to the sentence above, and a claim with an exception is
+        one nobody can rely on. The bound and the default now live in
+        `app.paging::page_number`, read below, behind the credential; the same
+        move covers `?page=abc`, which the framework would also have answered
+        before the token was looked at.
+
+        Every rule about the token is in `app.tokens`; this turns a refusal into
+        the status and the RFC 6750 §3 challenge it carries. The challenge is a
+        header rather than a body member because that is where a client reads it
+        — a bare 401 is indistinguishable from a route that has moved.
+
+        The verification is RSA arithmetic and this is a synchronous handler, so
+        FastAPI already runs it in a threadpool; there is nothing to hand off
+        here the way the token endpoint does.
 
         The header is the only place paging is expressed. A next URL in the body
         would read correctly to anyone looking at the response and would leave a
@@ -453,7 +612,26 @@ def _register_nrps(app: FastAPI, settings: PlatformSettings, platform: SeededPla
         `page` keeps working. It is the cursor the roster walk moves by, and a
         container that refused every query parameter would turn every seeded
         roster into its first page.
+
+        **A `page` that is not a page number is refused with the same 400**, and
+        the code is E0-28 item 2's rather than a new decision: 400 says this
+        platform read the request and will not serve it, which is the sentence a
+        tool's author acts on, while a 422 reports that a value could not be
+        parsed — a different fact, and one this handler is no longer in a
+        position to state. It is also deliberately not the 404 that a page
+        *past* the end answers with: page nine of a three-page roster is a client
+        following a header into nowhere, and page zero is a cursor no collection
+        could ever have.
         """
+        try:
+            authorised_token(request.headers.get("authorization"), MEMBERSHIP_SCOPE, settings, key)
+        except ServiceTokenError as refusal:
+            raise HTTPException(
+                status_code=refusal.status_code,
+                detail=refusal.description,
+                headers={"WWW-Authenticate": refusal.challenge()},
+            ) from refusal
+
         refused = [
             name
             for name, value in (("role", role), ("limit", limit), ("rlid", rlid))
@@ -471,9 +649,22 @@ def _register_nrps(app: FastAPI, settings: PlatformSettings, platform: SeededPla
                     f"`{PAGE_PARAMETER}` is the one parameter this container implements."
                 ),
             )
+        requested = page_number(page)
+        if requested is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"`{PAGE_PARAMETER}={page}` is not a page of this membership container. "
+                    f"`{PAGE_PARAMETER}` is a whole number from {FIRST_PAGE} upwards — the cursor "
+                    "the roster walk moves by, and the one query parameter this container "
+                    "implements. A page past the end of the roster is a different answer, and "
+                    "this is not that."
+                ),
+            )
+
         context = require_context(platform, context_id)
         try:
-            served = membership_page(platform, settings, context, page)
+            served = membership_page(platform, settings, context, requested)
         except PageOutOfRangeError as refusal:
             raise HTTPException(status_code=404, detail=str(refusal)) from refusal
         return JSONResponse(
@@ -690,22 +881,61 @@ def _register_mock_inspection(app: FastAPI, grades: GradeBook) -> None:
             }
         )
 
+    @app.get(MOCK_DEFECTS_PATH, summary="Mock only: every defect selector this platform answers to")
+    def served_defects() -> JSONResponse:
+        """The defect selectors, straight from `ALL_SELECTORS`.
+
+        E1-07's deferred item 1. `app.wrong_launches` cannot be imported outside
+        `mock-lms/` (ADR 0039's `app`-package collision), so every consumer of a
+        selector name holds a copied literal and ADR 0088's own consequences say
+        nothing makes those copies move together. This serves the tuple itself —
+        not a written-out list — so a consumer can check its copy against the one
+        source, and a rename in `ALL_SELECTORS` fails that check at the name
+        rather than as a dispatcher's 400 inside whichever case selected the
+        stale spelling.
+
+        Outside the AGS namespace under `/mock/`, like `posted_scores` above: a
+        tool that learned this route would have learned something no real
+        platform serves.
+        """
+        return JSONResponse({"selectors": list(ALL_SELECTORS)})
+
 
 def create_app() -> FastAPI:
     """Build the platform: read the environment, seed it, and generate its key.
 
-    The four values below are the whole of this platform's state, and each
+    The five values below are the whole of this platform's state, and each
     `_register_*` call above takes the ones its routes need. They were closures
     over this function when every handler lived in it — a 440-line body with
     fourteen nested definitions — and they are parameters now, which is the only
     change: no route, no status code and no document moved.
+
+    **One outbound client, on `app.state.http`** (E1-06), which is the backend's
+    own arrangement and for the same two reasons: every server-side fetch this
+    platform makes goes through one place, so a test can route it, and the
+    timeout is set once rather than per call. Built here rather than in the
+    lifespan so that a caller which never runs one still gets a working
+    application, and closed by name in the lifespan rather than by reading the
+    attribute back, because a test replaces it and closing somebody else's client
+    at shutdown would be this application reaching into a fixture.
     """
     settings = PlatformSettings.from_environment()
     platform = seeded_platform()
     key = IssuerKey.generate()
     grades = GradeBook(settings=settings)
+    wrong_launches = WrongLaunchMinter(key)
+    http = httpx.Client(timeout=OUTBOUND_TIMEOUT_SECONDS)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        """Close the client this factory opened, when the process stops serving."""
+        try:
+            yield
+        finally:
+            http.close()
 
     app = FastAPI(
+        lifespan=lifespan,
         title="Pulse Surveys — mock LMS",
         summary=SUMMARY,
         # No OpenAPI schema, and so no `/docs` and no `/redoc`. This service's
@@ -717,11 +947,13 @@ def create_app() -> FastAPI:
         openapi_url=None,
     )
     app.state.settings = settings
+    app.state.http = http
 
     _register_health_and_pages(app, settings, platform)
     _register_oidc_metadata(app, settings, key)
-    _register_authorization(app, settings, platform, key)
-    _register_nrps(app, settings, platform)
+    _register_authorization(app, settings, platform, key, wrong_launches)
+    _register_token(app, settings, key)
+    _register_nrps(app, settings, platform, key)
     _register_ags(app, settings, platform, grades)
     _register_mock_inspection(app, grades)
     return app

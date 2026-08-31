@@ -222,6 +222,42 @@ pull request adds a `secrets.*` reference to a workflow without the repository
 owner agreeing to it first. Credentials never appear in commit messages, pull
 request bodies, test fixtures, seed data, or logs.
 
+## Two testing lanes
+
+Every ticket names its lane in its header's `**Lane:**` field, assigned when
+the epic's build order is written. A missing field means heavy, any ⚠ on the
+ticket or its epic means heavy, and doubt means heavy. The ticket file is the
+authority — an epic README's table may summarize, but the header decides.
+
+**Heavy** is the orchestrated tests-first loop, for the surfaces an attacker
+would aim at — the path table at `.claude/heavy-lane-paths.md`. A separate
+test author writes failing tests from the ticket and the spec before any
+implementation exists; the implementer may not modify tests (a hook enforces
+the wall) and escalates disagreements as dispute files; an independent
+verifier confirms CI's green run on the same commit and runs a scoped
+mutation battery proving each test can actually fail.
+
+**Light** is for everything else — frontend tooling, UI rendering, governed
+copy, plumbing that touches no guarded surface. One `builder` agent writes
+the code and ordinary tests together, and the verifier confirms CI's green
+run and the standing gates once, fresh. No manifest, no mutation battery, no
+separate test author.
+
+What never varies by lane: CI green with nothing skipped or weakened, the
+§4.1 invariant suite, the independent security review on every pull request
+(SPEC §14.2 item 3), ADRs for contestable construction decisions, and the
+owner's written approval to merge. A light ticket whose diff turns out to
+reach a heavy surface stops and re-lanes, and the pull request records the
+switch.
+
+Future epics write the `**Lane:**` field on every ticket at breakdown time.
+E1 adopted the split mid-epic: its light tickets are E1-02, E1-03 and
+E1-07, and every other E1 ticket is heavy — including E1-14 and E1-15, whose
+⚠ lives in their Security-relevant lines rather than in the build-order
+table. E1-04 was listed light here and re-laned heavy by Todd on 2026-08-25,
+before its build started; where this list and a ticket header disagree, the
+header is the authority.
+
 ## Definition of done
 
 Every epic — and by extension every ticket that composes it — carries the
@@ -231,7 +267,9 @@ security review, accessibility is handled in-slice rather than deferred to E13,
 and docs cover anything an operator or developer needs. The pull request
 template restates the per-ticket ones as a checklist. At the epic boundary,
 §14.2 item 6 adds the epic-level reviews — exit, invariant coverage, docs/ADR
-completeness, and a threat model on ⚠ epics — that gate the merge to `main`.
+completeness, and a threat model on ⚠ epics — that gate the merge to `main`,
+now joined by the per-PR reviewers moved to this boundary — data-model,
+lti-oidc, a11y-copy, and prompt-eval (see ADR 0004).
 
 Testing and security review are not separate epics. They are part of finishing
 each one.

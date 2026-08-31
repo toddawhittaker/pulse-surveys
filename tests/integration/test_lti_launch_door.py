@@ -26,11 +26,33 @@ cannot be changed on the token — the platform signs with a key nothing here ho
 it is changed on the *registration*, which is the other half of every comparison
 the tool makes.
 
-**The landing role comes from the verified token.** E0-18: "the landing role comes
-from the verified token, not from the database", so the two happy paths below
-assert that a Learner's launch lands on the student view and an Instructor's on the
-instructor view, with the other four testids absent. Absent as well as present,
-because a page carrying every view is a page that is right about none of them.
+**The landing role came from the verified token, and since E1-13 it does not.**
+E0-18 wrote "the landing role comes from the verified token, not from the
+database", and that sentence is the one this ticket deletes: the landing is
+resolved from the person's own live assignments, filtered by ADR 0026's
+`permits_launch` column, with enrollment as the student fallback (ADR 0028). Two
+things follow for every test in this module.
+
+First, **a launch by a subject Pulse holds nothing about lands on the calm
+no-access page** — a `200` carrying `data-testid="no-access"`, no landing testid
+and no session — rather than on a role route. So the happy paths here take
+`landings_for_the_platforms_subjects`, which gives the platform's learner subject
+a live enrollment and its instructor subject an instructor assignment. That
+fixture is E1-13 arriving in a module whose subject is signatures, nonces, state
+and cookies (`docs/MISTAKES.md` entry 22); it decides nothing this module
+asserts, and the rule it stands in for — that the rows are what choose the view —
+is asserted in the open in
+`tests/integration/test_landing_resolves_from_assignments.py`.
+
+Second, **the "one door, one vocabulary" section below says something stronger
+than it used to.** It used to assert that a launch stating a web-door role in the
+web door's claim is *refused*, because the launch door reads one roles vocabulary.
+The claim now reaches no decision at all, so the honest assertion is that such a
+launch lands exactly where the same launch without that claim lands — on the calm
+page when the subject holds nothing, and on the student route when they are
+enrolled. A claim buys a person nothing they do not already hold, which is the
+fact E0-09's criterion 10 always wanted and could not have while a claim chose a
+screen.
 
 **Four things arrived in the third review round**, and they are the last three
 sections of this module. One door reads one roles vocabulary, which needs launches
@@ -57,6 +79,9 @@ launch belongs to a student and which to an instructor is learned by minting the
 and reading the LIS roles claim, rather than by naming a seeded user identifier.
 """
 
+import logging
+import re
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
@@ -74,13 +99,19 @@ MOCK_LMS_TOOL_LOGIN_URL_VARIABLE = "MOCK_LMS_TOOL_LOGIN_URL"
 MOCK_LMS_TOOL_LAUNCH_URL_VARIABLE = "MOCK_LMS_TOOL_LAUNCH_URL"
 MOCK_LMS_ISSUER_VARIABLE = "MOCK_LMS_ISSUER"
 
-# Where the tool is configured to send a browser to begin the launch. **Chosen so
-# that no implementation could arrive at it by accident**: E0-18 puts the
-# platform's browser-facing authorization endpoint in a settings field because
-# `lti_platform` has no column for it, and a redirect built from anything else —
-# the issuer plus a guessed path, a constant in the source — would agree with the
-# real mock and disagree with this. `.invalid` is reserved by RFC 2606.
-CONFIGURED_AUTHORIZATION_ENDPOINT = "http://lti-platform.invalid/e0-18-configured-authorize"
+# Where this platform's **registration** says to send a browser to begin the
+# launch. **Chosen so that no implementation could arrive at it by accident**: a
+# redirect built from anything else — the issuer plus a guessed path, a constant
+# in the source — would agree with the real mock and disagree with this.
+# `.invalid` is reserved by RFC 2606.
+#
+# **It was a setting until E1-05 and is a column now.** E0-18 put it in
+# `Settings` because `lti_platform` had no column for it (ADR 0075), which is
+# correct for one registered platform and wrong for two; E1-05 makes it a
+# property of the registration and deletes the setting outright. Nothing about
+# what this module asserts changes — the redirect still has to go to an address
+# nothing could guess — only where the value is written.
+REGISTERED_AUTHORIZATION_ENDPOINT = "http://lti-platform.invalid/e0-18-configured-authorize"
 
 # An issuer no `lti_platform` row will ever carry. Used for the login endpoint's
 # unknown-issuer case and for the second platform instance whose launches nobody
@@ -126,17 +157,15 @@ PRODUCTION = "production"
 # because a `Set-Cookie` attribute name is case-insensitive.
 SECURE_ATTRIBUTE = "secure"
 
-# A `state` that is well formed as a form field and not representable as ASCII.
+# A `nonce` that is well formed as a form field and not representable as ASCII.
 # `secrets.compare_digest` raises `TypeError` rather than answering `False` when
 # either side is a `str` outside ASCII, so this is the value that separates "the
-# tool compared and refused" from "the tool crashed on the way to comparing".
-NON_ASCII_STATE = "é"
+# tool compared and refused" from "the tool crashed on the way to comparing". Its
+# `state` counterpart, `NON_ASCII_STATE`, retired with the two login-cookie tests
+# dispute E1-08-01 removed — the cookieless handshake's own single-use property
+# is proved by `test_a_delivered_state_is_refused_on_replay_after_an_unrelated_
+# refusal` instead, which needs no non-ASCII value at all.
 NON_ASCII_NONCE = "é"
-
-# What each of those two lands on, per E0-18: "Learner → student empty view,
-# Instructor → instructor empty view".
-STUDENT_VIEW = "pulse-landing-student"
-INSTRUCTOR_VIEW = "pulse-landing-instructor"
 
 # How far back the platform's clock is wound to mint a launch that is certainly
 # expired, and how far back to mint one that is certainly not. The first is longer
@@ -146,6 +175,20 @@ INSTRUCTOR_VIEW = "pulse-landing-instructor"
 # launch rather than evidence that the tool checks `exp`.
 CERTAINLY_EXPIRED_SECONDS = 3600
 CERTAINLY_STILL_VALID_SECONDS = 30
+
+# How far back the seeded enrollment window starts. Comfortably longer than any
+# timezone offset, so that a window opened this many days before *UTC's* today
+# contains the institution's today under every `INSTITUTION_TIMEZONE` — which is
+# what lets this module state no timezone at all. The four tests whose subject
+# actually is the window's edge live in
+# `tests/integration/test_landing_resolves_from_assignments.py` and set the zone
+# themselves.
+ENROLLED_SINCE_DAYS = 30
+
+# E1-13's calm page, by the testid E1-15's browser proof addresses it by. Not one
+# of the five landing testids and not the refusal page: a launch the door verified
+# by a person whose rows entitle them to no view is a state rather than a fault.
+NO_ACCESS_TESTID = "no-access"
 
 
 @pytest.fixture
@@ -192,7 +235,9 @@ def jwks_url(platform: Any) -> str:
 @pytest.fixture
 def registration(platform: Any, jwks_url: str, register_platform: Any) -> Any:
     """The mock platform, registered in `lti_platform` and `lti_deployment`."""
-    return register_platform(platform.require_offers()[0], jwks_url)
+    return register_platform(
+        platform.require_offers()[0], jwks_url, REGISTERED_AUTHORIZATION_ENDPOINT
+    )
 
 
 @pytest.fixture
@@ -209,10 +254,7 @@ def open_launch_door(
     names = door_contract.settings
 
     def build(*, around: Any = None, environment: str | None = None, **overrides: str) -> Any:
-        values = {
-            names["public_base_url"]: door_contract.public_base_url,
-            names["lti_authorization_endpoint"]: CONFIGURED_AUTHORIZATION_ENDPOINT,
-        }
+        values = {names["public_base_url"]: door_contract.public_base_url}
         values.update({names[key]: value for key, value in overrides.items()})
         if environment is not None:
             values[ENVIRONMENT_VARIABLE] = environment
@@ -227,6 +269,90 @@ def tool(open_launch_door: Any) -> Any:
     return open_launch_door()
 
 
+def give_the_platforms_subjects_a_landing(
+    platform: Any, registration: Any, landing_ground: Any, web_identity: Any
+) -> dict[str, Any]:
+    """Seed the rows behind the two fixtures below. See either of their docstrings.
+
+    A function rather than a fixture because two registrations are in play in this
+    module and never at once: the platform's own, and the one pointing at
+    `suite_key_set`. A `user` row belongs to a registration, so seeding against the
+    wrong one leaves the door resolving nobody — and the tests would report that as
+    the landing rule being wrong.
+    """
+    ground = landing_ground()
+    platform_id = registration.platform_row[web_identity.key_of("lti_platform")]
+    enrolled_since = datetime.now(UTC).date() - timedelta(days=ENROLLED_SINCE_DAYS)
+
+    seeded: dict[str, Any] = {}
+    for role_uri, give in (
+        (LEARNER_ROLE_URI, "student"),
+        (INSTRUCTOR_ROLE_URI, "instructor"),
+    ):
+        offer = offer_for_role(platform, role_uri)
+        subject = platform.mint(offer).claims.get("sub")
+        assert isinstance(subject, str) and subject, (
+            f"The launch this platform signs for {role_uri!r} carries no `sub`, so there is no "
+            "subject to seed rows for and no launch in this module could land."
+        )
+        if give == "student":
+            seeded[give] = ground.a_student(
+                platform_id=platform_id, subject=subject, on=enrolled_since
+            )
+        else:
+            seeded[give] = ground.an_instructor(platform_id=platform_id, subject=subject)
+    return seeded
+
+
+@pytest.fixture
+def landings_for_the_platforms_subjects(
+    platform: Any, registration: Any, landing_ground: Any, web_identity: Any
+) -> dict[str, Any]:
+    """Give the platform's two launchable subjects something E1-13's door can land them on.
+
+    The learner subject gets a `user` row and a live enrollment (ADR 0028: a
+    student holds no assignment, and enrollment is the whole of their access); the
+    instructor subject gets a `person`, a `user` row, ADR 0024's link and one live
+    `INSTRUCTOR` assignment. Both are the minimum a real deployment holds for
+    somebody who can use this tool, and both are seeded committed, because the door
+    reads on its own connection.
+
+    **It decides nothing this module asserts.** Every test here is about a
+    signature, an issuer, a nonce, a `state`, a cookie or a log line, and each one
+    needs a launch that *lands* before it can say anything about those — which
+    stopped being free when E1-13 made the landing come from rows
+    (`docs/MISTAKES.md` entry 22). Which view those rows produce is asserted in the
+    open, over rows written by the test that reads them, in
+    `tests/integration/test_landing_resolves_from_assignments.py`.
+
+    The subjects are read off the launches the platform signs rather than off its
+    seed, exactly as `offer_for_role` reads the roles: nothing in this module is a
+    copy of `mock-lms/app/seed.py`.
+    """
+    return give_the_platforms_subjects_a_landing(
+        platform, registration, landing_ground, web_identity
+    )
+
+
+@pytest.fixture
+def landings_for_the_re_signed_subjects(
+    platform: Any,
+    registration_naming_this_suites_key: Any,
+    landing_ground: Any,
+    web_identity: Any,
+) -> dict[str, Any]:
+    """The same rows, against the registration the re-signed section runs behind.
+
+    `registration_naming_this_suites_key` replaces `registration` rather than
+    joining it — two rows registering one issuer would leave the door choosing
+    between them — and a `user` row belongs to a registration, so the seeding has
+    to follow whichever one the test is running behind.
+    """
+    return give_the_platforms_subjects_a_landing(
+        platform, registration_naming_this_suites_key, landing_ground, web_identity
+    )
+
+
 @pytest.fixture
 def registration_naming_this_suites_key(
     platform: Any, suite_key_set: Any, register_platform: Any
@@ -237,7 +363,9 @@ def registration_naming_this_suites_key(
     issuer would leave the door choosing between them, and which one it chose
     would decide the result of every test below.
     """
-    return register_platform(platform.require_offers()[0], suite_key_set.jwks_url)
+    return register_platform(
+        platform.require_offers()[0], suite_key_set.jwks_url, REGISTERED_AUTHORIZATION_ENDPOINT
+    )
 
 
 @pytest.fixture
@@ -255,10 +383,7 @@ def tool_verifying_against_this_suites_key(
     served the platform's real keys.
     """
     return tool_doors(
-        {
-            door_contract.settings["public_base_url"]: door_contract.public_base_url,
-            door_contract.settings["lti_authorization_endpoint"]: CONFIGURED_AUTHORIZATION_ENDPOINT,
-        },
+        {door_contract.settings["public_base_url"]: door_contract.public_base_url},
         {suite_key_set.host: suite_key_set},
     )
 
@@ -372,23 +497,79 @@ def views_in(response: Any, contract: Any) -> list[str]:
     return [testid for testid in contract.landing_testids if testid in response.text]
 
 
-def lands_on(response: Any, contract: Any, expected: str) -> None:
-    """The response is the landing page for `expected`, and for nothing else."""
+# `lands_on` (the `200` + inline-HTML + single-testid assertion) lived here.
+# Removed by E1-08's reconciliation pass: every caller was updated to
+# `redirected_to_role` (defined in the `# E1-08` section below), which checks
+# the `302` + fragment + `pulse_session` cookie contract that replaces it —
+# see ADR 0089 and the per-test "Updated by E1-08's reconciliation pass"
+# notes above. `views_in` stays: `refused()` still uses it to prove a refusal
+# rendered nobody's landing page.
+
+
+def the_no_access_page(response: Any, contract: Any, what: str) -> None:
+    """E1-13's calm answer: the launch verified, and this person's rows entitle them to no view.
+
+    Distinct from `refused` in every respect a test can see — the status, the
+    testid, and the fact that this is a page somebody is meant to read rather than
+    a refusal. Both halves are checked, because a door answering the calm page with
+    a 4xx would be right about the words and wrong about the event, and a door
+    answering 200 with the refusal's own body would be the reverse.
+
+    The launch is correct in every claim; what is missing is a row. That is the
+    difference between "we cannot accept this token" and "there is nothing here for
+    you yet", and the person in front of the screen is owed different words for
+    each.
+    """
     assert response.status_code == 200, (
-        f"The launch was answered {response.status_code} rather than 200. Body begins "
-        f"{response.text[:400]!r}."
+        f"The tool answered {response.status_code} to {what}. E1-13 replaces the launch door's 'no "
+        "role this tool has a view for' refusal with a calm page: the token verified, so nothing "
+        f"went wrong and the answer is a 200. Body begins {response.text[:400]!r}."
+    )
+    assert NO_ACCESS_TESTID in response.text, (
+        f"The tool answered {what} with a 200 carrying no `{NO_ACCESS_TESTID}` testid (body begins "
+        f"{response.text[:400]!r}). That testid is E1-13's contract for this page and is what says "
+        "which of the door's non-landing answers the person actually got."
     )
     found = views_in(response, contract)
-    assert found == [expected], (
-        f"The landing page carries {found or 'no landing testid at all'}, and E0-18 has this "
-        f"launch land on `{expected}`. Every other view's testid has to be absent as well as this "
-        "one present: a page carrying several is a page that is right about none of them, and it "
-        "is what a template rendering all five behind a condition that never fires looks like."
+    assert not found, (
+        f"The tool answered {what} with a page carrying {found}. A person whose rows entitle them "
+        "to no view lands on nobody's."
     )
+    assert "session=" not in (
+        response.headers.get("location") or ""
+    ), f"The tool answered {what} with a `Location` carrying a session token."
 
 
 def refused(response: Any, contract: Any, what: str) -> None:
-    """The tool refused, and rendered nobody's landing page while doing it."""
+    """The tool refused, rendered nobody's landing page, and said which guard did it.
+
+    **The last two assertions are the E1 boundary fix round's M7 arriving here**
+    rather than in a module of their own. `refusal_page` is the one door answer
+    whose body no test scanned, and the fix makes its copy come from the guard
+    name alone through a module constant — so the integration half of that rule
+    is that every refusal either door answers with still renders a page, and
+    still carries exactly one machine-readable marker on it. Extended in place,
+    because every refusal in this module already comes through here and a
+    parallel helper would be the same rule asserted in two places
+    (`docs/MISTAKES.md` entry 13).
+
+    **The mutation the marker assertion kills:** a refusal path that renders
+    something other than the shared page — a bare `HTTPException` detail, a
+    framework error body — which satisfies "4xx and no landing testid" and
+    leaves a reader with nothing that says what refused. **The near miss it must
+    survive**, and it is the reason the assertion is on the exact list rather
+    than on `"data-reason" in body`: a page that prints every guard's marker
+    leaves "the guard is named" true and useless, which is the failure
+    `exit-refused-launches.spec.ts` found in its own prose assertions.
+
+    The body-is-not-empty assertion is first, because "no landing testid",
+    "exactly one marker" and every scan below are all satisfiable by a response
+    with nothing in it (`docs/MISTAKES.md` entry 3).
+
+    `reason_markers` and `REASON_MARKER` are defined further down this module,
+    beside the tests that read a marker's *value*; a name in a function body
+    resolves when the function runs, so the order costs nothing.
+    """
     assert 400 <= response.status_code < 500, (
         f"The tool answered {response.status_code} to {what}. E0-18 requires a 4xx: this is auth "
         f"code, and 'absence of basic state/nonce/signature checks is not tolerable even "
@@ -399,6 +580,19 @@ def refused(response: Any, contract: Any, what: str) -> None:
         f"The tool refused {what} with {response.status_code} and still rendered {found}. A "
         "refusal that serves a landing page has admitted the launch and merely said so in the "
         "status line."
+    )
+    assert response.text.strip(), (
+        f"The tool refused {what} with an empty body. Every other assertion made about a refusal "
+        "here — no landing testid, one reason marker, no key set address — is true of a page with "
+        "nothing on it, and the person who provoked this is owed words."
+    )
+    markers = reason_markers(response)
+    assert len(markers) == 1 and markers[0].strip(), (
+        f"The page the tool refused {what} with carries the reason markers {markers}; it should "
+        "carry exactly one, naming the guard that fired. The refusal page is shared by both doors "
+        "and its copy comes from that name alone (E1 boundary fix, M7), so a refusal rendered by "
+        "something else — or by a page that names every guard, or none — is a refusal a reader "
+        "cannot act on and a browser-side spec cannot address."
     )
 
 
@@ -442,40 +636,21 @@ def re_signed_launch(
 
 
 # ---------------------------------------------------------------------------
-# The landing pages. E0-18: a launch lands on the view its verified roles name.
+# The landing pages. E0-18 originally had two tests here — one per role —
+# asserting the launch landed on a `200` page of inline HTML carrying a
+# `pulse-landing-*` testid. **Removed by E1-08's reconciliation pass**: that
+# response contract is retired outright by E1-08's session model (ADR 0089;
+# see the `# E1-08` section below) in favour of a `302` to
+# `/app/<role>#session=<token>` with the session and CSRF cookies set, and
+# the two tests this section now runs *are* those two tests, mechanically
+# identical in setup (`launched(tool, door_contract, platform,
+# offer_for_role(platform, LEARNER_ROLE_URI / INSTRUCTOR_ROLE_URI))`) and
+# differing only in which contract they check the result against —
+# `test_a_valid_launch_redirects_with_a_session_to_the_role_named_route` and
+# `test_an_instructors_valid_launch_redirects_to_the_instructor_route`, both
+# in the `# E1-08` section. Keeping the old pair here would have been the
+# same two flows asserted twice, once against a contract E1-08 retires.
 # ---------------------------------------------------------------------------
-
-
-def test_a_learner_launch_lands_on_the_student_view(
-    tool: Any, door_contract: Any, platform: Any
-) -> None:
-    """The whole door, end to end, for the role SPEC §2 gives the launch door only.
-
-    Every part of the flow is real: the platform's own launch form is posted at
-    `/lti/login`, the tool's redirect is answered at the platform's authorization
-    endpoint, and the signed `id_token` that comes back is delivered to
-    `/lti/launch`. Nothing is minted independently, so this fails if any link in
-    the chain is missing — which is the point of having it before the refusals.
-    """
-    response = launched(tool, door_contract, platform, offer_for_role(platform, LEARNER_ROLE_URI))
-
-    lands_on(response, door_contract, STUDENT_VIEW)
-
-
-def test_an_instructor_launch_lands_on_the_instructor_view(
-    tool: Any, door_contract: Any, platform: Any
-) -> None:
-    """The same door, the other role, and the pair is what makes either mean anything.
-
-    A tool that rendered one view for every launch satisfies the test above on its
-    own. E0-18's landing rule is a *dispatch* on the verified roles claim, and a
-    dispatch is only observable across two inputs.
-    """
-    response = launched(
-        tool, door_contract, platform, offer_for_role(platform, INSTRUCTOR_ROLE_URI)
-    )
-
-    lands_on(response, door_contract, INSTRUCTOR_VIEW)
 
 
 # ---------------------------------------------------------------------------
@@ -515,16 +690,24 @@ def test_the_login_endpoint_refuses_an_issuer_no_row_registers(
     )
 
 
-def test_the_login_redirect_goes_to_the_configured_authorization_endpoint(
-    tool: Any, door_contract: Any, platform: Any
+def test_the_login_redirect_goes_to_the_registrations_authorization_endpoint(
+    tool: Any, door_contract: Any, platform: Any, registration: Any
 ) -> None:
     """Criterion: the redirect targets the platform's authorization endpoint.
 
-    **Dies if the endpoint is derived rather than configured** — assembled from the
-    issuer plus a guessed path, or written into the source. E0-23 put service
-    addresses out of `lti_platform` until E1, so E0-18's stand-in is a settings
-    field, and the value used here is one nothing could arrive at by any other
-    route.
+    **Dies if the endpoint is derived rather than read** — assembled from the
+    issuer plus a guessed path, or written into the source. The value registered
+    here is one nothing could arrive at by any other route, so a redirect that
+    lands on it can only have been read from somewhere.
+
+    **What it no longer says, after E1-05.** Until this ticket the endpoint was a
+    process-wide setting, and this test could not tell "read from configuration"
+    from "read from *this* registration" — with one platform registered the two
+    are the same string. That distinction is the ticket's first criterion and is
+    asserted where it can be, in
+    `tests/integration/test_registration_endpoints_are_per_platform.py`, which
+    registers two platforms at once. What this one still holds, and holds for the
+    whole launch-door suite, is that the address is not derived.
     """
     offer = platform.require_offers()[0]
 
@@ -534,12 +717,11 @@ def test_the_login_redirect_goes_to_the_configured_authorization_endpoint(
 
     split = urlsplit(location)
     without_query = f"{split.scheme}://{split.netloc}{split.path}"
-    assert without_query == CONFIGURED_AUTHORIZATION_ENDPOINT, (
-        f"The tool redirected to {without_query!r} and the configured authorization endpoint is "
-        f"{CONFIGURED_AUTHORIZATION_ENDPOINT!r}. E0-18 makes that endpoint a setting because "
-        "`lti_platform` has no column for it; a value that agrees with the platform by "
-        "construction would pass a test written against the real address and would not be "
-        "configuration."
+    assert without_query == registration.authorization_endpoint, (
+        f"The tool redirected to {without_query!r} and this platform's registration carries "
+        f"{registration.authorization_endpoint!r}. E1-05 makes the authorization endpoint a "
+        "column on `lti_platform`; a value that agrees with the platform by construction would "
+        "pass a test written against the real address and would not be a registration at all."
     )
 
 
@@ -806,7 +988,11 @@ def test_a_launch_whose_token_expired_an_hour_ago_is_refused(
 
 
 def test_a_launch_minted_seconds_ago_is_still_accepted(
-    tool: Any, door_contract: Any, platform: Any, wind_the_clock_back: Any
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    wind_the_clock_back: Any,
+    landings_for_the_platforms_subjects: dict[str, Any],
 ) -> None:
     """The near miss for the test above: a token that is old and not yet expired.
 
@@ -819,6 +1005,19 @@ def test_a_launch_minted_seconds_ago_is_still_accepted(
 
     The wind-back is short enough to sit inside any `id_token` lifetime a platform
     would issue, so this token is valid by every reading.
+
+    **Updated by E1-08's reconciliation pass.** The E0-18 assertion was
+    `lands_on(response, door_contract, STUDENT_VIEW)` — a `200` page of inline
+    HTML carrying `pulse-landing-student`. E1-08's session model (ADR 0089)
+    retires that contract: acceptance is now a `302` to
+    `/app/student#session=<token>` with the session cookie set, which is what
+    `redirected_to_role` (defined in the `# E1-08` section below) checks.
+
+    **Updated again by E1-13**: the learner subject now needs a live enrollment
+    before any launch of hers lands at all, which
+    `landings_for_the_platforms_subjects` seeds. Nothing about what this test says
+    changes — the subject is still the expiry check — only what "accepted" costs to
+    set up.
     """
     offer = offer_for_role(platform, LEARNER_ROLE_URI)
     started = initiate(tool, door_contract, offer)
@@ -828,7 +1027,7 @@ def test_a_launch_minted_seconds_ago_is_still_accepted(
 
     response = land(tool, door_contract, id_token, state)
 
-    lands_on(response, door_contract, STUDENT_VIEW)
+    redirected_to_role(response, door_contract, STUDENT_ROLE)
 
 
 def test_a_launch_carrying_a_state_the_tool_never_issued_is_refused(
@@ -902,11 +1101,30 @@ def test_a_launch_whose_nonce_is_not_the_one_the_tool_sent_is_refused(
 
 
 # ---------------------------------------------------------------------------
-# One door, one vocabulary. SPEC §2 gives Care, leadership and admin the web door
-# *precisely so* the LMS cannot name those roles, and this is that rule at the
-# navigation layer — E0-09 criterion 10's shape, one layer up from the assignment
-# table. It is also the premise the Care sweep's exception argues from
-# (`tests/unit/test_care_is_not_reachable_from_a_claim.py::EXCEPTIONS`).
+# What a roles claim buys. SPEC §2 gives Care, leadership and admin the web door
+# *precisely so* the LMS cannot name those roles, and this section used to hold
+# that rule at the navigation layer: a launch stating a web-door role in the web
+# door's claim was *refused*, because this door read one vocabulary and that was
+# not it.
+#
+# **E1-13 replaces those refusals with something stronger, and this whole section
+# is rewritten to it.** The landing comes from the person's own live assignments
+# now, so no roles claim of any kind reaches the decision — and the assertion
+# worth making is not that a smuggled claim is refused but that it changes
+# *nothing*: the same launch, with its LIS roles claim emptied, removed, replaced
+# with a role this door has no view for, or carrying a web-door role beside it,
+# lands exactly where the subject's rows already said it would. That is the fact
+# E0-09's criterion 10 always wanted — "the launch or login establishes who
+# someone is; this table establishes what they may do" — and it could not be
+# stated while a claim chose a screen.
+#
+# The last test in the section is the one that costs something: a launch stating
+# `CARE`, by a subject whose rows entitle them to nothing, is met with the calm
+# page and never with the Care view. It is `invariant`-marked, and it is the
+# behavioural half of what
+# `tests/unit/test_care_is_not_reachable_from_a_claim.py::EXCEPTIONS` used to
+# argue in prose — that exception is gone in this same change, and the assertions
+# are what stand in its place.
 # ---------------------------------------------------------------------------
 
 
@@ -916,16 +1134,27 @@ def test_a_launch_re_signed_with_the_registered_key_is_still_accepted(
     platform: Any,
     suite_key_set: Any,
     claims_in_token: Any,
+    landings_for_the_re_signed_subjects: dict[str, Any],
 ) -> None:
     """The control for every re-signed case below, and they are worth nothing without it.
 
     The claims are the platform's own, unchanged, signed again by the key set this
     tool's registration names. If this lands on the student view then the machinery
     — the key, the served JWK Set, the `kid`, the re-encoding — produces launches
-    this door accepts, and a refusal in the tests below can only be the one claim
-    they changed. If it does *not*, every one of them is a red about the harness
-    rather than about the door, and this is where that shows (`docs/MISTAKES.md`
-    entry 3).
+    this door accepts, and a different answer in the tests below can only be the
+    one claim they changed. If it does *not*, every one of them is a red about the
+    harness rather than about the door, and this is where that shows
+    (`docs/MISTAKES.md` entry 3).
+
+    **Updated by E1-08's reconciliation pass.** Was `lands_on(response,
+    door_contract, STUDENT_VIEW)` — the `200`+inline-HTML contract E1-08's
+    session model (ADR 0089) retires. Acceptance is now the `302` to
+    `/app/student#session=<token>` `redirected_to_role` checks.
+
+    **Updated again by E1-13**: the subject `re_signed_launch` drives — the
+    platform's learner — reaches the student route because of the live enrollment
+    `landings_for_the_re_signed_subjects` seeds for her, not because her token says
+    Learner. That is the point of every test below and it starts here.
     """
     response = re_signed_launch(
         tool_verifying_against_this_suites_key,
@@ -936,11 +1165,11 @@ def test_a_launch_re_signed_with_the_registered_key_is_still_accepted(
         lambda claims: claims,
     )
 
-    lands_on(response, door_contract, STUDENT_VIEW)
+    redirected_to_role(response, door_contract, STUDENT_ROLE)
 
 
 @pytest.mark.parametrize("web_role", WEB_DOOR_ROLES)
-def test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused(
+def test_a_launch_naming_a_web_door_role_and_no_lis_role_lands_where_the_rows_already_said(
     tool_verifying_against_this_suites_key: Any,
     door_contract: Any,
     platform: Any,
@@ -948,22 +1177,25 @@ def test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused(
     claims_in_token: Any,
     web_vocabulary: tuple[str, frozenset[str]],
     web_role: str,
+    landings_for_the_re_signed_subjects: dict[str, Any],
 ) -> None:
-    """**Dies if the launch door consults the web door's vocabulary.**
+    """**Dies if any roles claim, in any vocabulary, reaches the landing decision.**
 
     SPEC §2 gives Care, leadership and admin a second way in *precisely so* that
     the LMS cannot name those roles: the person who administers the platform writes
-    what an `id_token` says, and E0-09 criterion 10 is that no claim may produce a
-    Care capability. This is that rule one layer up — at the navigation layer,
-    where a launch door that read the web door's roles claim would let the same
-    administrator put themselves on the Care screen by adding a claim to a launch.
+    what an `id_token` says. Until E1-13 this door defended that by *refusing* such
+    a launch; from E1-13 the defence is that the claim is not read at all, and this
+    test is that stronger fact. The launch is otherwise entirely correct — signed
+    by the registered key set, right issuer, audience, deployment, nonce, state and
+    expiry — its LIS roles claim is emptied, and it states a web-door role in the
+    web door's own claim. The subject behind it holds one live enrollment and
+    nothing else, so she lands on the student route, exactly as she does with her
+    claims untouched in the control above.
 
-    The launch is otherwise entirely correct: signed by the registered key set,
-    the right issuer, audience, deployment, nonce, state and expiry. Its LIS roles
-    claim is empty and it states a web-door role in the web door's own claim. There
-    is no view this door may serve for it, so the only answer is a refusal — and
-    `refused` requires that no landing testid at all appears, which covers the Care
-    page and the other four together.
+    **Two mutations die here.** A door that read the web vocabulary lands her on
+    leadership, Care or admin, depending on the parameter. A door that still read
+    the *LIS* vocabulary finds it empty and lands her nowhere — the calm page — so
+    emptying the claim is as much of the question as smuggling the other one is.
 
     The claim name and the role spelling are read off the provider's published
     registration document rather than written here, so this cannot pass by
@@ -972,8 +1204,8 @@ def test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused(
     claim, published = web_vocabulary
     assert web_role in published, (
         f"The mock provider publishes nobody holding {web_role!r} (it publishes "
-        f"{sorted(published)}), so this test is smuggling a role the web door never sees and a "
-        "refusal below would say nothing about which vocabulary the launch door reads."
+        f"{sorted(published)}), so this test is smuggling a role the web door never sees and its "
+        "result would say nothing about which vocabularies this door consults."
     )
 
     def adjust(claims: dict[str, Any]) -> dict[str, Any]:
@@ -990,29 +1222,29 @@ def test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused(
         adjust,
     )
 
-    refused(
-        response,
-        door_contract,
-        f"a launch whose LIS roles claim is empty and which states {web_role!r} in `{claim}`, the "
-        "claim SPEC §2 gives the web door",
-    )
+    redirected_to_role(response, door_contract, STUDENT_ROLE)
 
 
-def test_a_launch_with_no_lis_roles_claim_at_all_and_a_web_door_role_is_refused(
+def test_a_launch_with_no_lis_roles_claim_at_all_and_a_web_door_role_lands_the_same_way(
     tool_verifying_against_this_suites_key: Any,
     door_contract: Any,
     platform: Any,
     suite_key_set: Any,
     claims_in_token: Any,
     web_vocabulary: tuple[str, frozenset[str]],
+    landings_for_the_re_signed_subjects: dict[str, Any],
 ) -> None:
     """The absent case, which an empty list does not cover.
 
     `claims.get(ROLES_CLAIM, [])` and `claims[ROLES_CLAIM]` behave differently when
     the claim is missing rather than empty — the second raises, and a door that
-    catches broadly around it could fall through to a default. A different mutation
-    is a different case, which is the reason this module already has a launch with
-    no `state` beside the launch with the wrong one.
+    caught broadly around it could fall through to a default or to a 500. A
+    different mutation is a different case, which is the reason this module already
+    has a launch with no `state` beside the launch with the wrong one.
+
+    A door that reads no roles claim at all cannot notice the difference, which is
+    what makes this the cheapest possible statement of E1-13's rule: the token's
+    roles are absent and the landing is unchanged.
     """
     claim, published = web_vocabulary
     assert "CARE" in published, (
@@ -1034,33 +1266,33 @@ def test_a_launch_with_no_lis_roles_claim_at_all_and_a_web_door_role_is_refused(
         adjust,
     )
 
-    refused(
-        response,
-        door_contract,
-        f"a launch carrying no LIS roles claim at all and stating 'CARE' in `{claim}`",
-    )
+    redirected_to_role(response, door_contract, STUDENT_ROLE)
 
 
-def test_a_launch_carrying_both_vocabularies_lands_on_the_view_its_lis_role_names(
+def test_a_launch_carrying_both_vocabularies_lands_where_the_subjects_rows_say(
     tool_verifying_against_this_suites_key: Any,
     door_contract: Any,
     platform: Any,
     suite_key_set: Any,
     claims_in_token: Any,
     web_vocabulary: tuple[str, frozenset[str]],
+    landings_for_the_re_signed_subjects: dict[str, Any],
 ) -> None:
-    """The foreign vocabulary is **ignored**, not merely outranked.
+    """Neither vocabulary is consulted, and this is the case that says so both ways at once.
 
-    A launch stating the LIS Learner role and `CARE` in the web door's claim lands
-    on the student view. This is the boundary control on the two refusals above: a
-    door that refused every launch carrying an unfamiliar claim would satisfy them
-    while being wrong about what it does with one, and a door that read both
-    vocabularies and happened to prefer the LIS one would pass this and fail those.
-    Together the three say the launch door reads one claim and does not look at the
-    other.
+    The launch states the LIS **Instructor** role and `CARE` in the web door's
+    claim, and the subject behind it holds one live enrollment and no assignment of
+    any kind. Under E0-18's rule she lands on the instructor view; under a door
+    that read the web claim she lands on Care; under E1-13 she lands on the student
+    route, because that is what her rows say and nothing else is consulted.
 
-    It is expected to pass today, and its value is in what it stops the fix from
-    being: refusing anything that smells of the web vocabulary is not the fix.
+    **This is the boundary control on the two tests above**: a door that answered
+    the calm page to every launch carrying an unfamiliar claim would satisfy both
+    of them and be wrong about what it does with one, and a door that read the LIS
+    vocabulary and merely outranked the web one would pass those and fail this.
+
+    **Updated by E1-13 from `..._lands_on_the_view_its_lis_role_names`**, which is
+    the sentence this ticket makes false: the LIS role names no view any more.
     """
     claim, published = web_vocabulary
     assert "CARE" in published, (
@@ -1069,7 +1301,7 @@ def test_a_launch_carrying_both_vocabularies_lands_on_the_view_its_lis_role_name
     )
 
     def adjust(claims: dict[str, Any]) -> dict[str, Any]:
-        claims[ROLES_CLAIM] = [LEARNER_ROLE_URI]
+        claims[ROLES_CLAIM] = [INSTRUCTOR_ROLE_URI]
         claims[claim] = ["CARE"]
         return claims
 
@@ -1082,29 +1314,32 @@ def test_a_launch_carrying_both_vocabularies_lands_on_the_view_its_lis_role_name
         adjust,
     )
 
-    lands_on(response, door_contract, STUDENT_VIEW)
+    redirected_to_role(response, door_contract, STUDENT_ROLE)
 
 
-def test_a_launch_whose_only_lis_role_is_one_this_door_serves_no_view_for_is_refused(
+def test_a_launch_whose_only_lis_role_is_one_this_door_serves_no_view_for_still_lands(
     tool_verifying_against_this_suites_key: Any,
     door_contract: Any,
     platform: Any,
     suite_key_set: Any,
     claims_in_token: Any,
+    landings_for_the_re_signed_subjects: dict[str, Any],
 ) -> None:
-    """**Dies if the door defaults instead of refusing.**
+    """A role E0-18 had no view for, held by somebody whose rows entitle her to one.
 
-    E0-18 gives this door two dispatches and no third: "Learner → student empty
-    view, Instructor → instructor empty view". A launch whose LIS roles claim names
-    neither is one this system has no view for, and a door that fell through to a
-    default would put a mentor — a parent or an advisor, in the LIS vocabulary — on
-    whichever page came last in the `if`. The wrong default here is a person seeing
-    a screen nobody decided they should see, and it is the same fall-through the
-    web door's admin test exists to catch.
+    E0-18 gave this door two dispatches and no third — "Learner → student empty
+    view, Instructor → instructor empty view" — so a Mentor launch was a launch
+    with no view, and the risk was a door falling through to a default and putting
+    a parent or an advisor on whichever page came last in the `if`. E1-13 removes
+    the `if`: the claim is not a dispatch any more, so a Mentor claim over an
+    enrolled subject lands her on the student route with the rest of them.
 
-    Nothing else is changed: no web-door claim is added, so a 4xx can only be the
-    role. The Mentor URI is from the same LIS membership vocabulary the recognised
-    two come from, so this is not a malformed claim either.
+    **Dies if any residue of the old dispatch survives** — a door that still
+    special-cased an unrecognised LIS role would answer the calm page or a 4xx
+    here, for a person whose enrollment plainly entitles her to a view.
+
+    The Mentor URI is from the same LIS membership vocabulary the recognised two
+    come from, so this is not a malformed claim either.
     """
 
     def adjust(claims: dict[str, Any]) -> dict[str, Any]:
@@ -1120,11 +1355,67 @@ def test_a_launch_whose_only_lis_role_is_one_this_door_serves_no_view_for_is_ref
         adjust,
     )
 
-    refused(
+    redirected_to_role(response, door_contract, STUDENT_ROLE)
+
+
+@pytest.mark.invariant
+def test_a_launch_stating_care_by_a_subject_with_no_rows_is_met_with_the_calm_page(
+    tool_verifying_against_this_suites_key: Any,
+    door_contract: Any,
+    platform: Any,
+    suite_key_set: Any,
+    claims_in_token: Any,
+    web_vocabulary: tuple[str, frozenset[str]],
+) -> None:
+    """The one in this section that costs something: a claim buys no view at all.
+
+    **No landing rows are seeded**, which is the whole difference from every test
+    above. The launch is correct in every claim, states `CARE` in the web door's
+    own roles claim, and belongs to a subject Pulse holds no assignment and no
+    enrollment for. The answer has to be the calm page — and, specifically, never
+    the Care view.
+
+    E0-09's criterion 10 is why this is `invariant`-marked: "No LTI claim, no OIDC
+    claim, and no LMS role may ever produce a `CARE` assignment… a claim-to-Care
+    mapping would let an LMS administrator grant themselves identity access,
+    walking past every guarantee in §4." Care is the only role that can re-identify
+    a student (§6.2), and the person who administers the platform decides what a
+    launch says.
+
+    **The denial is asserted rather than the absence of a name.** `the_no_access_page`
+    requires the whole positive shape — a 200, the `no-access` testid, no landing
+    of any kind and no session in the `Location` — so a launch that failed for some
+    unrelated reason fails this test instead of passing it.
+
+    **Its boundary pair is the control at the head of this section**: the same
+    machinery, the same key, the same re-signing, and a landing — so a green here
+    is not the re-signed harness having stopped working.
+    """
+    claim, published = web_vocabulary
+    assert "CARE" in published, (
+        f"The mock provider publishes nobody holding 'CARE' (it publishes {sorted(published)}), so "
+        "this test is smuggling a role no door in this system would ever act on and its silence "
+        "would say nothing."
+    )
+
+    def adjust(claims: dict[str, Any]) -> dict[str, Any]:
+        claims[ROLES_CLAIM] = []
+        claims[claim] = ["CARE"]
+        return claims
+
+    response = re_signed_launch(
+        tool_verifying_against_this_suites_key,
+        door_contract,
+        platform,
+        suite_key_set,
+        claims_in_token,
+        adjust,
+    )
+
+    the_no_access_page(
         response,
         door_contract,
-        f"a launch whose only LIS role is {MENTOR_ROLE_URI!r}, which E0-18 gives this door no view "
-        "for",
+        f"a launch stating 'CARE' in `{claim}` by a subject holding no assignment and no enrollment",
     )
 
 
@@ -1155,13 +1446,19 @@ def answer_to(deliver: Any, what: str) -> Any:
 
 
 def cookies_set_by(response: Any, purpose: str) -> list[str]:
-    """Every `Set-Cookie` header on a response, or a failure saying there were none."""
+    """Every `Set-Cookie` header on a response, or a failure saying there were none.
+
+    Both current callers ask about a `/lti/launch` response, not `/lti/login`'s —
+    dispute E1-08-01's ruling took the login step's cookie away entirely, so the
+    only cookies this door sets any more are the session and CSRF cookies a
+    *valid launch* issues.
+    """
     headers = response.headers.get_list("set-cookie")
     assert headers, (
-        f"The login initiation set no cookie at all when {purpose} (it answered "
-        f"{response.status_code} with headers {sorted(response.headers)}). E0-18 puts `state` and "
-        "`nonce` 'into a short-lived signed cookie', and with no cookie there is nothing for the "
-        "launch endpoint to compare against — and nothing for this test to read an attribute off."
+        f"The launch set no cookie at all when {purpose} (it answered {response.status_code} "
+        f"with headers {sorted(response.headers)}). E1-08's session model issues the session and "
+        "CSRF cookies on a valid launch's own response, and with no cookie there is nothing for "
+        "this test to read an attribute off."
     )
     return headers
 
@@ -1171,112 +1468,80 @@ def attributes_of(header: str) -> set[str]:
     return {part.split("=", 1)[0].strip().lower() for part in header.split(";")[1:]}
 
 
-def test_the_login_cookie_is_marked_secure_outside_development(
-    open_launch_door: Any, door_contract: Any, platform: Any
+# **Reconciled by dispute E1-08-01's ruling.** The two tests that used to sit
+# here — `test_the_login_cookie_is_marked_secure_outside_development` and
+# `test_the_login_cookie_is_not_marked_secure_in_development` — asserted
+# `Secure`-outside-development on an ADR-0078 login-state cookie. E1-08-01
+# settled the open question the reconciliation pass had flagged: the launch
+# door builds the cookieless handshake E1-08-05's grant serves
+# (`lti_launch_state`, `app.lti.in_flight`) rather than an in-flight cookie at
+# all — a browser blocks a third-party cookie inside a cross-site iframe
+# whatever its attributes say, which is exactly what criterion 2 needs
+# avoided (SPEC §7.3). **`/lti/login` sets no cookie of any kind.** Both tests
+# are removed rather than updated: there is no cookie left for either to
+# assert an attribute of. The `Secure`-outside-development guarantee is not
+# lost — it lives on the one cookie this door does set, the long-lived
+# session cookie, and is already asserted in both environment modes by
+# `test_the_session_and_csrf_cookies_carry_the_session_adrs_attributes`
+# above, which this reconciliation confirmed still covers it before removing
+# these two.
+def test_a_delivered_state_is_refused_on_replay_after_an_unrelated_refusal(
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    tamper_with: Any,
+    claims_in_token: Any,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """**Dies if the cookie is issued without `Secure`.**
+    """The server-side handshake's single-use property, proven from the outside.
 
-    The launch cookie carries the `state` and `nonce` a launch is judged against.
-    Without `Secure` a browser sends it over plain HTTP, so anyone on the path can
-    read it — and this is auth code, where E0-18 says "absence of basic
-    state/nonce/signature checks is not tolerable even briefly". The attribute is
-    free and the omission is invisible in every test that does not look for it.
+    **Replaces `test_a_launch_whose_state_is_not_ascii_is_refused_and_the_
+    cookie_is_burned`**, renamed and rebuilt per dispute E1-08-01's ruling: the
+    launch door carries no login cookie at all any more — `state`/`nonce` are
+    held server-side, in `lti_launch_state` (dispute E1-08-05's grant), keyed
+    by `state`. The implementer's exact rule this test proves: on **any**
+    refusal, the handshake row for the *delivered* `state` is deleted,
+    whatever refused it. A non-ASCII `state` no longer proves this — it only
+    ever consumed `state="é"` itself, a value that was never a real handshake
+    row — so this uses a **state-independent** refusal instead: a bad
+    signature. The first delivery carries the tool's own real `state` and is
+    refused for the signature alone; the same `state`, presented again with a
+    fresh, validly-signed token, finds no handshake row left and is refused by
+    `StateRefused` specifically.
 
-    Its pair is the next test: the flag has to be conditional, because a `Secure`
-    cookie is not sent to `http://localhost` and would break the development flow
-    this whole ticket exists to open.
+    **Dies if the handshake row survives an unrelated refusal.** A door that
+    deletes the row only when the launch *succeeds*, or only when the refusal
+    is itself about `state`, passes a version of this test that never
+    replays and fails this one: the row from the first (signature-refused)
+    delivery has to already be gone by the second. **Dies too if the second
+    delivery is refused for the wrong reason** — a fresh, validly-signed
+    token with every other claim correct is delivered, so a refusal that is
+    not `StateRefused` specifically means this test found some other defect
+    and mistook it for the one it is about.
     """
-    tool = open_launch_door(environment=PRODUCTION)
-    offer = platform.require_offers()[0]
-
-    response = initiate(tool, door_contract, offer)
-
-    for header in cookies_set_by(response, f"`{ENVIRONMENT_VARIABLE}` was {PRODUCTION!r}"):
-        assert SECURE_ATTRIBUTE in attributes_of(header), (
-            f"The login initiation set `{header}` with `{ENVIRONMENT_VARIABLE}` set to "
-            f"{PRODUCTION!r}, and it carries no `Secure` attribute. That cookie holds the `state` "
-            "and `nonce` this door judges a launch by, and without `Secure` a browser will send it "
-            "over plain HTTP to anyone who can put a request in front of it."
-        )
-
-
-def test_the_login_cookie_is_not_marked_secure_in_development(
-    open_launch_door: Any, door_contract: Any, platform: Any
-) -> None:
-    """The near miss for the test above: `Secure` unconditionally breaks the laptop.
-
-    E0-18's whole point is that `docker compose up` yields a launchable-into system,
-    and a browser reaches it at `http://localhost:8000`. A `Secure` cookie is not
-    sent back over that, so the launch that set it is refused for a mismatched
-    `state` — which reads as a broken door rather than as a cookie flag.
-
-    Without this, "always set `Secure`" satisfies the requirement above and is the
-    wrong fix.
-    """
-    tool = open_launch_door(environment=DEVELOPMENT)
-    offer = platform.require_offers()[0]
-
-    response = initiate(tool, door_contract, offer)
-
-    for header in cookies_set_by(response, f"`{ENVIRONMENT_VARIABLE}` was {DEVELOPMENT!r}"):
-        assert SECURE_ATTRIBUTE not in attributes_of(header), (
-            f"The login initiation set `{header}` with `{ENVIRONMENT_VARIABLE}` set to "
-            f"{DEVELOPMENT!r}. A `Secure` cookie is not sent to `http://localhost`, so every launch "
-            "from the mock LMS on a developer's laptop arrives with no cookie and is refused for a "
-            "`state` mismatch."
-        )
-
-
-def test_a_launch_whose_state_is_not_ascii_is_refused_and_the_cookie_is_burned(
-    tool: Any, door_contract: Any, platform: Any
-) -> None:
-    """**Dies if the comparison crashes instead of refusing.**
-
-    `secrets.compare_digest` raises `TypeError` when either side is a `str` holding
-    a character outside ASCII, so a `state` of `é` takes a door that compares
-    directly out through the error handler rather than through the refusal. The
-    crash is fail-closed — nobody is admitted — which is why it survives a suite
-    that only asks whether the launch succeeded. What it skips is everything the
-    refusal path does on the way out, and on this door that is the single-use
-    cookie.
-
-    So both halves are asserted, and the second is the one worth having: after the
-    refusal, the launch the tool itself set up — correct `state`, correct token —
-    is delivered and must also be refused, because the cookie it would have been
-    judged against is gone. `test_a_learner_launch_lands_on_the_student_view` is
-    the control for that half: it is this same sequence without the `é` attempt,
-    and it answers 200.
-    """
+    caplog.set_level(logging.WARNING, logger=LAUNCH_LOGGER_NAME)
     offer = offer_for_role(platform, LEARNER_ROLE_URI)
     started = initiate(tool, door_contract, offer)
     parameters = query_of(redirect_target(started, "a registered platform began a launch"))
     id_token, state, _ = authorize(platform, parameters)
-    assert state, "The platform returned no `state`, so there is no correct value to replay below."
-
-    crashed = answer_to(
-        lambda: land(tool, door_contract, id_token, NON_ASCII_STATE),
-        f"a launch whose `state` was {NON_ASCII_STATE!r}",
+    assert state, (
+        "The platform returned no `state`, so there is no handshake row for this test to prove "
+        "was consumed."
     )
 
-    assert crashed.status_code != 500, (
-        f"The tool answered 500 to a launch whose `state` was {NON_ASCII_STATE!r}. That is "
-        "`secrets.compare_digest` raising `TypeError` on a non-ASCII `str` rather than answering "
-        f"`False`. Body begins {crashed.text[:400]!r}."
-    )
-    refused(crashed, door_contract, f"a launch whose `state` was {NON_ASCII_STATE!r}")
+    first = land(tool, door_contract, tamper_with(id_token), state)
+    refused(first, door_contract, "a launch whose payload was altered after signing")
+    caplog.clear()
 
-    replayed = answer_to(
-        lambda: land(tool, door_contract, id_token, state),
-        "the correct `state` for a login initiation whose cookie a refusal should have burned",
-    )
+    second = land(tool, door_contract, id_token, state)
 
-    assert 400 <= replayed.status_code < 500, (
-        f"After refusing the non-ASCII `state`, the tool answered {replayed.status_code} to the "
-        "correct `state` for the same login initiation. The cookie holding it should have been "
-        "cleared on the way out of the refusal: one login initiation buys one attempt, and a "
-        "refusal that leaves the cookie in place hands an attacker as many tries as they like at "
-        "a `state` the browser is still carrying."
+    refused(
+        second,
+        door_contract,
+        "the same `state` presented again, with a fresh validly-signed token, after an unrelated "
+        "refusal already consumed the handshake row",
     )
+    assert_guard_fired(caplog, guard=STATE_REFUSED, claims=claims_in_token(id_token))
 
 
 def test_a_launch_whose_nonce_is_not_ascii_is_refused_rather_than_crashing(
@@ -1368,4 +1633,1048 @@ def test_a_refusal_does_not_name_the_key_set_address_the_tool_could_not_reach(
         f"server-side ({jwks_url!r}). Body begins {response.text[:400]!r}. That address is a "
         "Compose service name: it is useless to the browser that received it and it is the "
         "network map to anyone else."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1-08 — the launch door on `pylti1p3`. Every E1-07 `WRONG_DEFECT` refused by
+# its specific guard, a positive control under the new session-issuing
+# contract, the replay guard proven within one process and across a fresh
+# session, and the session/CSRF cookies' attributes in both environment
+# modes.
+#
+# **The response shape changes under this ticket.** The landing seam no
+# longer renders a 200 page of inline HTML. E1-08's module layout has it
+# "issue a session, set the session and CSRF cookies, and return
+# `fragment_redirect(role, token)`" — a 302 to `/app/<role>#session=<jwt>`.
+# The seam is `landing_with_session`; E1-09 renamed it and gave it a `door`
+# parameter when the web door joined it on the same shape.
+# The sections above this one test the door as E0-18 built it and are not
+# touched here; `docs/tickets/e1/E1-08-launch-door-pylti1p3.md`'s own module
+# layout retires that contract, and reconciling the tests above — several
+# assert `response.status_code == 200` and a `pulse-landing-*` testid in the
+# body, which a correct E1-08 no longer produces — is outside this ticket's
+# test list as handed to this test-author. Flagged in the test-author's
+# report rather than silently rewritten.
+# ---------------------------------------------------------------------------
+
+# `logging.getLogger("app.lti.launch")` — the plan's own name for the launch
+# door's logger, the one place a refusal is allowed to say anything at all:
+# "Add `logging.getLogger("app.lti.launch")`, one `WARNING` per refusal
+# carrying **only** the guard name — never claims, token, or form."
+LAUNCH_LOGGER_NAME = "app.lti.launch"
+
+# The ten `LaunchRefusedError` subclasses named for this test-author, each
+# "classified by which pylti1p3 validate step raised" and each with "its own
+# constant, claim-free message". Spelled exactly as named; this suite does
+# not invent one.
+SIGNATURE_REFUSED = "SignatureRefused"
+AUDIENCE_REFUSED = "AudienceRefused"
+ISSUER_REFUSED = "IssuerRefused"
+NONCE_REFUSED = "NonceRefused"
+NONCE_REPLAYED = "NonceReplayedError"
+DEPLOYMENT_REFUSED = "DeploymentRefused"
+MESSAGE_TYPE_REFUSED = "MessageTypeRefused"
+VERSION_REFUSED = "VersionRefused"
+STATE_REFUSED = "StateRefused"
+CLOCK_SKEW_REFUSED = "ClockSkewRefused"
+
+# E1-07's fifteen `WRONG_DEFECTS`, copied — not imported — for the reason
+# `tests/integration/test_mock_lms_wrong_launches.py`'s own module docstring
+# gives: both mocks declare a package named `app`, so importing either by
+# name from a module outside its own package is the collision ADR 0039
+# describes.
+FOREIGN_SIGNATURE = "foreign_signature"
+RIGHT_KEY_TAMPERED_CLAIMS = "right_key_tampered_claims"
+ALG_NONE = "alg_none"
+HS256_CONFUSION = "hs256_confusion"
+WRONG_AUD = "wrong_aud"
+WRONG_ISS = "wrong_iss"
+MISSING_NONCE = "missing_nonce"
+REUSED_NONCE = "reused_nonce"
+UNREGISTERED_DEPLOYMENT = "unregistered_deployment"
+UNKNOWN_MESSAGE_TYPE = "unknown_message_type"
+WRONG_VERSION = "wrong_version"
+TAMPERED_STATE = "tampered_state"
+MISSING_STATE = "missing_state"
+IAT_FUTURE = "iat_future"
+EXP_PAST = "exp_past"
+
+# The fourteen non-replay defects, each mapped to the one guard this test-
+# author was told fires for it — "SignatureRefused for the four signature/alg
+# cases, AudienceRefused, IssuerRefused, NonceRefused, ..., DeploymentRefused,
+# MessageTypeRefused, VersionRefused, StateRefused, ClockSkewRefused".
+# `REUSED_NONCE` is not here: it needs two deliveries of the same artifact,
+# which the generic driver below only ever makes one of, so it has its own
+# test.
+DEFECT_GUARDS: dict[str, str] = {
+    FOREIGN_SIGNATURE: SIGNATURE_REFUSED,
+    RIGHT_KEY_TAMPERED_CLAIMS: SIGNATURE_REFUSED,
+    ALG_NONE: SIGNATURE_REFUSED,
+    HS256_CONFUSION: SIGNATURE_REFUSED,
+    WRONG_AUD: AUDIENCE_REFUSED,
+    WRONG_ISS: ISSUER_REFUSED,
+    MISSING_NONCE: NONCE_REFUSED,
+    UNREGISTERED_DEPLOYMENT: DEPLOYMENT_REFUSED,
+    UNKNOWN_MESSAGE_TYPE: MESSAGE_TYPE_REFUSED,
+    WRONG_VERSION: VERSION_REFUSED,
+    TAMPERED_STATE: STATE_REFUSED,
+    MISSING_STATE: STATE_REFUSED,
+    IAT_FUTURE: CLOCK_SKEW_REFUSED,
+    EXP_PAST: CLOCK_SKEW_REFUSED,
+}
+
+# The leak vocabulary criterion 6 names: "no claim payload, no name or email,
+# and no `lms_user_id`" — plus `deployment_id`, named for this test-author
+# too. Membership in this tuple is not a claim that a launch carries every
+# one of these; `assert_no_claim_leaked` below reads only the members
+# `claims` actually holds a real value for.
+LEAK_VOCABULARY = ("sub", "name", "email", "lms_user_id", DEPLOYMENT_ID_CLAIM)
+
+# E1-04's own route group names — "student, instructor, leadership, care,
+# admin" — used here only as the path segment `fragment_redirect` is expected
+# to build, `/app/<role>`.
+STUDENT_ROLE = "student"
+INSTRUCTOR_ROLE = "instructor"
+
+
+def mint_defect(tool: Any, contract: Any, platform: Any, offer: Any, defect: str | None) -> Any:
+    """Drive a real `/lti/login`, then a platform mint carrying `defect`, state/nonce matched.
+
+    pylti1p3's login step stores what it issued — a cookie, platform storage,
+    or a database row, per the adapter's own choice — and judges a launch
+    against that record. `MockPlatform.mint()` on its own builds an
+    authorization request independent of any tool, so a defect posed through
+    it alone would be refused for a `state`/`nonce` the tool never issued,
+    whatever else about it is wrong (`docs/MISTAKES.md` entry 3: a launch
+    wrong two ways tells this suite nothing about which guard fired). So this
+    drives `/lti/login` for real first, and hands the platform back its own
+    `state`/`nonce` to mint against — the same values a browser would have
+    carried on to the platform.
+    """
+    started = initiate(tool, contract, offer)
+    parameters = query_of(redirect_target(started, "a registered platform began a launch"))
+    assert parameters.get("state") and parameters.get("nonce"), (
+        "The tool's own login initiation carries no `state`/`nonce` to mint a defect against, so "
+        "no launch built from it could be judged as anything but a `state`/`nonce` mismatch."
+    )
+    return platform.mint(offer, state=parameters["state"], nonce=parameters["nonce"], defect=defect)
+
+
+def redirected_to_role(response: Any, contract: Any, role: str) -> str:
+    """The launch redirected to `/app/<role>#session=<token>`, `pulse_session` set.
+
+    E1-08's interface ruling, verbatim: "a 302 whose `Location` is
+    `/app/<segment>#session=<token>`, where `<segment>` is the role name
+    lowercased ... Assert the `Location` starts with `/app/student#session=`
+    (or the instructor route) and that `Set-Cookie` carries `pulse_session`."
+    The exact-prefix check on `Location` is also what rules out a query
+    string sneaking in between the path and the fragment — a value like
+    `/app/student?x=y#session=...` fails this `startswith`, so a separate
+    query-string check would only repeat what this already proves for the
+    one path this suite cares about.
+    """
+    try:
+        from app.services.session import SESSION_COOKIE
+    except ModuleNotFoundError as missing:
+        pytest.fail(
+            f"`app.services.session` does not import ({missing}). E1-08's interface ruling names "
+            '`SESSION_COOKIE = "pulse_session"` there.'
+        )
+
+    assert response.status_code in (302, 303, 307), (
+        f"A valid launch answered {response.status_code} rather than a redirect. Body begins "
+        f"{response.text[:300]!r}. E1-08: `landing_with_session` 'issues a session, sets the "
+        "session and CSRF cookies, and returns `fragment_redirect(role, token)`.'"
+    )
+    location = response.headers.get("location") or ""
+    prefix = f"/app/{role}#session="
+    assert location.startswith(prefix), (
+        f"A launch redirected to `{location}`, which does not start with `{prefix}`. E1-08's "
+        "interface ruling: a 302 whose `Location` is `/app/<segment>#session=<token>`, segment "
+        "lowercased."
+    )
+    token = location[len(prefix) :]
+    assert token, f"The redirect `{location}` carries `session=` with an empty token."
+
+    headers = cookies_set_by(response, f"a valid launch redirecting to `/app/{role}`")
+    names = {header.split("=", 1)[0].strip() for header in headers}
+    assert SESSION_COOKIE in names, (
+        f"No `Set-Cookie` names {SESSION_COOKIE!r} on a launch that redirected to `/app/{role}`. "
+        f"Cookies set: {sorted(names)}. E1-08's ruling: the redirect carries the session cookie "
+        "alongside the fragment token."
+    )
+    return token
+
+
+def assert_no_claim_leaked(caplog: pytest.LogCaptureFixture, *, claims: dict[str, Any]) -> str:
+    """Every WARNING captured from `app.lti.launch` carries none of `claims`'s own values.
+
+    Reads the leak vocabulary off `claims` itself rather than a fixed
+    blocklist, per this test-author's instruction, so a launch carrying no
+    `email` claim, say, is not asked to prove a negative about a value that
+    was never there. **The canary is the values themselves**: at least one
+    member of `LEAK_VOCABULARY` has to actually be present with a real value,
+    or this check would pass against a log that printed the whole claims
+    dict verbatim (`docs/MISTAKES.md` entry 3). Returns the captured text so
+    a caller can also assert which guard's name it carries.
+    """
+    records = [record for record in caplog.records if record.name == LAUNCH_LOGGER_NAME]
+    assert records, (
+        f"No log record at all was captured from `{LAUNCH_LOGGER_NAME}`. E1-08: 'Add "
+        f'logging.getLogger("{LAUNCH_LOGGER_NAME}"), one `WARNING` per refusal carrying only the '
+        "guard name.' Without a captured record, every assertion below is vacuous."
+    )
+    haystack = "\n".join(record.getMessage() for record in records)
+
+    values = {
+        str(claims[member]) for member in LEAK_VOCABULARY if claims.get(member) not in (None, "")
+    }
+    assert values, (
+        f"This launch's own claims carry a real value under none of {LEAK_VOCABULARY}, so this "
+        "check has nothing to look for and would pass against a log line that printed the claims "
+        "dict verbatim."
+    )
+    leaked = sorted(value for value in values if value in haystack)
+    assert not leaked, (
+        f"The captured log from `{LAUNCH_LOGGER_NAME}` carries {leaked}, drawn straight from this "
+        f"launch's own claims. §10: no student PII in logs. Captured: {haystack!r}"
+    )
+    return haystack
+
+
+def assert_guard_fired(
+    caplog: pytest.LogCaptureFixture, *, guard: str, claims: dict[str, Any]
+) -> None:
+    """The refusal's log names `guard` specifically, and none of `claims`'s own values.
+
+    Combines both of what E1-08 asks of every refusal test: which guard
+    fired, and criterion 6's no-claim-leak. **Dies if a refusal is checked by
+    a bare 4xx**: a door that refused every one of the fifteen
+    `WRONG_DEFECTS` with the same generic message would pass `refused()`
+    fifteen times and this check zero.
+    """
+    haystack = assert_no_claim_leaked(caplog, claims=claims)
+    assert guard in haystack, (
+        f"The captured log from `{LAUNCH_LOGGER_NAME}` is {haystack!r}, which does not name "
+        f"{guard!r}. E1-08 classifies a refusal 'by which pylti1p3 validate step raised', never "
+        f"by string-matching the library's own message — and this refusal should be {guard} "
+        "specifically."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The control for `assert_no_claim_leaked`, in the module that is its only
+# caller. A must-be-green control: if this is red, the fifteen refusal
+# tests' silence about a leak means nothing (`docs/MISTAKES.md` entry 9 —
+# never cite a guard that has not been run against the case it is supposed
+# to catch).
+# ---------------------------------------------------------------------------
+
+
+def test_assert_no_claim_leaked_catches_a_value_planted_in_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Plants a claim value into a log line on the real logger and requires the catch.
+
+    **Dies if `assert_no_claim_leaked` is satisfied by emptiness** — an empty
+    `values` set, an empty `records` list — which is exactly the failure mode
+    of a leak scan that has quietly stopped finding anything to look for.
+    This test needs no implementation beyond this module's own helper, so it
+    is green now; if it is not, the fifteen refusal tests' use of the helper
+    means nothing whatever they report.
+    """
+    caplog.set_level(logging.WARNING, logger=LAUNCH_LOGGER_NAME)
+    logging.getLogger(LAUNCH_LOGGER_NAME).warning(
+        "SignatureRefused (this line deliberately carries a planted subject: "
+        "e1-08-planted-leak-subject)"
+    )
+
+    with pytest.raises(AssertionError):
+        assert_no_claim_leaked(caplog, claims={"sub": "e1-08-planted-leak-subject"})
+
+
+# ---------------------------------------------------------------------------
+# The positive control. Criterion 1's happy-path half, under the new
+# session-issuing contract every refusal below is judged against.
+# ---------------------------------------------------------------------------
+
+
+def test_a_valid_launch_redirects_with_a_session_to_the_role_named_route(
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    landings_for_the_platforms_subjects: dict[str, Any],
+) -> None:
+    """An enrolled subject's launch redirects to `/app/student#session=...`, `pulse_session` set.
+
+    **Dies if the door still renders inline HTML** (the E0-18 contract this
+    ticket retires), and dies if the redirect carries the session as a query
+    string rather than a fragment — `redirected_to_role`'s exact-prefix check
+    on `Location` (`/app/student#session=`) is what rules a query string out:
+    a query string inserted between the path and the fragment breaks that
+    prefix match, which is the design's whole reason to prefer a fragment —
+    it reaches neither the access log nor a `Referer` header.
+    """
+    response = launched(tool, door_contract, platform, offer_for_role(platform, LEARNER_ROLE_URI))
+
+    token = redirected_to_role(response, door_contract, STUDENT_ROLE)
+
+    assert token.count(".") == 2, (
+        f"The fragment's `session=` value is {token!r}, which does not have the three dot-"
+        "separated segments a compact JWS has, so it is not a signed session token."
+    )
+
+
+def test_an_instructors_valid_launch_redirects_to_the_instructor_route(
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    landings_for_the_platforms_subjects: dict[str, Any],
+) -> None:
+    """The pair to the test above — one role is not enough to show a dispatch.
+
+    **Since E1-13 the dispatch is on the rows rather than on the claim**: this
+    subject holds a live `INSTRUCTOR` assignment and the one above holds a live
+    enrollment, so the pair still shows a door choosing between two answers — and
+    it now shows it choosing on the thing the ticket says decides.
+    """
+    response = launched(
+        tool, door_contract, platform, offer_for_role(platform, INSTRUCTOR_ROLE_URI)
+    )
+
+    redirected_to_role(response, door_contract, INSTRUCTOR_ROLE)
+
+
+# ---------------------------------------------------------------------------
+# The fifteen refusals. Criterion 1's negative half, criterion 6 on every one.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("defect", "guard"), sorted(DEFECT_GUARDS.items()))
+def test_a_launch_carrying_one_e1_07_defect_is_refused_by_its_specific_guard(
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    caplog: pytest.LogCaptureFixture,
+    defect: str,
+    guard: str,
+) -> None:
+    """Fourteen of E1-07's fifteen `WRONG_DEFECTS` (`reused_nonce` has its own test below).
+
+    **Dies if any one of these is checked by a bare 4xx** rather than by
+    which guard fired: a door that refused every defect the same way, or
+    that refused this one for a *different* reason than the one it is named
+    for, passes `refused()` and fails `assert_guard_fired`. **Dies if a claim
+    value reaches the log** — criterion 6, asserted on the same capture.
+    """
+    caplog.set_level(logging.WARNING, logger=LAUNCH_LOGGER_NAME)
+    offer = offer_for_role(platform, LEARNER_ROLE_URI)
+
+    minted = mint_defect(tool, door_contract, platform, offer, defect)
+
+    response = land(tool, door_contract, minted.id_token, minted.state)
+
+    refused(response, door_contract, f"a launch minted with `defect={defect}`")
+    assert_guard_fired(caplog, guard=guard, claims=minted.claims)
+
+
+def test_a_replayed_nonce_is_refused_by_the_replay_guard_not_by_a_generic_nonce_check(
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    caplog: pytest.LogCaptureFixture,
+    landings_for_the_platforms_subjects: dict[str, Any],
+) -> None:
+    """`reused_nonce`, E1-07's fifteenth defect, and criterion 3's within-process half.
+
+    The first delivery is the control — it must be accepted, or a refusal
+    below could be catching a launch that was broken for some other reason
+    entirely. The second delivery is the identical `(id_token, state)` pair,
+    presented again: refused, and refused specifically by
+    `NonceReplayedError` rather than by the ordinary `NonceRefused` a
+    missing or mismatched nonce gets — a different guard for a different
+    mutation, and a loose assertion ("refused, somehow, by something
+    nonce-shaped") would not tell the two apart.
+    """
+    caplog.set_level(logging.WARNING, logger=LAUNCH_LOGGER_NAME)
+    offer = offer_for_role(platform, LEARNER_ROLE_URI)
+
+    minted = mint_defect(tool, door_contract, platform, offer, REUSED_NONCE)
+
+    first = land(tool, door_contract, minted.id_token, minted.state)
+    redirected_to_role(first, door_contract, STUDENT_ROLE)
+
+    second = land(tool, door_contract, minted.id_token, minted.state)
+
+    refused(second, door_contract, "the same launch, presented to `/lti/launch` a second time")
+    assert_guard_fired(caplog, guard=NONCE_REPLAYED, claims=minted.claims)
+
+
+def test_a_claimed_nonce_is_refused_after_the_store_is_reopened_as_a_fresh_session(
+    migrated_engine: Any,
+) -> None:
+    """Criterion 3's other half: "across process restart if the store outlives the process".
+
+    `app.lti.replay_guard.claim_nonce` is driven directly, across two
+    independent `Session` objects bound to the same engine — the shape "the
+    process restarted and reopened the store" takes when nothing in a test
+    can actually kill a process. **Dies if the first claim only lived in
+    that session's own identity map** — an in-memory set kept on the session
+    object, say — because a second, freshly opened `Session` would see
+    nothing of it and this would pass for the wrong reason
+    (`docs/MISTAKES.md` entry 3): that is exactly why this uses a second
+    `Session`, not a second call on the first one.
+    """
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from sqlalchemy.orm import Session
+
+    try:
+        from app.lti.replay_guard import NonceReplayedError, claim_nonce
+    except ModuleNotFoundError as missing:
+        pytest.fail(
+            f"`app.lti.replay_guard` does not import ({missing}). E1-08's module layout: "
+            "'`backend/app/lti/replay_guard.py` (new) — `claim_nonce(session, *, nonce, "
+            "expires_at)` ... Its only caller is `launch.py`.'"
+        )
+
+    nonce = f"e1-08-replay-guard-{uuid4().hex}"
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+
+    first_session = Session(bind=migrated_engine)
+    try:
+        claim_nonce(first_session, nonce=nonce, expires_at=expires_at)
+        first_session.commit()
+    finally:
+        first_session.close()
+
+    second_session = Session(bind=migrated_engine)
+    try:
+        with pytest.raises(NonceReplayedError):
+            claim_nonce(second_session, nonce=nonce, expires_at=expires_at)
+    finally:
+        second_session.rollback()
+        second_session.close()
+
+
+# ---------------------------------------------------------------------------
+# The session and CSRF cookies' attributes, in both environment modes.
+# Criterion 5's first half.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("environment", (DEVELOPMENT, PRODUCTION))
+def test_the_session_and_csrf_cookies_carry_the_session_adrs_attributes(
+    open_launch_door: Any,
+    door_contract: Any,
+    platform: Any,
+    environment: str,
+    landings_for_the_platforms_subjects: dict[str, Any],
+) -> None:
+    """`HttpOnly` on the session cookie and absent on the CSRF one; `SameSite=None`
+    on both; `Secure` flips with the environment; `path=/` on both.
+
+    Read off a real `/lti/launch` response rather than called as a unit,
+    because the plan gives `set_session_cookie`/`issue_csrf_cookie` no
+    Python-level signature to call directly — only the attributes they must
+    produce, on "the Starlette `Response`". This is the observable contract
+    those functions exist to produce, whatever their own call shape turns
+    out to be.
+    """
+    try:
+        from app.services.session import CSRF_COOKIE, SESSION_COOKIE
+    except ModuleNotFoundError as missing:
+        pytest.fail(
+            f"`app.services.session` does not import ({missing}). E1-08's module layout puts "
+            "`SESSION_COOKIE`/`CSRF_COOKIE` there."
+        )
+
+    tool = open_launch_door(environment=environment)
+    response = launched(tool, door_contract, platform, offer_for_role(platform, LEARNER_ROLE_URI))
+    redirected_to_role(response, door_contract, STUDENT_ROLE)
+
+    headers = cookies_set_by(response, f"a valid launch under ENVIRONMENT={environment!r}")
+    by_name = {header.split("=", 1)[0].strip(): header for header in headers}
+    assert SESSION_COOKIE in by_name, (
+        f"No `Set-Cookie` names {SESSION_COOKIE!r} (the headers set: {sorted(by_name)}). E1-08's "
+        "session module names this constant as the session cookie."
+    )
+    assert CSRF_COOKIE in by_name, (
+        f"No `Set-Cookie` names {CSRF_COOKIE!r} (the headers set: {sorted(by_name)}). "
+        "`SameSite=None` 'is live because of' this exact cookie, and E1-08's session module names "
+        "it."
+    )
+
+    session_header = by_name[SESSION_COOKIE]
+    csrf_header = by_name[CSRF_COOKIE]
+    session_attrs = attributes_of(session_header)
+    csrf_attrs = attributes_of(csrf_header)
+
+    if environment == PRODUCTION:
+        assert SECURE_ATTRIBUTE in session_attrs and SECURE_ATTRIBUTE in csrf_attrs, (
+            f"Under ENVIRONMENT='production' at least one of the session/CSRF cookies carries no "
+            f"`Secure`: session={session_header!r}, csrf={csrf_header!r}."
+        )
+    else:
+        assert SECURE_ATTRIBUTE not in session_attrs and SECURE_ATTRIBUTE not in csrf_attrs, (
+            "A cookie carries `Secure` under ENVIRONMENT='development': "
+            f"session={session_header!r}, csrf={csrf_header!r}. A `Secure` cookie is not sent to "
+            "`http://localhost`, so every launch from the mock LMS on a developer's laptop would "
+            "arrive with no cookie."
+        )
+
+    assert "httponly" in session_attrs, (
+        f"The session cookie carries no `HttpOnly`: {session_header!r}. It holds the session "
+        "token itself, and a script that can read it can steal the session."
+    )
+    assert "httponly" not in csrf_attrs, (
+        f"The CSRF cookie carries `HttpOnly`: {csrf_header!r}. The plan: `CSRF_COOKIE` is not "
+        "`HttpOnly` because 'the SPA echoes it in `X-Pulse-CSRF`' — a script that cannot read it "
+        "cannot echo it."
+    )
+
+    for name, header in (("session", session_header), ("CSRF", csrf_header)):
+        lowered = header.lower()
+        assert "samesite=none" in lowered, (
+            f"The {name} cookie does not carry `SameSite=None`: {header!r}. The plan: the tool is "
+            "inside a cross-site iframe for the whole visit, so `Lax` would drop the cookie on "
+            "every in-iframe request."
+        )
+        assert "path=/" in lowered, f"The {name} cookie does not carry `path=/`: {header!r}."
+
+
+# ---------------------------------------------------------------------------
+# E1 cleanup Batch B, item 3 — this module's own copy of E1-07's selector
+# vocabulary, checked against the list the platform serves.
+#
+# ADR 0088's consequences record the hazard and record that nothing enforces
+# it: "a name renamed in `app.wrong_launches` without a matching rename in
+# every copy fails loudly ... but only once something actually calls it with
+# the stale name". This module is the third copy — the one the deferred item's
+# done-when does not name, and the same hazard for the same reason
+# (`docs/MISTAKES.md` entry 13: a quirk worked around in one of the places
+# facing it).
+# ---------------------------------------------------------------------------
+
+
+def test_this_modules_copied_selector_names_are_the_ones_the_platform_serves(
+    platform: Any,
+) -> None:
+    """`DEFECT_GUARDS`'s keys and `REUSED_NONCE` are all names the mock answers to.
+
+    **The mutation this must kill:** rename one member of `ALL_SELECTORS` in
+    `mock-lms/app/wrong_launches.py` and leave the constants above alone.
+    Today that surfaces as a 400 from the dispatcher *inside* the parametrised
+    refusal case that selected the stale name — which reads as "the door
+    refused", because a 400 is what that case is looking for, and
+    `assert_guard_fired` is the only thing between that and a green.
+    After this, it surfaces here, naming the spelling.
+
+    **The near miss it must survive:** the served list carrying names this
+    module does not drive. It legitimately does — `ALL_SELECTORS` holds the
+    near-miss and edge fixtures E1-10 consumes, which this door module has no
+    case for — so this is a subset check in one direction only, and the
+    equality in both directions is
+    `test_mock_lms_wrong_launches.py`'s.
+    """
+    driven = sorted({*DEFECT_GUARDS, REUSED_NONCE})
+    served = platform.served_defect_selectors()
+
+    unknown = sorted(name for name in driven if name not in served)
+    assert not unknown, (
+        f"This module selects mints by {unknown}, which the platform does not serve. It serves "
+        f"{sorted(served)}. Every refusal case here drives one of these strings through "
+        "`?defect=`, so a name that has drifted is a case asserting a dispatcher's 400 rather "
+        "than the guard it is named for."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1 cleanup Batch B, item 2 — the machine-readable reason marker.
+#
+# The refusal page prints each guard's own sentence, and E1-15's Playwright
+# specs read that prose to say *whose* guard refused. That coupling is what
+# this closes: the guard's class name is already the machine vocabulary (the
+# ten `LaunchRefusedError` subclasses, one per validate step), and it reaches
+# the page as `data-reason` so a spec can name a guard without naming a
+# sentence.
+# ---------------------------------------------------------------------------
+
+
+# The refusal page's own testid, copied whole from
+# `tests/e2e/exit-refused-launches.spec.ts:118` — the spec that reads this
+# page in a browser today, and the file this marker is built for.
+REFUSAL_TESTID = "pulse-entry-refused"
+
+# `data-reason="<guard>"` as it is rendered into the page. Both quote styles
+# are matched: which one the renderer emits is not something this test
+# decides, and a marker written with single quotes is the same marker.
+REASON_MARKER = re.compile(r"""data-reason=(?:"([^"]*)"|'([^']*)')""")
+
+
+def reason_markers(response: Any) -> list[str]:
+    """Every `data-reason` value the response body carries, in document order."""
+    return [double or single for double, single in REASON_MARKER.findall(response.text)]
+
+
+@pytest.mark.parametrize(
+    ("defect", "guard"),
+    ((FOREIGN_SIGNATURE, SIGNATURE_REFUSED), (TAMPERED_STATE, STATE_REFUSED)),
+)
+def test_a_refused_launch_names_the_guard_that_fired_in_a_machine_readable_marker(
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    defect: str,
+    guard: str,
+) -> None:
+    """The refusal page carries `data-reason="<guard>"`, and carries no other guard's.
+
+    **Two defects rather than one, and that is the whole design of this test.**
+    A single case is satisfied by a page that renders one constant marker —
+    `data-reason="LaunchRefused"`, say, or the first guard's name every time —
+    and a marker that does not vary tells a spec nothing it could not already
+    read off the status line. Two cases whose guards differ are what make the
+    marker a *reading* of which guard fired.
+
+    **The mutation this must kill:** dropping the guard at a call site — the
+    change that leaves `refusal_page` rendering no attribute at all, or
+    rendering `data-reason=""`. Both go red here on the emptiness rather than
+    on a mismatch, which is why the assertion is on the exact set of values
+    rather than on `guard in body`.
+
+    **The near miss it must survive, and it is the sharp one:** a page that
+    prints *every* guard's marker. That leaves "the guard's name is on the
+    page" true and meaningless, and it is exactly the failure
+    `exit-refused-launches.spec.ts` found in its own prose assertions and
+    closed by asserting the other guard's sentence absent. So this requires the
+    set of markers to be exactly one value, not to contain one.
+
+    A refusal that reaches this page at all is what the parametrised guard
+    tests above already establish; this asserts nothing about the status,
+    deliberately, so a failure here reads as the marker and not as the door.
+    """
+    offer = offer_for_role(platform, LEARNER_ROLE_URI)
+
+    minted = mint_defect(tool, door_contract, platform, offer, defect)
+
+    response = land(tool, door_contract, minted.id_token, minted.state)
+
+    refused(response, door_contract, f"a launch minted with `defect={defect}`")
+    assert REFUSAL_TESTID in response.text, (
+        f"A launch minted with `defect={defect}` was refused with a body carrying no "
+        f"`{REFUSAL_TESTID}` testid (body begins {response.text[:400]!r}). This test is about "
+        "what that page carries, so a refusal rendered by something else is a different subject."
+    )
+    assert reason_markers(response) == [guard], (
+        f"The refusal page for `defect={defect}` carries the reason markers "
+        f"{reason_markers(response)}; it should carry exactly {[guard]}. The guard's class name "
+        "is the machine vocabulary the ten `LaunchRefusedError` subclasses already define, and a "
+        "page carrying none of it leaves every browser-side refusal spec reading error prose — "
+        "while a page carrying all of it cannot tell one guard from another at all."
+    )
+
+
+def test_a_replayed_launch_names_the_replay_guard_in_the_marker(
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    landings_for_the_platforms_subjects: dict[str, Any],
+) -> None:
+    """The replay refusal's marker is the replay guard's, not the generic nonce one.
+
+    Its own test rather than a third parametrised case, for the reason
+    `test_a_replayed_nonce_is_refused_by_the_replay_guard_not_by_a_generic_
+    nonce_check` above is its own test: a replay needs two deliveries of the
+    same artifact, and the first one has to be *accepted*.
+
+    It is here because `exit-refused-launches.spec.ts` rests on it. That spec's
+    replay case asserts the replay guard's own sentence present and the state
+    guard's absent, and the marker is what those two assertions become — so a
+    marker that named `NonceRefused` here would leave the browser spec asserting
+    against a value the door never emits, red for a reason that is not the
+    door's.
+
+    **The mutation this must kill:** passing the wrong guard at the replay call
+    site — `NonceRefused` for `NonceReplayedError`. The refusal is real either
+    way and every status-and-landing assertion in this module stays green.
+
+    **The near miss it must survive:** the first delivery. It succeeds, so it
+    renders no refusal page and no marker, and this reads the second delivery's
+    response only.
+    """
+    offer = offer_for_role(platform, LEARNER_ROLE_URI)
+
+    minted = mint_defect(tool, door_contract, platform, offer, REUSED_NONCE)
+
+    first = land(tool, door_contract, minted.id_token, minted.state)
+    redirected_to_role(first, door_contract, STUDENT_ROLE)
+    assert not reason_markers(first), (
+        f"The *accepted* first delivery carries the reason markers {reason_markers(first)}. A "
+        "launch that landed was refused by nobody, so a marker on it means the page renders one "
+        "unconditionally — and every assertion below would then be about a constant."
+    )
+
+    second = land(tool, door_contract, minted.id_token, minted.state)
+
+    refused(second, door_contract, "the same launch, presented to `/lti/launch` a second time")
+    assert reason_markers(second) == [NONCE_REPLAYED], (
+        f"The replayed launch's refusal page carries the reason markers "
+        f"{reason_markers(second)}; it should carry exactly {[NONCE_REPLAYED]}. A replay and a "
+        "mismatched nonce are different guards for different mutations, and the browser-side "
+        "replay spec tells them apart by this value."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1 boundary fix batch B, item 1 (M4) — a launch that names nobody.
+#
+# LTI 1.3 Core §5.3.6.1 says a tool MUST treat an `id_token` with no `sub` as
+# an anonymous-user launch, so such a message is *conformant* and a platform
+# may send one. Pulse has no anonymous user: every door resolves a subject to a
+# `user` row and every view is somebody's. Todd's ruling is to refuse politely
+# and record the deliberate break with the MUST in ADR 0106 — the alternative
+# the boundary review measured is what happens today, which is that the launch
+# spends its nonce and then answers a 500 from inside provisioning.
+#
+# The pair is the whole design of this section: the *same* launch, minted the
+# same way, re-signed by the same key set, differing in exactly one claim.
+# ---------------------------------------------------------------------------
+
+
+# The claim LTI 1.3 (and OIDC Core §2) carries the subject in, and the one
+# thing the launches below differ by.
+SUBJECT_CLAIM = "sub"
+
+# The new guard's class name, settled with the rest of this batch's scope and
+# spelled here exactly as the implementation must spell it: the eleven
+# `LaunchRefusedError` subclasses *are* the machine vocabulary this door
+# publishes (see the ten above), and `data-reason` carries the name. A rename
+# on either side is meant to break this — it is a change to what a reader of
+# the page, and `exit-refused-launches.spec.ts`, is told.
+ANONYMOUS_LAUNCH_REFUSED = "AnonymousLaunchRefused"
+
+# The two roles a launch from this platform can carry, with the route each
+# subject's seeded rows send them to. Both are driven, because "no `sub`" is a
+# property of the token rather than of the person: the boundary review found
+# the crash inside provisioning, which a staff launch reaches further into than
+# a learner's, and a guard placed on one path only would leave the other
+# answering a 500 with nothing here to say so.
+LAUNCHES_BY_ROLE = ((LEARNER_ROLE_URI, STUDENT_ROLE), (INSTRUCTOR_ROLE_URI, INSTRUCTOR_ROLE))
+
+
+def re_signed_delivery(
+    tool: Any,
+    contract: Any,
+    platform: Any,
+    keys: Any,
+    claims_in_token: Any,
+    role_uri: str,
+    adjust: Any,
+    what: str,
+) -> tuple[dict[str, Any], Any]:
+    """A whole launch for `role_uri`, re-signed after `adjust`, and what the tool answered.
+
+    `re_signed_launch` above does almost this and cannot be used: it drives the
+    learner offer only, and the two tests below need the same mutation posed on
+    a staff launch as well. Everything else is that helper's design and its
+    reasons — the platform's own form, the tool's own authorization request, the
+    platform's signed answer, and a token re-signed by the key set the
+    registration in front of this tool names, so the signature, issuer,
+    audience, deployment, nonce, `state` and expiry are all still correct and
+    the only thing wrong with the delivered launch is what `adjust` did.
+
+    **Its must-be-green control is
+    `test_the_same_launch_carrying_its_subject_lands_on_a_view`**, which drives
+    this with an `adjust` that changes nothing and requires a landing. If that
+    is red, the refusals below are about this helper rather than about the door
+    (`docs/MISTAKES.md` entry 3).
+
+    The delivery goes through `answer_to`, because the state this batch exists
+    to close is a door that *raises* instead of answering — `TestClient` is
+    built with `raise_server_exceptions` at the default, so a 500 arrives here
+    as an exception and would otherwise read as a broken test rather than as
+    the defect it is.
+
+    Answers the claims that were actually signed alongside the response, so a
+    test asserts against the token that was delivered rather than against a
+    dictionary it wrote down.
+    """
+    offer = offer_for_role(platform, role_uri)
+    started = initiate(tool, contract, offer)
+    parameters = query_of(redirect_target(started, "a registered platform began a launch"))
+    id_token, state, _ = authorize(platform, parameters)
+
+    claims = dict(claims_in_token(id_token))
+    adjusted = adjust(dict(claims))
+    signed = keys.sign(adjusted)
+    return adjusted, answer_to(lambda: land(tool, contract, signed, state), what)
+
+
+def without_the_subject(claims: dict[str, Any]) -> dict[str, Any]:
+    """`claims` with `sub` removed outright — not blanked, not replaced.
+
+    The absent case rather than an empty one, deliberately, for the reason
+    `test_a_launch_with_no_lis_roles_claim_at_all_and_a_web_door_role_lands_the_
+    same_way` gives about the roles claim: `claims["sub"]` and
+    `claims.get("sub")` behave differently when the key is missing rather than
+    empty, and it is the missing one LTI 1.3 Core §5.3.6.1 describes.
+    """
+    claims.pop(SUBJECT_CLAIM, None)
+    return claims
+
+
+@pytest.mark.parametrize("role_uri", [role_uri for role_uri, _ in LAUNCHES_BY_ROLE])
+def test_a_launch_carrying_no_subject_is_refused_with_the_calm_page(
+    tool_verifying_against_this_suites_key: Any,
+    door_contract: Any,
+    platform: Any,
+    suite_key_set: Any,
+    claims_in_token: Any,
+    landings_for_the_re_signed_subjects: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+    role_uri: str,
+) -> None:
+    """A conformant anonymous launch is answered, not crashed on.
+
+    The launch is correct in every other respect — signed by the key set this
+    tool's registration names, right issuer, audience, deployment, nonce,
+    `state` and expiry — and carries no `sub`. LTI 1.3 Core §5.3.6.1 makes that
+    a message a platform may legitimately send; Pulse has no anonymous user, so
+    the answer is the calm refusal page and its own marker.
+
+    **The mutation this must kill, and it is the state of the code today:** no
+    guard at all. The launch verifies, the door spends the handshake, and the
+    subject claim is read inside `app.services.provisioning` where nothing
+    handles its absence — a 500 with a traceback, from an unauthenticated
+    caller, on a message the specification says is well formed.
+
+    **The near miss it must survive:** a door that answers *any* 4xx. A bare
+    status check is satisfied by a launch refused for something else entirely —
+    a signature, a nonce, a deployment — so the marker is asserted as the exact
+    single value `AnonymousLaunchRefused`, which no other guard emits. The
+    status is asserted as exactly 400 for the same reason: 500 is not a 4xx but
+    a door that answered 401 or 403 would be saying something about
+    authorization it has no grounds to say.
+
+    **No session is issued**, asserted as the forbidden state (`docs/MISTAKES.md`
+    entry 2) over both routes a session can leave by: the `Set-Cookie` header
+    and a `session=` fragment on the redirect. A refusal that issued one would
+    have admitted a launch that names nobody, which is the whole thing Pulse has
+    no representation for.
+
+    **The refusal is logged, because "the same shape as every other refused
+    launch" includes the line an operator reads.** E1-08: one `WARNING` on
+    `app.lti.launch` per refusal, carrying only the guard name.
+    `assert_guard_fired` makes both halves of that one assertion. **The mutation
+    it kills:** a guard that renders the page and logs nothing — the browser is
+    answered, every assertion above stays green, and the one place a deployment
+    could see that conformant launches are being turned away says nothing at
+    all. **And the second mutation, on the same capture:** a line that reports
+    what it refused. This launch has had its `sub` taken off it and still
+    carries the deployment id and whatever the platform says about the person,
+    so `assert_no_claim_leaked` has real values to look for — criterion 6, and
+    the reason it reads the vocabulary off the delivered claims rather than off
+    a fixed list.
+
+    **Its boundary pair is
+    `test_the_same_launch_carrying_its_subject_lands_on_a_view`**: the identical
+    launch, differing only in that `sub` is present, has to land. Without it,
+    every assertion here is satisfied by a door that refuses this platform's
+    launches wholesale.
+    """
+    try:
+        from app.services.session import SESSION_COOKIE
+    except ModuleNotFoundError as missing:  # pragma: no cover - a red, not a branch
+        pytest.fail(
+            f"`app.services.session` does not import ({missing}). E1-08's interface ruling names "
+            '`SESSION_COOKIE = "pulse_session"` there, and this test is about a refusal not '
+            "setting it."
+        )
+
+    caplog.set_level(logging.WARNING, logger=LAUNCH_LOGGER_NAME)
+    what = f"a launch for {role_uri} carrying no `{SUBJECT_CLAIM}` claim"
+    delivered, response = re_signed_delivery(
+        tool_verifying_against_this_suites_key,
+        door_contract,
+        platform,
+        suite_key_set,
+        claims_in_token,
+        role_uri,
+        without_the_subject,
+        what,
+    )
+
+    assert SUBJECT_CLAIM not in delivered, (
+        f"The launch delivered still carries `{SUBJECT_CLAIM}`, so this test posed nothing and "
+        "whatever the door answered it was not answering an anonymous launch "
+        "(`docs/MISTAKES.md` entry 3)."
+    )
+    refused(response, door_contract, what)
+    assert response.status_code == 400, (
+        f"The tool answered {response.status_code} to {what}. This launch is well formed and "
+        "names nobody: 400 is the answer — the message cannot be accepted, and nothing about it "
+        "is a question of who the caller is or what they may do. Body begins "
+        f"{response.text[:400]!r}."
+    )
+    assert REFUSAL_TESTID in response.text, (
+        f"The tool answered {what} with a body carrying no `{REFUSAL_TESTID}` testid (body begins "
+        f"{response.text[:400]!r}). Every other refused launch reaches the shared refusal page and "
+        "this one is 'the same shape as every other refused launch'; a 4xx rendered by something "
+        "else is a different answer wearing the same status code."
+    )
+    assert reason_markers(response) == [ANONYMOUS_LAUNCH_REFUSED], (
+        f"The refusal page for {what} carries the reason markers {reason_markers(response)}; it "
+        f"should carry exactly {[ANONYMOUS_LAUNCH_REFUSED]}. The guard's class name is this "
+        "door's machine vocabulary, and an anonymous launch answered under some other guard's "
+        "name tells whoever reads the page — or the browser-side refusal spec — that a signature, "
+        "a nonce or a deployment was wrong when none of them was."
+    )
+    handed = {header.split("=", 1)[0].strip() for header in response.headers.get_list("set-cookie")}
+    assert SESSION_COOKIE not in handed, (
+        f"The tool set {sorted(handed)} while refusing {what}, which includes "
+        f"{SESSION_COOKIE!r}. That is a session issued for a token that names nobody."
+    )
+    assert "session=" not in (response.headers.get("location") or ""), (
+        f"The tool answered {what} with `Location: {response.headers.get('location')!r}`, which "
+        "carries a session token. A refusal hands the browser nothing."
+    )
+    assert_guard_fired(caplog, guard=ANONYMOUS_LAUNCH_REFUSED, claims=delivered)
+
+
+@pytest.mark.parametrize(("role_uri", "role"), LAUNCHES_BY_ROLE)
+def test_the_same_launch_carrying_its_subject_lands_on_a_view(
+    tool_verifying_against_this_suites_key: Any,
+    door_contract: Any,
+    platform: Any,
+    suite_key_set: Any,
+    claims_in_token: Any,
+    landings_for_the_re_signed_subjects: dict[str, Any],
+    role_uri: str,
+    role: str,
+) -> None:
+    """The pair, and the control on `re_signed_delivery` itself.
+
+    The same platform, the same offer, the same handshake, the same key set and
+    the same re-signing — with the claims passed through untouched, so `sub` is
+    the one thing this launch has that the refused one above does not. The
+    subject's own rows entitle them to a view (`landings_for_the_re_signed_
+    subjects` seeds a live enrollment for the learner and an `INSTRUCTOR`
+    assignment for the instructor), so it lands.
+
+    **The mutation this kills:** a guard that refuses more than it was written
+    for — reading a `sub` that is present but, say, not a string it recognises,
+    or firing on any launch whose claims were re-signed. That is the cheapest
+    way to make the test above green and it takes the door down for everybody.
+
+    **If this is red, the test above proves nothing**: a refusal in a harness
+    that cannot produce an acceptable launch is a statement about the harness
+    (`docs/MISTAKES.md` entry 3).
+    """
+    what = f"a launch for {role_uri} carrying its `{SUBJECT_CLAIM}` claim"
+    delivered, response = re_signed_delivery(
+        tool_verifying_against_this_suites_key,
+        door_contract,
+        platform,
+        suite_key_set,
+        claims_in_token,
+        role_uri,
+        lambda claims: claims,
+        what,
+    )
+
+    assert delivered.get(SUBJECT_CLAIM), (
+        f"The launch this platform signed carries no `{SUBJECT_CLAIM}` of its own (it carries "
+        f"{sorted(delivered)}), so this is not the paired opposite of the launch above — it is the "
+        "same launch, and neither test would be about the claim."
+    )
+    redirected_to_role(response, door_contract, role)
+
+
+def test_a_launch_refused_for_having_no_subject_consumes_its_handshake(
+    tool_verifying_against_this_suites_key: Any,
+    door_contract: Any,
+    platform: Any,
+    suite_key_set: Any,
+    claims_in_token: Any,
+    landings_for_the_re_signed_subjects: dict[str, Any],
+) -> None:
+    """The nonce and `state` are treated exactly as every other refusal treats them.
+
+    The implementer's standing rule, proven for a signature refusal by
+    `test_a_delivered_state_is_refused_on_replay_after_an_unrelated_refusal`:
+    on **any** refusal the server-side handshake row for the delivered `state`
+    is gone, whatever refused it. This says the new guard is inside that rule
+    rather than beside it. The first delivery carries the tool's own real
+    `state` and no `sub`; the second carries the same `state` with a complete,
+    validly-signed token whose subject holds a live enrollment — a launch that
+    would otherwise land.
+
+    **The mutation this must kill:** an anonymous-launch guard that returns
+    early, before the refusal path runs, leaving the handshake row in place.
+    The `state` is then still spendable and the second delivery *lands* — a
+    launch replayable after a refusal, which is the property the cookieless
+    handshake exists to hold.
+
+    **Why the guard is named, and it is the whole discrimination.** "Refused"
+    alone would not tell the mutation from the fix: the first delivery gets far
+    enough to have claimed the nonce, so a door that left the handshake row
+    behind would still refuse this second one — as `NonceReplayedError`, on the
+    nonce, having looked the row up and found it. `StateRefused` is what a
+    *consumed* handshake answers, which is precisely what
+    `test_a_delivered_state_is_refused_on_replay_after_an_unrelated_refusal`
+    establishes for a signature refusal. So the marker is the difference
+    between the row being gone and the row being there.
+
+    **Its control is the first delivery being refused at all**: over a door
+    that accepted the anonymous launch, "the second one did not land" would be
+    about something else entirely.
+    """
+    offer = offer_for_role(platform, LEARNER_ROLE_URI)
+    started = initiate(tool_verifying_against_this_suites_key, door_contract, offer)
+    parameters = query_of(redirect_target(started, "a registered platform began a launch"))
+    id_token, state, _ = authorize(platform, parameters)
+    assert state, (
+        "The platform returned no `state`, so there is no handshake row for this test to prove "
+        "was consumed."
+    )
+    claims = dict(claims_in_token(id_token))
+    assert claims.get(SUBJECT_CLAIM), (
+        f"The launch this platform signed carries no `{SUBJECT_CLAIM}` of its own, so the second "
+        "delivery below is not the complete launch this test needs it to be."
+    )
+
+    first = answer_to(
+        lambda: land(
+            tool_verifying_against_this_suites_key,
+            door_contract,
+            suite_key_set.sign(without_the_subject(dict(claims))),
+            state,
+        ),
+        f"a launch carrying no `{SUBJECT_CLAIM}` claim",
+    )
+    refused(first, door_contract, f"a launch carrying no `{SUBJECT_CLAIM}` claim")
+
+    second = land(
+        tool_verifying_against_this_suites_key,
+        door_contract,
+        suite_key_set.sign(dict(claims)),
+        state,
+    )
+
+    replayed = (
+        f"the same `state` presented again, with a complete validly-signed token, after a launch "
+        f"carrying no `{SUBJECT_CLAIM}` was refused on it"
+    )
+    refused(second, door_contract, replayed)
+    assert reason_markers(second) == [STATE_REFUSED], (
+        f"The second delivery's refusal page carries the reason markers {reason_markers(second)}; "
+        f"it should carry exactly {[STATE_REFUSED]}. That is what a *consumed* handshake answers, "
+        "and it is the only thing here that tells the two states apart: a door that left the row "
+        f"in place would look it up, find the nonce already claimed, and answer {NONCE_REPLAYED!r} "
+        "— refusing this launch for a reason that says the row survived the first refusal. The "
+        "rule this door already keeps is that any refusal deletes the handshake row for the "
+        "delivered `state`, whatever refused it."
     )

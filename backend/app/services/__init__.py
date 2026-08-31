@@ -5,8 +5,11 @@ derives the section's length, dates and modality (§2.2, E0-07). `authz.py` is
 the authorization chokepoint every entry point passes through. `tokens.py`
 verifies a signed `id_token` against its issuer's published key set for both
 entry doors. `safety.py` holds the Care queue's one connection that can reach
-identity. `landing.py` maps a verified token to the landing role and page it
-sends the browser to (E0-18).
+identity. `identity.py` resolves a verified subject to the rows this system
+stores for them (E1-12); `session.py` signs and verifies what a door hands the
+browser. `landing.py` mapped a verified token's roles claim to a landing view
+until E1-13 deleted it: the landing comes from the assignment model now, out of
+`authz.py`, and the four pages a door renders live in `app/api/deps.py`.
 
 The package was created before any of them, because the strict mypy profile
 in `pyproject.toml` was pinned to `app.services.*` from the start: the modules

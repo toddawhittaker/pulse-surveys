@@ -7,7 +7,9 @@
 # both places. The Node checkers read the root `package.json`, which E0-40 split
 # from `frontend/package.json`: eslint, tsc and `npm audit` run over the
 # TypeScript this repository holds today, and the production build and bundle
-# budget still wait for the E1 scaffold. If it passes here
+# budget still wait for the E1 scaffold — for its `build` script now rather than
+# for its manifest, since E1-02 made `frontend/` a workspace member of the root
+# package and the manifest is committed (ADR 0083). If it passes here
 # it should pass there; when the two drift, the workflow is the source of truth
 # and this file is the bug.
 #
@@ -106,7 +108,7 @@ node-deps: ## Install the pinned Node closure — prerequisite of every npx gate
 	fi
 
 .PHONY: lint
-lint: node-deps ## ruff check + ruff format --check, eslint
+lint: node-deps ## ruff check + ruff format --check, eslint (root and frontend workspace)
 	$(call banner,ruff)
 	@ruff check . && ruff format --check .
 	$(call banner,eslint)
@@ -115,6 +117,8 @@ lint: node-deps ## ruff check + ruff format --check, eslint
 	else \
 		$(call skip,no package.json at the repository root); \
 	fi
+	$(call banner,eslint (frontend workspace))
+	@npm run lint --workspace frontend
 
 # mypy runs three times, and it has to: `backend/app`, `mock-lms/app` and
 # `mock-idp/app` are all packages called `app` (SPEC §13 names all three), and
@@ -123,7 +127,7 @@ lint: node-deps ## ruff check + ruff format --check, eslint
 # same three in the same order. See
 # docs/adr/0039-the-two-app-packages-are-typechecked-in-two-runs.md.
 .PHONY: typecheck
-typecheck: node-deps ## mypy over backend/, mock-lms/ and mock-idp/ + tsc --noEmit
+typecheck: node-deps ## mypy over backend/, mock-lms/ and mock-idp/ + tsc --noEmit (root and frontend workspace)
 	$(call banner,mypy)
 	@mypy
 	$(call banner,mypy mock-lms/app)
@@ -136,6 +140,8 @@ typecheck: node-deps ## mypy over backend/, mock-lms/ and mock-idp/ + tsc --noEm
 	else \
 		$(call skip,no package.json at the repository root); \
 	fi
+	$(call banner,tsc --noEmit (frontend workspace))
+	@npm run typecheck --workspace frontend
 
 # Needs a database to migrate: `make up` first. CI has its own Postgres service
 # for this job, provisioned with the same two roles the stack deploys.
@@ -177,10 +183,17 @@ invariants: ## Run the §4.1 invariant suite alone; a skip, an empty run and a t
 
 # The integration tests start their own Postgres through testcontainers, so this
 # needs a running Docker daemon but not the Compose stack.
+#
+# `-n 4` is pytest-xdist, mirroring the workflow's "Unit + integration with
+# coverage" step. Four workers means four pytest sessions, so four
+# testcontainers Postgres instances and four alembic runs — accepted for the
+# wall clock, and recorded in
+# docs/adr/0104-the-unit-and-integration-pass-runs-under-xdist.md. The
+# `invariants` target above stays serial in both places.
 .PHONY: test
-test: invariants ## pytest unit + integration with coverage
+test: invariants ## pytest unit + integration with coverage, four workers
 	$(call banner,pytest unit + integration)
-	@pytest tests/unit tests/integration --cov=backend/app --cov-report=term-missing
+	@pytest tests/unit tests/integration -n 4 --cov=backend/app --cov-report=term-missing
 
 .PHONY: e2e
 # Enforcing since E0-18: the specs exist, so this runs the suite unconditionally
@@ -265,15 +278,22 @@ docker-build: ## Build the images and check the stack against E0-02's and E0-03'
 		./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp >/dev/null; \
 	done
 
+# Enforcing since E1-04, and the workflow's copy of this recipe lost the same
+# condition in the same change. It carried the `frontend` probe in shell — a
+# `[ -f frontend/package.json ]` and a `grep` for the `build` script, with a skip
+# notice in the `else` — because CLAUDE.md requires `make ci` to run the gates the
+# workflow runs.
+#
+# The Makefile is the worse of the two to forget. A workflow that skips a gate at
+# least skips it on a pull request somebody looks at; `make ci` prints its skip
+# line to the one person who was told to run it before pushing, and reports
+# success.
 .PHONY: frontend-build
-frontend-build: ## Production build + bundle budget
+frontend-build: node-deps ## Production build + bundle budget
 	$(call banner,frontend production build)
-	@if [ -f frontend/package.json ]; then \
-		cd frontend && npm run build && cd .. && \
-		$(PYTHON) scripts/ci/check_bundle_size.py frontend/dist --budget ci/bundle-budget.json; \
-	else \
-		$(call skip,no frontend/package.json yet); \
-	fi
+	@npm run build --workspace frontend
+	$(call banner,bundle budget)
+	@$(PYTHON) scripts/ci/check_bundle_size.py frontend/dist --budget ci/bundle-budget.json
 
 # ---------------------------------------------------------------------------
 # Supply chain

@@ -24,7 +24,9 @@ boundary: `metadata_tables` is asked for by both.
   - `fixtures/app_imports.py` — importing a package called `app` when three of
     them answer to that name. Every `sys.meta_path` manipulation is there.
   - `fixtures/lti_services.py` — E0-14's `mock_platform` and the LTI Advantage
-    services E0-15 reaches through a launch's own claims.
+    services E0-15 reaches through a launch's own claims; since E1-11's fix round
+    it also holds the access token the mock's NRPS route requires, which is why
+    every roster read in the suite goes through `roster_get`.
   - `fixtures/supervision.py` — E0-09's assignment graph and the row-seeding
     helper, with the two counters that keep seeded values unique.
   - `fixtures/authz_data.py` — E0-10's committed rows and Care environment,
@@ -37,6 +39,22 @@ boundary: `metadata_tables` is asked for by both.
   - `fixtures/doors.py` — E0-18 PR 1: this project's own two doors, built here
     and driven in process against the mocks.
   - `fixtures/suite_keys.py` — the key set this suite signs its own tokens with.
+  - `fixtures/client_credentials.py` — E1-06: the tool's key set, the assertions a
+    client-credentials grant is asked with, and the seam a mock platform fetches
+    that key set through.
+  - `fixtures/provisioning.py` — E1-10: the launch-time writer, reached by
+    discovery; the committed prefix, term and start-letter map a launch resolves
+    against; and a launch's claims as a value for the cases nothing mints.
+  - `fixtures/roster_sync.py` — E1-11: the roster sync reached by discovery, the
+    `requests` seam its service calls travel over and are recorded on, a
+    membership container a test composes, and the registered platform and section
+    a sync starts from.
+  - `fixtures/web_identity.py` — E1-12: the `person`, `user` and
+    `web_login_subject` rows a door resolves a subject through, seeded committed,
+    and the session claims a landing carries them back in.
+  - `fixtures/landing.py` — E1-13: the names the assignment-derived landing is
+    settled under, one `enrollment` row with the window the caller chose, and the
+    rows a launch-driving suite needs before its subject can land at all.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -57,4 +75,9 @@ pytest_plugins = (
     "fixtures.seed",
     "fixtures.doors",
     "fixtures.suite_keys",
+    "fixtures.client_credentials",
+    "fixtures.provisioning",
+    "fixtures.roster_sync",
+    "fixtures.web_identity",
+    "fixtures.landing",
 )

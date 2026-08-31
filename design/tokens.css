@@ -12,9 +12,10 @@
   --spruce: #1E3932;        /* Primary ink: body text, headings, filled bars, the Course line in TrendDuo. */
   --spruce-60: #5B7269;     /* Secondary ink: labels, helpers, meta, mono eyebrows, axis text. */
   --hairline: #DCE4DD;      /* Borders, dividers, table rules, chart gridlines. Never for text. */
-  --marigold: #DFA320;      /* The hero accent: current-section trend line + terminal dot, focus ring,
+  --marigold: #DFA320;      /* The hero accent: current-section trend line + terminal dot,
                                selected/active states, validity coaching (never an error red). */
-  --marigold-deep: #8F6A10; /* Marigold at text-contrast: links, marigold-toned text on paper/chalk. */
+  --marigold-deep: #8F6A10; /* Marigold at text-contrast: links, marigold-toned text on paper/chalk,
+                               focus ring. */
   --madder: #A93F32;        /* Reserved: "attend to this." Flag chips, Care classification labels,
                                breached thresholds in the admin strip. Never decoration, never headers. */
   --mist: #93A5A0;          /* De-emphasis: benchmark/university comparison lines (dashed/dotted),
@@ -50,9 +51,12 @@
   --shadow-card: 0 1px 2px rgba(30, 57, 50, .06);
 }
 
-/* Focus ring — marigold, everywhere, always visible */
+/* Focus ring — everywhere, always visible. Deep marigold, not the accent:
+   the accent measures 2.1:1 against chalk and 2.2:1 against paper, under
+   SC 1.4.11's 3:1 floor for a focus indicator; the deep variant measures
+   4.6:1 and 5.0:1. */
 :focus-visible {
-  outline: 2px solid var(--marigold);
+  outline: 2px solid var(--marigold-deep);
   outline-offset: 2px;
 }
 

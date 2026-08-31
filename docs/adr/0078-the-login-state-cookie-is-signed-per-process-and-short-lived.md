@@ -91,3 +91,33 @@ look like a broken door.
 - E1 replaces this outright with its session model. When it does, the module
   docstring and this record go together: the cookie names, the lifetime and the
   per-process key are all in `deps.py` and nowhere else.
+
+**That last consequence turned out to be half right, and the half that stands is
+recorded in
+[0093](0093-the-web-door-keeps-the-cookie-carried-login-handshake.md).** E1 did
+replace this outright at the launch door (see the supersession note below) and
+deliberately did not at the web door: E1-09 examined the question this record
+left to E1 and kept the mechanism, because the fact that forced the launch
+handshake server-side — a cross-site iframe where a browser blocks a cookie
+whatever its attributes say — has no counterpart at a door reached by top-level
+navigation. So this record is not a two-ticket life awaiting its replacement; it
+is the live description of the web door's handshake, and 0093 is where its
+continuation was argued.
+
+**Superseded in part 2026-08-26 by E1-08
+([0089](0089-the-session-both-doors-issue-and-the-launch-nonce-ledger.md)) — the
+launch door only.** That ticket moved the launch door onto `pylti1p3` and holds
+its `state`/`nonce` handshake in a **server-side store** (`app.lti.in_flight`)
+rather than a cookie, so the `pulse_lti_login` cookie and
+`LOGIN_COOKIE_LIFETIME_SECONDS` no longer govern that door — which sets no login
+cookie at all now. This record still stands for the *web* door, which keeps the
+per-process `app.state.login_secret` and its `pulse_oidc_login` cookie — and
+keeps them for good rather than "until E1-09", which is what that ticket decided
+in [0093](0093-the-web-door-keeps-the-cookie-carried-login-handshake.md).
+This record's properties are preserved and, in one respect, strengthened: a cookie
+inside the LMS's cross-site iframe is blocked by the browser whatever its
+attributes say, so `Secure`-outside-development on an in-flight *cookie* could not
+be met there anyway; 0089 moves the handshake off the cookie entirely, so
+single-use / burn-after-use is a server-side property and there is no in-flight
+cookie left to mark `Secure`. `docs/disputes/E1-08-01.md` records the ruling and
+the reconciliation of this record's three tests.

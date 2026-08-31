@@ -15,6 +15,16 @@ claims a launch carries, which is how a tool reaches them and which means no URL
 is hardcoded here either. `link_relations_in` and `instant_of` sit beside
 `signed_launch` and exist so that a test module can exercise the paging-header
 parser and the timestamp comparison without importing this file by name.
+
+**Since E1-11's fix round the roster is behind a token, and this driver holds it.**
+The mock's NRPS route requires an access token its own endpoint issued carrying the
+membership scope, so every roster read here goes through `roster_get`, which asks
+`service_token` for one — one place rather than one per module
+(`docs/MISTAKES.md` entry 13). **AGS deliberately stays unauthenticated** until a
+grade-passback client exists, which SPEC §14.3 gives to E3, which is why
+`refuse_an_unspecified_ags_token_flow` is still here and is still called by every
+AGS path. What the platform must refuse, and with which status and code, is
+`tests/integration/test_mock_lms_nrps_requires_a_token.py` and not this file.
 """
 
 import importlib
@@ -31,6 +41,11 @@ from uuid import uuid4
 import pytest
 
 from fixtures.app_imports import import_mock_lms_application, mock_package_resolved
+from fixtures.client_credentials import (
+    ToolKeyPair,
+    ToolKeySetServer,
+    access_token_granted_to,
+)
 from fixtures.lti_platform import (
     AUTHORIZATION_REQUEST_CONSTANTS,
     MOCK_LMS_DIR,
@@ -71,6 +86,17 @@ AGS_CLAIM = "https://purl.imsglobal.org/spec/lti-ags/claim/endpoint"
 # differently fails there first, by name.
 CONTEXT_CLAIM = "https://purl.imsglobal.org/spec/lti/claim/context"
 
+# E1-08. The query parameter `mock-lms/app/wrong_launches.py` reads off an
+# authorization request to select one of E1-07's deliberately wrong (or
+# near-miss) mints by name. **This module's own copy of the string**, not an
+# import of `app.wrong_launches.DEFECT_QUERY_PARAM`: both mocks declare a
+# package named `app` (SPEC §13), and importing either by name from a module
+# outside its own package is the collision `docs/adr/0039-the-two-app-
+# packages-are-typechecked-in-two-runs.md` describes — the same reason
+# `tests/integration/test_mock_lms_wrong_launches.py` keeps its own copy
+# rather than importing the mock's.
+DEFECT_QUERY_PARAM = "defect"
+
 # The media types the Advantage services exchange, from NRPS 2.0 and AGS 2.0.
 # Sent rather than assumed, because sending them is what a tool does. All four
 # end in `+json`, which is also what lets a FastAPI endpoint declaring a JSON
@@ -93,10 +119,33 @@ SCORE_MEDIA_TYPE = "application/vnd.ims.lis.v1.score+json"
 # platform serves.
 MOCK_POSTED_SCORES_PATH = "/mock/posted-scores"
 
+# E1 cleanup Batch B, item 3 — where the platform serves the vocabulary of defect
+# selectors it answers to, and the member that list lives under. **Settled in the
+# batch's work order, not chosen here**: `GET /mock/defects`, outside the OIDC
+# namespace exactly as `/mock/posted-scores` sits outside the AGS one, answering
+# `{"selectors": [...]}`.
+#
+# Named here rather than discovered, and the `/mock/` prefix is the reason — the
+# same reason `MOCK_POSTED_SCORES_PATH` gives. A fixture that went looking for a
+# route whose path carries "defect" would also accept the authorization endpoint,
+# which is where `?defect=` is actually answered (ADR 0088); the prefix is what
+# rules that out, and a tool that learned this route would have learned something
+# no real platform serves.
+MOCK_DEFECTS_PATH = "/mock/defects"
+SERVED_SELECTORS_MEMBER = "selectors"
+
 # The two AGS scopes SPEC §3.4 needs: one line item per section, and a score
 # posted to it. Specification constants, not preferences.
 AGS_LINE_ITEM_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem"
 AGS_SCORE_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/score"
+
+# The scope a token has to carry before this platform will serve a roster, spelled
+# as NRPS 2.0 spells it and as the platform's own discovery document advertises it.
+# A specification constant, the same string `test_mock_lms_client_credentials_
+# grant.py` transcribes: a tool asks its token endpoint for the exact string the
+# service claim names, so a scope of this suite's own devising is one no token can
+# be requested for.
+NRPS_MEMBERSHIP_SCOPE = "https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly"
 
 # How many pages of one paged container are walked before the walk is called
 # broken. **This suite's choice**, and a bound rather than a rule: E0-15 keeps
@@ -251,7 +300,12 @@ class MockPlatform:
     an interface the ticket never asked for.
     """
 
-    def __init__(self, values: Mapping[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        values: Mapping[str, str] | None = None,
+        tool_key_set: Any | None = None,
+        tool_key_pair: Any | None = None,
+    ) -> None:
         from fastapi.testclient import TestClient
 
         self.values = dict(values or {})
@@ -260,8 +314,37 @@ class MockPlatform:
         # Entered so the application's lifespan runs: a platform that generates
         # its issuer key on startup has not generated one until it does.
         self.client.__enter__()
+        # E1-06. The platform verifies a tool-signed `client_assertion` against the
+        # tool's published key set, which it fetches — and neither the tool's
+        # address nor any other resolves in an in-process test. So every
+        # server-side fetch this platform makes goes through one client, the way
+        # `tests/fixtures/doors.py` routes the tool's own; see
+        # `tests/fixtures/client_credentials.py` for what that pins and what it
+        # deliberately leaves to the implementer. Installed **after** the lifespan
+        # has run, for the reason `tool_doors` gives: it then holds this test's
+        # client whether the mock builds one in its factory or at startup.
+        #
+        # **Served by default, and E1-11's NRPS enforcement is what changed that.**
+        # A roster read now needs a token, a token needs an assertion the platform
+        # can verify, and verifying it needs the tool's key set — so a driver that
+        # served one only when a caller asked would leave every roster suite unable
+        # to read a roster at all. A caller with its own arrangement passes both
+        # arguments and this default stands aside: the grant suite, which records
+        # what was fetched, and the roster-sync fixture, which points the platform
+        # at the real tool's own JWKS route.
+        if tool_key_pair is None:
+            tool_key_pair = ToolKeyPair("e1-06-tool")
+        self.tool_key_pair = tool_key_pair
+        self._own_key_set = tool_key_set is None
+        self.tool_key_set = (
+            ToolKeySetServer(self.tool_key_pair.key_set()) if self._own_key_set else tool_key_set
+        )
+        self.application.state.http = self.tool_key_set.client
+        self._service_tokens: dict[str, str] = {}
 
     def close(self) -> None:
+        if self._own_key_set:
+            self.tool_key_set.close()
         self.client.__exit__(None, None, None)
 
     # -- what the application serves ----------------------------------------
@@ -349,6 +432,50 @@ class MockPlatform:
         signature = token if isinstance(token, JsonWebSignature) else split_jws(str(token))
         return verifying_key(signature, self.jwks())
 
+    # -- the served defect vocabulary (E1 cleanup Batch B, item 3) ------------
+
+    def served_defect_selectors(self) -> list[str]:
+        """Every defect selector this platform says it answers to, in served order.
+
+        E1-07's deferred item 1. `app.wrong_launches.ALL_SELECTORS` cannot be
+        imported by any consumer outside `mock-lms/` — both mocks declare a
+        package called `app` (SPEC §13), the collision ADR 0039 records — so
+        every consumer that needed a selector name held a copied literal, and
+        ADR 0088's own consequences say nothing enforces that the copies move
+        together. This is the served source they are checked against.
+
+        **The shape is asserted rather than normalised**, for the reason
+        `posted_scores` below gives in full: an earlier version of that helper
+        accepted four shapes because its ticket named none, and three of the
+        four were mocks that did not do what the ticket said. The batch's work
+        order names one shape, so one shape is read.
+        """
+        response = self.client.get(MOCK_DEFECTS_PATH)
+        assert response.status_code == 200, (
+            f"`GET {MOCK_DEFECTS_PATH}` answered {response.status_code} rather than 200, so this "
+            "platform serves no defect vocabulary and every consumer of one is still holding a "
+            "copied literal nothing checks (E1-07 deferred item 1). Body begins "
+            f"{response.text[:200]!r}."
+        )
+        document = response.json()
+        assert isinstance(document, dict), (
+            f"`{MOCK_DEFECTS_PATH}` served {document!r}. The shape is "
+            f'`{{"{SERVED_SELECTORS_MEMBER}": [...]}}` — an object, the way `/mock/posted-scores` '
+            "is an object, so a member can be added later without changing what a reader parses."
+        )
+        served = document.get(SERVED_SELECTORS_MEMBER)
+        assert isinstance(served, list) and served, (
+            f"`{MOCK_DEFECTS_PATH}` served an object carrying {sorted(document)} rather than a "
+            f"non-empty `{SERVED_SELECTORS_MEMBER}` array. An empty list would agree with a stale "
+            "copy about nothing while satisfying every membership check made against it."
+        )
+        wrong = [name for name in served if not isinstance(name, str) or not name]
+        assert not wrong, (
+            f"`{MOCK_DEFECTS_PATH}` served {wrong!r} among its selectors. A selector is the string "
+            "a caller puts in `?defect=`, so anything else is a name no launch can be minted by."
+        )
+        return [str(name) for name in served]
+
     # -- launches ------------------------------------------------------------
 
     def offers(self) -> list[LaunchOffer]:
@@ -399,6 +526,7 @@ class MockPlatform:
         *,
         state: str | None = None,
         nonce: str | None = None,
+        defect: str | None = None,
     ) -> SignedLaunch:
         """Drive one launch to the point a tool would receive the `id_token`.
 
@@ -409,6 +537,17 @@ class MockPlatform:
         `id_token` out of what comes back. Nothing is called that a real tool
         would not call, so a launch minted here and a launch a browser produces
         are the same launch.
+
+        `defect`, added for E1-08, selects one of E1-07's deliberately wrong (or
+        near-miss) launches by name — `?defect=foreign_signature` and the rest
+        of `mock-lms/app/wrong_launches.py::ALL_SELECTORS`. `None`, the default,
+        takes the exact code path this method took before E1-07 existed: that
+        ticket's own module docstring promises its addition is additive, and
+        this keyword is what keeps that promise here too. A caller that wants a
+        defective launch to still be judged against a real tool's own `state`/
+        `nonce` — the shape a door test needs, since pylti1p3's login step
+        stores what it issued — passes them through the `state`/`nonce`
+        keywords above rather than letting this method invent fresh ones.
         """
         chosen = offer or self.require_offers()[0]
         request = dict(AUTHORIZATION_REQUEST_CONSTANTS)
@@ -425,13 +564,14 @@ class MockPlatform:
             ("auth",),
             "receives the tool's authorization request and answers with a signed `id_token`",
         )
+        query = {} if defect is None else {DEFECT_QUERY_PARAM: defect}
         # POST where the route accepts it, GET otherwise. Which of the two a
         # tool uses is the tool's choice under OIDC, so the endpoint's own
         # declaration decides rather than this file.
         if path in self.paths("POST"):
-            response = self.client.post(path, data=request)
+            response = self.client.post(path, data=request, params=query)
         else:
-            response = self.client.get(path, params=request)
+            response = self.client.get(path, params={**request, **query})
 
         id_token, returned_state, posted_to = self.read_authorization_response(response, path)
         return SignedLaunch(
@@ -490,31 +630,125 @@ class MockPlatform:
         return local_target(url)
 
     @staticmethod
-    def refuse_an_unspecified_token_flow(response: Any, url: str) -> None:
-        """Turn a 401 or a 403 into a named gap rather than a puzzling red.
+    def refuse_an_unspecified_ags_token_flow(response: Any, url: str) -> None:
+        """Turn a 401 or a 403 from **AGS** into a named gap rather than a puzzling red.
 
         Real LTI Advantage services sit behind an OAuth 2.0 client-credentials
-        grant against the platform's token endpoint. E0-15 does not mention one,
-        E0-14 built none, and no ticket says what a tool would sign its
-        assertion with — so this suite drives the services unauthenticated,
-        which is the only reading of the ticket that does not invent an
-        interface. If the mock requires a token, the answer is a sentence in the
-        ticket, not a guess here.
+        grant against the platform's token endpoint. E0-15 does not mention one
+        and E0-14 built none, so this suite drove both services unauthenticated.
+
+        **Narrowed to AGS, because for NRPS the premise has ended.** This guard
+        existed to say "no conformant client exists yet, so a refusal is a gap in
+        a ticket rather than a defect" — E1-06's own argument, that a service
+        refusing before a conformant client exists would refuse this repository's
+        own tests. E1-11 built that client for the roster, so the mock's NRPS
+        route now requires a token and this suite presents one: see
+        `service_token` below, and `test_mock_lms_nrps_requires_a_token.py` for
+        the refusals it is required to answer with.
+
+        AGS keeps the guard, and keeps it for the unchanged reason: SPEC §14.3
+        gives grade passback to E3, so no AGS client exists yet, and a platform
+        that started refusing there would turn every E0-15 line-item and score test
+        red for a reason none of them is about (`docs/MISTAKES.md` entry 22).
         """
         if response.status_code in (401, 403):
             pytest.fail(
                 f"The platform answered {response.status_code} for `{url}`, so it requires an "
-                "access token for its Advantage services. E0-15 specifies no token endpoint and "
-                "no grant, and E0-14 built neither, so this suite calls NRPS and AGS "
-                "unauthenticated. What a tool should present is an interface question for the "
-                "ticket rather than something to guess at in tests/fixtures/lti_services.py."
+                "access token for an Advantage service this suite calls unauthenticated. NRPS "
+                "requires one and this driver presents it; **AGS deliberately does not** — SPEC "
+                "§14.3 gives grade passback to E3 and no AGS client exists yet, so a service "
+                "refusing there would be refusing this repository's own tests. If AGS is meant to "
+                "start requiring "
+                "a token, that is a ticket rather than something to guess at in "
+                "tests/fixtures/lti_services.py."
             )
 
-    def service_get(self, url: str, accept: str | None = None) -> Any:
-        """GET one Advantage URL the platform advertised."""
-        response = self.client.get(self.local(url), headers={"accept": accept} if accept else None)
-        self.refuse_an_unspecified_token_flow(response, url)
+    # -- access tokens, obtained the one way (E1-11's enforcement) -------------
+
+    def service_token_grant(self, scope: str) -> dict[str, Any]:
+        """One access token for `scope`, and the whole response the platform granted.
+
+        The grant sequence lives in `tests/fixtures/client_credentials.py` and is
+        reached from here by every suite that needs a credential, so there is one
+        of it rather than one per module (`docs/MISTAKES.md` entry 13). What this
+        adds is the two values that are properties of *this* platform: the token
+        endpoint it advertises, read out of its discovery document rather than
+        from a path anybody knows, and the client id its own launch form
+        publishes.
+
+        The full response rather than the string, because a caller reasoning about
+        expiry needs `expires_in` — and reading the platform's own answer is how a
+        test avoids holding the lifetime in a second copy of it
+        (`docs/MISTAKES.md` entry 19).
+        """
+        document = self.discovery() or {}
+        token_url = document.get("token_endpoint")
+        if not isinstance(token_url, str) or not token_url:
+            pytest.fail(
+                "The platform's discovery document advertises no `token_endpoint` (it carries "
+                f"{sorted(document)}), so there is nowhere to ask for the access token its own "
+                "roster service now requires. E1-06 adds it, and "
+                "`test_mock_lms_client_credentials_grant.py` is where its absence is diagnosed."
+            )
+        offer = self.require_offers()[0]
+        client_id = offer.parameters.get("client_id")
+        if not isinstance(client_id, str) or not client_id:
+            pytest.fail(
+                "The launch form publishes no `client_id` (it publishes "
+                f"{sorted(offer.parameters)}), so there is nothing to put in a `client_assertion`'s "
+                "`iss` and `sub` and no token can be requested at all."
+            )
+        return access_token_granted_to(
+            lambda url, body: self.client.post(self.local(url), data=body),
+            token_url=token_url,
+            client_id=client_id,
+            key_pair=self.tool_key_pair,
+            scope=scope,
+        )
+
+    def service_token(self, scope: str) -> str:
+        """One freshly granted access token for `scope`, as a string."""
+        return str(self.service_token_grant(scope)["access_token"])
+
+    def nrps_token(self) -> str:
+        """This platform's roster token, granted once and reused for the run of a test.
+
+        Cached per platform instance so that walking a five-page roster is five
+        reads rather than five grants: an assertion is single-use at this endpoint
+        (RFC 7523 §3's `jti`), so a fresh grant per page would be five signatures
+        to prove nothing about paging. A test that needs a *particular* token —
+        stale, wrong-scoped, forged — builds it itself rather than asking here.
+        """
+        if NRPS_MEMBERSHIP_SCOPE not in self._service_tokens:
+            self._service_tokens[NRPS_MEMBERSHIP_SCOPE] = self.service_token(NRPS_MEMBERSHIP_SCOPE)
+        return self._service_tokens[NRPS_MEMBERSHIP_SCOPE]
+
+    def service_get(self, url: str, accept: str | None = None, *, token: str | None = None) -> Any:
+        """GET one Advantage URL the platform advertised.
+
+        `token`, when given, is presented as the `Bearer` credential RFC 6750 §2.1
+        describes — and its presence is also what says this call is one the
+        platform is entitled to refuse. A call that presents nothing is an AGS
+        call, where a refusal is still a gap rather than a defect.
+        """
+        headers: dict[str, str] = {}
+        if accept:
+            headers["accept"] = accept
+        if token is not None:
+            headers["authorization"] = f"Bearer {token}"
+        response = self.client.get(self.local(url), headers=headers or None)
+        if token is None:
+            self.refuse_an_unspecified_ags_token_flow(response, url)
         return response
+
+    def roster_get(self, url: str, accept: str | None = NRPS_MEDIA_TYPE) -> Any:
+        """GET one NRPS URL with this platform's own roster token attached.
+
+        The one door every roster read in this suite goes through, so that
+        "present a token" is a fact about the driver rather than something each
+        module remembers to do (`docs/MISTAKES.md` entry 13).
+        """
+        return self.service_get(url, accept=accept, token=self.nrps_token())
 
     def service_post(
         self,
@@ -533,7 +767,7 @@ class MockPlatform:
         if accept:
             headers["accept"] = accept
         response = self.client.post(self.local(url), content=json.dumps(payload), headers=headers)
-        self.refuse_an_unspecified_token_flow(response, url)
+        self.refuse_an_unspecified_ags_token_flow(response, url)
         return response
 
     def service_claim(self, launch: SignedLaunch, claim: str, member: str, purpose: str) -> str:
@@ -588,8 +822,12 @@ class MockPlatform:
         return [scope for scope in scopes if isinstance(scope, str)]
 
     def membership_page(self, url: str) -> MembershipPage:
-        """Fetch one page of a membership container and read its paging header."""
-        response = self.service_get(url, accept=NRPS_MEDIA_TYPE)
+        """Fetch one page of a membership container and read its paging header.
+
+        Through `roster_get`, so the token E1-11's enforcement requires is
+        attached here rather than in each of the six modules that read a roster.
+        """
+        response = self.roster_get(url)
         assert response.status_code == 200, (
             f"The membership service answered {response.status_code} for `{url}` rather than 200. "
             "E0-15's first criterion is a roster whose members carry role and enrollment status, "
@@ -625,7 +863,9 @@ class MockPlatform:
             next_url=urljoin(url, following) if following else None,
         )
 
-    def link_walk(self, url: str, accept: str, subject: str) -> list[tuple[str, Any]]:
+    def link_walk(
+        self, url: str, accept: str, subject: str, *, token: str | None = None
+    ) -> list[tuple[str, Any]]:
         """Fetch `url` and every page its `Link` header advertises, in order.
 
         One walk for both paged containers E0-15 serves — the roster and the
@@ -651,7 +891,7 @@ class MockPlatform:
                     "it. A client following this header never finishes."
                 )
             visited.add(following)
-            response = self.service_get(following, accept=accept)
+            response = self.service_get(following, accept=accept, token=token)
             assert response.status_code == 200, (
                 f"Page {len(walked) + 1} of the {subject} at `{following}` answered "
                 f"{response.status_code} rather than 200, so the `Link` header that pointed here "
@@ -674,7 +914,9 @@ class MockPlatform:
         """Walk a roster from its first page to its last. Exactly what a sync does."""
         return [
             self.membership_page_of(page_url, response)
-            for page_url, response in self.link_walk(url, NRPS_MEDIA_TYPE, "roster")
+            for page_url, response in self.link_walk(
+                url, NRPS_MEDIA_TYPE, "roster", token=self.nrps_token()
+            )
         ]
 
     def seeded_contexts(self) -> list[SeededContext]:
@@ -1020,6 +1262,126 @@ def mock_lms_config() -> Iterator[Any]:
         yield importlib.import_module(f"{MOCK_PACKAGE}.config")
 
 
+class MockLmsPaths(NamedTuple):
+    """The mock platform's own route paths, as strings, with nothing held open."""
+
+    jwks: str
+    authorization: str
+
+
+@pytest.fixture
+def mock_lms_paths() -> MockLmsPaths:
+    """The two paths a registration is built from, read out and the resolution closed.
+
+    **Why this exists beside `mock_lms_config` rather than instead of it.** That
+    fixture holds `mock_package_resolved(MOCK_LMS_DIR)` open for the whole test
+    body, deliberately and correctly — a class taken out of a mock and used after
+    the resolution closed would re-resolve its lazy imports against this
+    repository's own `app`, which is a different program. The cost is stated in
+    `tests/fixtures/app_imports.py`'s docstring and is absolute: while the mock's
+    `app` is resolved, **this repository's `app` is not importable**, so nothing
+    that imports it may run in that window.
+
+    An in-process `alembic upgrade head` is exactly such a thing — the first line
+    of `backend/migrations/env.py` is `from app.models import Base` — so a test
+    that requests `mock_lms_config` and then builds a database dies in
+    `ModuleNotFoundError` before its first assertion, and no change on the
+    implementation side of the wall can help it. That was measured and ruled on
+    in `docs/disputes/E1-05-02.md`.
+
+    So this reads the *values* out while the resolution is briefly open and lets
+    it close before the caller's body runs — the shape
+    `tests/fixtures/doors.py::seed_constant` already uses, for the reason its own
+    docstring gives. Both are plain strings, so nothing is lost by copying them
+    out. A test that needs the live module and never migrates anything can go on
+    asking for `mock_lms_config`.
+
+    The two paths are the ones a `lti_platform` registration is composed from:
+    the key set the launch signature is verified against, and the authorization
+    endpoint a browser is sent to. Both are validated here rather than in the
+    caller, because "absolute path" is a property of the mock's configuration and
+    not an assertion any one test owns.
+    """
+    if not MOCK_LMS_DIR.is_dir():
+        pytest.fail(
+            f"{MOCK_LMS_DIR} does not exist, so there is no configuration module to read the "
+            "platform's own paths out of. SPEC §13 puts the in-repo LTI 1.3 platform at "
+            "`mock-lms/`, and E0-14 is the ticket that writes it."
+        )
+    with mock_package_resolved(MOCK_LMS_DIR):
+        configuration = importlib.import_module(f"{MOCK_PACKAGE}.config")
+        found = {
+            name: getattr(configuration, name, None) for name in ("JWKS_PATH", "AUTHORIZATION_PATH")
+        }
+
+    wrong = {
+        name: value
+        for name, value in found.items()
+        if not isinstance(value, str) or not value.startswith("/")
+    }
+    if wrong:
+        pytest.fail(
+            f"`mock-lms/app/config.py` defines no absolute {sorted(wrong)} (found {wrong}). That "
+            "module declares the platform's routes and builds the URLs its discovery document "
+            "advertises, and a registration composed from a missing path would be checked against "
+            "an absence."
+        )
+    return MockLmsPaths(
+        jwks=str(found["JWKS_PATH"]), authorization=str(found["AUTHORIZATION_PATH"])
+    )
+
+
+@pytest.fixture
+def mock_lms_selectors() -> tuple[str, ...]:
+    """`app.wrong_launches.ALL_SELECTORS`, read out of the mock and copied nowhere.
+
+    E1-07's deferred item 1 exists because this tuple cannot be imported by a
+    consumer outside `mock-lms/`: both mocks declare a package called `app` (SPEC
+    §13), so an `import app.wrong_launches` from a test module resolves to
+    whichever of the two was on `sys.path` first — ADR 0039's collision. The
+    resolution `mock_package_resolved` installs is the honest way in, and this is
+    the only place in the suite that takes it for this tuple.
+
+    **Read out and the resolution closed before the caller's body runs**, exactly
+    as `mock_lms_paths` above does and for exactly the reason its docstring
+    gives: while the mock's `app` is resolved, *this repository's* `app` is not
+    importable, so a test that migrates a database inside that window dies in
+    `ModuleNotFoundError` before its first assertion. These are plain strings, so
+    nothing is lost by copying the values out.
+
+    This is deliberately **not** a second literal copy of the vocabulary — it is
+    the tuple itself, reached the one way it can be reached. A test comparing the
+    served list against a hand-written list would be comparing two copies and
+    would agree with a served route that had gone stale in the same direction
+    (`docs/MISTAKES.md` entry 19).
+    """
+    if not MOCK_LMS_DIR.is_dir():
+        pytest.fail(
+            f"{MOCK_LMS_DIR} does not exist, so there is no `app.wrong_launches` to read the "
+            "selector vocabulary out of. SPEC §13 puts the in-repo LTI 1.3 platform at "
+            "`mock-lms/`, and E1-07 is the ticket that writes the mints."
+        )
+    with mock_package_resolved(MOCK_LMS_DIR):
+        module = importlib.import_module(f"{MOCK_PACKAGE}.wrong_launches")
+        declared = getattr(module, "ALL_SELECTORS", None)
+        found = tuple(declared) if isinstance(declared, tuple | list) else None
+
+    if not found:
+        pytest.fail(
+            "`mock-lms/app/wrong_launches.py` declares no non-empty `ALL_SELECTORS`. ADR 0088 "
+            "decision 2 makes that tuple the whole vocabulary this platform answers to, and every "
+            "check that the served list and the copied literals agree is made against it — an "
+            "absent or empty tuple would agree with everything."
+        )
+    wrong = [name for name in found if not isinstance(name, str) or not name]
+    if wrong:
+        pytest.fail(
+            f"`ALL_SELECTORS` carries {wrong!r}. A selector is the string a caller puts in "
+            "`?defect=`, so anything else names no mint."
+        )
+    return tuple(str(name) for name in found)
+
+
 @pytest.fixture
 def mock_platforms() -> Iterator[Callable[..., MockPlatform]]:
     """Start one or more independent mock platforms, and shut them all down after.
@@ -1031,8 +1393,12 @@ def mock_platforms() -> Iterator[Callable[..., MockPlatform]]:
     """
     started: list[MockPlatform] = []
 
-    def start(values: Mapping[str, str] | None = None) -> MockPlatform:
-        platform = MockPlatform(values)
+    def start(
+        values: Mapping[str, str] | None = None,
+        tool_key_set: Any | None = None,
+        tool_key_pair: Any | None = None,
+    ) -> MockPlatform:
+        platform = MockPlatform(values, tool_key_set, tool_key_pair)
         started.append(platform)
         return platform
 

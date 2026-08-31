@@ -26,14 +26,25 @@ about the system: `mock-idp/app/seed.py::LMS_INSTRUCTOR_USER_ID` names the mock
 LMS's instructor user, and a unit test pins the two constants to each other so
 the cross-mock reference cannot go stale in silence.
 
-E1's dual-door identity merge is what closes this. Until it lands, a launch and
-a web login by the same person are two unrelated verified tokens.
+E1's dual-door identity merge is what closes this. Until it landed, a launch and
+a web login by the same person were two unrelated verified tokens.
 
 **Done when** one test drives the two-hat person through both doors and asserts
 that both resolve to the *same stored identity* — one row, by its primary key,
 not two rows that happen to agree on an email address — and the constant-pinning
 unit test E0-18 left behind is deleted in the same change, because the fact it
 stands in for is then asserted directly.
+
+**Closed by E1-12** (`docs/tickets/e1/E1-12-dual-door-identity-merge.md`). The
+stored identity is the `person` row and both doors resolve to it — a launch
+through `user.lms_user_id`, a web login through a new `web_login_subject` linkage
+— and the session carries it. The done-when's test is
+`tests/integration/test_dual_door_identity_merge.py::test_the_two_hat_person_resolves_to_one_person_row_through_both_doors`,
+and `tests/unit/test_the_mock_seeds_name_one_person.py` is gone. The decision is
+[ADR 0097](../../adr/0097-the-identity-a-verified-subject-resolves-to.md); the
+mechanism it resolves through is
+[ADR 0094](../../adr/0094-subjects-resolve-to-ids-through-definer-functions.md).
+The paragraphs above are kept as the record of what E0 shipped.
 
 ## The landing role is claims-derived scaffolding, and two of its rules are unexercised
 
@@ -71,6 +82,33 @@ she gets. Deleting `landing.py`'s entry from
 change is the signal that this is finished: that exception exists only because
 the mapping names the Care role while reading a claim.
 
+**Closed by E1-13** (`docs/tickets/e1/E1-13-role-resolution-from-assignments.md`).
+`backend/app/services/landing.py` is deleted. The landing is resolved in
+`app/services/authz.py` from the session's own live assignments, filtered in SQL
+by ADR 0026's `permits_launch` / `permits_web_login`, with enrollment as the
+student fallback at the launch door alone (ADR 0028); `assignment_scope_v002.sql`
+is what publishes those two columns to the chokepoint. The decision, the ordering
+and every alternative rejected are
+[ADR 0098](../../adr/0098-the-landing-comes-from-the-assignment-model.md).
+
+A precedence did survive, so both pairs above are now held. The launch pair — the
+teaching assistant, instructor beating learner — is
+`tests/integration/test_landing_resolves_from_assignments.py::test_the_teaching_assistant_lands_on_instructor_rather_than_on_her_own_student_view`,
+restated as assignments beating enrollment. The web pair is posed twice, at both
+ends of the ordering, because a test at one end says nothing about the other:
+`::test_a_person_holding_dean_and_care_lands_on_the_leadership_view_at_the_web_door`
+and `::test_a_person_holding_care_and_admin_lands_on_the_care_view_at_the_web_door`.
+`tests/unit/test_chosen_landing.py` pins the same ordering over every ordered
+pair in both input orders, so no single transposition survives.
+
+`EXCEPTIONS` is empty — the signal this entry names — and the rule it stood for
+is stronger than it was: "Care is unreachable from a launch" no longer rests on
+an exception list or on a door refusing a smuggled claim, but on the generated
+column, exercised over a real live `CARE` assignment held by the very person
+launching, in
+`::test_a_care_only_persons_launch_is_answered_with_the_calm_page_and_never_the_care_view`.
+The paragraphs above are kept as the record of what E0 shipped.
+
 ## `LTI_PLATFORM_AUTHORIZATION_ENDPOINT` is process-wide and platforms are not
 
 The security review of E0-18 named this. Platforms resolve per issuer:
@@ -97,6 +135,19 @@ round-trips to *its own* authorization endpoint, proved by a test that would
 fail if both went to the same address — and `LTI_PLATFORM_AUTHORIZATION_ENDPOINT`
 is gone from `Settings` and `.env.example`, rather than left as a default the
 column falls back to.
+
+**Closed 2026-08-25 by E1-05.** The endpoint is a column on `lti_platform`,
+read in `begin_a_launch` off the row the issuer resolved to and carried on the
+`Initiation`, so the row that decides the client ID is the row that decides the
+address.
+`tests/integration/test_registration_endpoints_are_per_platform.py` registers
+two platforms with endpoints that differ in host as well as in path and asserts
+each redirect against its own row and *against not being the other's*. The
+setting is deleted from both places rather than demoted: a registration that
+states no endpoint is refused with `LaunchRefusedError`, because a fallback
+would be this entry re-opened under another name. `docs/adr/0075` records the
+supersession, and `docs/adr/0081` decides what a legitimate value for the column
+is.
 
 ## The client-credentials grant, and the four things that move with it
 
@@ -146,6 +197,45 @@ performed the way `pylti1p3` performs one — token requested with a tool-signed
 assertion, token attached, container returned — rather than an unauthenticated
 `GET` that happens to answer.
 
+**Closed 2026-08-25 by E1-06**, as one change over all four parts. Part 1: the
+mock's discovery document advertises `token_endpoint`, built from
+`mock-lms/app/config.py`'s new `TOKEN_PATH`, and the platform serves a `POST`
+there. Part 2: `scopes_supported` is composed in `mock-lms/app/tokens.py` from
+`app.ags::ADVERTISED_SCOPES` and `app.nrps::MEMBERSHIP_SCOPE` with `openid` still
+at its head, and the token endpoint grants off that same tuple, so a scope
+advertised but not grantable is no longer expressible. Part 3: the `/registration`
+document states `auth_token_url` — the column name, not `token_endpoint` — and
+`scripts/seed.py` writes the same address into the seeded mock row, on the
+issuer's horizon rather than the browser's, through E1-05's chokepoint. Part 4:
+the tool publishes its key set at `GET /lti/jwks` (`backend/app/lti/
+registration.py`), public in every environment, one RSA key whose `kid` is its
+RFC 7638 thumbprint and never the private half — and `pulse_app` gained `SELECT`
+on `tool_signing_key` with the code that spends it, in
+`tool_signing_key_grants_v001.sql`.
+
+The platform fetches that key set to verify the assertion, so part 4 is
+load-bearing rather than decorative, and
+`tests/integration/test_mock_lms_client_credentials_grant.py` asserts the fetch
+happened as well as the grant. The whole sequence is exercised in raw HTTP by
+`test_a_roster_is_read_with_a_token_obtained_the_way_a_service_connector_obtains_one`,
+and the six refusals each carry the request they differ from by one thing.
+**What is deliberately not closed here**: the Advantage services still answer
+without a token. E1-06 rules that enforcement pairs with E1-11's client, and this
+entry's own "done when" asks for the grant rather than for the refusal.
+`docs/adr/0084` records what the token endpoint decides and `docs/adr/0085` what
+the tool's key set does.
+
+**Half of that closed on 2026-08-27, in E1-11's fix round.** The paragraph above
+is true of AGS alone now. E1-11 built the conformant client — the event E1-06's
+ruling named — so the mock's NRPS memberships route requires a token it issued
+for the membership scope, in RFC 6750's vocabulary; SPEC §14.3's E1 exit line
+asks for exactly that ("an authenticated service call, not an unauthenticated
+GET"), and it cannot be witnessed against a platform that answers either way.
+AGS keeps the open state, because no grade-passback client exists yet: SPEC §3.4
+states the passback rule and SPEC §14.3 gives the work to **E3 — Grade
+passback**, so **E3 owns closing it** — carried with a "done when" in
+[`deferred.md`](deferred.md). `docs/adr/0099` records the split.
+
 **Also read E0-35 before writing the roster sync** — a pointer rather than a
 copy, because that ticket owns the question and restating it here would give it
 two homes.
@@ -155,6 +245,14 @@ nothing today, and E1's roster sync is the first code that writes `course`,
 `section`, `enrollment` and the `INSTRUCTOR` `role_assignment` row — every
 relation the guard names, in one module. E0-35 names E1 as its deadline for
 exactly that reason, and it records what its static sweep cannot see.
+
+**Half of this landed 2026-08-26 in E1-10.** `app.services.provisioning` is the
+first caller of `guard_write` and writes three of those four relations, so the
+guard is called by something now and ADR 0090 records how a sanctioned writer
+passes it. The sync is still the first writer of `enrollment` and of the
+`INSTRUCTOR` `role_assignment` row, and it follows that mechanism rather than
+designing one — if it finds the mechanism wrong, that is a dispute and an
+amendment to ADR 0090, not a second mechanism beside it.
 
 ## The §4.1 view sweep is blind to an aliased identity column and to join keys
 
@@ -302,7 +400,11 @@ surface, in plain words, no shield or lock iconography — are both rules about
 *shipped copy*, and nothing in the suite reads a shipped surface against either.
 The only string in the tree either rule touches is
 `backend/app/services/landing.py`'s "Nothing needs attention.", which happens to
-comply. Every screen those items govern arrives in E2 and E4, and each will be
+comply. (**Where that string lives moved twice after this was written**: E1-08
+took the five landing pages out of that module, and E1-13 deleted the module, so
+the sentence is `frontend/src/lib/landings.ts`'s now. Nothing else about this
+entry changes — one complying string in the tree either way.) Every screen those
+items govern arrives in E2 and E4, and each will be
 reviewed by a person who has read §4.1 — which is exactly the enforcement model
 §4.1's own preamble says is not enough.
 

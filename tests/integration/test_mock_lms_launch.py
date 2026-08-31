@@ -45,6 +45,7 @@ asks for strict LTI 1.3 core.
 import base64
 import json
 import re
+import secrets
 import time
 from pathlib import Path
 from typing import Any
@@ -78,6 +79,12 @@ REQUIRED_SIGNATURE_ALGORITHM = "RS256"
 # key to whoever asked.
 PRIVATE_JWK_MEMBERS = ("d", "p", "q", "dp", "dq", "qi", "k")
 
+# RFC 7515 appendix C's base64url alphabet, with no `=`. Used by
+# `test_the_published_keys_numbers_are_spelled_as_unpadded_base64url` below to
+# pin the spelling by looking at the characters — see that test's docstring for
+# why decoding cannot be the check.
+UNPADDED_BASE64URL = re.compile(r"[A-Za-z0-9_-]+")
+
 # The LTI 1.3 message claims, spelled as the specification spells them. Not this
 # suite's choice in any part: a claim under a different name is a claim
 # `pylti1p3` (SPEC §7.1) will not read.
@@ -92,6 +99,21 @@ ROLES_CLAIM = LTI_CLAIM + "roles"
 
 RESOURCE_LINK_MESSAGE_TYPE = "LtiResourceLinkRequest"
 LTI_VERSION = "1.3.0"
+
+# The two subjects the launch page's pairing is asserted by name for — E1-15,
+# and the section at the end of this module says why the pairing needed
+# asserting at all. Both are values `scripts/seed.py` writes on the Pulse side
+# and `tests/integration/test_demo_seed_script.py::MOCK_WORLD_SUBJECTS` already
+# pins as the whole of what a launch from this platform can reach, so these are
+# transcriptions of a guarded pair rather than a third independent spelling.
+#
+# `SECTION_ONLY_THE_DEAN_TAKES` appears in a failure message and nowhere in an
+# assertion: which section he is enrolled in is the seed's choice, and pinning
+# it here would make moving him a test change. What is asserted is that it is
+# exactly one.
+LEADERSHIP_SUBJECT = "mock-lms-user-dean"
+TWO_HAT_SUBJECT = "mock-lms-user-instructor"
+SECTION_ONLY_THE_DEAN_TAKES = "MATH-140-E1FF"
 
 # Every LTI role is a URI in one of the LIS v2 vocabularies — membership,
 # institution/person, system/person — and all three share this stem. LTI 1.3
@@ -258,6 +280,63 @@ def test_the_published_key_set_carries_no_private_key_material(
         "`p`, `q`, `dp`, `dq`, `qi` and `k` the private members of a JWK; publishing any of "
         "them serves the signing key to anyone who asks. Serialise the public half."
     )
+
+
+def test_the_published_keys_numbers_are_spelled_as_unpadded_base64url(
+    mock_platform: Any,
+) -> None:
+    """`n` and `e` carry no `=`, because JOSE's base64url has no padding.
+
+    **Owed here, not invented here.** `docs/tickets/e1/deferred.md`'s E1-06
+    entry, item 3: the same pin exists for the tool's own `/lti/jwks`
+    (`tests/integration/test_the_tool_publishes_its_key_set.py::test_the_
+    published_keys_numbers_are_spelled_as_unpadded_base64url`), built after the
+    E1-06 mutation battery dropped `.rstrip(b"=")` from that encoder and the
+    whole suite it was checked against stayed green — `docs/MISTAKES.md` entry
+    3 arriving in the one place that had claimed in writing to cover it. This
+    mock ships the identical encoder shape in `mock-lms/app/signing.py`
+    (`base64url`), and nothing asserted it here. E1-07 is "the first ticket
+    that touches either mock's signing surface" the deferred item names, so
+    this closes the mock LMS's third of it; the mock IdP's copy is still owed
+    to whichever ticket touches `mock-idp/app/signing.py`'s encoder first.
+
+    **Asserted on the strings, and deliberately never by decoding.** Decoding
+    is exactly the operation that forgives this defect — every base64url
+    decoder re-pads its input first, so a padded value decodes to the correct
+    integer and a test built on a decode passes regardless. `mock_platform.
+    verifies` and every claim comparison elsewhere in this module reach these
+    members only by decoding, for that reason: the encoding is one property,
+    checked once, here, by looking at the characters rather than the number
+    they represent.
+
+    A whole-string match against the alphabet rather than a search for `=`, so
+    the other ways an integer member goes wrong — a `+` or `/` from standard
+    base64, a newline, surrounding whitespace — fail the same assertion.
+    """
+    keys = mock_platform.published_keys()
+    assert keys, "The JWKS endpoint serves no keys, so this test has nothing to inspect."
+    for key in keys:
+        for member in ("n", "e"):
+            value = key.get(member)
+            assert isinstance(value, str) and value, (
+                f"The published key {key.get('kid')!r} carries `{member}` {value!r}, so there is "
+                "no spelling here to judge."
+            )
+            assert "=" not in value, (
+                f"The published key {key.get('kid')!r} spells `{member}` as {value!r}, which "
+                "carries base64 padding. RFC 7518 §2 fixes JOSE's encoding as base64url with the "
+                "trailing `=` removed; a document spelled this way is one a strict JOSE "
+                "implementation refuses to parse, and it also makes the key's RFC 7638 "
+                "thumbprint depend on whether the reader strips the padding before hashing — two "
+                "conformant platforms then compute two `kid` values for one key."
+            )
+            assert UNPADDED_BASE64URL.fullmatch(value), (
+                f"The published key {key.get('kid')!r} spells `{member}` as {value!r}, which is "
+                "not base64url. RFC 7515 appendix C allows `A-Z`, `a-z`, `0-9`, `-` and `_` and "
+                "nothing else — `+` and `/` are standard base64's alphabet and mean different "
+                "bits, and whitespace or a newline is a value some readers strip and others hand "
+                "straight to a decoder."
+            )
 
 
 def test_the_id_token_is_signed_with_rs256_and_names_a_published_key(
@@ -768,6 +847,230 @@ def test_the_launch_page_submits_by_http_post(mock_platform: Any) -> None:
         f"The launch form on `{offer.page}` submits by {offer.method.upper()} rather than "
         "POST. E0-14's scope: 'A launch page that posts the form to the tool, so a "
         "browser-driven test can click through a realistic launch.'"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Who the launch page pairs with which section — E1-15.
+#
+# **What changed, and why these tests are new rather than amended.** Until
+# E1-15 the page offered `app.seed.launch_users()`, the users enrolled in
+# *every* seeded context, and paired each of them with every placement — so
+# "every combination of the two selectors is a launch that works" held by
+# construction and nothing had to assert it. E1-12's deferral 1 needs a
+# leadership subject launchable from the page, and enrolling that person in
+# every section would put a sixth member in `NURS-8100-Q2FF`, whose five members
+# are exactly one page and are the fixture
+# `test_a_single_page_roster_advertises_first_last_and_current_and_no_next`
+# rests on.
+#
+# So the one rule became two. `LAUNCH_PAGE_CAST` says who a browser picks from —
+# a written list, filtered to the members the seed actually enrolled — and
+# `placements_for()` says which sections each of them launches from. It is
+# deliberately **not** "anybody enrolled in at least one context": that would put
+# E0-28's windowless member on the page, which
+# `test_the_windowless_member_is_an_active_student_away_from_the_add_and_drop_section`
+# forbids, and it would bury the three people every other suite reaches by name
+# under eighteen anonymous students. Either way the property that used to hold by
+# construction now has to be asserted.
+#
+# Three tests, and the first is the control for the other two: a filter written
+# to offer the new user without narrowing the placements would hand a browser a
+# dead combination, which reads as a broken platform and which
+# `resolve_launch` answers 400 to.
+# ---------------------------------------------------------------------------
+
+
+def authorization_request_for(offer: Any) -> dict[str, str]:
+    """One well-formed authorization request for exactly the launch `offer` names.
+
+    The same construction `MockPlatform.mint` uses, kept here because the tests
+    below need the *response* — including a refusal — rather than the launch
+    `mint` fails loudly when it cannot produce one.
+    """
+    request = {
+        "scope": "openid",
+        "response_type": "id_token",
+        "response_mode": "form_post",
+        "prompt": "none",
+        "state": secrets.token_urlsafe(24),
+        "nonce": secrets.token_urlsafe(24),
+        "redirect_uri": offer.parameters.get("target_link_uri", ""),
+    }
+    for name in ("login_hint", "lti_message_hint", "client_id", "lti_deployment_id"):
+        value = offer.parameters.get(name)
+        if value:
+            request[name] = value
+    return request
+
+
+def post_authorization(platform: Any, request: dict[str, str]) -> Any:
+    """POST one authorization request and hand back whatever the platform answered."""
+    path = platform.endpoint(
+        "authorization_endpoint",
+        ("auth",),
+        "receives the tool's authorization request and answers with a signed `id_token`",
+    )
+    return platform.client.post(path, data=request)
+
+
+def offered_pairs(platform: Any) -> set[tuple[str, str]]:
+    """Every (user, placement) the launch page would submit, as a set of pairs."""
+    return {
+        (str(offer.parameters.get("login_hint")), str(offer.parameters.get("lti_message_hint")))
+        for offer in platform.require_offers()
+        if offer.parameters.get("login_hint") and offer.parameters.get("lti_message_hint")
+    }
+
+
+def test_every_launch_the_page_offers_is_one_this_platform_signs(mock_platform: Any) -> None:
+    """The control on the two tests below, and the rule E1-15's filter must not break.
+
+    `mock-lms/app/pages.py` states it: the page's two selectors are chosen
+    independently, "so an option that is only a launch in some sections is an
+    option that produces a `400` — which reads, from a browser, as a broken
+    platform rather than as a dead choice". A filter that widened the user list
+    without narrowing the placement list is exactly that mutation, and it is the
+    obvious first way to write the change E1-15 asks for.
+
+    It is also what protects six other suites. `test_lti_launch_door.py`,
+    `test_the_launch_views_name_nobody.py`, `test_web_login_door.py`,
+    `test_mock_lms_ags_line_items_and_scores.py`, this module's own
+    `launches_across_seeded_offers` and the `seeded_contexts` fixture all mint
+    every offer the page publishes; a dead combination turns each of them red at
+    once, in a message about a launch rather than about a launch page.
+
+    The emptiness guard comes first because "every offered launch signs" is
+    satisfied perfectly by a page that offers none (`docs/MISTAKES.md` entry 3).
+    """
+    offers = mock_platform.require_offers()
+    subjects = {offer.parameters.get("login_hint") for offer in offers}
+    assert len(subjects) > 1, (
+        f"The launch page offers {len(offers)} launches naming {sorted(map(str, subjects))}. With "
+        "one user there is no pairing to be right or wrong about, and the two tests below would "
+        "be about a page that cannot express the property."
+    )
+
+    refused = []
+    for offer in offers:
+        answered = post_authorization(mock_platform, authorization_request_for(offer))
+        if answered.status_code != 200:
+            refused.append(
+                (
+                    offer.parameters.get("login_hint"),
+                    offer.parameters.get("lti_message_hint"),
+                    answered.status_code,
+                )
+            )
+    assert not refused, (
+        f"The launch page offers {len(refused)} combination(s) this platform will not sign: "
+        f"{refused}. `resolve_launch` refuses a (user, context) pair the seed does not hold, so "
+        "an offered pair that is refused is a dead option on the page — a browser picks it, gets "
+        "a 400, and reads the platform as broken. E1-15 widens who the page offers; the placement "
+        "list has to narrow with it."
+    )
+
+
+def test_the_launch_page_pairs_each_user_with_only_their_own_sections(mock_platform: Any) -> None:
+    """The other direction: the page's pairs are a filter, not a cartesian product.
+
+    **The mutation this kills** is the one the control above cannot see: a page
+    that keeps offering every user against every placement stays green there for
+    as long as every offered user happens to be enrolled everywhere, and silently
+    stops being able to express the new seed at all. The observable difference
+    between a filtered page and a product is that a filtered one leaves some
+    (user, placement) combination unoffered — and this asserts both that such a
+    combination exists and that the platform refuses it, which is what says the
+    page is filtering for a reason rather than dropping options at random.
+
+    Written over what the page publishes rather than over the seed's names, so a
+    reseeding moves it. The subjects and sections themselves are named in the
+    test below, which is the legible inventory.
+
+    A page that offers one user, or one placement, cannot express this property
+    at all; that case fails in the control above rather than here.
+    """
+    pairs = offered_pairs(mock_platform)
+    users = sorted({user for user, _ in pairs})
+    placements = sorted({placement for _, placement in pairs})
+    assert users and placements, (
+        "The launch page publishes no (user, placement) pairs at all, so there is no pairing to "
+        "assert about."
+    )
+
+    unoffered = sorted(
+        (user, placement)
+        for user in users
+        for placement in placements
+        if (user, placement) not in pairs
+    )
+    assert unoffered, (
+        f"The launch page offers every one of its {len(users)} users against every one of its "
+        f"{len(placements)} placements. That is the product it published before E1-15, and it is "
+        "only correct while every offered user is enrolled in every seeded context — which stops "
+        "being true with the leadership subject E1-12 deferral 1 owes, who is enrolled in one "
+        "section so that `NURS-8100-Q2FF` keeps the five members its single-page fixture needs."
+    )
+
+    user, placement = unoffered[0]
+    request = authorization_request_for(mock_platform.require_offers()[0])
+    request["login_hint"] = user
+    request["lti_message_hint"] = placement
+    answered = post_authorization(mock_platform, request)
+    assert answered.status_code == 400, (
+        f"An authorization request naming {user!r} in placement {placement!r} — a combination the "
+        f"launch page deliberately does not offer — was answered {answered.status_code}. "
+        "`resolve_launch` refuses a (user, context) pair the seed does not hold, and it has to: "
+        "the page's filtering is a convenience for a browser, and the endpoint is what makes it a "
+        f"rule. Body begins {answered.text[:200]!r}."
+    )
+
+
+def test_the_leadership_subject_is_offered_one_section_and_the_instructor_every_one(
+    mock_platform: Any,
+) -> None:
+    """The inventory, by name: who the page offers which sections to.
+
+    The general property is asserted above; this is the legible half, so that a
+    seed that stopped offering the dean — or that quietly enrolled him
+    everywhere — fails in a message naming him rather than in one about set
+    arithmetic. Both halves are here because each is a different mutation:
+
+      - the leadership subject offered **no** placements is the mock LMS never
+        seeding him (E1-12 deferral 1), which is what E1-15's browser proof
+        cannot be driven without;
+      - the leadership subject offered **every** placement is the seed enrolling
+        him in every context, which puts a sixth member in `NURS-8100-Q2FF` and
+        breaks the one-page container
+        `test_a_single_page_roster_advertises_first_last_and_current_and_no_next`
+        is written against;
+      - the instructor offered **fewer** than every placement is the filter
+        overshooting, which would take sections away from the person every other
+        suite in this repository launches as.
+
+    The instructor's expected count is the number of placements the page offers
+    anybody, rather than a literal three, so a seed that grows a fourth section
+    moves this test with it.
+    """
+    pairs = offered_pairs(mock_platform)
+    placements = {placement for _, placement in pairs}
+    assert placements, "The launch page offers no placements, so neither half below is about it."
+
+    leadership = sorted(placement for user, placement in pairs if user == LEADERSHIP_SUBJECT)
+    instructor = sorted(placement for user, placement in pairs if user == TWO_HAT_SUBJECT)
+
+    assert len(leadership) == 1, (
+        f"The launch page offers {LEADERSHIP_SUBJECT} {len(leadership)} placements: {leadership}. "
+        "E1-12 deferral 1 asks for a launchable leadership subject enrolled in at least one "
+        f"context; E1-15 seeds him into exactly one ({SECTION_ONLY_THE_DEAN_TAKES}) so that "
+        "`NURS-8100-Q2FF` keeps the five members its single-page container fixture rests on. Zero "
+        "means the mock platform still has no dean and E1-15's clause-1 launch cannot be driven."
+    )
+    assert sorted(placements) == instructor, (
+        f"The launch page offers {TWO_HAT_SUBJECT} {instructor} and offers "
+        f"{sorted(placements)} to somebody. He teaches every seeded section, so narrowing his "
+        "list is the per-user filter overshooting — and he is the subject `lti-launch.spec.ts`, "
+        "`cookieless-launch.spec.ts`, `two-hat.spec.ts` and three of E1-15's own specs launch as."
     )
 
 

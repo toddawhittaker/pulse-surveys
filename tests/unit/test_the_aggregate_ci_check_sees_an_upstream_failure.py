@@ -28,9 +28,11 @@ on, transitively, including `detect`. That rules out the second remedy *on its
 own*: adding the four fast jobs to `ci`'s needs catches a `migration-drift`
 failure but not a `detect` failure, which still cascades to an all-`skipped` join.
 Treating `skipped` as a failure covers both, and the file supports it: every
-`detect`-driven tolerance in `e2e`, `evals`, `frontend-build` and `lint-frontend`
-is at the *step* level, so no job in `ci`'s needs is ever legitimately skipped and
-a skip there always means an upstream failure.
+`detect`-driven tolerance left in this workflow is at the *step* level, so no job
+in `ci`'s needs is ever legitimately skipped and a skip there always means an
+upstream failure. There are fewer of them than there were — E1-04 makes the four
+frontend gates enforcing and withdraws the probe they waited on, so `evals` is the
+last one, and SPEC §14.3 gives that to E2.
 
 **That last sentence is true and it is not the whole picture, which is worth
 saying here because this module is where somebody will come looking.** Step-level

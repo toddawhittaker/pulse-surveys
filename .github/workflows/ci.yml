@@ -219,7 +219,6 @@ jobs:
     name: Detect what exists
     runs-on: ubuntu-latest
     outputs:
-      frontend: ${{ steps.d.outputs.frontend }}
       node: ${{ steps.d.outputs.node }}
       evals: ${{ steps.d.outputs.evals }}
     steps:
@@ -255,26 +254,41 @@ jobs:
           # and the §9.2 specs there. `npm audit`, the licence scan, `tsc` and
           # `eslint` all asked `frontend/package.json`, which does not exist and
           # is not due until E1, so four gates reported green over a tree they
-          # never read. So there are two questions here and they are asked
-          # separately: `node` is the root manifest and gates those four, and
-          # `frontend` is the E1 manifest and gates the production build and the
-          # bundle budget, which are still legitimately waiting for the scaffold.
-          # A single probe answering both would put `npm run build` in a
-          # directory that is not there.
+          # never read. `node` is that question asked honestly: the root
+          # manifest, which is where this repository's Node tree is.
+          #
+          # It gated `tsc` and `eslint` too until E1-04. That ticket lands the
+          # application those two check, and ADR 0002 makes removing a tolerance
+          # an acceptance criterion of the ticket that lands the code, so they
+          # now run unconditionally and this probe gates `npm audit` and the
+          # licence scan alone.
+          #
+          # **There was a `frontend` probe here, and E1-04 withdrew it.** It
+          # asked whether `frontend/package.json` declared a `build` script — the
+          # narrowing ADR 0083 made when the workspace layout committed that
+          # manifest on every branch — and it gated the production build and the
+          # bundle budget while both were legitimately waiting for the scaffold.
+          # E1-04 lands the scaffold and makes all four frontend gates enforcing,
+          # so those two readers stopped reading it. A boolean nothing consults
+          # is worse than an unused variable: its wrongness produces no symptom
+          # at all, so nobody finds out it is wrong, and the next gate wired to it
+          # inherits an answer nothing has ever checked. It goes in the same
+          # change as its last reader rather than being left emitting.
           echo "Probing repository layout (SPEC §13):"
           if [ -f package.json ]; then emit node true; else emit node false; fi
-          if [ -f frontend/package.json ]; then emit frontend true; else emit frontend false; fi
           # The exact module the job imports, in the shape the manifest probes
           # already use. Stricter than "some Python exists under tests/evals",
           # and deliberately: a tree with `__init__.py` and no runner would make
           # that glob answer true and the job then fails on the import.
           if [ -f tests/evals/runner.py ]; then emit evals true; else emit evals false; fi
           #
-          # There is deliberately no `e2e` probe. PR #61 made the Playwright gate
-          # unconditional on the specs being present, so nothing consumed that
-          # output; a boolean nobody reads is a probe whose wrongness has no
-          # symptom, which is the failure this comment's first paragraph is
-          # about. E0-40 decision 5 removed it.
+          # There is deliberately no `e2e` probe and no `frontend` one. PR #61
+          # made the Playwright gate unconditional on the specs being present and
+          # E1-04 made the four frontend gates enforcing, so in each case nothing
+          # consumed the output any more; a boolean nobody reads is a probe whose
+          # wrongness has no symptom, which is the failure this comment's first
+          # paragraph is about. E0-40 decision 5 removed the first, E1-04 the
+          # second.
 
   # ==========================================================================
   # FAST GATES — everything else waits on these.
@@ -307,6 +321,28 @@ jobs:
         run: |
           pip install --require-hashes -r requirements-dev.txt
           pip install -e . --no-deps --no-build-isolation
+
+      # mypy's incremental cache, which is what makes the three runs below cost
+      # seconds instead of minutes on a warm runner. All three write to the same
+      # `.mypy_cache/` at the repository root, so one entry covers them.
+      #
+      # The key is the runner OS, the pinned mypy version, and the hash of the
+      # dev lockfile: a cache written by a different mypy, or over a different
+      # set of installed type stubs, describes types this run does not have. The
+      # restore-keys prefix lets a lockfile bump start from the previous
+      # closure's cache rather than from nothing — mypy revalidates what it
+      # restores, so a stale entry costs time, never correctness. The same
+      # revalidation is why three packages all called `app` sharing one cache
+      # directory is safe: an entry records the source path it came from, and
+      # one written for another `app` is rejected and recomputed. What all three
+      # genuinely share is the third-party stub cache, which is the bulk of it.
+      - name: Cache mypy's incremental results
+        uses: actions/cache@v6
+        with:
+          path: .mypy_cache
+          key: mypy-${{ runner.os }}-${{ env.MYPY_VERSION }}-${{ hashFiles('requirements-dev.txt') }}
+          restore-keys: |
+            mypy-${{ runner.os }}-${{ env.MYPY_VERSION }}-
 
       # mypy runs over backend/, with the strict profile pinned to
       # app/services/ and app/ai/contracts.py in pyproject.toml. Those two are
@@ -349,12 +385,40 @@ jobs:
       # suite is where someone looks for them. The duplication is the same shape
       # as `ci-selftest` re-running the classifier battery, and for the same
       # reason: a guard inside a job the classifier can switch off is not a guard.
+      # E1-05 adds two entries here, both widenings.
+      #
+      # The third private-key id is the control one level out. The matcher
+      # control above proves that `holds_pem_private_key` reads a header; it
+      # says nothing about the *walk*, and the sweep asserts that a walk
+      # produced an empty list — which is what a walk that pruned too far
+      # produces too (docs/MISTAKES.md entry 35). That control belongs beside
+      # the sweep it protects, in the same job, or the protected run is the one
+      # without it.
+      #
+      # The fourth entry is a whole module rather than node ids, and the
+      # granularity is deliberate: every test in
+      # `test_the_process_wide_authorization_endpoint_is_gone.py` is either the
+      # sweep or one of its three controls, so the file is exactly the set that
+      # has to travel together, and a control added later comes with it instead
+      # of being forgotten here. Its subject is every tracked file, `docs/`
+      # included, which is why it is in this job at all.
+      #
+      # The fifth entry is E1-02's `@types/node` guard, and it is here because
+      # the guard that forces this decision said so rather than because anyone
+      # noticed. It walks the repository for every `package.json` — the pin may
+      # sit in any of them, and E1-04 will move it — and
+      # `classify_changed_paths.py` calls `docs/package.json` inert, measured
+      # rather than assumed. So a documentation-only pull request can commit a
+      # manifest this guard reads, on the one run where it would not have run.
       - name: Repository-wide sweeps that a docs-only diff must not switch off
         run: |
           pytest -q \
             "tests/unit/test_no_unresolved_merge_conflicts.py::test_the_index_holds_no_conflict_marker" \
             "tests/unit/test_mock_lms_service.py::test_no_private_key_material_is_committed_to_the_repository" \
-            "tests/unit/test_mock_lms_service.py::test_the_private_key_matcher_finds_a_private_key_and_ignores_a_public_one"
+            "tests/unit/test_mock_lms_service.py::test_the_private_key_matcher_finds_a_private_key_and_ignores_a_public_one" \
+            "tests/unit/test_mock_lms_service.py::test_the_sweep_itself_finds_a_planted_key_and_not_a_tree_without_one" \
+            "tests/unit/test_the_process_wide_authorization_endpoint_is_gone.py" \
+            "tests/unit/test_types_node_tracks_runtime.py"
 
   # The job keeps its id and its display name. Branch protection's required-check
   # list keys on the display name, and renaming it is a change to that list
@@ -363,17 +427,31 @@ jobs:
   #
   # What changed is what it reads. `tsc` and `eslint` ran in `frontend/` on
   # `detect.outputs.frontend`, a directory that does not exist; they now run at
-  # the repository root on `detect.outputs.node`, over `playwright.config.ts` and
-  # the §9.2 specs, which is the TypeScript this repository actually holds.
+  # the repository root on `playwright.config.ts` and the §9.2 specs, and — from
+  # E1-04 — in the frontend workspace on the application.
   #
-  # And the job joins E0-38's documentation-only short-circuit. Its exemption was
-  # justified by being free — with the frontend probe false every step switched
-  # itself off — and E0-40 is what makes it cost an `npm ci` plus two checkers on
-  # every pull request. A documentation-only diff changes no TypeScript and no
+  # **E1-04 is where this job stopped being tolerant.** It consulted
+  # `detect.outputs.node` and printed a notice in place of the work when the
+  # answer was no; ADR 0002 makes removing a tolerance an acceptance criterion of
+  # the ticket that lands the code, and this is that ticket for `tsc` and
+  # `eslint`. The probe is gone from every step here, the notice that stood in
+  # for the checkers is gone with it, and there is nothing left to decide: the
+  # root manifest is committed and so is the application.
+  #
+  # The two workspace steps are the other half of the flip and the one that is
+  # easy to miss. Since E0-40 these checkers have read `playwright.config.ts` and
+  # the §9.2 specs, which was genuinely all the TypeScript this repository held;
+  # E1-04 lands several hundred lines more of it in a package with its own
+  # `tsconfig.json` and its own eslint configuration, and a gate that went on
+  # reading only the root would exit 0 over every line of it — `docs/MISTAKES.md`
+  # entry 36 arriving through a workspace boundary instead of through a probe.
+  #
+  # The job keeps E0-38's documentation-only short-circuit, which is a different
+  # clause and stays: a documentation-only diff changes no TypeScript and no
   # manifest, so it is exactly the diff these checkers have nothing to read.
   lint-frontend:
     name: Fast · tsc + eslint
-    needs: [changed, detect]
+    needs: [changed]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -384,28 +462,35 @@ jobs:
           echo "::notice::Every changed path is inert documentation (E0-38), so tsc and eslint did not run."
           echo "This job ran and reports success, so the required CI check still sees it."
 
-      - name: Nothing to check yet
-        if: needs.detect.outputs.node != 'true' && needs.changed.outputs.inert != 'true'
-        run: echo "::notice::No package.json at the repository root — tsc and eslint have nothing to check."
-
       - uses: actions/setup-node@v7
-        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.changed.outputs.inert != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: package-lock.json
 
+      # The one lockfile, at the root, resolving the whole workspace (ADR 0083).
+      # It installs the frontend's closure as well as the root's, which is what
+      # makes the two workspace steps below possible without a second install.
       - name: Install (lockfile, exact)
-        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.changed.outputs.inert != 'true'
         run: npm ci
 
-      - name: tsc --noEmit
-        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
+      - name: tsc --noEmit (root)
+        if: needs.changed.outputs.inert != 'true'
         run: npx tsc --noEmit
 
-      - name: eslint
-        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
+      - name: eslint (root)
+        if: needs.changed.outputs.inert != 'true'
         run: npx eslint . --max-warnings=0
+
+      - name: tsc --noEmit (frontend workspace)
+        if: needs.changed.outputs.inert != 'true'
+        run: npm run typecheck --workspace frontend
+
+      - name: eslint (frontend workspace)
+        if: needs.changed.outputs.inert != 'true'
+        run: npm run lint --workspace frontend
 
   # Enforcing since e0/db-session-alembic (E0-04): `backend/alembic.ini` and the
   # revision chain exist, so this job no longer tolerates their absence.
@@ -536,9 +621,25 @@ jobs:
   # Enforcing since e0/db-session-alembic (E0-04): the suite exists, so this job
   # no longer tolerates its absence. A change that breaks collection now fails
   # this gate instead of switching it off.
+  # This job does **not** wait on `fast-gate`. It is the longest job in the
+  # pipeline, and holding it behind a three-and-a-half minute lint gate added
+  # that gate's duration to every green run's wall clock. Nothing in the steps
+  # below reads anything `fast-gate` produces — the only `needs` output any of
+  # them consults is `changed.outputs.inert` — so the edge was ordering, not
+  # data, and ordering is what cost the time.
+  #
+  # `fast-gate` is unchanged and still a required leg of the aggregate `ci` job
+  # at the bottom of this file, so red lint still fails the pipeline. What is
+  # given up is runner minutes: a push with red lint now burns this job too.
+  # That is the trade and it is the whole trade — no job-level `if:` is
+  # introduced here or anywhere else, because the aggregate treats a skipped
+  # job as a failure and every tolerance in this pipeline stays at step level
+  # (docs/adr/0002-ci-gates-ship-tolerant.md, and
+  # tests/unit/test_the_aggregate_ci_check_sees_an_upstream_failure.py is the
+  # regression test).
   test:
     name: Test · pytest + invariants
-    needs: [changed, fast-gate]
+    needs: [changed]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -589,6 +690,13 @@ jobs:
           python scripts/ci/check_invariants.py reports/invariants.xml
           python scripts/ci/check_invariant_assertions.py tests
 
+      # `-n 4` is pytest-xdist: four worker processes over the same collection.
+      # This pass is the pipeline's wall clock, and it is the only pass that
+      # runs under xdist — the invariant pass above stays serial on purpose
+      # (docs/adr/0104-the-unit-and-integration-pass-runs-under-xdist.md, which
+      # also records what the four workers cost: each is a full pytest session,
+      # so each provisions its own testcontainers Postgres and runs alembic
+      # once). `make test` runs the same flag.
       - name: Unit + integration with coverage
         if: needs.changed.outputs.inert != 'true'
         env:
@@ -596,7 +704,7 @@ jobs:
           # is what it talks to.
           TESTCONTAINERS_RYUK_DISABLED: 'false'
         run: |
-          pytest tests/unit tests/integration \
+          pytest tests/unit tests/integration -n 4 \
             --cov=backend/app --cov-report=term-missing --cov-report=xml \
             --junitxml=reports/pytest.xml
 
@@ -885,47 +993,56 @@ jobs:
 
   frontend-build:
     name: Build · frontend + bundle budget
-    needs: [changed, detect, fast-gate]
+    needs: [changed, fast-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      # The sixth expensive job of the seven. It is free today only because
-      # `detect.outputs.frontend` is false and there is no frontend to build;
-      # once the scaffold lands it is an `npm ci` and a production build, which
-      # is the same order of cost as the others. E0-38's security review found it
-      # guarded by neither the ticket, the ADR nor the pull request body, all
-      # three of which said five.
+      # The sixth expensive job of the seven, and from E1-04 it is genuinely
+      # expensive: an `npm ci`, a production build and a bundle measurement on
+      # every pull request that is not documentation-only. It was free while
+      # `detect.outputs.frontend` was false, which is why E0-38's security review
+      # found it guarded by neither the ticket, the ADR nor the pull request
+      # body — all three of which said five expensive jobs.
       #
-      # This job keeps the `frontend` probe, and that is the half of E0-40 that
-      # is easy to lose: the split is only honest while the two probes stay
-      # different questions. A blanket rename of `detect.outputs.frontend` to
-      # `detect.outputs.node` — which is how this file has been edited before —
-      # would point `npm run build` at a directory that holds no application.
+      # **The probe is gone, and E1-04 is what removed it.** ADR 0002: removing a
+      # tolerance is an acceptance criterion of the ticket that lands the
+      # corresponding code. The scaffold is committed, so the question that probe
+      # asked is answered by the tree on every branch from now on — and a
+      # condition that is always true is not harmless, it is a switch nobody is
+      # watching whose failure has no symptom.
+      #
+      # E0-38's documentation-only short-circuit is a different clause and stays.
       - name: Inert diff, so the frontend build did not run
         if: needs.changed.outputs.inert == 'true'
         run: echo "::notice::Every changed path is inert documentation (E0-38), so no frontend bundle was built."
 
-      - name: Nothing to build yet
-        if: needs.detect.outputs.frontend != 'true' && needs.changed.outputs.inert != 'true'
-        run: echo "::notice::No frontend/ yet. Enforcing once the frontend scaffold lands."
-
+      # The one lockfile, at the root. `frontend/` is a workspace member of the
+      # root package (ADR 0083), so it has no lockfile of its own to cache on and
+      # no install of its own to run: the root `npm ci` resolves the whole
+      # workspace, and `--workspace frontend` picks the script to run out of it.
+      # A `cache-dependency-path` naming a file that is not there is not a
+      # tolerated miss — setup-node fails the step — so this line moved with the
+      # lockfile in the same change (E1-02, acceptance criterion 4).
       - uses: actions/setup-node@v7
-        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.changed.outputs.inert != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Production build
-        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
-        working-directory: frontend
+        if: needs.changed.outputs.inert != 'true'
         run: |
           npm ci
-          npm run build
+          npm run build --workspace frontend
 
+      # The budget is read from the committed file rather than left to the
+      # script's own default: a limit nobody reviewed is a limit nobody can see
+      # move. E1-04 re-baselined both numbers against the first real build and
+      # `ci/bundle-budget.json` says how they were chosen.
       - name: Bundle budget
-        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.changed.outputs.inert != 'true'
         run: python scripts/ci/check_bundle_size.py frontend/dist --budget ci/bundle-budget.json
 
   # ==========================================================================

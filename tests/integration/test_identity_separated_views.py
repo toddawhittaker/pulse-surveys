@@ -41,6 +41,35 @@ message points away from the defect spends the one moment somebody was looking.
 the two planted-file tests below it are the demonstration that neither the
 `SCRIPTS` tuple nor the qualification sweep changes its answer.
 
+**E1-01 adds a fourth mechanism to that guard and two inventories beside it.**
+The reviewer self-test that found E0-34's blind spots found two more, recorded as
+"The §4.1 view sweep is blind to an aliased identity column and to join keys" in
+`docs/tickets/e1/carried-from-e0.md`: the three mechanisms below are all phrased
+over the identity *vocabulary*, and a view's author chooses the label a column
+arrives under. `ui.display_name AS respondent_display_name` matches no fragment,
+carries no marker, and names a column this schema does not have — and the sweep
+was measured green over the file that selects it. The `bound column` mechanism
+reads what an alias is bound *to* instead: a read of any column of `user`,
+`user_identity` or `person` other than the keys a view joins on. That closes
+`user.lms_user_id` with it, which is the same entry's second finding and which no
+rule in this repository looked at before.
+
+**A fresh-context security review then found a third route, and it is why the
+`whole row` and `star` mechanisms sweep the guarded tables and not only the
+marked ones.**
+`SELECT to_jsonb(u) AS platform_ref FROM public."user" u` writes no column name,
+no `*` and no qualified reference, so the `column`, `star` and `bound column`
+mechanisms are all silent — and the `whole row` mechanism iterated the tables
+carrying a *marked* column, which `user` does not and by ADR 0001's design never
+will. One statement carrying every value `user` holds, seen by four mechanisms
+and reported by none. `SELECT * FROM public."user"` was open through the `star`
+mechanism for the identical reason and is closed in the same change, because a
+finding names one spelling and a guard owes an answer for the class. The same
+review found the quoted spelling `SELECT "user".lms_user_id FROM public."user"`,
+which binds no alias and puts a quote where the read pattern expected a dot.
+Every one of them has a shape in the inventories below, and each has an
+allow-side pair.
+
 **The guard's two controls read their inventory from constants and not from the
 table of mechanisms they control**, and that separation is load-bearing rather
 than stylistic: with the controls parametrised over `IDENTITY_MECHANISMS`,
@@ -620,6 +649,7 @@ def test_alembic_upgrade_head_creates_the_identity_separated_read_views(
     )
 
 
+@pytest.mark.invariant
 def test_every_read_view_is_created_from_a_sql_file_under_views_sql(
     migrated_engine: Any,
 ) -> None:
@@ -638,6 +668,21 @@ def test_every_read_view_is_created_from_a_sql_file_under_views_sql(
     The search is by name and the canary is the word `select`: a directory of
     view SQL certainly contains it, so a search that has gone blind against these
     files says so here rather than passing (`docs/MISTAKES.md` entry 3).
+
+    **`invariant`-marked, as E1-01's deferral item 4 asks.** Every §4.1 rule this
+    module asserts over the `views_sql/` *files* — the schema-qualification sweep
+    and the identity-column sweep both — is total only because every live view
+    ships through one of those files, and this test is the whole of what says so.
+    It ran in the ordinary suite alone, so the isolated §4.1 pass never collected
+    the one test holding the text half's completeness: a view inlined into a
+    revision would have taken both file sweeps out of reach while that pass went
+    on reporting a clean run over the tests that were left. E1-01 item 1's
+    text/catalog complementarity is the argument that needs it.
+
+    The marker adds a second reader rather than a second rule: the body already
+    asserts directly, which is what `scripts/ci/check_invariant_assertions.py`
+    requires of a marked test under E0-36 §3, so nothing here was restructured to
+    carry it.
     """
     with migrated_engine.connect() as connection:
         views = read_views(connection)
@@ -1022,7 +1067,20 @@ def test_every_relation_a_view_sql_file_names_is_schema_qualified(migrated_engin
         if found:
             offenders[path.name] = found
 
-    assert not offenders, (
+    # **The operand is a bool on purpose, and it is a repair rather than a
+    # style.** Written as `assert not offenders`, pytest's assertion rewriting
+    # appends the repr of the dict to the exception, so the offending file name
+    # appears in `str(failure.value)` whatever this message says — and
+    # `test_the_schema_qualification_failure_does_not_hide_the_identity_failure`,
+    # whose whole job is to establish that this message names the file, would
+    # pass against a message that had stopped naming anything. With a plain bool
+    # there is nothing for the rewriter to expand: the explanation is
+    # `assert False`, and the names below are the only names in the failure.
+    # The same fix, in the same shape, as `agrees` in
+    # `tests/integration/test_identity_grants.py`, where the mutation battery
+    # measured it (E1-01, deferral item 3).
+    clean = not offenders
+    assert clean, (
         f"These view files name a relation without a schema: {offenders}. Postgres searches the "
         "temporary schema first for relation names — being unlisted in `search_path` is what puts "
         "it first, not what skips it — so an unqualified name is a table the *reader* can choose. "
@@ -1168,6 +1226,14 @@ IDENTITY_MARKER_NAMES = (
     "database_marked_columns",
     "identity_bearing_columns",
     "IDENTITY_NAME_FRAGMENTS",
+    # E1-01's two, borrowed for the same reason as the four above rather than
+    # retyped here: `PERSON_TABLES` is the set of tables that hold a person by
+    # construction and `JOIN_KEY_COLUMNS` is the closed list of columns a view may
+    # read from one of them. Both are decided next door, where the marker
+    # convention is defined, and a second copy here would be the copy that does
+    # not get the next widening (`docs/MISTAKES.md` entry 3).
+    "PERSON_TABLES",
+    "JOIN_KEY_COLUMNS",
 )
 
 # The file planted by the two demonstration tests, and the view it creates. The
@@ -1256,12 +1322,24 @@ class IdentityVocabulary(NamedTuple):
     is about the message rather than about the red: the same file already fails
     the schema-qualification sweep, whose message is about `public.` prefixes, and
     a reader who fixes four prefixes has left the identity join in place.
+
+    **`guarded` and `join_keys` are E1-01's, and neither is derived from the
+    marker at all.** The three fields above all answer "which columns hold
+    identity", which is a judgement about names and values; these two answer
+    "which tables hold a person, and what may be read from one", which is a fact
+    about the schema's shape. The difference is the whole of what E1-01 closes:
+    `user` carries no marked column by construction — ADR 0001 puts the key and
+    the platform reference there so that they are *not* identity — so it is
+    absent from `tables`, present in `guarded`, and `user.lms_user_id` is a
+    stable per-person key at the platform that no name-based rule sees.
     """
 
     tables: frozenset[str]
     columns: frozenset[str]
     ambiguous: frozenset[str]
     carried: dict[str, tuple[str, ...]]
+    guarded: frozenset[str]
+    join_keys: frozenset[str]
 
 
 class IdentityFinding(NamedTuple):
@@ -1294,10 +1372,26 @@ class IdentityMechanism(NamedTuple):
 
 
 class RequiredShape(NamedTuple):
-    """A shape this guard must catch, and the mechanism label required to catch it."""
+    """A shape this guard must catch, the label required to catch it, what it must name.
+
+    **`expected` is E1-01's, and it defaults to what every shape before it
+    required**, so the sixteen shapes that predate it are unchanged in meaning:
+    the finding must name `{column}`, the identity column this database really
+    carries. It is a field rather than a constant because the `bound column`
+    mechanism reports `table.column` — it has to, since the column it catches may
+    exist in no schema and mean nothing on its own — and because the reviewer's
+    fixture reads two different columns off two different person tables in one
+    statement, so one shape can require two findings.
+
+    A shape that declared nothing would be one whose control asserts only that
+    *something* was reported, and that is the state this file's own history warns
+    about twice: a shape two mechanisms both catch kept such an assertion true
+    with either one deleted.
+    """
 
     label: str
     template: str
+    expected: tuple[str, ...] = ("{column}",)
 
 
 def identity_marker_module() -> Any:
@@ -1392,6 +1486,8 @@ def build_identity_vocabulary(engine: Any, marker: Any) -> IdentityVocabulary:
         columns=frozenset(names - ambiguous),
         ambiguous=frozenset(ambiguous),
         carried={table: tuple(columns) for table, columns in carried.items()},
+        guarded=frozenset(marker.PERSON_TABLES),
+        join_keys=frozenset(column.lower() for column in marker.JOIN_KEY_COLUMNS),
     )
 
 
@@ -1542,6 +1638,23 @@ def identity_columns_a_star_reaches(body: str, vocabulary: IdentityVocabulary) -
     names alone is green against the widest read in the schema. It is also one of
     the two places the table-grained marker is honoured, because a `*` really does
     reach every column of the table it stars.
+
+    **It sweeps the guarded person tables too, for the reason
+    `identity_rows_read_whole` below now does.** The security review that found
+    `to_jsonb(u)` invisible on this side named that spelling; `SELECT * FROM
+    public."user"` is the same exposure through this mechanism, and it was
+    invisible for the identical reason — the iteration was over the tables
+    carrying a *marked* column, and `user` carries none by ADR 0001's design.
+    Widening only the mechanism the review happened to name would have left the
+    wider of the two reads open, which is `docs/MISTAKES.md` entry 35's rule read
+    the wrong way round: a finding names one currency and the guard owes an answer
+    for the class.
+
+    The catalog rule does catch that one — a `*` records a column dependency for
+    every column, so `test_identity_column_marker.py` sees it — which makes this a
+    gap only for a `views_sql/` file no revision has executed. That is precisely
+    the state E0-34 exists to cover, so it is closed here rather than left to the
+    other side.
     """
     if not SELECTS_A_STAR.search(body):
         return ()
@@ -1549,9 +1662,9 @@ def identity_columns_a_star_reaches(body: str, vocabulary: IdentityVocabulary) -
         sorted(
             {
                 column
-                for table in vocabulary.tables
+                for table in sorted(vocabulary.tables | vocabulary.guarded)
                 if names_a_relation(body, table)
-                for column in vocabulary.carried.get(table, ())
+                for column in vocabulary.carried.get(table, ()) or (f"{table}.*",)
             }
         )
     )
@@ -1602,6 +1715,32 @@ def identity_rows_read_whole(body: str, vocabulary: IdentityVocabulary) -> tuple
     reference — `ui.identity_name` — is a column read and belongs to the column
     mechanism; the whole row is what is left.
 
+    **It sweeps the guarded person tables as well as the marked ones, which is
+    E1-01's widening and a security review's finding.** As E0-34 wrote it, this
+    iterated the tables carrying a marked column and skipped any table with none
+    — and `user` has none by construction, because ADR 0001 puts the key and the
+    platform reference there precisely so that they are *not* identity. So
+    `SELECT to_jsonb(u) AS platform_ref FROM public."user" u` was seen by no
+    mechanism here and by neither dependency grain in the catalog: the shape that
+    carries `lms_user_id` and everything else `user` holds, reported by nothing.
+    A table with no marked column now reports `<table>.*`, because there is no
+    column name to report and the star is what tells a reader which shape they
+    are looking at.
+
+    **The widening lives here rather than in `person_table_columns_bound`**, and
+    the choice is entry 13's: "is this row read whole" is one question, this is
+    where it is answered, and a second implementation of it inside the
+    bound-column mechanism would be the copy that does not get the next repair —
+    the comma-join false positive below took a review to find and is stated in one
+    place.
+
+    **A quote between the token and its dot is still a column read.** `"user".id`
+    binds no row; it names a column of one. The lookahead below refuses it for the
+    same reason `person_table_columns_bound` was taught to *accept* it — the two
+    mechanisms have to agree about which shape a quoted reference is, or a
+    quoted column read is reported as a whole-row read by one of them and the
+    repair is to weaken whichever fired.
+
     **Its known false positive, stated rather than discovered**
     (`docs/MISTAKES.md` entry 14): an old-style comma join,
     `FROM public.a, public.user_identity ui`, binds through no `FROM` or `JOIN`
@@ -1613,16 +1752,14 @@ def identity_rows_read_whole(body: str, vocabulary: IdentityVocabulary) -> tuple
     and in the guard's failure message rather than left to be found.
     """
     found: set[str] = set()
-    for table in vocabulary.tables:
-        columns = vocabulary.carried.get(table, ())
-        if not columns:
-            continue
+    for table in sorted(vocabulary.tables | vocabulary.guarded):
+        columns = vocabulary.carried.get(table, ()) or (f"{table}.*",)
         bindings = relation_bindings(body, table)
         spans = [(start, end) for start, end, _ in bindings]
         names = {table} | {alias for _, _, alias in bindings if alias}
         for token in names:
-            bare = re.compile(rf"\b{re.escape(token)}\b(?!\s*\.)", re.IGNORECASE)
-            whole = re.compile(rf"\b{re.escape(token)}\s*\.\s*\*", re.IGNORECASE)
+            bare = re.compile(rf'\b{re.escape(token)}\b(?!"?\s*\.)', re.IGNORECASE)
+            whole = re.compile(rf'\b{re.escape(token)}"?\s*\.\s*\*', re.IGNORECASE)
             outside = [
                 match
                 for match in bare.finditer(body)
@@ -1633,19 +1770,126 @@ def identity_rows_read_whole(body: str, vocabulary: IdentityVocabulary) -> tuple
     return tuple(sorted(found))
 
 
+def person_table_columns_bound(body: str, vocabulary: IdentityVocabulary) -> tuple[str, ...]:
+    """Every column `body` reads off a table that holds a person, other than a join key.
+
+    **The mechanism that does not need to know the column's name**, which is
+    E1-01's whole subject. The three above are all phrased over the identity
+    vocabulary — a marked column's name, a marked table's row — and a view's
+    author chooses the label: the reviewer's fixture selects
+    `ui.display_name AS respondent_display_name`, and the repository's own §4.1
+    sweep was measured **green** over that file. `display_name` is in no schema
+    here, matches no fragment, and carries no marker, so there is nothing about
+    the column for a vocabulary to hold.
+
+    What is knowable is the *lineage*: `ui` is bound to `user_identity` by the
+    join two lines below, so `ui.<anything>` is a read of a table that holds a
+    person, and the only such reads a view has a reason to make are the keys it
+    joins on. So the rule is the other way round from its three neighbours — an
+    allow-list of columns rather than a search for forbidden ones — and it fires
+    on a column that does not exist in today's schema exactly as it fires on one
+    that does.
+
+    `relation_bindings` is what supplies the lineage, and it is E0-34's function
+    rather than a second one: the alias it binds and the span of the clause that
+    binds it took an incident to get right, and the whole-row mechanism above
+    already depends on both (`docs/MISTAKES.md` entry 13).
+
+    **The left boundary is load-bearing and is pinned by a sample.** Without it,
+    any token *ending* in a bound name is read as that name — `xu.note` becomes
+    `u.note` and is reported as a read of `user` — which flags correct SQL and so
+    fails in the direction that gets a guard weakened rather than the direction
+    that leaks. A mutation battery found nothing distinguishing the two versions,
+    so `IDENTITY_SWEEP_MUST_ALLOW` now carries the two-alias shape that does.
+
+    **It is a lookbehind rather than a `\\b`, because a quote is not a word
+    character.** `SELECT "user".lms_user_id FROM public."user"` puts a `"` between
+    the token and its dot and binds no alias to fall back on, so a pattern
+    anchored with `\\b` and requiring the dot immediately after the name matched
+    nothing at all — found by a fresh-context security review. The optional quotes
+    are matched on both sides of the token and `(?<![\\w"])` keeps the left
+    boundary: `"user_archive".note` still does not match, because the quote is
+    consumed before the token and what follows the token is `_` rather than a dot.
+
+    **What it cannot see**, stated here rather than found later
+    (`docs/MISTAKES.md` entry 14):
+
+      - **a read through a relation it did not see bound.** A comma join binds
+        through no keyword `relation_bindings` reads, so `FROM public.a,
+        public.user_identity ui` leaves `ui.identity_name` unattributed here. The
+        whole-row mechanism over-reports that same shape rather than
+        under-reporting it, which is stated as its known false positive, so the
+        file is still red — with a message about the row rather than the column.
+      - **a chain of views.** A view reading `roster.leaked` is reading a column
+        of a *view*, and this mechanism is scoped to the three tables that hold a
+        person. `test_identity_column_marker.py`'s strict rule folds those hops
+        in the catalog, where the dependency is recorded.
+      - **an unqualified read.** `SELECT identity_name FROM public.user_identity`
+        names no alias and no table before the column, so this sees nothing —
+        the `column` mechanism is what catches that, and it catches it only
+        because the column carries a name the vocabulary knows.
+      - **a name bound by a CTE.** `WITH ui AS (SELECT * FROM public.user_identity)
+        SELECT ui.identity_name FROM ui` binds `ui` in a `WITH` clause rather than
+        in the `FROM` this reads, so `relation_bindings` reports nothing and every
+        later `ui.<column>` is unattributed. **This is deliberately not closed
+        here**: following a CTE in text means resolving one query's scope from
+        another's, which is parsing SQL rather than sweeping it, and a
+        half-resolved scope flags correct queries.
+
+        The backstop is **the catalog at column grain and this module's own
+        whole-row mechanism at the other**, which is narrower than the first
+        version of this note claimed and is measured rather than reasoned.
+        `test_identity_column_marker.py`'s strict rule reads what the *stored*
+        view depends on, so a CTE that reads a column records the same
+        column-grain dependency a plain join does. It does **not** follow that a
+        CTE leaves the same row at both grains: Postgres drops the
+        `refobjsubid = 0` whole-row row as soon as the view also names any column
+        of that table, so the join form of a whole-row read records only the
+        column it joined on. `identity_rows_read_whole` above catches that
+        spelling — it is text, and it was attacked and held.
+
+        **The two sides no longer trade places there, and this paragraph used to
+        say they did.** Batch A closed E1-01's first deferred item: the catalog
+        half reads `pg_get_viewdef` as well as `pg_depend`, so
+        `decompiled_whole_row_reads` in `test_identity_column_marker.py` reports
+        the join-hidden whole-row form the dependency row does not survive. Each
+        side now answers for the same shape in its own currency — this module for
+        the spellings a human writes in a `views_sql/` file, that one for what
+        Postgres decompiled a stored view back to — and neither is the guarantee
+        on its own.
+
+        A file no revision has executed is still the case that falls between the
+        two at column grain, and it is the one this mechanism cannot answer for.
+    """
+    found: set[str] = set()
+    for table in sorted(vocabulary.guarded):
+        bindings = relation_bindings(body, table)
+        if not bindings:
+            continue
+        for token in sorted({table} | {alias for _, _, alias in bindings if alias}):
+            reads = re.compile(rf'(?<![\w"])"?{re.escape(token)}"?\s*\.\s*"?(\w+)"?', re.IGNORECASE)
+            for match in reads.finditer(body):
+                if match.group(1).lower() not in vocabulary.join_keys:
+                    found.add(f"{table}.{match.group(1)}")
+    return tuple(sorted(found))
+
+
 # The mechanisms this guard is made of: one line each, so that disabling one is a
 # single edit that still parses and can therefore be measured.
 IDENTITY_MECHANISMS = (
     IdentityMechanism("column", identity_columns_named),
     IdentityMechanism("star", identity_columns_a_star_reaches),
     IdentityMechanism("whole row", identity_rows_read_whole),
+    IdentityMechanism("bound column", person_table_columns_bound),
 )
 
 # ---------------------------------------------------------------------------
-# The inventory: what this guard is **required** to catch. Two constants, and
-# neither is derived from `IDENTITY_MECHANISMS`. That separation is the whole
-# point and is worth stating plainly, because re-deriving one from the other is a
-# tidy-looking edit that silently removes the guard.
+# The inventory: what this guard is **required** to catch. Three constants, and
+# none of them is derived from the structure it describes — two from
+# `IDENTITY_MECHANISMS`, and E1-01's third from the person tables the marker
+# module names. That separation is the whole point and is worth stating plainly,
+# because re-deriving one from the other is a tidy-looking edit that silently
+# removes the guard.
 #
 # **Measured, on this file, before the separation existed.** The controls were
 # parametrised over `IDENTITY_MECHANISMS`, so deleting the `column` mechanism did
@@ -1677,7 +1921,17 @@ IDENTITY_MECHANISMS = (
 # *label* now, so `ui.*` being both a star and a whole-row read costs nothing and
 # each mechanism still answers for itself.
 # ---------------------------------------------------------------------------
-REQUIRED_MECHANISM_LABELS = ("column", "star", "whole row")
+REQUIRED_MECHANISM_LABELS = ("column", "star", "whole row", "bound column")
+
+# The tables E1-01's `bound column` mechanism is required to guard, written down
+# here for the reason `REQUIRED_MECHANISM_LABELS` above is: the mechanism reads
+# `PERSON_TABLES` out of `test_identity_column_marker.py`, where the convention is
+# defined, and a required list that came from the same place could not notice that
+# set getting smaller. Deleting `"user"` from it there is one word, leaves every
+# test in that module green — `user` carries no marked column, so nothing there is
+# about it — and takes with it the only rule in the repository that looks at
+# `user.lms_user_id`.
+REQUIRED_GUARDED_PERSON_TABLES = ("user", "user_identity", "person")
 
 IDENTITY_SWEEP_MUST_CATCH = (
     RequiredShape(
@@ -1737,6 +1991,82 @@ IDENTITY_SWEEP_MUST_CATCH = (
         "CREATE VIEW public.{view} AS SELECT (ui.*)::text FROM public.{table} ui;",
     ),
     RequiredShape("whole row", "CREATE VIEW public.{view} AS TABLE public.{table};"),
+    # The widest read of the same table, through the mechanism beside it. Not the
+    # spelling the review named — it named `to_jsonb` — and it was open for the
+    # identical reason, so it is closed and controlled in the same change.
+    RequiredShape(
+        "star",
+        'CREATE VIEW public.{view} AS SELECT * FROM public."user";',
+        ("user.*",),
+    ),
+    # The same mechanism over the person table that carries **no marked column**,
+    # which is where a fresh-context security review walked around every guard in
+    # this repository at once. `user` holds the LMS key and the platform reference
+    # by ADR 0001's split, so it is in no marked-table set — and the row of it is
+    # every one of those values under one harmless column name. The alias is the
+    # reviewer's own: this is what the accident looks like.
+    RequiredShape(
+        "whole row",
+        'CREATE VIEW public.{view} AS SELECT to_jsonb(u) AS platform_ref FROM public."user" u;',
+        ("user.*",),
+    ),
+    RequiredShape(
+        "whole row",
+        'CREATE VIEW public.{view} AS SELECT u FROM public."user" u;',
+        ("user.*",),
+    ),
+    # The quoted spelling, which binds no alias and puts a `"` between the table
+    # name and its dot — so a pattern anchored on `\b` and requiring the dot
+    # immediately after the name matched nothing at all. Also a security review's,
+    # and the reason the read pattern carries a lookbehind rather than a boundary.
+    RequiredShape(
+        "bound column",
+        'CREATE VIEW public.{view} AS SELECT "user".lms_user_id FROM public."user";',
+        ("user.lms_user_id",),
+    ),
+    # E1-01's shapes, and the first of them is the reviewer's fixture. Its lines
+    # are **copied** out of `.claude/review-fixtures/identity-column-in-view.diff`
+    # rather than retyped, including the run of spaces before each `AS` — entry
+    # 3's canary rule, whose whole point is that a sentence retyped from where you
+    # think it begins is the thing the sample exists to disprove. The `FROM` is
+    # the one adapted line: the fixture reads `FROM response r`, and `response`
+    # arrives with the survey tables in E2, so the canary relation stands in for
+    # it. Nothing about the two identity reads changes with it.
+    #
+    # One statement, two required findings, on two different person tables — the
+    # aliased name and the LMS join key are the two blind spots the carried entry
+    # measured, and the fixture writes them four lines apart.
+    RequiredShape(
+        "bound column",
+        "CREATE OR REPLACE VIEW public.{view} AS\n"
+        "SELECT\n"
+        "    ui.display_name     AS respondent_display_name,\n"
+        "    u.lms_user_id\n"
+        "FROM public.{other} r\n"
+        'JOIN "user" u        ON u.id = r.user_id\n'
+        "JOIN user_identity ui ON ui.user_id = u.id;",
+        ("user_identity.display_name", "user.lms_user_id"),
+    ),
+    # The same read moved into a `WHERE`, where nothing appears in the view's own
+    # column list at all. A guard reading output labels sees a view returning one
+    # integer.
+    RequiredShape(
+        "bound column",
+        "CREATE VIEW public.{view} AS SELECT 1 AS n FROM public.{other} r\n"
+        "JOIN user_identity ui ON ui.user_id = r.user_id\n"
+        "WHERE ui.display_name IS NOT NULL;",
+        ("user_identity.display_name",),
+    ),
+    # And the same rule over a column this schema really carries, aliased to a
+    # name no fragment matches. Caught by the `column` mechanism too, which is
+    # harmless — the control asserts per label — and it is what ties this
+    # mechanism's report to the real vocabulary rather than to a name the fixture
+    # invented.
+    RequiredShape(
+        "bound column",
+        "CREATE VIEW public.{view} AS SELECT p.{column} AS respondent FROM public.{table} p;",
+        ("{table}.{column}",),
+    ),
 )
 
 # What the sweep must **allow**, and this is where the weight is: every member is
@@ -1763,7 +2093,64 @@ IDENTITY_SWEEP_MUST_ALLOW = (
     "CREATE VIEW public.{view} AS SELECT e.id FROM public.{table} ui"
     " JOIN public.{other} e ON e.id = ui.id;",
     "CREATE VIEW public.{view} AS SELECT 'no {column} here'::text AS note FROM public.{other};",
-    "CREATE VIEW public.{view} AS SELECT r.a * r.b AS scaled FROM public.{table} r;",
+    # The multiplication trap, whose subject moved with E1-01 and whose purpose did
+    # not. As first written it read `FROM public.{table} r` and selected `r.a *
+    # r.b` — two columns of an identity table, which the strict rule forbids
+    # outright, so the sample asserted something this ticket makes false and had to
+    # change. **Re-pointing the `FROM` at the canary alone would have quietly
+    # retired it**: the star mechanism only reports a column when the body also
+    # names a table that carries one, so with no identity table in the statement,
+    # widening `SELECTS_A_STAR` to any `*` would no longer show up here at all. The
+    # join is what keeps the trap live — the identity table is named, its key is
+    # the only thing read from it, and a `*` pattern that matched the
+    # multiplication would fire.
+    "CREATE VIEW public.{view} AS SELECT r.a * r.b AS scaled FROM public.{other} r"
+    " JOIN public.{table} ui ON ui.id = r.id;",
+    # E1-01's allow side, one per catch shape above. A view that joins a person
+    # table and reads only the keys it joins on is what a read path *is*: the
+    # carried entry on the reveal's composition says `section_roster` "hands
+    # instructor-scoped code the `user_id` of every enrolled student… the key is
+    # what makes a de-identified response addressable". The last of the three is
+    # the reviewer fixture's own join line with the identity select removed, which
+    # is the neighbouring shape the guard has to let through.
+    "CREATE VIEW public.{view} AS SELECT ui.id, ui.user_id FROM public.{table} ui;",
+    'CREATE VIEW public.{view} AS SELECT u.id FROM public."user" u;',
+    "CREATE VIEW public.{view} AS SELECT r.id FROM public.{other} r\n"
+    'JOIN "user" u        ON u.id = r.user_id;',
+    # **The word boundary, which nothing else here distinguishes.** The bound-column
+    # mechanism resolves a read by looking for `<token>.` where the token is a
+    # person table or the alias it bound, and dropping the `\b` from that pattern
+    # widens it to any token *ending* in one — `xu.note` reads as `u.note` and is
+    # reported as `user.note`, on SQL that touches no person column at all. The
+    # mutation battery found nothing telling the two versions apart.
+    #
+    # It fails in the direction that gets a guard weakened rather than the
+    # direction that leaks, which is why the sample belongs on this side: an
+    # author whose correct view is flagged for a read it never wrote repairs the
+    # guard, and the cheapest repair is to stop looking at the alias at all. The
+    # short alias is the realistic case — `u` beside `xu` is two joins in one
+    # statement — and the same defect reaches any alias with a person table's
+    # alias as its suffix.
+    "CREATE VIEW public.{view} AS SELECT xu.note FROM public.{other} xu\n"
+    'JOIN "user" u        ON u.id = xu.user_id;',
+    # The allow half of the two shapes a security review added above.
+    #
+    # A whole-row read of a relation that holds **no** person: the widened
+    # whole-row mechanism must stay off it, or the first legitimate `to_jsonb` in
+    # the schema is a red and the repair is to narrow the mechanism back to marked
+    # tables — which is the state the review found.
+    "CREATE VIEW public.{view} AS SELECT to_jsonb(r) AS payload FROM public.{other} r;",
+    # And a **quoted** relation whose name *ends* in a guarded one, beside a real
+    # binding of that guarded table so that the read pattern actually runs. The
+    # suffix is what makes this discriminate: with the quote allowed on the left
+    # and no lookbehind to stop it, `"archived_user".note` matches — the optional
+    # quote skips nothing, `user` matches the tail, the closing quote is consumed
+    # and the dot follows — and every view naming an archive table is reported as
+    # reading `user`. `"user_archive"` would not have shown this: what stops that
+    # one is the `_` where a dot is required, which every version of the pattern
+    # gets right.
+    'CREATE VIEW public.{view} AS SELECT "archived_user".note FROM public."archived_user"\n'
+    'JOIN public."user" u ON u.id = "archived_user".user_id;',
     # The clause words that may follow a relation and are not an alias for it. Each
     # of these is a line a real view writes, and each would be a false red if
     # `ALIAS_STOP_WORDS` lost a member: the word after the table would be read as
@@ -1786,11 +2173,18 @@ def identity_findings(sql: str, vocabulary: IdentityVocabulary) -> tuple[Identit
       - **A chain of views.** `SELECT roster.leaked FROM public.some_view` reads
         identity if `some_view` does — this sees the name only if the column
         keeps it, and sees nothing at all if the intermediate view renames it.
-        (It does catch the case `pg_depend` misses in the other direction: a
+        It does catch the case `pg_depend` missed in the other direction: a
         column-level dependency is recorded against the *intermediate* view,
-        whose columns carry no marker, so the catalog sweep next door goes green
-        on a chain that preserves the name and this one goes red.)
+        whose columns carry no marker, so the catalog sweep next door went green
+        on a chain that preserves the name and this one goes red. **E1-01 closed
+        the catalog side of that**, with a fixed-point fold over the one-hop
+        dependency rows, so a chain is now caught there whether or not the name
+        survives it — and is still not caught here.
       - **An alias assigned in the intermediate object**, for the same reason.
+        An alias assigned *in this statement* is a different matter and is E1-01's
+        `bound column` mechanism: `ui.display_name AS respondent_display_name` is
+        read as a column of whatever `ui` was bound to, so the label the author
+        chose decides nothing.
       - **A name that is never written**: dynamic SQL, a name assembled by
         `format()`, or a reference living only inside a string literal — all of
         which `without_quoted_text` removes on purpose, because the alternative
@@ -1852,7 +2246,13 @@ def identity_pair(vocabulary: IdentityVocabulary) -> tuple[str, str]:
 
 
 def sample_sql(template: str, vocabulary: IdentityVocabulary) -> str:
-    """One sweep sample, spelled with this database's own identity table and column."""
+    """One template, spelled with this database's own identity table and column.
+
+    Used for a sweep sample and for the finding a sample is required to produce,
+    which are the same substitution over two different kinds of string. One
+    function rather than two so that a sample and its expectation cannot come to
+    disagree about what `{table}` means (`docs/MISTAKES.md` entry 13).
+    """
     table, column = identity_pair(vocabulary)
     return template.format(table=table, column=column, view=CANARY_VIEW, other=CANARY)
 
@@ -1950,8 +2350,12 @@ def test_the_view_file_identity_sweep_catches_the_shape_each_mechanism_names(
     which walks the table of mechanisms, rather than through `find` — because a
     control asked of the probe directly stays green when the probe is deleted
     from the table, which is exactly how E0-33's first control came to guard
-    nothing. And each shape is catchable by *one* mechanism only, so no mechanism
-    can answer for another one's blindness.
+    nothing. **And the assertion is per label**, so no mechanism can answer for
+    another one's blindness — a shape two mechanisms both see is harmless, which
+    the comment on `IDENTITY_SWEEP_MUST_CATCH` records and which E1-01's last
+    shape relies on: an aliased read of a real marked column is a `column`
+    finding and a `bound column` finding at once, and each has to be made
+    separately.
 
     **Marked `invariant` although it asserts nothing about the schema**, and the
     reason is mechanical: CI runs the invariant pass as `pytest -m invariant`, in
@@ -1973,8 +2377,10 @@ def test_the_view_file_identity_sweep_catches_the_shape_each_mechanism_names(
 
     assert shape.label in caught, (
         f"The {shape.label!r} mechanism does not report {sample!r}, which reads "
-        f"`{column}` on `{table}` — a column this database marks as identity. The sweep reported "
-        f"{sorted(caught)}, and `IDENTITY_MECHANISMS` holds "
+        f"{sorted(sample_sql(entry, identity_vocabulary) for entry in shape.expected)} — either "
+        f"`{column}` on `{table}`, which this database marks as identity, or a column of a table "
+        "that holds a person, which the `bound column` mechanism refuses whatever it is called. "
+        f"The sweep reported {sorted(caught)}, and `IDENTITY_MECHANISMS` holds "
         f"{sorted(mechanism.label for mechanism in IDENTITY_MECHANISMS)}.\n\n"
         "If the label is in that table, the mechanism has gone blind. If it is not, it has been "
         "deleted, and `test_the_identity_sweep_holds_every_mechanism_this_module_requires` is the "
@@ -1984,12 +2390,18 @@ def test_the_view_file_identity_sweep_catches_the_shape_each_mechanism_names(
         "clean files — and this shape is written so that no other mechanism can answer for it."
     )
     named = {finding.column for finding in findings if finding.mechanism == shape.label}
-    assert column in named, (
+    required = {sample_sql(entry, identity_vocabulary) for entry in shape.expected}
+    assert required <= named, (
         f"The {shape.label!r} mechanism reports {sample!r} but names {sorted(named)} "
-        f"rather than `{column}`. E0-34's second criterion is about the message and not only "
-        "about the red: the same file already fails the schema-qualification sweep, whose "
+        f"rather than {sorted(required)}. E0-34's second criterion is about the message and not "
+        "only about the red: the same file already fails the schema-qualification sweep, whose "
         "message is about missing `public.` prefixes, so a failure that does not name the "
-        "identity column is repaired by adding four prefixes with the join left in place."
+        "identity column is repaired by adding four prefixes with the join left in place.\n\n"
+        "What a shape requires is written on the shape itself and defaults to the identity column "
+        f"this database carries, which is `{column}` on `{table}`. The `bound column` mechanism "
+        "names `table.column` instead, because the column it catches may exist in no schema at "
+        "all — `display_name` is the reviewer fixture's, and a bare column name that means "
+        "nothing on its own would send a reader looking for a column rather than for a join."
     )
 
 
@@ -2008,22 +2420,35 @@ def test_the_view_file_identity_sweep_allows_the_shapes_that_read_no_identity(
     and a file-grained rule would be red on it on the day it landed. An exemption
     granted on the day a guard ships is an exemption nobody ever revisits.
 
-    The rest are near misses the three patterns have to get right: `count(*)`,
+    The rest are near misses the four patterns have to get right: `count(*)`,
     which is what an enrollment-count view is made of; a multiplication; a
     grant, a revoke and a comment naming the identity table; a column whose name
     merely begins with an identity column's; a join to an identity table that
     reads no column of it; the same name inside a comment and inside a string
-    literal; and — since the whole-row mechanism arrived — the clause words that
-    may follow a relation without being an alias for it. That last group is the
-    one to add to when a real file goes unexpectedly red: `FROM public.person
-    WHERE …` binds no alias, and a `ALIAS_STOP_WORDS` missing a member reads the
-    clause word as the row's name and reports every later use of it.
+    literal; the clause words that may follow a relation without being an alias
+    for it, which the whole-row mechanism brought; and — since E1-01 — a view
+    that joins a person table and reads the keys it joined on. That last pair is
+    the one that decides whether this guard can live with a real read path at
+    all: a rule that flagged `ui.user_id` would be red on `section_roster`, and
+    the carried entry says that key is what makes a de-identified response
+    addressable.
+
+    The clause-word group is the one to add to when a real file goes unexpectedly
+    red: `FROM public.person WHERE …` binds no alias, and an `ALIAS_STOP_WORDS`
+    missing a member reads the clause word as the row's name and reports every
+    later use of it.
 
     **The mutation it exists to survive**: widening `SELECTS_A_STAR` to any `*`,
     which makes `count(*)` an identity read; dropping the word boundary from the
     column search, which makes `{column}_hash` one; dropping the dollar-quote and
-    view-body handling, which makes the reveal function one; or emptying
-    `ALIAS_STOP_WORDS`, which makes `WHERE` a row reference.
+    view-body handling, which makes the reveal function one; emptying
+    `ALIAS_STOP_WORDS`, which makes `WHERE` a row reference; emptying
+    `JOIN_KEY_COLUMNS`, which makes every join to a person table a person read;
+    dropping the left boundary from the bound-column read pattern, which makes an
+    alias *ending* in a person table's alias one — measured surviving everything
+    else in this module, which is why the two-alias sample and the
+    `"archived_user"` sample are here; and widening the whole-row mechanism to any
+    `to_jsonb`, which makes a row of a table holding no person one.
     **The near miss it tolerates**: none — that is what this test is.
     """
     assert IDENTITY_SWEEP_MUST_ALLOW, (
@@ -2044,6 +2469,130 @@ def test_the_view_file_identity_sweep_allows_the_shapes_that_read_no_identity(
             "with is a property instead: the rule is about views, and the reveal function that "
             "reads identity by design (ADR 0001, point 4) is not one."
         )
+
+
+@pytest.mark.invariant
+def test_the_bound_column_mechanism_guards_every_person_table_this_module_requires(
+    identity_vocabulary: IdentityVocabulary,
+) -> None:
+    """The third inventory: which tables a read of *any* column is refused on.
+
+    `REQUIRED_MECHANISM_LABELS`' argument, applied to the set E1-01 added. The
+    mechanism reads `PERSON_TABLES` out of `test_identity_column_marker.py`, which
+    is where the convention lives and where a widening has to happen for every
+    reader to get it — and a required list read from the same place could not
+    notice that set getting smaller. Deleting `"user"` from it there is one word.
+
+    **The second assertion is why `user` has to be in the list at all**, and it is
+    a measurement rather than a restatement: `user` carries no marked column, so
+    it is absent from `tables` and the `star`, `whole row` and `column`
+    mechanisms have nothing to say about any column it holds. That absence is
+    deliberate — ADR 0001 puts the key and the platform reference there precisely
+    so that they are not identity, and `marked` next door refuses a table comment
+    on `user` on that ground. The consequence is the carried entry's second blind
+    spot: `user.lms_user_id` is the LTI `sub`, and a view returning it beside a
+    comment lets an instructor resolve a named student in the LMS in one step
+    with every other guard in this file green.
+
+    **The mutation it exists to survive**: removing a table from `PERSON_TABLES`,
+    with or without removing the shapes that read it — this names it either way.
+    **The near miss it tolerates**: a new person table added there, which fails
+    here until it is written down, deliberately, because a table added to the
+    guarded set with no shape that certainly reads it is the state entry 35
+    exists to stop.
+    """
+    guarded = sorted(identity_vocabulary.guarded)
+    assert guarded == sorted(REQUIRED_GUARDED_PERSON_TABLES), (
+        f"The `bound column` mechanism guards {guarded} and this module requires "
+        f"{sorted(REQUIRED_GUARDED_PERSON_TABLES)}. The set it reads is `PERSON_TABLES` in "
+        "`test_identity_column_marker.py`.\n\n"
+        "If a table has been removed there, every column of it is now readable by any view with "
+        "nothing in this repository saying so — the marker-based mechanisms are about columns that "
+        "hold identity, and the whole point of this one is the table whose columns do not. Removing "
+        "one is allowed and is a decision rather than a deletion: take it out of this list in the "
+        "same change, with the shapes that read it, and say in the pull request which reads are no "
+        "longer caught."
+    )
+    assert "user" not in identity_vocabulary.tables, (
+        "`user` now carries a marked identity column, so it is inside the marker-based mechanisms' "
+        f"reach as well as this one's; the marked tables are {sorted(identity_vocabulary.tables)}. "
+        "That contradicts ADR 0001's split — `user` holds the LMS key and the platform reference, "
+        "`user_identity` holds the name and the email — and "
+        "`test_the_marker_does_not_reach_columns_that_hold_no_identity` next door is where it is "
+        "diagnosed. Read that first: this test is not the place to repair it, and the `bound "
+        "column` mechanism is not made redundant by it either, because a marked column is still "
+        "only the columns somebody marked."
+    )
+
+
+@pytest.mark.invariant
+def test_every_join_key_the_bound_column_mechanism_allows_is_a_structural_key(
+    migrated_engine: Any, identity_vocabulary: IdentityVocabulary
+) -> None:
+    """The allow-list, held to what an allow-list is for: joining, never reading a person.
+
+    `JOIN_KEY_COLUMNS` is the one place this guard can be weakened without
+    deleting anything. It is a list of column names a view may read off a table
+    that holds a person, so a name added to it is a read nobody will be told
+    about again — and the name somebody would add is exactly the one the carried
+    entry names, because `user.lms_user_id` is what a view wants when a screen
+    needs to identify a row in the LMS.
+
+    So the list is required to be what it claims: every entry has to be a primary
+    key or a column carrying a foreign key, on at least one of the tables the
+    mechanism guards. `lms_user_id` is neither — it is a value the platform sent,
+    marked `lms_` for ownership by ADR 0014 and by nothing for identity — so
+    adding it turns this red on an unmutated schema, which is the only shape that
+    makes the list load-bearing rather than decorative.
+
+    **The mutation it exists to survive**: adding `lms_user_id`, or any other
+    column name, to `JOIN_KEY_COLUMNS` in `test_identity_column_marker.py`.
+    **The near miss it tolerates**: a genuine new key — a second foreign key
+    landing on a person table with E1's roster sync — which is added to the list
+    with the sentence that sanctions it and passes here.
+    """
+    assert identity_vocabulary.join_keys, (
+        "`JOIN_KEY_COLUMNS` is empty, so the `bound column` mechanism forbids every read of every "
+        "person table including the keys a read view joins on. That is not a stricter guard, it is "
+        "a red on `section_roster` and on every view like it, and the repair somebody reaches for "
+        "under that pressure is to widen the rule back out to marked columns only."
+    )
+
+    inspector = inspect(migrated_engine)
+    present = set(inspector.get_table_names())
+    absent = sorted(identity_vocabulary.guarded - present)
+    assert not absent, (
+        f"{absent} are guarded by the `bound column` mechanism and are not tables in the migrated "
+        "database, so no view can read them and this rule guards nothing on them. Either the "
+        "schema has moved or `PERSON_TABLES` next door names something that no longer exists."
+    )
+
+    structural: dict[str, list[str]] = {}
+    for table in sorted(identity_vocabulary.guarded):
+        keys = set((inspector.get_pk_constraint(table) or {}).get("constrained_columns") or [])
+        keys |= {
+            column
+            for key in inspector.get_foreign_keys(table)
+            for column in key.get("constrained_columns") or []
+        }
+        for column in sorted(identity_vocabulary.join_keys & keys):
+            structural.setdefault(column, []).append(table)
+
+    unstructural = sorted(identity_vocabulary.join_keys - set(structural))
+    assert not unstructural, (
+        f"{unstructural} are allowed to be read off `{sorted(identity_vocabulary.guarded)}` and "
+        "are the primary key of none of them and a foreign key on none of them. What the mechanism "
+        f"does recognise as structural is {structural}.\n\n"
+        "A join key is a column that names a *row*: it is what a read view joins on, and reading "
+        "one tells you which row without telling you whose. A column on a person table that is "
+        "neither a key nor a reference is a fact about the person — `user.lms_user_id` is the LTI "
+        "`sub`, which resolves that person at the platform in one step, and ADR 0014's `lms_` "
+        "prefix marks where the value came from rather than what it holds.\n\n"
+        "If the entry names no column at all, it is dead: it permits nothing and it will permit "
+        "the first column that ever takes the name. If it names a real column that is genuinely a "
+        "key, this test is where the argument goes, and the pull request that makes it says which "
+        "reads are no longer caught."
+    )
 
 
 @pytest.mark.invariant
@@ -2178,7 +2727,21 @@ def test_no_view_created_under_views_sql_names_an_identity_column(
                 for finding in findings
             )
 
-    assert not offenders, (
+    # **The operand is a bool on purpose, and it is a repair rather than a
+    # style.** Written as `assert not offenders`, pytest's assertion rewriting
+    # appends the repr of the dict to the exception, so the identity column
+    # appears in `str(failure.value)` whatever this message says — and both
+    # planted-file demonstrations at the foot of this module
+    # (`test_a_view_sql_file_reading_a_marked_identity_column_fails_the_guard`
+    # and `test_the_schema_qualification_failure_does_not_hide_the_identity_
+    # failure`) exist to establish that this message names it. With a plain bool
+    # there is nothing for the rewriter to expand: the explanation is
+    # `assert False`, and the findings printed below are the only place the
+    # column is named. The same fix, in the same shape, as `agrees` in
+    # `tests/integration/test_identity_grants.py`, where the mutation battery
+    # measured it (E1-01, deferral item 3).
+    clean = not offenders
+    assert clean, (
         f"These files under {VIEWS_SQL_DIR} create a view that reads an identity column: "
         f"{offenders}.\n\n"
         "SPEC §8 requires the instructor and leadership read paths to go through views that "
@@ -2193,6 +2756,13 @@ def test_no_view_created_under_views_sql_names_an_identity_column(
         "executed, so the same join sitting in a file that no revision names yet passes it "
         "vacuously — and goes live the day somebody adds the file to a `SCRIPTS` tuple in a ticket "
         "about something else.\n\n"
+        "**A `bound column` finding names a table and a column together** — "
+        "`user_identity.display_name` rather than `display_name` — because it is not a finding "
+        "about the column's name at all. It says that the statement binds a table holding a "
+        "person and then reads something off that binding which is not one of the keys a view "
+        "joins on, whatever the column is called and whether or not this schema has it. The "
+        "repair is to stop reading it, never to rename it: the label is what the guard was "
+        "measured green against.\n\n"
         "**A `whole row` finding may be an old-style comma join** — "
         "`FROM public.a, public.user_identity ui` — which reads no identity and is reported anyway, "
         "because a relation bound by a comma is bound by no keyword this sweep can see. Rewriting "

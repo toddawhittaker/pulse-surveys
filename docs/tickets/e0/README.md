@@ -183,7 +183,10 @@ closing them inside the epic is the argument for the exit scope above.
   relations without naming `guard_write`. What it inherits instead is the
   question that sweep leaves open by decision: `guard_write(table="course")`
   refuses unconditionally, so nothing records how a *sanctioned* writer satisfies
-  the rule, and ADR 0069 hands the mechanism to E1 with a "done when". **E0-28
+  the rule, and ADR 0069 hands the mechanism to E1 with a "done when".
+  **That question was closed 2026-08-26 in E1-10 (ADR 0090)**: a sanctioned writer
+  calls the guard and passes a sanction a catalog has to back, no exclusion list
+  was added, and the sync inherits a mechanism rather than the question. **E0-28
   item 1 landed 2026-08-21 in Batch E (PR #64)**: one seeded member now carries no
   enrollment window at all, so E1 meets that branch in a fixture, and Todd settled
   what the participation denominator does with it in SPEC §3.4 the same day.

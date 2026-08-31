@@ -193,9 +193,14 @@ INERT_DIFFS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "a record that is not in the tree, as a new file and a deleted one both appear in a diff",
         ("docs/adr/0071-a-record-this-test-invented.md",),
     ),
+    # A design file whose name has a space in it, and **`design/tokens.css` is no
+    # longer beside it** — see `UNCLASSIFIED_PATHS` below and
+    # `docs/disputes/E1-04-01.md`. The rest of `design/` is inert exactly as it
+    # was: nothing imports a prototype canvas or a usage note, and nothing copies
+    # one into an image.
     (
-        "a design file, including one whose name has a space in it",
-        ("design/tokens.css", "design/Usage Rules.md"),
+        "a design file whose name has a space in it",
+        ("design/Usage Rules.md",),
     ),
     # `CONTRIBUTING.md` rather than `README.md`. The readme is a root Markdown
     # file and is deliberately *not* inert: `pyproject.toml` declares it as the
@@ -204,7 +209,15 @@ INERT_DIFFS: tuple[tuple[str, tuple[str, ...]], ...] = (
     # E0-38's security review asked whether a build input belongs in the set that
     # switches the build off, and ADR 0070 records the reversal and its cost.
     ("a root Markdown file", ("CONTRIBUTING.md",)),
-    ("several families at once", ("CLAUDE.md", "docs/MISTAKES.md", "design/tokens.css")),
+    # `design/CommentCard.dc.html` in place of `design/tokens.css`, which E1-04
+    # made a build input. A `.dc.html` canvas is the prototype export itself and
+    # is the bulk of that directory: nothing imports it, no `COPY` names it, no
+    # test parses it, and deleting it breaks nothing that builds. It is what
+    # `design/**` being an inert family is actually about.
+    (
+        "several families at once",
+        ("CLAUDE.md", "docs/MISTAKES.md", "design/CommentCard.dc.html"),
+    ),
 )
 
 # Paths in neither set. The classification fails toward running everything, so a
@@ -231,6 +244,22 @@ UNCLASSIFIED_PATHS: tuple[tuple[str, str], ...] = (
     # A declared build input that reads as documentation. See the inert table
     # above for why it moved.
     ("the readme, which the wheel and the image both consume", "README.md"),
+    # The second file to make that move, and it is the stronger case of the two.
+    # E1-04 made `design/tokens.css` a build input by both of the tests `README.md`
+    # had to satisfy to leave this set: `frontend/src/styles.css` opens with
+    # `@import '../../design/tokens.css'`, so the palette, the type scale and the
+    # focus ring are compiled into `frontend/dist/assets/*.css` and served to every
+    # visitor — the readme is only packaged, never rendered — and
+    # `backend/Dockerfile`'s frontend stage carries
+    # `COPY design/tokens.css ./design/tokens.css`, so deleting it breaks the image
+    # build. Called inert, a palette edit built no bundle, measured no budget and
+    # built no image, and a deletion surfaced on some later unrelated pull request.
+    # SPEC §7.6's "single source" forecloses the alternative that would have kept
+    # it inert — a copy of the definitions under `frontend/src/`. Ruled in
+    # `docs/disputes/E1-04-01.md`; ADR 0070 is the precedent, applied rather than
+    # extended. Only this path moves: the rest of `design/` stays inert, and the
+    # `design/Usage Rules.md` case above stays green.
+    ("the design tokens, which the stylesheet imports and the image copies", "design/tokens.css"),
     # A path that leaves the directory it appears to be in. Unreachable from
     # `git diff --name-only` today, and one line to close.
     ("a path escaping the inert directory", "docs/../backend/app/main.py"),
@@ -309,8 +338,17 @@ EXPENSIVE_COMMANDS: dict[str, re.Pattern[str]] = {
     "the dependency audit or the licence scan": re.compile(
         r"^\s*(?:pip-audit|pip-licenses)\b", re.MULTILINE
     ),
-    "an npm install or production build": re.compile(
-        r"^\s*npm\s+(?:ci|run\s+build)\b", re.MULTILINE
+    # **Widened by E1-04, and the widening is the point of it.** It read
+    # `npm (ci|run build)`, which was every npm command in this workflow while the
+    # frontend gates were tolerant. That ticket adds `npm run typecheck` and
+    # `npm run lint` in the frontend workspace, and those are two more minutes of
+    # real work per pull request — including on a pull request that changes a line
+    # of Markdown and no TypeScript at all. A pattern that named only the two
+    # commands it knew would leave the new steps outside every guard test in this
+    # module, which is `docs/MISTAKES.md` entry 35's shape: an inventory that
+    # shrinks in silence when the thing it inventories grows.
+    "an npm install or workspace script": re.compile(
+        r"^\s*npm\s+(?:ci|run\s+[A-Za-z0-9:_-]+)\b", re.MULTILINE
     ),
 }
 
@@ -353,11 +391,14 @@ EXPENSIVE_GATES: dict[str, tuple[str, re.Pattern[str]]] = {
     # thing the guarded structure cannot shrink. E0-37 item 11 is what stops the
     # seventh needing a third review pass to be noticed.
     #
-    # It is free today only because `detect.outputs.frontend` is false. Once the
-    # scaffold lands it is an `npm ci` and a production build.
+    # It was free while `detect.outputs.frontend` was false. E1-04 lands the
+    # scaffold and withdraws that probe, so from then on it is an `npm ci`, a
+    # production build and a bundle budget on every pull request that is not
+    # documentation-only — which is what turns this entry from a placeholder into a
+    # live guard.
     "frontend-build": (
         "the frontend production build and the bundle budget",
-        EXPENSIVE_COMMANDS["an npm install or production build"],
+        EXPENSIVE_COMMANDS["an npm install or workspace script"],
     ),
     # The seventh, moved here from `GATES_THAT_NEED_NO_SHORT_CIRCUIT` by E0-40
     # decision 6. E0-38 exempted it because its work never ran: with
@@ -371,9 +412,16 @@ EXPENSIVE_GATES: dict[str, tuple[str, re.Pattern[str]]] = {
     # The exemption is the entry that costs coverage when it is wrong — a job in
     # that set is a job no guard test iterates — so moving it here is the
     # direction that adds a control rather than removing one.
+    #
+    # E1-04 gives it two more: `npm run typecheck` and `npm run lint` in the
+    # frontend workspace, which is how those two checkers come to read the
+    # application. They are inside this floor because the pattern above was widened
+    # to reach them, rather than by being listed — a list would have to be
+    # remembered, and this dict is the one E0-38's second review pass found a job
+    # missing from.
     "lint-frontend": (
-        "the Node dependency install, tsc and eslint",
-        EXPENSIVE_COMMANDS["an npm install or production build"],
+        "the Node dependency install, tsc and eslint, at the root and in the workspace",
+        EXPENSIVE_COMMANDS["an npm install or workspace script"],
     ),
 }
 
@@ -2535,6 +2583,19 @@ SWEEPS_THAT_NEED_NO_PROTECTION = {
         "this module — it sweeps tests/ to build its own guards, and an inert diff "
         "that switched it off would be switching off the assertions about itself, "
         "which the guard below covers by checking the job rather than the module"
+    ),
+    # E1-04's token sweep. It matches the detector because it enumerates through
+    # `git ls-files`, which is the ordinary idiom here, and its pathspec is
+    # `frontend/` — every file it can possibly read is outside the inert set, so a
+    # diff that could plant a raw hex, the host's blue or a forbidden typeface
+    # already runs the whole pipeline. The samples it checks its readers against
+    # are copied literals rather than reads of `design/tokens.css` — which is no
+    # longer inert either, per `docs/disputes/E1-04-01.md`, so that file is now
+    # covered twice over. What would still break this entry is the sweep being
+    # taught to read something under `docs/` or the rest of `design/`; then it
+    # belongs in the unconditional job instead.
+    "tests/unit/test_the_frontend_source_uses_tokens_only.py": (
+        "sweeps tracked files under frontend/ only, and nothing under frontend/ is inert"
     ),
 }
 

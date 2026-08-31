@@ -1,6 +1,6 @@
 ---
 name: build-ticket
-description: Build one ticket through the orchestrated tests-first loop - test-author writes red, implementer turns green, verifier proves it, a fresh-context security pass reviews the diff. Use when the user says "build E0-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the ticket branch and stops at a PR without merging.
+description: Build one ticket through the lane its header names - heavy rides the orchestrated tests-first loop (test-author writes red, implementer turns green, verifier proves it by battery), light rides builder-writes-code-and-tests with one fresh verifier pass; both get the fresh-context security review. Use when the user says "build E0-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the ticket branch and stops at a PR without merging.
 ---
 
 # Build a ticket
@@ -13,6 +13,17 @@ finding or a wasted round.
 
 `$1` is the ticket ID (`E0-05`) or a loose ordinal ("ticket 3" means `E0-03`).
 If ambiguous, ask — building the wrong ticket wastes a whole loop.
+
+## 0. The lane
+
+Read the ticket header's `**Lane:**` field first. A missing field, a ⚠
+anywhere on the ticket, or doubt means **heavy** — steps 1 through 7 below.
+`**Lane:** light` means step 1, then the **Light lane** section at the end of
+this file in place of steps 2–5, then steps 6 and 7 unchanged. If mid-build
+the diff reaches a surface CLAUDE.md's lane rule names as heavy (the path
+table at .claude/heavy-lane-paths.md), stop and re-lane: what exists becomes
+the heavy lane's starting material, the tests get a `test-author` pass before
+they are trusted, and the PR records the switch.
 
 ## 1. Plan, before any agent
 
@@ -84,6 +95,13 @@ refactors and from documentation, appending each attempt to
 ticket, `SendMessage` the same agent rather than spawning fresh — it remembers
 what it tried. Never edit the tree while it works in it.
 
+Once it reports green, push the ticket branch and open the pull request into
+the epic branch **as a draft**, right here — not at step 7. CI does not run on
+a ticket branch until a pull request exists (it triggers on `pull_request` and
+on push to `epic/**` only), so the draft PR is what gives step 5's verifier a
+run to confirm. Step 7 no longer opens the PR; it updates the body and marks
+the draft ready.
+
 ## 4. Dispute, if one happens
 
 **You arbitrate.** Read the objection, the test, and the governing spec
@@ -96,10 +114,13 @@ in the dispute file.
 
 ## 5. Verify (proven, not reported)
 
-Spawn `verifier`: fresh full-suite runs with exact totals, then the mutation
-battery from the manifest. No green is believed on its author's word. A
-survivor is a decision for you — cover it, or record it as named residue with
-the reason; never silently drop it. Commit before any battery runs.
+Spawn `verifier`: confirm CI's green run on this exact commit (totals
+cross-checked, not re-run locally) — the draft PR opened at the end of step 3
+is what makes that run exist — then the mutation battery from the manifest,
+scoped to each row's named killer test per verifier.md. No green is
+believed on its author's word. A survivor is a decision for you — cover it, or
+record it as named residue with the reason; never silently drop it. Commit
+before any battery runs.
 
 ## 6. Security review (fresh context)
 
@@ -111,11 +132,17 @@ ticket's recorded decisions so it can tell a decision from an oversight — with
 standing to challenge any decision it judges unsafe.
 
 Findings get a fix round: **declare the stopping rule before the round starts**
-(typically: tests-first fixes, one re-verification, targeted re-mutations, no
-further round unless something is red or a HIGH appears), then hold to it and
-record rule and residue in the PR body. A fix round has the defect density of
-the original work; the round's fixes get verified the same way the original
-did.
+(tests-first fixes, one re-verification, targeted re-mutations, no further
+round unless something is red or a HIGH appears), then hold to it and record
+rule and residue in the PR body. The declared rule may extend a round to cover
+findings the round itself introduced; what it forbids is unbounded re-polish
+of work the review already accepted. A fix round has the defect density of the
+original work; the round's fixes get verified the same way **in kind** — no
+green believed on the fixer's word — but the battery is **targeted
+re-mutations of what the round touched, including any original battery rows
+whose subject code the round modified** — never a blind re-run of the whole
+original battery. Scope follows the diff; an original row is not immune just
+because it already ran once.
 
 ## 7. Finish
 
@@ -124,11 +151,34 @@ did.
   moving.
 - Any construction decision the spec does not answer gets its ADR in this PR.
 - Remove any CI tolerance this ticket owns per its acceptance criteria.
-- Push; open the PR into the epic branch: the ticket, the §14.2 items covered,
-  the security findings and resolutions, the arbitrations, and everything
-  deliberately deferred with where it is recorded.
+- Push the final commits; update the draft PR's body: the ticket, the §14.2
+  items covered, the security findings and resolutions, the arbitrations, and
+  everything deliberately deferred with where it is recorded. Mark it ready
+  for review.
 - **Then stop. Do not merge.** Todd's written approval in conversation is the
   only merge trigger.
+
+## Light lane
+
+For tickets whose header says `**Lane:** light`. Step 1 runs in full — a
+lighter loop is not a lighter brief; the work order still settles decisions,
+names traps, and draws the boundary. Then:
+
+- Spawn `builder` with the work order. It writes implementation and ordinary
+  tests together: unit and integration tests asserting the acceptance
+  criteria, house style, no manifest, no mutation-naming docstrings, no
+  red-first commit ordering. The standing rules hold with no exceptions —
+  nothing skipped or xfailed to green, the §4.1 suite untouched, gate
+  tolerances moved only where the ticket owns the flip. It commits in small
+  steps and appends attempts to the epic's `.attempts/<TICKET>.md`.
+- Once it reports green, push the ticket branch and open the pull request into
+  the epic branch as a draft — same reason as the heavy lane: no CI run
+  exists on a ticket branch until a pull request does.
+- Spawn `verifier` for one fresh pass: confirm CI's green run on this commit
+  (totals cross-checked), plus `ruff format --check`, `ruff check`, `mypy`,
+  `alembic check` where schema moved, run locally. No battery. No green is
+  believed on the builder's word in this lane either.
+- Steps 6 (security review) and 7 (finish) are identical to the heavy lane.
 
 If a ticket spans sittings, resume the session (`claude --resume`) rather than
 starting fresh — the warm implementer's reasoning survives with it; the

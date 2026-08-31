@@ -82,3 +82,9 @@ rather than red gets caught. If any acceptance criterion is untestable
 as written, or the ticket does not tell you enough to write the test without
 guessing at an interface, name it and stop — that is a defect in the ticket, not
 something to work around.
+
+## Lanes
+
+You exist for heavy-lane tickets (CLAUDE.md, "How a ticket is built: two
+lanes"). A ticket whose header says `**Lane:** light` is built by `builder`
+and never invokes you; if you are handed one anyway, say so and stop.

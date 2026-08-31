@@ -1,9 +1,12 @@
 {
-  // The TypeScript this repository actually holds, which is the Playwright
-  // harness and the SPEC §9.2 specs it runs (E0-18 PR 2, E0-40 decision 2).
-  // There is no frontend yet; when the E1 scaffold lands it brings its own
-  // `frontend/tsconfig.json` and the `frontend` probe in
-  // `.github/workflows/ci.yml` is what turns its build gates on.
+  // The root TypeScript: the Playwright harness and the SPEC §9.2 specs it runs
+  // (E0-18 PR 2, E0-40 decision 2). Deliberately not all the TypeScript in the
+  // repository — E1-04 landed `frontend/`, which brings its own
+  // `frontend/tsconfig.json` and is checked by `npm run typecheck --workspace
+  // frontend` in the same CI job that runs this one. Two configurations because
+  // the two trees are different runtimes (Node and Playwright here, the DOM and
+  // JSX there) and one compiler, resolved from the root package by npm workspace
+  // hoisting (ADR 0083), so the two cannot disagree about the language.
   //
   // `noEmit` because nothing here is compiled: Playwright transpiles the specs
   // itself at run time, so `tsc` is only ever a checker in this repository.

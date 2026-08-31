@@ -13,6 +13,16 @@
 // the browser witness that both doors open for her and land role-appropriately,
 // not that they are one row.
 //
+// **That forward reference resolves now, and this note is the amendment E1-15
+// owed it** (`docs/MISTAKES.md` entry 1: a record that goes on asserting
+// something a later change made incomplete is how the next reader learns a stale
+// rule). The merge is proven, in a browser, by
+// `tests/e2e/exit-identity-merge.spec.ts` — she enters by both doors in one test
+// and both sessions carry the same `person_id`, which is E1's exit clause 2.
+// What is written above is still exactly right about *this* file: the split
+// stands, and the sentence "not that they are one row" now means "asserted next
+// door" rather than "not asserted anywhere".
+//
 // Falsification (the one change that must turn it red): if the web door read her
 // launch-only instructor role instead of her Care role — landing her on the
 // instructor view — the first half fails; if the launch door landed her teaching

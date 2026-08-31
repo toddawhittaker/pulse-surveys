@@ -331,30 +331,75 @@ def test_the_schedule_beat_reads_is_the_one_the_schedule_module_exposes(
     )
 
 
-def test_the_beat_schedule_holds_no_real_entries_yet(
+# E1-08's entry — the daily purge of the launch replay ledger — and the only
+# thing landed in the beat schedule as of this ticket. ADR 0089: the launch
+# nonce is stored in Postgres rather than Redis, "and that the native TTL a
+# Redis store would have had is replaced by a daily Celery-beat purge." SPEC
+# §9.1 requires single-use nonces; a ledger only ever appended to (`INSERT`,
+# per `RUNTIME_BASE_TABLE_PRIVILEGES` in `test_identity_grants.py`) grows
+# without bound absent this job, so it is part of what makes the
+# Postgres-over-Redis choice sustainable rather than an optional extra.
+PURGE_NONCES_SCHEDULE_KEY = "purge-expired-launch-nonces"
+PURGE_NONCES_TASK_NAME = f"{TASKS_MODULE}.purge_launch_nonces"
+
+# E1-11's entry, spelled by that ticket's work order (D10): "`schedules.py`
+# `BEAT_SCHEDULE` gains `"roster-sync-hourly"`, `crontab(minute="0")`", running
+# `app.jobs.tasks.sync_rosters`, which walks every section with a stored roster
+# address. SPEC §7.3 is where the cadence comes from — "Roster sync: NRPS pulled
+# on schedule and on launch (debounced)" — and the stored address is the only
+# discovery the scheduled half has: "it has no way of its own to learn that a
+# section exists."
+ROSTER_SYNC_SCHEDULE_KEY = "roster-sync-hourly"
+ROSTER_SYNC_TASK_NAME = f"{TASKS_MODULE}.sync_rosters"
+SECTION_ROSTER_TASK_NAME = f"{TASKS_MODULE}.sync_section_roster"
+
+# The minute of the hour that entry fires on, as a `crontab` spells it. Asserted
+# because "hourly" and "every 3600 seconds" are different schedules and only one
+# of them is what a `crontab(minute="0")` produces: a `timedelta`-scheduled entry
+# drifts with every restart, so the hour a section is synced in depends on when
+# beat last came up.
+ROSTER_SYNC_MINUTE = "0"
+
+
+def test_the_beat_schedule_holds_exactly_the_two_entries_that_have_landed(
     configured_env: dict[str, str],
     import_app_module: Callable[[str], ModuleType | None],
     celery_application_in: Callable[[ModuleType], Any],
 ) -> None:
-    """E0-03 scope: the schedule module is "empty of real entries".
+    """E1-08 landed the first real entry and E1-11 the second; this test is the record.
 
-    Every scheduled job in the product is somebody else's ticket — window
-    open and close is E2, Monday reports are E4, roster sync is E1, retention
-    purges are E13 — and E0-03 puts all of them out of scope explicitly. An
-    entry that lands here now runs on a beat whose only verification is that it
-    starts.
+    **Rewritten by E1-08, per this test's own instruction at E0-03.** The
+    original docstring: "This test is a record with a shelf life, and that is
+    deliberate. The first real entry is meant to make it fail, so that adding
+    it is a conversation about which ticket owns the job rather than a line
+    that slips in. Whoever lands that entry rewrites this test in the same
+    change." E1-08 was that ticket — `purge-expired-launch-nonces`, running
+    `app.jobs.tasks.purge_launch_nonces` (ADR 0089's daily purge of the
+    replay ledger `app.lti.replay_guard` claims nonces into).
 
-    **This test is a record with a shelf life, and that is deliberate.** The
-    first real entry is meant to make it fail, so that adding it is a
-    conversation about which ticket owns the job rather than a line that slips
-    in. Whoever lands that entry rewrites this test in the same change.
+    **E1-11 is the second, and this test is being changed by it exactly as the
+    instruction above asks.** `roster-sync-hourly`, running
+    `app.jobs.tasks.sync_rosters` on `crontab(minute="0")` — that ticket's work
+    order, D10 — because SPEC §7.3 pulls NRPS "on schedule and on launch
+    (debounced)" and the scheduled half has no discovery of its own but the
+    stored roster address. The remaining jobs named at E0-03 stay out of scope:
+    window open/close is E2, Monday reports are E4, retention purges are E13.
+    If one of those has now landed too, this test is again the record that has
+    to change with it.
 
-    The empty assertion is the weak half of the pair and is not left to stand on
-    its own: an empty schedule is exactly what a module that does not exist
-    would produce, so `app.jobs.schedules` is imported first and asserted to be
-    real. The wiring test above — that the entries this module holds are the
-    ones beat reads — is the other half, and without it "empty" here would be
-    indistinguishable from "connected to nothing".
+    **An equality rather than a superset, and E1-11 is what pays for that
+    choice.** Widening it to "contains these two" would let a third entry land
+    with no diff here, and an entry in this mapping is a job that runs against
+    every section in the institution on a cadence nobody at the keyboard sees.
+
+    The name-and-task assertion is the strong half of the pair and is not
+    left to stand on its own: a module that does not exist produces an empty
+    schedule that would vacuously fail to contain anything, so
+    `app.jobs.schedules` is imported first and asserted to be real. The
+    wiring test above — that the entries this module holds are the ones beat
+    reads — is the other half, and without it "the schedule holds this entry"
+    here would be indistinguishable from "this module holds it, unread by
+    beat".
     """
     schedules = import_app_module(SCHEDULES_MODULE)
     assert schedules is not None, MISSING_MODULE_MESSAGE.format(module=SCHEDULES_MODULE)
@@ -362,12 +407,50 @@ def test_the_beat_schedule_holds_no_real_entries_yet(
     application = require_application(import_app_module, celery_application_in)
     entries = dict(application.conf.beat_schedule or {})
 
-    assert not entries, (
-        f"The beat schedule declares {sorted(entries)}. E0-03 puts every real scheduled "
-        "task out of scope: window scheduling is E2, reports are E4, roster sync is E1, "
-        "retention is E13. If one of those has now landed, this test is the record that "
-        "has to change with it — say which ticket owns the entry and assert what it is, "
-        "rather than deleting the assertion."
+    assert set(entries) == {PURGE_NONCES_SCHEDULE_KEY, ROSTER_SYNC_SCHEDULE_KEY}, (
+        f"The beat schedule declares {sorted(entries)}, not exactly "
+        f"{sorted({PURGE_NONCES_SCHEDULE_KEY, ROSTER_SYNC_SCHEDULE_KEY})}. E1-08 landed the first "
+        "real entry — the daily purge of the launch replay ledger, ADR 0089 — and E1-11 the "
+        "second, the hourly roster sync SPEC §7.3 asks for. No other ticket has landed one: "
+        "window scheduling is E2, reports are E4, retention is E13. If one of those has now "
+        "landed too, this test is again the record that has to change with it — say which ticket "
+        "owns the new entry and assert what it is, rather than widening this equality to a "
+        "superset check."
+    )
+
+    def member(entry: Any, name: str) -> Any:
+        return entry.get(name) if isinstance(entry, dict) else getattr(entry, name, None)
+
+    entry = entries[PURGE_NONCES_SCHEDULE_KEY]
+    task = member(entry, "task")
+    assert task == PURGE_NONCES_TASK_NAME, (
+        f"`{PURGE_NONCES_SCHEDULE_KEY}` runs {task!r}, not {PURGE_NONCES_TASK_NAME!r}. E1-08's "
+        "entry has to run the nonce-purge task specifically, or the schedule fires something "
+        "beat was never told to run."
+    )
+    schedule = member(entry, "schedule")
+    assert schedule, (
+        f"`{PURGE_NONCES_SCHEDULE_KEY}` declares no `schedule` ({schedule!r}). ADR 0089 gives "
+        "the nonce ledger 'a daily Celery-beat purge' in place of the native TTL a Redis store "
+        "would have supplied — an entry with no period runs on no cadence at all."
+    )
+
+    roster = entries[ROSTER_SYNC_SCHEDULE_KEY]
+    roster_task = member(roster, "task")
+    assert roster_task == ROSTER_SYNC_TASK_NAME, (
+        f"`{ROSTER_SYNC_SCHEDULE_KEY}` runs {roster_task!r}, not {ROSTER_SYNC_TASK_NAME!r}. E1-11's "
+        "hourly entry walks every section that has a stored roster address; the per-section task "
+        f"beside it, `{SECTION_ROSTER_TASK_NAME}`, is what the launch trigger enqueues for one "
+        "section, and scheduling that one instead would sync a single section every hour and "
+        "leave the rest of the institution unsynced."
+    )
+    roster_schedule = member(roster, "schedule")
+    assert getattr(roster_schedule, "minute", None) == {int(ROSTER_SYNC_MINUTE)}, (
+        f"`{ROSTER_SYNC_SCHEDULE_KEY}` is scheduled as {roster_schedule!r}. E1-11's work order "
+        f'settles `crontab(minute="{ROSTER_SYNC_MINUTE}")`, and a `timedelta(hours=1)` is not the '
+        "same schedule: it drifts with every restart, so which minute of the hour an institution's "
+        "rosters are pulled in depends on when beat last came up. `crontab.minute` is the set of "
+        "minutes an entry fires on, so this reads the schedule rather than its repr."
     )
 
 
@@ -409,4 +492,57 @@ def test_the_ping_task_is_registered_with_that_same_application(
         f"(it holds {sorted(n for n in application.tasks if not n.startswith('celery.'))}). "
         "The worker runs that application's registry, so a task registered elsewhere is "
         "enqueued and never run."
+    )
+
+
+@pytest.mark.parametrize(
+    "name", [ROSTER_SYNC_TASK_NAME, SECTION_ROSTER_TASK_NAME], ids=["all-sections", "one-section"]
+)
+def test_both_roster_sync_tasks_are_registered_with_that_same_application(
+    configured_env: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    celery_application_in: Callable[[ModuleType], Any],
+    name: str,
+) -> None:
+    """E1-11's two tasks, and the reason there are two rather than one.
+
+    D10: "`backend/app/jobs/tasks.py` gains `sync_rosters` (walk sections with a
+    stored address, sync each) and `sync_section_roster(section_id)` (one section),
+    thin wrappers over `roster_sync` service functions." SPEC §7.3 is why the pair
+    exists — NRPS is "pulled on schedule **and on launch** (debounced)" — and the
+    two halves enqueue different work: beat runs the first every hour, and a staff
+    launch enqueues the second for the one section it just touched.
+
+    **Registration is the assertion, for the reason the `ping` test gives**: a
+    worker runs the tasks registered on the application `celery -A
+    app.jobs.celery_app worker` starts, so a task defined against a second Celery
+    instance is enqueued by the launch door and never executed — and the symptom is
+    a section that never syncs, which looks exactly like a platform that withheld
+    the roster address.
+
+    **The parametrisation is what makes a missing half visible.** One test asserting
+    both would name whichever failed first; two report which one is absent, and the
+    per-section task is the one a debounced launch trigger cannot work without.
+    """
+    application = require_application(import_app_module, celery_application_in)
+    tasks = import_app_module(TASKS_MODULE)
+    assert tasks is not None, MISSING_MODULE_MESSAGE.format(module=TASKS_MODULE)
+
+    attribute = name.rsplit(".", 1)[-1]
+    task = getattr(tasks, attribute, None)
+    assert task is not None, (
+        f"`{TASKS_MODULE}` defines no `{attribute}` — it defines "
+        f"{sorted(n for n in vars(tasks) if not n.startswith('_'))}. E1-11's work order (D10) puts "
+        "both roster-sync tasks there, following `purge_launch_nonces`' shape."
+    )
+    assert getattr(task, "name", None) == name, (
+        f"`{TASKS_MODULE}.{attribute}` has `.name` {getattr(task, 'name', None)!r} rather than "
+        f"{name!r}, so it is either a plain function — which cannot be enqueued at all — or a task "
+        "registered under a name the beat schedule and the launch trigger do not use."
+    )
+    assert name in application.tasks, (
+        f"`{name}` is not registered on the application in `{CELERY_APP_MODULE}` (it holds "
+        f"{sorted(n for n in application.tasks if not n.startswith('celery.'))}). The worker runs "
+        "that application's registry, so this task would be enqueued and never run — and a section "
+        "that never syncs looks exactly like one whose platform withheld the roster address."
     )

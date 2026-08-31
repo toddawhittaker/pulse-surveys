@@ -12,14 +12,25 @@ escalation in this product costs an attacker somebody else's data; this one cost
 them a name attached to a comment about self-harm. It is marked `invariant`, so
 CI runs it in a pass of its own and treats a skip as a failure.
 
-**What this test is today, said plainly.** It is armed. When it was written no
-claim-mapping code existed and the sweep was vacuous; E0-18's two doors landed
-it — several modules read a claim, several name the role, and one does both and
-is the exception below. The canary still carries weight for the same reason it
-always did: the sweep is required to find the Care role somewhere in the source
-before it is allowed to report anything about which paths name it, because a
-search that has gone blind reads exactly like a search that found nothing wrong
-(`docs/MISTAKES.md` entry 3).
+**What this test is today, said plainly.** It is armed, and since E1-13 it carries
+no exceptions at all. When it was written no claim-mapping code existed and the
+sweep was vacuous; E0-18's two doors landed it — several modules read a claim,
+several name the role, and one, `backend/app/services/landing.py`, did both and
+was the single named exception. E1-13 deleted that module: the landing view comes
+from the assignment model now, so nothing under `backend/app/` both reads a claim
+and names the Care role, and the equality below is against an empty set. That
+deletion is the signal the carried entry
+(`docs/tickets/e1/carried-from-e0.md`, second entry) names as the sign the
+claims-derived mapping is finished, and it is why the exception is gone rather
+than reworded.
+
+The canary still carries weight for the same reason it always did: the sweep is
+required to find the Care role somewhere in the source before it is allowed to
+report anything about which paths name it, because a search that has gone blind
+reads exactly like a search that found nothing wrong (`docs/MISTAKES.md` entry 3).
+An empty `EXCEPTIONS` makes that canary the whole of what stands between this
+test and vacuity, which is worth knowing before anybody narrows the fragment
+lists below.
 
 **Why the syntax tree rather than the file text.** A correct implementation is
 very likely to *say* "CARE" in a comment or a docstring in exactly the module
@@ -29,13 +40,23 @@ failure and teach the next person to delete the comment. So both halves are read
 out of the parsed module: comments are not in a syntax tree at all, and a
 docstring is a string constant that is not the bare word.
 
-**One module is a named exception, and the exception set is an equality.**
-`EXCEPTIONS` below carries the modules this sweep flags on purpose, each with the
-reason it is allowed to, and the assertion is that the flagged set *equals* the
-exception set. So an exception that has gone stale — the module deleted, or
-rewritten so that it no longer reads a claim — fails exactly as loudly as a new
-unexcepted claim-reader naming the role. A list of things to ignore that nobody
-has to keep true is how a sweep quietly stops sweeping.
+**The exception set is an equality, and it is empty.** `EXCEPTIONS` below carries
+the modules this sweep flags on purpose, each with the reason it is allowed to,
+and the assertion is that the flagged set *equals* the exception set. So an
+exception that has gone stale — the module deleted, or rewritten so that it no
+longer reads a claim — fails exactly as loudly as a new unexcepted claim-reader
+naming the role. A list of things to ignore that nobody has to keep true is how a
+sweep quietly stops sweeping. The equality machinery is kept over the empty
+mapping deliberately: it is what makes the *next* exception a decision somebody
+has to write down rather than a line somebody adds.
+
+Two rules follow from the set being empty, and E1-13's work order (D10) records
+both. `LandingRole` may not move to `app/services/session.py`: `SessionClaims`
+makes that module a claim-reader by identifier fragment, and a `CARE` member would
+flag it. And nothing added to `app/services/authz.py` may carry a claim-fragment
+identifier or a vocabulary string — no parameter named `claims`, no docstring
+containing `openid`, `/claim/`, `membership#`, `lis/v2/` or `purl.imsglobal.org`,
+matched as a lowercase substring. "OIDC" is safe; "openid" is not.
 
 **What it cannot see** (`docs/MISTAKES.md` entry 14, which is about not
 overclaiming a search): a mapping that reaches the role through a variable, a
@@ -81,33 +102,28 @@ CLAIM_STRING_FRAGMENTS = (
 # to, keyed by path relative to the repository root. The assertion below is an
 # equality against these keys: adding one is a decision somebody has to write down
 # here, and leaving a stale one is a failure rather than a silence.
-EXCEPTIONS = {
-    "backend/app/services/landing.py": (
-        "E0-18's landing seam: it maps a verified web-login roles claim to which "
-        "empty page to render. Navigation, not capability — the criterion this "
-        "file enforces is that no claim may *produce a Care assignment*, and this "
-        "module writes no `role_assignment` row and grants nothing. That is "
-        "asserted behaviourally, not argued: "
-        "`tests/integration/test_web_login_door.py::"
-        "test_the_web_door_writes_no_row_for_the_care_person_it_lands` drives the "
-        "whole flow as the Care person and requires the row counts to be "
-        "unchanged. The Care queue itself is E10's, and every read on it is gated "
-        "on a live `CARE` assignment in the database through the authz chokepoint "
-        "(E0-11, `app/services/authz.py`) — never on a claim, so a forged or "
-        "administrator-granted claim buys an empty page and nothing else. The "
-        "claim that buys it can also only arrive at the door SPEC §2 gives Care: "
-        "`tests/integration/test_lti_launch_door.py::"
-        "test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused` and "
-        "`::test_a_launch_carrying_both_vocabularies_lands_on_the_view_its_lis_"
-        "role_names` require the launch door to refuse a launch stating `CARE` in "
-        "the web door's roles claim and to ignore that claim entirely when an LIS "
-        "role is present, so an LMS administrator cannot reach even the empty page "
-        "by writing one into a launch. E1 "
-        "replaces claim-derived landing roles with the assignment model, at which "
-        "point this exception should go and this equality will say so. "
-        "Arbitrated 2026-08-21 on E0-18 PR 1."
-    ),
-}
+#
+# **It is empty, and E1-13 is what emptied it.** Its single entry was
+# `backend/app/services/landing.py` — E0-18's landing seam, which mapped a verified
+# roles claim to which empty view a person was sent to, and which was excepted
+# because navigation is not capability. E1-13 deletes that module outright and
+# resolves the landing from the assignment model instead, so the last code path in
+# this application that read a claim beside the Care role is gone. The carried
+# entry (`docs/tickets/e1/carried-from-e0.md`, second entry) names this deletion as
+# the signal that the claims-derived mapping is finished: "Deleting `landing.py`'s
+# entry from `tests/unit/test_care_is_not_reachable_from_a_claim.py::EXCEPTIONS` in
+# the same change is the signal that this is finished."
+#
+# What the old entry argued is now asserted rather than argued, in two places. The
+# behavioural half — that no claim produces a row in `role_assignment` — is
+# `tests/integration/test_web_login_door.py::test_the_web_door_writes_no_row_for_
+# the_care_person_it_lands`. The half about reaching the Care *view* is stronger
+# than it was: it no longer rests on the launch door refusing a smuggled claim, but
+# on ADR 0026's generated `permits_launch` column, exercised over a real Care
+# assignment held by a real launching person in
+# `tests/integration/test_landing_resolves_from_assignments.py::test_a_care_only_
+# persons_launch_is_answered_with_the_calm_page_and_never_the_care_view`.
+EXCEPTIONS: dict[str, str] = {}
 
 
 def parsed_modules() -> dict[Path, ast.Module]:

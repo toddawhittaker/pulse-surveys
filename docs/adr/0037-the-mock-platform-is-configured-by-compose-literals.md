@@ -56,6 +56,15 @@ attacker-controlled, in a service whose whole job is to sign things.
 
 ## Consequences
 
+> **Amended 2026-08-25 by E1-06: there are six values, not five.** The decision
+> is unchanged and the sixth took it without argument.
+> `MOCK_LMS_TOOL_JWKS_URL` — where the tool publishes the key set this platform
+> verifies a `client_assertion` against — is a literal in the same block, with
+> one correct value on the Compose network like every other, and `.env.example`
+> gained nothing. Read each "five" below and above as "six": the count moved and
+> the reasoning did not, and saying so once here is better than five edits that
+> would leave the argument reading as though it had been written for six.
+
 **Two places hold the same five values** — the Compose block and the defaults in
 `config.py` — and they can drift. Both are stated to agree, in comments on each
 side, and the Compose file is named as authoritative for a deployment. The

@@ -17,10 +17,20 @@ reveal can only be asserted against an identity that exists, and the seeding it
 needs is "one row of whatever table, with its ancestors" rather than a graph
 shape.
 
-E0-11 adds `supervision_graph_on`, which is the same builder pointed at a
-database standing at an earlier revision: the ticket's migration has to answer
+E0-11 adds `supervision_graph_on`, which is the same builder on a session the
+caller opened rather than on `db_session`: the ticket's migration has to answer
 for rows that were already stored when it runs, and no fixture here could reach
 that state before.
+
+**Nothing here seeds into a schema that is not `Base.metadata`'s, and nothing
+here can.** `seed_row` writes through the declared tables and reads every
+declared column back, so the database it is pointed at has to be at head. That is
+a rule about this helper rather than about any one migration, it is stated on
+`seed_row` and on `supervision_graph_on` below, and `seed_row` fails saying so
+when a caller breaks it. A test whose *subject* is an older revision seeds while
+the database is at head and walks it back down afterwards — see
+`tests/integration/test_the_upgrade_refuses_a_stored_edge_that_does_not_climb.py`,
+which is the one caller that needs to.
 
 **This module is the one home of the two mutable caches** `_GRAPH_UNIQUE` and
 `_GRAPH_INTEGER_COUNTERS`. They are what guarantee that no two seeded rows in a
@@ -354,6 +364,30 @@ def invented_value(table: Any, column: Any) -> Any:
     )
 
 
+# The two SQLSTATEs a database that is behind `Base.metadata` answers a seed with:
+# `42703` undefined_column and `42P01` undefined_table. Deliberately these two and
+# not "any `DatabaseError`" — a constraint violation is the *subject* of a good
+# many callers here, which pass a write to `SupervisionGraph.refusal` precisely to
+# be told it was refused, and swallowing one of those would turn a real assertion
+# into a message about the schema.
+SCHEMA_IS_BEHIND_THE_MODELS = ("42703", "42P01")
+
+
+def sqlstate_of(failure: BaseException) -> str | None:
+    """The SQLSTATE a driver exception carries, under either driver's spelling.
+
+    psycopg 3 spells it `sqlstate` and psycopg 2 spells it `pgcode`; this project
+    pins the first (`tests/unit/test_psycopg_driver_pinned.py`) and reading both
+    costs one line rather than a future afternoon.
+    """
+    original = getattr(failure, "orig", failure)
+    for attribute in ("sqlstate", "pgcode"):
+        code = getattr(original, attribute, None)
+        if isinstance(code, str):
+            return code
+    return None
+
+
 def require_table(tables: dict[str, Any], name: str) -> Any:
     """The table called `name`, or a failure saying it is not there."""
     table = tables.get(name)
@@ -470,7 +504,35 @@ def seed_row(
     be read back with RETURNING rather than predicted. An override is honoured
     even when it is `None`, so a test can write a null and let the database
     accept or refuse it.
+
+    **The database this is pointed at has to be at head**, and that is a property
+    of this helper rather than of any one migration. The insert is built from
+    `Base.metadata` and the `RETURNING` clause names *every* column that metadata
+    declares — whether or not the insert supplied it, and whatever its default is.
+    So the moment any revision adds a column to a table this seeds, seeding into a
+    database standing before that revision fails: on the `RETURNING` clause if the
+    new column is defaulted, and on the insert itself if it is not. No definition
+    of the new column avoids it and no choice of column is safe, which is why the
+    rule is stated here rather than worked around wherever it next fires.
+
+    That is exactly how it did fire (`docs/disputes/E1-10-01.md`). E0-11's
+    migration test seeded through this helper into a database standing at E0-11's
+    own revision, said in its own prose that doing so "keeps their columns the ones
+    today's models declare", and stayed true for eight revisions — until E1-10
+    added `course.title_is_fallback` and two tests about a trigger went red inside
+    their own fixture. `docs/MISTAKES.md` entry 22 is the shape: a later ticket's
+    legitimate change makes an earlier ticket's tests unrunnable, and the repair is
+    on the other side of the test wall. A test whose subject *is* an older revision
+    seeds at head and walks the database back down afterwards, which is what that
+    module does now.
+
+    The failure below is what turns the next occurrence into a message naming the
+    cause. Without it the symptom is `UndefinedColumn` raised inside whichever
+    control happened to seed first, which reads as a broken schema rather than as
+    this helper being pointed somewhere it cannot go.
     """
+    from sqlalchemy.exc import DatabaseError
+
     chain = {} if chain is None else chain
     table = require_table(tables, name)
     values: dict[str, Any] = dict(overrides)
@@ -494,7 +556,26 @@ def seed_row(
         values[column.name] = invented_value(table, column)
 
     statement = table.insert().values(**values).returning(*table.columns)
-    inserted = session.execute(statement).mappings().one()
+    try:
+        inserted = session.execute(statement).mappings().one()
+    except DatabaseError as failure:
+        if sqlstate_of(failure) not in SCHEMA_IS_BEHIND_THE_MODELS:
+            raise
+        pytest.fail(
+            f"Seeding `{name}` failed because the database does not have something "
+            f"`Base.metadata` declares: {failure}\n\n"
+            "That is this helper being pointed at a database that is not at head, rather than a "
+            "defect in the row or in the schema. The insert and its `RETURNING` clause are both "
+            "built from the declared table, so every column today's models carry has to exist "
+            "wherever this seeds — see this function's docstring, and "
+            "`docs/disputes/E1-10-01.md` for the occasion it was written on.\n\n"
+            "Two honest answers. If the test's subject is an older revision, seed while the "
+            "database is at head and downgrade afterwards, the way "
+            "`tests/integration/test_the_upgrade_refuses_a_stored_edge_that_does_not_climb.py` "
+            "does. If the database is meant to be at head, then a model declares something no "
+            "migration creates, which is drift — `alembic check` and "
+            "`tests/integration/test_alembic_baseline.py` are where that is diagnosed."
+        )
     chain.setdefault(name, inserted)
     return inserted
 
@@ -1114,15 +1195,26 @@ def supervision_graph(db_session: Any, metadata_tables: dict[str, Any]) -> Super
 def supervision_graph_on(
     metadata_tables: dict[str, Any],
 ) -> Callable[[Any], SupervisionGraph]:
-    """The same builder, on a session the caller opened, for a database that is not at head.
+    """The same builder, on a session and a database the caller opened for itself.
 
     `supervision_graph` above and `committed_rows` below both bind the builder to
-    the session database, which `migrated_database` has already taken to head.
-    E0-11 needs the same rows in a database standing at an **earlier** revision —
-    the state a deployment is in at the moment a new rule arrives — and that is
+    the session database. E0-11 needs the same rows in a database of its own — one
+    it can migrate up and down without touching the session's — and that is
     `empty_database`'s, on a connection the test opens and closes around each
     migration step. The choice was a fifth private copy of the builder or this
     (`docs/MISTAKES.md` entry 13), and the copy is the one nobody updates.
+
+    **It still only seeds a database at head**, and this is the sentence that used
+    to say otherwise. It read that E0-11 "needs the same rows in a database
+    standing at an **earlier** revision", and that is not something this fixture
+    can do: `seed_row` writes through `Base.metadata` and reads back every column
+    that metadata declares, so a database standing before any revision that added
+    one is a database it cannot write to. The rows and the migration step are
+    separable, which is what makes the rule affordable — E0-11's module seeds while
+    its database is at head and downgrades afterwards, and the revision under test
+    is reached by upgrading into it, which is the step every assertion there is
+    about. `docs/disputes/E1-10-01.md` is the occasion this was found on, and
+    `seed_row` fails with the reason if a caller tries it anyway.
 
     The counters are cleared once per test rather than once per call, because a
     test that opens three sessions against one database is still one test's budget

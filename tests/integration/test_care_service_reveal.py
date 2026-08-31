@@ -91,6 +91,21 @@ REVEAL_NOTE = "E0-10 proof of mechanism"
 # platform" is a call that would succeed and mean nothing.
 LMS_USER_ID_COLUMNS = ("lms_user_id", "lms_sub", "lms_subject", "lms_id", "sub")
 
+# The name the seeded student's identity row carries. **This suite's choice, and
+# stated rather than borrowed since E1-11.** It used to be whatever `seed_row`
+# invented, and the fixture below asked only that the row carry *some* non-key
+# string — a guard that worked only because `user_identity.identity_name` was
+# `NOT NULL` and `seed_row` therefore had to fill it. E1-11's D7 makes the column
+# nullable, because the roster sync records an address for a member it has no name
+# for (ADR 0050) and its writer holds no privilege on the name column at all; so
+# `seed_row` correctly leaves it, and every test here failed inside its own
+# seeding (dispute E1-11-02, `docs/MISTAKES.md` entry 22).
+#
+# Naming the value is the better test as well as the working one: what the reveal
+# returns is now compared against a string this file chose, rather than against one
+# the fixture generated and nothing ever named.
+SEEDED_IDENTITY_NAME = "Robin Reveal-Me"
+
 
 class Revealable(NamedTuple):
     """One student to reveal, and two people who might ask."""
@@ -248,7 +263,7 @@ def revealable(committed_rows: Any) -> Revealable:
     graph = committed_rows.graph
     hats = graph.care_and_instructor_person()
     chain: dict[str, Any] = {}
-    identity = committed_rows.seed("user_identity", chain)
+    identity = committed_rows.seed("user_identity", chain, identity_name=SEEDED_IDENTITY_NAME)
     committed_rows.commit()
 
     user = chain.get("user")
@@ -263,10 +278,15 @@ def revealable(committed_rows: Any) -> Revealable:
         for key, value in identity.items()
         if isinstance(value, str) and value and not key.endswith("_id")
     }
-    assert values, (
-        f"The seeded `user_identity` row carries no non-key string value: {dict(identity)}. There "
-        "is then nothing for a reveal to return that could be recognised, and the test below would "
-        "assert that a call returned something rather than that it returned the identity."
+    assert SEEDED_IDENTITY_NAME in values, (
+        f"The seeded `user_identity` row does not carry the name this fixture asked it to "
+        f"({SEEDED_IDENTITY_NAME!r}): {dict(identity)}. There is then nothing for a reveal to "
+        "return that could be recognised, and the tests below would assert that a call returned "
+        "something rather than that it returned this student's identity.\n\n"
+        "Until E1-11 this asked only for *some* non-key string, and got one because "
+        "`identity_name` was NOT NULL and `seed_row` fills what the schema requires. That column "
+        "is nullable now (D7, ADR 0050), so the value is stated here instead of borrowed from a "
+        "constraint two tickets away."
     )
 
     key = next((name for name in user if name in {"id", "user_id"}), None)

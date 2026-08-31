@@ -7,18 +7,28 @@ with the door settings a test chooses, and hands back a `TestClient` whose
 seam is the ticket's design rather than a fixture's convenience — every
 server-side fetch a door makes (a platform's JWKS, the provider's token endpoint)
 goes through one client, so a test can route it and nothing else has to be
-intercepted. `seed_constant` sits beside it and exists for one assertion: the two
-mock seeds name one human, and the constant that says so can only be read by
-importing a module out of each mock, which the two packages both being called
-`app` makes a one-at-a-time affair.
+intercepted. `seed_constant` sits beside it and reads a module-level value out of
+one mock's `app.seed`, which the two packages both being called `app` makes a
+one-at-a-time affair.
+
+**`seed_constant` has no caller as of E1-12, and it is kept deliberately.** It was
+built for one assertion — that the two mock seeds name one human — and that fact is
+asserted directly now, against what the two mocks *serve*, in
+`tests/integration/test_dual_door_identity_merge.py`; the unit module that compared
+the two constants was deleted in the same change, which is that ticket's own
+"done when". What keeps this fixture here is the resolution it demonstrates:
+`tests/fixtures/lti_services.py` and dispute E1-05-02 both cite it as the reference
+for reading a value out of a mock package and letting the meta-path resolution
+close before the caller touches anything.
 """
 
 import base64
 import importlib
 import json
+import sys
 import time
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from types import ModuleType
 from typing import Any, NamedTuple
@@ -66,9 +76,16 @@ LANDING_TESTIDS = (
 # The settings E0-18 adds, under the names its "Configuration: one public base URL,
 # two horizons" section describes them by. **These spellings are this suite's
 # choice** — the ticket names each value and none of the variables — so a
-# deliberate rename is these seven lines and nothing else.
+# deliberate rename is these six lines and nothing else.
+#
+# **The launch door's authorization endpoint is not here any more, and its
+# absence is E1-05.** It was a process-wide setting while `lti_platform` had no
+# column for it (ADR 0075), which is correct for one registered platform and
+# wrong for two: a launch from platform B resolved B's registration and then sent
+# the browser to A's endpoint. E1-05 makes it a property of the registration, so
+# a door suite writes it into the row through `register_platform` below rather
+# than into the environment, and `Settings` no longer carries it at all.
 PUBLIC_BASE_URL_VARIABLE = "PUBLIC_BASE_URL"
-LTI_AUTHORIZATION_ENDPOINT_VARIABLE = "LTI_PLATFORM_AUTHORIZATION_ENDPOINT"
 OIDC_ISSUER_VARIABLE = "OIDC_ISSUER"
 OIDC_AUTHORIZATION_ENDPOINT_VARIABLE = "OIDC_AUTHORIZATION_ENDPOINT"
 OIDC_TOKEN_ENDPOINT_VARIABLE = "OIDC_TOKEN_ENDPOINT"  # noqa: S105
@@ -197,6 +214,62 @@ def routed_through(
     return httpx.Client(transport=httpx.MockTransport(handle))
 
 
+def engines_behind(application: Any) -> list[Any]:
+    """Every SQLAlchemy engine the freshly imported application built, found structurally.
+
+    **Why this exists.** `import_app_module` drops every `app.*` module from
+    `sys.modules` before a test runs, so each `create_app()` re-imports `app.db`
+    and that module builds its engine at import time — a fresh engine, with a
+    fresh connection pool, per test that opens a door. Nothing disposed them:
+    the modules were discarded at teardown and the pools they held stayed open
+    for the rest of the session, so a full run accumulated one live pool per
+    door-opening test until Postgres answered `FATAL: remaining connection slots
+    are reserved for non-replication superuser connections` to whichever module
+    happened to run next.
+
+    Every other engine-holding fixture in this suite disposes —
+    `migrated_engine`, `application_engine` and the three admin engines in
+    `tests/fixtures/database.py` all end in `engine.dispose()` — and `tool_doors`
+    below now does the same for the engine it causes to be built.
+
+    **Found rather than named.** No ticket says what `app.db` calls its engine,
+    and `tests/integration/test_db_session.py` deliberately discovers that
+    module's session dependency structurally rather than pinning a name. This
+    does the same thing for the engine: any value that *is* a SQLAlchemy `Engine`
+    — on `app.db`, or held on the application's own `state` — is one to dispose.
+    An `AsyncEngine` is reached through its `sync_engine`, because disposing the
+    async wrapper is a coroutine and this runs in a synchronous teardown.
+
+    Answers an empty list rather than failing when it finds nothing. A door suite
+    whose application holds no engine is a possibility this has no business
+    ruling on, and the cost of being wrong is the leak that already existed.
+    """
+    from sqlalchemy.engine import Engine
+
+    found: list[Any] = []
+    seen: set[int] = set()
+
+    def consider(value: Any) -> None:
+        engine = getattr(value, "sync_engine", None)
+        if not isinstance(engine, Engine):
+            engine = value
+        if isinstance(engine, Engine) and id(engine) not in seen:
+            seen.add(id(engine))
+            found.append(engine)
+
+    module = sys.modules.get("app.db")
+    if module is not None:
+        for value in list(vars(module).values()):
+            consider(value)
+
+    held = getattr(getattr(application, "state", None), "_state", None)
+    if isinstance(held, dict):
+        for value in list(held.values()):
+            consider(value)
+
+    return found
+
+
 @contextmanager
 def clock_wound_back(seconds: int) -> Iterator[None]:
     """Move `time.time` back for the body, and put it back afterwards.
@@ -271,7 +344,6 @@ def door_contract() -> DoorContract:
         landing_testids=LANDING_TESTIDS,
         settings={
             "public_base_url": PUBLIC_BASE_URL_VARIABLE,
-            "lti_authorization_endpoint": LTI_AUTHORIZATION_ENDPOINT_VARIABLE,
             "oidc_issuer": OIDC_ISSUER_VARIABLE,
             "oidc_authorization_endpoint": OIDC_AUTHORIZATION_ENDPOINT_VARIABLE,
             "oidc_token_endpoint": OIDC_TOKEN_ENDPOINT_VARIABLE,
@@ -343,6 +415,13 @@ def tool_doors(
     convenience: every server-side fetch either door makes goes through one client,
     which is what lets a test serve the mocks in process without intercepting
     anything else.
+
+    **Every engine the built application holds is disposed at teardown.** The
+    application is imported fresh, which means `app.db` builds a fresh engine and a
+    fresh connection pool for each test that opens a door — and until this was
+    added nothing closed them, so a full run held one live pool per such test and
+    eventually exhausted the server's connection slots. `engines_behind` above says
+    what that cost and why the engine is discovered rather than named.
     """
     from fastapi.testclient import TestClient
 
@@ -350,6 +429,7 @@ def tool_doors(
         monkeypatch.setenv(name, value)
 
     opened: list[Any] = []
+    engines: list[Any] = []
 
     def open_the_tool(
         values: Mapping[str, str],
@@ -376,6 +456,12 @@ def tool_doors(
         client.__enter__()
         opened.append(client)
         client.app.state.http = routed_through(mocks or {}, around)
+        # Collected here rather than at teardown, because `import_app_module`
+        # restores `sys.modules` on the way out and the module this engine came
+        # from would be gone by then. Two tools built inside one test share one
+        # `app.db` — the second import finds the first in `sys.modules` — so
+        # `engines_behind` deduplicates and this list holds one entry per test.
+        engines.extend(engine for engine in engines_behind(client.app) if engine not in engines)
         return client
 
     try:
@@ -383,6 +469,13 @@ def tool_doors(
     finally:
         for client in reversed(opened):
             client.__exit__(None, None, None)
+        for engine in engines:
+            # Suppressed for the reason `care_connections` suppresses its closes:
+            # a teardown that raises replaces the test's own failure with its own,
+            # and a pool that cannot be disposed is a diagnosis for the run that
+            # provoked it rather than for the test that happened to be last.
+            with suppress(Exception):
+                engine.dispose()
 
 
 # How `lti_platform` and `lti_deployment` might spell the four values a launch is
@@ -394,6 +487,12 @@ PLATFORM_ISSUER_COLUMNS = ("issuer", "iss", "issuer_url", "platform_issuer")
 PLATFORM_CLIENT_ID_COLUMNS = ("client_id", "oauth_client_id", "tool_client_id", "lti_client_id")
 PLATFORM_JWKS_URL_COLUMNS = ("jwks_url", "jwks_uri", "public_jwks_url", "key_set_url", "keyset_url")
 DEPLOYMENT_ID_COLUMNS = ("deployment_id", "lti_deployment_id", "platform_deployment_id")
+
+# Where the platform's browser-facing authorization endpoint lives, from E1-05.
+# **One candidate rather than a list**, unlike the four above: E1-05 spells this
+# column, and the mock's `/registration` document carries the same key, so a
+# candidate list would be inventing alternatives the ticket does not leave open.
+PLATFORM_AUTHORIZATION_ENDPOINT_COLUMNS = ("authorization_endpoint",)
 
 
 def door_column_named(table: Any, candidates: tuple[str, ...], purpose: str) -> str:
@@ -441,7 +540,14 @@ class PlatformRegistration:
     the test names rather than any of three things at once.
     """
 
-    def __init__(self, rows: Any, tables: dict[str, Any], offer: Any, jwks_url: str) -> None:
+    def __init__(
+        self,
+        rows: Any,
+        tables: dict[str, Any],
+        offer: Any,
+        jwks_url: str,
+        authorization_endpoint: str | None,
+    ) -> None:
         for name in ("lti_platform", "lti_deployment"):
             if name not in tables:
                 pytest.fail(
@@ -455,6 +561,7 @@ class PlatformRegistration:
         self.client_id = announced_by(offer, "client_id")
         self.deployment_id = announced_by(offer, "lti_deployment_id")
         self.jwks_url = jwks_url
+        self.authorization_endpoint = authorization_endpoint
 
         self.issuer_column = door_column_named(
             self.platform_table,
@@ -471,6 +578,11 @@ class PlatformRegistration:
             PLATFORM_JWKS_URL_COLUMNS,
             "where the verifying key set is fetched from",
         )
+        self.authorization_endpoint_column = door_column_named(
+            self.platform_table,
+            PLATFORM_AUTHORIZATION_ENDPOINT_COLUMNS,
+            "where a login initiation from this platform sends the browser (E1-05)",
+        )
         self.deployment_column = door_column_named(
             self.deployment_table,
             DEPLOYMENT_ID_COLUMNS,
@@ -485,6 +597,12 @@ class PlatformRegistration:
                 self.issuer_column: self.issuer,
                 self.client_id_column: self.client_id,
                 self.jwks_column: self.jwks_url,
+                # Written even when it is `None`, which `seed_row` honours: a
+                # registration that predates E1-05's column is exactly the case
+                # the launch door has to refuse rather than fall back from, and
+                # leaving the keyword out would let the column's own default —
+                # if anybody ever gives it one — stand in for the absence.
+                self.authorization_endpoint_column: self.authorization_endpoint,
             },
         )
         self.deployment_row = rows.seed(
@@ -512,17 +630,76 @@ class PlatformRegistration:
 @pytest.fixture
 def register_platform(
     committed_rows: Any, metadata_tables: dict[str, Any]
-) -> Callable[[Any, str], PlatformRegistration]:
+) -> Callable[[Any, str, str | None], PlatformRegistration]:
     """Register a running mock platform, so the tool's launch door can resolve it.
 
     Here rather than in the launch-door module because both door suites need it:
     the two-hat person's launch is driven from the web-login module, and a second
     copy of "which column holds the issuer" is the shape `docs/MISTAKES.md` entry 13
     is about.
+
+    **The authorization endpoint is a required argument with no default**, and
+    that is deliberate. It is the value E1-05 moves out of the process and into
+    the registration, so the suite that cares about where a browser is sent has
+    to name it — a fixture that supplied one would be answering the question its
+    own tests ask (`docs/MISTAKES.md` entry 30). `None` is the registration that
+    predates the column, which the launch door refuses.
     """
 
-    def register(offer: Any, jwks_url: str) -> PlatformRegistration:
-        return PlatformRegistration(committed_rows, metadata_tables, offer, jwks_url)
+    def register(
+        offer: Any, jwks_url: str, authorization_endpoint: str | None
+    ) -> PlatformRegistration:
+        return PlatformRegistration(
+            committed_rows, metadata_tables, offer, jwks_url, authorization_endpoint
+        )
+
+    return register
+
+
+@pytest.fixture
+def register_platform_row(
+    committed_rows: Any, metadata_tables: dict[str, Any]
+) -> Callable[..., Any]:
+    """One committed `lti_platform` row from values a test names, and no platform running.
+
+    `register_platform` above needs a live mock, because the values it registers
+    are read off that platform's own launch form — which is right for a suite
+    that then drives a launch through it. The developer console needs neither: it
+    renders a launcher link per registered authorization endpoint and never
+    resolves a launch, so starting two mock platforms to give it two rows would
+    be paying for a launch nobody makes.
+
+    The column names are looked up through the same helper and the same candidate
+    lists `PlatformRegistration` uses, so the two cannot end up disagreeing about
+    which column holds what (`docs/MISTAKES.md` entry 13).
+    """
+
+    def register(*, issuer: str, authorization_endpoint: str | None, jwks_url: str) -> Any:
+        table = metadata_tables.get("lti_platform")
+        if table is None:
+            pytest.fail(
+                f"There is no `lti_platform` table (there are {sorted(metadata_tables)}). E0-08 "
+                "creates it and every registration in this suite is a row in it."
+            )
+        row = committed_rows.seed(
+            "lti_platform",
+            {},
+            **{
+                door_column_named(table, PLATFORM_ISSUER_COLUMNS, "how a launch is resolved"): (
+                    issuer
+                ),
+                door_column_named(
+                    table, PLATFORM_JWKS_URL_COLUMNS, "where the verifying key set is fetched from"
+                ): jwks_url,
+                door_column_named(
+                    table,
+                    PLATFORM_AUTHORIZATION_ENDPOINT_COLUMNS,
+                    "where a login initiation from this platform sends the browser (E1-05)",
+                ): authorization_endpoint,
+            },
+        )
+        committed_rows.commit()
+        return row
 
     return register
 

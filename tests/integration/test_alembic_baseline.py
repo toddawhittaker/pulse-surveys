@@ -131,8 +131,19 @@ def test_check_reports_no_drift_after_upgrading_an_empty_database(
 def test_check_fails_when_the_models_carry_a_column_the_database_lacks(
     empty_database: Any,
     alembic_config_pointed_at: Callable[[Any], Any],
+    configured_env: dict[str, str],
 ) -> None:
     """Criterion 2: a model change with no migration behind it is a failure.
+
+    **`configured_env` is here because `load_base()` imports `app.db`**, and
+    `app.db` builds a full `Settings()` at import time. That import only
+    happens once per process, so this test used to be carried by whichever
+    earlier test in the same session had already imported the module under a
+    configured environment — a dependency on process state that nothing
+    declared. It held while the suite ran in one process and stopped holding
+    the moment the pass was split across xdist workers, which is the same
+    defect as `docs/MISTAKES.md` entry 40: a test that builds `Settings()`,
+    directly or through an import, depends on `configured_env`.
 
     The mechanism, spelled out because reading it later should not require
     reconstructing it: a table is declared on `Base.metadata` from inside this
