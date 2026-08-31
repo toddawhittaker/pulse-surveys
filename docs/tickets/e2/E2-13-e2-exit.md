@@ -38,8 +38,12 @@ deferred notes as they accumulated in `deferred.md`.
   deterministic.
 - **Clause 3 — the §4.1 item 1 test.** Already E2-09's; here the exit
   verifies it is collected in the isolated invariant pass on the exit
-  commit, and the boundary invariant-coverage audit asks whether every read
-  path E2 added is touched by the suite.
+  commit **and re-runs E2-09's loosened-predicate mutation against that
+  commit** — collection is presence, not the failing behavior the clause
+  names, and anything merged since E2-09 could have loosened the assertion
+  under a green suite. Battery discipline applies: commit first, snapshot
+  restore, check the mutation landed. The boundary invariant-coverage audit
+  separately asks whether every read path E2 added is touched by the suite.
 - **Clause 4 — the copy-inventory test exists and reads shipped strings.**
   E2-11's; verified collected and its canary live on the exit commit.
 - Also in the browser, because the epic's correctness rests on them: the
@@ -56,9 +60,20 @@ deferred notes as they accumulated in `deferred.md`.
   green), or reports they no longer hold. If E2-09 added a denial module,
   the review names it against the shapes.
 - **The hand-off**: `docs/tickets/e3/carried-from-e2.md`, one entry per
-  deferral with owner and done-when, per §14.1 — including whatever E2-12
-  left of §11 question 4, and the standing entries passing through
-  (`PERSON_TABLES`; the mock scope-superstring pin; the mock IdP entries).
+  deferral with owner and done-when, per §14.1. Its completeness rule:
+  **every entry of `carried-from-e1.md` not closed inside E2 appears, whoever
+  owns it** — the E3/E4/E9/E11/E13-owned entries (signing-key custody, AGS
+  token, the reveal-subject guard and its E4 deadline, logout, the web-login
+  linkage, the squat repair, the CSP write-time rejection, `PERSON_TABLES`,
+  the local-account fallback, the mock-conditional pins) pass through by
+  being re-listed, because §14.1 routes every deferral through the epic
+  boundary and E3's breakdown reads this file, not E1's. Plus whatever
+  E2-12 left of §11 question 4 and everything in E2's own `deferred.md`.
+- **The TypeScript 7 watch**: the carried entry's owner is "whichever epic
+  is running when `typescript-eslint` admits 7.x". Run
+  `npm view typescript-eslint peerDependencies` at exit: if 7.x was admitted
+  during E2 and the pair was not moved, say so and carry it with that fact
+  rather than silently re-deferring.
 
 ## Acceptance criteria
 

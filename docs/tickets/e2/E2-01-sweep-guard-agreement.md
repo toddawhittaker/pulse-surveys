@@ -51,8 +51,9 @@ and the one-importer sweep at
     the count-only-plant docstring that claims a location assertion the
     assertion does not make;
   - `backend/app/services/authz.py`'s comment still says the sweep polices
-    "the three org views" — make it count what the sweep polices (fourteen
-    relations at the re-review).
+    "the three org views" — a stale count. Do not write a new number that
+    will drift the same way: the comment stops asserting a count and points
+    at the catalog the sweep actually reads.
 
 ## Acceptance criteria
 
@@ -61,7 +62,7 @@ and the one-importer sweep at
 2. The planted two-step offender is red under the new rule and green when
    removed — both directions run, not argued (MISTAKES entries 3 and 9).
 3. The statement-pin docstrings and the pin agree; the `authz.py` comment
-   counts the policed relations.
+   asserts no count and names the catalog as the source.
 4. The carried entry's done-when is met in full.
 
 ## Out of scope

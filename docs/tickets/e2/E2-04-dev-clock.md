@@ -51,8 +51,13 @@ entry 40 (tests that read the process environment state what they run under).
   clock beside it so an overridden stack is never mistaken for a live one.
 - An ADR: database-row dev clock, offset semantics, and the explicit list of
   clocks it does **not** touch (launch validation, session expiry, audit
-  timestamps, `func.now()` column defaults). The spec is silent and the
-  choice is contestable; that is the ADR test.
+  timestamps, `func.now()` column defaults). One column is called out by
+  name so two tickets cannot each leave it to the other: `response`'s
+  submission timestamp is *application-written through this service* (E2-08
+  does the writing) — a dev-clock submission whose stored timestamp sits
+  outside the window that accepted it would hand E3's participation formula
+  a row that contradicts itself. The spec is silent and the choice is
+  contestable; that is the ADR test.
 - Tests: the override moves the service's answers in development and moves
   nothing outside it (both directions); the migrated call sites read the
   service (the sweep question: a new direct `datetime.now` in scheduling code

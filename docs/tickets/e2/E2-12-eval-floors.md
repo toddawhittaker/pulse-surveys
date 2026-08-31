@@ -21,11 +21,19 @@ E2 exits**.
 **Decided with Todd, 2026-08-31 — when live calls happen.** Ordinary test
 runs never call a provider (they use the loopback stub and E2-07's mock). The
 eval suite is the only live-provider surface, and it runs: (a) in CI only
-when the change touches the AI surface — prompts, `backend/app/ai/`,
-`tests/evals/` — via the existing `changed`-outputs pattern at **step level**
-(ADR 0002's amendment: the aggregate treats a skipped job as failure, so the
-job always runs and its steps decide; a job-level `if:` is the shape
-`test_the_aggregate_ci_check_sees_an_upstream_failure.py` exists to refuse);
+when the change touches what §9.3's gate names — **prompt or model** — so the
+path set is `backend/app/ai/`, `tests/evals/`, *and the files that carry the
+model identifier*: `backend/app/config.py` (`ai_model_name`) and
+`.env.example`. Over-firing on an unrelated config edit costs one eval run;
+under-firing on a model bump is §9.3's gate not running, which is the worse
+trade by the ADR 0002 incident record. The condition is **step level** (ADR
+0002's amendment: the aggregate treats a skipped job as failure, so the job
+always runs and its steps decide; a job-level `if:` is the shape
+`test_the_aggregate_ci_check_sees_an_upstream_failure.py` exists to refuse),
+and it is new work, not reuse: the `changed` job emits exactly one output
+today (`inert`), so `scripts/ci/classify_changed_paths.py` grows an
+`ai_surface` classification with the planted-tree tests MISTAKES entry 36
+demands of any probe that decides whether a gate runs;
 (b) on demand via `workflow_dispatch`; (c) locally via a make target reading
 `.env`. Hundreds of live calls per merge is exactly what this design refuses.
 
@@ -61,6 +69,14 @@ itself a gate).
   never provisional. The runner refuses plainly when the key is absent
   (an AI-touching PR without the secret is a red gate naming what is
   missing, not a quiet pass — MISTAKES entry 34's cousin).
+- **The sequencing this creates is a named blocker, not a surprise:** this
+  ticket's own PR touches `tests/evals/`, so its own eval steps fire, and
+  without the secret they go red — and red does not merge. So the ask to
+  Todd happens at ticket start, the secret exists before the flip can land,
+  and the PR's green run with the secret in place is itself the proof the
+  wiring works. If Todd declines the secret, the ticket stops and the
+  fallback (local-only enforcement) is his decision to make, not the
+  builder's.
 - The flip proven by breaking, both ways: a planted floor breach (a case set
   the current prompt fails) runs red through the real runner; the
   lowered-floor review fixture still trips `prompt-eval` in review-selftest;

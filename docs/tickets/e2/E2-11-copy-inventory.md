@@ -17,9 +17,12 @@ reads the survey surface's shipped strings** — an inventory fed by hand is
 exactly the copy-drift this rule exists to catch.
 
 Item 4: aggregate language counts sections, never instructors; "needs
-attention," never "underperforming"; no ranking, no composite scores. Item 5:
-confidentiality copy exactly once per surface — for the survey, in the
-submit bar — plain words, no shield or lock iconography.
+attention," never "underperforming"; no ranking, no composite scores, and no
+score-sorting anywhere. Item 5: confidentiality copy exactly once per
+surface — for the survey, in the submit bar — plain words, no shield or lock
+iconography. **The assertions are written from the spec's own wording of
+both items, not from this paraphrase** — a dropped clause here must not
+become a dropped assertion there.
 
 Read first: SPEC §4.1 items 4–5 and §5.6's non-goals vocabulary; the E2-08 /
 E2-09 / E2-10 string modules (built to be read by this test); §10's i18n line
@@ -33,7 +36,8 @@ an inventory needs a source the guarded structure cannot shrink.
 - The inventory: a collector that reads the shipped strings — the
   externalized frontend string module(s) and the backend-served copy (bounce
   feedback, refusal messages) — per surface, from the source of record, not
-  from a copied list. A governed surface registers itself; the collector
+  from a copied list. The registry shape is E2-08's (E2-09 and E2-10 follow
+  it), so this ticket consumes one convention rather than reconciling three. A governed surface registers itself; the collector
   proves non-emptiness per registered surface (an empty surface is a failure,
   not a pass) and carries a canary string it must always find.
 - The vocabulary assertions over the inventory: item 4's forbidden terms and

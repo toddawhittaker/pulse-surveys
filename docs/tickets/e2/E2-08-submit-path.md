@@ -15,10 +15,20 @@ fields are enforced (comment required when its Likert is ≤ 2); each submitted
 comment is classified synchronously at submit — substantive / insufficient /
 nonsense — and "it was okay" is bounced immediately with coaching copy and
 one concrete example, never silently penalized after the fact, never a shame
-state. On provider timeout the ≥25-character floor applies and the submission
-is accepted, then classified async (fail open — ADR 0056 already pins that
-only a timeout does this). Resubmission is allowed within the window; missed
-weeks are not back-filled; one response per (student, section, week).
+state. On a provider outage the ≥25-character floor applies and the
+submission is accepted, then classified async. **ADR 0056's taxonomy governs
+exactly which failures floor** — the record was rewritten after its first
+"only a timeout" wording measured wrong at both ends:
+`AIProviderUnavailableError` (read timeout, write timeout, HTTP
+408/502/503/504) floors; `AIProviderUnreachableError` (connect timeout, DNS,
+TLS, reset, pool) and `AIProviderRefusedError` (401/403/404/429/500 and any
+other status) raise, and `backend/app/ai/tasks.py` says in as many words that
+E2's submit path is where a caller decides what to do with one. That decision
+is this ticket's, it is contestable, and it gets an ADR: the spec sanctions
+the floor only for the outage shape, so accepting on a refused 500 would
+widen ADR 0056 by the back door, and a raw 500 to the student is not an
+answer either. Resubmission is allowed within the window; missed weeks are
+not back-filled; one response per (student, section, week).
 
 The classifier side exists (`classify_comment_validity`,
 `backend/app/ai/tasks.py`, 4s budget, floor, `classification` row). What does
@@ -43,10 +53,24 @@ policy is exactly the async-reclassify enqueue this ticket writes).
 - Synchronous gating: submitted comments classified through the existing
   task; an `insufficient` or `nonsense` verdict on any submitted comment
   bounces the submission with the verdict's coaching copy; nothing is stored
-  as submitted on a bounce. A timeout accepts on the floor, stores the
-  response, records the floored classification (ADR 0054), and enqueues the
-  async re-classification — published with retries off and caught broadly
-  (MISTAKES entry 41), the scheduled path covering the gap.
+  as submitted on a bounce. An *unavailable* provider accepts on the floor,
+  stores the response, records the floored classification (ADR 0054), and
+  enqueues the async re-classification — published with retries off and
+  caught broadly (MISTAKES entry 41), the scheduled path covering the gap.
+  For *unreachable* and *refused* (the rows ADR 0056 keeps outside the
+  floor), this ticket decides and records the student-facing behavior — an
+  honest retryable refusal is the lean — and tests the near-miss pair that
+  distinguishes the taxonomy: a 503 floors, a 500 does not (MISTAKES
+  entry 3; E2-07 gives the mock both selectors).
+- Submission timestamps are written by this path through the E2-04 clock
+  service, never by a server default — a dev-clock submission must be
+  internally consistent with the window that accepted it, because E3's
+  participation formula will read both.
+- This ticket also establishes the string-externalization shape E2-11's
+  inventory will read — one registry convention the backend's user-facing
+  strings (bounce copy, refusals) live in, which E2-09 and E2-10 then
+  follow. Three tickets inventing three shapes is how the inventory decays
+  into a hand-kept list.
 - Resubmission within the window replaces the prior answers and re-runs the
   gating; after close, resubmission refuses like any closed-window write.
   The (student, section, week) constraint from E2-05 is the backstop, not
@@ -62,11 +86,13 @@ policy is exactly the async-reclassify enqueue this ticket writes).
    required-comment-missing refuses; blank optional comment stores as valid;
    closed window refuses; foreign section refuses; resubmit in-window
    replaces; resubmit after close refuses.
-2. The timeout path against the stack: mock told to stall (E2-07), submit
-   accepted on the floor, floored classification row present, async
-   re-classification lands a second row — and the request returns inside the
+2. The failure taxonomy against the stack: mock told to stall (E2-07) —
+   submit accepted on the floor, floored classification row present, async
+   re-classification lands a second row, and the request returns inside the
    §10 budget rather than hanging on the worker (MISTAKES entry 41's
-   near-miss is the test).
+   near-miss is the test). Mock told to answer 503 — floors. Mock told to
+   answer 500 — the recorded refused-behavior, not the floor. Both cells
+   run, and the ADR names the choice.
 3. A second submission racing the first cannot produce two responses for one
    (student, section, week) — the constraint is seen refusing, not cited
    (MISTAKES entry 9).

@@ -39,8 +39,10 @@ schema first buys.
   carried as data the form reads, the workload slider's range and step).
 - `response`: one per (student, section, week), enforced by constraint; the
   student key is the same identity spelling `enrollment` uses; submission
-  timestamps; whatever state the resubmission rule needs (E2-08 defines the
-  writes, this ticket gives it columns to write).
+  timestamps **with no server default** — E2-08 writes them through the
+  E2-04 clock service, per that ticket's ADR — and whatever state the
+  resubmission rule needs (E2-08 defines the writes, this ticket gives it
+  columns to write).
 - `answer`: linked to its versioned `question` row; workload as a decimal
   column, not a band.
 - The ADR 0018 rule on `survey_window`: `term_id` plus the two composite

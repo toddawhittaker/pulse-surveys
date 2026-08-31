@@ -2,7 +2,9 @@
 
 **ID:** E2-09
 **Branch:** `e2/student-read-path`
-**Depends on:** E2-01, E2-05, E2-06
+**Depends on:** E2-01, E2-02, E2-05, E2-06 (E2-02 by deadline: Todd's ruling
+puts the purview fix before any surface renders roster-derived data, and
+this read path plus E2-10's screen are that surface)
 **Lane:** heavy
 **Security-relevant:** the first student-visible read path — the reason §4.1
 item 1 has been waiting since E0. The invariant test this ticket adds is the
@@ -51,7 +53,8 @@ structure cannot shrink.
 - The invariant suite still runs in the isolated CI pass, still cannot be
   empty, and the new test is proven red by mutation (loosen the enrollment
   predicate; watch it fail — MISTAKES entry 3, and check the mutation landed).
-- Whatever refusal copy this path serves is externalized for E2-11.
+- Whatever refusal copy this path serves is externalized in the registry
+  shape E2-08 established, for E2-11 to read.
 
 ## Acceptance criteria
 

@@ -42,7 +42,10 @@ so no ticket re-litigates them:
    session expiry) stay real.
 3. **Term-map re-derivation goes to E11**, per ADR 0018/0021's own lean:
    the calendar editor is where a map is edited, and whoever builds that
-   owns the re-derivation. E2 builds nothing that edits a map.
+   owns the re-derivation. E2 builds nothing that edits a map. The three
+   records that described this as open — SPEC §14.3's E2 entry, ADR 0018,
+   ADR 0021 — are corrected in this same PR, so no record goes on asserting
+   an undecided question (MISTAKES entry 1).
 
 ## Build order
 
@@ -56,7 +59,7 @@ so no ticket re-litigates them:
 | 06 | [Survey windows derive from the calendar](E2-06-window-scheduling.md) | `e2/window-scheduling` | 04, 05 | Friday 18:00 → Sunday 23:59:59 in the institution timezone, derived per active course week; one open window per section, missed weeks never back-filled. | |
 | 07 | [A mock AI provider joins the Compose stack](E2-07-mock-ai-provider.md) | `e2/mock-ai-provider` | none | Deterministic OpenAI-compatible verdicts plus selectable wrong answers, so dev and e2e never spend a token and the non-timeout paths are actually drivable. | |
 | 08 | [The submit path](E2-08-submit-path.md) | `e2/submit-path` | 05, 06 (07 for stack tests) | Required fields, conditional-required comments, synchronous validity gating with the coached bounce, fail-open on timeout with async re-classify, resubmission within window. | |
-| 09 | [The student read path, and §4.1 item 1 gets its assertion](E2-09-student-read-path.md) | `e2/student-read-path` | 01, 05, 06 | What the form fetches, scoped to the student's own enrollment; the invariant test whose path inventory the code cannot quietly shrink. | |
+| 09 | [The student read path, and §4.1 item 1 gets its assertion](E2-09-student-read-path.md) | `e2/student-read-path` | 01, 02, 05, 06 | What the form fetches, scoped to the student's own enrollment; the invariant test whose path inventory the code cannot quietly shrink. 02 is a dependency by deadline. | |
 | 10 | [StudentWeeklySurvey: the five-question form](E2-10-student-survey-form.md) | `e2/student-survey-form` | 08, 09 | The first real screen per §7.6: LikertInput, ConditionalTextArea, WorkloadSlider, SubmitBar; the carried webfont decision lands here. Light lane. | |
 | 11 | [The copy-inventory test](E2-11-copy-inventory.md) | `e2/copy-inventory` | 08, 09, 10 | §4.1 items 4 and 5 become assertions over the shipped strings, with planted violations red and a canary against a blind collector. | |
 | 12 | [The validity eval set, and the floors turn enforcing](E2-12-eval-floors.md) | `e2/eval-floors` | none | `tests/evals/` becomes real, §11 question 4 gets its operational answer, and the last E0 tolerance flips — live calls only on AI-touching changes and manual dispatch. | |
@@ -65,13 +68,13 @@ so no ticket re-litigates them:
 ## Dependency graph
 
 ```
-01 ─────────┐
+01, 02 ─────┐
 04 ─┬─ 06 ─┬┴─ 09 ─┬─ 10 ── 11 ──┐
 05 ─┘      └── 08 ─┘             ├── 13
-02   03   07   12 (free-standing)┘
+03   07   12 (free-standing) ────┘
 ```
 
-(09 needs 01, 05, 06; 08 needs 05, 06; 10 needs 08 and 09; 11 needs all
+(09 needs 01, 02, 05, 06; 08 needs 05, 06; 10 needs 08 and 09; 11 needs all
 three; 13 needs everything.)
 
 Six starts run independently and can interleave: the two carried guards (01,
@@ -79,9 +82,10 @@ Six starts run independently and can interleave: the two carried guards (01,
 chain (06 → 08/09 → 10 → 11), the mock (07), and the eval suite (12). 01 goes
 first on principle as well as dependency: Todd's deadline puts it before any
 E2 read path, and building the guard while no E2 view exists is what makes
-its red case honest — the same reasoning as E1-01. 02 has the same
-before-any-surface deadline and no dependents, so it lands early rather than
-last.
+its red case honest — the same reasoning as E1-01. 02's deadline has the
+same shape and is encoded the same way — as a dependency of 09 — so the
+schedule itself, not a sentence in a ticket, is what stops the student
+surface merging over an unfixed ingestion trigger.
 
 ## Exit criterion → the tickets that prove it
 
@@ -113,10 +117,16 @@ it. The entries' own done-whens govern; the tickets point at them.
 | `PERSON_TABLES` standing review question, asked of the tables E2 adds | E2-05 (answered in its PR body) |
 | Term-map re-derivation (E2 or E11 per ADR 0018/0021) | **E11** — Todd, 2026-08-31 |
 
-Entries owned by other epics (E3's signing-key custody and AGS token, E9's
-logout, E11's squat repair and CSP write-time rejection, E13's structural
-`PERSON_TABLES` source and local-account fallback, the mock-conditional pins)
-pass through untouched; E2-13 carries them forward in `carried-from-e2.md`.
+Every other `carried-from-e1.md` entry passes through by being re-listed in
+`carried-from-e2.md` at E2-13 — the completeness rule is *every entry not
+closed inside E2, whoever owns it*: E3's signing-key custody and AGS token,
+E4's reveal-subject guard with its deadline, E9's logout and the web-login
+linkage, E11's squat repair and CSP write-time rejection, E13's structural
+`PERSON_TABLES` source and local-account fallback, and the mock-conditional
+pins. One entry has a floating owner and therefore a watch, not a pass:
+the TypeScript 7 pair belongs to "whichever epic is running when
+`typescript-eslint` admits 7.x" — E2-13 checks at exit whether that happened
+on E2's watch.
 
 ## What E2 deliberately does not do
 

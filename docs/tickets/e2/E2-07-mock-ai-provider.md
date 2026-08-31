@@ -30,8 +30,10 @@ gateway speaks OpenAI-format chat completions through pydantic-ai — the mock
 implements the platform side of exactly that); ADR 0037/0038 (compose
 conventions for mocks); the stub classes in the roundtrip test (the wire
 format is already worked out there); `mock-lms/` and `mock-idp/` for the
-service pattern; ADR 0056 (only a timeout fails open — the mock is what lets
-the *non*-timeout paths run in a browser).
+service pattern; ADR 0056 whole (the fail-open taxonomy: unavailable floors,
+unreachable and refused raise — the mock must be able to produce cells from
+each row, because E2-08's tests need the near-miss pair a 503 and a 500
+make).
 
 ## Scope
 
@@ -42,9 +44,11 @@ the *non*-timeout paths run in a browser).
   length rule; the mock's README states them; `"it was okay"` must classify
   insufficient so the spec's own example works end to end).
 - Deliberately wrong answers on request, the `mock-lms` wrong-launches
-  precedent: a malformed shape, a delayed answer past the 4s budget, a 500 —
-  selectable per request, so e2e can drive the fail-open and shape-retry
-  paths without patching the backend.
+  precedent: a malformed shape, a delayed answer past the 4s budget, a 503,
+  and a 500 — selectable per request, so e2e can drive the fail-open,
+  refused, and shape-retry paths without patching the backend. The 503/500
+  pair exists on purpose: it is the near miss that separates ADR 0056's
+  unavailable row from its refused row in E2-08's tests.
 - Compose wiring: the backend and worker reach it by service name;
   `.env.example` documents pointing `AI_PROVIDER_BASE_URL` at it for
   development. Decide host exposure (the other mocks publish 8080/8081; 8082
@@ -57,9 +61,11 @@ the *non*-timeout paths run in a browser).
 
 1. `make up`, `.env` pointed at the mock: a submit through the real gateway
    classifies deterministically with no external call and no 4s stall.
-2. The wrong-answer selectors work: one e2e-reachable path each for timeout
-   (fail-open floor applies, ADR 0056) and malformed shape (one retry, then
-   the error surface), driven from the mock, asserted from the tool side.
+2. The wrong-answer selectors work: one e2e-reachable path each for
+   unavailable (a stall past the budget, and a 503 — the floor applies),
+   refused (a 500 — E2-08's recorded behavior, not the floor), and malformed
+   shape (one retry, then the error surface), driven from the mock, asserted
+   from the tool side.
 3. The mock's rules are served, not copied: its README/route states them, and
    the tests that aim at them read the served statement (the E1-07
    `ALL_SELECTORS` lesson — no second hand-held copy).

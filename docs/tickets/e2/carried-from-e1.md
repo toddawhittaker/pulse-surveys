@@ -359,5 +359,5 @@ resolve-only-your-own-subject rule, and the Hypothesis purview properties
 (E9, per `carried-from-e0.md`'s three entries); §4.1 item 1's assertion and
 the copy-inventory test (E2); `PlatformProfile` adapters (E3);
 supervision-graph and Lead-Faculty-mapping editing (E9); notifications
-(E12); term-map edits re-deriving section calendars (E2 or E11, ADR 0018
-and ADR 0021); real-LMS certification (post-v1, §14.4).
+(E12); term-map edits re-deriving section calendars (ruled E11, 2026-08-31,
+at the E2 breakdown; ADR 0018 and ADR 0021); real-LMS certification (post-v1, §14.4).

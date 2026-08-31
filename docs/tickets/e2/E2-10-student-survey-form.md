@@ -49,8 +49,8 @@ at merge); ADR 0086 (the router knows paths, the backend knows roles).
   with its value announced; the bounce announced via a live region; focus
   handling on refusal.
 - User-facing strings externalized in one module the copy inventory
-  (E2-11) reads — built that way now so E2-11 does not refactor this screen
-  a week after it lands.
+  (E2-11) reads, following the registry shape E2-08 established — built that
+  way now so E2-11 does not refactor this screen a week after it lands.
 
 ## Acceptance criteria
 
