@@ -615,14 +615,13 @@ def test_a_second_override_row_is_refused_by_the_database(
         "something else."
     )
 
-    with pytest.raises(IntegrityError) as refused:
-        with db_session.begin_nested():
-            insert_one_row(
-                db_session,
-                clock_override_table,
-                pretend_now=ANOTHER_PRETEND_NOW,
-                anchored_at=anchored,
-            )
+    with pytest.raises(IntegrityError) as refused, db_session.begin_nested():
+        insert_one_row(
+            db_session,
+            clock_override_table,
+            pretend_now=ANOTHER_PRETEND_NOW,
+            anchored_at=anchored,
+        )
 
     said = str(refused.value)
     assert SINGLE_ROW_INDEX in said, (
