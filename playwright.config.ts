@@ -27,6 +27,17 @@ export default defineConfig({
   // by the trace setting below, which no longer needs one.
   retries: 0,
 
+  // One worker, because the stack these specs drive has one clock (E2-06).
+  // `dev-clock.spec.ts` and `window-scheduling.spec.ts` both write the single
+  // `clock_override` row, and the first of them *clears* it — at the start of its
+  // test and again in its `finally` — so run in parallel each would read a clock
+  // the other had moved. The failure that produces is the worst kind: it lands in
+  // whichever spec lost the race, points at the door that spec is about, and does
+  // not reproduce when that spec is run alone. It is pinned here rather than
+  // worked around in a spec because the shared thing is the composed stack, which
+  // no spec owns.
+  workers: 1,
+
   // The whole run and each expectation get finite, generous budgets. A hung
   // door fails loudly instead of holding the pipeline open.
   timeout: 30_000,
