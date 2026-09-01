@@ -379,6 +379,13 @@ class Section(UuidPrimaryKey, Base):
         # bypass it by not calling it" — and E1-11's roster sync writes sections
         # too, without reading `app.services.provisioning`.
         UniqueConstraint("lti_deployment_id", "lms_context_id"),
+        # **Redundant beside the primary key, and load-bearing anyway.** A
+        # foreign key must reference a unique constraint, and this is what lets
+        # `survey_window` carry `(section_id, term_id)` as one reference — the
+        # rule ADR 0018 named and deferred, that a window's section and its week
+        # belong to the same term. Dropping this drops that rule with it, and
+        # `app/models/term.py`'s `SurveyWindow` is where it is written down.
+        UniqueConstraint("id", "term_id"),
     )
 
     # Reaching sections by course has to be indexed: `section` is the leaf table
