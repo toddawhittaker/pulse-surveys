@@ -917,10 +917,14 @@ class ScopedReader:
     Bypassing it means calling `app.views_sql.queries` directly, which is one
     import — and E0-41 mechanised that. The sweep in
     `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` fails any
-    module under `backend/app/` outside this one that makes that import, or that
-    runs SQL naming one of the three org views. Until then it was a property a
-    reviewer had to notice in a diff, and a property nothing executes is a
-    comment (`docs/MISTAKES.md` entry 9).
+    module under `backend/app/` outside this one that makes that import; its SQL
+    half likewise fails any module that runs SQL naming a relation in the
+    policed inventory, outside the exempt locations that sweep file records —
+    this file among them, each with its reason beside it. The inventory is
+    parsed at test time from the catalog under `backend/app/views_sql/`, so the
+    set moves with the catalog and no count written here can go stale. Until
+    then it was a property a reviewer had to notice in a diff, and a property
+    nothing executes is a comment (`docs/MISTAKES.md` entry 9).
     """
 
     def __init__(self, session: Session, scope: ActorScope) -> None:

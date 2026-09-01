@@ -97,9 +97,37 @@ route — importing `app.views_sql.queries`, the module holding the statements t
 grant functions already run, and running one of them on a session of the
 caller's own, which names no relation in the importing module at all.
 
-**Exemptions are locations, never shapes.** Four of them for the SQL half, and
-**two of the four are pinned to the statement their reason describes** — the
-location is how the exemption is *spelled*, and the pin is how wide it is:
+**The two halves name the same object, and E2-01 is the ticket that made that
+true.** Before it, the SQL half excused the whole `backend/app/views_sql/`
+package by containment while the import half watched one module *name*,
+`app.views_sql.queries`. A second module filed in that package — holding a raw
+read of `enrollment`, imported from an API handler — was excused by the first
+half for sitting in the package and invisible to the second for not being that
+name: two individually legal steps to the institution, reproduced with a planted
+module by the re-review of PR #123 (`docs/tickets/e2/carried-from-e1.md`, "The
+`views_sql` package exemption and the import guard disagree on their object").
+Both halves name the module now. `views_sql/queries.py` is the file the SQL half
+excuses, `app.views_sql.queries` is the name the import half watches, and they
+are the same module spelled two ways. The package is excused by nothing, so the
+second module is an offender the day somebody writes it rather than the day
+somebody notices — the fail-closed shape, and `docs/MISTAKES.md` entry 35's
+lesson that a closed set must not be extendable by the thing it guards.
+
+**The import half's exemption is narrower still: `services/authz.py`, alone.**
+Its package containment went in the same change. It excused nothing — no module
+in that package imports `queries` — and a live exemption for a route nobody
+takes is how the same hole reopens one level out: a package module doing `from .
+import queries` and re-exporting the statements, imported from a handler, would
+have been excused by the package on one side and carried no SQL for the other to
+read. That module is caught at its own import now, which is why closing only the
+SQL half would have been half a fix. A dead exemption is also against this
+file's own doctrine, stated below for the pinned files: an exemption that
+excuses nothing should go rather than sit.
+
+**Exemptions are locations, never shapes.** Four of them for the SQL half, one
+for the import half, and **two of the SQL half's four are pinned to the
+relations their reason names** — the location is how the exemption is *spelled*,
+and the pin is how wide it is:
 
   - `backend/app/services/authz.py`, the chokepoint the rule is written around.
     Unpinned, because reading these relations under §2.1's purview rules is the
@@ -118,11 +146,16 @@ location is how the exemption is *spelled*, and the pin is how wide it is:
     the fix round's verifier pass, which is the run that found it. **Pinned to
     `role_assignment`**: when E9 or E10 gives that module a query over
     `assignment_scope`, it is an offender again and this file says so;
-  - the `backend/app/views_sql/` package, which is where the SQL lives (ADR 0041:
-    "the SQL lives in `backend/app/views_sql/<object>_v<NNN>.sql`, and the
-    revision executes it by name"). A rule forbidding the query module from
-    naming the relations it queries would forbid the design the ticket describes,
-    and what keeps that module honest is the second half below — one importer.
+  - `backend/app/views_sql/queries.py`, the module holding the statements the
+    grant functions run against these relations (ADR 0041: "the SQL lives in
+    `backend/app/views_sql/<object>_v<NNN>.sql`, and the revision executes it by
+    name"). A rule forbidding the query module from naming the relations it
+    queries would forbid the design the ticket describes. Unpinned, for the
+    reason `authz.py` is unpinned: holding these statements is the whole of what
+    that module is for, and there is no single statement to pin it to. What
+    keeps it honest is the second half below — one importer — and the file that
+    half watches is this same one. **Its package is not exempt**: a second module
+    filed beside it is swept like any other module in the tree.
 
 The console is the one that shows why an exemption has to be spelled as a
 location rather than as a shape. A count is a *shape*, and "a read that only
@@ -130,8 +163,11 @@ counts is fine" is a rule no sweep can grade: `SELECT count(*) FROM enrollment
 WHERE section_id = :id` counts one section and `SELECT count(*) FROM enrollment`
 counts the institution, and a sweep reading for `count(` cannot tell which of
 them the next one is. So the console is exempt for being the console, and a
-count-only read written anywhere else is caught — which is asserted below rather
-than described.
+count-only read written anywhere else is caught. That composite claim is asserted
+below in its three parts, and in no single test — the excused set is exactly four
+files, the relation sweep reads a policed relation out of a `count(*)` statement
+carrying a `WHERE`, and every module outside those four files is swept for what
+that pattern finds.
 
 **The pin is what keeps the location from being wider than its reason.** An
 exemption by location excuses a *file*, and the reasons above are about single
@@ -160,12 +196,42 @@ comments are absent from the tree entirely, and docstrings are subtracted by nam
   - **Widening an exemption to a shape** — exempting a statement because it only
     counts, or because it carries a `WHERE`.
     `test_the_sql_sweep_exempts_four_locations_and_no_exemption_is_a_shape`
-    goes red on the planted count-only read at an unexempt location.
-  - **Growing a pinned exemption past the statement its reason names** — a second
+    goes red on the count-only read, which the relation sweep is asserted to see
+    for every roster relation. That test asserts no location about the count —
+    the location half is its excused-set equality, and the reporting half is
+    `test_no_module_outside_the_sanctioned_locations_runs_sql_naming_a_policed_relation`.
+  - **Growing a pinned exemption past the relations its reason names** — a second
     query added to the development console, or the `assignment_scope` read E9 or
     E10 will want in `safety.py`.
-    `test_each_pinned_exemption_covers_exactly_the_statement_its_reason_names`
+    `test_each_pinned_exemption_names_exactly_the_relations_its_reason_names`
     goes red on the file whose reads have grown, and names what it grew by.
+  - **Appending a fifth path to `SQL_SWEEP_EXEMPT_FILES`** — the widening that
+    needs no containment test at all, and the one E2-01's security review found
+    this file green under.
+    `test_the_sql_sweep_exempts_four_locations_and_no_exemption_is_a_shape` goes
+    red on its excused-set equality, which is written out rather than derived
+    from the tuple the sweep reads, so the two spellings have to move together
+    and a reviewer sees the decision.
+  - **Restoring either package exemption** — `views_sql/` back in
+    `sql_sweep_is_exempt` by containment, or in `import_sweep_is_exempt` by
+    containment.
+    `test_the_sql_sweep_exempts_four_locations_and_no_exemption_is_a_shape` and
+    `test_the_import_sweep_exempts_the_grant_chokepoint_alone` each go red on
+    their excused-set equality, naming the package module the exemption
+    re-admitted. Neither reads the exemption's spelling: both walk
+    `backend/app/` and compare the set of files actually excused, so a
+    containment test, a `startswith`, a file-name test and a directory-name test
+    all fail the same way.
+  - **The two-step second module**, which is the offender the re-review planted
+    and the reason this file changed.
+    `test_a_second_module_in_the_query_package_is_swept_for_its_raw_read` is the
+    first leg, and
+    `test_a_second_module_in_the_query_package_cannot_launder_the_statements` is
+    the second. Each parses the planted source and runs the live predicates over
+    the planted path, so neither leg is argued — and
+    `test_every_query_package_module_that_is_not_the_statement_store_is_swept_and_clean`
+    is the other direction, that narrowing the exemption cost the real package
+    nothing.
   - **Re-adding the hand-written list** — replacing the parse with a tuple of
     the three org views. The premise test goes red on the other three names,
     which is the failure M8 reported and the reason the list is gone.
@@ -209,6 +275,20 @@ comments are absent from the tree entirely, and docstrings are subtracted by nam
     premise test exists to catch for the six names the rule is written about.
   - **`from app import views_sql` followed by attribute access**, for the import
     half: reaching the package and walking to it is a route this does not follow.
+  - **A dynamic import**, the same half's other blind spot, confirmed by E2-01's
+    security review rather than reasoned about:
+    `importlib.import_module("app.views_sql.queries")` in a handler, running one
+    of the statements on a session of its own, passes both halves. The module
+    name is a *string* rather than an `ast.Import` or `ast.ImportFrom`, so the
+    import sweep has nothing to resolve, and the handler names no relation of its
+    own for the SQL sweep to read. It is **recorded and not swept**: a sweep over
+    string constants that look like module names would go red on the first
+    legitimate one written in application code — a plugin table, a lazy-import
+    registry, an error message naming the module to call — which is red against
+    correct code, and that is the kind of red that gets deleted rather than
+    fixed. What stands against it is review of
+    a handler that imports dynamically at all, which is not a shape anything in
+    this repository writes.
   - **Migrations.** `backend/alembic.ini`'s revisions live outside
     `backend/app/`, and creating these relations is what they are for.
 
@@ -260,18 +340,60 @@ DEV_CONSOLE_MODULE = APP_ROOT / "api" / "dev.py"
 # still reported.
 CARE_REVALIDATION_MODULE = APP_ROOT / "services" / "safety.py"
 
-# The three exempt *files*, and the exempt *package* beside them. Files are
-# compared whole: a prefix or a substring test would exempt
-# `services/authz_helpers.py` and `api/dev_tools.py` along with them, which is how
-# a closed set is defeated one level out. The package is compared by containment,
-# which is what a package exemption means, and `app/api/views_sql/` — the same
-# name one directory over — is not it.
-SQL_SWEEP_EXEMPT_FILES = (AUTHZ_MODULE, DEV_CONSOLE_MODULE, CARE_REVALIDATION_MODULE)
-SQL_SWEEP_EXEMPT_PACKAGE = VIEWS_SQL_DIR
-
-# The module that holds the statements the grant functions run, spelled as the
-# ticket spells it and as an import would.
+# The module that holds the statements the grant functions run, in the two
+# spellings this file needs it in: the dotted name an import writes, and the file
+# it is. **They are the same module, and that is the point of E2-01** — the SQL
+# half of this sweep excuses the file, the import half watches the name, and
+# before that ticket the first of them excused the whole package while the second
+# watched one name in it.
 QUERY_MODULE = "app.views_sql.queries"
+QUERY_MODULE_PATH = VIEWS_SQL_DIR / "queries.py"
+
+# The four exempt *files*, compared whole. There is no exempt *package* here and
+# no containment test anywhere in this file: `views_sql/` was excused by
+# containment until E2-01, and a second module filed in it was excused for being
+# filed there. Whole-path equality is what a location exemption has to be — a
+# prefix or a substring test would exempt `services/authz_helpers.py` and
+# `api/dev_tools.py` along with these, a directory test would exempt everything
+# in `views_sql/`, and either is how a closed set is defeated one level out.
+SQL_SWEEP_EXEMPT_FILES = (
+    AUTHZ_MODULE,
+    DEV_CONSOLE_MODULE,
+    CARE_REVALIDATION_MODULE,
+    QUERY_MODULE_PATH,
+)
+
+# The offender the PR #123 re-review planted, kept here as the negative control it
+# became. Nothing in this repository defines this name, and nothing writes this
+# file: the tests below parse its source in memory and run the live predicates
+# over its path, which is what makes them green on a clean tree and red the moment
+# either exemption goes back to containment.
+PLANTED_SECOND_MODULE = VIEWS_SQL_DIR / "e2_planted_second_module.py"
+
+# The raw read the planted module holds. `enrollment` because it is the relation
+# M8 is about and the one that reaches the policed inventory only through a view
+# body, so a sweep that had lost the view-body half of the catalog parse cannot
+# pass this by accident. The docstring names `section_roster` — a policed relation
+# in prose, which a careful module writes and which must not be read as a read.
+PLANTED_SECOND_MODULE_SOURCE = '''"""A second statement store, filed beside `queries.py`.
+
+Reads of `public.section_roster` go through the grant functions in
+`services/authz.py`; this docstring names that relation and reads nothing.
+"""
+
+ENROLLED_PEOPLE = "SELECT person_id FROM public.enrollment"
+'''
+
+# The same offender with its SQL taken out: it re-exports the statements instead,
+# which is the shape that survives the SQL half untouched and has to die at the
+# import half. This is the route that would have stayed open if E2-01 had closed
+# only the SQL exemption.
+PLANTED_LAUNDERING_MODULE_SOURCE = '''"""A second module that re-exports the store."""
+
+from . import queries
+
+LEAD_FACULTY_COURSES = queries.LEAD_FACULTY_COURSES
+'''
 
 # **A premise, not the inventory.** The inventory is parsed from `views_sql/` at
 # test time; these six are asserted to be *in* it, so a rename, a view body
@@ -499,24 +621,36 @@ def reference_to(names: tuple[str, ...]) -> re.Pattern[str]:
 def sql_sweep_is_exempt(path: Path) -> bool:
     """Whether `path` is one of the four locations a policed relation may be named in.
 
-    Whole-path equality for the three files, and directory containment for the
-    package. A `startswith`, a file-name test or a directory-name test would
-    exempt a sibling module that merely reads like one of these, and the exemption
-    is the whole of what stands between a module and the institution.
+    **Whole-path equality, four files, no containment.** Until E2-01 this also
+    excused `views_sql/` by directory containment, which excused every module
+    anybody filed there — including the one the re-review planted. A `startswith`,
+    a file-name test or a directory-name test has the same defect one level out:
+    it exempts a sibling that merely reads like one of these, and the exemption is
+    the whole of what stands between a module and the institution.
     """
-    return path in SQL_SWEEP_EXEMPT_FILES or SQL_SWEEP_EXEMPT_PACKAGE in path.parents
+    return path in SQL_SWEEP_EXEMPT_FILES
 
 
 def import_sweep_is_exempt(path: Path) -> bool:
     """Whether `path` may import the module holding the grant functions' statements.
 
-    E0-41's set, unchanged: the chokepoint, and the package where the SQL lives. A
-    rule that forbade the query module's own package from reaching it would forbid
-    ADR 0041's design. It is not the same set as `sql_sweep_is_exempt` — the
-    development console names a relation and imports nothing — and the two are
-    written separately so that widening one does not silently widen the other.
+    **One location: the chokepoint.** E0-41's set also held the `views_sql/`
+    package by containment, on the reading that a rule forbidding the query
+    module's own package from reaching it would forbid ADR 0041's design. E2-01
+    deleted that half: no module in the package imports `queries`, so it excused
+    nothing, and an exemption that excuses nothing is one this file's own pin
+    doctrine says should go. What it *would* have excused is the laundering route
+    — a second module in the package doing `from . import queries` and
+    re-exporting the statements to a handler, carrying no SQL for the other half
+    to read.
+
+    It is not the same set as `sql_sweep_is_exempt` — the development console
+    names a relation and imports nothing; `queries.py` is the module the sweep is
+    about, so it is excused from naming these relations and not from importing
+    itself — and the two are written separately so that widening one does not
+    silently widen the other.
     """
-    return path == AUTHZ_MODULE or VIEWS_SQL_DIR in path.parents
+    return path == AUTHZ_MODULE
 
 
 def parsed_modules(is_exempt: Callable[[Path], bool]) -> dict[Path, ast.Module]:
@@ -1099,8 +1233,17 @@ def test_the_import_matcher_resolves_every_route_to_the_query_module() -> None:
 
 # Paths that read like an exemption and are not one. Each is the shape a location
 # test gets defeated by: a name that starts with an exempt module's name, a
-# package that replaces one, the same file name one directory over, and — for the
-# package exemption — the same directory name somewhere else in the tree.
+# package that replaces one, the same file name one directory over, the same
+# directory name somewhere else in the tree — and, since E2-01, **a second module
+# inside the real `views_sql/` package**, which is the sharpest lookalike in the
+# list because it is the one that used to be exempt.
+#
+# The three package shapes are the three ways the deleted containment test comes
+# back. `e2_planted_second_module.py` is the offender the re-review planted;
+# `loader.py` is the innocent-looking name somebody would really file there; and
+# `views_sql/v2/queries.py` is the query module's own file name one directory
+# deeper, which a containment test and a file-name test both re-admit while
+# whole-path equality does not.
 NOT_EXEMPT_LOOKALIKES = (
     APP_ROOT / "services" / "authz_helpers.py",
     APP_ROOT / "services" / "authz" / "__init__.py",
@@ -1112,33 +1255,67 @@ NOT_EXEMPT_LOOKALIKES = (
     APP_ROOT / "api" / "safety.py",
     APP_ROOT / "services" / "safety_helpers.py",
     APP_ROOT / "services" / "roster_sync.py",
+    PLANTED_SECOND_MODULE,
+    VIEWS_SQL_DIR / "loader.py",
+    VIEWS_SQL_DIR / "v2" / "queries.py",
 )
 
 
 def test_the_sql_sweep_exempts_four_locations_and_no_exemption_is_a_shape() -> None:
     """The exemption list is exact, is a list of places, and is not a list of shapes.
 
-    M8's ruling, as settled: `services/authz.py` because it is the chokepoint
-    SPEC §2.1's purview rules are written in, `api/dev.py` because ADR 0100 put a
-    count-only read of the enrolled figure on the development console,
-    `services/safety.py` because the Care path revalidates the holds-Care rule on
-    its own `pulse_care` credential and a grant function would answer on the
-    wrong connection, and the `views_sql/` package because ADR 0041 puts the
-    statements there and the import half below is what keeps that module to one
-    importer. All four are excused for *being those locations*.
+    M8's ruling as settled, with E2-01's correction to its fourth entry:
+    `services/authz.py` because it is the chokepoint SPEC §2.1's purview rules are
+    written in, `api/dev.py` because ADR 0100 put a count-only read of the enrolled
+    figure on the development console, `services/safety.py` because the Care path
+    revalidates the holds-Care rule on its own `pulse_care` credential and a grant
+    function would answer on the wrong connection, and `views_sql/queries.py`
+    because ADR 0041 puts the statements there and the import half below is what
+    keeps that module to one importer. All four are excused for *being those
+    files*.
 
-    **Why a shape cannot be the rule, asserted rather than argued.** `SELECT
-    count(*) FROM enrollment WHERE section_id = :id` counts one section and
-    `SELECT count(*) FROM enrollment` counts the institution, and no sweep reading
-    for `count(` can tell which the next one is. So the count-only read is planted
-    here at a location that is *not* exempt and asserted caught.
+    **The fourth was the `views_sql/` package until E2-01**, excused by directory
+    containment, so a second module filed beside `queries.py` inherited the
+    exemption while the import half went on watching one module name — the
+    two-step route the PR #123 re-review reproduced with a planted module. The
+    equality below is what holds that closed: it does not read the exemption's
+    spelling, it walks `backend/app/` and compares the set of files actually
+    excused, so the containment test coming back shows up as
+    `backend/app/views_sql/__init__.py` in the excused list.
 
-    **The mutations this exists to survive**: widening an exemption to a shape —
-    "a statement that only counts is fine", "a statement with a `WHERE` is fine" —
-    and widening it to a neighbourhood, by testing the path with `startswith`, by
-    file name, or by directory name. `services/authz_helpers.py`,
-    `api/v1/dev.py`, `api/safety.py` and `api/views_sql/queries.py` are in the
-    lookalike list because each is what one of those loosenings would let through.
+    **Why a shape cannot be the rule.** `SELECT count(*) FROM enrollment WHERE
+    section_id = :id` counts one section and `SELECT count(*) FROM enrollment`
+    counts the institution, and no sweep reading for `count(` can tell which the
+    next one is. So the count-only read is planted below and the **relation
+    sweep** is asserted to read it: what is checked is the pattern, over a
+    `count(*)` statement carrying a `WHERE`, for each roster relation the
+    inventory holds. It asserts **nothing about a location** — no path is passed
+    to it — and this docstring said it planted the read "at a location that is not
+    exempt" until E2-01 (`docs/tickets/e2/carried-from-e1.md`, the low-findings
+    block). The location half of that claim is the excused-set equality above:
+    exactly four files are excused, so a module writing this statement anywhere
+    else is inside the sweep, and
+    `test_no_module_outside_the_sanctioned_locations_runs_sql_naming_a_policed_relation`
+    is where it gets reported.
+
+    **The mutation E2-01's security review found this test surviving**, named
+    first because the repair is what the assertion below now looks like: a fifth
+    path **appended to `SQL_SWEEP_EXEMPT_FILES`**, with a raw read of
+    `enrollment` planted in that fifth file. The expectation was derived from the
+    same tuple the sweep reads, so both sides moved together and the whole file
+    stayed green — a widened exemption with nothing asserting against it. The
+    expectation is written out now, so appending to the tuple alone reds here, and
+    a fifth exemption costs two edits in one diff. The import half was never
+    exposed to this: it compares against one literal path.
+
+    **The other mutations this exists to survive**: widening an exemption to a
+    shape — "a statement that only counts is fine", "a statement with a `WHERE` is
+    fine" — and widening it to a neighbourhood, by testing the path with
+    `startswith`, by file name, or by directory name. `services/authz_helpers.py`,
+    `api/v1/dev.py`, `api/safety.py`, `api/views_sql/queries.py` and the three
+    package shapes (`views_sql/e2_planted_second_module.py`, `views_sql/loader.py`
+    and `views_sql/v2/queries.py`) are in the lookalike list because each is what
+    one of those loosenings would let through.
     """
     for path in SQL_SWEEP_EXEMPT_FILES:
         assert path.is_file(), (
@@ -1147,27 +1324,43 @@ def test_the_sql_sweep_exempts_four_locations_and_no_exemption_is_a_shape() -> N
             "took over its job is being swept under another name — or, worse, was renamed to a "
             "path this list still excuses."
         )
-    assert SQL_SWEEP_EXEMPT_PACKAGE.is_dir(), (
-        f"{SQL_SWEEP_EXEMPT_PACKAGE.relative_to(REPO_ROOT)} is exempt from this sweep and is not a "
-        "directory. ADR 0041 puts the view SQL there, and the inventory above is read from it."
-    )
-
     excused = sorted(
-        str(path.relative_to(REPO_ROOT))
+        path.relative_to(REPO_ROOT).as_posix()
         for path in APP_ROOT.rglob("*.py")
         if sql_sweep_is_exempt(path)
     )
-    expected = sorted(
-        str(path.relative_to(REPO_ROOT))
-        for path in {*SQL_SWEEP_EXEMPT_FILES, *SQL_SWEEP_EXEMPT_PACKAGE.rglob("*.py")}
-    )
+    # **Written out, not derived from `SQL_SWEEP_EXEMPT_FILES`.** This is a
+    # deliberate second spelling of the same four paths, and E2-01's security
+    # review is why: with the expectation derived from the tuple the sweep reads,
+    # both sides moved together, and appending a fifth path to the tuple — with a
+    # raw read of `enrollment` planted in that fifth file — left this whole file
+    # green. Widening the exemption now takes two edits in one diff, which is the
+    # visible decision the failure message below has always demanded. Sorted, and
+    # spelled with `/` against `as_posix()` above, so the comparison is about the
+    # set and not about ordering or a path separator.
+    expected = [
+        "backend/app/api/dev.py",
+        "backend/app/services/authz.py",
+        "backend/app/services/safety.py",
+        "backend/app/views_sql/queries.py",
+    ]
     assert excused == expected, (
-        f"The SQL sweep excuses {excused} under `backend/app/`, and the four locations M8 settles "
-        f"on hold {expected}. Every other module in the tree runs its reads through a grant "
-        "function in `services/authz.py`; a fifth excused location is a fifth place SPEC §2.1's "
-        "purview can be computed by whoever wrote the query, and it belongs in the pull request "
-        "that adds it with the reason beside it — the three that are not the chokepoint each "
-        "carry theirs at the top of this file."
+        f"The SQL sweep excuses {excused} under `backend/app/`, and the four files M8 settles on "
+        f"and E2-01 corrects are {expected}. Every other module in the tree runs its reads "
+        "through a grant function in `services/authz.py`; a fifth excused location is a fifth "
+        "place SPEC §2.1's purview can be computed by whoever wrote the query, and it belongs in "
+        "the pull request that adds it with the reason beside it — the three that are not the "
+        "chokepoint each carry theirs at the top of this file.\n\n"
+        "**If you reached here by adding a path to `SQL_SWEEP_EXEMPT_FILES`, that is this "
+        "assertion working.** The list above is written out rather than derived from that tuple, "
+        "so a fifth exemption is two edits in one diff and a reviewer sees the decision. Add the "
+        "path here, with the reason beside the constant, and pin the file unless reading these "
+        "relations is the whole of what it is for.\n\n"
+        "If the extra entries are other modules under `backend/app/views_sql/`, the package "
+        "exemption is back: it was a containment test until E2-01, and it excused every module "
+        "anybody filed in that package — which is the two-step route to the institution the PR "
+        "#123 re-review planted. Exactly one file in that package is exempt, and it is the one "
+        "the import half below watches."
     )
 
     swept = parsed_modules(sql_sweep_is_exempt)
@@ -1179,9 +1372,10 @@ def test_the_sql_sweep_exempts_four_locations_and_no_exemption_is_a_shape() -> N
 
     for path in NOT_EXEMPT_LOOKALIKES:
         assert not sql_sweep_is_exempt(path), (
-            f"{path.relative_to(REPO_ROOT)} is treated as exempt. It is not one of the four "
-            "locations M8 names; it merely reads like one. A prefix, a file name or a directory "
-            "name is how a closed set gets defeated one level out."
+            f"{path.relative_to(REPO_ROOT)} is treated as exempt. It is not one of the four files "
+            "this sweep excuses; it merely reads like one. A prefix, a file name or a directory "
+            "name is how a closed set gets defeated one level out — and for the three paths "
+            "inside `backend/app/views_sql/`, a directory test is exactly what E2-01 deleted."
         )
 
     inventory = policed_relations()
@@ -1195,19 +1389,321 @@ def test_the_sql_sweep_exempts_four_locations_and_no_exemption_is_a_shape() -> N
         )
 
 
+def test_the_import_sweep_exempts_the_grant_chokepoint_alone() -> None:
+    """The import half's exemption is one file, and the package is not in it.
+
+    E0-41 excused `services/authz.py` *and* the `views_sql/` package by
+    containment. The package half excused nothing — no module in that package
+    imports `queries` — so nothing went red when E2-01 deleted it, and that is
+    exactly why it had to go rather than sit: a live exemption for a route nobody
+    takes is a route somebody can take later without review. The one it would have
+    covered is the laundering module,
+    `test_a_second_module_in_the_query_package_cannot_launder_the_statements`.
+
+    **The mutation this exists to survive:** `VIEWS_SQL_DIR in path.parents` back
+    in `import_sweep_is_exempt`. The equality below reads the excused *set* over
+    the real tree rather than the predicate's spelling, so a containment test, a
+    `startswith` and a directory-name test all fail it the same way, each printing
+    the package modules the exemption re-admitted.
+
+    **The near miss that must stay green:** `services/authz.py` itself, asserted
+    first as the control. A predicate that excused nothing at all would satisfy
+    every "is not exempt" assertion in this file and prove none of them.
+    """
+    assert AUTHZ_MODULE.is_file(), (
+        f"{AUTHZ_MODULE.relative_to(REPO_ROOT)} does not exist, so the one module allowed to "
+        "import the statements is not there and this test's control is meaningless. E0-11 ships "
+        "it and SPEC §2.1's purview rules live in it."
+    )
+    assert QUERY_MODULE_PATH.is_file(), (
+        f"{QUERY_MODULE_PATH.relative_to(REPO_ROOT)} does not exist, so `{QUERY_MODULE}` — the "
+        "module both halves of this file are written about — is not there, and the import sweep "
+        "is watching a name nothing defines."
+    )
+    assert import_sweep_is_exempt(AUTHZ_MODULE), (
+        f"{AUTHZ_MODULE.relative_to(REPO_ROOT)} is not exempt from the import sweep. It is the "
+        f"chokepoint: the grant functions are what `{QUERY_MODULE}`'s statements exist for, and a "
+        "rule that forbade the chokepoint its own statements would be red against correct code. "
+        "This is the control — with it failing, the refusals below prove nothing, because a "
+        "predicate that excuses nothing refuses everything."
+    )
+
+    excused = sorted(
+        str(path.relative_to(REPO_ROOT))
+        for path in APP_ROOT.rglob("*.py")
+        if import_sweep_is_exempt(path)
+    )
+    assert excused == [str(AUTHZ_MODULE.relative_to(REPO_ROOT))], (
+        f"The import sweep excuses {excused} under `backend/app/`, and exactly one module may "
+        f"import `{QUERY_MODULE}`: `{AUTHZ_MODULE.relative_to(REPO_ROOT)}`.\n\n"
+        "If the extra entries are modules under `backend/app/views_sql/`, the package containment "
+        "E2-01 deleted is back. It excuses a second module in that package doing `from . import "
+        "queries` and re-exporting the statements to a handler — the same two-step route as the "
+        "raw-read offender, one level over, carrying no SQL for the other half of this file to "
+        "read.\n\n"
+        "A second importer anywhere is a second place SPEC §2.1's purview is computed, because an "
+        "importer supplies its own session and its own parameters. The sanctioned route is to "
+        "call the grant function in `services/authz.py`; if the function it needs is not there "
+        "yet, it belongs there."
+    )
+
+    for path in NOT_EXEMPT_LOOKALIKES:
+        assert not import_sweep_is_exempt(path), (
+            f"{path.relative_to(REPO_ROOT)} may import `{QUERY_MODULE}`. It is not the "
+            "chokepoint; it merely reads like it, or sits in the package that used to be excused. "
+            "A prefix, a file name or a directory name is how a closed set gets defeated one "
+            "level out."
+        )
+
+
+def test_a_second_module_in_the_query_package_is_swept_for_its_raw_read() -> None:
+    """The re-review's planted offender, first leg: it is excused by neither half.
+
+    This is the finding E2-01 closes, run rather than argued
+    (`docs/tickets/e2/carried-from-e1.md`, "The `views_sql` package exemption and
+    the import guard disagree on their object"). A module filed at
+    `backend/app/views_sql/e2_planted_second_module.py`, holding
+    `SELECT person_id FROM public.enrollment` and imported from an API handler,
+    used to pass both halves in two individually legal steps: the SQL half excused
+    it for sitting in the package, and the import half never looked at the handler
+    because the name it imported was not `app.views_sql.queries`.
+
+    The chain dies at step one now. The planted path is exempt from neither
+    predicate, so the module itself is an offender, and
+    `test_no_module_outside_the_sanctioned_locations_runs_sql_naming_a_policed_relation`
+    is where it gets reported over the real tree.
+
+    **`enrollment` rather than one of the org views**, deliberately: it is M8's
+    relation and the one name in the premise that reaches the policed inventory
+    only through a view body. A parse that had lost that half would leave it out
+    of the inventory, and the equality below would then read `[]` and say so
+    rather than passing on a pattern that had gone blind.
+
+    **The mutation this exists to survive:** the package containment back in
+    `sql_sweep_is_exempt`, in any spelling — this leg reads the predicate over the
+    planted path, not the predicate's source.
+
+    **The near miss it tolerates**, asserted as the control: `queries.py` in the
+    same package *is* exempt. The narrowing is to one file, not to nothing, and a
+    rule that swept the statement store would be red against ADR 0041's design and
+    deleted rather than fixed. The second near miss is inside the planted source —
+    its docstring names `public.section_roster`, which is what a module that goes
+    through the grant is expected to write, and the equality below is `enrollment`
+    alone because docstrings are subtracted before the sweep reads a module.
+
+    Nothing is written to disk. The planted source is parsed in memory and the
+    live predicates are run over the planted *path*, which is why this test is
+    green on a clean tree; the live plant-and-remove pass is the verifier's
+    battery. A monkeypatched tree would prove less here than it does for the depth
+    test above: `policed_relations` reads `VIEWS_SQL_DIR` at call time, but the
+    exemptions are paths bound at import, so a sweep pointed at a temporary tree
+    would find nothing exempt in it and every module in it an offender — a green
+    that holds whatever the predicate says.
+    """
+    inventory = policed_relations()
+    assert "enrollment" in inventory, (
+        f"`enrollment` is not in the parsed inventory {sorted(inventory)}, so the planted read "
+        "below names nothing this sweep polices and this test would pass over an offender. "
+        "`test_the_policed_inventory_comes_from_the_catalog_and_holds_the_six_the_rule_names` "
+        "diagnoses that."
+    )
+    pattern = reference_to(inventory)
+
+    assert QUERY_MODULE_PATH.is_file(), (
+        f"{QUERY_MODULE_PATH.relative_to(REPO_ROOT)} does not exist, so the file this exemption "
+        "was narrowed to is not there and the control below excuses nothing."
+    )
+    assert sql_sweep_is_exempt(QUERY_MODULE_PATH), (
+        f"{QUERY_MODULE_PATH.relative_to(REPO_ROOT)} is not exempt from the SQL sweep. It holds "
+        "the statements the grant functions run, so naming these relations is the whole of what "
+        "it is for (ADR 0041), and a sweep that reported it would be red against correct code. "
+        "This is the control: with it failing, the refusal below is a predicate that excuses "
+        "nothing rather than a package exemption that has gone."
+    )
+    assert PLANTED_SECOND_MODULE.parent.is_dir(), (
+        f"{PLANTED_SECOND_MODULE.parent.relative_to(REPO_ROOT)} is not a directory, so the "
+        "planted path is not inside the real package, and 'a second module in that package is "
+        "not exempt' is not what is being asserted."
+    )
+
+    assert not sql_sweep_is_exempt(PLANTED_SECOND_MODULE), (
+        f"{PLANTED_SECOND_MODULE.relative_to(REPO_ROOT)} is exempt from the SQL sweep. That is "
+        "the package exemption E2-01 deleted, back: a second module filed beside `queries.py` "
+        "may then hold any read of any policed relation, and the only thing between it and the "
+        "institution is that nobody has written it yet."
+    )
+    assert not import_sweep_is_exempt(PLANTED_SECOND_MODULE), (
+        f"{PLANTED_SECOND_MODULE.relative_to(REPO_ROOT)} is exempt from the import sweep. Closing "
+        "one half and leaving the other is the same hole one level out — this module may then "
+        "import the statements instead of writing its own."
+    )
+
+    tree = ast.parse(PLANTED_SECOND_MODULE_SOURCE, filename=str(PLANTED_SECOND_MODULE))
+    found = relations_named_by(tree, pattern)
+    assert found == ["enrollment"], (
+        f"The sweep reads {found} out of the planted second module, and it holds one statement, "  # noqa: S608
+        "`SELECT person_id FROM public.enrollment`.\n\n"
+        "If the list is empty, the sweep has gone blind to a read it is written about: "
+        "`enrollment` is the row that says which student sits in which section, `pulse_app` reads "
+        "it unfiltered, and the only narrowing anywhere is the `WHERE` inside the grant functions "
+        "in `services/authz.py`.\n\n"
+        "If `section_roster` is in the list, the sweep is reading the planted module's docstring. "
+        "Prose naming a relation is what a module going through the grant is expected to write, "
+        "and a sweep that fired on it would teach the next person to delete the comment."
+    )
+
+
+def test_a_second_module_in_the_query_package_cannot_launder_the_statements() -> None:
+    """The same offender's second leg: no SQL of its own, and it dies at the import.
+
+    This is the variant that would have survived if E2-01 had narrowed only the
+    SQL exemption. The module holds no statement — it does `from . import queries`
+    and re-exports what the grant functions run — so the relation sweep has
+    nothing to read in it, which is asserted below as the control rather than
+    assumed. What catches it is the import half, and only because the package
+    containment went from `import_sweep_is_exempt` in the same change.
+
+    **The relative form is the one that matters.** `from . import queries` names
+    no module a literal match could find, and it is what somebody writing inside
+    that package would naturally type; `imported_targets` resolves it against the
+    package, which is the machinery
+    `test_the_import_matcher_resolves_every_route_to_the_query_module` proves in
+    both directions.
+
+    **Where the chain is broken, stated so nothing here is cited as more than it
+    is** (`docs/MISTAKES.md` entry 9). A handler that imported this planted module
+    would **not** be flagged: the import sweep watches `app.views_sql.queries` and
+    the handler would name `app.views_sql.e2_planted_second_module`. That is
+    deliberate. The chain dies at the module, not at its importer — the module may
+    not exist with either the read or the import in it, so there is nothing for a
+    handler to reach.
+
+    **The mutation this exists to survive:** the package containment back in
+    `import_sweep_is_exempt`.
+
+    **The near miss it tolerates**, asserted as the control: `services/authz.py`
+    is exempt from this half, so what is being asserted is "every module but the
+    chokepoint" rather than "every module". A predicate that excused nobody would
+    satisfy the refusal below and prove nothing by it.
+    """
+    tree = ast.parse(PLANTED_LAUNDERING_MODULE_SOURCE, filename=str(PLANTED_SECOND_MODULE))
+
+    inventory = policed_relations()
+    pattern = reference_to(inventory)
+    assert relations_named_by(tree, pattern) == [], (
+        "The relation sweep reads a policed relation out of the laundering module, which holds no "
+        "SQL at all — it re-exports `queries`. That makes this test a duplicate of the raw-read "
+        "leg rather than the second route, and the property it is here to prove — that the SQL "
+        "half alone cannot see this shape — is not what is being tested."
+    )
+
+    assert import_sweep_is_exempt(AUTHZ_MODULE), (
+        f"{AUTHZ_MODULE.relative_to(REPO_ROOT)} is not exempt from the import sweep, so the "
+        "refusal below is a predicate that excuses nobody rather than one that excuses the "
+        "chokepoint alone."
+    )
+    assert not import_sweep_is_exempt(PLANTED_SECOND_MODULE), (
+        f"{PLANTED_SECOND_MODULE.relative_to(REPO_ROOT)} is exempt from the import sweep, so a "
+        "second module in that package may import the statements the grant functions run and hand "
+        "them to anything that imports it. That is the package containment E2-01 deleted."
+    )
+
+    targets = imported_targets(tree, PLANTED_SECOND_MODULE)
+    assert QUERY_MODULE in targets, (
+        f"`from . import queries`, written in {PLANTED_SECOND_MODULE.relative_to(REPO_ROOT)}, "
+        f"resolved to {sorted(targets)}, which does not include `{QUERY_MODULE}`. The relative "
+        "form resolves against the package, and a sweep that read `ast.ImportFrom.module` alone "
+        "would report this module clean while it re-exports every statement in the store."
+    )
+
+
+def test_every_query_package_module_that_is_not_the_statement_store_is_swept_and_clean() -> None:
+    """The other direction of the narrowing: the real package pays nothing for it.
+
+    Narrowing an exemption from a package to one file puts every other module in
+    that package inside both sweeps. This asserts what that costs today, which is
+    the premise E2-01 was written on: the package holds `queries.py` and
+    `__init__.py`, and the second names no policed relation and imports no
+    `queries`, so nothing in the tree goes red for the narrowing.
+
+    It is derived rather than listed, so it is not a claim about `__init__.py` — it
+    is a claim about **every** module in that package that is not the statement
+    store, whatever a later ticket files there. That makes this the test the
+    ticket's deadline lands on: the first second module written into that package
+    reds here, by name, with the two sanctioned answers in the message, rather
+    than reddening the whole-tree sweep with no explanation of why that package is
+    suddenly in it.
+
+    **The mutation this exists to survive:** a package module gaining either half
+    of the two-step offender — a read of a policed relation, or an import of the
+    statement store.
+
+    **The near miss it tolerates:** `queries.py`, which is excluded here because it
+    is the one file the exemption covers, and which
+    `test_a_second_module_in_the_query_package_is_swept_for_its_raw_read` asserts
+    is still exempt.
+    """
+    modules = sorted(VIEWS_SQL_DIR.rglob("*.py"))
+    names = sorted(path.name for path in modules)
+    assert QUERY_MODULE_PATH in modules, (
+        f"{QUERY_MODULE_PATH.relative_to(REPO_ROOT)} is not among the Python modules under "
+        f"{VIEWS_SQL_DIR.relative_to(REPO_ROOT)}, which holds {names}. The file this exemption "
+        "was narrowed to is not where both halves of this sweep say it is."
+    )
+    others = [path for path in modules if path != QUERY_MODULE_PATH]
+    assert others, (
+        f"{VIEWS_SQL_DIR.relative_to(REPO_ROOT)} holds no Python module besides the statement "
+        "store, so this test looks at nothing and would report success. The package has at least "
+        "an `__init__.py`, which is what makes `from . import queries` an import at all."
+    )
+
+    inventory = policed_relations()
+    pattern = reference_to(inventory)
+    for path in others:
+        where = path.relative_to(REPO_ROOT)
+        assert not sql_sweep_is_exempt(path), (
+            f"{where} is exempt from the SQL sweep. Exactly one file in that package is — "
+            f"{QUERY_MODULE_PATH.relative_to(REPO_ROOT)} — and a package exemption is what E2-01 "
+            "deleted."
+        )
+        assert not import_sweep_is_exempt(
+            path
+        ), f"{where} is exempt from the import sweep. Only `services/authz.py` is."
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        named = relations_named_by(tree, pattern)
+        assert not named, (
+            f"{where} runs SQL naming {named}, and it is not the statement store. Since E2-01 the "
+            "exemption covers `queries.py` alone, so this module is swept like any other: move "
+            "the read into the statement store and reach it through a grant function in "
+            "`services/authz.py`, or exempt this file in its own reviewed commit with a pin and "
+            "the reason beside it. A package exemption is not one of the answers — it is what "
+            "let a second module in this package read the institution unseen."
+        )
+        assert QUERY_MODULE not in imported_targets(tree, path), (
+            f"{where} imports `{QUERY_MODULE}`, and only `services/authz.py` may. A module in the "
+            "package that re-exports the statements hands them to everything that imports it, "
+            "which is the laundering route with one more name on it."
+        )
+
+
 # The statement each pinned exemption exists for, as the relations that file's
-# own statements may name — an equality, not a floor. The reason is carried with
-# the pin so a failure message can say what the exemption was granted for without
-# anybody opening the module.
+# own statements may name — an equality, not a floor. **Relations is what the pin
+# is held in**, which this comment always said and the test's name did not until
+# E2-01; the words moved to the mechanism rather than the other way about, because
+# a pin against statement *text* goes red when somebody reformats a query or
+# renames a bound parameter, and a red against correct code is the kind that gets
+# deleted. The reason is carried with the pin so a failure message can say what
+# the exemption was granted for without anybody opening the module.
 #
-# `services/authz.py` and the `views_sql/` package carry no pin, and that is not
-# an oversight. The grant functions may hold their statements in
+# `services/authz.py` and `views_sql/queries.py` carry no pin, and that is not an
+# oversight. The grant functions may hold their statements in
 # `app.views_sql.queries` rather than in their own text, so which of the two
-# carries the SQL is a construction choice this file does not settle — and the
-# chokepoint's whole job is reading these relations under §2.1's rules, so there
-# is no single statement to pin it to. The import half below is what keeps that
-# route to one module.
-STATEMENT_PINS = (
+# carries the SQL is a construction choice this file does not settle — and reading
+# these relations under §2.1's rules is the whole job of both, so there is no
+# single statement to pin either to. The import half is what keeps that route to
+# one module, and since E2-01 the file it excuses and the module it watches are
+# the same one.
+RELATION_PINS = (
     (
         DEV_CONSOLE_MODULE,
         ["section_enrollment_count"],
@@ -1225,13 +1721,25 @@ STATEMENT_PINS = (
 
 @pytest.mark.parametrize(
     ("module", "pinned", "reason"),
-    STATEMENT_PINS,
-    ids=[path.stem for path, _, _ in STATEMENT_PINS],
+    RELATION_PINS,
+    ids=[path.stem for path, _, _ in RELATION_PINS],
 )
-def test_each_pinned_exemption_covers_exactly_the_statement_its_reason_names(
+def test_each_pinned_exemption_names_exactly_the_relations_its_reason_names(
     module: Path, pinned: list[str], reason: str
 ) -> None:
     """An exemption excuses a file; its reason is about one statement. This is the gap.
+
+    **What the pin is spelled in, said plainly because this test's name said
+    otherwise until E2-01.** The assertion below is an equality over the **relation
+    names** a module's executable strings read — `relations_named_by`, the same
+    function the sweep itself uses — and never over statement text. That is the
+    smaller claim and the deliberate one: a pin against the text would go red when
+    somebody reformats a query or renames a bound parameter, which is red against
+    correct code and gets deleted rather than fixed. What each exemption is *for*
+    is a module reading one named relation, and that is what the equality holds it
+    to. The mechanism has not changed; the name and this docstring have
+    (`docs/tickets/e2/carried-from-e1.md`, the low-findings block, and ADR 0107,
+    which described the pin honestly while this test's name did not).
 
     **The floor half** is `docs/MISTAKES.md` entry 35: a guard that only ever
     reports absence cannot tell you which mechanisms it can see. Each pinned file
@@ -1347,6 +1855,16 @@ def test_no_module_outside_the_grant_chokepoint_imports_the_view_query_module() 
     running one of its statements on a session of your own reaches exactly the
     unfiltered relations the test above is about, and the module doing it contains
     no SQL for that sweep to read.
+
+    **What this sweeps has widened since E2-01**, which is worth a sentence because
+    the swept set is the whole of what a sweep means: `queries.py`'s own package is
+    in it now. The exemption was `authz.py` *and* everything under `views_sql/`,
+    and the containment half is gone, so a module filed in that package that
+    imports the statements and re-exports them is reported here like any other
+    importer. `test_a_second_module_in_the_query_package_cannot_launder_the_statements`
+    is that case run against a planted source, and
+    `test_the_import_sweep_exempts_the_grant_chokepoint_alone` is the excused set
+    itself.
 
     **The mutation this exists to survive:** a module outside `authz.py` importing
     `queries` — by any of the forms `imported_targets` resolves, including the
