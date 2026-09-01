@@ -98,12 +98,18 @@ editor's decision, ruled at the E2 breakdown on 2026-08-31.
   `/dev` console reads `closed` for a section whose first Friday has passed, until
   the reconciler runs. E2-08's submit path and E2-09's read path both meet the same
   window, so neither can be more current than this job.
-- **`pulse_app` needs `SELECT` and `INSERT` on `survey_window`.** The worker writes
-  the rows on that connection and the console reads them on it; `UPDATE` and
-  `DELETE` stay withheld, which is what makes "the writer skips, never rewrites"
-  a property of the database rather than a rule the next writer has to remember.
-  Like every base-table grant in this scheme, the verbs are recorded in
-  `RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py`.
+- **`pulse_app` holds `SELECT` and `INSERT` on `survey_window`**, granted by
+  `survey_window_grants_v001.sql`: the worker writes the rows on that connection
+  and the console reads them on it. `UPDATE` and `DELETE` stay withheld, which is
+  what makes "the writer skips, never rewrites" a property of the database rather
+  than a rule the next writer has to remember — and which means the application
+  role **structurally cannot reopen or move a window that has closed**. No
+  statement it can issue changes `closes_at`, so a week that has ended cannot be
+  made to accept a submission by anything short of a superuser connection, and
+  §3.1's report-after-close is not resting on a job's good behaviour. Like every
+  base-table grant in this scheme the verbs are recorded in
+  `RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py`,
+  as an equality — the widening is `docs/disputes/E2-06-03.md`.
 - **The rhythm is four named constants in one module**, with §3.1 cited beside
   them. Making them editable is §6.3's configuration surface and E11's, which the
   E2 README's deliberately-not-done list records.
