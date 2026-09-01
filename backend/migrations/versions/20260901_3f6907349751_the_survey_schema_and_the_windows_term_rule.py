@@ -52,8 +52,12 @@ step. The enum type is bound to a name so the downgrade has an object to drop:
 `op.drop_table` leaves a type behind, and a second `upgrade()` would then fail on
 a type that already exists.
 
-Every constraint name comes from `op.f(...)`, which is the naming convention on
-`Base.metadata` rendering it. None is hand-written; see `app/models/base.py`.
+Constraint names on the four new tables come from `op.f(...)`, the naming
+convention on `Base.metadata` rendering them (`app/models/base.py`). The six
+names in the constants below are hand-written — the two referenced uniques and
+the four foreign-key names on `survey_window`, where this revision replaces
+constraints another revision created — and each is spelled to match the same
+convention character for character, which `alembic check` keeps honest.
 
 **No grants.** No application code reads or writes these four tables yet — this
 ticket is schema, a seed and nothing else — so `pulse_app` is given nothing on
