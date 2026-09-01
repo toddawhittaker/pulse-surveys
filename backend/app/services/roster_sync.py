@@ -78,7 +78,7 @@ from sqlalchemy import insert, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.config import Settings, canonical_host, url_host
+from app.config import DEVELOPMENT_ENVIRONMENT, Settings, canonical_host, url_host
 from app.lti.launch import INSTRUCTOR_ROLE_URI, stated_roles
 from app.lti.registration import NoSigningKeyError, OrmToolConf
 from app.models.identity import AssignmentRole, Enrollment, User
@@ -348,6 +348,23 @@ def sync_section(
     # other pin miss (a name that reached the transport without being judged and
     # pinned) rather than resolving it a second time. Both are shared by reference
     # and filled below, before the first request leaves.
+    #
+    # **The roster host's entry is conditional on the environment, and E2-02 is
+    # what made it so.** The comment above has said "in development" since the pin
+    # was written; the code added the host in every environment, which the E1
+    # post-merge re-review carried as a finding. Outside development there is
+    # nothing to exempt it for — rule 5 resolves the stored address like every
+    # other, so it is pinned before its first GET — and leaving it in the set means
+    # a request to that host for which no pin was recorded is dialled by name
+    # rather than refused, with the tool's Bearer token attached. That is the
+    # fail-closed path the pin exists to have, switched off for exactly the host
+    # the platform controls most. In development nothing resolves that host at all
+    # (`_walked_roster`'s `exempt_host`), so nothing pins it and the entry is what
+    # lets the demo stack's every roster page through.
+    #
+    # The token host stays unpinned in every environment, deliberately: it is
+    # `pylti1p3`'s own call and this walk never judges it, so there is no pin to
+    # hold and an exemption is the honest statement of that.
     pins: dict[str, str] = {}
     unpinned_hosts: set[str] = set()
     transport = _pinned(_no_redirects(http), pins, unpinned_hosts)
@@ -357,7 +374,7 @@ def sync_section(
     if token_host is not None:
         unpinned_hosts.add(token_host)
     exempt = url_host(address)
-    if exempt is not None:
+    if exempt is not None and settings.environment == DEVELOPMENT_ENVIRONMENT:
         unpinned_hosts.add(exempt)
     connector = ServiceConnector(registration, requests_session=transport)
     walked = _walked_roster(
@@ -812,10 +829,15 @@ def _walked_roster(
     because it is the operator's own and the hourly walk would otherwise pay a
     lookup per page of every section.
 
-    **A token failure answers `None`**, because it leaves no usable prefix: the
-    token endpoint refused everything, no page was ever asked for, and `_ingest`
-    never runs. The call is recorded, with the response code that says which failure
-    it was; a NULL response code means the call never reached the platform at all.
+    **A token failure is the only `None`**, because it is the only exit that
+    leaves no usable prefix: the token endpoint refused everything, no page was
+    ever asked for, and `_ingest` never runs. The call is recorded, with the
+    response code that says which failure it was; a NULL response code means the
+    call never reached the platform at all. Every other way this walk stops early
+    — a refused address, a page that would not fetch, and since E2-02 a `Link`
+    header that cycles or never ends — answers the members already read with
+    `complete=False`, because the members of page one are on the roster whatever
+    page two did.
 
     **A page that could not be fetched answers what was already read, incomplete** —
     the same answer a refused address gets, for the same reason (the boundary
@@ -889,12 +911,26 @@ def _walked_roster(
             logger.error(
                 "the roster walk for section %s reached %s after %d page(s) and stopped: a `Link` "
                 "header that returns to a page it already served, or one that never says stop, is "
-                "a container this tool cannot read to the end",
+                "a container this tool cannot read to the end. The %d member(s) already read are "
+                "kept and the walk is reported incomplete",
                 section_id,
                 following,
                 len(walked),
+                len(members),
             )
-            return None
+            # The prefix, incomplete, exactly as the two failure exits below answer
+            # (E2-02, from the E1 post-merge re-review). This branch used to return
+            # `None`, which threw away every page the walk had fully read: a
+            # platform that advertises `next` on a full final page starved that
+            # section's roster on every hourly run, and every call in the log said
+            # 200, so nothing but this ERROR line ever said why.
+            #
+            # **No `nrps_call` row is written here**, and that is the same grain
+            # decision. Every page the walk fetched has already written its own row
+            # with the status it answered; a row invented for the terminator would
+            # carry a NULL `response_code`, which D9 gives exactly one meaning — a
+            # call that never reached the platform — and no request here failed.
+            return members, False
         try:
             resolved = refuse_invalid_fetched_address(
                 environment,
