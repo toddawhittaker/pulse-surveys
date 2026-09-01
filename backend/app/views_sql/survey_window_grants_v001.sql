@@ -1,0 +1,71 @@
+-- What the application may do to a survey window — ticket E2-06, SPEC §3.1,
+-- ADR 0001, ADR 0009, ADR 0021, ADR 0111.
+--
+-- E2-06 is the first code that touches public.survey_window. E0-06 created the
+-- table, E2-05 added its cross-term rule, and neither granted the runtime role
+-- anything on it, because until this ticket nothing read a window and nothing
+-- wrote one. Both halves of E2-06 run on the connection pulse_app holds — the
+-- Celery worker derives the rows on the hourly beat entry, and the `/dev`
+-- console reads them to say whether a section's survey is open — so without this
+-- file each is refused by Postgres with 42501 rather than by anything the ticket
+-- is about. Measured, not assumed: eight tests of the development console fail
+-- that way without it and pass with it, one of them `invariant`-marked.
+--
+-- **SELECT and INSERT, and nothing else.**
+--
+--   - SELECT is the open/closed question — `open_window_for_section` and the
+--     console's whole-page reader — and it is also how the derivation knows which
+--     windows a section already has.
+--   - INSERT is the derivation writing a window it did not find.
+--   - **UPDATE stays withheld, and that is the interesting half.** E2-06's writer
+--     skips a `(section_id, week_id)` that already has a row and rewrites nothing;
+--     withholding UPDATE is what makes that a property of the database rather than
+--     a rule the next writer has to remember. It also means **the application role
+--     structurally cannot reopen or move a window that has closed** — no statement
+--     it can issue changes `closes_at`, so a week that has ended cannot be made to
+--     accept a submission by anything short of a superuser connection. SPEC §3.1
+--     puts the report after the close, so a moved `closes_at` is a week that can
+--     still change under a report already generated.
+--   - **DELETE stays withheld** for the same reason one level up: a missed week
+--     cannot be back-filled (§3.1), and deleting a window is how a row keyed to it
+--     — E2-08's responses, §3.4's participation denominator — would lose the week
+--     it was counted in. Re-deriving after a calendar edit is E11's decision, on a
+--     surface an administrator drives, not something an hourly job can reach.
+--
+-- **A grant on a base table rather than a read view**, the same exception the
+-- grants before it take (`lti_registration_grants_v001.sql`,
+-- `tool_signing_key_grants_v001.sql`, `clock_override_grants_v001.sql`). SPEC
+-- §4.1 routes an *identity* read path through a view, and the reason is identity:
+-- a view selects the columns a caller may see and omits the ones §8 protects. A
+-- window is a section, a week, a term and two instants — no subject, no name, no
+-- address — so a view over it would select every column of its source and exist
+-- only to satisfy the shape of the rule. E2-09's student read path is scoped by
+-- the student's own enrollment, and that scoping is `authz.py`'s grant functions,
+-- not a view over this table.
+--
+-- **This widens what pulse_app can reach, and it is meant to be visible.**
+-- `RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py`
+-- is the hand-written record every base-table grant is compared against as an
+-- equality in both directions, deliberately not derived from these `.sql` files
+-- so that a widening cannot justify itself. These two verbs have to be recorded
+-- there in the same change, and that edit is on the far side of the test wall for
+-- E2-06's implementer: it is raised as `docs/disputes/E2-06-03.md`, the same shape
+-- as `docs/disputes/E2-04-02.md` was for `clock_override`.
+--
+-- **pulse_care is granted nothing.** The Care queue reaches a threat comment and
+-- the audited reveal (ADR 0001, SPEC §6.2); when a section's survey opens is no
+-- part of that surface, and the role that can reach a student's name gets no
+-- privilege it has no use for.
+--
+-- **USAGE ON SCHEMA public is not granted again here.** identity_grants_v001.sql
+-- grants it to pulse_app and identity_grants_v002.sql restates it; an ACL entry
+-- records no history, so a third grant would be indistinguishable from those and
+-- any matching revoke would remove all of them.
+--
+-- **The downgrade has something to revoke.** The table is E0-06's and outlives
+-- this revision, so a privilege granted here would survive a downgrade that drops
+-- nothing. The revision's `downgrade()` writes the REVOKE rather than a second
+-- file, because ADR 0041 makes a versioned file the immutable record of what an
+-- upgrade applied and an un-grant is not a record of anything.
+
+GRANT SELECT, INSERT ON public.survey_window TO pulse_app;
