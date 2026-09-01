@@ -43,6 +43,14 @@ E1-01 item 2.
 (standing); the structural source is E13's at the latest (ruled
 2026-08-28), with the reached-table report as its compensating control.
 **Done when:** the deferred entry's, for the half still open.
+**E2-05 asked the standing question of the four tables it adds.**
+`question_set` and `question` hold no key to a person and the walk reaches
+neither. `response` and `answer` are reached — `response.user_id` is one
+hop from `user`, `answer.response_id` is a second — and both are recorded
+in the carries-nothing inventory with the columns each judgement was made
+against, which took it from five entries to seven. `PERSON_TABLES` is
+unchanged: `response.user_id` is a foreign key, and the identity behind it
+stays on `user_identity`, which `pulse_app` is granted no `SELECT` on.
 
 ## A non-development deployment has no way to supply the tool's signing key
 

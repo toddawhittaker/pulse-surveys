@@ -128,10 +128,13 @@ one alike. The second is a *report* rather than a guard: the sweeps above are al
 phrased over names and markers, so a table the walk reaches whose columns none of
 them recognises is passed over in silence, which is how `web_login_subject` would
 have shipped unmarked. `unclassified_reached_tables` names such a table, and
-`REACHED_TABLES_THAT_CARRY_NOTHING` is where the five the silence is acceptable
-over today are recorded — each with the columns that judgement was made against,
-so the entry expires the moment one of them grows a column, and with the reason a
-reviewer reads when it does.
+`REACHED_TABLES_THAT_CARRY_NOTHING` is where the tables the silence is acceptable
+over are recorded — each with the columns that judgement was made against, so the
+entry expires the moment one of them grows a column, and with the reason a
+reviewer reads when it does. No count is written here: the mapping grows with
+every ticket that adds a table the walk reaches, and a number in a docstring is a
+record with a scheduled expiry (`docs/MISTAKES.md` entry 1). E2-05 added two,
+`response` and `answer`.
 
 What remains outside the search is stated on `IDENTITY_NAME_FRAGMENTS` below
 rather than here, beside the tuple that decides it (`docs/MISTAKES.md` entry 14).
@@ -566,9 +569,19 @@ def people_tables(engine: Any) -> set[str]:
     rather than against the set it was building, so it walked exactly one hop and
     a table linking to a table that links to `user` was never swept at all. The
     tables that was written about are `answer` and `threat_case` — the second
-    being §6.2's Care queue — and neither exists yet, so the property is asserted
-    over a planted chain in
-    `test_the_marker_sweep_follows_the_foreign_key_walk_to_a_fixed_point` below.
+    being §6.2's Care queue.
+
+    **`answer` is no longer hypothetical, and this sentence used to say it was.**
+    E2-05 builds it: `response.user_id` is one hop from `user` and
+    `answer.response_id` is a second, so `answer` is reached by the fixed point
+    and by nothing else, and both tables are recorded in
+    `REACHED_TABLES_THAT_CARRY_NOTHING` at the foot of this file. That makes this
+    walk the first thing in the repository to depend on the extra hop against a
+    real table rather than against a plant. `threat_case` is still hypothetical,
+    and the property is still asserted over a planted chain as well, in
+    `test_the_marker_sweep_follows_the_foreign_key_walk_to_a_fixed_point` below:
+    a plant is what keeps the guard measurable when the schema's own two-hop
+    tables happen to be reachable by one hop too.
 
     The loop terminates because `found` only grows and is bounded by `present`.
     On today's schema it reaches exactly the tables the one-hop version reached,
@@ -2540,6 +2553,41 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
     "lead_faculty_mapping": CarriesNothing(
         ("course_id", "id", "person_id"),
         "Two foreign keys, a person and a course, and no other column.",
+    ),
+    # The two E2-05 adds, and the first entries here that were written before
+    # the tables existed. They are the reason `people_tables`' own docstring no
+    # longer says `answer` is hypothetical: `response.user_id` puts `response`
+    # one hop from `user` and `answer.response_id` puts `answer` two, so the
+    # fixed-point walk E0-10 built for exactly this case reaches both the moment
+    # E2-05's migration runs. Neither carries a name the vocabulary knows, so
+    # without these two entries the report would name them and the repair would
+    # be on the other side of the test wall from the ticket that caused it
+    # (`docs/MISTAKES.md` entry 22).
+    "response": CarriesNothing(
+        (
+            "first_submitted_at",
+            "id",
+            "last_submitted_at",
+            "section_id",
+            "user_id",
+            "week_id",
+        ),
+        "The three keys SPEC §8's uniqueness rule is written over — a student, a section and a "
+        "week — and the two submission timestamps, and nothing about the person. What holds the "
+        "student's identity is the same thing that holds it on `enrollment`: `user_id` is a "
+        "foreign key, and the identity behind it sits on `user_identity`, which `pulse_app` is "
+        "granted no `SELECT` on. Note that this is the table SPEC §4 is written about — the "
+        "de-identification rules are about what a *view* of it may carry, which the bound-column "
+        "rule above governs, not about a column on the row.",
+    ),
+    "answer": CarriesNothing(
+        ("comment_text", "id", "question_id", "rating", "response_id", "workload_hours"),
+        "Two foreign keys and the three value columns, exactly one of which a row holds. "
+        "`comment_text` is a student's own words and can name anybody at all — that is why §5.2 "
+        "moderates it and §4 randomises its display order and never shows a timestamp beside it "
+        "— but it is not an identity *column* in this convention's sense: it holds no key to a "
+        "person, and marking it would put every comment in the set the identity-separated views "
+        "may not read, which is the opposite of what §5.1 requires of the instructor report.",
     ),
     "role_assignment": CarriesNothing(
         (

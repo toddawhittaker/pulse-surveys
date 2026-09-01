@@ -10,7 +10,8 @@ supervision graph, role_assignment and lead_faculty_mapping (E0-09), which SPEC
 Care reveal cannot return a name until its record is committed (ADR 0071). `ai` holds
 classification, the append-only record of what a model answered and which prompt
 version and model ID produced it (E0-13); §13 gives that module `summary` too,
-and E4 adds it. The other aggregates §13 lists arrive with the tickets that need
+and E4 adds it. `survey` holds question_set, question, response and answer — the
+weekly instrument and everything it collects (E2-05). The other aggregates §13 lists arrive with the tickets that need
 them.
 
 **Importing this package must import every model module.** `backend/migrations/
@@ -24,7 +25,7 @@ The module is imported for that side effect, so it is re-exported in `__all__`
 rather than left to look like an unused import that a later cleanup can delete.
 """
 
-from app.models import ai, audit, identity, lti, org, term
+from app.models import ai, audit, identity, lti, org, survey, term
 from app.models.base import NAMING_CONVENTION, AwareDateTime, Base, UuidPrimaryKey
 
 __all__ = [
@@ -37,5 +38,6 @@ __all__ = [
     "identity",
     "lti",
     "org",
+    "survey",
     "term",
 ]

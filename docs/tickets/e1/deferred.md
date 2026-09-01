@@ -85,6 +85,15 @@ Every E1 pull request that defers something adds it here in the same PR.
    five measured entries are `user`, `audit_log`, `enrollment`,
    `lead_faculty_mapping` and `role_assignment`, each with its pinned
    columns and its reason beside it.
+   **E2-05 grew that inventory to seven**, adding `response` and `answer`:
+   `response.user_id` puts one of them a hop from `user` and
+   `answer.response_id` puts the other two, so the fixed-point walk reaches
+   both the moment that ticket's migration runs. The count above is left as
+   it was measured, with this line beside it: a number written into a record
+   expires every time the thing it counts grows (`docs/MISTAKES.md` entry 1),
+   and the inventory itself is the mapping in
+   `tests/integration/test_identity_column_marker.py`, which is where a
+   reader should look for today's list.
    **The structural-source half was attempted by Batch A and failed
    honestly; it stays carried to E13.** Measured 2026-08-28: the
    grant-derived candidate (tables `pulse_app` holds no SELECT on) returns

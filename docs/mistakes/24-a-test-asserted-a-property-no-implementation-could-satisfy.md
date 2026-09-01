@@ -1,8 +1,24 @@
 # Entry 24. A test asserted a property no implementation could satisfy
 
-**Caught: 0**
+**Caught: 1**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
+
+*(A fourth instance, E2-05, ruled in [E2-05-01](../disputes/E2-05-01.md) on
+2026-09-01, and the first counted catch: the implementer recognised the shape
+from this entry, measured it in both directions, and wrote the objection
+instead of shipping the one schema change that would have satisfied both tests.
+The sub-shape is the E2-02 one wearing a fixture: a control that names one
+column of a pair and lets the shared seeding walker complete the row from a
+constant chosen for a different table — two days before the named value — so
+the control attempts the exact backwards row the sibling ordering test requires
+the database to refuse. The naive-datetime test was red with the ordering CHECK
+present and its sibling red with it absent; no implementation satisfies both.
+What the entry prevented: a nullable `last_submitted_at`, which turns both
+tests green and pushes a `None` into every later reader of the pair. The
+repair is the control naming both timestamps, equal — the killed mutation is
+unchanged because the naive guard sits on the column type and is reached by
+whichever column carries the naive value.)*
 
 *(A third instance, E2-02, ruled the same way in
 [E2-02-01](../disputes/E2-02-01.md) on 2026-08-31. Third sub-shape, and the one
