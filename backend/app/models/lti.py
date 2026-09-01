@@ -1296,7 +1296,8 @@ class NrpsCall(UuidPrimaryKey, Base):
         # column, this one serves every lookup that one served, so keeping both
         # bought nothing and cost a second index write on every call row — of which
         # there is one per HTTP call, per section, every hour. `a4d61c8f9b27` drops
-        # it in the same revision that creates this. That is the reasoning E0-06
+        # it in the same revision that created this index's descending predecessor,
+        # and `d2f6a913c47e` swaps that one for this. That is the reasoning E0-06
         # applied to `ix_section_course_id`, and the reasoning `section`,
         # `college.institution_id`, `department.college_id` and `course.prefix_id`
         # are all left unindexed under today: an index that is merely contained by
