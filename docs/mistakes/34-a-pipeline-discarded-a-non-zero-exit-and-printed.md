@@ -1,8 +1,15 @@
 # Entry 34. A pipeline discarded a non-zero exit and printed a line that read as success
 
-**Caught: 3**
+**Caught: 4**
 
-*4 instances recorded: one occurrence, and three catches.*
+*5 instances recorded: one occurrence, and four catches.*
+
+*(**A catch**, building E2-07, 2026-09-01. Six gates were run for the green
+report — the suite, the invariant pass, two linters, four mypy scopes, a Docker
+build — every one redirected to a file with its exit status read afterwards,
+because this entry names the pipe as the thing that turns a red gate into a
+passing line. The suite's exit 1 (the disputed test) was seen and reported as a
+red rather than laundered through a tail.)*
 
 *(An occurrence, not a prevention, and it earned no bump: this
 entry did **not** stop the mistake here. In E0-33, by the orchestrating session, against this entry's own

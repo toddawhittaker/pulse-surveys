@@ -1,9 +1,20 @@
 # Entry 18. A deliverable existed in the source tree and not in the built artifact
 
-**Caught: 1**
+**Caught: 2**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
+
+*2 instances recorded; newest first.*
+
+*(**A catch**, building E2-07's image, 2026-09-01. `.dockerignore` excluded
+everything the backend image does not need, which silently excluded the whole
+new `mock-ai/` directory from the build context: the Dockerfile would have
+COPYed from an empty context and no test in the suite reads an image's
+contents. Acting on this entry — the deliverable must exist in the ARTIFACT,
+not the tree — the image was built for real before green was reported, the
+miss surfaced as a build failure, and `.dockerignore` gained the `!mock-ai`
+re-include in the same commit.)*
 
 **What happened.** E0-12 shipped `backend/app/ai/prompts/validity.v1.md`, the
 prompt SPEC §7.4 requires a classification to name. Every gate was green: the
