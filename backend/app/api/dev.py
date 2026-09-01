@@ -60,24 +60,26 @@ audit away from a hole. Nothing a caller or a roster supplies is ever written in
 the `<style>` block, which carries no interpolation at all.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from html import escape
-from typing import Any, NoReturn
+from typing import Any
 from urllib.parse import parse_qs, urlencode
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import delete, insert, select, text
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
+from starlette.routing import Route
 
 from app.api.auth import LOGIN_PATH
 from app.config import Settings, is_development
-from app.db import get_session
+from app.db import SessionLocal, get_session
 from app.lti.registration import launcher_origins
 from app.models.clock import ClockOverride
 from app.models.org import Course, Prefix, Section
@@ -108,14 +110,13 @@ BAD_REQUEST = 400
 # a GET and a reload does not re-post the form.
 SEE_OTHER = 303
 
-# The methods the clock paths answer 404 to. `POST` is the only verb either route
-# serves, and everything else is answered here rather than left to the router —
-# which would say `405 Allow: POST` and tell an unauthenticated caller on a
-# deployment that this build carries a clock control. That is a stricter gate than
-# the console's own measured `405` (ADR 0079, ADR 0087, and
+# The one method either clock route serves. Every other method — standard, or a
+# token nobody has thought of — is refused by the handler and not by the router,
+# which is what `AnyMethodRoute` below exists to arrange. That is a stricter gate
+# than the console's own measured `405` (ADR 0079, ADR 0087, and
 # `tests/unit/test_dev_console_exposure.py` pins it there), deliberately: a page is
 # a thing to read and a control is a thing to attack.
-METHODS_THE_CLOCK_CONTROL_REFUSES = ["GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS"]
+POST_METHOD = "POST"
 
 CONSOLE_TITLE = "Pulse Surveys — developer test console"
 
@@ -685,11 +686,56 @@ def dev_console(request: Request, session: Session = Depends(get_session)) -> HT
     return HTMLResponse(page(body))
 
 
-@router.post(DEV_CLOCK_SET_PATH, summary="Development-only: move the clock to a pretend now")
-async def set_the_dev_clock(
-    request: Request, session: Session = Depends(get_session)
-) -> RedirectResponse:
-    """Replace the override row with the posted instant, or `404` outside development.
+class AnyMethodRoute(Route):
+    """A route that matches its path whatever method the request carries.
+
+    **The security round of 2026-09-01 is why this class exists.** The two clock
+    controls were registered as a `POST` plus a second registration naming the six
+    other standard verbs, and a review drove a method outside that list. Starlette
+    matches a route by path and then by method: a path it knows and a method no
+    registration names is a *partial* match, and a partial match with no full one
+    anywhere answers `405 Allow: POST` from the router, before any handler runs. So
+    `TRACE` — a real method from RFC 9110 — and any arbitrary token got the router's
+    answer, and the environment check never had a say. On a deployment that is one
+    unauthenticated request telling a caller both that this build carries a clock
+    control and that `ENVIRONMENT` is not `development`.
+
+    Adding the missing tokens to the list is not the fix; the next token nobody
+    thought of reopens it (`docs/MISTAKES.md` entry 35 — a guard that enumerates the
+    forms a thing can take misses the form nobody listed). **The fix is to stop
+    enumerating**: match the path for every method and let the handler decide, so
+    what answers a method probe is the same 404 the environment check gives.
+
+    `Route.matches` treats `self.methods` of `None` as no restriction at all — a
+    full match for every method — but `Route.__init__` cannot be asked for that
+    directly: given a function endpoint it reads `methods=None` as "the default",
+    which is `["GET"]`. So the route is built naming the one method it really serves
+    and the restriction is cleared in the line below, which is the whole of this
+    class.
+
+    A plain `starlette.routing.Route` rather than a FastAPI `APIRoute`, because
+    `APIRouter.api_route` requires a method list and every route class FastAPI
+    builds carries one. It costs the two paths their entry in the OpenAPI schema —
+    `get_openapi` walks `APIRoute` instances only — which is no loss: `/docs` is
+    served in development alone (ADR 0074) and the controls are two buttons on the
+    page beside it, not an API anybody writes a client against. It also costs
+    `Depends`, so the two handlers open their own session the way `app.main`'s
+    framing middleware does.
+    """
+
+    def __init__(self, path: str, endpoint: Callable[..., Any]) -> None:
+        super().__init__(path, endpoint, methods=[POST_METHOD], include_in_schema=False)
+        # Not `methods=None` above: for a function endpoint that means "the
+        # default", and the default is GET. Cleared here, where `matches` reads it.
+        self.methods = None
+
+
+async def set_the_dev_clock(request: Request) -> Response:
+    """Replace the override row with the posted instant, or `404`.
+
+    `404` in two cases, and they are one answer on purpose: outside development, and
+    to any method that is not `POST`. A caller cannot tell which of those refused
+    them, which is the point — see `AnyMethodRoute` above.
 
     The gate is the same in-handler comparison the console carries, for the same
     reason and one step more urgently: the row this writes moves the clock that
@@ -720,7 +766,7 @@ async def set_the_dev_clock(
     the threadpool, the way `app.main`'s framing middleware does its own.
     """
     settings: Settings = request.app.state.settings
-    if not is_development(settings):
+    if not is_development(settings) or request.method != POST_METHOD:
         raise HTTPException(status_code=NOT_FOUND)
 
     posted = posted_field(await request.body(), PRETEND_NOW_FIELD)
@@ -733,62 +779,41 @@ async def set_the_dev_clock(
             ),
         )
     pretend_now = pretend_instant(posted, settings)
-    await run_in_threadpool(replace_the_override, session, pretend_now)
+    await run_in_threadpool(replace_the_override, pretend_now)
     return RedirectResponse(DEV_CONSOLE_PATH, status_code=SEE_OTHER)
 
 
-@router.post(DEV_CLOCK_CLEAR_PATH, summary="Development-only: give the real clock back")
-def clear_the_dev_clock(
-    request: Request, session: Session = Depends(get_session)
-) -> RedirectResponse:
-    """Delete the override row, or `404` outside development.
+def clear_the_dev_clock(request: Request) -> Response:
+    """Delete the override row, or `404`.
+
+    The same two refusals as the setter above and in the same order — not
+    development, or not `POST` — answered identically so a probe learns nothing.
 
     Deleting the row rather than writing a zero offset: a row holding a zero offset
     answers the same instants today and is a state nothing else in this product
-    knows how to read. Synchronous — it reads no body — so its one statement runs in
-    FastAPI's threadpool like the console's own reads.
+    knows how to read.
+
+    Synchronous, and that is enough: it reads no body, and Starlette runs a
+    non-async endpoint in a worker thread, so the statement below is off the event
+    loop without this function saying anything about threads.
     """
     settings: Settings = request.app.state.settings
-    if not is_development(settings):
+    if not is_development(settings) or request.method != POST_METHOD:
         raise HTTPException(status_code=NOT_FOUND)
 
-    session.execute(delete(ClockOverride))
-    session.commit()
+    with SessionLocal() as session:
+        session.execute(delete(ClockOverride))
+        session.commit()
     return RedirectResponse(DEV_CONSOLE_PATH, status_code=SEE_OTHER)
 
 
-@router.api_route(
-    DEV_CLOCK_SET_PATH,
-    methods=METHODS_THE_CLOCK_CONTROL_REFUSES,
-    include_in_schema=False,
-    response_model=None,
-)
-@router.api_route(
-    DEV_CLOCK_CLEAR_PATH,
-    methods=METHODS_THE_CLOCK_CONTROL_REFUSES,
-    include_in_schema=False,
-    response_model=None,
-)
-def the_clock_control_answers_no_other_method() -> NoReturn:
-    """`404` to every method but `POST`, in every environment.
-
-    `response_model=None` because this returns nothing at all: FastAPI builds a
-    response model out of the return annotation, and `NoReturn` is not a type
-    anything can be serialised to.
-
-    Registered rather than left to the router, and that is the whole point of it: a
-    path a router knows and a method it does not answers `405 Allow: POST`, which
-    tells an unauthenticated caller on a deployment both that this build carries a
-    clock control and that it is switched off. The console beside it does disclose
-    exactly that (ADR 0079 measured it, ADR 0087 kept it, and
-    `tests/unit/test_dev_console_exposure.py` pins it), and these paths do not: a
-    page is a thing to read and a control is a thing to attack.
-
-    It answers 404 in development too. There is nothing to serve at either path but
-    the `POST`, and a second rule keyed on the environment would be a second gate to
-    keep right for no gain.
-    """
-    raise HTTPException(status_code=NOT_FOUND)
+# The two controls, each matching its path for every method. Appended rather than
+# decorated because `APIRouter.api_route` requires a method list, which is the thing
+# that has to go — see `AnyMethodRoute`. One route per path, so there is no ordering
+# between a route that serves `POST` and a route that refuses everything else, and
+# no way to reintroduce the router's `405` by moving one of them.
+router.routes.append(AnyMethodRoute(DEV_CLOCK_SET_PATH, set_the_dev_clock))
+router.routes.append(AnyMethodRoute(DEV_CLOCK_CLEAR_PATH, clear_the_dev_clock))
 
 
 def posted_field(body: bytes, name: str) -> str | None:
@@ -841,16 +866,24 @@ def pretend_instant(posted: str, settings: Settings) -> datetime:
     return wall.replace(tzinfo=ZoneInfo(settings.institution_timezone))
 
 
-def replace_the_override(session: Session, pretend_now: datetime) -> None:
+def replace_the_override(pretend_now: datetime) -> None:
     """Make this the single override row, anchored at the real instant now.
 
     Delete then insert, rather than an upsert: the table holds at most one row by a
     unique index over `(true)`, so a second insert would be refused by that index
     rather than replacing anything. Both statements and the commit are one
     transaction, so a stack is never briefly running on a clock nobody set.
+
+    **It opens its own session.** The route it serves is a plain
+    `starlette.routing.Route` (see `AnyMethodRoute`), which has no `Depends`, so
+    there is no request-scoped session to be handed — the same position
+    `app.main.framing_ancestors` is in, and the same answer. The `with` block is
+    what makes the closing unconditional, which is the whole of what
+    `app.db.get_session` does for a routed handler.
     """
-    session.execute(delete(ClockOverride))
-    session.execute(
-        insert(ClockOverride).values(pretend_now=pretend_now, anchored_at=datetime.now(UTC))
-    )
-    session.commit()
+    with SessionLocal() as session:
+        session.execute(delete(ClockOverride))
+        session.execute(
+            insert(ClockOverride).values(pretend_now=pretend_now, anchored_at=datetime.now(UTC))
+        )
+        session.commit()
