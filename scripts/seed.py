@@ -886,6 +886,14 @@ MOCK_LMS_LEADERSHIP_USER_ID = "mock-lms-user-dean"
 # platform launches into: `BIOL-215-R3WW` does not exist until somebody launches
 # it, and a seed cannot scope a grant to a row a later launch will create. The
 # dean is the launchable subject §7.3's leadership limb needs.
+#
+# **The dean's college is the one his launch lands in, and that is now load-bearing**
+# (E2-02). The limb no longer admits a leadership holder wherever they launch from:
+# it binds a context only where the launcher's own assignments reach it (ADR 0108).
+# `mock-lms` launches him into `MATH-140-E1FF`, and MATH sits under Mathematics
+# under the College of Arts and Sciences — so that is the college his deanship is
+# scoped to, and `tests/e2e/exit-dean-both-doors.spec.ts` is what fails if it moves.
+# It was the College of Business and Technology until E2-02, when nothing checked.
 MOCK_WORLD_PEOPLE: tuple[MockWorldPerson, ...] = (
     MockWorldPerson(
         "vpaa",
@@ -897,7 +905,7 @@ MOCK_WORLD_PEOPLE: tuple[MockWorldPerson, ...] = (
         "dean",
         "Demo Mock-World Dean",
         "Leadership",
-        assignments=((AssignmentRole.DEAN, ("college", "College of Business and Technology")),),
+        assignments=((AssignmentRole.DEAN, ("college", "College of Arts and Sciences")),),
         lms_user_id=MOCK_LMS_LEADERSHIP_USER_ID,
     ),
     MockWorldPerson(
