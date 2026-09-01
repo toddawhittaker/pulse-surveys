@@ -88,10 +88,14 @@ const JUST_AFTER_IT_OPENS = '2026-10-30T18:05';
 const ITS_LAST_MINUTE = '2026-11-01T23:59';
 const THE_MONDAY_AFTER = '2026-11-02T00:00';
 
-/** The whitespace-trimmed text of one testid on the page as it stands. */
-async function readout(page: Page, testid: string): Promise<string> {
-  return ((await page.getByTestId(testid).textContent()) ?? '').trim();
-}
+// `dev-clock.spec.ts` carries a `readout(page, testid)` helper and this file used
+// to carry a copy of it, unused: the only text this spec reads is scoped to the
+// section's row rather than to the page, so `openWindowCell` below does its own
+// read and the copy was never called. `tsc --noEmit` and `eslint
+// --max-warnings=0` both refuse an unused declaration, which is
+// `docs/disputes/E2-06-02.md`; it is deleted rather than silenced, because an
+// `eslint-disable` or a widened `--max-warnings` makes the gate quieter for every
+// future file to spare one line in this one.
 
 /** Clear any override the stack is carrying and come back to the console. */
 async function clearTheClock(page: Page): Promise<void> {

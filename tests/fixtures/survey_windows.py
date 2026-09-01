@@ -222,6 +222,14 @@ SEEDED_COHORTS: dict[str, tuple[int, int, date]] = {
 # cannot tell a course week from a term week.
 CRITERION_ONE_COHORTS = ("E", "U", "V", "H", "Q")
 
+# The rest of a seeded section's code, after its cohort's start position. §2.2:
+# `{startLetter}{ordinal}{modality}`, `WW` online. Ordinal 1 because these
+# fixtures seed one section per cohort, and `scripts/seed.py` writes `U1WW` and
+# `21WW` for the same reason. See `Fall2026.section_row` for why the code is
+# named here rather than left to the seeding walker to invent.
+COHORT_SECTION_ORDINAL = "1"
+COHORT_SECTION_MODALITY = "WW"
+
 
 @pytest.fixture
 def survey_window_service() -> ModuleType:
@@ -348,12 +356,40 @@ class Fall2026:
         return self
 
     def section_row(self, letter: str) -> Any:
-        """One section of the cohort `letter`, as the inserted row's mapping."""
+        """One section of the cohort `letter`, as the inserted row's mapping.
+
+        **The section code is named here rather than invented, and that is
+        `docs/disputes/E2-06-01.md`'s repair.** The shared seeding walker fills an
+        unnamed `lms_section_code` from `graph_letters(1)`, a session-wide counter
+        one letter wide; a `section` row draws it twice — once for its code and once
+        for its `lms_context_id` — so the letters advance by two and the alphabet
+        closes after thirteen. A test seeding all twenty of §2.2's cohorts under one
+        course and one term therefore died on its twelfth, inside its own fixture,
+        against E0-06's `uq_section_course_id_term_id_lms_section_code`. That was
+        `docs/MISTAKES.md` entry 13's corollary exactly — when a test fails inside
+        its own fixture, suspect the fixture first.
+
+        `{letter}1WW` cannot collide across cohorts, because the cohort letters are
+        distinct by construction: `SEEDED_COHORTS` is keyed by them, and E0-06 makes
+        a start position unique within a term. It is also §2.2's own grammar —
+        `{startLetter}{ordinal}{modality}` — and it is what `scripts/seed.py`
+        actually writes, `U1WW` and `21WW` among them, so a numbered cohort is
+        spelled the way the seed spells it.
+
+        **It is worth more than uniqueness.** Before this, a cohort-`H` section was
+        seeded carrying a code beginning with whatever letter the counter happened to
+        be on, so the row disagreed with the cohort it was supposed to be — which
+        made the missing-week warning's "name the section code" assertion a check
+        against an unrelated string. The derivation reads `length_weeks` and
+        `start_date` and never the code, so naming it supplies nothing the tests
+        then read back as an answer (`docs/MISTAKES.md` entry 30).
+        """
         length_weeks, _first_term_week, start = SEEDED_COHORTS[letter]
         return self.seed(
             SECTION_TABLE,
             self.chain,
             **{
+                SECTION_CODE_COLUMN: f"{letter}{COHORT_SECTION_ORDINAL}{COHORT_SECTION_MODALITY}",
                 SECTION_LENGTH_COLUMN: length_weeks,
                 SECTION_START_COLUMN: start,
                 SECTION_END_COLUMN: start + timedelta(days=length_weeks * 7 - 1),
