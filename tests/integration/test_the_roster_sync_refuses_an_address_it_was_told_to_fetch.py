@@ -74,10 +74,17 @@ server would be red here for a reason that has nothing to do with the rules
 what was asked of it, which is how "nothing was resolved" becomes an assertion
 rather than an absence.
 
-**One test in this module runs under the development name, deliberately**, and
+**Some tests in this module run under the development name, deliberately**, and each
 says so in its own docstring: the exemption that keeps a development stack from
 resolving its own roster host only exists there, so it cannot be posed anywhere
 else.
+
+**E2-02 adds a pair at the foot of the module about that same exemption, one layer
+down.** The carried low finding is that the stored roster host is exempted from the pin
+in *every* environment while the comment beside the entry calls it development-only, so
+the pair asks the sync which hosts it exempted and requires the answer to differ by
+environment. That is read off the transport the sync built rather than off the wire, and
+the section header there says why and what the choice gives up.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -253,6 +260,7 @@ def sync(
     rows: Any,
     settings: Any,
     resolve: Any = None,
+    http: Any = None,
 ) -> BaseException | None:
     """Run one section's sync, answering the exception it raised or `None`.
 
@@ -268,11 +276,15 @@ def sync(
     that renamed it is caught by
     `test_the_sync_takes_the_resolution_seam_this_suite_injects` rather than by
     thirty tests going quietly to real DNS.
+
+    `http` is the wire's own session unless a test hands one over. Two do: E2-02's
+    pair at the foot of this module reads what the sync mounted on the transport
+    afterwards, and it can only do that over a session it still holds a handle on.
     """
     available: dict[str, Any] = {
         "session": rows.session,
         "section_id": section.id,
-        "http": wire.session(),
+        "http": wire.session() if http is None else http,
         "settings": settings,
     }
     if resolve is not None:
@@ -1942,4 +1954,197 @@ def test_the_resolver_really_refuses_to_encode_these_hosts(spelling: str) -> Non
     assert not isinstance(raised, OSError), (
         f"Resolving {host[:40]!r}… raised {raised!r}, which is an `OSError` — so a rule catching "
         "`OSError` already catches it and there is no MEDIUM here to fix."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E2-02: which hosts this sync exempts from the pin, and where that is true.
+#
+# The carried low finding (`docs/tickets/e2/carried-from-e1.md`): "The stored roster
+# host joins `unpinned_hosts` in every environment while the docstring beside it calls
+# that entry development-only. Done when the entry is environment-narrowed or the
+# docstring states what the code does." E2-02 narrows the entry, so the pair below asks
+# the sync which hosts it exempted and requires the answer to differ by environment.
+#
+# **Why this is read off the transport rather than off the wire.** Under a deployment
+# every roster page is judged and pinned before its GET, so the exemption is inert while
+# a pin exists and no request this suite can drive goes out differently for it —
+# `test_the_walk_connects_to_the_address_it_judged_and_not_to_a_later_answer` above is
+# the proof of that, and it passes today with the entry present. What the entry does
+# change is what happens to a request at that host for which no pin was recorded: the
+# adapter's fail-closed path is what should catch an unjudged name, and an exemption
+# switches it off. That is a property of the transport the sync built, so it is asserted
+# there. The limitation is stated rather than papered over: this pair would not notice
+# an exemption that was narrowed in one environment and re-added by another route.
+# ---------------------------------------------------------------------------
+
+# The two names E2-02 settles for this, and the only two spellings this reader knows.
+# `PinnedResolutionAdapter` is the transport adapter the sync mounts on its session, and
+# `unpinned_hosts` is the set of hosts it is told to let through unpinned. A build that
+# spells either of them otherwise is a rename to say out loud in the pull request, and
+# these two lines are the one place that changes — not a shape to guess at here, because
+# a reader that fell back to "no exemptions found" would report the narrowing as done on
+# a build that never made it (`docs/MISTAKES.md` entry 3).
+PIN_ADAPTER_CLASS = "PinnedResolutionAdapter"
+UNPINNED_HOSTS_MEMBER = "unpinned_hosts"
+
+
+def hosts_exempted_from_the_pin(session: Any) -> set[str]:
+    """Every host the sync told its transport to connect to without a pin.
+
+    Read off the adapters the sync mounted on the session the test handed it, folded
+    through `canonical_host` so that two spellings of one name are one answer.
+
+    Every failure below names a deliverable or an interface question rather than
+    answering "none": "the stored host is not exempted" is exactly what a reader that
+    could not find the set at all would report, and the two are opposite states.
+    """
+    mounted = list({id(adapter): adapter for adapter in session.adapters.values()}.values())
+    pinning = [adapter for adapter in mounted if type(adapter).__name__ == PIN_ADAPTER_CLASS]
+    if not pinning:
+        pytest.fail(
+            f"The sync mounted no `{PIN_ADAPTER_CLASS}` on the session it was handed; it mounted "
+            f"{sorted({type(adapter).__name__ for adapter in mounted})}. Either the adapter is "
+            "named something else, or it is mounted on a session of the sync's own rather than on "
+            "the one the caller passed, or it is mounted only when there is a pin to hold — and "
+            "under development there is none. Each of those is a question for the pull request; "
+            f"`{PIN_ADAPTER_CLASS}` at the head of this section is the one line that changes."
+        )
+    exempted: set[str] = set()
+    for adapter in pinning:
+        if not hasattr(adapter, UNPINNED_HOSTS_MEMBER):
+            pytest.fail(
+                f"`{PIN_ADAPTER_CLASS}` carries no `{UNPINNED_HOSTS_MEMBER}` (it carries "
+                f"{sorted(name for name in vars(adapter) if not name.startswith('__'))}). That set "
+                "is what E2-02 narrows to development, and without a handle on it this pair can "
+                "say nothing about which hosts were exempted."
+            )
+        exempted |= {canonical_host(str(host)) for host in getattr(adapter, UNPINNED_HOSTS_MEMBER)}
+    return exempted
+
+
+def test_a_development_stacks_own_roster_host_is_exempted_from_the_pin(
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    development_settings: Any,
+    resolving: Any,
+    a_subject: Any,
+) -> None:
+    """The half that must stay true, and the control that this reader can find an exemption.
+
+    A development stack does not resolve its own stored roster address — that is the
+    exemption `test_a_development_stack_fetches_its_own_roster_host_without_resolving_it`
+    above asserts at the wire — so nothing pins that host, and the transport has to be
+    told to connect to it anyway. The exemption is real, it is deliberate, and E2-02
+    keeps it exactly where it is.
+
+    **It is also `docs/MISTAKES.md` entry 35's control.** The test below reports an
+    *absence*, and a reader that could not see an exemption at all would report absence
+    everywhere and pass. So the reader is required first to find one on a sync that
+    certainly has it.
+
+    **A red here means these tests are broken, or the exemption was narrowed too far** —
+    the second is a real risk of E2-02's change and is what this half is for: narrowing
+    it to nothing makes the development stack resolve a Compose service name on every
+    page of every hourly walk, or refuse it outright.
+    """
+    resolver = resolving({})
+    subject = a_subject("development-exempt-pin")
+    session = service_wire.session()
+    service_wire.serve(compose_a_roster(synced_section, [roster_contract.member(subject)]))
+
+    failure = sync(
+        roster_sync,
+        synced_section,
+        service_wire,
+        committed_rows,
+        development_settings,
+        resolve=resolver,
+        http=session,
+    )
+
+    assert failure is None, f"A development stack's own roster sync raised {failure!r}."
+    assert roster_rows.enrollments_for(subject), (
+        "The development stack's roster member was not ingested, so the sync did not complete and "
+        "whatever it mounted on this session is not what a working walk mounts."
+    )
+    exempted = hosts_exempted_from_the_pin(session)
+    assert canonical_host(str(synced_section.host)) in exempted, (
+        f"The sync exempted {sorted(exempted)} from the pin, and the section's own stored host "
+        f"{synced_section.host!r} is not among them. Under the development name nothing resolves "
+        "that host, so nothing pins it either — an unexempted host with no pin is a request the "
+        "transport must refuse, and the demo stack's every roster page goes through it."
+    )
+
+
+def test_a_deployments_stored_roster_host_is_not_exempted_from_the_pin(
+    roster_sync: Any,
+    platform_on_https: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    deployment_settings: Any,
+    resolving_the_platform: Any,
+    a_subject: Any,
+) -> None:
+    """The carried finding: the exemption is written for development and applied everywhere.
+
+    "The stored roster host joins `unpinned_hosts` in every environment while the
+    docstring beside it calls that entry development-only." Outside development there is
+    nothing to exempt it for — rule 5 resolves the stored address like any other, and the
+    pin is what keeps the connection on the address that was judged. Leaving the host in
+    the set means that a request to it for which no pin was recorded is dialled by name
+    instead of being refused, which is the fail-closed path the pin exists to have.
+
+    **The mutation this kills**: deleting the environment condition on the entry — which
+    is what the tree does today, and which no test in this suite reports, because with a
+    pin in hand the exemption never fires.
+
+    Its pair is the test above, where the same host must still be exempted. Together they
+    say the entry is conditional rather than absent: removing it outright would pass this
+    test and break the development stack the exemption was written for.
+
+    The walk itself is required to have worked, so that what is read off the transport is
+    what a successful sync mounted rather than what a sync that gave up early left behind.
+    """
+    subject = a_subject("deployment-pinned")
+    session = service_wire.session()
+    service_wire.serve(compose_a_roster(platform_on_https, [roster_contract.member(subject)]))
+
+    failure = sync(
+        roster_sync,
+        platform_on_https,
+        service_wire,
+        committed_rows,
+        deployment_settings,
+        resolve=resolving_the_platform,
+        http=session,
+    )
+
+    assert failure is None, f"An ordinary one-page walk under a deployment raised {failure!r}."
+    assert roster_rows.enrollments_for(subject), (
+        f"The page's member {subject!r} was not ingested, so this sync did not walk the roster and "
+        "what it mounted on the session is not what a working deployment walk mounts."
+    )
+    assert resolving_the_platform.asked, (
+        f"The sync resolved nothing while fetching {platform_on_https.host!r} under a deployment. "
+        "Rule 5 has no exemption outside development, so a walk that asked its resolver nothing is "
+        "running under the development rules and this test is not posing a deployment at all."
+    )
+    exempted = hosts_exempted_from_the_pin(session)
+    assert canonical_host(str(platform_on_https.host)) not in exempted, (
+        f"Under a deployment the sync exempted {sorted(exempted)} from the pin, including the "
+        f"section's own stored host {platform_on_https.host!r}. That host was resolved and judged "
+        "like every other, so it has a pin and needs no exemption; carrying one means a request to "
+        "it that no pin covers is sent to whatever the client resolves at dial time, with the "
+        "tool's Bearer token attached — which is the rebind window the pin was added to close, and "
+        "the fail-closed path that should catch an unjudged name is switched off for exactly the "
+        "host the platform controls the most."
     )

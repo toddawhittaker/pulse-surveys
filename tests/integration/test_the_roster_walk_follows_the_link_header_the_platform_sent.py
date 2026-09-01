@@ -74,6 +74,14 @@ dialled. That belongs with the other address rules and is asserted in
 `test_the_roster_sync_refuses_an_address_it_was_told_to_fetch.py` and in
 `tests/unit/test_registration_address_constraints.py`, not here.
 
+**E2-02 adds the last exit that did not keep what it had read.** The E1 post-merge
+re-review found that the walk's cycle and page-cap terminator discards the pages it
+already fetched, while every other failure exit keeps them and reports the prefix
+incomplete. The section at the foot of this module poses that exit as a two-page cycle —
+every call 200, the container never ending — beside the two-page container that really
+does end, because "the members were kept" and "the walk was not read as complete" are
+two claims and only the pair distinguishes the repair from doing nothing.
+
 **The controls come first and they must be green.** A header this module believes
 declares `rel="next"` at a URL, and a wire that can tell that URL from its
 lower-cased spelling, are what every assertion below rests on. **A red in the
@@ -1181,4 +1189,185 @@ def test_an_unterminated_quote_does_not_let_quoted_content_declare_the_next_page
     assert roster_rows.enrollments_for(first), (
         f"The first page's own member {first!r} has no enrollment, so this walk ingested nothing "
         "and the denials above hold of a sync that did not run."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E2-02: the one exit that threw away what it had read.
+# ---------------------------------------------------------------------------
+
+
+def test_a_next_page_that_returns_to_a_page_already_walked_keeps_the_members_read(
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    seed_a_member: Any,
+    a_subject: Any,
+) -> None:
+    """The carried low finding, E2-02: the cycle terminator is the exit that discards.
+
+    `docs/tickets/e2/carried-from-e1.md`: "The roster walk's cycle/page-cap terminator is
+    the one exit that discards members it already read; every other failure exit keeps
+    the prefix with `complete=False`. A platform that advertises `next` on a full final
+    page starves that section's roster forever, with 200s in `nrps_call` and only an
+    ERROR line as signal." Done when "that branch returns the prefix incomplete like its
+    siblings."
+
+    The container here is a two-page cycle: the first page declares the second, and the
+    second declares the first. Both answered 200, both were read, and the walk cannot
+    finish — which is exactly the state the finding describes, and the reason it is
+    invisible is that every call it made succeeded.
+
+    **The mutation this kills**: `return None` from that branch — the walk throws away
+    two pages it fully read and the section syncs as no members at all, every hour,
+    with a clean call log. It is the same defect the transport branch had and it is
+    asserted in the same currency next door
+    (`test_a_transport_failure_on_a_later_page_keeps_the_pages_already_read`).
+
+    **The second mutation, which the two directions here are what separate**: reporting
+    this walk as complete. A truncated container read as a finished one is a licence to
+    close the enrollment of everyone the walk did not see, so the member seeded below is
+    on neither page and is required to still be open afterwards. Its near miss is the
+    next test, where a two-page container that really ends *does* close them — without
+    it, "nobody was closed" is satisfied by a sync that never closes anybody.
+
+    **And a third**: recording the terminator as a call. Every page here already wrote
+    its own 200 row, and D9 gives a NULL `response_code` exactly one meaning — a call
+    that never reached the platform. A row invented for the branch would tell §6.1's
+    console that this section has an unanswered call, which is false.
+
+    The window is read before the walk as well as after it, because a member seeded
+    already closed would satisfy the assertion below whatever the sync did
+    (`docs/MISTAKES.md` entry 3).
+    """
+    returning = a_subject("synced-three-weeks-ago")
+    seed_a_member(synced_section, returning, started_on=weeks_ago(3))
+    first = a_subject("first-page")
+    second = a_subject("second-page")
+    beginning = str(synced_section.address)
+    following = page_url(synced_section, NEXT_PAGE_PATH)
+    service_wire.serve(
+        compose_a_roster(synced_section, [roster_contract.member(first)], next_url=following)
+    )
+    service_wire.serve(
+        served_at(
+            compose_a_roster(synced_section, [roster_contract.member(second)], next_url=beginning),
+            NEXT_PAGE_PATH,
+        )
+    )
+
+    opened = one_enrollment(roster_rows, returning)
+    assert opened[roster_contract.ended_on_column] is None, (
+        f"The seeded member's enrollment is already closed "
+        f"({opened[roster_contract.ended_on_column]!r}) before the walk ran, so the assertion "
+        "below would hold whatever the sync did."
+    )
+
+    during, _ = sync(roster_sync, synced_section, service_wire, committed_rows)
+
+    assert following in gets(during), (
+        f"The walk never asked for {following!r}, so it never reached the page that points back "
+        f"at the first and there is no cycle here to terminate. It fetched {gets(during)}."
+    )
+    assert gets(during).count(beginning) == 1, (
+        f"The walk fetched {beginning!r} {gets(during).count(beginning)} times: {gets(during)}. "
+        "The second page declares the first as its `next`, so a walk that follows it is walking "
+        "the cycle rather than recognising it, and the only thing stopping it is the page cap."
+    )
+    for subject, page in ((first, "first"), (second, "second")):
+        assert roster_rows.enrollments_for(subject), (
+            f"The {page} page's member {subject!r} was not ingested. Both pages answered 200 and "
+            "both were read in full; the walk then met a `next` it had already fetched and threw "
+            "away everything it held. A platform that advertises `next` on its last page starves "
+            "this section's roster on every hourly run, and every call in the log says 200."
+        )
+    after = one_enrollment(roster_rows, returning)
+    assert after[roster_contract.ended_on_column] is None, (
+        f"A walk that ended on a cycle closed {returning!r}: "
+        f"`{roster_contract.ended_on_column}` is {after[roster_contract.ended_on_column]!r}. That "
+        "member is on neither page the walk read, so the sync learned nothing about them — and a "
+        "container it could not finish is not evidence that a roster shrank."
+    )
+    recorded = roster_rows.calls_for(synced_section.id)
+    assert len(recorded) == 2 and all(row.get("response_code") == 200 for row in recorded), (
+        f"A two-page cycle left the `nrps_call` rows {[dict(row) for row in recorded]}. Two pages "
+        "were fetched and both answered 200, so D9's one-row-per-call grain is two rows carrying "
+        "200. A third row — or a NULL `response_code` — says a call was attempted and never "
+        "answered, which no request here did."
+    )
+
+
+def test_a_two_page_container_that_ends_closes_a_member_on_neither_page(
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    seed_a_member: Any,
+    a_subject: Any,
+) -> None:
+    """The near miss for the test above: a walk that really finishes still closes.
+
+    Identical to the cycle above in every respect but one — the second page declares no
+    next page, so the container ends and the walk is complete. The member on neither page
+    has genuinely left the roster, and a complete walk is exactly the licence to say so:
+    SPEC §3.4 reads those windows to answer "was this student enrolled in week N".
+
+    Without this half, "nobody was closed" in the test above is satisfied by a sync that
+    closes nobody ever, which is the opposite defect and costs the same thing — every
+    dropped student counted as enrolled for the rest of the term.
+
+    **The mutation this kills**: making the cycle terminator's repair unconditional —
+    reporting *every* multi-page walk as incomplete, which would pass the test above and
+    quietly stop the enrollment-window half of the sync from ever ending anybody.
+
+    A single-page version of this rule is asserted in
+    `test_the_roster_sync_records_enrollment_windows.py::test_a_member_who_vanishes_from_
+    the_roster_is_ended_at_the_syncs_own_date`; this one is over two pages, which is the
+    shape the test above varies.
+    """
+    departed = a_subject("synced-three-weeks-ago")
+    seed_a_member(synced_section, departed, started_on=weeks_ago(3))
+    first = a_subject("first-page")
+    second = a_subject("second-page")
+    following = page_url(synced_section, NEXT_PAGE_PATH)
+    service_wire.serve(
+        compose_a_roster(synced_section, [roster_contract.member(first)], next_url=following)
+    )
+    service_wire.serve(
+        served_at(
+            compose_a_roster(synced_section, [roster_contract.member(second)]), NEXT_PAGE_PATH
+        )
+    )
+
+    opened = one_enrollment(roster_rows, departed)
+    assert opened[roster_contract.ended_on_column] is None, (
+        f"The seeded member's enrollment is already closed "
+        f"({opened[roster_contract.ended_on_column]!r}) before the walk ran."
+    )
+
+    during, _ = sync(roster_sync, synced_section, service_wire, committed_rows)
+
+    assert following in gets(during), (
+        f"The walk never asked for {following!r}, so this is a one-page walk and not the two-page "
+        f"container this test pairs with. It fetched {gets(during)}."
+    )
+    for subject, page in ((first, "first"), (second, "second")):
+        assert roster_rows.enrollments_for(subject), (
+            f"The {page} page's member {subject!r} was not ingested, so this container was not "
+            "read to its end and whatever is asserted below is asserted about a walk that failed."
+        )
+    after = one_enrollment(roster_rows, departed)
+    assert after[roster_contract.ended_on_column] is not None, (
+        f"A two-page container that ended normally left {departed!r} open: "
+        f"`{roster_contract.ended_on_column}` is {after[roster_contract.ended_on_column]!r}. The "
+        "walk read every page the platform offered and this member was on none of them, which is "
+        "what a completed walk is entitled to conclude — SPEC §3.4's grade passback stops "
+        "updating for a student who dropped, and it can only know from this."
     )
