@@ -3311,6 +3311,47 @@ MEMBER_OF_ROLES = """
 #     E1-01 item 2) is answered no on exactly this ground: `nrps_call` references
 #     `section` and nothing else.
 #     Decided and spent in E1-11.
+#   - `pulse_app` **reads, inserts and deletes** `clock_override`, the single-row
+#     development clock E2-04 adds, and holds no `UPDATE` on it. This is the
+#     widening this test's docstring says will happen and has happened before, and
+#     `docs/disputes/E2-04-02.md` is its record: the branch was run without the
+#     grant, and five of the six cases in
+#     `tests/integration/test_the_dev_console_sets_and_clears_the_clock.py` failed
+#     with `permission denied for table clock_override` on the `GET /dev` render
+#     and on both `POST`s alike. It is issued by
+#     `backend/app/views_sql/clock_override_grants_v001.sql`, executed by revision
+#     `a789f1920de3`, so a fresh database reproduces it.
+#     **A verb per caller.** `SELECT` is `app.services.clock.now`, which every
+#     scheduling and visibility read in the product goes through — the service
+#     reads the row on the tool's connection and on the Celery worker's, and
+#     `DATABASE_URL` names `pulse_app` for both. `INSERT` is `POST /dev/clock`,
+#     which writes the pretended instant and the real instant it was anchored at.
+#     `DELETE` is `POST /dev/clock/clear`, and it is also the first half of a set:
+#     the table holds at most one row by a unique index over `(true)`, so replacing
+#     an override is a delete and an insert rather than an update.
+#     **`UPDATE` and `TRUNCATE` are withheld, and that is the assertion**, as it is
+#     on `classification` and on E1-10's group. The two instants are one fact
+#     written together: an anchor rewritten on its own leaves a clock running at
+#     the right rate from the wrong origin, which no single reading of `now` can
+#     detect and which
+#     `test_now_adds_the_real_time_elapsed_since_the_override_was_anchored` is the
+#     only thing in the suite that would catch. Withholding the verb makes
+#     write-together a property of the database rather than a rule the next writer
+#     has to remember.
+#     **This grant does not weaken the ticket's "unreachable outside development".**
+#     No grant can express "in development only", so the gate is behavioural and in
+#     two places: `app.services.clock` refuses to read the table unless
+#     `is_development(settings)`, and both `/dev` routes answer `404` outside
+#     development. A deployment holding a stray `clock_override` row goes on
+#     reading the real clock, which
+#     `test_the_override_moves_neither_now_nor_today_outside_development` asserts in
+#     both deployment environments.
+#     **What this table carries, for §4.1.** `id`, `pretend_now` and `anchored_at`
+#     — two timestamps and no person. No foreign key to anything, no view over it,
+#     so it is outside `test_identity_column_marker.py`'s marker and outside the
+#     policed inventory of
+#     `tests/unit/test_the_org_views_are_read_only_through_the_grant.py`.
+#     Decided and spent in E2-04, ruled in `docs/disputes/E2-04-02.md`.
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -3337,6 +3378,9 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "enrollment", "INSERT"),
         (APPLICATION_ROLE, "nrps_call", "SELECT"),
         (APPLICATION_ROLE, "nrps_call", "INSERT"),
+        (APPLICATION_ROLE, "clock_override", "SELECT"),
+        (APPLICATION_ROLE, "clock_override", "INSERT"),
+        (APPLICATION_ROLE, "clock_override", "DELETE"),
     }
 )
 

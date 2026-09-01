@@ -195,5 +195,9 @@ steps decide. A job-level `if:` is the shape
   raise and wait on, not a reason to hold the epic.
 - **Every ticket that touches the seed** (05, 06, 07's env defaults) stays
   behind the development-environment guard (ADR 0063, 0064). The dev clock
-  override is inert outside development by construction, and E2-04 asserts
-  it.
+  override is inert outside development, and E2-04 asserts it in both
+  directions. As built, that inertness is behavioural and not structural:
+  nothing in the schema marks a `clock_override` row as development-only, and
+  what makes it dead weight on a deployment is `app.services.clock` refusing to
+  read the table unless `is_development` — with the two `/dev` routes refusing
+  to write one. ADR 0109's consequences say so in as many words.

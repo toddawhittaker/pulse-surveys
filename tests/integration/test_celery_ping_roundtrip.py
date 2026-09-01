@@ -15,6 +15,13 @@ worker, started in a thread by `celery.contrib.testing.worker.start_worker`
 against that broker. The CI `test` job has a Docker daemon and no Compose stack,
 so the container is how this test gets a broker at all.
 
+**The `broker_url` fixture moved to `tests/fixtures/celery_broker.py` in E2-04**,
+which added the second module that needs a real broker — the development clock
+override reaching a Celery worker. Nothing about it changed but where it lives:
+it is still one container per test, on the image the Compose file names. Two
+copies of "which Redis does this project run" would be `docs/MISTAKES.md` entry
+13, so this module asks for the fixture by name like the other one.
+
 **Criterion 2 says "from the API container", and this test does not run there.**
 What the container adds over this test is the network path from `api` to
 `redis` and the worker being a separate process — both of which the `docker`
@@ -31,22 +38,14 @@ two places. The preconditions below assert separately because each is a
 different, specific way this test could go green while proving nothing.
 """
 
-from collections.abc import Callable, Iterator
-from pathlib import Path
+from collections.abc import Callable
 from types import ModuleType
 from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
 from celery.contrib.testing.worker import start_worker
-
-# `testcontainers.community.redis`, not `testcontainers.redis`: on the locked
-# testcontainers 4.15.0 the shorter path raises a DeprecationWarning at import,
-# and `filterwarnings = ["error::DeprecationWarning"]` in pyproject.toml turns
-# that into a collection error that aborts the whole run. Moving the import is
-# the fix; a warning filter here would suppress the pyproject setting for
-# everything else this module imports, Celery included.
-from testcontainers.community.redis import RedisContainer
+from fixtures.celery_broker import REDIS_URL_VARIABLE
 
 # The definition of done names the marker. `pyproject.toml` describes it as
 # testcontainers-backed, which this is; its description was widened in this same
@@ -57,10 +56,6 @@ CELERY_APP_MODULE = "app.jobs.celery_app"
 TASKS_MODULE = "app.jobs.tasks"
 PING_TASK_ATTRIBUTE = "ping"
 
-REDIS_URL_VARIABLE = "REDIS_URL"
-REDIS_SERVICE_NAME = "redis"
-REDIS_CONTAINER_PORT = 6379
-
 # The criterion says "within a timeout" and does not give a number, so this is
 # **this test's choice**. Generous enough that a cold CI runner pulling an image
 # and starting a worker is not a flake, short enough that a task that never
@@ -68,33 +63,6 @@ REDIS_CONTAINER_PORT = 6379
 # GitHub Actions ceiling.
 RESULT_TIMEOUT_SECONDS = 30.0
 WORKER_SHUTDOWN_SECONDS = 30.0
-
-
-@pytest.fixture
-def broker_url(base_compose: dict[str, Any], base_compose_path: Path) -> Iterator[str]:
-    """A real Redis, on the image the stack runs, reachable from this process.
-
-    Started per test rather than per session: there is one test in this module,
-    and a shared broker would let a leftover result from one test satisfy
-    another. If a second test arrives and the second start becomes expensive,
-    widen the scope deliberately and say what stops the two sharing state.
-    """
-    services = base_compose.get("services") or {}
-    service = services.get(REDIS_SERVICE_NAME) or {}
-    image = service.get("image") if isinstance(service, dict) else None
-
-    if not isinstance(image, str) or not image:
-        pytest.fail(
-            f"{base_compose_path} declares no image for the `{REDIS_SERVICE_NAME}` service, so "
-            "this test has no broker image to run and cannot fall back to one without testing "
-            "a Redis the project does not deploy. SPEC §7.2 runs Redis as the broker and "
-            "result backend; E0-02 ships the service."
-        )
-
-    with RedisContainer(image=image) as container:
-        host = container.get_container_host_ip()
-        port = container.get_exposed_port(REDIS_CONTAINER_PORT)
-        yield f"redis://{host}:{port}/0"
 
 
 def test_ping_result_comes_back_through_the_redis_backend(

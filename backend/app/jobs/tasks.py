@@ -1,7 +1,8 @@
 """Celery tasks (SPEC §13).
 
-`ping` exists only to prove the round trip; `purge_launch_nonces` is E1-08's
-daily maintenance of the two launch tables, and the two `sync_*` tasks are
+`ping` exists only to prove the round trip and `effective_now` only to prove that
+the worker reads the same clock the tool does (E2-04); `purge_launch_nonces` is
+E1-08's daily maintenance of the two launch tables, and the two `sync_*` tasks are
 E1-11's roster pull. Async classification, summaries, and grade passback (§7.4,
 §3.4) are E3 and E13's work, and each of those is a call into `app/services/`
 from here rather than domain logic written in this file — which is exactly the
@@ -16,6 +17,7 @@ from app.db import SessionLocal
 from app.jobs.celery_app import celery_app
 from app.lti.in_flight import purge_expired_launch_states
 from app.lti.replay_guard import purge_expired_nonces
+from app.services import clock
 from app.services.roster_sync import sync_all_rosters, sync_section
 
 
@@ -29,6 +31,36 @@ def ping() -> str:
     this dull in the tree.
     """
     return "pong"
+
+
+@celery_app.task
+def effective_now() -> str:
+    """Return what `app.services.clock` says the time is, as an ISO 8601 string.
+
+    The worker half of E2-04's criterion 2: "setting the pretend now from `/dev`
+    changes what the backend **and the worker** both answer". The override is a
+    database row precisely so two processes can agree about it, and this task is how
+    the worker's answer is asked for at all — nothing else in the tree can report
+    what time the worker thinks it is.
+
+    **A permanent stack probe, on `ping`'s justification** (E0-03): it proves a
+    round trip that is not provable any other way. `ping` proves the broker path;
+    this proves that the clock a worker reads is the clock the tool moved, which is
+    where E2-06's weekly scheduling will run.
+
+    **A string and not a `datetime`**, because Celery here is configured with the
+    JSON serializer and a `datetime` would fail inside the worker rather than at the
+    caller. The offset rides in the string: `clock.now` answers an aware instant, and
+    an ISO rendering that dropped the offset would be a different moment on every
+    reader.
+
+    Opens a session the way every task below does, so the row is read on the
+    worker's own connection every time and no offset is held anywhere in this
+    process.
+    """
+    settings = Settings()
+    with SessionLocal() as session:
+        return clock.now(session, settings=settings).isoformat()
 
 
 @celery_app.task

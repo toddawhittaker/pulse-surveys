@@ -97,11 +97,9 @@ could choose the one that reaches identity.
 
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
 from enum import Enum, StrEnum, auto
 from typing import Final
 from uuid import UUID
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import RowMapping, text
 from sqlalchemy.orm import Session
@@ -109,6 +107,7 @@ from sqlalchemy.sql.elements import TextClause
 
 from app.config import Settings
 from app.models.identity import LEADERSHIP_ROLES, AssignmentRole
+from app.services import clock
 from app.views_sql.queries import (
     SectionEnrollmentCount,
     SectionRosterRow,
@@ -1500,13 +1499,23 @@ def _enrolled_today(session: Session, *, user_id: UUID, settings: Settings) -> b
     timezone a deployment-level setting, and a boundary evaluated in UTC puts
     everybody who launches in the evening a calendar day out.
 
-    The expression is the one `app.services.provisioning` uses to decide which
-    term contains a launch (`_term_containing_the_launch_day`); the two copies are
-    named at both ends so that a change to one is a change somebody can find. A
-    shared helper is the right answer and is *proposed* rather than taken here,
-    because it moves a function across a module boundary.
+    **The day comes from `app.services.clock`, and the second copy of it is gone**
+    (E2-04, ADR 0109). This read and `app.services.provisioning`'s term lookup
+    (`_term_containing_the_launch_day`) each computed the institution's day for
+    itself, and the two were named at both ends because a shared helper would have
+    moved a function across a module boundary. E2-04 is the ticket that made the
+    move worth taking: the same question is asked by a third site, the roster sync,
+    and by E2-06's window logic, and it now has one answer — the effective day,
+    which on a developer's machine carries the `clock_override` offset so a week
+    that is not this one can be walked through by hand.
+
+    **Nothing about the *authorization* rule moved with it.** The window is still
+    `started_on <= today AND (ended_on IS NULL OR ended_on >= today)`, and it is
+    still judged in the institution's zone; what changed is only where the day
+    comes from. The override applies in development alone, so no deployment's
+    enrollment check can be moved by a row.
     """
-    today = datetime.now(ZoneInfo(settings.institution_timezone)).date()
+    today = clock.today(session, settings=settings)
     answer = session.execute(_A_LIVE_ENROLLMENT, {"user_id": user_id, "today": today}).scalar_one()
     return bool(answer)
 

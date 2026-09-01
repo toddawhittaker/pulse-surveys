@@ -55,6 +55,10 @@ boundary: `metadata_tables` is asked for by both.
   - `fixtures/landing.py` — E1-13: the names the assignment-derived landing is
     settled under, one `enrollment` row with the window the caller chose, and the
     rows a launch-driving suite needs before its subject can land at all.
+  - `fixtures/celery_broker.py` — E0-03's real Redis on the image the stack
+    deploys, moved here in E2-04 when a second module needed a broker.
+  - `fixtures/clock.py` — E2-04: the `clock_override` row a test chose the values
+    of, committed or not, and `Settings` built under an environment the test named.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -80,4 +84,6 @@ pytest_plugins = (
     "fixtures.roster_sync",
     "fixtures.web_identity",
     "fixtures.landing",
+    "fixtures.celery_broker",
+    "fixtures.clock",
 )
