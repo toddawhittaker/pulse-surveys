@@ -1,6 +1,6 @@
 # Entry 24. A test asserted a property no implementation could satisfy
 
-**Caught: 0**
+**Caught: 1**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 

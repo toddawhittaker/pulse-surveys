@@ -284,7 +284,7 @@ file and check the status, or run the gate bare.
 
 ## 24. A test asserted a property no implementation could satisfy
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/24-a-test-asserted-a-property-no-implementation-could-satisfy.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/24-a-test-asserted-a-property-no-implementation-could-satisfy.md)
 
 ## 25. Two lockfiles resolved the same package to two versions
 
