@@ -410,6 +410,19 @@ jobs:
       # `classify_changed_paths.py` calls `docs/package.json` inert, measured
       # rather than assumed. So a documentation-only pull request can commit a
       # manifest this guard reads, on the one run where it would not have run.
+      #
+      # The sixth entry is E2-06's one-writer sweep over `survey_window`, and it
+      # is a whole module for the same reason the fourth is: every test in
+      # `test_survey_windows_have_one_assignment_site.py` is the sweep itself, the
+      # control that proves the detector finds each shape it claims to, the
+      # positive control that proves it finds the sanctioned writer, or the check
+      # that the columns it names are the ones the schema has — and a sweep run
+      # without its controls is a silence nobody can read. What puts it in this
+      # job is the detector in
+      # `test_every_repository_wide_sweep_runs_in_a_job_the_filter_cannot_switch_off`,
+      # which reads its `REPO_ROOT`-rooted `rglob` as a repository-wide sweep; the
+      # repair that guard asks for is to name the ids here, never to reshape the
+      # sweep until the detector stops seeing it.
       - name: Repository-wide sweeps that a docs-only diff must not switch off
         run: |
           pytest -q \
@@ -418,7 +431,8 @@ jobs:
             "tests/unit/test_mock_lms_service.py::test_the_private_key_matcher_finds_a_private_key_and_ignores_a_public_one" \
             "tests/unit/test_mock_lms_service.py::test_the_sweep_itself_finds_a_planted_key_and_not_a_tree_without_one" \
             "tests/unit/test_the_process_wide_authorization_endpoint_is_gone.py" \
-            "tests/unit/test_types_node_tracks_runtime.py"
+            "tests/unit/test_types_node_tracks_runtime.py" \
+            "tests/unit/test_survey_windows_have_one_assignment_site.py"
 
   # The job keeps its id and its display name. Branch protection's required-check
   # list keys on the display name, and renaming it is a change to that list
