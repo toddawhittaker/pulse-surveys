@@ -350,16 +350,17 @@ jobs:
       # confidentiality and eval guarantees, so they get no untyped escape.
       #
       # Then one invocation per mock, each of which is a further package also
-      # called `app` (SPEC §13 names all three). One run over two of them stops
+      # called `app` (SPEC §13 names all four). One run over two of them stops
       # with "Duplicate module named app" having checked neither, so this is
-      # three runs rather than a longer `files` list. `make typecheck` runs the
-      # same three in the same order. See
+      # four runs rather than a longer `files` list. `make typecheck` runs the
+      # same four in the same order. See
       # docs/adr/0039-the-two-app-packages-are-typechecked-in-two-runs.md.
       - name: mypy
         run: |
           mypy
           mypy mock-lms/app
           mypy mock-idp/app
+          mypy mock-ai/app
 
       # **Repository-wide sweeps run here because this job is unconditional.**
       # E0-38's inert set says `docs/` is documentation nothing depends on, and
@@ -766,12 +767,12 @@ jobs:
           pip install --require-hashes -r requirements-dev.txt
           pip install -e . --no-deps --no-build-isolation
 
-      - name: Bring up the stack (api, worker, beat, mock-lms, mock-idp)
+      - name: Bring up the stack (api, worker, beat, mock-lms, mock-idp, mock-ai)
         if: needs.changed.outputs.inert != 'true'
         run: |
           cp .env.example .env
           docker compose up -d --build
-          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
+          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp mock-ai
 
       # Host-side, against the published port. `.env` supplies the superuser
       # credentials `migrations/env.py` connects as and the ENVIRONMENT the seed
@@ -887,17 +888,18 @@ jobs:
         if: needs.changed.outputs.inert != 'true'
         run: ./scripts/ci/check_image_contents.sh
 
-      # Five services named, seven covered. `api` declares `depends_on` on a
+      # Six services named, eight covered. `api` declares `depends_on` on a
       # healthy `db` and a healthy `redis`, so reaching healthy here means those
-      # two did too. `worker`, `beat`, `mock-lms` and `mock-idp` have to be
-      # named: nothing depends on any of them — the API must come up whether or
-      # not the job runtime does, and nothing in the tool depends on either mock
-      # — and a service nobody names is one this gate never looks at.
-      - name: Stack comes up healthy (api, worker, beat, mock-lms, mock-idp, and through api db and redis)
+      # two did too. `worker`, `beat`, `mock-lms`, `mock-idp` and `mock-ai` have
+      # to be named: nothing depends on any of them — the API must come up
+      # whether or not the job runtime does, and nothing in the tool depends on
+      # any of the three mocks — and a service nobody names is one this gate
+      # never looks at.
+      - name: Stack comes up healthy (api, worker, beat, mock-lms, mock-idp, mock-ai, and through api db and redis)
         if: needs.changed.outputs.inert != 'true'
         run: |
           docker compose up -d
-          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
+          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp mock-ai
 
       # The container's own HEALTHCHECK proves the app answers itself. It says
       # nothing about whether the development override publishes the port, which
@@ -957,15 +959,15 @@ jobs:
       #
       # Every service is named on purpose. `api` reaches `db` and `redis`
       # through its depends_on conditions; nothing depends on `worker`, `beat`,
-      # `mock-lms` or `mock-idp`, so dropping any of them from this list would
-      # leave the pass green against a container that never started.
+      # `mock-lms`, `mock-idp` or `mock-ai`, so dropping any of them from this
+      # list would leave the pass green against a container that never started.
       - name: Base file alone runs the installed application, not the mounted checkout
         if: needs.changed.outputs.inert != 'true'
         run: |
           set -euo pipefail
           docker compose -f docker-compose.yml down -v
           docker compose -f docker-compose.yml up -d
-          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
+          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp mock-ai
 
       # `down -v` discards the Postgres volume and beat's schedule volume, so
       # the second and third starts each initialise from nothing. This catches
@@ -979,7 +981,7 @@ jobs:
             echo "::group::down -v && up -d (attempt ${attempt})"
             docker compose down -v
             docker compose up -d
-            ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
+            ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp mock-ai
             echo "::endgroup::"
           done
 
