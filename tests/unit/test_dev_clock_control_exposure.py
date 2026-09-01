@@ -50,6 +50,7 @@ and changes nothing else.
 from typing import Any
 
 import pytest
+from fixtures.routing import registered_paths
 
 ENVIRONMENT_VARIABLE = "ENVIRONMENT"
 
@@ -107,11 +108,6 @@ def client_for(application: Any) -> Any:
     return TestClient(application)
 
 
-def registered_paths(application: Any) -> set[str]:
-    """Every path this application has a route for."""
-    return {route.path for route in application.routes if hasattr(route, "path")}
-
-
 # ---------------------------------------------------------------------------
 # The control, before any refusal below is believed. A red here means these
 # tests are broken, not that the gate is.
@@ -135,6 +131,17 @@ def test_the_dev_clock_control_is_a_route_this_application_carries(
     than over HTTP so that it says nothing about which methods answer or what they
     do. What the routes serve is
     `tests/integration/test_the_dev_console_sets_and_clears_the_clock.py`'s subject.
+
+    **The reading is `fixtures.routing.registered_paths`, and the first version of
+    this test could not make it.** `docs/disputes/E2-04-01.md`, ruled 2026-09-01:
+    on the pinned `fastapi` 0.141.1 `include_router` appends an `_IncludedRouter`
+    with no `.path`, so a walk over `application.routes` alone finds only FastAPI's
+    four documentation paths — and this test was red on its `/dev` assertion both
+    on HEAD and with every E2-04 route registered, which is `docs/MISTAKES.md`
+    entry 24. The shared helper follows `original_router`, and its own docstring
+    carries the measurement and the reason the flattening keeps the property below
+    intact: a factory that skipped its `include_router` calls appends no router to
+    recurse into, so a missing router is still missing from the walk.
 
     **Dies if E2-04's routes are not registered**, which is the state HEAD is in.
     **Must not die** once they are: this is the one test in this module that has to
