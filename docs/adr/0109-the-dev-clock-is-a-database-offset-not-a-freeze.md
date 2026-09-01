@@ -66,6 +66,24 @@ Four parts, and each is a separate choice.
    `405 Allow: GET`) because a page is a thing to read and a control is a thing to
    attack.
 
+   **How "every method" is enforced, and how it was not.** Each clock path is one
+   route that matches for *any* method, with the handler answering a method that is
+   not `POST` with the same bare `404` the environment check gives — a
+   `starlette.routing.Route` whose method restriction is cleared, because
+   `APIRouter.api_route` requires a list and every route class FastAPI builds
+   carries one. The first version instead *enumerated* the verbs it would answer,
+   and the security round of 2026-09-01 measured what that misses: a method outside
+   the list — `TRACE`, or any token nobody thought of — matches no route, so
+   Starlette answers `405 Allow: POST` from the router before the handler runs, and
+   an unauthenticated caller learns in one request both that this build carries a
+   clock control and that `ENVIRONMENT` is not `development`. Adding the missing
+   tokens would have been the third widening of a list that can always be stepped
+   outside (`docs/MISTAKES.md` entry 35). The cost of the fix is the two paths'
+   OpenAPI entries and their `Depends`, so they open their own session the way
+   `app.main`'s framing middleware does; the walk that proves it is
+   `test_the_dev_clock_control_answers_404_to_every_method_outside_development`,
+   which drives the seven standard verbs plus `TRACE` plus an arbitrary token.
+
 **What the readout shows.** `/dev` renders the effective now as ISO 8601 in the
 institution's timezone with its offset and to the second — `2026-09-04T18:30:00-04:00`.
 The zone because SPEC §3.1 makes it the one every window is expressed in and so
@@ -164,6 +182,41 @@ size is the shape `docs/MISTAKES.md` entry 35 is about.
   session and no CSRF token, because `/dev` has neither — which is precisely why
   the environment gate is the whole of its safety, and why the method probe is
   answered more tightly here than on the page.
+
+  **Accepted residue, named rather than left to be found.** The two controls take a
+  simple form — `application/x-www-form-urlencoded`, no token, no `SameSite` cookie
+  to lean on because there is no cookie at all — so any page a developer visits
+  while their stack is up can auto-submit a cross-site form to
+  `http://localhost:8000/dev/clock` and move that stack's clock. Nothing comes back
+  to the attacker: the answer is a `303` the attacking page cannot read, so this is
+  a write and not a read.
+
+  Two things already narrow it, and neither is a reason to stop reading here.
+  `docker-compose.override.yml` publishes the API as `127.0.0.1:8000:8000`, so a
+  host on the same network cannot post directly — the request has to come through a
+  browser running on the developer's own machine. And browsers have begun
+  restricting requests from a public page into loopback, which E2-13 already records
+  hitting from the other side ("Chromium's Local Network Access rules around the
+  synthetic-iframe wrapper"). That is a moving target and belongs to the browser
+  rather than to this design, so it is written down as context and relied on for
+  nothing.
+
+  The residue is accepted as development-only, beside the console's own much larger
+  exposure: `/dev` offers one-click sign-in as *any* seeded identity, and a
+  cross-site `GET` to one of those links is the same class of attack with a bigger
+  prize. The gate for both is the same and it is the one that matters — the
+  exact-equality environment check (ADR 0063, ADR 0079) that runs before every
+  write, so none of this reaches a deployment. What it costs on a developer's laptop
+  is a confusing clock, which the console's own effective-now readout exists to
+  explain.
+
+  One cheap hardening was considered and not taken: **an `Origin` or
+  `Sec-Fetch-Site` check on the two POSTs**, which would refuse the cross-site form
+  specifically. It is not taken here because it would put a second gate on this
+  surface for whoever next has to keep the two agreeing, while the console beside
+  it — the larger hole, and the one an attacker would actually aim at — would still
+  have none. If it is taken, it should be taken for `/dev` as a whole and in its own
+  change, so that the page and the control are refused on the same rule.
 - **A stack left overridden stays overridden**, across restarts of both processes,
   because the row survives them. That is the point, and it is also the cost: the
   console shows the effective clock beside the sections table so that an

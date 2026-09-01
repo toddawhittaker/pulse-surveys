@@ -46,12 +46,15 @@ anything. SPEC §3.1 makes every survey window a wall-clock time in the institut
 timezone, and E2 has to be drivable by hand, so the console shows the effective
 clock and offers two `POST` routes — `/dev/clock` sets a pretend now and
 `/dev/clock/clear` gives the real one back. Both carry the same in-handler gate this
-page does, and both are stricter about the method probe: an unregistered method
-answers `404` here rather than the `405 Allow:` the console itself discloses (ADR
-0079, ADR 0087), because the row they write moves the clock every scheduling and
-visibility read in the product goes through. `app.services.clock` is what applies
-it, and only where `is_development`; ADR 0109 carries the design and the list of
-clocks it deliberately does not touch.
+page does, and both are stricter about the method probe: **every** method they do
+not serve answers `404` here rather than the `405 Allow:` the console itself
+discloses (ADR 0079, ADR 0087), because the row they write moves the clock every
+scheduling and visibility read in the product goes through. "Every" is enforced by
+matching the path for any method at all and refusing in the handler — see
+`AnyMethodRoute` below, and the security round of 2026-09-01 that put it there
+after a closed list of verbs let `TRACE` reach the router's `405`.
+`app.services.clock` is what applies the row, and only where `is_development`; ADR
+0109 carries the design and the list of clocks it deliberately does not touch.
 
 **Every interpolated value goes through `html.escape` with `quote=True`.** The
 subjects and labels come from the mock provider's roster, which is trusted, but
