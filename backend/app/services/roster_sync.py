@@ -364,7 +364,17 @@ def sync_section(
     #
     # The token host stays unpinned in every environment, deliberately: it is
     # `pylti1p3`'s own call and this walk never judges it, so there is no pin to
-    # hold and an exemption is the honest statement of that.
+    # hold and an exemption is the honest statement of that (ADR 0101, "the token
+    # POST … is never judged at fetch time and so never pinned").
+    #
+    # **What that leaves, said out loud rather than left to be discovered.** A
+    # platform that serves its token endpoint and its roster from one host — which
+    # is the ordinary shape, and the one `mock-lms` builds — puts that host in the
+    # set through the token entry whatever the environment is. So narrowing the
+    # roster entry changes nothing for such a platform, and what it does change is
+    # the case where the two differ: there, a deployment no longer exempts a host
+    # it has judged and pinned. Closing the rest means judging inside the library's
+    # own client, which ADR 0101 names as the wider change it did not take on.
     pins: dict[str, str] = {}
     unpinned_hosts: set[str] = set()
     transport = _pinned(_no_redirects(http), pins, unpinned_hosts)
