@@ -73,6 +73,12 @@ for this and not a formality. It also printed "Detected added index … on
 expression, which is why the catalog-reading test is the actual guarantee. Both
 facts are written into the model comment and the revision docstring.
 
+> **Superseded in part by E2-02** (revision `d2f6a913c47e`): the `DESC` served
+> no query, and being an expression it was exactly what `alembic check` could
+> not compare. The index is now the plain ascending composite
+> `ix_nrps_call_section_id_called_at`, `check` compares it, and the paragraph
+> above stands as the record of the state it replaced.
+
 **The downgrade clause the manifest listed as a gap** was verified by hand rather
 than left unmeasured, with a throwaway script (in the scratchpad, not the repo)
 that upgrades a scratch container to head, records every index and column in
