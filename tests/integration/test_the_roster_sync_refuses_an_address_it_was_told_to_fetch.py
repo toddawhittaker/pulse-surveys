@@ -74,10 +74,23 @@ server would be red here for a reason that has nothing to do with the rules
 what was asked of it, which is how "nothing was resolved" becomes an assertion
 rather than an absence.
 
-**One test in this module runs under the development name, deliberately**, and
+**Some tests in this module run under the development name, deliberately**, and each
 says so in its own docstring: the exemption that keeps a development stack from
 resolving its own roster host only exists there, so it cannot be posed anywhere
 else.
+
+**E2-02 adds a group at the foot of the module about that same exemption, one layer
+down.** The carried low finding is that the stored roster host is exempted from the pin
+in *every* environment while the comment beside the entry calls it development-only, so
+those tests ask the sync which hosts it exempted and require the answer to differ by
+environment. That is read off the transport the sync built rather than off the wire, and
+the section header there says why and what the choice gives up. Two of them run over a
+platform of its own whose section stores a roster address on a second host, because the
+exemption set holds an entry for ADR 0101's token endpoint too and every other platform
+in this suite gives both entries the same string — dispute E2-02-01, and the section
+header records the ruling. The development witness among them is behavioural rather than
+a set read, because the mutation battery showed a set read cannot see the entry deleted
+outright; the header records that too.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -253,6 +266,7 @@ def sync(
     rows: Any,
     settings: Any,
     resolve: Any = None,
+    http: Any = None,
 ) -> BaseException | None:
     """Run one section's sync, answering the exception it raised or `None`.
 
@@ -268,11 +282,15 @@ def sync(
     that renamed it is caught by
     `test_the_sync_takes_the_resolution_seam_this_suite_injects` rather than by
     thirty tests going quietly to real DNS.
+
+    `http` is the wire's own session unless a test hands one over. Two do: E2-02's
+    pair at the foot of this module reads what the sync mounted on the transport
+    afterwards, and it can only do that over a session it still holds a handle on.
     """
     available: dict[str, Any] = {
         "session": rows.session,
         "section_id": section.id,
-        "http": wire.session(),
+        "http": wire.session() if http is None else http,
         "settings": settings,
     }
     if resolve is not None:
@@ -1942,4 +1960,422 @@ def test_the_resolver_really_refuses_to_encode_these_hosts(spelling: str) -> Non
     assert not isinstance(raised, OSError), (
         f"Resolving {host[:40]!r}… raised {raised!r}, which is an `OSError` — so a rule catching "
         "`OSError` already catches it and there is no MEDIUM here to fix."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E2-02: which hosts this sync exempts from the pin, and where that is true.
+#
+# The carried low finding (`docs/tickets/e2/carried-from-e1.md`): "The stored roster
+# host joins `unpinned_hosts` in every environment while the docstring beside it calls
+# that entry development-only. Done when the entry is environment-narrowed or the
+# docstring states what the code does." E2-02 narrows the entry, so the tests below ask
+# the sync which hosts it exempted and require the answer to differ by environment.
+#
+# **Reading the set is not enough on its own, and the mutation battery is what showed
+# it.** Making `unpinned_hosts.add(exempt)` unreachable in every environment — the
+# battery's row 7b — left the full suite green: ADR 0101's token entry keeps the set
+# non-empty in both environments, so a test that only reads the set has nothing to fail
+# on. The development witness is therefore behavioural, and it is the plainest currency
+# there is — whether the roster page arrives at all. In development nothing resolves the
+# section's own stored host, so nothing pins it, so the exemption is the only thing that
+# lets the GET out; delete it and the adapter fails closed and the section syncs nobody.
+# The set-reading assertions stay beside it as the attribution, never as the evidence.
+#
+# **Why this is read off the transport rather than off the wire.** Under a deployment
+# every roster page is judged and pinned before its GET, so the exemption is inert while
+# a pin exists and no request this suite can drive goes out differently for it —
+# `test_the_walk_connects_to_the_address_it_judged_and_not_to_a_later_answer` above is
+# the proof of that, and it passes today with the entry present. What the entry does
+# change is what happens to a request at that host for which no pin was recorded: the
+# adapter's fail-closed path is what should catch an unjudged name, and an exemption
+# switches it off. That is a property of the transport the sync built, so it is asserted
+# there. The limitation is stated rather than papered over: this pair would not notice
+# an exemption that was narrowed in one environment and re-added by another route.
+#
+# **The set holds entries for two unrelated reasons, and the deployment half is built so
+# that it can tell them apart** (dispute E2-02-01, ruled against the first version of
+# that test). ADR 0101 keeps the *token* endpoint's host unpinned in every environment —
+# "its host is never judged at fetch time and so never pinned: it passes through
+# untouched" — and this ticket narrows the *roster* host's entry to development. Every
+# other platform in this suite serves both from one host, because `mock-lms` builds its
+# token URL from its issuer, so one string carried both reasons and an assertion about
+# its absence was equally an assertion about ADR 0101's entry: the first version of the
+# deployment test was red whether or not this ticket's narrowing had been made, which
+# measures nothing. `platform_whose_roster_is_on_another_host` below separates them by
+# serving the roster from a host of its own, which a real platform may do and which
+# `test_a_next_page_on_a_second_host_that_resolves_publicly_still_walks` above already
+# treats as ordinary. The deployment half then names *both* entries — the token host must
+# still be exempt, the roster host must not — so neither can be read off the other.
+#
+# The ruling's preferred shape was the mirror of this one, a token endpoint on a second
+# host. The roster is moved instead because it needs no machinery at all: `roster_platforms`
+# already takes the address a section stores and already mounts that host on the wire,
+# whereas re-pointing `auth_token_url` at a name the mock does not build from its issuer
+# puts the mock's own audience check for the client assertion in play, which buys nothing
+# — what either shape has to deliver is only that the two hosts differ.
+# ---------------------------------------------------------------------------
+
+# The two names E2-02 settles for this, and the only two spellings this reader knows.
+# `PinnedResolutionAdapter` is the transport adapter the sync mounts on its session, and
+# `unpinned_hosts` is the set of hosts it is told to let through unpinned. A build that
+# spells either of them otherwise is a rename to say out loud in the pull request, and
+# these two lines are the one place that changes — not a shape to guess at here, because
+# a reader that fell back to "no exemptions found" would report the narrowing as done on
+# a build that never made it (`docs/MISTAKES.md` entry 3).
+PIN_ADAPTER_CLASS = "PinnedResolutionAdapter"
+UNPINNED_HOSTS_MEMBER = "unpinned_hosts"
+
+# Where the deployment half of the pair serves its roster: a host of its own, under the
+# same registered platform, so that the roster entry and ADR 0101's token entry are two
+# strings rather than one. A name of its own rather than the contract's second platform
+# host, for the reason every other host in this module is its own — a failure then names
+# this case rather than a vector shared with the paging tests. `.invalid` is RFC 2606's,
+# so nothing could resolve it even if a lookup escaped the stub.
+A_ROSTER_HOST_OF_ITS_OWN = "rosters.roster-platform.invalid"
+ITS_OWN_ROSTER_PATH = "/rosters/e2-02-exemption-page"
+
+
+def hosts_exempted_from_the_pin(session: Any) -> set[str]:
+    """Every host the sync told its transport to connect to without a pin.
+
+    Read off the adapters the sync mounted on the session the test handed it, folded
+    through `canonical_host` so that two spellings of one name are one answer.
+
+    Every failure below names a deliverable or an interface question rather than
+    answering "none": "the stored host is not exempted" is exactly what a reader that
+    could not find the set at all would report, and the two are opposite states.
+    """
+    mounted = list({id(adapter): adapter for adapter in session.adapters.values()}.values())
+    pinning = [adapter for adapter in mounted if type(adapter).__name__ == PIN_ADAPTER_CLASS]
+    if not pinning:
+        pytest.fail(
+            f"The sync mounted no `{PIN_ADAPTER_CLASS}` on the session it was handed; it mounted "
+            f"{sorted({type(adapter).__name__ for adapter in mounted})}. Either the adapter is "
+            "named something else, or it is mounted on a session of the sync's own rather than on "
+            "the one the caller passed, or it is mounted only when there is a pin to hold — and "
+            "under development there is none. Each of those is a question for the pull request; "
+            f"`{PIN_ADAPTER_CLASS}` at the head of this section is the one line that changes."
+        )
+    exempted: set[str] = set()
+    for adapter in pinning:
+        if not hasattr(adapter, UNPINNED_HOSTS_MEMBER):
+            pytest.fail(
+                f"`{PIN_ADAPTER_CLASS}` carries no `{UNPINNED_HOSTS_MEMBER}` (it carries "
+                f"{sorted(name for name in vars(adapter) if not name.startswith('__'))}). That set "
+                "is what E2-02 narrows to development, and without a handle on it this pair can "
+                "say nothing about which hosts were exempted."
+            )
+        exempted |= {canonical_host(str(host)) for host in getattr(adapter, UNPINNED_HOSTS_MEMBER)}
+    return exempted
+
+
+@pytest.fixture
+def platform_whose_roster_is_on_another_host(roster_platforms: Any, roster_contract: Any) -> Any:
+    """One deployment-safe platform whose section stores a roster address on a second host.
+
+    Beside the pair it serves rather than up with `platform_on_https`, because it exists
+    for one question and its whole point is a difference from that fixture: the issuer —
+    and therefore the token endpoint the registration carries, which `mock-lms` builds
+    from it — stays on `roster-platform.invalid`, and the section's stored roster address
+    is on `A_ROSTER_HOST_OF_ITS_OWN`. `roster_platforms` mounts both hosts on the wire
+    itself, so nothing here teaches the wire anything new.
+
+    `https`, like `platform_on_https` and for the same reason: ADR 0081's rule 1 refuses
+    cleartext that leaves this machine, so a deployment's roster has to be fetched over
+    `https` before anything else about it can be asserted.
+
+    A test using this must not also ask for `platform_on_https`: both start a platform
+    under the one issuer `roster_contract.https_platform_issuer`, and two registrations
+    of one issuer would leave the sync choosing between them.
+    """
+    return roster_platforms(
+        roster_contract.https_platform_issuer,
+        address=f"https://{A_ROSTER_HOST_OF_ITS_OWN}{ITS_OWN_ROSTER_PATH}",
+    )
+
+
+def test_a_development_stacks_own_roster_host_is_exempted_from_the_pin(
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    development_settings: Any,
+    resolving: Any,
+    a_subject: Any,
+) -> None:
+    """The half that must stay true, and the control that this reader can find an exemption.
+
+    A development stack does not resolve its own stored roster address — that is the
+    exemption `test_a_development_stack_fetches_its_own_roster_host_without_resolving_it`
+    above asserts at the wire — so nothing pins that host, and the transport has to be
+    told to connect to it anyway. The exemption is real, it is deliberate, and E2-02
+    keeps it exactly where it is.
+
+    **It is also `docs/MISTAKES.md` entry 35's control.** The test below reports an
+    *absence*, and a reader that could not see an exemption at all would report absence
+    everywhere and pass. So the reader is required first to find one on a sync that
+    certainly has it.
+
+    **What this half cannot say, and where that is said instead** (`docs/MISTAKES.md`
+    entry 14 — the boundary of a check stated rather than left looking like coverage).
+    This platform is the mock's own, which serves its token endpoint and its roster from
+    one host, so the entry found here could be this ticket's development exemption or
+    ADR 0101's token exemption and nothing here tells them apart. That is exactly the
+    confusion dispute E2-02-01 was ruled on, arriving one level out. What this half owes
+    the pair is only that the reader can see a populated set at all.
+
+    **This test does not catch the exemption being narrowed to nothing, and it used to
+    say it did.** The mutation battery proved otherwise: with `unpinned_hosts.add(exempt)`
+    made unreachable in every environment the whole suite stayed green, because ADR 0101's
+    token entry alone makes this set identical either way. The sentence claiming the catch
+    is gone rather than softened, and the paragraph above is why it could never have been
+    true (`docs/MISTAKES.md` entry 1 — a record that went on asserting something a
+    measurement had made false). Two tests carry that claim now, each over a platform
+    whose roster host and token host differ: the behavioural witness in development is
+    `test_a_development_stacks_unresolved_roster_host_is_still_reached_because_it_is_exempt`
+    below, and the deployment half after it is the attributing absence.
+
+    **A red here means this reader is broken** — it could not find the set the sync built,
+    or it is looking at the wrong object. It does not mean any particular entry is
+    missing, because this platform cannot say which entry it found.
+    """
+    resolver = resolving({})
+    subject = a_subject("development-exempt-pin")
+    session = service_wire.session()
+    service_wire.serve(compose_a_roster(synced_section, [roster_contract.member(subject)]))
+
+    failure = sync(
+        roster_sync,
+        synced_section,
+        service_wire,
+        committed_rows,
+        development_settings,
+        resolve=resolver,
+        http=session,
+    )
+
+    assert failure is None, f"A development stack's own roster sync raised {failure!r}."
+    assert roster_rows.enrollments_for(subject), (
+        "The development stack's roster member was not ingested, so the sync did not complete and "
+        "whatever it mounted on this session is not what a working walk mounts."
+    )
+    exempted = hosts_exempted_from_the_pin(session)
+    assert canonical_host(str(synced_section.host)) in exempted, (
+        f"The sync exempted {sorted(exempted)} from the pin, and the section's own stored host "
+        f"{synced_section.host!r} is not among them. Under the development name nothing resolves "
+        "that host, so nothing pins it either — an unexempted host with no pin is a request the "
+        "transport must refuse, and the demo stack's every roster page goes through it."
+    )
+
+
+def test_a_development_stacks_unresolved_roster_host_is_still_reached_because_it_is_exempt(
+    roster_sync: Any,
+    platform_whose_roster_is_on_another_host: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    development_settings: Any,
+    resolving: Any,
+    a_subject: Any,
+) -> None:
+    """The exemption doing its job, measured by whether the page arrives at all.
+
+    **The mutation this kills**: the exemption narrowed to nothing — the battery's row
+    7b, `unpinned_hosts.add(exempt)` made unreachable in every environment, which passed
+    the whole suite of 2,156 tests when it was run. Every set-reading test in this module
+    survived it, because ADR 0101's token entry leaves the set non-empty and, on a
+    platform serving both from one host, identical. This test is written in the currency
+    that mutation actually changes: whether the roster page can be fetched.
+
+    **The chain, which is what makes the ingestion evidence about the exemption.** Under
+    the development name rule 5 skips resolution for the section's own stored roster
+    host, so nothing resolves it and nothing pins it — asserted below over an injected
+    resolver that would raise if it were asked. A host with no pin is a host the adapter
+    must refuse, fail-closed, which is the whole point of the pin. So the only thing that
+    can let this GET out is the exemption, and the member's arrival in the database is
+    that entry existing. Take the entry away and the page is never fetched.
+
+    **Its roster is on a host of its own**, through the fixture dispute E2-02-01's ruling
+    called for, and that is not decoration here either: on the mock's single host the
+    token entry would cover the roster host too and the GET would succeed with this
+    ticket's entry gone. The distinctness is asserted before anything rests on it.
+
+    Its pair is the deployment half below, which requires this same entry to be absent
+    outside development. Together they say the entry is conditional. This half alone
+    would be satisfied by an exemption applied everywhere, which is the finding.
+    """
+    section = platform_whose_roster_is_on_another_host
+    token_host = urlsplit(roster_contract.https_platform_issuer).hostname or ""
+    subject = a_subject("development-exempt-unpinned")
+    session = service_wire.session()
+    resolver = resolving({})
+    service_wire.serve(compose_a_roster(section, [roster_contract.member(subject)]))
+
+    assert canonical_host(str(section.host)) != canonical_host(token_host), (
+        f"This section's roster host and its platform's token host are both {section.host!r}. "
+        "ADR 0101 exempts the token host in every environment, so on one host this test would "
+        "pass with the roster exemption deleted — which is the survivor it exists to kill."
+    )
+
+    failure = sync(
+        roster_sync,
+        section,
+        service_wire,
+        committed_rows,
+        development_settings,
+        resolve=resolver,
+        http=session,
+    )
+
+    assert failure is None, (
+        f"A development stack's roster sync raised {failure!r}. With the exemption gone the "
+        f"adapter holds no pin for {section.host!r} and must refuse to dial it, which is what a "
+        "narrowed-to-nothing entry looks like from here."
+    )
+    assert not resolver.asked, (
+        f"The sync resolved {resolver.asked!r}. Under the development name the section's own "
+        "stored roster host is exempt from rule 5, so a walk that resolved it has a pin for it — "
+        "and then the page below could have arrived pinned, with nothing about the exemption "
+        "being asserted at all."
+    )
+    fetched = roster_gets(service_wire, section)
+    assert fetched, (
+        f"The roster at {section.address!r} was never fetched, so nothing here is about how it "
+        "was dialled. Every GET the sync made: "
+        f"{[call.url for call in service_wire.calls if call.method.upper() == 'GET']}."
+    )
+    for call in fetched:
+        assert urlsplit(call.url).hostname == section.host, (
+            f"A roster page was fetched at {call.url!r} rather than at {section.host!r}. Nothing "
+            "resolved this host, so nothing pinned it, and a rewritten URL here is the adapter "
+            "sending the request to an address no rule judged."
+        )
+    assert roster_rows.enrollments_for(subject), (
+        f"The member {subject!r} was not ingested. Nothing resolved {section.host!r} and so "
+        "nothing pinned it, which leaves the exemption as the only thing that could let this "
+        "request out — an unexempted host with no pin is one the transport refuses. A development "
+        "stack whose roster host is not exempt fetches no roster at all, every hour, and the "
+        "narrowing that does that passes every set-reading test in this module."
+    )
+    exempted = hosts_exempted_from_the_pin(session)
+    assert canonical_host(str(section.host)) in exempted, (
+        f"The sync exempted {sorted(exempted)} from the pin and the section's own stored roster "
+        f"host {section.host!r} is not among them, yet its page was fetched anyway. Then this "
+        "request went out by some route neither the pin nor the exemption accounts for, and what "
+        "the assertion above attributes to the exemption belongs to something else."
+    )
+
+
+def test_a_deployments_stored_roster_host_is_not_exempted_from_the_pin(
+    roster_sync: Any,
+    platform_whose_roster_is_on_another_host: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    deployment_settings: Any,
+    resolving: Any,
+    a_subject: Any,
+) -> None:
+    """The carried finding: the exemption is written for development and applied everywhere.
+
+    "The stored roster host joins `unpinned_hosts` in every environment while the
+    docstring beside it calls that entry development-only." Outside development there is
+    nothing to exempt it for — rule 5 resolves the stored address like any other, and the
+    pin is what keeps the connection on the address that was judged. Leaving the host in
+    the set means that a request to it for which no pin was recorded is dialled by name
+    instead of being refused, which is the fail-closed path the pin exists to have.
+
+    **The mutation this kills**: deleting the environment condition on
+    `unpinned_hosts.add(exempt)`, so the roster host is exempted in a deployment too. The
+    section here stores its roster on a host of its own, so that entry is a string
+    nothing else in the set can be: `roster-platform.invalid` is the registered token
+    endpoint's host, exempt in every environment by ADR 0101, and
+    `rosters.roster-platform.invalid` is this ticket's entry and nothing else.
+
+    **Both entries are named, and that is what makes the absence attributable.** The
+    token host is required to still be exempt — which is a non-vacuity guard as much as
+    an assertion (`docs/MISTAKES.md` entry 3): "the roster host is not in the set" is
+    equally true of an empty set, of a set read off the wrong object, and of a sync that
+    stopped before it built one. Requiring the reader to *find* the entry ADR 0101 puts
+    there is what tells those apart from the narrowing this ticket asks for
+    (`docs/MISTAKES.md` entry 35 — a guard that only ever reports absence cannot say
+    which mechanisms it can see).
+
+    **This is the shape dispute E2-02-01 was ruled on.** The first version asserted about
+    `platform_on_https`, whose token endpoint and roster share one host because the mock
+    builds both from its issuer — so the assertion was equally an assertion about ADR
+    0101's entry, and it was red whether or not this ticket's narrowing had been made.
+    The section note above records why the roster was moved rather than the token
+    endpoint.
+
+    Its pair is
+    `test_a_development_stacks_unresolved_roster_host_is_still_reached_because_it_is_exempt`
+    above, over this same two-host platform, where the entry must be there and must be
+    what lets the page through. Together they say the entry is conditional rather than
+    absent: deleting it outright passes this test and breaks the development stack it was
+    written for, which is the survivor the mutation battery found under the first version
+    of this section.
+
+    The walk itself is required to have worked, so that what is read off the transport is
+    what a successful sync mounted rather than what a sync that gave up early left behind.
+    """
+    section = platform_whose_roster_is_on_another_host
+    token_host = urlsplit(roster_contract.https_platform_issuer).hostname or ""
+    subject = a_subject("deployment-pinned")
+    session = service_wire.session()
+    resolver = resolving({A_ROSTER_HOST_OF_ITS_OWN: (roster_contract.a_global_address,)})
+    service_wire.serve(compose_a_roster(section, [roster_contract.member(subject)]))
+
+    assert canonical_host(str(section.host)) != canonical_host(token_host), (
+        f"This section's roster host and its platform's token host are both "
+        f"{section.host!r}, so the two exemptions are one string again and this test cannot "
+        "attribute the entry it is about — which is exactly what dispute E2-02-01 was ruled on. "
+        "`platform_whose_roster_is_on_another_host` is where that is arranged."
+    )
+
+    failure = sync(
+        roster_sync,
+        section,
+        service_wire,
+        committed_rows,
+        deployment_settings,
+        resolve=resolver,
+        http=session,
+    )
+
+    assert failure is None, f"An ordinary one-page walk under a deployment raised {failure!r}."
+    assert roster_rows.enrollments_for(subject), (
+        f"The page's member {subject!r} was not ingested, so this sync did not walk the roster and "
+        "what it mounted on the session is not what a working deployment walk mounts."
+    )
+    assert resolver.asked, (
+        f"The sync resolved nothing while fetching {section.host!r} under a deployment. Rule 5 has "
+        "no exemption outside development, so a walk that asked its resolver nothing is running "
+        "under the development rules and this test is not posing a deployment at all."
+    )
+    exempted = hosts_exempted_from_the_pin(session)
+    assert canonical_host(token_host) in exempted, (
+        f"The sync exempted {sorted(exempted)} from the pin, and the registered token endpoint's "
+        f"host {token_host!r} is not among them. ADR 0101 keeps that one unpinned in every "
+        "environment — 'its host is never judged at fetch time and so never pinned' — and the "
+        "token request travels over this very session, so a walk that got its token and left no "
+        "entry for it means this reader is not looking at the set the sync built. Every absence "
+        "asserted below would then be an absence from the wrong object."
+    )
+    assert canonical_host(str(section.host)) not in exempted, (
+        f"Under a deployment the sync exempted {sorted(exempted)} from the pin, including the "
+        f"section's own stored roster host {section.host!r}. That host was resolved and judged "
+        "like every other, so it has a pin and needs no exemption; carrying one means a request to "
+        "it that no pin covers is sent to whatever the client resolves at dial time, with the "
+        "tool's Bearer token attached — which is the rebind window the pin was added to close, and "
+        "the fail-closed path that should catch an unjudged name is switched off for exactly the "
+        "host the platform controls the most."
     )

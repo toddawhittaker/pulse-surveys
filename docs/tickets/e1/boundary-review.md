@@ -103,7 +103,10 @@ and failure paths, canary-shaped).
   staff-launch debounce probe against 5 with `(section_id, called_at DESC)`,
   growing all term with no purge until E13. Verification also found
   `sync_all_rosters` has no term filter, so retired sections are called
-  hourly forever — recorded below as carried. Batch A.
+  hourly forever — recorded below as carried. Batch A. (The Batch A index
+  was descending; E2-02 later replaced it with the ascending composite
+  `ix_nrps_call_section_id_called_at`, which performs identically and is
+  visible to `alembic check`.)
 - **M6 — seven of E1's strongest confidentiality denials carry no
   `invariant` marker**, so they sit outside the isolated pass CI cannot see
   skipped — including the whole E1-12 identity-merge module and the only test

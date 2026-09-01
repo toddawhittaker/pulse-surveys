@@ -9,6 +9,20 @@ called_at DESC)`, growing all term with no purge until E13."
 (section_id, called_at DESC)`; `alembic check` clean; the downgrade drops exactly
 it."
 
+**E2-02 reverses the direction, and the reason is the same sentence's second clause.**
+The E1 post-merge re-review found that the `DESC` was what made the declaration
+invisible to `alembic check` — a text-expression index is not comparable, so the drift
+gate that was supposed to keep the model and the migration honest about this index could
+not see it at all (`docs/tickets/e2/carried-from-e1.md`: "The `DESC` on
+`ix_nrps_call_section_id_called_at_desc` serves no query in the tree, and it is exactly
+what makes the declaration invisible to `alembic check`; a plain ascending composite
+would perform identically and be comparable"). So the index this module asserts is now
+the plain ascending composite `ix_nrps_call_section_id_called_at`, and the performance
+claim M5 rests on is unchanged: Postgres serves `ORDER BY called_at DESC LIMIT 1` from
+an ascending index by a backward scan, at the same cost. What the reversal buys is that
+`alembic check` can now compare the declaration with the database — which is the gate
+that catches the index being dropped, renamed or re-declared by anybody after this.
+
 **What this module asserts and what it leaves to the gates that already exist.**
 The index is asserted here, against the migrated database, by reading the
 catalog — because that is the only place an index a migration created actually
@@ -20,23 +34,26 @@ migration is diagnosed, for every ticket. Two tests of one rule is
 `docs/MISTAKES.md` entry 19's shape.
 
 **The reach of the test below, stated exactly, because it is narrower than it
-reads.** It answers one question: does an index with these key columns, in this
-order, with this direction, exist. It does **not** notice a superseded index left
-behind beside it — the `section_id`-only index this one replaces, still there,
-still costing every write — because an extra index is not an absent one. That is
-`test_alembic_baseline.py`'s catch, through the drift `alembic check` reports
-between `Base.metadata` and the database, and it is named here rather than left
-for a reader to assume this module covers it (`docs/MISTAKES.md` entry 14: the
-boundary of a search said out loud rather than left looking like coverage).
+reads.** It answers two questions: does an index of this name carry these key columns,
+in this order, ascending; and does the table carry any descending index at all. The
+second is E2-02's, and it catches exactly one superseded index — the descending
+composite this one replaces, left in place beside it. It does **not** notice any other
+leftover, the `section_id`-only index M5 replaced among them, because an extra index is
+not an absent one and this module cannot enumerate what the table is *allowed* to carry.
+That remains `test_alembic_baseline.py`'s catch, through the drift `alembic check`
+reports between `Base.metadata` and the database — which E2-02's ascending composite is
+what makes possible for this index at all. Said here rather than left for a reader to
+assume this module covers it (`docs/MISTAKES.md` entry 14: the boundary of a search said
+out loud rather than left looking like coverage).
 
-**Column order and sort direction are the whole point, so both are read.** An index
-on `section_id` alone is what exists today and is what the measurement condemns; an
-index on `(called_at, section_id)` is the same two columns in the order that does
-not answer the probe; an ascending `(section_id, called_at)` makes the planner walk
-to the oldest row of a section to find its newest. All three are indexes on the
-right table over the right columns, and none of them is this criterion — so the
-reader below reports each key column's position *and* its descending flag, and the
-control proves it can tell those cases apart before anything is asserted with it.
+**Column order is the whole point, and the direction is read beside it.** An index on
+`section_id` alone is what M5 condemns; an index on `(called_at, section_id)` is the
+same two columns in the order that does not answer the probe. Neither is this criterion.
+The direction is read because the reader must be able to see it — the index this module
+required until E2-02 was descending, so a reader blind to the flag could not tell the
+old index from the new one, and a build carrying both would look like a build carrying
+one. The control proves it can tell all of those cases apart before anything is asserted
+with it.
 """
 
 from typing import Any
@@ -84,6 +101,12 @@ INDEX_KEY_COLUMNS = text(
 PROBE_TABLE = "e1_boundary_index_probe"
 PROBE_DESCENDING_INDEX = "e1_boundary_probe_leading_then_trailing_desc"
 PROBE_REVERSED_INDEX = "e1_boundary_probe_trailing_then_leading"
+
+# The name E2-02 settles for the debounce's index, dropping the `_desc` suffix with the
+# direction it described. Asserted by name as well as by columns: the failure this
+# module cannot otherwise see is the superseded descending index left in place beside
+# the new one, and a name is what tells two indexes over the same columns apart.
+DEBOUNCE_INDEX = "ix_nrps_call_section_id_called_at"
 
 
 def index_key_columns(connection: Any, table: str) -> dict[str, list[tuple[str, bool]]]:
@@ -161,28 +184,30 @@ def test_the_index_reader_reports_column_order_and_the_descending_flag(
 # ---------------------------------------------------------------------------
 
 
-def test_nrps_call_carries_an_index_on_section_id_and_called_at_descending(
+def test_nrps_call_carries_an_ascending_index_on_section_id_and_called_at(
     migrated_engine: Any, roster_rows: Any, roster_contract: Any
 ) -> None:
-    """M5: the debounce probe's own access path exists in the migrated database.
+    """M5's access path, in the form `alembic check` can compare — E2-02.
 
     D9 makes `nrps_call` the row a staff launch's debounce reads — "skips the
     enqueue when the section has an `nrps_call` row younger than 5 minutes" — which
     is the newest row for one section, and it is read on the request path of every
-    staff launch. The review measured what that costs against the index that exists
-    today: 2,006 buffers per probe at a million rows laid out hour-major, against 5.
+    staff launch. The review measured what that costs against the index that existed
+    before M5: 2,006 buffers per probe at a million rows laid out hour-major, against 5.
 
     **The mutation this kills**: leaving the index on `section_id` alone. The probe
     still answers, every other test stays green, and the cost grows all term because
     nothing purges the table until E13.
 
-    **The two near misses this is written around, and both are in the assertion
-    rather than in the prose.** `(called_at, section_id)` is the same two columns in
-    the order that makes the leading column the one the probe does not filter on. An
-    *ascending* `(section_id, called_at)` puts the section's oldest call first, so
-    the newest — the one the debounce wants — is at the far end of its range. Column
-    order and the descending flag are therefore both compared, and the control above
-    is what says the reader can see either of them being wrong.
+    **The near misses, all of them in the assertion rather than in the prose.**
+    `(called_at, section_id)` is the same two columns in the order that makes the leading
+    column the one the probe does not filter on. `(section_id, called_at DESC)` is what
+    this criterion required until E2-02 and performs identically, and it is refused now
+    for the reason the module docstring gives: a text-expression index is invisible to
+    `alembic check`, so the drift gate cannot see the declaration at all. And the index
+    is required *by name*, because the pair of them living side by side — the old
+    descending one left in place beside the new one — is a state that satisfies every
+    question about columns and costs a write on every call row.
 
     The columns are followed rather than spelled: `section_id` is named by the
     foreign key `nrps_call` carries to `section`, for the reason `RosterRows.link`
@@ -190,11 +215,13 @@ def test_nrps_call_carries_an_index_on_section_id_and_called_at_descending(
     guessed wrong, silently.
 
     Reflected rather than declared, because a declaration no migration created
-    exists nowhere a deployment can reach.
+    exists nowhere a deployment can reach. That the declaration and the database agree
+    is `tests/integration/test_alembic_baseline.py`'s question, and it is the one this
+    ticket makes answerable at all.
     """
     table = roster_contract.nrps_call_table
     section_column = roster_rows.link(table, "section")
-    wanted = [(section_column, False), (roster_contract.called_at_column, True)]
+    wanted = [(section_column, False), (roster_contract.called_at_column, False)]
 
     with migrated_engine.connect() as connection:
         read = index_key_columns(connection, table)
@@ -205,15 +232,29 @@ def test_nrps_call_carries_an_index_on_section_id_and_called_at_descending(
         ".py` is where its absence is diagnosed — or this reader is looking somewhere the migrated "
         "schema is not, and the assertion below would be about nothing."
     )
-    assert any(columns == wanted for columns in read.values()), (
-        f"No index on `{table}` has key columns {wanted!r}. The indexes it carries are {read!r}, "
-        "each as `(column, descending)` in key order.\n\n"
+    assert read.get(DEBOUNCE_INDEX) == wanted, (
+        f"`{DEBOUNCE_INDEX}` is {read.get(DEBOUNCE_INDEX)!r} and this criterion is {wanted!r}. The "
+        f"indexes on `{table}` are {read!r}, each as `(column, descending)` in key order.\n\n"
         f"The debounce reads the newest `{roster_contract.called_at_column}` for one "
         f"`{section_column}`, on the request path of every staff launch: measured at a million "
-        "rows laid out hour-major, 2,006 buffers per probe on `section_id` alone against 5 on "
-        "`(section_id, called_at DESC)`, and the table grows all term because nothing purges it "
-        "until E13.\n\n"
+        "rows laid out hour-major, 2,006 buffers per probe on `section_id` alone against 5 on the "
+        "composite, and the table grows all term because nothing purges it until E13. Postgres "
+        "serves the probe's `ORDER BY … DESC LIMIT 1` from this ascending index by a backward "
+        "scan, at the same cost.\n\n"
         f"An index on `{section_column}` alone does not satisfy this, and neither does "
-        f"`({roster_contract.called_at_column}, {section_column})` nor an ascending pair — the "
-        "column order and the direction are the criterion."
+        f"`({roster_contract.called_at_column}, {section_column})`. A descending "
+        f"`{roster_contract.called_at_column}` does not either, and the reason is not performance: "
+        "a text-expression index is not comparable, so `alembic check` cannot see the declaration "
+        "and the drift gate is blind to this index for as long as it is written that way."
+    )
+    descending = {
+        name: columns
+        for name, columns in read.items()
+        if any(is_descending for _, is_descending in columns)
+    }
+    assert not descending, (
+        f"`{table}` carries descending indexes {descending!r}. The composite this criterion asks "
+        "for is ascending, so a descending one here is the superseded index still in place beside "
+        "it — every insert into the call log maintains both, and the declaration `alembic check` "
+        "compares is one of them."
     )

@@ -53,6 +53,19 @@ not store is attributable to the role that launched. The first test's dean is
 unchanged and still asserts `landed`, because §2.1's table gives every leadership
 role the LTI launch and her assignment really does open it.
 
+**E2-02 makes the first test's scope explicit, and it had to.** That ticket closes the
+E1 boundary review's M9 — a leadership assignment anywhere was an unscoped
+roster-ingestion trigger — by requiring the launched context to sit inside the
+launching person's own grant. This module's dean was scoped to whatever college
+`committed_rows.graph` happened to seed, which is *not* the college above the launched
+prefix, so under that condition her launch would record a defect and store nothing, and
+this test would go red for a reason that is not its own (`docs/MISTAKES.md` entry 22).
+Her assignment now names the college the launch's own prefix sits under, read out of the
+containment chain rather than written down. That leaves this module's subject exactly
+where it was — whether the limb resolves `sub` → `user` → `person` → assignment at all —
+and the purview condition itself, in both directions, is asserted next door in
+`tests/integration/test_a_staff_launch_binds_only_inside_the_launchers_purview.py`.
+
 **Giving her something to land on is deliberately not done.** An instructor
 assignment would make her a different person and would invert the very rule this
 module exists to hold; an enrollment would need a second `user` row for a subject
@@ -191,6 +204,17 @@ def test_a_leadership_persons_launch_stores_the_roster_address_with_no_instructo
     that pair, this one is equally satisfied by a door that provisions from every
     launch, which would hand a student's launch the roster of names and addresses
     §7.3 does not authorize them to reach.
+
+    **The dean's assignment names the college the launch's own prefix sits under, and
+    from E2-02 it has to.** It used to take whatever college `committed_rows.graph`
+    seeded, which is a different one — and that ticket's condition refuses a leadership
+    launch into a context outside the launcher's grant, so this test would have recorded
+    a defect and stored nothing, for a reason that is not this module's subject
+    (`docs/MISTAKES.md` entry 22). The scope is read out of the chain `launch_ground`
+    seeded rather than written down, so a mock that changes its context label moves it
+    too. What this test still says is what it always said: the limb resolves the
+    launching subject to a person and reads their assignments. Whether a *covering*
+    assignment is what the writer requires is asserted in both directions next door.
     """
     offer = a_launch_carrying_no_instructor_urn(launch_driver, provisioning_contract)
     claims = launch_driver.claims_of(offer)
@@ -198,7 +222,7 @@ def test_a_leadership_persons_launch_stores_the_roster_address_with_no_instructo
     ground = launch_ground(label)
 
     person_id = a_linked_person(web_identity, launch_driver, claims[SUBJECT_CLAIM])
-    committed_rows.graph.assign(LEADERSHIP_ROLE, person=person_id)
+    committed_rows.graph.assign(LEADERSHIP_ROLE, scope=ground.college_id, person=person_id)
     committed_rows.commit()
 
     response, signed = launch_driver.launch(offer)
