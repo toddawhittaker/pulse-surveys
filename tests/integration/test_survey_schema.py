@@ -494,35 +494,67 @@ def test_a_naive_datetime_cannot_be_written_to_either_submission_timestamp(
     submission timestamp is exactly what SPEC §3.1's window close is compared
     against.
 
-    **The control and the mutation differ in one thing: `tzinfo`.** The naive
-    value is the aware one with its offset stripped and the session is pinned to
-    UTC first, so an unguarded write stores the very same instant the control
-    stored, and a refusal can only be about the missing offset.
+    **Every write here names both timestamps, and dispute E2-05-01 is why.**
+    This test used to name one column per iteration and leave the other to the
+    shared seeding walker, which fills a `NOT NULL` timestamp it was not told
+    about from a constant chosen for `survey_window` — an instant two days
+    *before* `SUBMITTED_AT`. So its control attempted a response whose last
+    submission precedes its first, which is exactly the row
+    `test_a_response_whose_last_submission_precedes_its_first_is_refused`
+    requires the database to refuse: the two tests were red in complementary
+    states, and this one was failing inside its own fixture rather than on its
+    subject. That is `docs/MISTAKES.md` entry 13's closing sentence — when a
+    test fails inside its own fixture, suspect the fixture first — and dispute
+    E0-09-01 is the earlier occasion, a walker constant that satisfied one
+    ticket's rule while violating another's.
 
-    **The mutation it kills:** declaring either column as
-    `DateTime(timezone=True)` rather than through the decorated type ADR 0019
-    puts the guard on.
+    **The control and the mutation still differ in one thing: `tzinfo`.** The
+    pair is written equal at `SUBMITTED_AT`, which is a response submitted once
+    and never revised — the module's own model of the ordinary row. The mutation
+    half writes that same pair with only the named column's offset stripped, and
+    the session is pinned to UTC first, so an unguarded write would store the
+    very same two instants the control stored. The ordering rule is therefore
+    satisfied by both rows — equal before, equal after — and cannot be what
+    refuses either of them. A refusal can only be about the missing offset.
+
+    **The mutation it kills is unchanged, and naming both columns is what keeps
+    it killed.** ADR 0019 puts the guard on the column *type*, so it is reached
+    by whichever column carries the naive value and by no other — the column
+    left aware passes any guard it has, which is what makes the completed
+    control harmless to what this measures. Were the named column declared
+    `DateTime(timezone=True)`, its naive value would bind without complaint, the
+    equal pair would satisfy the ordering check, the row would insert, and
+    `refused_naive` would stay `False`. The loop runs both columns, so either
+    one declared without the decorated type is caught, and a fix applied to only
+    one of the two still reds here.
     """
     response = survey_table(metadata_tables, RESPONSE)
     require_columns(response, SUBMISSION_TIMESTAMPS)
 
     db_session.execute(text("SET TIME ZONE 'UTC'"))
 
+    # Both timestamps, equal, aware. Every write below starts from this pair and
+    # changes exactly one thing about it.
+    aware_pair = dict.fromkeys(SUBMISSION_TIMESTAMPS, SUBMITTED_AT)
+
     for column_name in SUBMISSION_TIMESTAMPS:
         try:
             with db_session.begin_nested():
-                seed_rows(RESPONSE, {}, **{column_name: SUBMITTED_AT})
+                seed_rows(RESPONSE, {}, **aware_pair)
         except DatabaseError as rejected:
             pytest.fail(
-                f"An aware datetime was refused by `{RESPONSE}.{column_name}`: {rejected}. Until "
-                "the ordinary row inserts, a refusal below says nothing about naivety."
+                f"A response carrying an aware datetime in both {list(SUBMISSION_TIMESTAMPS)}, "
+                f"equal, was refused: {rejected}. That is a response submitted once and never "
+                "revised, which is the ordinary row — and until it inserts, a refusal below says "
+                "nothing about naivety."
             )
 
         naive = SUBMITTED_AT.replace(tzinfo=None)
+        half_naive = {**aware_pair, column_name: naive}
         refused_naive = False
         try:
             with db_session.begin_nested():
-                seed_rows(RESPONSE, {}, **{column_name: naive})
+                seed_rows(RESPONSE, {}, **half_naive)
         except (StatementError, ValueError, TypeError):
             refused_naive = True
 
