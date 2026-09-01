@@ -126,6 +126,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, TypeVar
 from uuid import UUID
@@ -156,6 +157,7 @@ from app.models.lti import (
     refuse_invalid_registration_addresses,
 )
 from app.models.org import College, Course, Department, Institution, Prefix, Section
+from app.models.survey import Question, QuestionKind, QuestionSet
 from app.models.term import StartLetterMap, Term, Week, week_rows_for_term
 from app.services.section_codes import apply_section_code
 
@@ -1156,6 +1158,122 @@ def upsert(session: Session, model: type[RowT], key: dict[str, Any], **values: A
 
 
 # ---------------------------------------------------------------------------
+# The survey instrument (SPEC §3.2).
+#
+# **This is the one thing in this file that is not demo data.** Everything else
+# here is an invented institution for a development box. SPEC §3.2 fixes the v1
+# question set — five questions, their wording, their kinds and their two rules —
+# so these rows are the same in every deployment there will ever be, and E2-08's
+# validity check and E2-10's form both read them as the survey itself.
+#
+# **That makes its natural key a third case, and ADR 0064 now names it.** The
+# rule there is that a key must be scoped to a row the seed created or be a value
+# the seed invented, and refuse rather than match otherwise. `question_set` on
+# `{version: 1}` is neither: version 1 is a value SPEC §3.2 chose. It is adopted
+# and corrected all the same, because the danger the refuse rule guards against
+# is a key matching a row somebody else owns whose legal content differs from
+# this file's — and §3.2 fixes version 1's content to exactly one legal answer,
+# so a v1 set that disagrees with this file is a v1 set that is wrong. Putting it
+# back the way this file describes it enforces the spec rather than overwriting
+# somebody's data.
+#
+# The wording below is §3.2's own, transcribed. A paraphrase here is a change to
+# the instrument that nothing else in this repository would notice.
+# ---------------------------------------------------------------------------
+
+# The version SPEC §3.2 ships: "the five questions (standardized, v1 fixed)".
+QUESTION_SET_VERSION = 1
+
+# §3.2's Likert scale, and its workload slider — "range 0-40, 0.5-hour steps".
+# (§3.2 writes both ranges with an en dash; a hyphen is used here because ruff
+# reads the en dash as a confusable character.)
+LIKERT_BOUNDS = (Decimal("1"), Decimal("5"), Decimal("1"))
+WORKLOAD_BOUNDS = (Decimal("0"), Decimal("40"), Decimal("0.5"))
+
+
+@dataclass(frozen=True)
+class SurveyQuestion:
+    """One of SPEC §3.2's five, as the columns `question` holds it in.
+
+    `prompt` is `None` for the three questions §3.2 quotes no sentence for — the
+    two comments and the slider. That is a decision rather than an omission:
+    display copy for those three is E2-10's, governed by E2-11's copy inventory,
+    and a sentence invented here would be user-facing copy shipped through a
+    schema ticket with no copy review.
+
+    `required_if` is §3.2's "Required if Q1 ≤ 2" as the position it depends on
+    and the threshold it applies at, and `bounds` is a minimum, a maximum and a
+    step. Each is whole or absent, which is what the schema's two CHECK
+    constraints hold.
+    """
+
+    position: int
+    name: str
+    prompt: str | None
+    kind: QuestionKind
+    required_if: tuple[int, int] | None
+    bounds: tuple[Decimal, Decimal, Decimal] | None
+
+
+SPEC_3_2_QUESTIONS = (
+    SurveyQuestion(
+        1,
+        "Instructor rating",
+        "This week, my instructor supported my learning.",
+        QuestionKind.LIKERT,
+        None,
+        LIKERT_BOUNDS,
+    ),
+    SurveyQuestion(2, "Instructor comment", None, QuestionKind.COMMENT, (1, 2), None),
+    SurveyQuestion(
+        3,
+        "Course rating",
+        "This week, the course materials and activities supported my learning.",
+        QuestionKind.LIKERT,
+        None,
+        LIKERT_BOUNDS,
+    ),
+    SurveyQuestion(4, "Course comment", None, QuestionKind.COMMENT, (3, 2), None),
+    SurveyQuestion(5, "Workload", None, QuestionKind.WORKLOAD, None, WORKLOAD_BOUNDS),
+)
+
+
+def seed_question_set(session: Session) -> QuestionSet:
+    """SPEC §3.2's v1 question set and its five questions.
+
+    Each question is matched on `(question_set_id, position)`, which is scoped to
+    the set matched immediately above it and so is an ordinary ADR 0064 key. The
+    set itself is matched on its version, which is the third case that record now
+    describes.
+
+    Nothing is deleted: a sixth question added to the table by hand stays there,
+    the way every other loader in this file leaves a row it does not describe.
+    `tests/integration/test_demo_seed_script.py` asserts the five and asserts
+    that a second run changes none of them.
+    """
+    question_set = upsert(session, QuestionSet, {"version": QUESTION_SET_VERSION})
+
+    for question in SPEC_3_2_QUESTIONS:
+        required_if_position, required_if_at_most = question.required_if or (None, None)
+        minimum_value, maximum_value, step = question.bounds or (None, None, None)
+        upsert(
+            session,
+            Question,
+            {"question_set_id": question_set.id, "position": question.position},
+            kind=question.kind,
+            name=question.name,
+            prompt=question.prompt,
+            required_if_position=required_if_position,
+            required_if_at_most=required_if_at_most,
+            minimum_value=minimum_value,
+            maximum_value=maximum_value,
+            step=step,
+        )
+
+    return question_set
+
+
+# ---------------------------------------------------------------------------
 # The calendar.
 # ---------------------------------------------------------------------------
 
@@ -1812,10 +1930,16 @@ def seed(session: Session, configuration: Mapping[str, str]) -> None:
     first so that a refusal costs no writes at all; the third cannot, because its
     rows hang off almost everything here — and its own guard is what makes a
     refusal there cost nothing that reaches the mock's registration.
+
+    `seed_question_set` takes no configuration and runs after those two guarded
+    writes for the same reason they run first: it writes, so it goes once a
+    refusal has had its chance to cost nothing. It hangs off nothing else here,
+    because SPEC §3.2's instrument belongs to no institution.
     """
     check_calendar_fits()
     mock = seed_mock_platform(session, configuration)
     seed_tool_signing_key(session, configuration)
+    seed_question_set(session)
     demo = seed_demo_platform(session, configuration)
     nodes = seed_containment(session)
     term = seed_calendar(session, nodes["institution", INSTITUTION_NAME])

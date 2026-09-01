@@ -1,7 +1,7 @@
 """the dev clock override row
 
 Revision ID: a789f1920de3
-Revises: d2f6a913c47e
+Revises: 3f6907349751
 Create Date: 2026-09-01 00:00:00.000000
 
 E2-04. SPEC §3.1 makes every survey window a wall-clock time in the institution's
@@ -35,8 +35,13 @@ and for the one withheld.
 
 **`downgrade()` drops the table**, which takes its index and its privileges with
 it: a granted privilege belongs to the relation, so there is nothing left to
-revoke. A database taken back to `d2f6a913c47e` holds precisely what that revision
+revoke. A database taken back to `3f6907349751` holds precisely what that revision
 left it holding.
+
+**Chained after `3f6907349751`, not after `d2f6a913c47e`.** Both this revision and
+`3f6907349751` (E2-05) were written in parallel worktrees off `d2f6a913c47e`; once
+E2-05's PR merged into the epic branch, this revision's `down_revision` was moved
+onto it so the chain stays linear, with no change to what either revision does.
 """
 
 from collections.abc import Sequence
@@ -48,7 +53,7 @@ from app.views_sql import read_sql
 
 # revision identifiers, used by Alembic.
 revision: str = "a789f1920de3"
-down_revision: str | Sequence[str] | None = "d2f6a913c47e"
+down_revision: str | Sequence[str] | None = "3f6907349751"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

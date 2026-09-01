@@ -65,6 +65,18 @@ written through it, and the session it holds belongs to a different database
 entirely. That is cheaper than a fourth copy of the scope-shape logic, which
 `docs/MISTAKES.md` entry 13 is about — and a copy is what nobody updates.
 
+**E2-05 adds a section at the foot of the file, and it is a second ticket's
+criterion in E0-17's module.** That ticket grows `scripts/seed.py` by one loader
+— SPEC §3.2's v1 question set — and its third criterion is "Seeded v1 question
+set matches §3.2's text verbatim; running the seed twice changes nothing". Both
+halves are questions about a run of this script against a database of its own,
+and everything that answers them is already here: the module database, the
+second run, and the labelled comparison. A module of its own would have paid for
+a second `alembic upgrade head` and a second seed run to ask the same two
+questions with a copy of the same machinery, which is `docs/MISTAKES.md` entry
+13's shape. What it costs is that this file is no longer only E0-17's, so the
+section says which ticket it belongs to.
+
 **The small schema helpers and the constant lists are copied rather than
 imported.** A test module importing a fixtures module by name works only
 because of where pytest puts `tests/` on `sys.path`, and a collection error is
@@ -78,9 +90,10 @@ import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import date
+from decimal import Decimal
 from importlib import import_module
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
 import pytest
@@ -4043,3 +4056,489 @@ def test_the_run_refused_beside_another_institution_writes_nothing(
         f"Row counts after: {counted(planted.after)}\n"
         f"{planted.run.report()}"
     )
+
+
+# ---------------------------------------------------------------------------
+# E2-05 criterion 3 — the seeded v1 question set.
+#
+# "Seeded v1 question set matches §3.2's text verbatim; running the seed twice
+# changes nothing." Both halves, and they are a pair on purpose: a seed that
+# wrote nothing satisfies the second perfectly, and a seed that wrote the five
+# twice satisfies the first. Neither is asserted without the other in view.
+#
+# **Where this differs from everything above it.** The rest of this file is
+# about a *demo* institution — rows invented for a development box, matched by
+# natural keys ADR 0064 scopes to rows the seed created. The question set is not
+# demo data: SPEC §3.2 fixes it, every deployment's v1 is the same five
+# questions, and the seed's natural key for it is the version number. That is a
+# root matched by a value the seed did **not** invent, which is the one shape
+# ADR 0064's rule tells a loader to refuse rather than match. The tests below do
+# not settle that — they assert the criterion, which is about what one run
+# writes and what a second run leaves — and the pull request owes the reading.
+# ---------------------------------------------------------------------------
+
+# E2-05's two new tables that the seed fills. `response` and `answer` are the
+# other two it creates and the seed writes neither: SPEC §3.2's question set is
+# reference data, and a seeded student response would be a fabricated answer in
+# a table SPEC §4 protects.
+QUESTION_SETS = "question_set"
+QUESTIONS = "question"
+
+# The columns E2-05's settled design gives them. Constants so a deliberate
+# rename is a one-line change here, as everywhere else in this file.
+QUESTION_SET_VERSION_COLUMN = "version"
+QUESTION_POSITION_COLUMN = "position"
+QUESTION_NAME_COLUMN = "name"
+QUESTION_PROMPT_COLUMN = "prompt"
+QUESTION_KIND_COLUMN = "kind"
+QUESTION_REQUIRED_IF_POSITION_COLUMN = "required_if_position"
+QUESTION_REQUIRED_IF_AT_MOST_COLUMN = "required_if_at_most"
+QUESTION_MINIMUM_COLUMN = "minimum_value"
+QUESTION_MAXIMUM_COLUMN = "maximum_value"
+QUESTION_STEP_COLUMN = "step"
+
+# SPEC §3.2 calls the shipped set v1 — "the five questions (standardized, v1
+# fixed)" — and E2-05's seed writes that one.
+SEEDED_QUESTION_SET_VERSION = 1
+
+
+class SpecQuestion(NamedTuple):
+    """One of SPEC §3.2's five, as the section states it.
+
+    `name` and `prompt` are transcriptions: the name is the section's bold
+    heading and the prompt is the sentence it quotes. `kind`, `conditional` and
+    `bounds` are the section's *rules* — "Required if Q1 ≤ 2", "Likert 1-5",
+    "range 0-40, 0.5-hour steps" — carried as the data E2-05 stores them as.
+    (§3.2 writes those two ranges with an en dash, which ruff reads as a
+    confusable, so every range quoted in this section is transcribed with a
+    hyphen. Everything else in the quotations is the section's own.)
+
+    **`prompt` is `None` for three of the five, and that is a decision rather
+    than a transcription.** §3.2 quotes a sentence for the two Likert questions
+    and none for the two comments or the slider, and E2-05 settles that the
+    column is NULL where the spec quotes nothing, because display copy for those
+    three is E2-10's and is governed by E2-11's copy inventory. A prompt
+    invented here would be unreviewed user-facing copy arriving through a
+    schema ticket, which §4.1 items 4 and 5 exist to prevent.
+    """
+
+    position: int
+    name: str
+    prompt: str | None
+    kind: str
+    conditional: tuple[int, int] | None
+    bounds: tuple[Decimal, Decimal, Decimal] | None
+
+
+# SPEC §3.2's five, in the order and the wording that section gives them. This
+# is the one place in this file whose expectation is a transcription of the
+# spec rather than a property of the schema, and it is written out rather than
+# read from anywhere the implementation can reach: a test that read its
+# expectation out of `scripts/seed.py` would hold its expectation inside the
+# thing it checks (`docs/MISTAKES.md` entry 19).
+SPEC_3_2_V1 = (
+    SpecQuestion(
+        1,
+        "Instructor rating",
+        "This week, my instructor supported my learning.",
+        "likert",
+        None,
+        (Decimal("1"), Decimal("5"), Decimal("1")),
+    ),
+    SpecQuestion(2, "Instructor comment", None, "comment", (1, 2), None),
+    SpecQuestion(
+        3,
+        "Course rating",
+        "This week, the course materials and activities supported my learning.",
+        "likert",
+        None,
+        (Decimal("1"), Decimal("5"), Decimal("1")),
+    ),
+    SpecQuestion(4, "Course comment", None, "comment", (3, 2), None),
+    SpecQuestion(
+        5,
+        "Workload",
+        None,
+        "workload",
+        None,
+        (Decimal("0"), Decimal("40"), Decimal("0.5")),
+    ),
+)
+
+
+def test_the_transcribed_question_inventory_is_spec_3_2s_five() -> None:
+    """The control on `SPEC_3_2_V1`, and it is green with or without E2-05.
+
+    Six tests below compare the seeded rows against this tuple, so a typo in it
+    — a repeated position, a conditional rule pointing at a comment rather than
+    at the rating above it — would make six tests wrong in the same direction
+    and every one of them would read as a defect in the seed. This asserts the
+    properties §3.2 states about the *shape* of the set, so the transcription is
+    checked against something other than itself.
+
+    It cannot check the wording, and saying so is the point: the five names and
+    the two sentences are a transcription, and the only thing that verifies a
+    transcription is reading §3.2 beside it. What this catches is the
+    mechanical half — the numbering, which questions are conditional, and which
+    carry a numeric range.
+
+    It asks for no fixture, which is why it is green on a tree where E2-05 has
+    not been written: it is a check of a constant in this file and of nothing
+    the implementer controls.
+    """
+    positions = [item.position for item in SPEC_3_2_V1]
+    assert positions == [1, 2, 3, 4, 5], (
+        f"The transcribed inventory is numbered {positions}. SPEC §3.2 numbers its five "
+        "questions 1 to 5, and every comparison below is written over this ordering."
+    )
+
+    conditional = {item.position: item.conditional for item in SPEC_3_2_V1}
+    assert conditional[2] == (1, 2) and conditional[4] == (3, 2), (
+        f"The transcribed conditional rules are {conditional}. SPEC §3.2 attaches one to Q2 "
+        "('Required if Q1 ≤ 2') and one to Q4 ('Required if Q3 ≤ 2') — each pointing at the "
+        "rating immediately above it, at a threshold of 2."
+    )
+    unconditional = sorted(position for position, rule in conditional.items() if rule is None)
+    assert unconditional == [1, 3, 5], (
+        f"The transcribed inventory makes {unconditional} unconditional. SPEC §3.2's two ratings "
+        "and its workload slider carry no conditional requirement; only the two comments do."
+    )
+
+    bounded = sorted(item.position for item in SPEC_3_2_V1 if item.bounds is not None)
+    assert bounded == [1, 3, 5], (
+        f"The transcribed inventory gives numeric bounds to {bounded}. SPEC §3.2 gives them to "
+        "the two Likert ratings and to the workload slider, and the two free-text comments have "
+        "no range at all."
+    )
+
+    kinds = sorted({item.kind for item in SPEC_3_2_V1})
+    assert kinds == ["comment", "likert", "workload"], (
+        f"The transcribed inventory uses the kinds {kinds}. SPEC §3.2 has three question shapes "
+        "and E2-05 names them `likert`, `comment` and `workload`; a fourth spelling here is a "
+        "typo that would fail the kind comparison below as though the seed were wrong."
+    )
+
+
+def seeded_question_set(demo: Any, tables: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
+    """The seeded v1 question set and its questions, ordered by position.
+
+    Stops the test rather than returning something empty when the set is not
+    there: every assertion below is about what the seed *wrote*, and over an
+    unwritten set each of them is satisfied by emptiness (`docs/MISTAKES.md`
+    entry 3). The link from a question to its set is followed rather than named,
+    the way everything else in this file follows a foreign key.
+    """
+    question_sets = require_table(tables, QUESTION_SETS)
+    questions = require_table(tables, QUESTIONS)
+    require_columns(question_sets, (QUESTION_SET_VERSION_COLUMN,))
+    require_columns(questions, (QUESTION_POSITION_COLUMN,))
+    set_key = single_primary_key(question_sets)
+    set_column = one_foreign_key_column(questions, QUESTION_SETS)
+
+    with reading(demo, tables) as rows:
+        all_sets = rows_of(rows, QUESTION_SETS)
+        all_questions = rows_of(rows, QUESTIONS)
+
+    versioned = [
+        row for row in all_sets if row[QUESTION_SET_VERSION_COLUMN] == SEEDED_QUESTION_SET_VERSION
+    ]
+    if len(versioned) != 1:
+        pytest.fail(
+            f"The seeded database holds {len(versioned)} question sets at version "
+            f"{SEEDED_QUESTION_SET_VERSION} and E2-05's seed writes one. Every version it does "
+            f"hold: {sorted(row[QUESTION_SET_VERSION_COLUMN] for row in all_sets)}. None means "
+            "`seed_question_set` did not run or is not wired into `seed()`; more than one means "
+            "the version's unique constraint is missing and a second run inserted rather than "
+            "matched."
+        )
+
+    owned = sorted(
+        (row for row in all_questions if row[set_column] == versioned[0][set_key]),
+        key=lambda row: row[QUESTION_POSITION_COLUMN],
+    )
+    return versioned[0], owned
+
+
+def test_the_seed_writes_the_five_questions_of_the_v1_set_and_no_others(
+    seeded_demo: Any, demo_database: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """E2-05 criterion 3, the count: one set at version 1, holding exactly five questions.
+
+    SPEC §3.2 names five and the section heading calls them "standardized, v1
+    fixed", so the count is part of the text rather than a detail: a sixth
+    question is a question every student is asked and no epic has specified, and
+    a fourth is one of §3.2's five silently missing from every survey.
+
+    Asserted as **exactly** five owned by that set rather than as five rows in
+    the table, so a second set arriving later — which §3.2 says the versioning
+    exists for — does not make this fail for the wrong reason.
+
+    **The mutation it kills:** a loader that writes four of the five, or that
+    appends the set again on a second run rather than matching it (the second is
+    reported by `seeded_question_set` above, which requires exactly one v1 row).
+    """
+    seeded(seeded_demo)
+    _, questions = seeded_question_set(demo_database, metadata_tables)
+
+    positions = [row[QUESTION_POSITION_COLUMN] for row in questions]
+    assert positions == [item.position for item in SPEC_3_2_V1], (
+        f"The seeded v1 question set holds questions at positions {positions}; SPEC §3.2 gives it "
+        f"{[item.position for item in SPEC_3_2_V1]}. The section is titled 'The five questions "
+        "(standardized, v1 fixed)' — a missing one is a question no student is ever asked and a "
+        "spare one is a question nobody specified, and E2-08's completeness check and E2-10's "
+        "form both read this set as the whole survey."
+    )
+
+
+def test_the_seeded_questions_carry_spec_3_2s_names_verbatim(
+    seeded_demo: Any, demo_database: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """E2-05 criterion 3, the text: "matches §3.2's text verbatim".
+
+    The five names are §3.2's own bold headings, transcribed character for
+    character. Verbatim is the criterion's word and it is the right one: these
+    strings reach a student's screen through E2-10, and a paraphrase — "Rating
+    of instructor", "Instructor score" — is a change to the instrument that
+    nothing else in this repository would notice.
+
+    **The mutation it kills:** any edit to a seeded name, including a change of
+    case or a lost space. **The near miss it tolerates:** none; equality is the
+    assertion, and a name this test would accept is one §3.2 contains.
+    """
+    seeded(seeded_demo)
+    questions = require_table(metadata_tables, QUESTIONS)
+    require_columns(questions, (QUESTION_NAME_COLUMN,))
+    _, rows = seeded_question_set(demo_database, metadata_tables)
+
+    found = [(row[QUESTION_POSITION_COLUMN], row[QUESTION_NAME_COLUMN]) for row in rows]
+    expected = [(item.position, item.name) for item in SPEC_3_2_V1]
+    assert found == expected, (
+        f"The seeded question names are {found}; SPEC §3.2's are {expected}. The criterion is "
+        "'matches §3.2's text verbatim' — these strings are the instrument, they reach students "
+        "through E2-10's form, and a reworded one changes what is being measured while every "
+        "count and every chart goes on looking correct."
+    )
+
+
+def test_the_seeded_likert_questions_carry_spec_3_2s_prompt_sentences(
+    seeded_demo: Any, demo_database: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """E2-05 criterion 3, the two sentences §3.2 quotes.
+
+    §3.2 quotes a prompt for Q1 and Q3 and quotes none for Q2, Q4 or Q5, so this
+    asserts the whole mapping — the two sentences present and verbatim, and the
+    other three absent — rather than only the two that are there. Asserting only
+    the present pair would pass over a loader that invented copy for the other
+    three, which is the state E2-11's copy inventory exists to govern and §4.1
+    items 4 and 5 exist to keep out of unreviewed surfaces.
+
+    **The mutation it kills:** a paraphrased prompt on either Likert question,
+    and a prompt invented for one of the other three.
+    """
+    seeded(seeded_demo)
+    questions = require_table(metadata_tables, QUESTIONS)
+    require_columns(questions, (QUESTION_PROMPT_COLUMN,))
+    _, rows = seeded_question_set(demo_database, metadata_tables)
+
+    found = [(row[QUESTION_POSITION_COLUMN], row[QUESTION_PROMPT_COLUMN]) for row in rows]
+    expected = [(item.position, item.prompt) for item in SPEC_3_2_V1]
+    assert found == expected, (
+        f"The seeded prompts are {found}; SPEC §3.2 quotes {expected}. Two of the five carry the "
+        "section's own sentence and three carry none, because §3.2 quotes none for them and "
+        "E2-05 leaves their display copy to E2-10 under E2-11's inventory. A prompt invented "
+        "here is user-facing copy shipped through a schema ticket with no copy review."
+    )
+
+
+def test_each_seeded_question_carries_the_kind_spec_3_2_gives_it(
+    seeded_demo: Any, demo_database: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """E2-05 criterion 3: two Likerts, two free-text comments, one workload slider.
+
+    §3.2's five are three shapes, and the kind is what tells E2-10 which control
+    to render and E2-08 which value column of `answer` a submission may fill.
+    Compared through `enum_text` on both sides, so the assertion is about the
+    two agreeing rather than about whether the column hands back a Python
+    member or a string.
+
+    **The mutation it kills:** the workload question seeded as a Likert — the
+    two are both numeric, so nothing else here would separate them, and §3.2 is
+    explicit that workload is "stored as a decimal so reporting can show true
+    means and medians rather than band midpoints" while a Likert is a 1-5 scale.
+    """
+    seeded(seeded_demo)
+    questions = require_table(metadata_tables, QUESTIONS)
+    require_columns(questions, (QUESTION_KIND_COLUMN,))
+    _, rows = seeded_question_set(demo_database, metadata_tables)
+
+    found = [(row[QUESTION_POSITION_COLUMN], enum_text(row[QUESTION_KIND_COLUMN])) for row in rows]
+    expected = [(item.position, enum_text(item.kind)) for item in SPEC_3_2_V1]
+    assert found == expected, (
+        f"The seeded question kinds are {found}; SPEC §3.2's five are {expected} — two Likert "
+        "ratings, two free-text comments and one workload slider. The kind decides which control "
+        "E2-10 renders and which column of `answer` E2-08 may fill, so a question of the wrong "
+        "kind is a question that cannot be answered."
+    )
+
+
+def test_the_seeded_conditional_rules_are_spec_3_2s_two_required_if_clauses(
+    seeded_demo: Any, demo_database: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """E2-05 criterion 3: "Required if Q1 ≤ 2" and "Required if Q3 ≤ 2", carried as data.
+
+    §3.2 attaches a conditional requirement to the two comment questions and to
+    nothing else, and E2-05 stores it as the position it depends on and the
+    value at or below which it applies. The whole mapping is asserted — the two
+    rules present with §3.2's own numbers, and the other three rows carrying
+    neither — because a rule attached to a question §3.2 leaves optional is a
+    student blocked from submitting by a requirement nobody wrote.
+
+    **The mutation it kills:** the threshold seeded as 1 or 3 rather than 2,
+    and the dependency pointing at the comment's own position rather than at the
+    rating above it. Both are rules that look configured and gate the wrong
+    thing: §3.3 makes validity "all required fields answered", so a wrong
+    threshold silently changes who gets participation credit.
+    """
+    seeded(seeded_demo)
+    questions = require_table(metadata_tables, QUESTIONS)
+    require_columns(
+        questions,
+        (QUESTION_REQUIRED_IF_POSITION_COLUMN, QUESTION_REQUIRED_IF_AT_MOST_COLUMN),
+    )
+    _, rows = seeded_question_set(demo_database, metadata_tables)
+
+    found = [
+        (
+            row[QUESTION_POSITION_COLUMN],
+            row[QUESTION_REQUIRED_IF_POSITION_COLUMN],
+            row[QUESTION_REQUIRED_IF_AT_MOST_COLUMN],
+        )
+        for row in rows
+    ]
+    expected = [
+        (
+            item.position,
+            None if item.conditional is None else item.conditional[0],
+            None if item.conditional is None else item.conditional[1],
+        )
+        for item in SPEC_3_2_V1
+    ]
+    assert found == expected, (
+        f"The seeded conditional rules are {found} as (position, required if position, required "
+        f"if at most); SPEC §3.2's are {expected}. The section attaches one to Q2 ('Required if "
+        "Q1 ≤ 2') and one to Q4 ('Required if Q3 ≤ 2') and leaves the other three unconditional. "
+        "§3.3 scores a response valid only when 'all required fields answered', so a rule on the "
+        "wrong question or with the wrong threshold changes who earns participation credit and "
+        "reads as configured either way."
+    )
+
+
+def test_the_seeded_numeric_bounds_are_spec_3_2s_likert_scale_and_workload_slider(
+    seeded_demo: Any, demo_database: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """E2-05 criterion 3: "Likert 1-5" and "range 0-40, 0.5-hour steps", carried as data.
+
+    The ranges are §3.2's own numbers and E2-05 stores them on `question`
+    because a `CHECK` on `answer` could not read them (ADR 0018's opening
+    problem, and ADR 0110's decision). That makes these three columns the *only*
+    statement of the ranges anywhere in the system: E2-08's write path validates
+    against them and E2-10's slider is rendered from them, so a wrong bound here
+    is a wrong bound everywhere, with nothing to disagree with it.
+
+    The whole mapping again — the two Likerts and the slider carrying their
+    ranges, and the two comment questions carrying none. Compared as `Decimal`
+    on both sides, since §3.2's half-hour step is exactly why the column is
+    numeric rather than integral.
+
+    **The mutation it kills:** a workload maximum of 24 or 168 instead of 40, a
+    step of 1 instead of 0.5, or a Likert seeded 0-5.
+    """
+    seeded(seeded_demo)
+    questions = require_table(metadata_tables, QUESTIONS)
+    require_columns(
+        questions, (QUESTION_MINIMUM_COLUMN, QUESTION_MAXIMUM_COLUMN, QUESTION_STEP_COLUMN)
+    )
+    _, rows = seeded_question_set(demo_database, metadata_tables)
+
+    found = [
+        (
+            row[QUESTION_POSITION_COLUMN],
+            row[QUESTION_MINIMUM_COLUMN],
+            row[QUESTION_MAXIMUM_COLUMN],
+            row[QUESTION_STEP_COLUMN],
+        )
+        for row in rows
+    ]
+    expected = [
+        (item.position, *(item.bounds if item.bounds is not None else (None, None, None)))
+        for item in SPEC_3_2_V1
+    ]
+    assert found == expected, (
+        f"The seeded numeric bounds are {found} as (position, minimum, maximum, step); SPEC "
+        f"§3.2's are {expected}. The section gives the two ratings a Likert 1-5 and the workload "
+        "question a 'range 0-40, 0.5-hour steps'. E2-05 deliberately puts no range check on "
+        "`answer` (ADR 0110), so these three columns are the only place the ranges are written "
+        "down — E2-08 validates against them and E2-10 renders the slider from them, and there "
+        "is nothing left for a wrong value here to disagree with."
+    )
+
+
+def test_a_second_seed_run_leaves_the_question_set_exactly_as_it_was(
+    seeded_demo: Any, second_seed: SecondSeed, metadata_tables: dict[str, Any]
+) -> None:
+    """E2-05 criterion 3, second half: "running the seed twice changes nothing".
+
+    Scoped to `question_set` and `question` rather than to the whole database,
+    which `test_running_the_seed_a_second_time_leaves_the_same_rows` already
+    compares. That test would go red too, and this one is what says the two new
+    tables are the reason: a developer running `make seed` after a schema change
+    should not be reading a wall of labels to find out that the question set
+    doubled.
+
+    **The non-vacuity guard is the whole reason this is not a duplicate of the
+    generic test.** Two empty tables have the same rows before and after, so
+    this would pass most convincingly against a seed whose question-set loader
+    was never wired into `seed()` — `docs/MISTAKES.md` entry 3 in its purest
+    form, and the exact state the first run's tests above are about. So the
+    before-state is required to hold the five.
+
+    **What a label is, and what it deliberately does not pin**, is written on
+    `row_label` above: a row is compared by its values and by the rows its keys
+    point at, never by a uuid, because E2-05 does not say whether a second run
+    re-uses the rows it finds or reloads them and both are idempotent in the
+    sense the criterion means.
+
+    **The mutation it kills:** an unconditional insert in the new loader, which
+    on the second run either raises on the version's unique constraint — caught
+    by `test_running_the_seed_a_second_time_completes_without_a_constraint_violation`
+    — or, where that constraint is missing, silently writes a second v1 set and
+    five more questions, which this catches. **The near miss it tolerates:** a
+    loader that matches the set and rewrites the questions' text to the same
+    values, which is idempotent in the sense the criterion means.
+    """
+    seeded(seeded_demo)
+    require_table(metadata_tables, QUESTION_SETS)
+    require_table(metadata_tables, QUESTIONS)
+
+    before = labelled(metadata_tables, second_seed.before)
+    after = labelled(metadata_tables, second_seed.after)
+
+    counts_before = counted(second_seed.before)
+    assert counts_before.get(QUESTION_SETS) and counts_before.get(QUESTIONS) == len(SPEC_3_2_V1), (
+        f"Before the second run the database held {counts_before.get(QUESTION_SETS)} question "
+        f"sets and {counts_before.get(QUESTIONS)} questions, and E2-05's first run writes one set "
+        f"and {len(SPEC_3_2_V1)} questions. Over empty tables 'the same rows afterwards' compares "
+        "nothing, so this would pass against a `seed_question_set` that was written and never "
+        "wired into `seed()` — which is the defect the tests above this one are about."
+    )
+
+    for name in (QUESTION_SETS, QUESTIONS):
+        assert sorted(after.get(name, [])) == sorted(before.get(name, [])), (
+            f"A second seed run changed `{name}`.\n"
+            f"Gone: {sorted(set(before.get(name, [])) - set(after.get(name, [])))[:5]}\n"
+            f"Arrived: {sorted(set(after.get(name, [])) - set(before.get(name, [])))[:5]}\n"
+            "E2-05's third criterion is 'running the seed twice changes nothing'. A developer "
+            "runs `make seed` again after every schema change; a second copy of the v1 question "
+            "set is not a visible failure, it is a demo database where the survey has ten "
+            "questions and every response is scored against a set nothing chose."
+        )

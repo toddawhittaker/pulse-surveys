@@ -1,12 +1,27 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 7**
+**Caught: 8**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*6 instances recorded; the 4 most recent are below, newest first — except the
+*7 instances recorded; the 5 most recent are below, newest first — except the
 E0-18 PR 2 one, which sits further down beside the consequence it illustrates.
 The 2 earliest are in this file's git history and in the pull requests they cite.*
+
+*(Writing E2-05's tests (2026-09-01), found by asking this entry's question of
+a discovery walk's fixed point rather than of a fixture. E2-05's
+`response.user_id` puts `response` one foreign-key hop from `user` and
+`answer.response_id` puts `answer` two, so the `people_tables` walk in
+`test_identity_column_marker.py` reaches both the moment the migration lands —
+and the closed inventory `REACHED_TABLES_THAT_CARRY_NOTHING`, asserted by an
+`@invariant` test in a module the ticket does not otherwise edit, would go red
+with the repair on the read-only side of the wall. The two entries were added
+with pinned columns and reasons in the ticket's own tests-first round, and the
+two docstrings the change falsifies were corrected in the same pass, so the
+implementer never meets a red they are forbidden to fix. Counted as a catch:
+without this entry's sweep, the tests would have shipped green-looking and the
+red would have surfaced in the implementer's runner as an apparent defect in
+the migration.)*
 
 *(Writing E1-06's tests (2026-08-25), found by this entry's prescribed sweep —
 `grep -rn 'auth_token_url' tests/` before anything was written. E1-05 seeded the

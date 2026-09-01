@@ -13,7 +13,9 @@ version and model ID produced it (E0-13); §13 gives that module `summary` too,
 and E4 adds it. `clock` holds `clock_override`, the single row E2-04 lets a
 developer move the effective clock with — the one module here that §13 names no
 aggregate for, because a development scaffold is not part of the product's
-domain. The other aggregates §13 lists arrive with the tickets that need them.
+domain. `survey` holds question_set, question, response and answer — the
+weekly instrument and everything it collects (E2-05). The other aggregates §13 lists arrive with the tickets that need
+them.
 
 **Importing this package must import every model module.** `backend/migrations/
 env.py` autogenerates against `Base.metadata`, and a table whose module nobody
@@ -26,7 +28,7 @@ The module is imported for that side effect, so it is re-exported in `__all__`
 rather than left to look like an unused import that a later cleanup can delete.
 """
 
-from app.models import ai, audit, clock, identity, lti, org, term
+from app.models import ai, audit, clock, identity, lti, org, survey, term
 from app.models.base import NAMING_CONVENTION, AwareDateTime, Base, UuidPrimaryKey
 
 __all__ = [
@@ -40,5 +42,6 @@ __all__ = [
     "identity",
     "lti",
     "org",
+    "survey",
     "term",
 ]

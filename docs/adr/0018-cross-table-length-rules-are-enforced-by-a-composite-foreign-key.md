@@ -165,10 +165,23 @@ repairs nothing.
 matching every containment key in `app/models/org.py`). Deliberate: losing a term
 would silently lose its weeks and every window keyed to them.
 
-**A third such rule should use the same mechanism.** `survey_window` has one
-available and does not take it: nothing yet stops a window pairing a section in
-one term with a week in another. It would need `UNIQUE (id, term_id)` on both
-`section` and `week` and a `term_id` on `survey_window`, which is a second index
-on `section` for a table E2 has not started filling. Deferred to E2 with the
-scheduling logic, when the rows exist to protect, and named here so the omission
-is a decision rather than an oversight.
+**A third such rule should use the same mechanism, and E2-05 took it.** This
+paragraph used to say that `survey_window` had one available and did not take it,
+and deferred it "to E2 with the scheduling logic". That is no longer true.
+`survey_window` carries a non-nullable `term_id`, `section` and `week` each carry
+`UNIQUE (id, term_id)`, and the window's two references are composite foreign
+keys into those uniques — so a window pairing a section in one term with a week
+in another is refused by one limb or the other, and
+`tests/integration/test_a_survey_window_names_one_terms_section_and_week.py`
+attempts it through each limb separately.
+
+The mechanism is exactly the one described above for `week` and
+`start_letter_map`, with two differences worth naming. Neither limb carries an
+`ON UPDATE` action: the value carried here is the term itself rather than a copy
+of the term's length, and a section or a week moved to another term under an open
+window is a change to refuse rather than one to follow. And `term_id` is
+`NOT NULL` because Postgres evaluates a composite foreign key under `MATCH
+SIMPLE`, which skips the check entirely when any key column is null — a nullable
+column would be a documented way around the rule. The cost this paragraph priced,
+a second unique index on `section`, was paid; the rows the rule protects arrive
+with E2-06.

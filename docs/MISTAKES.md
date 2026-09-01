@@ -204,7 +204,7 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 8** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 17. An unqualified table name let the caller choose which table a guard read
 
@@ -284,7 +284,7 @@ file and check the status, or run the gate bare.
 
 ## 24. A test asserted a property no implementation could satisfy
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/24-a-test-asserted-a-property-no-implementation-could-satisfy.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/24-a-test-asserted-a-property-no-implementation-could-satisfy.md)
 
 ## 25. Two lockfiles resolved the same package to two versions
 
