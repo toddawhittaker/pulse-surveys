@@ -137,6 +137,57 @@ INSERT INTO public.{PRESERVED_TABLE}
 SELECT id, {CONTEXT_ID_COLUMN}, {DEPLOYMENT_COLUMN} FROM public.section;
 """
 
+# Stop the upgrade if a preserved binding points at a registration that has gone.
+#
+# **What this is about** (E2-03, from the E1 boundary review's carried findings).
+# An operator downgrades below this revision, deletes an `lti_deployment` row —
+# which the older schema permits, because the foreign key below is one of the
+# things the downgrade drops — and upgrades again. The restore then repoints
+# those sections at a deployment that is not there, and the failure the operator
+# is handed is the foreign key two statements down saying a constraint was
+# violated: a message that names a constraint, names neither table, and gives no
+# hint that the fix is to put the registration back and run the upgrade again.
+#
+# **The outcome was already right and does not change.** The `RAISE` aborts the
+# same transaction the constraint violation aborted, so nothing is stamped and
+# every preserved row survives for the retry. Only the message changes — which is
+# the whole of the finding.
+#
+# It runs **before** the restore rather than inside it, so the refusal is reached
+# with the sections still holding what the downgrade left them and the preserved
+# table still whole. `to_regclass` answers NULL rather than raising on a database
+# that never went down, which is what makes the first check a branch and not an
+# error, exactly as in the restore below.
+REFUSE_A_RESTORE_ONTO_A_MISSING_REGISTRATION = f"""
+DO $$
+DECLARE
+    stranded bigint;
+BEGIN
+    IF to_regclass('public.{PRESERVED_TABLE}') IS NULL THEN
+        RETURN;
+    END IF;
+
+    SELECT count(*) INTO stranded
+      FROM public.{PRESERVED_TABLE} AS kept
+     WHERE NOT EXISTS (
+               SELECT 1 FROM public.lti_deployment AS registered
+                WHERE registered.id = kept.{DEPLOYMENT_COLUMN}
+           );
+    IF stranded > 0 THEN
+        RAISE EXCEPTION
+            'E2-03: % preserved binding(s) in {PRESERVED_TABLE} point at an lti_deployment '
+            'row that is not in this database. Restoring them would bind those sections to a '
+            'registration that no longer exists, and the foreign key added below would then '
+            'refuse the upgrade with a message naming neither table. Re-register the platform '
+            'those sections came from, or restore the deleted lti_deployment row under the id '
+            'the preserved rows carry, and run this upgrade again. Nothing here has been '
+            'changed: this refusal aborts the transaction the migration runs in, so every '
+            '{PRESERVED_TABLE} row is untouched and survives for that retry.', stranded;
+    END IF;
+END
+$$;
+"""
+
 # Give every section its preserved binding back, then take the table away.
 #
 # **One PL/pgSQL block, for `BIND_EXISTING_SECTIONS`'s reason**: `alembic upgrade
@@ -224,12 +275,20 @@ def upgrade() -> None:
     preserved gets it back first, so the backfill sees it as bound and invents
     nothing for it. On a database that has never been downgraded there is no
     preserved table, the restore returns, and this reads exactly as it did.
+
+    **The refusal comes before the restore**, and only for the one state the
+    restore cannot honour: a preserved binding whose registration was deleted
+    while the database stood below this revision. Left to run, the restore would
+    hand that dead reference to the foreign key created below, and the operator
+    would be told a constraint was violated rather than what to put back. See
+    `REFUSE_A_RESTORE_ONTO_A_MISSING_REGISTRATION`.
     """
     for kind in NEW_DEFECT_KINDS:
         op.execute(f"ALTER TYPE launch_defect_kind ADD VALUE IF NOT EXISTS '{kind}'")
 
     op.add_column("section", sa.Column(CONTEXT_ID_COLUMN, sa.Text(), nullable=True))
     op.add_column("section", sa.Column(DEPLOYMENT_COLUMN, sa.Uuid(), nullable=True))
+    op.execute(REFUSE_A_RESTORE_ONTO_A_MISSING_REGISTRATION)
     op.execute(RESTORE_PRESERVED_BINDINGS)
     op.execute(BIND_EXISTING_SECTIONS)
     op.alter_column("section", CONTEXT_ID_COLUMN, nullable=False)
