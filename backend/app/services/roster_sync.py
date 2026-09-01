@@ -68,7 +68,6 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
-from zoneinfo import ZoneInfo
 
 import requests
 from pylti1p3.exception import LtiServiceException
@@ -91,6 +90,7 @@ from app.models.lti import (
     refuse_invalid_fetched_address,
 )
 from app.models.org import Section
+from app.services import clock
 from app.services.authz import (
     LmsOwnedWriteRefused,
     WriteSanction,
@@ -400,12 +400,26 @@ def sync_section(
     if walked is None:
         return
     members, complete = walked
+    # The day this sync is running, in the institution's own calendar. SPEC §3.1
+    # makes every moment in this product a moment in the institution timezone and §8
+    # makes that "a deployment-level setting"; `started_on` and the fallback
+    # `ended_on` are Pulse's record of which *day* a member was first and last seen,
+    # so reading the server's clock instead is the defect deferred E1-10 item 2
+    # records against the launch path, written into a second module. E2-04 routes it
+    # through `app.services.clock` (ADR 0109), which reads that same zone and — on a
+    # developer's machine alone — the offset a `clock_override` row carries, so a
+    # late add can be driven by hand instead of waited for.
+    #
+    # **The two other clocks in this module stay real, deliberately.** The NRPS
+    # debounce window and the `nrps_call` log both read `datetime.now(UTC)`: they
+    # are protocol and observability instants, not calendar ones, and ADR 0109 lists
+    # them among the clocks the service does not touch.
     _ingest(
         session,
         section,
         platform.id,
         _deduplicated(members, section_id),
-        _today(settings),
+        clock.today(session, settings=settings),
         complete=complete,
     )
 
@@ -1309,19 +1323,6 @@ def _read_member(member: Mapping[str, Any]) -> _Member | None:
 # ---------------------------------------------------------------------------
 # What the roster means for the rows.
 # ---------------------------------------------------------------------------
-
-
-def _today(settings: Settings | None) -> date:
-    """The day this sync is running, in the institution's own calendar.
-
-    SPEC §3.1 makes every moment in this product a moment in the institution
-    timezone, and §8 makes that "a deployment-level setting". `started_on` and the
-    fallback `ended_on` are Pulse's record of which *day* a member was first and
-    last seen, so reading the server's clock instead is the defect deferred E1-10
-    item 2 records against the launch path, written into a second module.
-    """
-    configured = Settings() if settings is None else settings
-    return datetime.now(ZoneInfo(configured.institution_timezone)).date()
 
 
 def _ingest(

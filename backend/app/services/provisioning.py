@@ -23,7 +23,10 @@ wrong in the same way: a process whose `ENVIRONMENT` lives only in a `.env` file
 judged a development stack by a deployment's rules, and a launch in the hours
 either side of a term boundary landed in the neighbouring term. `Settings` is the
 one place either question is answered now, and `app.api.lti.launch` passes the
-instance it already has on `request.app.state.settings`.
+instance it already has on `request.app.state.settings`. E2-04 moved the second of
+the two one step further on: the day now comes from `app.services.clock`, which
+reads the institution timezone out of that same `Settings` and, on a developer's
+machine alone, adds the offset a `clock_override` row carries (ADR 0109).
 
 **A refusal here never fails the launch.** Every way a context can be unreadable
 ends in a `launch_defect` row and a return, and the person lands exactly as they
@@ -79,10 +82,8 @@ import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Final
 from uuid import UUID, uuid4
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
@@ -102,6 +103,7 @@ from app.models.lti import (
 )
 from app.models.org import Course, Prefix, Section
 from app.models.term import Term
+from app.services import clock
 from app.services.authz import (
     LmsOwnedWriteRefused,
     WriteSanction,
@@ -661,11 +663,18 @@ def _term_containing_the_launch_day(session: Session, settings: Settings) -> Ter
     §8 makes that a deployment-level setting, so a section's term is a fact about the
     institution's calendar rather than about the server's clock.
 
+    **And the day comes from `app.services.clock`** (E2-04, ADR 0109), which is the
+    one place this codebase asks what day it is for scheduling purposes. It reads
+    the institution's zone, so the paragraph above is unchanged; what it adds is
+    that a developer who has moved the clock provisions into the term they moved to.
+    `app.services.authz._enrolled_today` asks the same question through the same
+    service, so the two are one reading now rather than two copies to keep in step.
+
     The most recently started containing term wins if an administrator has
     configured two that overlap, which is a tie this schema permits and nothing else
     decides.
     """
-    today = datetime.now(ZoneInfo(settings.institution_timezone)).date()
+    today = clock.today(session, settings=settings)
     return session.scalars(
         select(Term)
         .where(Term.start_date <= today, Term.end_date >= today)
