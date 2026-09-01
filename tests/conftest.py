@@ -59,6 +59,9 @@ boundary: `metadata_tables` is asked for by both.
     deploys, moved here in E2-04 when a second module needed a broker.
   - `fixtures/clock.py` — E2-04: the `clock_override` row a test chose the values
     of, committed or not, and `Settings` built under an environment the test named.
+  - `fixtures/survey_windows.py` — E2-06: SPEC §3.1's Fall 2026 window calendar
+    written out by hand as UTC instants, and the term, weeks and cohort sections
+    a derivation is run over.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -86,4 +89,5 @@ pytest_plugins = (
     "fixtures.landing",
     "fixtures.celery_broker",
     "fixtures.clock",
+    "fixtures.survey_windows",
 )

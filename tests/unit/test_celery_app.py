@@ -360,13 +360,28 @@ SECTION_ROSTER_TASK_NAME = f"{TASKS_MODULE}.sync_section_roster"
 # beat last came up.
 ROSTER_SYNC_MINUTE = "0"
 
+# E2-06's entry: the survey-window reconciler, running
+# `app.jobs.tasks.derive_survey_windows` on `crontab(minute="30")` — that
+# ticket's work order, decision 5. It walks every section and derives the windows
+# its calendar implies, so a section that appeared mid-term gets its windows
+# without anybody running anything; staleness of up to an hour is accepted and
+# recorded in ADR 0111. Minute 30 because minute 0 is the roster sync's, and two
+# jobs that both walk every section in the institution are better apart.
+#
+# **The key this entry is filed under is not asserted, and that is deliberate.**
+# The work order settles the task, the module and the cadence and settles no name
+# for the schedule entry, so the entry is found by the task it runs. Pinning a key
+# here would be this test choosing an identifier the ticket left open.
+WINDOW_DERIVATION_TASK_NAME = f"{TASKS_MODULE}.derive_survey_windows"
+WINDOW_DERIVATION_MINUTE = "30"
 
-def test_the_beat_schedule_holds_exactly_the_two_entries_that_have_landed(
+
+def test_the_beat_schedule_holds_exactly_the_three_entries_that_have_landed(
     configured_env: dict[str, str],
     import_app_module: Callable[[str], ModuleType | None],
     celery_application_in: Callable[[ModuleType], Any],
 ) -> None:
-    """E1-08 landed the first real entry and E1-11 the second; this test is the record.
+    """E1-08 landed the first entry, E1-11 the second and E2-06 the third; this test is the record.
 
     **Rewritten by E1-08, per this test's own instruction at E0-03.** The
     original docstring: "This test is a record with a shelf life, and that is
@@ -382,15 +397,29 @@ def test_the_beat_schedule_holds_exactly_the_two_entries_that_have_landed(
     `app.jobs.tasks.sync_rosters` on `crontab(minute="0")` — that ticket's work
     order, D10 — because SPEC §7.3 pulls NRPS "on schedule and on launch
     (debounced)" and the scheduled half has no discovery of its own but the
-    stored roster address. The remaining jobs named at E0-03 stay out of scope:
-    window open/close is E2, Monday reports are E4, retention purges are E13.
-    If one of those has now landed too, this test is again the record that has
-    to change with it.
+    stored roster address.
 
-    **An equality rather than a superset, and E1-11 is what pays for that
-    choice.** Widening it to "contains these two" would let a third entry land
-    with no diff here, and an entry in this mapping is a job that runs against
-    every section in the institution on a cadence nobody at the keyboard sees.
+    **E2-06 is the third, and the instruction is being followed once more.** The
+    survey-window reconciler, running `app.jobs.tasks.derive_survey_windows` on
+    `crontab(minute="30")`, which walks every section and derives the windows its
+    calendar implies. It exists because the derivation has to reach a section that
+    appears in the middle of a term — a launch or a roster sync creates one at any
+    hour — and E2-06 deliberately does not hook the writer into those flows, which
+    would put its diff inside E2-02's ingestion surface. ADR 0111 records the
+    choice and the staleness it accepts. Of the jobs E0-03 named, Monday reports
+    are still E4's and retention purges still E13's; if one of those has now landed
+    too, this test is again the record that has to change with it.
+
+    **An equality rather than a superset, and E1-11 paid for that choice while
+    E2-06 pays for it again.** Widening it to "contains these" would let a fourth
+    entry land with no diff here, and an entry in this mapping is a job that runs
+    against every section in the institution on a cadence nobody at the keyboard
+    sees. Being made to edit this test is the whole point of the equality.
+
+    **The third entry is found by its task and not by its key**, because E2-06's
+    work order settles the task name, the module and the cadence and settles no
+    name for the schedule key. Asserting a key here would pin an identifier the
+    ticket leaves open; asserting the task is asserting what the ticket says.
 
     The name-and-task assertion is the strong half of the pair and is not
     left to stand on its own: a module that does not exist produces an empty
@@ -407,19 +436,28 @@ def test_the_beat_schedule_holds_exactly_the_two_entries_that_have_landed(
     application = require_application(import_app_module, celery_application_in)
     entries = dict(application.conf.beat_schedule or {})
 
-    assert set(entries) == {PURGE_NONCES_SCHEDULE_KEY, ROSTER_SYNC_SCHEDULE_KEY}, (
-        f"The beat schedule declares {sorted(entries)}, not exactly "
-        f"{sorted({PURGE_NONCES_SCHEDULE_KEY, ROSTER_SYNC_SCHEDULE_KEY})}. E1-08 landed the first "
-        "real entry — the daily purge of the launch replay ledger, ADR 0089 — and E1-11 the "
-        "second, the hourly roster sync SPEC §7.3 asks for. No other ticket has landed one: "
-        "window scheduling is E2, reports are E4, retention is E13. If one of those has now "
-        "landed too, this test is again the record that has to change with it — say which ticket "
-        "owns the new entry and assert what it is, rather than widening this equality to a "
-        "superset check."
-    )
-
     def member(entry: Any, name: str) -> Any:
         return entry.get(name) if isinstance(entry, dict) else getattr(entry, name, None)
+
+    tasks = sorted(str(member(entry, "task")) for entry in entries.values())
+    expected_tasks = sorted(
+        {PURGE_NONCES_TASK_NAME, ROSTER_SYNC_TASK_NAME, WINDOW_DERIVATION_TASK_NAME}
+    )
+    assert tasks == expected_tasks, (
+        f"The beat schedule runs {tasks}, not exactly {expected_tasks} — its keys are "
+        f"{sorted(entries)}. E1-08 landed the daily purge of the launch replay ledger (ADR 0089), "
+        "E1-11 the hourly roster sync SPEC §7.3 asks for, and E2-06 the hourly survey-window "
+        "reconciler that reaches a section which appeared mid-term. No other ticket has landed "
+        "one: reports are E4, retention is E13. If one of those has now landed too, this test is "
+        "again the record that has to change with it — say which ticket owns the new entry and "
+        "assert what it is, rather than widening this equality to a superset check."
+    )
+
+    assert {PURGE_NONCES_SCHEDULE_KEY, ROSTER_SYNC_SCHEDULE_KEY} <= set(entries), (
+        f"The beat schedule declares {sorted(entries)} and the two entries that landed before "
+        f"E2-06 are filed under {sorted({PURGE_NONCES_SCHEDULE_KEY, ROSTER_SYNC_SCHEDULE_KEY})}. "
+        "Those two keys are E1-08's and E1-11's own and are not E2-06's to rename."
+    )
 
     entry = entries[PURGE_NONCES_SCHEDULE_KEY]
     task = member(entry, "task")
@@ -451,6 +489,24 @@ def test_the_beat_schedule_holds_exactly_the_two_entries_that_have_landed(
         "same schedule: it drifts with every restart, so which minute of the hour an institution's "
         "rosters are pulled in depends on when beat last came up. `crontab.minute` is the set of "
         "minutes an entry fires on, so this reads the schedule rather than its repr."
+    )
+
+    derivations = [
+        entry for entry in entries.values() if member(entry, "task") == WINDOW_DERIVATION_TASK_NAME
+    ]
+    assert len(derivations) == 1, (
+        f"{len(derivations)} beat entries run {WINDOW_DERIVATION_TASK_NAME!r}; the schedule holds "
+        f"{sorted(entries)}. E2-06 lands one hourly reconciler, and two entries running it would "
+        "walk every section in the institution twice an hour."
+    )
+    derivation_schedule = member(derivations[0], "schedule")
+    assert getattr(derivation_schedule, "minute", None) == {int(WINDOW_DERIVATION_MINUTE)}, (
+        f"The survey-window reconciler is scheduled as {derivation_schedule!r}. E2-06's work order "
+        f'settles `crontab(minute="{WINDOW_DERIVATION_MINUTE}")` — minute 30 because minute 0 is '
+        "the roster sync's, and two jobs that each walk every section in the institution are "
+        "better an hour apart than on the same tick. A `timedelta(hours=1)` is not the same "
+        "schedule either: it drifts with every restart, so which minute a section's windows are "
+        "reconciled at depends on when beat last came up."
     )
 
 
