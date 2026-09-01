@@ -35,6 +35,15 @@ ignored the row entirely, and no tolerance a test could choose would tell the tw
 apart (`docs/MISTAKES.md` entry 30). Five years apart, a sixty-second tolerance
 is generous to a slow container and still cannot admit the wrong answer.
 
+**The last section is about the table rather than the service**, and it was added
+after the mutation battery reported the gap it closes. `clock_override` holds at
+most one row by a unique index over `(true)`, and every writer in this module
+reaches the table through `clock_overrides.set`, which deletes before it inserts —
+so no test had ever asked the database for a second row, and the index could be
+dropped from the model and the migration with the whole suite still green. The two
+cases there are the pair: a second insert while a row stands is refused, and
+delete-then-insert succeeds, which is the replace path `POST /dev/clock` uses.
+
 The `/dev` control that writes this row is
 `tests/integration/test_the_dev_console_sets_and_clears_the_clock.py`; its refusal
 outside development is `tests/unit/test_dev_clock_control_exposure.py`.
@@ -71,6 +80,20 @@ PRETEND_DAY_IN = {
     "Pacific/Niue": date(2031, 3, 13),  # UTC-11
 }
 PRETEND_DAY_IN_UTC = date(2031, 3, 14)
+
+# A second instant, for the two single-row cases at the foot of this module. A
+# different year again, so that "the replacement took" and "the old value was
+# written back" cannot be confused, and so that a refusal naming a duplicate is
+# certainly about the row's existence rather than about its value.
+ANOTHER_PRETEND_NOW = datetime(2033, 7, 9, 4, 15, tzinfo=UTC)
+
+# The single-row index, spelled by E2-04's work order:
+# `Index("uq_clock_override_one_row", text("(true)"), unique=True)`, the same
+# instrument `backend/app/models/org.py` uses to hold `institution` to one row.
+# Named here because the refusal below is required to name it: several integrity
+# rules on this table would raise the same exception class, and only this one is
+# the rule under test.
+SINGLE_ROW_INDEX = "uq_clock_override_one_row"
 
 # A zone to run the cases that are not about zones under. Named rather than left
 # to `.env.example`'s default, because a test that depends on the institution's
@@ -510,4 +533,162 @@ def test_the_override_moves_neither_now_nor_today_outside_development(
         f"today in {A_STATED_TIMEZONE} is one of {sorted(expected_days)} and the override's own "
         f"day is {PRETEND_DAY_IN_UTC}. The gate has to hold on both functions, not on the one "
         "somebody remembered."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The single-row index. Added after the mutation battery reported that nothing
+# in the suite killed it: every writer in this module reaches the table through
+# `clock_overrides.set`, which deletes before it inserts, so no test had ever
+# asked the database for a second row and the index could be dropped from the
+# model and the migration with the suite still green.
+# ---------------------------------------------------------------------------
+
+
+def insert_one_row(
+    session: Any, table: Any, *, pretend_now: datetime, anchored_at: datetime
+) -> Any:
+    """One `INSERT` into `clock_override`, with **no delete before it**.
+
+    This exists because `clock_overrides.set` cannot pose the question below. That
+    fixture replaces the override — delete, then insert — which is right for every
+    other case in this module and is precisely what makes it blind here: a writer
+    that clears the table first never meets the constraint, so a suite built only
+    out of it reports a single-row rule that nothing has ever tested. That is what
+    the battery found, and this raw insert is the repair.
+    """
+    from sqlalchemy import insert
+
+    return session.execute(
+        insert(table).values(**{PRETEND_NOW_COLUMN: pretend_now, ANCHORED_AT_COLUMN: anchored_at})
+    )
+
+
+def test_a_second_override_row_is_refused_by_the_database(
+    clock_overrides: Any, db_session: Any, clock_override_table: Any
+) -> None:
+    """Two override rows cannot exist: the database refuses the second one.
+
+    E2-04's work order settles the table as holding at most one row, enforced the
+    way `institution` enforces it — `Index("uq_clock_override_one_row",
+    text("(true)"), unique=True)`, a unique index over a constant expression, so
+    every row collides with every other. The whole clock service is written on
+    that: `now` reads *the* override, and two rows would make which instant the
+    product believes depend on which one a query happened to return first.
+
+    **The mutation this kills: the unique index dropped from the migration** (and
+    from the model beside it). Nothing else in this suite notices — every other
+    writer here goes through `clock_overrides.set`, which deletes before it
+    inserts, so the constraint is never approached and the rule ships as a
+    convention (`docs/MISTAKES.md` entry 2, and entry 9 on citing a guard nobody
+    has executed). The mutation battery is what found that, and this test is the
+    killer it lacked.
+
+    **Near misses it must not pass on.** A unique index on `id` alone — which the
+    primary key already gives — refuses nothing here, because the second row takes
+    a different key. A non-unique index on `(true)` refuses nothing either. Both
+    leave this test red while looking, in a migration diff, like an index over the
+    table. So the refusal is required to name `uq_clock_override_one_row`: any
+    integrity rule could raise `IntegrityError` on this statement — a `NOT NULL`, a
+    check — and only one of them is the rule under test.
+
+    **The transaction survives the refusal**, which is why the insert sits inside a
+    `begin_nested()` savepoint: a failed statement poisons the enclosing
+    transaction, and the assertion afterwards — that the first row is still there —
+    is both this test's proof that a row genuinely stood while the second was
+    attempted and its guard against passing over an empty table
+    (`docs/MISTAKES.md` entry 3).
+
+    **This test reads no process environment and states none.** Its subject is a
+    schema constraint, which holds in every environment; the `is_development` gate
+    is asserted in `test_the_override_moves_neither_now_nor_today_outside_development`
+    above. `docs/MISTAKES.md` entry 40 asks a test whose subject reads the
+    environment to state it, and this one does not.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    anchored = datetime.now(UTC)
+    clock_overrides.set(pretend_now=PRETEND_NOW, anchored_at=anchored)
+    assert len(clock_overrides.rows()) == 1, (
+        f"`clock_override` holds {clock_overrides.rows()} rather than the one row this test seeded, "
+        "so the insert below would not be a *second* row and the refusal it expects would be about "
+        "something else."
+    )
+
+    with pytest.raises(IntegrityError) as refused:
+        with db_session.begin_nested():
+            insert_one_row(
+                db_session,
+                clock_override_table,
+                pretend_now=ANOTHER_PRETEND_NOW,
+                anchored_at=anchored,
+            )
+
+    said = str(refused.value)
+    assert SINGLE_ROW_INDEX in said, (
+        f"A second `clock_override` row was refused, and not by the single-row index: the database "
+        f"said {said!r}, which does not name `{SINGLE_ROW_INDEX}`. Any integrity rule on this table "
+        "raises `IntegrityError` on this statement — a `NOT NULL` on either column would — and only "
+        "the unique index over `(true)` is the rule this test is about. A refusal by something else "
+        "would leave the index droppable with this test still green, which is the state the "
+        "mutation battery found."
+    )
+
+    standing = clock_overrides.rows()
+    assert len(standing) == 1 and standing[0][PRETEND_NOW_COLUMN] == PRETEND_NOW, (
+        f"After the refusal `clock_override` holds {standing}; it should hold the single row seeded "
+        f"at the top, pretending it is {PRETEND_NOW!r}. An empty table here means the refusal above "
+        "was raised over nothing — a second row cannot be refused where there is no first one — and "
+        "a second row means the index did not hold after all."
+    )
+
+
+def test_replacing_the_override_by_deleting_first_succeeds(
+    clock_overrides: Any, db_session: Any, clock_override_table: Any
+) -> None:
+    """The accepted direction: delete then insert, which is what `POST /dev/clock` does.
+
+    The paired opposite of the test above, and neither is worth anything alone. A
+    single-row index that refused a second row would also refuse a legitimate
+    *replacement* if the control were written as an insert over a table it had not
+    cleared — and a developer who set a pretend now twice would meet a 500 on the
+    second attempt. E2-04's work order settles the route as "sets **or replaces**
+    the single row", so the replace path has to work, and this is the test that
+    says so.
+
+    **The mutations this kills**: an index or constraint written so that no second
+    write ever succeeds — a deferred constraint that fires at commit and defeats
+    delete-then-insert in one transaction, or an exclusion constraint reaching
+    across the delete; and, in the other direction, a `set` path that silently
+    leaves both rows, which the row count here would catch.
+
+    **The instants differ between the two writes**, which is what makes this a
+    replacement rather than an idempotent no-op: the row read back must carry the
+    *second* one. A delete-then-insert that wrote the old value back would satisfy
+    a count-only assertion and would mean the control never changed anything.
+
+    Read against the same session that wrote, without commit, because the subject
+    is the schema's behaviour inside one transaction; that the tool's own committed
+    write is visible to another connection is
+    `tests/integration/test_the_dev_console_sets_and_clears_the_clock.py`'s.
+    """
+    anchored = datetime.now(UTC)
+    clock_overrides.set(pretend_now=PRETEND_NOW, anchored_at=anchored)
+    assert clock_overrides.rows()[0][PRETEND_NOW_COLUMN] == PRETEND_NOW, (
+        f"The seeded row carries {clock_overrides.rows()} rather than {PRETEND_NOW!r}, so the "
+        "replacement below would not be replacing the value this test thinks it is."
+    )
+
+    clock_overrides.set(pretend_now=ANOTHER_PRETEND_NOW, anchored_at=anchored)
+
+    replaced = clock_overrides.rows()
+    assert len(replaced) == 1, (
+        f"After a replacement `clock_override` holds {replaced}. Setting a pretend now twice leaves "
+        "one row: the control replaces the override rather than accumulating them, and the "
+        "single-row index is what makes that the only possible outcome."
+    )
+    assert replaced[0][PRETEND_NOW_COLUMN] == ANOTHER_PRETEND_NOW, (
+        f"After a replacement the row still pretends it is {replaced[0][PRETEND_NOW_COLUMN]!r}; the "
+        f"second write asked for {ANOTHER_PRETEND_NOW!r}. A replace that kept the old value is a "
+        "control a developer can use exactly once per stack."
     )
