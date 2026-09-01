@@ -13,9 +13,15 @@ UPDATE on that column, and nothing in the failure says a downgrade caused it.
 Launch-triggered ingestion and refresh die; the hourly sync survives, because
 the roster address column round-trips intact.
 
-**The fix shape is already in this tree** — `e2c94b6a1f70`'s downgrade preserves
-into a scratch table and its upgrade restores from it — and this module is what
-says the round trip is the identity the docstring claims.
+**The fix shape is inside the revision itself** — `b8c41f7d2e05`'s downgrade
+preserves the pair it is about to drop and its upgrade restores it — and this
+module is what says the round trip is the identity the docstring claims. The
+sentence here used to offer an earlier revision as the precedent for that shape,
+and the E1 boundary record corrections struck that claim in the same merge that
+made it: the revision it named does no data migration at all, and its own
+docstring says so. It names no precedent now, and
+`tests/unit/test_no_test_cites_the_struck_preserve_precedent.py` is what keeps
+every module here from acquiring one again (E2-03, `docs/MISTAKES.md` entry 1).
 
 **Everything is asserted per row, keyed by the section's own primary key.** Two
 sections are seeded, carrying distinct values in *both* columns, and the
