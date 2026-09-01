@@ -1,0 +1,54 @@
+-- What the application may do to the development clock override — ticket E2-04,
+-- SPEC §3.1, ADR 0001, ADR 0009, ADR 0109.
+--
+-- E2-04 holds the development clock in public.clock_override: one row carrying a
+-- pretended instant and the real instant it was anchored at. The tool and the
+-- Celery worker both run on the connection pulse_app holds, and until this file it
+-- held nothing here — so the `/dev` control's write and the clock service's read
+-- would be refused by Postgres with 42501 rather than by anything the ticket is
+-- about.
+--
+-- **SELECT, INSERT and DELETE, and nothing else.**
+--
+--   - SELECT is `app.services.clock.now`, on every scheduling and visibility read
+--     a development stack makes.
+--   - INSERT is `POST /dev/clock`, setting the pretended instant.
+--   - DELETE is `POST /dev/clock/clear`, and also the first half of the set: the
+--     table holds at most one row by a unique index over `(true)`, so the control
+--     deletes before it inserts rather than meeting that index.
+--   - UPDATE stays withheld. The pair of instants is written together and never
+--     edited — an anchor rewritten on its own would leave a clock running at the
+--     right rate from the wrong origin, which no single reading of `now` can
+--     detect. The verb withheld is the assertion.
+--
+-- **A base table rather than a read view**, the same exception the grants before
+-- it take (`lti_registration_grants_v001.sql`, `lti_launch_nonce_grants_v001.sql`,
+-- `lti_launch_state_grants_v001.sql`). SPEC §4.1 routes an *identity* read path
+-- through a view; this table holds two timestamps and no person, and a view over it
+-- would select both its columns and exist only to satisfy the shape of the rule.
+--
+-- **This widens what pulse_app can reach, and it is meant to be visible.**
+-- `RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py` is
+-- the hand-written record every base-table grant is compared against as an
+-- equality, so these three verbs have to be recorded there in the same change. That
+-- edit is on the far side of the test wall for E2-04's implementer, and is raised
+-- as `docs/disputes/E2-04-02.md`.
+--
+-- **pulse_care is granted nothing.** The Care queue reaches a threat comment and
+-- the audited reveal (ADR 0001, SPEC §6.2); a development scaffold is no part of
+-- that surface.
+--
+-- **The row is inert outside development, and no grant here says so.** Nothing in
+-- the schema can: `app.services.clock` refuses to read the table unless
+-- `app.config.is_development`, which is where E2-04's criterion 3 puts that gate.
+-- A deployment holding a stray row issues no statement about it at all.
+--
+-- **USAGE ON SCHEMA public is not granted again here.** identity_grants_v001.sql
+-- grants it to pulse_app and identity_grants_v002.sql restates it; an ACL entry
+-- records no history, so a third grant would be indistinguishable from those and
+-- any matching revoke would remove all of them.
+--
+-- **The downgrade drops the table** (this revision creates it), so there is
+-- nothing left to revoke — the privileges go with the relation.
+
+GRANT SELECT, INSERT, DELETE ON public.clock_override TO pulse_app;

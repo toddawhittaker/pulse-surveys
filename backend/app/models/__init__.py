@@ -10,8 +10,10 @@ supervision graph, role_assignment and lead_faculty_mapping (E0-09), which SPEC
 Care reveal cannot return a name until its record is committed (ADR 0071). `ai` holds
 classification, the append-only record of what a model answered and which prompt
 version and model ID produced it (E0-13); §13 gives that module `summary` too,
-and E4 adds it. The other aggregates §13 lists arrive with the tickets that need
-them.
+and E4 adds it. `clock` holds `clock_override`, the single row E2-04 lets a
+developer move the effective clock with — the one module here that §13 names no
+aggregate for, because a development scaffold is not part of the product's
+domain. The other aggregates §13 lists arrive with the tickets that need them.
 
 **Importing this package must import every model module.** `backend/migrations/
 env.py` autogenerates against `Base.metadata`, and a table whose module nobody
@@ -24,7 +26,7 @@ The module is imported for that side effect, so it is re-exported in `__all__`
 rather than left to look like an unused import that a later cleanup can delete.
 """
 
-from app.models import ai, audit, identity, lti, org, term
+from app.models import ai, audit, clock, identity, lti, org, term
 from app.models.base import NAMING_CONVENTION, AwareDateTime, Base, UuidPrimaryKey
 
 __all__ = [
@@ -34,6 +36,7 @@ __all__ = [
     "UuidPrimaryKey",
     "ai",
     "audit",
+    "clock",
     "identity",
     "lti",
     "org",
