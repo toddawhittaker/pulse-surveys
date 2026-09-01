@@ -59,6 +59,10 @@ boundary: `metadata_tables` is asked for by both.
     deploys, moved here in E2-04 when a second module needed a broker.
   - `fixtures/clock.py` — E2-04: the `clock_override` row a test chose the values
     of, committed or not, and `Settings` built under an environment the test named.
+  - `fixtures/mock_ai.py` — E2-07's mock AI provider, in process and on a loopback
+    socket, plus the non-mock provider a deployment-environment test needs.
+  - `fixtures/ai_tasks.py` — E2-07: the comment-validity task, found rather than
+    named, and ADR 0056's failure classes looked up by name.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -86,4 +90,6 @@ pytest_plugins = (
     "fixtures.landing",
     "fixtures.celery_broker",
     "fixtures.clock",
+    "fixtures.mock_ai",
+    "fixtures.ai_tasks",
 )

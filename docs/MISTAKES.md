@@ -204,7 +204,7 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 8** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 9** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 17. An unqualified table name let the caller choose which table a guard read
 
@@ -335,7 +335,7 @@ printed.
 
 ## 40. The suite ran under an environment nobody chose, and it was a different one in CI
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/40-the-suite-ran-under-an-environment-nobody-chose.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/40-the-suite-ran-under-an-environment-nobody-chose.md)
 
 **Rule.** A test whose subject reads the process environment states the value it
 runs under, in its own fixture chain. Anything a fixture runs in process brings

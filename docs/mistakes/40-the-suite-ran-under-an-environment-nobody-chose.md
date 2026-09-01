@@ -1,10 +1,21 @@
 # Entry 40. The suite ran under an environment nobody chose, and it was a different one in CI
 
-**Caught: 0**
+**Caught: 1**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*1 instance recorded.*
+*2 instances recorded; newest first.*
+
+*(**A catch**, writing E2-07's tests, 2026-09-01. The ticket points
+`.env.example`'s `AI_PROVIDER_BASE_URL` at the in-stack mock, and a deployment
+refuses that value by two new rules. Acting on this entry, every new
+environment-sensitive test states the environment it runs under in its own
+fixture chain rather than inheriting whatever the process held — and stating it
+is what exposed that roughly twenty-seven existing modules build `Settings`
+under a non-development environment and would have stopped in their own setup
+on a rule that is not their subject. The repair went into the two shared
+fixtures those modules already request, in the same tests-first round, instead
+of surfacing later as unexplained reds in CI's differently-ordered workers.)*
 
 *(E1-10, found by CI on PR #105 after three verified build rounds, two mutation
 batteries, and repeated green local runs of the full suite.
