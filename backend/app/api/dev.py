@@ -41,6 +41,18 @@ invariant 4 puts every count behind. `tests/integration/
 test_the_dev_console_names_nobody.py` is the durable assertion of that rule, over
 a section a roster sync has really filled.
 
+**It grows a clock control in E2-04**, and that is the one thing here that writes
+anything. SPEC §3.1 makes every survey window a wall-clock time in the institution's
+timezone, and E2 has to be drivable by hand, so the console shows the effective
+clock and offers two `POST` routes — `/dev/clock` sets a pretend now and
+`/dev/clock/clear` gives the real one back. Both carry the same in-handler gate this
+page does, and both are stricter about the method probe: an unregistered method
+answers `404` here rather than the `405 Allow:` the console itself discloses (ADR
+0079, ADR 0087), because the row they write moves the clock every scheduling and
+visibility read in the product goes through. `app.services.clock` is what applies
+it, and only where `is_development`; ADR 0109 carries the design and the list of
+clocks it deliberately does not touch.
+
 **Every interpolated value goes through `html.escape` with `quote=True`.** The
 subjects and labels come from the mock provider's roster, which is trusted, but
 they are escaped anyway — a page that escapes only the values it distrusts is one
@@ -49,27 +61,35 @@ the `<style>` block, which carries no interpolation at all.
 """
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from html import escape
-from typing import Any
-from urllib.parse import urlencode
+from typing import Any, NoReturn
+from urllib.parse import parse_qs, urlencode
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
-from sqlalchemy import select, text
+from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import delete, insert, select, text
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.api.auth import LOGIN_PATH
 from app.config import Settings, is_development
 from app.db import get_session
 from app.lti.registration import launcher_origins
+from app.models.clock import ClockOverride
 from app.models.org import Course, Prefix, Section
+from app.services import clock
 
 router = APIRouter(tags=["dev"])
 
 DEV_CONSOLE_PATH = "/dev"
+
+# E2-04's clock control: the two routes the section below posts to.
+DEV_CLOCK_SET_PATH = "/dev/clock"
+DEV_CLOCK_CLEAR_PATH = "/dev/clock/clear"
 
 # Where the console reads the roster from. The mock provider publishes its
 # registration and its seed together (ADR 0058) under this path on the issuer's
@@ -82,6 +102,20 @@ MOCK_REGISTRATION_PATH = "/mock/registration"
 ROSTER_TIMEOUT_SECONDS = 5.0
 
 NOT_FOUND = 404
+BAD_REQUEST = 400
+
+# The answer both clock controls give on success: 303, so the browser follows with
+# a GET and a reload does not re-post the form.
+SEE_OTHER = 303
+
+# The methods the clock paths answer 404 to. `POST` is the only verb either route
+# serves, and everything else is answered here rather than left to the router —
+# which would say `405 Allow: POST` and tell an unauthenticated caller on a
+# deployment that this build carries a clock control. That is a stricter gate than
+# the console's own measured `405` (ADR 0079, ADR 0087, and
+# `tests/unit/test_dev_console_exposure.py` pins it there), deliberately: a page is
+# a thing to read and a control is a thing to attack.
+METHODS_THE_CLOCK_CONTROL_REFUSES = ["GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
 CONSOLE_TITLE = "Pulse Surveys — developer test console"
 
@@ -102,6 +136,32 @@ SECTION_LENGTH_WEEKS_TESTID = "section-length-weeks"
 SECTION_MODALITY_TESTID = "section-modality"
 SECTION_ENROLLED_COUNT_TESTID = "section-enrolled-count"
 SECTION_ROSTER_ADDRESS_TESTID = "section-roster-address-stored"
+
+# The clock section's `data-testid` vocabulary (E2-04). Spelled once here, and in
+# `tests/e2e/dev-clock.spec.ts` and the two Python suites that drive these routes;
+# a rename is those four places.
+CLOCK_EFFECTIVE_NOW_TESTID = "clock-effective-now"
+CLOCK_OVERRIDE_STATE_TESTID = "clock-override-state"
+CLOCK_PRETEND_NOW_TESTID = "clock-pretend-now"
+CLOCK_SET_TESTID = "clock-set"
+CLOCK_CLEAR_TESTID = "clock-clear"
+
+# The form field `POST /dev/clock` reads: an HTML `datetime-local` value — a wall
+# time with no offset, minute precision — read in the institution's timezone.
+PRETEND_NOW_FIELD = "pretend_now"
+
+# How the page writes an instant, and how the field is pre-filled. ISO 8601 in the
+# institution's own timezone, offset included: SPEC §3.1 makes that zone the one
+# every window is expressed in, so it is the zone a developer is thinking in, and
+# the offset is what stops the reading being ambiguous on a page that also shows
+# dates. Seconds are shown because the whole point of the section is that an
+# overridden clock is still running.
+PRETEND_NOW_INPUT_FORMAT = "%Y-%m-%dT%H:%M"
+
+# What the state readout says. Two constants, because its whole job is to tell the
+# two states apart at a glance — and because a browser spec compares the cleared
+# reading against the one it took before it set anything.
+NO_OVERRIDE_STATE = "The clock is real: no override is set."
 
 # What the roster-address cell says. A yes or a no on
 # `lms_context_memberships_url IS NOT NULL` (SPEC §7.3's never-synced state), and
@@ -235,6 +295,16 @@ STYLE = """
       border-radius: 4px;
       color: #52525b;
     }
+    form.clock { display: inline-flex; gap: 0.5rem; margin: 0 0.75rem 0.5rem 0; }
+    form.clock input, form.clock button {
+      font: inherit;
+      padding: 0.35rem 0.6rem;
+      border-radius: 6px;
+      border: 1px solid #d4d4d8;
+      background: #ffffff;
+      color: inherit;
+    }
+    form.clock button { border-color: #0f766e; color: #0f766e; font-weight: 600; cursor: pointer; }
     .scroller { overflow-x: auto; }
     table { border-collapse: collapse; width: 100%; font-size: 0.8125rem; }
     th, td { text-align: left; padding: 0.35rem 0.6rem; white-space: nowrap; }
@@ -251,6 +321,8 @@ STYLE = """
       code { background: rgba(255, 255, 255, 0.08); color: #a1a1aa; }
       .banner { background: #451a03; border-color: #c2410c; color: #fed7aa; }
       .note { background: #450a0a; border-color: #b91c1c; color: #fecaca; }
+      form.clock input, form.clock button { background: #27272a; border-color: #3f3f46; }
+      form.clock button { border-color: #5eead4; color: #5eead4; }
       thead th { color: #a1a1aa; border-bottom-color: #3f3f46; }
       tbody tr + tr th, tbody tr + tr td { border-top-color: #27272a; }
     }
@@ -507,6 +579,81 @@ def sections_section(sections: list[ConsoleSection]) -> str:
     </div>"""
 
 
+def standing_override(session: Session) -> ClockOverride | None:
+    """The `clock_override` row, or `None` if the clock is real.
+
+    **Read here rather than through `app.services.clock`**, which answers what time
+    it is and not whether somebody moved it. Those are two questions, and the second
+    is this page's alone: the console exists to say that an overridden stack is not
+    a live one, and no other reader in the product has any business asking. Adding a
+    third function to the service for one page's readout would put a question with
+    one caller in the module every scheduling read goes through.
+
+    A direct read of a model in a router, which is what the sections table above
+    already does for `section`, `course` and `prefix`. `clock_override` holds two
+    timestamps and no person, so no view stands over it and none of SPEC §4.1's
+    read-path rules reach it.
+    """
+    return session.scalars(select(ClockOverride)).first()
+
+
+def clock_section(session: Session, settings: Settings) -> str:
+    """The effective clock, whether an override stands, and the two controls (E2-04).
+
+    **Beside the sections table on purpose.** That table shows derived dates, and a
+    stack whose clock has been moved shows them against a day that is not today; the
+    ticket's scope says to "show the effective clock beside it so an overridden stack
+    is never mistaken for a live one".
+
+    **Rendered in the institution's timezone, with the offset** — ISO 8601, e.g.
+    `2026-09-04T18:30:00-04:00`. SPEC §3.1 puts every window at a wall-clock time in
+    that zone, so it is the zone a developer setting one is thinking in, and the
+    offset is what keeps the reading unambiguous beside a table of dates. Seconds
+    are shown because the override is an offset and not a freeze: the point is
+    visible only if the clock is seen running.
+
+    **The field is pre-filled with the effective now** so that moving the clock by
+    an hour is an edit rather than a full datetime typed from nothing. Minute
+    precision, which is what an `<input type="datetime-local">` carries.
+    """
+    zone = ZoneInfo(settings.institution_timezone)
+    effective = clock.now(session, settings=settings).astimezone(zone)
+    override = standing_override(session)
+    if override is None:
+        state = NO_OVERRIDE_STATE
+    else:
+        state = (
+            "An override is in force: set to "
+            f"{override.pretend_now.astimezone(zone).isoformat(timespec='seconds')}, anchored at "
+            f"{override.anchored_at.astimezone(zone).isoformat(timespec='seconds')}."
+        )
+    return f"""    <h2>Clock</h2>
+    <p>
+      What this stack thinks the time is (SPEC §3.1, in {escape(settings.institution_timezone)}).
+      Setting a pretend now moves the clock for the tool and the worker alike, and it
+      keeps running from there — an offset, never a freeze.
+    </p>
+    <p>Effective now:
+      <code data-testid="{escape(CLOCK_EFFECTIVE_NOW_TESTID, quote=True)}"
+        >{escape(effective.isoformat(timespec="seconds"))}</code></p>
+    <p data-testid="{escape(CLOCK_OVERRIDE_STATE_TESTID, quote=True)}"
+      >{escape(state)}</p>
+    <form class="clock" method="post" action="{escape(DEV_CLOCK_SET_PATH, quote=True)}">
+      <input
+        data-testid="{escape(CLOCK_PRETEND_NOW_TESTID, quote=True)}"
+        type="datetime-local"
+        name="{escape(PRETEND_NOW_FIELD, quote=True)}"
+        value="{escape(effective.strftime(PRETEND_NOW_INPUT_FORMAT), quote=True)}"
+        required>
+      <button data-testid="{escape(CLOCK_SET_TESTID, quote=True)}" type="submit"
+        >Set the pretend now</button>
+    </form>
+    <form class="clock" method="post" action="{escape(DEV_CLOCK_CLEAR_PATH, quote=True)}">
+      <button data-testid="{escape(CLOCK_CLEAR_TESTID, quote=True)}" type="submit"
+        >Clear the override</button>
+    </form>"""
+
+
 @router.get(DEV_CONSOLE_PATH, summary="Development-only test console for both entry doors")
 def dev_console(request: Request, session: Session = Depends(get_session)) -> HTMLResponse:
     """Render the console, or `404` outside development.
@@ -533,5 +680,177 @@ def dev_console(request: Request, session: Session = Depends(get_session)) -> HT
     <p>Walk either of Pulse's two entry doors (SPEC §2) without typing URLs.</p>
 {web}
 {launcher_section(launcher_origins(session))}
+{clock_section(session, settings)}
 {sections_section(console_sections(session))}"""
     return HTMLResponse(page(body))
+
+
+@router.post(DEV_CLOCK_SET_PATH, summary="Development-only: move the clock to a pretend now")
+async def set_the_dev_clock(
+    request: Request, session: Session = Depends(get_session)
+) -> RedirectResponse:
+    """Replace the override row with the posted instant, or `404` outside development.
+
+    The gate is the same in-handler comparison the console carries, for the same
+    reason and one step more urgently: the row this writes moves the clock that
+    decides which survey window is open, which term a launch lands in and which
+    enrollments are live, and the console has no session and no CSRF token to put in
+    front of it. Outside development this route does not exist, to any method.
+
+    **The posted value is a wall time and the institution's zone is what supplies
+    the offset.** An `<input type="datetime-local">` sends `2031-03-14T10:30` and
+    nothing about a zone; SPEC §3.1 makes the institution's the zone every window is
+    expressed in, so a developer typing `18:30` to reach a Friday evening means
+    18:30 where the institution is. Reading it as UTC would put the stack four or
+    five hours from where they aimed it — enough to be on the wrong side of a
+    boundary and never enough to look obviously wrong.
+
+    **The anchor is the real instant this ran at**, and it is what makes the
+    override an offset rather than a freeze: `app.services.clock` adds the elapsed
+    real time to the pretended instant on every read. Storing the pretended instant
+    in both columns would give a clock running at the right rate from the wrong
+    origin, which no single reading can tell from a correct one.
+
+    **Asynchronous, because the body is read with `await`, and parsed by hand.**
+    Both of FastAPI's routes to a form field — a `Form()` parameter and
+    `request.form()` — need `python-multipart`, which is not in this project's
+    locked dependency closure; a development scaffold is no reason to add one, and
+    the body a browser sends here is `application/x-www-form-urlencoded`, which
+    `urllib.parse.parse_qs` reads in a line. The blocking database work then goes to
+    the threadpool, the way `app.main`'s framing middleware does its own.
+    """
+    settings: Settings = request.app.state.settings
+    if not is_development(settings):
+        raise HTTPException(status_code=NOT_FOUND)
+
+    posted = posted_field(await request.body(), PRETEND_NOW_FIELD)
+    if not posted:
+        raise HTTPException(
+            status_code=BAD_REQUEST,
+            detail=(
+                f"This control reads a `{PRETEND_NOW_FIELD}` field carrying an HTML "
+                "`datetime-local` value, e.g. `2031-03-14T10:30`."
+            ),
+        )
+    pretend_now = pretend_instant(posted, settings)
+    await run_in_threadpool(replace_the_override, session, pretend_now)
+    return RedirectResponse(DEV_CONSOLE_PATH, status_code=SEE_OTHER)
+
+
+@router.post(DEV_CLOCK_CLEAR_PATH, summary="Development-only: give the real clock back")
+def clear_the_dev_clock(
+    request: Request, session: Session = Depends(get_session)
+) -> RedirectResponse:
+    """Delete the override row, or `404` outside development.
+
+    Deleting the row rather than writing a zero offset: a row holding a zero offset
+    answers the same instants today and is a state nothing else in this product
+    knows how to read. Synchronous — it reads no body — so its one statement runs in
+    FastAPI's threadpool like the console's own reads.
+    """
+    settings: Settings = request.app.state.settings
+    if not is_development(settings):
+        raise HTTPException(status_code=NOT_FOUND)
+
+    session.execute(delete(ClockOverride))
+    session.commit()
+    return RedirectResponse(DEV_CONSOLE_PATH, status_code=SEE_OTHER)
+
+
+@router.api_route(
+    DEV_CLOCK_SET_PATH,
+    methods=METHODS_THE_CLOCK_CONTROL_REFUSES,
+    include_in_schema=False,
+    response_model=None,
+)
+@router.api_route(
+    DEV_CLOCK_CLEAR_PATH,
+    methods=METHODS_THE_CLOCK_CONTROL_REFUSES,
+    include_in_schema=False,
+    response_model=None,
+)
+def the_clock_control_answers_no_other_method() -> NoReturn:
+    """`404` to every method but `POST`, in every environment.
+
+    `response_model=None` because this returns nothing at all: FastAPI builds a
+    response model out of the return annotation, and `NoReturn` is not a type
+    anything can be serialised to.
+
+    Registered rather than left to the router, and that is the whole point of it: a
+    path a router knows and a method it does not answers `405 Allow: POST`, which
+    tells an unauthenticated caller on a deployment both that this build carries a
+    clock control and that it is switched off. The console beside it does disclose
+    exactly that (ADR 0079 measured it, ADR 0087 kept it, and
+    `tests/unit/test_dev_console_exposure.py` pins it), and these paths do not: a
+    page is a thing to read and a control is a thing to attack.
+
+    It answers 404 in development too. There is nothing to serve at either path but
+    the `POST`, and a second rule keyed on the environment would be a second gate to
+    keep right for no gain.
+    """
+    raise HTTPException(status_code=NOT_FOUND)
+
+
+def posted_field(body: bytes, name: str) -> str | None:
+    """One field out of an `application/x-www-form-urlencoded` body, or `None`.
+
+    The whole of this project's form parsing, and it is four lines because a
+    `<form method="post">` with text inputs sends exactly that encoding.
+    `python-multipart` — which both of FastAPI's form seams require — is not in the
+    locked dependency closure, and this page is not the reason to widen it.
+
+    Undecodable bytes are replaced rather than raised on: what follows judges the
+    value and answers `400` about it, and a caller who sent something that is not a
+    form should meet that answer rather than a 500 from the decoder. `parse_qs`
+    drops a blank value, so an empty field arrives here as `None` and is refused by
+    the caller like a missing one.
+    """
+    fields = parse_qs(body.decode("utf-8", errors="replace"))
+    values = fields.get(name)
+    return values[0] if values else None
+
+
+def pretend_instant(posted: str, settings: Settings) -> datetime:
+    """The posted wall time as an instant in the institution's timezone.
+
+    `datetime.fromisoformat` reads what a browser sends for `datetime-local`
+    (`2031-03-14T10:30`, and the seconds-bearing form some browsers send). A value
+    that already carries an offset is refused rather than reinterpreted: no
+    `datetime-local` control produces one, so it means the caller is not the form,
+    and silently replacing an offset somebody stated would move the clock somewhere
+    they did not ask for.
+    """
+    try:
+        wall = datetime.fromisoformat(posted)
+    except ValueError:
+        raise HTTPException(
+            status_code=BAD_REQUEST,
+            detail=(
+                f"`{posted}` is not an HTML `datetime-local` value. This control reads a wall "
+                "time such as `2031-03-14T10:30`, in the institution's timezone."
+            ),
+        ) from None
+    if wall.utcoffset() is not None:
+        raise HTTPException(
+            status_code=BAD_REQUEST,
+            detail=(
+                f"`{posted}` carries a UTC offset. An HTML `datetime-local` value is a wall time "
+                "with none, and this control reads it in the institution's timezone (SPEC §3.1)."
+            ),
+        )
+    return wall.replace(tzinfo=ZoneInfo(settings.institution_timezone))
+
+
+def replace_the_override(session: Session, pretend_now: datetime) -> None:
+    """Make this the single override row, anchored at the real instant now.
+
+    Delete then insert, rather than an upsert: the table holds at most one row by a
+    unique index over `(true)`, so a second insert would be refused by that index
+    rather than replacing anything. Both statements and the commit are one
+    transaction, so a stack is never briefly running on a clock nobody set.
+    """
+    session.execute(delete(ClockOverride))
+    session.execute(
+        insert(ClockOverride).values(pretend_now=pretend_now, anchored_at=datetime.now(UTC))
+    )
+    session.commit()
