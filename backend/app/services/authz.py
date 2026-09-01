@@ -138,6 +138,7 @@ __all__ = [
     "guard_write",
     "holds_care",
     "holds_leadership",
+    "leadership_grant_covers",
     "own_grant",
     "raw_comments_permitted",
     "resolve_landing",
@@ -766,6 +767,11 @@ def holds_leadership(session: Session, *, person_id: UUID) -> bool:
     `app.services.provisioning` asks this once a launch's subject has resolved to
     a person, and only when the claim-based half has already said no.
 
+    **It says the limb applies, not that it reaches this context.** Whether the
+    person's assignments cover the launch's own course is `leadership_grant_covers`
+    below, which E2-02 added and which the same caller asks straight after this
+    one — the E1 boundary review's M9 was that nobody asked it at all.
+
     **Here rather than at the caller**, and that placement is the rule rather than
     a preference: `public.assignment_scope` is unfiltered — nothing in the
     database narrows it — so every read of it goes through this module, where
@@ -791,6 +797,86 @@ def holds_leadership(session: Session, *, person_id: UUID) -> bool:
         {"person_id": person_id, "roles": [role.value for role in LEADERSHIP_ROLES]},
     ).scalar_one()
     return bool(answer)
+
+
+def leadership_grant_covers(
+    session: Session,
+    *,
+    person_id: UUID,
+    prefix_id: UUID,
+    course_id: UUID | None,
+    section_id: UUID | None,
+) -> bool:
+    """Do this person's leadership assignments reach the context a launch came from? (E2-02)
+
+    `holds_leadership` above answers whether §7.3's second limb applies at all;
+    this answers whether it applies *here*. The E1 boundary review's M9 is the
+    gap between the two: the limb "admits any holder of a live leadership
+    assignment as a staff-launch trigger with no reference to the launch's
+    context", so a Lead Faculty enrolled as a Learner in a sibling lead's course
+    could launch from it and bind that section — which §2.1 refuses in as many
+    words, "a Lead Faculty's grant is only the courses they lead (never sibling
+    leads' courses, at any point in the union)".
+
+    **The answer is the union of the person's own grants, at the leadership
+    roles only**, and it is checked at three grains: the section this launch is
+    bound to, the course its label names, or the prefix above that course. A
+    `None` at either of the first two is a row that does not exist yet and never
+    matches; the prefix always does exist, because a launch whose prefix the org
+    does not hold is `unknown_prefix` before this is asked.
+
+    **Prefix-or-below is what keeps the first launch working**, and it is this
+    ticket's design answer (ADR 0108). A dean's legitimate first launch into a
+    brand-new course is a launch whose course is in nobody's course set, by
+    construction — Pulse has never heard of it — so a condition written over the
+    course or the section alone would refuse the one launch §7.3 relies on to
+    discover a section at all. A dean's own grant lists every prefix under their
+    college (`_nodes_beneath`), so the prefix is both the thing that makes that
+    launch legitimate and the thing a wrong-college launch fails on.
+
+    **The claim limb is deliberately not gated by this.** The LTI roles claim is
+    context-scoped: it states what the launching person is *in the course they
+    launched from*, so an Instructor claim already carries the fact this
+    predicate exists to establish, and `app.services.provisioning` asks nothing
+    here for that limb. Gating both limbs is the natural over-application and it
+    would stop every real instructor Pulse holds no assignment for from
+    discovering their own section — which is most of them.
+
+    **An assistant dean holding nothing else fails closed until E9**, and that is
+    a consequence rather than an oversight. §2.1 makes them the worked example of
+    a purview that comes from the supervision graph — "own led courses union
+    every supervised chair's department — a set no single containment node
+    holds" — so their own grant is empty (`_GRANT_ARRIVES_THROUGH_THE_GRAPH`
+    above) and `transitive_purview` is what would answer, which raises by design
+    until E9 (ADR 0003).
+
+    **Both directions cost something and they are not symmetric**, in the same
+    direction §7.3's own cost argument runs. A false *no* is a section discovered
+    late: this launch binds nothing, the section stays unknown, and the real
+    instructor's next launch discovers it through the claim limb. A false *yes*
+    stores a roster address permanently and points the scheduled sync — which
+    calls with the tool's own credentials — at a class the launcher's records do
+    not reach, and takes the `(course, term, section_code)` name with it under
+    ADR 0091's first-writer-wins.
+
+    **Here rather than at the caller**, for the reason every predicate in this
+    section gives: `public.assignment_scope` is unfiltered, so every read of it
+    lives in this module (`tests/unit/test_the_org_views_are_read_only_through_
+    the_grant.py`). It runs no new SQL — the statement and the grant rules are
+    the ones `resolve_scope` uses.
+    """
+    rows = session.execute(_ASSIGNMENTS_OF_PERSON, {"person_id": person_id}).mappings().all()
+    granted = Purview.empty()
+    for row in rows:
+        assignment = _Assignment.of(row)
+        if assignment.role not in LEADERSHIP_ROLES:
+            continue
+        granted = granted.union(_own_grant_of(session, assignment))
+    return (
+        (section_id is not None and section_id in granted.section_ids)
+        or (course_id is not None and course_id in granted.course_ids)
+        or prefix_id in granted.prefix_ids
+    )
 
 
 def teaching_instructor_assigned(session: Session, *, person_id: UUID, section_id: UUID) -> bool:
