@@ -1,11 +1,17 @@
 """The beat schedule (SPEC §13, §3.1).
 
 Wired to the application in `app.jobs.celery_app`. E0-03 gave it a runtime that
-already works while every scheduled job still belonged to a later ticket — window
-open and close is E2, the Monday report is E4, retention is E13. Two entries have
-landed: E1-08's daily purge of the launch replay ledger, which replaces the native
-TTL a Redis nonce store would have had (ADR 0089), and E1-11's hourly roster pull
-(SPEC §7.3). Wired matters as much as present: a schedule module nothing loads is
+already works while every scheduled job still belonged to a later ticket — the
+Monday report is E4, retention is E13. Three entries have landed: E1-08's daily
+purge of the launch replay ledger, which replaces the native TTL a Redis nonce
+store would have had (ADR 0089), E1-11's hourly roster pull (SPEC §7.3), and
+E2-06's hourly survey-window reconciler, which derives the windows a section's
+calendar implies (SPEC §3.1, ADR 0111). Note that the last of those is scheduled
+on real time like every entry here: beat's own firing is outside the development
+clock override (ADR 0109), which is exactly why E2-06 materializes its rows in
+advance rather than at the moment a window opens.
+
+Wired matters as much as present: a schedule module nothing loads is
 one beat never reads, so `test_celery_app.py` follows the mapping end to end
 rather than asserting it was imported.
 
@@ -44,5 +50,20 @@ BEAT_SCHEDULE: dict[str, dict[str, Any]] = {
     "roster-sync-hourly": {
         "task": "app.jobs.tasks.sync_rosters",
         "schedule": crontab(minute="0"),
+    },
+    # E2-06's reconciler: every section's survey windows, derived from its calendar
+    # (SPEC §3.1, §2.2). A `crontab` for the same reason the roster sync is one,
+    # and **minute 30 rather than minute 0** because that minute is already the
+    # roster sync's and the two each walk every section in the institution.
+    #
+    # It exists because a section can appear in the middle of a term — a staff
+    # launch or a roster sync creates one at any hour — and E2-06 deliberately
+    # does not hook the writer into those flows, which would put its diff inside
+    # E2-02's ingestion surface. Staleness of up to an hour is the cost, recorded
+    # in ADR 0111. The pass is idempotent, so running it hourly forever writes
+    # nothing after the first time it reaches a section.
+    "derive-survey-windows-hourly": {
+        "task": "app.jobs.tasks.derive_survey_windows",
+        "schedule": crontab(minute="30"),
     },
 }
