@@ -987,12 +987,19 @@ jobs:
       #
       # The runner refuses plainly when the key is absent or blank, naming the
       # variable, rather than reporting a pass over a run that reached nothing.
+      #
+      # **The two open values are kept in step with `.env.example` by hand**, and
+      # they name the provider ruled on 2026-09-02. The endpoint has to serve the
+      # `json_schema` structured-output mode `app.ai.gateway` asks for; the
+      # provider named here before that ruling answered HTTP 400 to it, which is
+      # why the switch happened rather than a second output mode being added.
+      # ADR 0118's consequences carry the measurement.
       - name: Eval runner (per-task floors; threat recall is a hard gate)
         if: needs.changed.outputs.inert != 'true' && (needs.changed.outputs.ai_surface == 'true' || github.event_name == 'workflow_dispatch')
         env:
           AI_PROVIDER_API_KEY: ${{ secrets.AI_PROVIDER_API_KEY }}
-          AI_PROVIDER_BASE_URL: 'https://api.deepseek.com/v1'
-          AI_PROVIDER_MODEL_NAME: 'deepseek-v4-flash'
+          AI_PROVIDER_BASE_URL: 'https://api.openai.com/v1'
+          AI_PROVIDER_MODEL_NAME: 'gpt-5-mini'
         run: python -m tests.evals.runner --enforce-floors
 
   # ==========================================================================

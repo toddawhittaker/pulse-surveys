@@ -134,6 +134,44 @@ provider calls a run. It loads `.env`, because the real credential lives there
 and the runner always builds a live gateway. README.md says what it costs and
 when CI fires it.
 
+**Not every OpenAI-compatible provider can hold the real triple, and finding that
+out cost this ticket a round.** The endpoint has to serve the output *mode* the
+gateway speaks, which is a narrower requirement than speaking the API.
+`app.ai.gateway` sends `response_format: {"type": "json_schema", …, "strict":
+true}` and declares no tool, because SPEC §7.4 requires "one call in, one
+validated object out — no tool use" and ADR 0053 chose `NativeOutput` on that
+sentence.
+
+The provider first named on these two lines refuses that shape. Measured on
+2026-09-02, in the order that narrows it: one live call answered HTTP 400; the
+account's model listing served the configured name, so the name was not the
+problem; a hand-posted `json_schema` body was refused on every non-vision model
+with "This response_format type is unavailable now", while `{"type":
+"json_object"}` was accepted in the same second; the request the gateway actually
+puts on the wire was captured against a loopback stub and is `json_schema` /
+`strict: true` with `tools: null`; and the shipped prompt, unchanged, posted under
+`json_object` returned four answers that all validated against the contract. So
+the blocker was the mode alone — not the prompt, not the contract, not the model,
+not the credential.
+
+**The switch was ruled rather than the second output mode**, on 2026-09-02, and
+the real triple names OpenAI. The alternative was to teach the gateway a mode for
+providers that lack `json_schema`, and the two obvious candidates are closed by
+rules older than this record: `ToolOutput` by §7.4's "no tool use", and
+`PromptedOutput` by `app/ai/prompts/README.md`, which rests the whole injection
+boundary on the gateway appending nothing after the student's comment. That
+leaves plain `json_object`, which is a real option — the prompt already demands
+JSON and the gateway validates and re-asks once regardless — and it was declined
+because it gives up schema enforcement at the provider for *every* task,
+including the moderation ones E4 and E10 build, to accommodate one vendor.
+Naming a provider that serves the mode costs nothing and keeps one code path.
+
+What follows for anyone editing those two lines: **check structured outputs
+before naming a provider**, because nothing in the suite can. Every ordinary test
+run reaches the loopback stub or `mock-ai`, and both answer whatever they are
+asked — so a provider that cannot serve the gateway is green everywhere until a
+live eval run meets it.
+
 **Nine test modules and four fixtures were repaired for the rename**, and four
 committed integration modules moved with them, because a fixture that configures
 a test-process gateway is configuring the mock side by this decision's own rule.
