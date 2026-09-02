@@ -1,23 +1,46 @@
 #!/usr/bin/env python3
-"""Answer one question about a diff: did it touch anything but inert documentation?
+"""Answer one of two questions about a diff, and both decide whether a gate runs.
 
-Ticket E0-38. `.github/workflows/ci.yml` had no path filtering, so a pull request
-touching only Markdown ran pytest against testcontainers, built both images,
-brought up the Compose stack, ran Playwright, ran the eval floors and audited the
-supply chain — about fifteen minutes of runner time to establish that no Python
-changed, on a shape this epic produced six times.
+Ticket E0-38 asked the first: **did it touch anything but inert documentation?**
+`.github/workflows/ci.yml` had no path filtering, so a pull request touching only
+Markdown ran pytest against testcontainers, built both images, brought up the
+Compose stack, ran Playwright, ran the eval floors and audited the supply chain —
+about fifteen minutes of runner time to establish that no Python changed, on a
+shape this epic produced six times.
+
+Ticket E2-12 asks the second: **did it touch the AI surface?** SPEC §9.3's eval
+floors are the one gate in this pipeline that calls a paid provider, about a
+hundred requests a run, and §9.3 scopes them to "prompt or model changes". So the
+live eval steps run on a diff that touches `backend/app/ai/`, `tests/evals/`, or
+either of the two files that carry the model identifier — and on nothing else.
 
 Usage:
-    classify_changed_paths.py <changed path>...
+    classify_changed_paths.py [--classification inert|ai-surface] -- <changed path>...
 
-    exit 0  every path is inert; the expensive gates may short-circuit
-    exit 1  something outside the inert set changed; run everything
+    --classification inert (the default, and how E0-38's caller invokes it)
+      exit 0  every path is inert; the expensive gates may short-circuit
+      exit 1  something outside the inert set changed; run everything
 
-**The polarity is the safety property, not a convention.** A script that is
-missing, that crashes, or that meets something it cannot make sense of exits
-non-zero, and the pipeline reads non-zero as "run everything". Every way this can
-go wrong therefore falls toward the full run. Reversing the two exits would make a
-crash indistinguishable from a documentation-only diff and skip every gate on it.
+    --classification ai-surface
+      exit 0  no changed path is an AI surface; the eval steps may stay off
+      exit 1  at least one is; the eval steps must run
+
+**The polarity is the safety property, not a convention, and it is one polarity
+for both questions.** Exit 0 always means "the gates this decides may
+short-circuit" and exit 1 always means "run them". A script that is missing, that
+crashes, or that meets something it cannot make sense of exits non-zero, so every
+way this can go wrong falls toward running the gate. Reversing either pair would
+make a crash indistinguishable from a diff nobody needs to test, and a second
+question whose 0 meant the opposite would be a trap nobody could read off the
+shell.
+
+**Adding the second question must not cost the first answer**, which is why
+`--classification` has a default rather than being required: the `changed` job's
+existing call passes no flag at all, and it switches off pytest, the §4.1
+invariant suite, both image builds, Playwright and the audit. A new option that
+made that call an error would have broken every pull request in the repository
+while satisfying every case written for the new question (`docs/MISTAKES.md`
+entry 22).
 
 **The set is an allowlist and never a denylist.** A path nobody has classified is
 not inert. The difference only shows on paths nobody thought about: "inert unless
@@ -112,6 +135,30 @@ PARSED_DOCUMENTS = frozenset(
 )
 
 
+# Directories whose entire contents are the AI surface. SPEC §9.3's gate is
+# "prompt or model changes", and everything a model call passes through lives
+# under one of these two: the gateway, the task functions, the typed contracts and
+# the versioned prompt files under `backend/app/ai/`, and the runner, the eval
+# sets and the floor declarations under `tests/evals/`.
+#
+# **"Under", and not "starts with".** `backend/app/ai_helpers.py` and
+# `tests/evals_archive/` are not in either tree, and a prefix comparison says they
+# are — which fires a paid gate on files that have nothing to do with a model. The
+# trailing slash is what makes the difference, and it is the whole of the rule.
+AI_SURFACE_DIRECTORIES = ("backend/app/ai/", "tests/evals/")
+
+# Files that are the AI surface without being under either directory, because they
+# carry the model identifier. E2-12's scope argues the trade: "Over-firing on an
+# unrelated config edit costs one eval run; under-firing on a model bump is §9.3's
+# gate not running, which is the worse trade by the ADR 0002 incident record."
+#
+# **"Equals", and not "starts with", and that is a second rule rather than the
+# same one.** `.env.example.local` and `backend/app/config.py.bak` are files
+# somebody will plausibly create, and a single prefix comparison collapses the two
+# rules into one and fires on both.
+AI_SURFACE_FILES = frozenset({"backend/app/config.py", ".env.example"})
+
+
 def is_inert(path: str) -> bool:
     """Whether one changed path is documentation nothing depends on.
 
@@ -141,8 +188,83 @@ def is_inert(path: str) -> bool:
     return "/" not in path and path.endswith(".md")
 
 
+def is_an_ai_surface(path: str) -> bool:
+    """Whether one changed path is something SPEC §9.3's eval floors measure.
+
+    Two rules rather than one, because E2-12's scope states two: *under* the two
+    directories, and *equal to* the two files. See the constants above for what a
+    single prefix comparison would do to each.
+
+    Paths are taken as given and never resolved against the filesystem, for the
+    reason `is_inert` gives: a diff shows a deleted file exactly as it shows an
+    edited one, and deleting a prompt is a change the floors have every reason to
+    run on.
+    """
+    # Refused rather than resolved, on the same terms as `is_inert` and in the
+    # safe direction for this question too: an unclassifiable path is not the AI
+    # surface's business, and the caller below is what turns "cannot classify"
+    # into "run the gate".
+    if ".." in Path(path).parts:
+        return False
+
+    return path in AI_SURFACE_FILES or path.startswith(AI_SURFACE_DIRECTORIES)
+
+
+INERT = "inert"
+AI_SURFACE = "ai-surface"
+
+
+def report_inert(paths: list[str]) -> int:
+    """E0-38's question. Exit 0 when every path is documentation nothing depends on."""
+    outside = [path for path in paths if not is_inert(path)]
+
+    if outside:
+        print(f"not inert: {len(outside)} of {len(paths)} changed path(s) sit outside the")
+        print("inert set, so every gate runs:")
+        for path in outside:
+            why = " (parsed at run time by the suite)" if path in PARSED_DOCUMENTS else ""
+            print(f"  {path}{why}")
+        return 1
+
+    print(f"inert: all {len(paths)} changed path(s) are documentation nothing depends on:")
+    for path in paths:
+        print(f"  {path}")
+    return 0
+
+
+def report_ai_surface(paths: list[str]) -> int:
+    """E2-12's question. Exit 0 when no changed path is one SPEC §9.3 measures."""
+    touched = [path for path in paths if is_an_ai_surface(path)]
+
+    if touched:
+        print(f"ai surface: {len(touched)} of {len(paths)} changed path(s) are the AI surface,")
+        print("so the eval floors run:")
+        for path in touched:
+            print(f"  {path}")
+        return 1
+
+    print(f"no ai surface: none of the {len(paths)} changed path(s) is under")
+    print(f"{list(AI_SURFACE_DIRECTORIES)} or is one of {sorted(AI_SURFACE_FILES)}:")
+    for path in paths:
+        print(f"  {path}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    # **Defaulted rather than required**, and that is the half a reviewer's eye
+    # slides over. E0-38's caller in `.github/workflows/ci.yml` invokes this
+    # script with no flag at all, so a required option here would turn the
+    # inert classification into an argparse error — exit 2, which the workflow
+    # reads as "run everything" — on every pull request in the repository, while
+    # every case written for the new question passed (`docs/MISTAKES.md`
+    # entry 22).
+    parser.add_argument(
+        "--classification",
+        choices=(INERT, AI_SURFACE),
+        default=INERT,
+        help="which question to answer about the diff (default: %(default)s)",
+    )
     parser.add_argument(
         "paths",
         nargs="*",
@@ -161,8 +283,9 @@ def main() -> int:
     dashed = [path for path in args.paths if path.startswith("-")]
     if dashed:
         print(
-            f"not inert: {len(dashed)} path(s) begin with a dash, which this script "
-            "refuses to classify because argparse would answer first:",
+            f"{args.classification}: cannot answer — {len(dashed)} path(s) begin with a dash, "
+            "which this script refuses to classify because argparse would answer first. "
+            "The gates this question decides run:",
             file=sys.stderr,
         )
         for path in dashed:
@@ -177,27 +300,17 @@ def main() -> int:
     # computation into a green required check over a pipeline that never ran.
     if not args.paths:
         print(
-            "not inert: no changed paths were given. An empty diff is treated as "
-            "unknown rather than as documentation, because the usual cause is the "
-            "diff computation failing rather than nothing having changed.",
+            f"{args.classification}: cannot answer — no changed paths were given. An empty "
+            "diff is treated as unknown rather than as nothing, because the usual cause is "
+            "the diff computation failing rather than nothing having changed, and the change "
+            "it failed to see may be the model bump. The gates this question decides run.",
             file=sys.stderr,
         )
         return 1
 
-    outside = [path for path in args.paths if not is_inert(path)]
-
-    if outside:
-        print(f"not inert: {len(outside)} of {len(args.paths)} changed path(s) sit outside the")
-        print("inert set, so every gate runs:")
-        for path in outside:
-            why = " (parsed at run time by the suite)" if path in PARSED_DOCUMENTS else ""
-            print(f"  {path}{why}")
-        return 1
-
-    print(f"inert: all {len(args.paths)} changed path(s) are documentation nothing depends on:")
-    for path in args.paths:
-        print(f"  {path}")
-    return 0
+    if args.classification == AI_SURFACE:
+        return report_ai_surface(args.paths)
+    return report_inert(args.paths)
 
 
 if __name__ == "__main__":
