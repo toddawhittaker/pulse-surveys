@@ -70,6 +70,9 @@ boundary: `metadata_tables` is asked for by both.
     student a submission needs, committed; the tool built with the AI provider
     and broker a test chose; a minted student session; and the submit route
     found through the module the work order settles rather than through a path.
+  - `fixtures/student_read.py` — E2-09: the names that ticket settles, a student
+    enrolled in one section and not in its sibling, and the door their read path
+    is asked through with a session a real launch issued.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -101,4 +104,5 @@ pytest_plugins = (
     "fixtures.mock_ai",
     "fixtures.ai_tasks",
     "fixtures.submit",
+    "fixtures.student_read",
 )

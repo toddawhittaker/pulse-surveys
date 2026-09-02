@@ -10,7 +10,13 @@ site is a refusal the inventory cannot see.
 **Two things live here and nothing else.** `CopyEntry`, which is what one string
 is, and `copy_modules()`, which is how the package's contents are found. Each
 surface adds one module beside this one defining `COPY: Mapping[str, CopyEntry]`
-keyed by dotted keys. E2-08 adds `submit.py`; E2-09 and E2-10 add theirs.
+keyed by dotted keys. E2-08 adds `submit.py`, E2-09 adds `student_read.py`, and
+E2-10 adds its own.
+
+**The key is a name, not a sentence.** `student.not_a_student` says which surface
+and which event; what it *says* to a person is `text`, and the two are separated
+so that rewording a refusal is one edit here rather than an edit in a router. Keys
+are dotted and grouped by surface, so an inventory can be read by surface.
 
 **There is deliberately no central list of the modules.** `copy_modules()`
 enumerates the package directory, so the inventory's reach cannot be shrunk by an
@@ -25,9 +31,9 @@ sentence would be a defect, and it would make this package unimportable from
 `migrations/env.py`'s environment the way `app.models.ai` warns about.
 """
 
-import importlib
 import pkgutil
 from dataclasses import dataclass
+from importlib import import_module
 from types import ModuleType
 
 __all__ = ["CopyEntry", "copy_modules"]
@@ -36,6 +42,9 @@ __all__ = ["CopyEntry", "copy_modules"]
 @dataclass(frozen=True, slots=True)
 class CopyEntry:
     """One user-facing string, and the key it is served and inventoried by.
+
+    `key` is the stable name — `<surface>.<event>` — and `text` is what a person
+    reads.
 
     Frozen, because the inventory reads the registry at one moment and the
     application serves it at another: an entry that can be rewritten after import
@@ -51,14 +60,17 @@ class CopyEntry:
 
 
 def copy_modules() -> tuple[ModuleType, ...]:
-    """Every copy module in this package, found rather than listed.
+    """Every copy module in this package, found rather than listed, in a stable order.
 
     The directory is the inventory. `pkgutil.iter_modules` walks this package's
     own `__path__`, so a module added beside `submit.py` is enumerated by existing
     and a module deleted stops being enumerated by not existing — neither needs
     anybody to remember a list.
+
+    Sorted by name so the order is the same on every machine and in every run —
+    `pkgutil.iter_modules` answers in directory order, which is not one.
     """
     return tuple(
-        importlib.import_module(f"{__name__}.{found.name}")
-        for found in pkgutil.iter_modules(__path__)
+        import_module(f"{__name__}.{found.name}")
+        for found in sorted(pkgutil.iter_modules(__path__), key=lambda found: found.name)
     )

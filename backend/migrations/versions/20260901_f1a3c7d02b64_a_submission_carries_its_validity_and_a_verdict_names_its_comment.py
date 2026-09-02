@@ -57,10 +57,20 @@ took for `survey_window`. `response`'s new column and `classification`'s new
 reachability do the same to `tests/integration/test_identity_column_marker.py`'s
 record of what carries nothing, raised as `docs/disputes/E2-08-04.md`.
 
-**Chained after `c9b4e0a71d38`**, E2-06's survey-window grants, which is the head
-this branch was cut from and the head `alembic heads` reports. E2-09 is being built
-in parallel and adds a revision of its own against the same head; whichever merges
-second re-points its `down_revision`.
+**Chained after `d3a71b5c8e42`**, E2-09's student-read grants. This branch was cut
+from `c9b4e0a71d38`, E2-06's survey-window grants, and E2-09 was built in parallel
+against the same head; both revisions said whichever merged second would re-point
+its `down_revision`, and this is the one that did.
+
+**Two consequences of merging second, and both are in the code below.** The
+`SELECT` privileges this revision's `.sql` file grants on `question_set`,
+`question`, `response` and `answer` are already held by the time it runs — a
+`GRANT` of a privilege a role has is a no-op, and the file stays as it was written
+because a versioned script is the immutable record of what its author applied
+(ADR 0041). And the `downgrade()` takes back **only the verbs this revision adds**:
+`INSERT` and `UPDATE` on `response`, `INSERT`, `UPDATE` and `DELETE` on `answer`.
+Revoking `SELECT` on the four would leave the schema at `d3a71b5c8e42` with E2-09's
+read path unable to read, which is a downgrade undoing somebody else's revision.
 """
 
 from collections.abc import Sequence
@@ -72,7 +82,7 @@ from app.views_sql import read_sql
 
 # revision identifiers, used by Alembic.
 revision: str = "f1a3c7d02b64"
-down_revision: str | Sequence[str] | None = "c9b4e0a71d38"
+down_revision: str | Sequence[str] | None = "d3a71b5c8e42"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -112,12 +122,11 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Undo this revision."""
-    op.execute(
-        "REVOKE SELECT, INSERT, UPDATE, DELETE ON public.answer FROM pulse_app"
-    )
-    op.execute("REVOKE SELECT, INSERT, UPDATE ON public.response FROM pulse_app")
-    op.execute("REVOKE SELECT ON public.question FROM pulse_app")
-    op.execute("REVOKE SELECT ON public.question_set FROM pulse_app")
+    # Only the verbs this revision adds. `SELECT` on these four is
+    # `d3a71b5c8e42`'s — see this revision's docstring — and taking it back here
+    # would leave E2-09's read path unable to read at a revision that grants it.
+    op.execute("REVOKE INSERT, UPDATE, DELETE ON public.answer FROM pulse_app")
+    op.execute("REVOKE INSERT, UPDATE ON public.response FROM pulse_app")
 
     op.drop_constraint(
         op.f("fk_classification_answer_id_answer"), "classification", type_="foreignkey"

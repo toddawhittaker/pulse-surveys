@@ -1,6 +1,6 @@
 """What a router needs from the request that is not the request (SPEC §13).
 
-Today that is two things. The first is the short-lived signed cookie the **web**
+Today that is three things. The first is the short-lived signed cookie the **web**
 door uses to carry a `state`, a `nonce` and a PKCE verifier from the redirect
 that mints them to the redirect that checks them. The launch door carried one
 too until E1-08 moved its handshake into a server-side store (ADR 0089); this
@@ -8,9 +8,11 @@ cookie is the web door's alone now, and ADR 0093 says why it stays. The second
 is the small amount of scaffolding both doors share around their answers: the
 two status codes, the four pages a door can answer with that are not a landing,
 and the tail that turns verified claims into a session and a landing redirect,
-or into one of those pages. §13 names this module for "auth context, role
-scoping, n-threshold guards"; the first of those is what this is, and the other
-two arrive with the screens that need them.
+or into one of those pages. The third is E2-09's `require_student`, the first
+dependency that reads a session back off a later request and says what it may
+act as. §13 names this module for "auth context, role scoping, n-threshold
+guards"; the first two of those are here now, and the third arrives with the
+screens that need it.
 
 **The pages themselves live here from E1-13 on.** They were in
 `app/services/landing.py`, beside the claims-derived landing seam that ticket
@@ -93,13 +95,15 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import jwt
-from fastapi import HTTPException, Request
+from fastapi import HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
+from starlette.requests import Request
 from starlette.responses import Response
 
 from app.config import Settings, is_development
+from app.copy.student_read import NOT_A_STUDENT
 from app.copy.submit import COPY
 from app.services.authz import Door, LandingRole, resolve_landing
 from app.services.identity import (
@@ -128,7 +132,7 @@ __all__ = [
     "FOUND",
     "LOGIN_COOKIE_LIFETIME_SECONDS",
     "LTI_LOGIN_COOKIE",
-    "NOT_A_STUDENT_KEY",
+    "NOT_A_STUDENT_CHALLENGE",
     "NOT_A_STUDENT_STATUS",
     "OIDC_LOGIN_COOKIE",
     "PAGE",
@@ -252,6 +256,73 @@ def clear_carried(response: Response, name: str) -> None:
     server-side store; it now sets no login cookie to clear (ADR 0089).
     """
     response.delete_cookie(name, path="/")
+
+
+# ---------------------------------------------------------------------------
+# Who a later request may act as.
+# ---------------------------------------------------------------------------
+
+# What a request that is not a student's is answered with. **401 and not 403**,
+# and the same 401 whether the caller holds somebody else's session or none at
+# all: the difference between "you are signed in, but not as a student" and "you
+# are not signed in" is a fact about who holds the token, and a path that answers
+# the two differently tells whoever is trying tokens that one of them was real.
+# The scheme is `Bearer` because that is how the session travels inside the LMS's
+# cross-site iframe, where no cookie survives (E1-08's cookieless path) — and
+# because RFC 6750 §3 makes the challenge how a client learns which scheme to
+# present a credential under. 403 would say "you are somebody, and not somebody
+# who may do this", which is a statement about the caller neither of the two
+# student routes makes.
+NOT_A_STUDENT_STATUS = 401
+BEARER_SCHEME = "Bearer"
+NOT_A_STUDENT_CHALLENGE = {"WWW-Authenticate": BEARER_SCHEME}
+
+
+def require_student(request: Request) -> SessionClaims:
+    """The verified session of a student, or one refusal for everybody else.
+
+    E2-09's student read path depends on this, E2-08's submit path depends on the
+    same object, and the object is what makes both **findable**: SPEC §4.1 item
+    1's sweep builds its inventory of student-visible routes by asking the running
+    application which routes carry this dependency in their graph. A student route
+    that resolved the session itself would be a student route outside that sweep,
+    so this is the one way in.
+
+    **The role comes from the session, which came from the person's own rows.**
+    `LandingRole.STUDENT` was decided at the door by `resolve_landing` out of
+    assignments and enrollment (ADR 0098) — never out of what a launch claimed —
+    and this only reads it back. A route that checked for *a* session and not for
+    the role would answer an instructor with a student's own survey, which is the
+    mutation the §4 denial suite is written against.
+
+    **One refusal, out of the copy registry.** Absent, malformed, expired, signed
+    with another key, or a real session in another role: all of them get
+    `NOT_A_STUDENT_STATUS`, the `Bearer` challenge, and
+    `app.copy.student_read.NOT_A_STUDENT`'s words. The text lives in the registry
+    rather than in this file because SPEC §4.1 items 4 and 5 are checked over the
+    inventory that registry publishes, and a literal here is a string that
+    inventory cannot see.
+
+    **It says nothing about the person it is refusing.** No section, no subject,
+    no role — a refusal says no, and one that described what it was refusing on
+    behalf of would be the disclosure the read path behind it exists to prevent.
+    `app.services.session.session_from_request` already collapses "no token", "a
+    token this deployment did not sign" and "an expired one" into a single `None`
+    for the same reason.
+
+    Returns `SessionClaims` — the claims object the doors already issue, not a
+    type of its own. What the submit path needs from it is `user_id`, which E1-12
+    put there as "the launch-side row", and a second wrapper around it would be a
+    second answer to "who is this" for the two modules to disagree about.
+    """
+    session = session_from_request(request, request.app.state.session_secret)
+    if session is None or session.role is not LandingRole.STUDENT:
+        raise HTTPException(
+            status_code=NOT_A_STUDENT_STATUS,
+            detail=NOT_A_STUDENT.text,
+            headers=NOT_A_STUDENT_CHALLENGE,
+        )
+    return session
 
 
 # ---------------------------------------------------------------------------
@@ -730,21 +801,9 @@ async def landing_with_session(
 
 
 # ---------------------------------------------------------------------------
-# Role scoping: the dependency a student-only route carries. §13's second phrase
-# for this module, arriving with the first screen that needs it (E2-08).
+# The write half of the student scoping above: what a mutating student route
+# carries on top of `require_student` (E2-08).
 # ---------------------------------------------------------------------------
-
-# What a request with no student session is answered. 401 and not 403, and the
-# `WWW-Authenticate` challenge is why: RFC 6750 §3 makes the challenge how a
-# client learns the scheme it should present a credential under, and this API is
-# presented a session as a Bearer token (SPEC §7.3's cookieless path). 403 would
-# say "you are somebody, and not somebody who may do this", which is a statement
-# about the caller that this route deliberately never makes.
-NOT_A_STUDENT_STATUS = 401
-BEARER_SCHEME = "Bearer"
-
-# The registry key of the one sentence both refusals below serve.
-NOT_A_STUDENT_KEY = "student.not_a_student"
 
 # What a cookie-borne write with no valid double-submit token is answered, and the
 # header that token is echoed in (ADR 0089; the status is ADR 0114's, which is the
@@ -755,41 +814,6 @@ NOT_A_STUDENT_KEY = "student.not_a_student"
 CSRF_REFUSED_STATUS = 403
 CSRF_HEADER = "X-Pulse-CSRF"
 CSRF_REFUSED_KEY = "student.request_not_verified"
-
-
-def require_student(request: Request) -> SessionClaims:
-    """The verified session on `request`, if it is a student's; otherwise a 401.
-
-    **An absent session, an invalid one and somebody else's are one answer.** The
-    same status, the same challenge and the same sentence, because the differences
-    between them are all statements about this route: a body naming the role would
-    tell the holder of any session which surfaces exist for which role, and a 403
-    for a valid non-student session against a 401 for no session would say the same
-    thing in the status line. `app.services.session.session_from_request` already
-    collapses "no token", "a token this deployment did not sign" and "an expired
-    one" into a single `None` for the same reason.
-
-    **The role comes from the session and not from a claim the platform wrote.**
-    `LandingRole` is resolved at the door out of Pulse's own records (E1-13, ADR
-    0098) and sealed into the token; what this reads is that resolution.
-
-    The sentence is looked up in `app.copy` rather than written here, because a
-    student reads it and E2-11's inventory has to be able to find every string a
-    student reads.
-
-    Returns `SessionClaims` — the claims object the doors already issue, not a
-    type of its own. What a submit path needs from it is `user_id`, which E1-12
-    put there as "the launch-side row", and a second wrapper around it would be a
-    second answer to "who is this" for the two modules to disagree about.
-    """
-    claims = session_from_request(request, request.app.state.session_secret)
-    if claims is None or claims.role is not LandingRole.STUDENT:
-        raise HTTPException(
-            status_code=NOT_A_STUDENT_STATUS,
-            detail=COPY[NOT_A_STUDENT_KEY].text,
-            headers={"WWW-Authenticate": BEARER_SCHEME},
-        )
-    return claims
 
 
 def csrf_verified_student(request: Request) -> SessionClaims:

@@ -31,7 +31,8 @@ anybody but the reader.
 **Two keys are settled outside this file.** `student.not_a_student` is the refusal
 `app.api.deps.require_student` serves, and `submit.classifier_down` is ADR 0114's
 honest retryable refusal. They are named in E2-08's work order, so they are the
-two spellings this module may not choose.
+two spellings this module may not choose. The first of them is *published* by
+`app.copy.student_read` — see the last paragraph below.
 
 **Two entries here are refusals a student meets without having done anything
 wrong**, and both are written that way: `student.request_not_verified` is a
@@ -39,9 +40,13 @@ cross-site request forgery defence firing, which the person at the keyboard cann
 distinguish from a hiccup, and `submit.classifier_down` is a provider being down.
 Neither says the reader made a mistake, because neither of them did.
 
-**`student.not_a_student` lives in this module rather than one of its own**
-because this is the surface it is served on: the student API's one write route.
-E2-09 adds the read path's module beside this one and the two share the key.
+**`student.not_a_student` is published by `app.copy.student_read`, not here.** The
+sentence is one guard's — `app.api.deps.require_student` — and that guard is
+carried by the read path and by this write path alike, so the key belongs to
+neither surface alone. It is registered once, in the module E2-09 added for it, and
+the registry `copy_modules()` walks holds one entry and one wording for it. Two
+modules publishing the key would be two sentences under one name for E2-11's
+inventory to choose between, and two routes free to drift apart.
 """
 
 from collections.abc import Mapping
@@ -49,14 +54,6 @@ from collections.abc import Mapping
 from app.copy import CopyEntry
 
 __all__ = ["COPY"]
-
-# The refusal a request carrying no student session gets, and the refusal a
-# request carrying somebody else's session gets — one sentence for both, because
-# the two answers are required to be indistinguishable (E2-08's work order). It
-# says what is true and names no role: "this is not a student session" and "there
-# is no session" have to read alike, or the difference is a statement about which
-# routes exist for which role.
-NOT_A_STUDENT = "not signed in as a student"
 
 # What a cookie-borne write carrying no valid double-submit token is told (ADR
 # 0089, ADR 0114's status table). One sentence for a missing token and a wrong
@@ -83,7 +80,6 @@ CLASSIFIER_DOWN = (
 COPY: Mapping[str, CopyEntry] = {
     entry.key: entry
     for entry in (
-        CopyEntry(key="student.not_a_student", text=NOT_A_STUDENT),
         CopyEntry(key="student.request_not_verified", text=REQUEST_NOT_VERIFIED),
         CopyEntry(key="submit.classifier_down", text=CLASSIFIER_DOWN),
         # §3.3's two refused verdicts. Each says what a useful answer looks like

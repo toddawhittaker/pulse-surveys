@@ -1,21 +1,39 @@
-"""The one route a student writes through: the weekly survey submission (SPEC §3.2, §3.3).
+"""The student's own weekly survey: the read a form is built on, and the write it posts.
 
 §13's tree gives the student-facing API this module, and §13's closing rule keeps
-it thin: this file parses the request once (ADR 0062), asks
-`app.services.submissions` to store it, and turns whatever comes back into an HTTP
-answer. Every decision — who may submit, into which week, whether the values hold,
-what a comment's verdict means — is in the service, and every sentence a student
-reads is in `app.copy`.
+it thin: a handler here resolves the session, hands the work to a service, and
+turns what comes back into an HTTP answer. Every decision — who may read or
+submit, into which week, whether the values hold, what a comment's verdict means —
+is in `app.services.survey_read` and `app.services.submissions`, and every
+sentence a student reads is in `app.copy`.
 
-**One POST route and no others.** The read path a form fetches is E2-09's and the
-form itself is E2-10's; this is the write.
+**Two routes and no others.** `GET /student/survey` (E2-09) answers the form's
+whole question, and `POST /student/submissions` (E2-08) is the weekly submission.
+The form itself is E2-10's.
 
-**What the router owns is the protocol, and only that.** A refusal reaches it as a
-`RefusalReason`, which is a copy key; this module is what says a closed window is a
-409 and an off-step workload a 422, because a status code is a statement about HTTP
-rather than about the survey. The mapping is a table rather than a chain of `if`s so
-that a reason with no status is a `KeyError` at the one place that would show it,
-not a silent 500.
+**Both carry `app.api.deps.require_student` rather than a check of their own**,
+which is what puts every route this module serves inside SPEC §4.1 item 1's sweep
+the day it is written: that sweep builds its inventory of student-visible routes
+by asking the running application which routes carry that dependency. The write
+carries `csrf_verified_student`, which is `require_student` plus ADR 0089's
+double-submit check, so it is in the same inventory.
+
+**The read takes no path parameters and no query parameters, and that is the
+interface rather than a simplification.** It answers "for me, right now, what is
+there?" for the session's own reader. A parameter would be a way to ask this path
+*about* a section, and the first section anybody would ask it about is one they are
+not in — so the shape of the route is itself part of the confidentiality argument,
+and
+`test_naming_another_section_is_answered_exactly_as_naming_one_that_does_not_exist`
+is what holds it to that by requiring the ordinary spellings of such a parameter to
+change nothing at all.
+
+**What the router owns on the write is the protocol, and only that.** A refusal
+reaches it as a `RefusalReason`, which is a copy key; this module is what says a
+closed window is a 409 and an off-step workload a 422, because a status code is a
+statement about HTTP rather than about the survey. The mapping is a table rather
+than a chain of `if`s so that a reason with no status is a `KeyError` at the one
+place that would show it, not a silent 500.
 
 **Four statuses are worth their own sentence.**
 
@@ -26,9 +44,9 @@ not a silent 500.
     browser attach an `Authorization` header.
   - **404 for a section the student is not enrolled in**, with the same body a
     section id that names nothing gets. SPEC §4.1 item 1, asserted from E2 because
-    this is the first student-visible path: a 403 here, or a 404 whose body differed,
-    would answer "does this section exist" for any signed-in student, one request at
-    a time, over every id in the institution.
+    this is the first student-visible surface: a 403 here, or a 404 whose body
+    differed, would answer "does this section exist" for any signed-in student, one
+    request at a time, over every id in the institution.
   - **409 for a closed window**, which is *not* the same shape. The section is the
     student's own and nothing about it is secret; a student who missed the week is
     owed an honest reason rather than the pretence that their own course is not
@@ -52,10 +70,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import csrf_verified_student
+from app.api.deps import csrf_verified_student, require_student
 from app.config import Settings
 from app.copy.submit import COPY
 from app.db import get_session
+from app.schemas.student import StudentSurveyView
 from app.schemas.survey import SubmissionAccepted, SubmissionRequest
 from app.services.session import SessionClaims
 from app.services.submissions import (
@@ -64,13 +83,17 @@ from app.services.submissions import (
     SubmissionRefusedError,
     store_submission,
 )
+from app.services.survey_read import survey_for_student
 from app.services.validity import ClassifierUnavailableError, enqueue_reclassification
 
 router = APIRouter(tags=["student"])
 
-# Where a submission is posted. Under `/student` because the whole of this
-# module's surface is the student's own, and named for the thing being created
-# rather than for the act, which is what the method already says.
+# Where the form reads from, and where a submission is posted. Both under
+# `/student` because the whole of this module's surface is the student's own, and
+# each named for the thing rather than for the act, which the method already says.
+# The paths are written out in full rather than carried on a router prefix, so that
+# what a route is registered at is what this file says it is.
+SURVEY_PATH = "/student/survey"
 SUBMIT_PATH = "/student/submissions"
 
 # SPEC §3.3's bounce: a client error, because the submission is well formed and
@@ -97,6 +120,36 @@ STATUS_OF_REASON: dict[RefusalReason, int] = {
     RefusalReason.VALUE_OFF_STEP: 422,
     RefusalReason.ANSWER_NOT_RECOGNISED: 422,
 }
+
+
+@router.get(SURVEY_PATH, summary="This student's enrollments and the survey open for each")
+def student_survey(
+    request: Request,
+    claims: SessionClaims = Depends(require_student),
+    session: Session = Depends(get_session),
+) -> StudentSurveyView:
+    """Answer the form's whole question for whoever this session belongs to.
+
+    **The reader comes from the session and from nowhere else.**
+    `require_student` verified the token and refused anybody who is not a student;
+    the `user` row it carries was resolved at the door out of the verified launch
+    (E1-12), so no part of this request's own text reaches the query.
+
+    **A session carrying no `user` row reads nothing rather than everything.** A
+    student landing is reached through an enrollment (ADR 0028), so a `STUDENT`
+    session without one is a token from before that resolution existed; the honest
+    answer is that this reader is enrolled in nothing, and the dangerous one would
+    be a query with its scoping left empty.
+
+    **Synchronous, and FastAPI runs it in a threadpool.** The session is
+    synchronous (ADR 0013) and every statement here is a blocking read, so a
+    handler declared `async` would take them on the event loop and block every
+    other request on the process.
+    """
+    settings: Settings = request.app.state.settings
+    if claims.user_id is None:
+        return StudentSurveyView(sections=[])
+    return survey_for_student(session, user_id=UUID(claims.user_id), settings=settings)
 
 
 @router.post(SUBMIT_PATH, summary="Submit this week's survey for one of my sections")

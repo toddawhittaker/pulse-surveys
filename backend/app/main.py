@@ -295,9 +295,12 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(lti.router)
     app.include_router(auth.router)
-    # The student's own surface (E2-08): one POST route, the weekly submission.
-    # Registered unconditionally like the doors above — the route carries
-    # `require_student`, so what gates it is the session rather than the build.
+    # The student's own surface: E2-09's weekly read and E2-08's weekly
+    # submission. Registered unconditionally like the doors above, and behind
+    # `app.api.deps.require_student` rather than behind a check of its own — what
+    # gates these routes is the session rather than the build, and carrying that
+    # one dependency is what puts every route this router serves inside SPEC §4.1
+    # item 1's sweep the day the route is written.
     app.include_router(student.router)
     # The developer test console. Always registered; the handler gates itself on
     # `ENVIRONMENT == development` and answers 404 elsewhere, so production is
