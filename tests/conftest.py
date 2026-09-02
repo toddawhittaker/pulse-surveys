@@ -62,6 +62,10 @@ boundary: `metadata_tables` is asked for by both.
   - `fixtures/survey_windows.py` — E2-06: SPEC §3.1's Fall 2026 window calendar
     written out by hand as UTC instants, and the term, weeks and cohort sections
     a derivation is run over.
+  - `fixtures/mock_ai.py` — E2-07's mock AI provider, in process and on a loopback
+    socket, plus the non-mock provider a deployment-environment test needs.
+  - `fixtures/ai_tasks.py` — E2-07: the comment-validity task, found rather than
+    named, and ADR 0056's failure classes looked up by name.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -90,4 +94,6 @@ pytest_plugins = (
     "fixtures.celery_broker",
     "fixtures.clock",
     "fixtures.survey_windows",
+    "fixtures.mock_ai",
+    "fixtures.ai_tasks",
 )

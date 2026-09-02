@@ -47,6 +47,28 @@ without-a-key half of the refusal is the one that was legal until E0-37; the
 without-a-key halves of the two acceptances are what stop the fix being "refuse
 everything that has no key".
 
+**E2-07 makes the transport rule read `ENVIRONMENT`, and adds a second rule beside
+it.** The stack now ships a mock AI provider and `.env.example` points
+`AI_PROVIDER_BASE_URL` at `http://mock-ai:8000/v1`, which the rule above refused
+unconditionally — so acceptance criteria 1 and 4 of that ticket are unsatisfiable
+without a change here. The change is the one the identity provider already
+carries (ADR 0077, `tests/unit/test_oidc_provider_configuration.py`): cleartext
+off this machine is refused *outside development*, and a URL whose host is the
+mock is refused outside development too. Both halves are needed. Without the
+environment condition the development stack does not start; without the mock-name
+rule a deployment that forgot the variable is pointed at a container the base
+Compose file starts in every deployment, which is what ADR 0077 found for the
+identity provider and refused to leave standing for it.
+
+**So every test whose subject is one of those two rules states the environment it
+runs under** (`docs/MISTAKES.md` entry 40), and each is written so that exactly
+one rule can be what fires: the mock-name rows carry `https`, because a cleartext
+mock address is refused by either rule and a test that could not say which would
+be green for a reason unrelated to what it asserts. The rest of this module —
+the masking rules, the userinfo rules, the needles — runs under `.env.example`'s
+documented `development` through `configured_env`, and says so here rather than
+in each test, because none of them turns on the value.
+
 **The key's variable is not named here.** E0-13 spells no variable and no field,
 so both are found — the `.env.example` entry by the words in its name, and the
 `Settings` field by the words in *its* name — and one test requires the two to be
@@ -170,6 +192,55 @@ LOOPBACK_HTTP_URLS = (
     "http://[::1]:11434/v1",
 )
 
+# The variable that decides which of E2-07's two new rules apply, and the
+# environments that are not the development one. Two rows rather than four:
+# *which* names count as a deployment is settled once, by
+# `tests/unit/test_oidc_provider_configuration.py::test_a_url_addressing_the_mock
+# _is_refused_outside_development`, whose four rows include the two near misses a
+# one-line condition gets wrong (`development-blue`, `pre-development`). Repeating
+# them under every rule here would be four copies of one assertion.
+ENVIRONMENT_VARIABLE = "ENVIRONMENT"
+DEPLOYMENT_ENVIRONMENTS = ("production", "staging")
+
+# The mock provider's Compose service name — the name by which a container on this
+# stack reaches it, and the whole of what the catalog rule refuses.
+#
+# Written out here rather than derived, exactly as `MOCK_SERVICE` is in
+# `test_oidc_provider_configuration.py`: it is the subject of the rule, and a
+# second entry belongs in a reviewed diff on this line. It is held against reality
+# by `test_the_refused_provider_host_is_the_compose_service_name_the_mock_runs_as`
+# below, because a written-out catalog can go stale without anything failing — a
+# rule that refuses a name nothing runs under reports every configuration clean
+# (`docs/MISTAKES.md` entry 35).
+MOCK_AI_SERVICE = "mock-ai"
+
+# Ways of addressing the mock, one per spelling, because a rule that matches the
+# development stack's exact string is not a rule about the host. All `https`, so
+# that only the catalog can be what refuses them: a cleartext mock address is
+# refused by the transport rule too, and a row that two rules both refuse cannot
+# say which one fired.
+MOCK_AI_URL_SPELLINGS = {
+    "the development stack's address over TLS": f"https://{MOCK_AI_SERVICE}:8000/v1",
+    "no port": f"https://{MOCK_AI_SERVICE}/v1",
+    "another port": f"https://{MOCK_AI_SERVICE}:8443/v1",
+    "no path": f"https://{MOCK_AI_SERVICE}",
+}
+
+# The other direction: URLs that contain the service name and address something
+# else entirely. Each is an address a real institution could hold, and each is
+# refused by the substring rule that is the obvious way to write the check.
+NON_MOCK_AI_URL_SPELLINGS = {
+    "the service name as a subdomain": f"https://{MOCK_AI_SERVICE}.example.edu/v1",
+    "a host the service name prefixes": f"https://{MOCK_AI_SERVICE}-2.example.edu/v1",
+    "a host the service name ends": f"https://staging-{MOCK_AI_SERVICE}/v1",
+    "the service name in the path": f"https://ai.example.edu/{MOCK_AI_SERVICE}/v1",
+}
+
+# The development stack's own value, cleartext to a service name that is not this
+# machine — refused by the old rule unconditionally, and the configuration E2-07's
+# first and fourth acceptance criteria both run from.
+DEVELOPMENT_MOCK_AI_URL = f"http://{MOCK_AI_SERVICE}:8000/v1"
+
 # A username and a password written into the URL. Both are needles as well as
 # credentials: the refusal has to quote neither, so neither may share an
 # eight-character run with the field name, with the field's own `description`, or
@@ -238,6 +309,23 @@ def load_configuration_error() -> type[BaseException]:
     from app.config import ConfigurationError
 
     return ConfigurationError
+
+
+def development_environment() -> str:
+    """The `ENVIRONMENT` value that means development, read from its one definition.
+
+    Out of `app.config` rather than written here, because E0-37 item 2 made that
+    constant the single definition site and a literal in this module would be one
+    more copy of the value that item exists to remove. Spelled exactly as
+    `tests/unit/test_oidc_provider_configuration.py` spells it.
+    """
+    from app.config import DEVELOPMENT_ENVIRONMENT
+
+    assert isinstance(DEVELOPMENT_ENVIRONMENT, str) and DEVELOPMENT_ENVIRONMENT, (
+        "`app.config.DEVELOPMENT_ENVIRONMENT` is not a non-empty string, so this module cannot "
+        "tell which environment the mock provider is permitted in."
+    )
+    return DEVELOPMENT_ENVIRONMENT
 
 
 def documented_key_variables(documented_env: Mapping[str, str]) -> list[str]:
@@ -658,11 +746,24 @@ def renderings_of(failure: BaseException) -> dict[str, str]:
 
 
 def configure_provider(
-    monkeypatch: pytest.MonkeyPatch, base_url: str, *, with_key: bool = True
+    monkeypatch: pytest.MonkeyPatch,
+    base_url: str,
+    *,
+    with_key: bool = True,
+    environment: str | None = None,
 ) -> None:
-    """Point the provider at `base_url`, with or without a key configured."""
+    """Point the provider at `base_url`, with or without a key, in a named environment.
+
+    `environment` is optional and every test whose subject is one of the two
+    environment-conditioned rules passes it (`docs/MISTAKES.md` entry 40). Left
+    unset, the value is `.env.example`'s own, laid down by `configured_env` — which
+    is right for the rules that do not read it, and is stated in the module
+    docstring rather than repeated on each of them.
+    """
     settings_cls = load_settings_class()
     name, info = one_key_field(settings_cls)
+    if environment is not None:
+        monkeypatch.setenv(ENVIRONMENT_VARIABLE, environment)
     monkeypatch.setenv(AI_PROVIDER_BASE_URL_VARIABLE, base_url)
     if with_key:
         monkeypatch.setenv(variable_for(name, info), FAKE_PROVIDER_CREDENTIAL)
@@ -671,12 +772,29 @@ def configure_provider(
 
 
 @pytest.mark.parametrize("with_key", (True, False), ids=("key set", "no key set"))
+@pytest.mark.parametrize("environment", ("development", *DEPLOYMENT_ENVIRONMENTS))
 def test_an_https_provider_url_is_accepted_wherever_it_points(
     configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     with_key: bool,
+    environment: str,
 ) -> None:
     """The ordinary deployment: a hosted provider over TLS, with a key or without one.
+
+    **Run in a deployment as well as in development since E2-07**, which is the
+    row that keeps that ticket's environment condition from being implemented as
+    "a deployment refuses everything". The `development` row is spelled as a
+    literal rather than read from `app.config`, because parametrisation needs a
+    value at collection time and importing the application there would make a
+    missing module a collection error rather than a red;
+    `test_the_development_row_above_is_the_environment_app_config_names` holds
+    that literal against the constant.
+
+    The two deployment rows carry `deployed_identity_provider`, which also moves
+    the AI provider off `.env.example`'s mock address — without it the refusal
+    under test would be E0-39's or E2-07's own catalog rule firing on a background
+    value.
 
     The permitted case, asserted first and separately, because a rule that refuses
     plain HTTP is trivially satisfiable by refusing everything — and a startup
@@ -691,25 +809,30 @@ def test_an_https_provider_url_is_accepted_wherever_it_points(
     supported. What changes is the *scheme* required off this machine, and
     nothing else.
     """
-    configure_provider(monkeypatch, OFF_MACHINE_HTTPS_URL, with_key=with_key)
+    configure_provider(
+        monkeypatch, OFF_MACHINE_HTTPS_URL, with_key=with_key, environment=environment
+    )
 
     settings = load_settings_class()()
 
     assert settings is not None, (
-        f"`Settings` refused {OFF_MACHINE_HTTPS_URL}, a hosted provider reached over TLS "
-        f"{'with' if with_key else 'without'} a key configured. That is the deployment "
-        "`.env.example` documents, and E0-37 item 12 requires the transport rule to read the "
-        "scheme and the host rather than whether a credential is present."
+        f"`Settings` refused {OFF_MACHINE_HTTPS_URL} under ENVIRONMENT={environment!r}, a hosted "
+        f"provider reached over TLS {'with' if with_key else 'without'} a key configured. That is "
+        "the deployment a real institution runs, and E0-37 item 12 requires the transport rule to "
+        "read the scheme and the host rather than whether a credential is present."
     )
 
 
 @pytest.mark.parametrize("with_key", (True, False), ids=("key set", "no key set"))
 @pytest.mark.parametrize("base_url", LOOPBACK_HTTP_URLS)
+@pytest.mark.parametrize("environment", ("development", *DEPLOYMENT_ENVIRONMENTS))
 def test_a_plain_http_provider_url_is_accepted_on_this_machine(
     configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     base_url: str,
     with_key: bool,
+    environment: str,
 ) -> None:
     """Plain HTTP to this machine stays legal, in all three spellings of it.
 
@@ -730,24 +853,35 @@ def test_a_plain_http_provider_url_is_accepted_on_this_machine(
     that refused every keyless provider would take this row down with it, which is
     the near miss that separates "off this machine means https" from "a provider
     must be authenticated".
+
+    **In every environment, since E2-07.** That ticket makes the transport rule
+    environment-conditioned, and the exemption for this machine is not the part
+    that moves: a model server in the same pod is reached at `localhost` by a
+    production container as readily as by a laptop, and there is no wire either
+    way. These rows are what stop the condition being written as "in a deployment,
+    require https" — which refuses the sidecar deployment ADR 0056's consequences
+    already name as supported.
     """
-    configure_provider(monkeypatch, base_url, with_key=with_key)
+    configure_provider(monkeypatch, base_url, with_key=with_key, environment=environment)
 
     settings = load_settings_class()()
 
     assert settings is not None, (
-        f"`Settings` refused {base_url}, which is plain HTTP to this machine, "
-        f"{'with' if with_key else 'without'} a key configured. There is no network between the "
-        "process and a local model server, so there is nothing for the transport rule to protect "
-        "— and refusing it makes running without a hosted provider impossible."
+        f"`Settings` refused {base_url} under ENVIRONMENT={environment!r}, which is plain HTTP to "
+        f"this machine, {'with' if with_key else 'without'} a key configured. There is no network "
+        "between the process and a local model server, so there is nothing for the transport rule "
+        "to protect — and refusing it makes running without a hosted provider impossible."
     )
 
 
 @pytest.mark.parametrize("with_key", (True, False), ids=("key set", "no key set"))
-def test_a_plain_http_provider_url_to_another_host_is_refused(
+@pytest.mark.parametrize("environment", DEPLOYMENT_ENVIRONMENTS)
+def test_a_plain_http_provider_url_to_another_host_is_refused_in_a_deployment(
     configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     with_key: bool,
+    environment: str,
 ) -> None:
     """Cleartext to a model on another host is refused at startup, key or no key.
 
@@ -791,20 +925,71 @@ def test_a_plain_http_provider_url_to_another_host_is_refused(
     the name would be red for the rename rather than for the rule. The controls
     that keep this from being satisfied by a rule that refuses everything are the
     two acceptance tests above, both of which now run without a key too.
+
+    **The environment is stated, and the test is renamed for it, by E2-07.** That
+    ticket makes this rule apply outside development only, so the same
+    configuration is *accepted* on a developer's machine — which is the test
+    below. Before that change this ran under `.env.example`'s `development` and
+    passed because the rule was unconditional; afterwards it would have been red
+    against a correct implementation, which is `docs/MISTAKES.md` entry 22's
+    shape: a new rule making an earlier ticket's test fail, with the repair on the
+    other side of the test wall from whoever meets it.
     """
-    configure_provider(monkeypatch, OFF_MACHINE_HTTP_URL, with_key=with_key)
+    configure_provider(
+        monkeypatch, OFF_MACHINE_HTTP_URL, with_key=with_key, environment=environment
+    )
 
     with pytest.raises(load_configuration_error()):
         load_settings_class()()
 
 
+def test_a_plain_http_provider_url_to_another_host_is_accepted_in_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pair to the test above, and the reason E2-07 could change that rule at all.
+
+    The development stack's own provider is `http://mock-ai:8000/v1` — cleartext,
+    to a Compose service name, which is not this machine by any reading. The rule
+    as E0-37 left it refuses that value unconditionally, so E2-07's first and
+    fourth acceptance criteria are unsatisfiable without this exemption existing.
+
+    **The exemption is the environment and not the host.** ADR 0077 already draws
+    that line for the identity provider's four URLs, and this rule is written to
+    match it rather than to carve out the one address the development stack uses:
+    a developer running a model server on another machine on their own network is
+    the same situation, and a rule that named only `mock-ai` would still refuse
+    them while being one line longer.
+
+    **The mutation this kills:** the transport rule left unconditional, which is
+    the state at HEAD and which makes `docker compose up` from a clean checkout
+    fail to start the API. **The near miss that must stay red:** the identical URL
+    in a deployment, which is the test above.
+    """
+    configure_provider(
+        monkeypatch, OFF_MACHINE_HTTP_URL, with_key=False, environment=development_environment()
+    )
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        f"`Settings` refused {OFF_MACHINE_HTTP_URL} in development. E2-07 points `.env.example` "
+        "at `http://mock-ai:8000/v1`, which is cleartext to a host that is not this machine, so "
+        "an unconditional transport rule stops the development stack from starting at all — and "
+        "with it every e2e run, which copies that file to `.env`."
+    )
+
+
 @pytest.mark.parametrize("with_key", (True, False), ids=("key set", "no key set"))
 @pytest.mark.parametrize("shape", list(USERINFO_URLS))
+@pytest.mark.parametrize("environment", ("development", *DEPLOYMENT_ENVIRONMENTS))
 def test_a_provider_url_carrying_a_credential_is_refused(
     configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     shape: str,
     with_key: bool,
+    environment: str,
 ) -> None:
     """A credential in the URL is refused outright — over TLS, on this machine, key or no key.
 
@@ -830,8 +1015,18 @@ def test_a_provider_url_carrying_a_credential_is_refused(
     The type is named for the reason given on the test above: a bare `Exception`
     is satisfied by an `AttributeError` from a moved symbol, and eight
     parametrisations all passing on one would read as a rule holding everywhere.
+
+    **The environment rows are E2-07's, and they say what did *not* change.** That
+    ticket makes the transport rule conditional; this one stays unconditional,
+    because a credential belongs in the URL in no environment — the field is a
+    plain displayable `str` that §6.3's admin view renders, on a laptop as much as
+    in production. Written as a parametrisation rather than as prose so that a
+    condition added to the wrong validator is a red rather than a paragraph
+    somebody has to notice is now false.
     """
-    configure_provider(monkeypatch, USERINFO_URLS[shape], with_key=with_key)
+    configure_provider(
+        monkeypatch, USERINFO_URLS[shape], with_key=with_key, environment=environment
+    )
 
     with pytest.raises(load_configuration_error()):
         load_settings_class()()
@@ -854,7 +1049,15 @@ def test_the_refusal_of_a_url_carrying_a_credential_quotes_neither_it_nor_the_ho
     username, the password and the host do not collide with the report's own
     vocabulary, so the silence asserted afterwards means something rather than
     nothing (`docs/MISTAKES.md` entry 3).
+
+    **Development, stated** (`docs/MISTAKES.md` entry 40). The rule under test is
+    the unconditional one, so the environment is not the subject — but the
+    *control* builds the whole application under `.env.example`'s values, and
+    since E2-07 those include a provider address a deployment refuses. Left to
+    whatever the environment happened to be, the control would refuse for the
+    right reason today and for the wrong one after one edit.
     """
+    monkeypatch.setenv(ENVIRONMENT_VARIABLE, development_environment())
     restored = configured_env.get(REQUIRED_DEPLOYMENT_VARIABLE)
     assert restored is not None, (
         f"`.env.example` documents no {REQUIRED_DEPLOYMENT_VARIABLE}, so the control below cannot "
@@ -914,6 +1117,7 @@ def test_the_refusal_of_a_url_carrying_a_credential_quotes_neither_it_nor_the_ho
 
 def test_the_refusal_of_an_insecure_provider_url_names_the_variable_and_quotes_nothing_else(
     configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """What the operator is told: which variable, and neither the URL nor the key.
@@ -936,7 +1140,15 @@ def test_the_refusal_of_an_insecure_provider_url_names_the_variable_and_quotes_n
     away. And then it must quote neither the URL it refused nor the key that made
     it refuse: a startup diagnostic is printed to the container log and pasted
     into chat windows, which is exactly where a `.env` line does not belong.
+
+    **A deployment's environment, since E2-07**, because the rule this reads the
+    message of applies only outside development now. `deployed_identity_provider`
+    moves the identity provider and the AI provider off `.env.example`'s mock
+    addresses first, so the refusal asserted here is this rule's rather than a
+    neighbour's — with them left in place, the message would name whichever
+    variable the report happened to reach first.
     """
+    monkeypatch.setenv(ENVIRONMENT_VARIABLE, DEPLOYMENT_ENVIRONMENTS[0])
     restored = configured_env.get(REQUIRED_DEPLOYMENT_VARIABLE)
     assert restored is not None, (
         f"`.env.example` documents no {REQUIRED_DEPLOYMENT_VARIABLE}, so the control below cannot "
@@ -993,6 +1205,254 @@ def test_the_refusal_of_an_insecure_provider_url_names_the_variable_and_quotes_n
             "goes to the container log and into whatever the operator pastes when asking for "
             "help. Naming the variable is what the message is for; repeating its value is not."
         )
+
+
+# ---------------------------------------------------------------------------
+# The mock provider's own name — ticket E2-07.
+#
+# The stack now starts a service that answers chat completions, in the base
+# Compose file, in every deployment (ADR 0038). ADR 0077 found what that means for
+# the identity provider and the argument transfers exactly: a deployment that sets
+# no `AI_PROVIDER_BASE_URL` — or copies the development one forward — ships every
+# student comment to a container in its own network and stores whatever it
+# answers as a classification, with nothing to say the model was never asked. The
+# ticket puts it plainly: "nothing may point production at it".
+#
+# Every refusal below carries `https`, so that only the catalog can be what
+# refuses it: the development stack's own address is cleartext, and a cleartext
+# mock address is refused by the transport rule as well.
+# ---------------------------------------------------------------------------
+
+
+def test_the_development_environment_this_module_parametrises_over_is_the_one_app_config_names(
+    configured_env: dict[str, str],
+) -> None:
+    """A control on the `"development"` literal in the parametrisations above.
+
+    **A red here means these tests are broken, not the code.** Parametrisation
+    needs its values at collection time, and importing `app.config` there would
+    turn a missing module into a collection error rather than a red — so the rows
+    above spell the development environment as a literal, and this is what holds
+    it against `app.config.DEVELOPMENT_ENVIRONMENT`, which E0-37 item 2 makes its
+    one definition site.
+
+    Without it, a renamed constant would leave every "accepted in development" row
+    above running under a *deployment* name and passing only because the value
+    they set is legal in both — and the two rows that are legal in one environment
+    only would fail for a reason no message would explain.
+    """
+    assert development_environment() == "development", (
+        f"`app.config.DEVELOPMENT_ENVIRONMENT` is {development_environment()!r} and the "
+        "parametrisations in this module spell 'development'. They have to be the same string, or "
+        "half the rows above are running in an environment nobody chose."
+    )
+
+
+def test_the_development_stack_may_point_the_provider_at_the_mock(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Acceptance criterion 1's configuration half: `.env.example`'s value builds.
+
+    `http://mock-ai:8000/v1` is what E2-07 documents and what CI's e2e job copies
+    to `.env`, and it is refused by the rule as E0-37 left it — cleartext, to a
+    host that is not this machine. So this row is the whole reason the transport
+    rule changes at all, and it is the one that must stay green afterwards: a red
+    here means `docker compose up` from a clean checkout does not start the API,
+    which is SPEC §14.3's exit criterion for every epic.
+
+    **The mutation this kills:** the catalog rule written without the environment
+    condition, which refuses the development stack too and passes every refusal
+    test below. **The near miss that must stay red:** the identical URL in a
+    deployment, which is the next test.
+    """
+    configure_provider(
+        monkeypatch, DEVELOPMENT_MOCK_AI_URL, with_key=False, environment=development_environment()
+    )
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        f"`Settings` refused {DEVELOPMENT_MOCK_AI_URL} in development. That is the address E2-07 "
+        "documents in `.env.example`, the address CI's e2e job runs the stack with, and the only "
+        "provider a development machine has — refusing it leaves the stack unable to start."
+    )
+
+
+@pytest.mark.parametrize("environment", DEPLOYMENT_ENVIRONMENTS)
+@pytest.mark.parametrize("spelling", list(MOCK_AI_URL_SPELLINGS))
+def test_a_url_addressing_the_mock_provider_is_refused_outside_development(
+    configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    spelling: str,
+    environment: str,
+) -> None:
+    """A deployment pointed at the mock stops at startup, however the URL is spelled.
+
+    The ticket's security-relevant note: "nothing may point production at it." The
+    base Compose file starts `mock-ai` in every deployment (ADR 0038), so this is
+    not a hypothetical misconfiguration — it is the one that resolves, answers,
+    and looks like a working classifier. What it produces is a `substantive` for
+    every comment over 25 characters, stored with a real prompt version and model
+    id against a student's participation.
+
+    **Four spellings, because the rule is about the host.** A container on this
+    network reaches the mock at `mock-ai` on whatever port it listens on, so a rule
+    written against `http://mock-ai:8000/v1` — the exact string `.env.example`
+    ships, and the obvious thing to compare — is defeated by an operator who
+    copies the address and changes the port, or who puts TLS in front of it.
+
+    **The mutation this kills:** no catalog rule at all, which is the state at
+    HEAD; equality against the development stack's full URL; and a rule that reads
+    `host:port` rather than the host.
+
+    **Every row carries `https`**, so the transport rule cannot be what refuses
+    it: the cleartext spellings are refused by either rule and a green row nobody
+    can attribute is `docs/MISTAKES.md` entry 3.
+    """
+    configure_provider(
+        monkeypatch,
+        MOCK_AI_URL_SPELLINGS[spelling],
+        with_key=False,
+        environment=environment,
+    )
+
+    with pytest.raises(load_configuration_error()):
+        load_settings_class()()
+
+
+def test_the_mock_provider_host_is_refused_whatever_case_it_is_written_in(
+    configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`MOCK-AI` is the same host as `mock-ai`, so the refusal has to read it as one.
+
+    Host names are case-insensitive (RFC 4343) and Compose folds nothing of its
+    own, so `MOCK-AI` in a container reaches the mock exactly as the lower-case
+    spelling does. This is a judgement rather than a transcription of the ticket,
+    and it is a narrow one — the ticket's rule is about the URL's host, and this is
+    that host.
+
+    **The mutation this kills:** `url.netloc.split(":")[0] == "mock-ai"`, which
+    does not fold case, as against `urlsplit(url).hostname`, which does.
+
+    Written as its own test rather than as a fifth spelling above, exactly as
+    `tests/unit/test_oidc_provider_configuration.py` does, so that a dispute about
+    the reading costs one test rather than four.
+    """
+    configure_provider(
+        monkeypatch,
+        f"https://{MOCK_AI_SERVICE.upper()}:8000/v1",
+        with_key=False,
+        environment=DEPLOYMENT_ENVIRONMENTS[0],
+    )
+
+    with pytest.raises(load_configuration_error()):
+        load_settings_class()()
+
+
+@pytest.mark.parametrize("spelling", list(NON_MOCK_AI_URL_SPELLINGS))
+def test_a_url_that_merely_contains_the_mock_providers_name_is_accepted_in_a_deployment(
+    configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    spelling: str,
+) -> None:
+    """The host is compared as a component, not searched for as a substring.
+
+    Each row is an address a real institution could hold, and each is refused by
+    the one-line version of this rule — `"mock-ai" in url` — which is the obvious
+    way to write it and which the refusals above cannot tell from the right one. A
+    subdomain, a host the name prefixes, a host the name ends, and a path segment:
+    none of them resolves to the Compose service, which is the only thing the
+    catalog names.
+
+    **The mutation this kills:** substring matching, over the URL or over the host.
+    **The near miss on the other side:** `MOCK_AI_URL_SPELLINGS` above, where the
+    host is exactly the service name and every one is refused.
+    """
+    configure_provider(
+        monkeypatch,
+        NON_MOCK_AI_URL_SPELLINGS[spelling],
+        with_key=False,
+        environment=DEPLOYMENT_ENVIRONMENTS[0],
+    )
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        f"`Settings` refused {NON_MOCK_AI_URL_SPELLINGS[spelling]!r}, whose host is not "
+        f"{MOCK_AI_SERVICE!r}. The catalog is the Compose service name — the name by which a "
+        "container on this stack reaches the mock — and nothing else resolves to it."
+    )
+
+
+def test_the_refusal_of_a_mock_provider_url_names_the_variable(
+    configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What the operator reads: which setting is wrong.
+
+    An operator meets this in a container log with no traceback into the
+    validator, and this deployment has two provider settings that could carry a
+    mock's name — the identity provider's five and this one. A refusal that says
+    only "a mock address is configured" sends them to read six variables.
+
+    Nothing else about the wording is pinned. The host may appear: it is what is
+    being refused, and unlike the userinfo case there is no credential in it.
+
+    **The mutation this kills:** a refusal raised on the right field with a
+    message assembled from another one — which
+    `tests/unit/test_oidc_provider_configuration.py` records as reachable, since
+    `_describe_invalid_settings` builds what the operator reads out of the field
+    name rather than out of the validator's own words.
+    """
+    configure_provider(
+        monkeypatch,
+        MOCK_AI_URL_SPELLINGS["another port"],
+        with_key=False,
+        environment=DEPLOYMENT_ENVIRONMENTS[0],
+    )
+
+    with pytest.raises(load_configuration_error()) as refusal:
+        build_app()
+
+    message = str(refusal.value)
+    assert AI_PROVIDER_BASE_URL_VARIABLE.lower() in message.lower(), (
+        f"The refusal does not name {AI_PROVIDER_BASE_URL_VARIABLE}: {message!r}. Six settings in "
+        "this deployment can carry a mock's address, and the operator reading a container log has "
+        "to learn which one did."
+    )
+
+
+def test_the_refused_provider_host_is_the_compose_service_name_the_mock_runs_as(
+    mock_ai_service: str,
+) -> None:
+    """A control: the host this module refuses is the name the service actually runs under.
+
+    **A red here means these tests are broken, or the mock has been renamed.** The
+    catalog is written out above rather than derived, which is the right call for
+    a one-entry rule that a reviewed diff should have to change — but a written-out
+    catalog goes stale without anything failing, because a rule that refuses a name
+    nothing runs under reports every configuration clean (`docs/MISTAKES.md` entry
+    35, whose rule is that a guard which only ever reports absence has to be seen
+    finding the thing on a subject that certainly has it).
+
+    `mock_ai_service` is `tests/fixtures/mock_ai.py`'s single answer to "what is
+    the mock provider called", and
+    `tests/unit/test_mock_ai_service.py::test_the_base_compose_file_builds_the_mock
+    _ai_service_from_this_repository` is what holds *that* against the Compose file
+    — so the chain from this literal to a running container is closed rather than
+    ending in a second literal.
+    """
+    assert mock_ai_service == MOCK_AI_SERVICE, (
+        f"This module refuses the host {MOCK_AI_SERVICE!r} and the mock provider runs as the "
+        f"Compose service {mock_ai_service!r}. Every refusal above is then about a name nothing on "
+        "this stack answers to, and would pass against a deployment configured with the real one."
+    )
 
 
 def test_no_workflow_references_a_repository_secret_beyond_the_permitted_set() -> None:

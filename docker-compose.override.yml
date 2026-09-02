@@ -146,3 +146,26 @@ services:
       MOCK_IDP_TOOL_REDIRECT_URI: http://localhost:8000/auth/oidc/callback
     ports:
       - '127.0.0.1:8081:8000'
+
+  # The mock model provider's published rules, so a developer can read what the
+  # stack's classifier is actually deciding — `curl http://localhost:8082/mock/rules`
+  # — and drive a wrong answer by hand. 8082 on the host because 8000 is `api`,
+  # 8080 is `mock-lms` and 8081 is `mock-idp`; inside the container it is 8000
+  # like every other Python service here.
+  #
+  # **The published port is here and nowhere else**, and that is the decision
+  # E2-07's scope asks the pull request to defend. Nothing in the stack reaches
+  # this service from the host — `api`, `worker` and `beat` all reach it by
+  # service name on the Compose network — so the host port buys debugging and
+  # nothing else, which is exactly what belongs in the development override
+  # rather than in the file every deployment runs.
+  #
+  # No environment override: unlike the other two mocks this one holds no address
+  # that differs between a browser on the host and a container on the network,
+  # because nothing redirects a browser here. And no source mount and no reload
+  # flag, for the reason `mock-lms` gives above — the development anchor sets
+  # PYTHONPATH to `/app/backend`, which is the backend's import root and not this
+  # service's. Editing the mock means `docker compose up -d --build mock-ai`.
+  mock-ai:
+    ports:
+      - '127.0.0.1:8082:8000'

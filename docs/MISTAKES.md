@@ -204,7 +204,7 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 9** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 10** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 17. An unqualified table name let the caller choose which table a guard read
 
@@ -212,7 +212,7 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 ## 34. A pipeline discarded a non-zero exit and printed a line that read as success
 
-**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
+**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
 
 **Rule.** Never read a gate's result through a pipe. `cmd | tail` reports the
 exit status of `tail`, so a failing gate prints a passing line. Redirect to a
@@ -228,7 +228,7 @@ file and check the status, or run the gate bare.
 
 ## 18. A deliverable existed in the source tree and not in the built artifact
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/18-a-deliverable-existed-in-the-source-tree-and-not.md)
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/18-a-deliverable-existed-in-the-source-tree-and-not.md)
 
 ## 23. A validation created the appearance of a behaviour
 
@@ -305,7 +305,7 @@ glob is a single `*` unless `globstar` is set.
 
 ## 37. A harness ran the real artifact under conditions the runtime does not use
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/37-a-harness-ran-the-real-artifact-under-conditions.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/37-a-harness-ran-the-real-artifact-under-conditions.md)
 
 **Rule.** When you extract something to run it, copy the invocation and not just
 the body — the shell and its flags, the interpreter, the environment. Prefer a
@@ -335,7 +335,7 @@ printed.
 
 ## 40. The suite ran under an environment nobody chose, and it was a different one in CI
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/40-the-suite-ran-under-an-environment-nobody-chose.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/40-the-suite-ran-under-an-environment-nobody-chose.md)
 
 **Rule.** A test whose subject reads the process environment states the value it
 runs under, in its own fixture chain. Anything a fixture runs in process brings

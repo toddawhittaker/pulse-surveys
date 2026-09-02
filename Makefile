@@ -120,20 +120,22 @@ lint: node-deps ## ruff check + ruff format --check, eslint (root and frontend w
 	$(call banner,eslint (frontend workspace))
 	@npm run lint --workspace frontend
 
-# mypy runs three times, and it has to: `backend/app`, `mock-lms/app` and
-# `mock-idp/app` are all packages called `app` (SPEC §13 names all three), and
-# one run over two of them stops with "Duplicate module named app" having
-# checked neither. Measured, not assumed. `.github/workflows/ci.yml` runs the
-# same three in the same order. See
+# mypy runs four times, and it has to: `backend/app`, `mock-lms/app`,
+# `mock-idp/app` and `mock-ai/app` are all packages called `app` (SPEC §13 names
+# all four), and one run over two of them stops with "Duplicate module named app"
+# having checked neither. Measured, not assumed. `.github/workflows/ci.yml` runs
+# the same four in the same order. See
 # docs/adr/0039-the-two-app-packages-are-typechecked-in-two-runs.md.
 .PHONY: typecheck
-typecheck: node-deps ## mypy over backend/, mock-lms/ and mock-idp/ + tsc --noEmit (root and frontend workspace)
+typecheck: node-deps ## mypy over backend/, mock-lms/, mock-idp/ and mock-ai/ + tsc --noEmit (root and frontend workspace)
 	$(call banner,mypy)
 	@mypy
 	$(call banner,mypy mock-lms/app)
 	@mypy mock-lms/app
 	$(call banner,mypy mock-idp/app)
 	@mypy mock-idp/app
+	$(call banner,mypy mock-ai/app)
+	@mypy mock-ai/app
 	$(call banner,tsc --noEmit)
 	@if [ -f package.json ]; then \
 		npx tsc --noEmit; \

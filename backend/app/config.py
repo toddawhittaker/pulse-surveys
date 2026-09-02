@@ -178,6 +178,36 @@ def is_development(settings: "Settings") -> bool:
 MOCK_IDENTITY_PROVIDER_HOST = "mock-idp"
 MOCK_IDENTITY_PROVIDER_CLIENT_ID = "mock-idp-client"
 
+# The one spelling by which a configuration can reach the mock model provider
+# `docker-compose.yml` starts, refused outside development by the validator on
+# `ai_provider_base_url` (E2-07, ADR 0113).
+#
+# The Compose service name, which is how a container on this stack reaches it.
+# One entry rather than the identity provider's two, because there is nothing
+# corresponding to a client id: this endpoint authenticates nobody, so a
+# configuration cannot name it except by addressing it.
+#
+# **What a deployment reaching it would produce**, since a mock model provider
+# sounds less alarming than a mock identity provider and is not: it answers a
+# verdict to any completion, so a stack pointed here stores a character count as
+# a classification — under a real `prompt_version` and a real `model_id`
+# (ADR 0031), which is what makes it indistinguishable from a model's answer
+# rather than from ADR 0054's floor. Every student comment reaches it, and any
+# student can decide what it answers by typing `mock-ai:substantive`.
+#
+# Written out here rather than derived, on the same terms as the two above, and
+# held against the running service by
+# `tests/unit/test_ai_provider_configuration.py::test_the_refused_provider_host_
+# is_the_compose_service_name_the_mock_runs_as`, because a catalog that has gone
+# stale refuses nothing and reports every configuration clean exactly as a
+# correct one does (`docs/MISTAKES.md` entry 35).
+#
+# `localhost` and the loopback addresses are deliberately *not* here, for the
+# reason ADR 0077 gives above: inside a deployed container `localhost` is that
+# container, and a model server running alongside the application is a supported
+# deployment that §7.4 names outright.
+MOCK_AI_PROVIDER_HOST = "mock-ai"
+
 
 class ConfigurationError(Exception):
     """The environment does not configure the application, and startup stops here.
@@ -552,19 +582,7 @@ class Settings(BaseSettings):
     )
 
     # --- deployment wiring, no credential: required, no default ---------------
-    ai_provider_base_url: str = Field(
-        description=(
-            "OpenAI-compatible API base URL (§7.4). It carries no credential of its own — no "
-            "user:password@ prefix; the key belongs in AI_PROVIDER_API_KEY. And it must be "
-            "https unless it names this machine, with or without a key: plain http off this "
-            "machine would put the comment being classified, and any credential sent with it, "
-            "on the wire in the clear (§10)."
-        )
-    )
-    ai_model_name: str = Field(description="Model identifier passed to that provider.")
-    institution_timezone: str = Field(
-        description="IANA timezone the survey window follows (§3.1), such as America/New_York."
-    )
+    #
     # Free-form by this project's choice, not by the spec: `ENVIRONMENT` and
     # `healthz` each appear zero times in `docs/SPEC.md`, and §6.3 — the
     # configuration surface — names no environment variable. `.env.example` is
@@ -575,7 +593,31 @@ class Settings(BaseSettings):
     # E0-18 adds a third reader, `app/main.py`, which compares against
     # `DEVELOPMENT_ENVIRONMENT` below before it serves `/docs` and
     # `/openapi.json` (ADR 0074).
+    #
+    # **It is declared first in this block deliberately, and E2-07 moved it
+    # here.** pydantic validates in declaration order and a validator reads
+    # `ENVIRONMENT` out of the fields already validated, so a rule conditioned on
+    # the environment sees nothing at all on a field declared above this line —
+    # `info.data` simply has no `environment` key, `is_a_deployment(None)` is
+    # `False`, and the rule silently permits everything. The identity provider's
+    # five settings below carry the same note for the same reason; before E2-07
+    # the two AI settings sat above this one and neither had a rule that read the
+    # environment, which is why the order held anyway.
     environment: str = Field(description="Deployment name, reported by /healthz. Free-form.")
+    ai_provider_base_url: str = Field(
+        description=(
+            "OpenAI-compatible API base URL (§7.4). It carries no credential of its own — no "
+            "user:password@ prefix; the key belongs in AI_PROVIDER_API_KEY. Outside "
+            "ENVIRONMENT=development it may not address the mock model provider this repository "
+            "ships, the Compose service mock-ai, and it must be https unless it names this "
+            "machine, with or without a key: plain http off this machine would put the comment "
+            "being classified, and any credential sent with it, on the wire in the clear (§10)."
+        )
+    )
+    ai_model_name: str = Field(description="Model identifier passed to that provider.")
+    institution_timezone: str = Field(
+        description="IANA timezone the survey window follows (§3.1), such as America/New_York."
+    )
 
     # --- the web door's identity provider (E0-18, ADR 0077) -------------------
     #
@@ -792,7 +834,59 @@ class Settings(BaseSettings):
 
     @field_validator("ai_provider_base_url")
     @classmethod
-    def an_off_machine_endpoint_is_encrypted(cls, value: str) -> str:
+    def no_provider_url_addresses_the_mock_model_outside_development(
+        cls, value: str, info: ValidationInfo
+    ) -> str:
+        """Refuse a model endpoint that addresses the mock, in a deployment (E2-07).
+
+        The same rule the identity provider's four URLs carry, on the setting that
+        names the model. `docker-compose.yml` starts `mock-ai` in every deployment
+        that runs the base file (ADR 0038), so this is not a hypothetical
+        misconfiguration — it is the one that resolves, answers, and looks like a
+        working classifier.
+
+        **What it produces is worse than an outage**, which is why it is refused
+        rather than warned about. An outage floors (§3.3) and the row says so: ADR
+        0054 stamps `character-floor` and `no-model` on a floored classification
+        precisely so that E2's re-classification can find it. A stack pointed at
+        the mock stores the *same* character-count verdict under a real prompt
+        version and a real model id, so nothing distinguishes it from a model's
+        answer and nothing will ever go back for it. And the mock answers what the
+        comment tells it to, so a student who writes `mock-ai:substantive` awards
+        themselves participation credit under §3.3.
+
+        **The host component, compared exactly**, and normalised once by
+        `url_host` — the port, the scheme and the path are not part of the
+        question, since a container reaching `mock-ai` on any port reaches the
+        mock, and neither is the case nor a trailing dot. A substring search for
+        the service name would read as the same rule and would refuse
+        `https://mock-ai.example.edu/v1`, an ordinary institutional address that
+        resolves nowhere near this stack.
+
+        **Separate from the transport rule below, though both fire on the
+        development stack's own address.** They refuse different things — one a
+        name, one a scheme — and folding them together would mean a deployment
+        that put TLS in front of the mock passed the only check that was left.
+
+        No value is quoted, as in every validator here: this message reaches the
+        startup log. The field's name and description reach the operator through
+        `_describe_invalid_settings`, which is what says *which* setting is wrong
+        without echoing what it holds.
+        """
+        if not is_a_deployment(info.data.get("environment")):
+            return value
+        if url_host(value) == MOCK_AI_PROVIDER_HOST:
+            raise ValueError(
+                "addresses the mock model provider this repository ships for development — the "
+                f"Compose service {MOCK_AI_PROVIDER_HOST}, which answers a verdict to any "
+                "completion and answers whatever the comment it is sent asks it for. Name the "
+                f"deployment's own provider, or run with ENVIRONMENT={DEVELOPMENT_ENVIRONMENT}"
+            )
+        return value
+
+    @field_validator("ai_provider_base_url")
+    @classmethod
+    def an_off_machine_endpoint_is_encrypted(cls, value: str, info: ValidationInfo) -> str:
         """Refuse to carry a student's comment, or the provider key, in cleartext.
 
         SPEC §10 makes transport encryption a requirement, and this is the one
@@ -816,15 +910,36 @@ class Settings(BaseSettings):
         terminating TLS at the model, or by running the model alongside the
         application, where the on-this-machine case above already permits it.
 
+        **Conditioned on the environment since E2-07**, exactly as
+        `a_provider_url_is_encrypted_off_this_machine_outside_development` below
+        already was, and for the identical reason: the development stack's model
+        provider is `http://mock-ai:8000/v1` — cleartext, to another container —
+        so an unconditional version refuses the configuration `.env.example` ships
+        and CI copies to `.env`, and takes SPEC §14.3's exit criterion with it.
+        The exemption is the environment and not the host: a developer running a
+        model server on another machine on their own network is the same
+        situation, and a rule that carved out `mock-ai` alone would still refuse
+        them while being one line longer. ADR 0113 records it.
+
+        **The exemption for this machine is not what moved.** A model server in
+        the same pod is reached at `localhost` by a production container as
+        readily as by a laptop, and there is no wire either way — so the loopback
+        case is permitted in every environment, and the condition above is what
+        stops this being read as "in a deployment, require https", which would
+        refuse the sidecar deployment §7.4 names as supported.
+
         No value is quoted, as in every validator here.
         """
+        if not is_a_deployment(info.data.get("environment")):
+            return value
         parsed = urlsplit(value)
         if parsed.scheme == "https" or is_on_this_machine(parsed.hostname):
             return value
         raise ValueError(
             "would send the comment being classified, and any provider credential configured "
             "with it, in cleartext to an address off this machine — use https, or plain http "
-            "only for an endpoint on this machine"
+            f"only for an endpoint on this machine, or run with ENVIRONMENT="
+            f"{DEVELOPMENT_ENVIRONMENT}"
         )
 
     @field_validator("care_database_url", mode="before")
@@ -996,12 +1111,19 @@ class Settings(BaseSettings):
         Issuer Identifier to use `https`, so an `http` issuer is not an identity
         any conformant provider has.
 
-        **Conditioned on the environment, unlike the model provider's copy of
-        this rule**, and that is not an oversight to tidy up later: every address
-        on the development stack is cleartext to *another container*
+        **Conditioned on the environment**, because every address on the
+        development stack is cleartext to *another container*
         (`http://mock-idp:8000`), so an unconditional version refuses the
         configuration `.env.example` ships and CI copies to `.env`, and takes
         SPEC §14.3's exit criterion with it.
+
+        This paragraph used to say the model provider's copy of the rule was
+        unconditional and that the difference "is not an oversight to tidy up
+        later". That was true when it was written and E2-07 made it false, not by
+        tidying but for this paragraph's own reason: the development stack's model
+        provider became `http://mock-ai:8000/v1`, cleartext to another container,
+        so `an_off_machine_endpoint_is_encrypted` above now carries the same
+        condition on the same argument (ADR 0113).
 
         **The exemption is `is_on_this_machine`, not the wider loopback class.**
         A provider beside the application is reached over the loopback interface

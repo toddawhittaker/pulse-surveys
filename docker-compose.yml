@@ -493,6 +493,64 @@ services:
       retries: 6
       start_period: 15s
 
+  # The in-repo OpenAI-compatible endpoint the §7.4 tasks are classified by
+  # (§9.2: an end-to-end run is self-contained). Development and test only, in
+  # this file rather than behind a profile for the reason ADR 0038 gives about
+  # the platform: a profile would take it out of CI's base-file-only pass, the
+  # one pass that runs what actually ships — and here that pass matters more than
+  # for the other two, because `api`, `worker` and `beat` all build a `Settings`
+  # whose `AI_PROVIDER_BASE_URL` names this service in development.
+  #
+  # **This service will answer whatever the comment asks it to.** A student
+  # comment carrying `mock-ai:500` makes it answer HTTP 500, and one carrying
+  # `mock-ai:substantive` makes it award participation credit — that is what makes
+  # it drivable from a test and what makes it unfit for anywhere else. What keeps
+  # it out of a deployment is not this file: `app/config.py` refuses an
+  # `AI_PROVIDER_BASE_URL` whose host is `mock-ai` anywhere `ENVIRONMENT` is not
+  # `development`, exactly as it already refuses `mock-idp` (ADR 0077, ADR 0113).
+  #
+  # **No `environment:` at all**, which is one less than either other mock. They
+  # each hold addresses — an issuer, a client id, where to send a browser — and
+  # every one of those has a deployment-specific answer. This one holds a
+  # character threshold, a stall and a handful of markers, and each has exactly
+  # one correct value, so there is nothing here for an operator to set. It
+  # follows that it earns no `.env.example` entry either, which is ADR 0037's
+  # rule reached with nothing to configure at all; `mock-ai/app/config.py` says
+  # so where a reader of that package will meet it.
+  #
+  # **No `env_file:`, deliberately**, for the reason `mock-lms` and `mock-idp`
+  # declare none: `env_file:` is all-or-nothing, and it would hand a fake model
+  # provider the database credentials — and the real provider key — that ADR 0009
+  # spends two rules keeping out of containers with no use for them.
+  mock-ai:
+    build:
+      context: .
+      dockerfile: mock-ai/Dockerfile
+    # Documentation, not publishing: reachable from `api`, `worker` and `beat` on
+    # this network, and from nothing on the host. The development override
+    # publishes it on 8082.
+    expose:
+      - '8000'
+    healthcheck:
+      # Declared here rather than as a HEALTHCHECK in the image, exactly as
+      # `mock-lms` and `mock-idp` above. One copy either way; this is the one
+      # `wait_for_health.sh` needs and the one `tests/unit/test_mock_ai_service.py`
+      # reads, and a second copy in the Dockerfile would be a thing to keep in
+      # step.
+      #
+      # urllib is in the standard library, so this adds nothing to the image and
+      # needs no shell; `urlopen` raises on any non-2xx, which is the failure the
+      # check has to report.
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4)
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
 volumes:
   # Named, so `docker compose down -v` is the only thing that discards the
   # database and an ordinary `down` never does.

@@ -1,7 +1,8 @@
-# Build context for the three images this repository builds:
-# backend/Dockerfile (ticket E0-02), mock-lms/Dockerfile (E0-14) and
-# mock-idp/Dockerfile (E0-16). One file serves all three, because Docker reads
-# it per build *context* and all three are built from the repository root.
+# Build context for the four images this repository builds:
+# backend/Dockerfile (ticket E0-02), mock-lms/Dockerfile (E0-14),
+# mock-idp/Dockerfile (E0-16) and mock-ai/Dockerfile (E2-07). One file serves all
+# four, because Docker reads it per build *context* and all four are built from
+# the repository root.
 #
 # E1-04 gives `backend/Dockerfile` a Node stage that builds the frontend, so the
 # root manifest, the root lockfile, `frontend/` and `design/tokens.css` are now
@@ -25,12 +26,15 @@
 # review, and was reaching the builder stage until the re-exclusions below were
 # added. Verified by planting all three and rebuilding.
 #
-# `mock-lms/` and `mock-idp/` get the same re-exclusions for the same reasons,
-# and one more reason of their own: they are the services that hold a signing
-# key, so a `*.pem` or `*.key` appearing under either is the exact file E0-14
-# criterion 3 and E0-16 criterion 9 say must never exist. Both keys are generated
-# per process and never written to disk, so these patterns should never match
-# anything — they are here so that the day one does, it does not reach a layer.
+# `mock-lms/`, `mock-idp/` and `mock-ai/` get the same re-exclusions for the same
+# reasons, and the first two for one more of their own: they are the services
+# that hold a signing key, so a `*.pem` or `*.key` appearing under either is the
+# exact file E0-14 criterion 3 and E0-16 criterion 9 say must never exist. Both
+# keys are generated per process and never written to disk, so these patterns
+# should never match anything — they are here so that the day one does, it does
+# not reach a layer. `mock-ai/` holds no key at all and gets them anyway: what
+# they really guard against is a file parked beside the source while debugging,
+# and that is true of any directory a build reads.
 
 *
 
@@ -41,6 +45,7 @@
 !backend
 !mock-lms
 !mock-idp
+!mock-ai
 
 # The frontend build stage's inputs (E1-04). The root manifest and lockfile are
 # the whole workspace's resolution (ADR 0083), `design/tokens.css` is the single
@@ -127,6 +132,13 @@ mock-idp/**/.env.*
 mock-idp/**/*.pem
 mock-idp/**/*.key
 
+mock-ai/.env
+mock-ai/.env.*
+mock-ai/**/.env
+mock-ai/**/.env.*
+mock-ai/**/*.pem
+mock-ai/**/*.key
+
 # Build and test debris; none of it belongs in an image.
 backend/**/__pycache__
 backend/**/*.py[cod]
@@ -137,6 +149,9 @@ mock-lms/**/*.py[cod]
 
 mock-idp/**/__pycache__
 mock-idp/**/*.py[cod]
+
+mock-ai/**/__pycache__
+mock-ai/**/*.py[cod]
 
 # Editor and merge debris. E0-12 made this reachable: `pyproject.toml` ships
 # `app/ai/prompts/**/*` as package data, so any non-hidden file left in that
