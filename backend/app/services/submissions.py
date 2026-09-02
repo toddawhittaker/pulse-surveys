@@ -4,30 +4,52 @@ The write path behind `app.api.student`. §13's closing rule puts the decisions 
 and leaves the router thin, so everything this module raises is a *reason* and the
 router is what turns a reason into a status code.
 
-**The order the checks run in is the design, not a detail.** Whether the section is
-one this student can reach is asked first and answered identically for a section
-that does not exist (SPEC §4.1 item 1 — a refusal that told the two apart would
-answer "does this section exist" for any signed-in student, one request at a time).
-Then the window, which is a fact about time and comes from E2-06's one function
-through E2-04's clock. Then the answers, against the questions they answer. Only
-then is anything written, and only after that is a comment sent to a model — so
-every refusal that can be decided cheaply is decided before a student waits on a
-provider.
+**The order the checks run in is the design, not a detail**, and it is written out
+here because it changed once already and a paragraph describing the old order is
+worse than none. In the order the code runs them:
 
-**Nothing is stored on a refusal, including a bounce.** §3.3 refuses an
-`insufficient` comment "before submission", and a bounce that stored the response
-and marked it invalid would be the "silently penalized after the fact" the same
-sentence forbids. The rollback is written here rather than left to the session's
-teardown, so "nothing was stored" is a property of this module.
+1. **Whether the section is one this student can reach**, answered identically for
+   a section that does not exist (SPEC §4.1 item 1 — a refusal that told the two
+   apart would answer "does this section exist" for any signed-in student, one
+   request at a time). This is first, so a caller probing section ids is refused
+   before anything else happens at all: no window is read, no question is loaded,
+   no model is asked, and the two answers are indistinguishable in content and in
+   the work they cost.
+2. **The open window**, a fact about time, from E2-06's one function through
+   E2-04's clock.
+3. **The submitted values against the questions they answer** — the shape, the
+   range and the step (ADR 0110), and §3.2's conditional requirement.
+4. **The model**, once per submitted comment. Everything above is decided before a
+   student waits on a provider, and everything above is decided about the
+   student's own week rather than about anything they cannot see.
+5. **The write**, and the two refusals it can still raise: the duplicate the
+   uniqueness constraint refuses, and the withdrawal of a comment a verdict names
+   (ADR 0115).
 
-**The one thing a bounce does keep is the verdict that bounced it** (ADR 0114).
-The gate runs before any write, so a bounced submission never creates a response
-or an answer to roll back, and the verdict is recorded against no answer — which
-is the only place in this module that commits, and the docstring at that line says
-why. What is *not* kept is the comment's text: ADR 0055 keeps a classification row
-free of it, and the limitation that leaves — a bounced comment reaches neither
-§5.2's moderation nor §6.2's Care queue — is stated in ADR 0114 and carried in
-`docs/tickets/e2/deferred.md` rather than decided here.
+**So the model call precedes every write, and steps 5's two refusals are decided
+after it.** That is the reverse of the order this path shipped with and it is
+deliberate: a bounce has to be able to keep its verdict, and a verdict written
+inside the transaction a bounce rolls back is a verdict that is never committed at
+all (ADR 0114). What it costs is that a racing duplicate and a withdrawn judged
+comment each spend one provider call before being refused. Neither is a §4.1
+concern — both are facts about the student's own week, which they may ask about
+freely — and neither is reachable without a valid student session and an
+enrollment in the section, both established at step 1.
+
+**A bounce stores its verdict rows and nothing else.** Not "nothing", which is what
+this paragraph used to claim and is no longer true: §3.3 refuses an `insufficient`
+comment "before submission", so no `response` and no `answer` row is written — a
+bounce that stored the response and marked it invalid would be the "silently
+penalized after the fact" the same sentence forbids — and the classification that
+refused it *is* committed, against no answer, because SPEC §7.4 rests auditability
+on the pair that produced a verdict. Because the gate runs before the write, that
+is achieved by never creating the rows rather than by rolling them back.
+
+What is *not* kept is the comment's text: ADR 0055 keeps a classification row free
+of it, and the limitation that leaves — a bounced comment reaches neither §5.2's
+moderation nor §6.2's Care queue — is stated in ADR 0114 and carried in
+`docs/tickets/e2/deferred.md` rather than decided here. Nor is the count of those
+rows bounded per attempt, which is the same file's other entry.
 
 **A resubmission revises its answer rows in place** rather than deleting them and
 inserting fresh ones, and
