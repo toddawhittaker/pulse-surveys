@@ -76,8 +76,8 @@ from app.ai.tasks import (
     FLOOR_MODEL_ID,
     FLOOR_PROMPT_VERSION,
     classify_comment_validity,
-    comment_validity_verdict,
     record_classification,
+    verdict_for_comment,
 )
 from app.models.ai import Classification, ClassificationTask
 from app.models.survey import Answer, Response
@@ -139,7 +139,7 @@ def verdict_for_submitted_comment(
 ) -> CommentValidityOutput:
     """One submitted comment's verdict, with `ClassifierUnavailableError` for ADR 0056's raises.
 
-    A thin boundary over `app.ai.tasks.comment_validity_verdict`, and the whole of
+    A thin boundary over `app.ai.tasks.verdict_for_comment`, and the whole of
     what it adds is the taxonomy decision: the availability shapes floor inside
     that function and never arrive here, and the three that do arrive become one
     exception this path answers for.
@@ -149,7 +149,7 @@ def verdict_for_submitted_comment(
     `record_verdict` below.
     """
     try:
-        return comment_validity_verdict(comment, gateway)
+        return verdict_for_comment(comment, gateway)
     except UNCLASSIFIABLE as failure:
         raise ClassifierUnavailableError(str(failure)) from failure
 

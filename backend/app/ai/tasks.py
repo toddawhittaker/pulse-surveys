@@ -14,9 +14,10 @@ E0-13's sixth criterion).
 **Failing open means accepting the submission, not skipping the classification.**
 §3.3: "Classifier latency budget: p95 < 2s; on provider timeout, the heuristic
 floor applies and the submission is accepted, then classified async (fail open,
-never block a student on an outage)." So `classify_comment_validity` catches the
+never block a student on an outage)." So `verdict_for_comment` catches the
 one error that means "the endpoint was reached and did not classify", applies it,
-and returns the contract — and the row it writes says a floor decided it, under a
+and returns the contract — and the row `classify_comment_validity` then writes
+says a floor decided it, under a
 prompt version and a model ID that name no prompt and no model
 ([ADR 0054](../../../docs/adr/0054-a-floored-classification-names-the-floor-in-its-audit-pair.md)).
 Everything else the gateway raises propagates: a rejected credential is not an
@@ -33,6 +34,16 @@ so that "what gets stored when a model answers" is a question with one place to
 read rather than a line at each call site. It writes and does not commit: the
 caller owns the transaction, because E2's submit path stores the response and the
 classification together or stores neither.
+
+**The comment-validity task comes in two halves, and `classify_comment_validity`
+is still the task.** `verdict_for_comment` judges and stores nothing;
+`classify_comment_validity` is that call plus `record_classification`, and it is
+what a caller uses when it already knows what the verdict will be recorded
+against. The split exists because E2-08's submit path does not: a comment §3.3
+bounces stores no `answer` row, and the verdict that bounced it still has to be
+recorded (ADR 0114). Asking the model once and choosing where the row goes
+afterwards is what the two halves buy, and the fail-open taxonomy stays in one
+place either way.
 """
 
 import threading
@@ -235,7 +246,7 @@ def record_classification(
     return row
 
 
-def comment_validity_verdict(
+def verdict_for_comment(
     comment: str,
     gateway: AIGateway | None = None,
 ) -> CommentValidityOutput:
@@ -289,7 +300,7 @@ def classify_comment_validity(
 ) -> CommentValidityOutput:
     """§7.4's comment-validity task: judge one comment and store the verdict.
 
-    The two halves above and below composed — `comment_validity_verdict` decides
+    The two halves above and below composed — `verdict_for_comment` decides
     and `record_classification` writes — which is the whole of what this function
     is. §3.3 gates participation on the verdict, and refuses an `insufficient`
     comment to the student's face at submit time with coaching copy, so what this
@@ -299,12 +310,12 @@ def classify_comment_validity(
     Callers that want both in one step use this, which is every caller that
     already knows what the verdict will be recorded against: the async
     re-classification sweep, and any later task. E2-08's submit path calls the two
-    halves separately, for the reason `comment_validity_verdict` gives.
+    halves separately, for the reason `verdict_for_comment` gives.
 
     `answer_id` is the `answer` row this comment was submitted on, stored on the
     verdict so that the row names what it judged (ADR 0055, E2-08). See
     `record_classification` for why it has a default at all.
     """
-    output = comment_validity_verdict(comment, gateway)
+    output = verdict_for_comment(comment, gateway)
     record_classification(session, ClassificationTask.COMMENT_VALIDITY, output, answer_id=answer_id)
     return output
