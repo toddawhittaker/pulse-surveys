@@ -1841,7 +1841,27 @@ def runner_shaped_path(root: Path) -> str:
 def classification_step(
     workflow: dict[str, Any], workflow_path: Path
 ) -> tuple[str, dict[str, Any]]:
-    """The output name the `changed` job publishes, and the step that produces it."""
+    """E0-38's verdict output, and the step that produces it.
+
+    **This required the job to publish exactly one step output until dispute
+    E2-12-02, and it was the assumption rather than the requirement that went
+    stale.** One job, one question, one output was true when E0-38 wrote it. E2-12
+    gives the same job a second classification — `ai_surface`, which decides
+    whether SPEC §9.3's eval floors run at all — and `docs/MISTAKES.md` entry 36
+    makes that a published job output rather than a value smuggled through some
+    other context. The old form then stopped four executed guards in this module
+    before they had read a line of the step, with a message about how many outputs
+    a job has.
+
+    So the verdict is selected by name. `INERT` is E0-38's own constant, already
+    held in this module, and every case downstream is about that classification:
+    the documentation-only short-circuit, the routes that must fail toward running
+    everything, and the `--` before the path list. A job that grows a third
+    classification changes nothing here.
+
+    A missing `inert` is still a refusal rather than a guess, and it is the same
+    finding it always was — nothing publishes the answer six expensive gates read.
+    """
     jobs = jobs_of(workflow, workflow_path)
     job = jobs.get(CHANGED_JOB)
     if not job:
@@ -1851,22 +1871,26 @@ def classification_step(
             "rather than leaving this module looking for something that is gone."
         )
 
-    published = [
-        (name, match)
-        for name, value in (job.get("outputs") or {}).items()
-        if (match := STEP_OUTPUT_REFERENCE.search(str(value)))
-    ]
-    if len(published) != 1:
+    outputs = dict(job.get("outputs") or {})
+    match = STEP_OUTPUT_REFERENCE.search(str(outputs.get(INERT, "")))
+    if match is None:
         pytest.fail(
-            f"The `{CHANGED_JOB}` job publishes {len(published)} step outputs and this module "
-            "expects exactly one — the classification every expensive gate reads.\n"
-            f"  outputs: {dict(job.get('outputs') or {})}\n"
+            f"The `{CHANGED_JOB}` job publishes no `{INERT}` output filled from one of its own "
+            "steps.\n"
+            f"  outputs: {outputs}\n"
             "\n"
-            "If the job now publishes several, this module has to be told which one is the "
-            "verdict rather than guessing at it."
+            f"`{INERT}` is E0-38's verdict — the classification pytest, the §4.1 invariant suite, "
+            "both image builds, Playwright, the evals and the supply-chain audit all switch their "
+            "own work off on. It is selected by name rather than by being the only output, "
+            "because E2-12 gave this job a second classification (`ai_surface`) and "
+            "`docs/MISTAKES.md` entry 36 requires that one to be published too.\n"
+            "\n"
+            f"If the verdict has been renamed, `INERT` at the top of this file is the one line "
+            "that changes. If it is gone, every gate below reads an empty string — which is not "
+            "`'true'`, so all of them run and the filter has silently never fired."
         )
 
-    output_name, match = published[0]
+    output_name = INERT
     step_id = match.group("step")
     for step in steps_of(job):
         if step.get("id") == step_id:

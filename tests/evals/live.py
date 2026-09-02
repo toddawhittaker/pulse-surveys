@@ -33,10 +33,18 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Callable
+from typing import TYPE_CHECKING, cast
 
 from app.ai.contracts import CommentValidityOutput
 from app.ai.tasks import verdict_for_comment
 from tests.evals.declarations import EvalRefusalError
+
+if TYPE_CHECKING:
+    # For the `cast` below and for nothing else. Imported under `TYPE_CHECKING`
+    # rather than plainly so that this module binds no reference to the class at
+    # run time: `build_live_gateway` reaches it through the module object on
+    # purpose, and a second binding here would read as defeating that.
+    from app.ai.gateway import AIGateway
 
 # SPEC §13 places the module: "`ai/gateway.py` — provider-agnostic client
 # (OpenAI-compatible base_url)".
@@ -80,8 +88,21 @@ def build_live_gateway() -> object:
 
 
 def build_validity_classifier() -> Callable[[str], CommentValidityOutput]:
-    """A callable answering one comment through a gateway built `live=True`."""
-    gateway = build_live_gateway()
+    """A callable answering one comment through a gateway built `live=True`.
+
+    **The `cast` is the price of the substitution above, and it is deliberate**
+    (dispute E2-12-04). `build_live_gateway` returns `object` because it reaches
+    the class through the module object so that a test can put a recorder there,
+    and a recorder is not an `AIGateway` — so an `isinstance` narrowing would
+    refuse exactly the double
+    `tests/unit/test_the_eval_runner_builds_a_live_gateway.py` installs to see
+    which flag was passed. The cast asserts what is true of every run that is not
+    that test, and leaves the one call this module makes into an application
+    contract checked: `verdict_for_comment`'s parameter types are what SPEC §9.3's
+    "breaks its evals at type-check time" means here, and widening them to accept
+    `object` would remove the check on the one call site the evals have.
+    """
+    gateway = cast("AIGateway", build_live_gateway())
 
     def classify(comment: str) -> CommentValidityOutput:
         return verdict_for_comment(comment, gateway=gateway)

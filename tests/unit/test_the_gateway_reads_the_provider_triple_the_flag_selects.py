@@ -297,6 +297,7 @@ def mock_endpoint() -> Iterator[RecordingProvider]:
 def classify_through(
     monkeypatch: pytest.MonkeyPatch,
     configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
     import_app_module: Callable[[str], ModuleType | None],
     real_endpoint: RecordingProvider,
     mock_endpoint: RecordingProvider,
@@ -312,6 +313,24 @@ def classify_through(
     just set (`docs/MISTAKES.md` entry 3). `ENVIRONMENT` is stated by the caller
     rather than inherited, because it is half of what selection turns on
     (`docs/MISTAKES.md` entry 40).
+
+    **`deployed_identity_provider` is requested for what it does rather than for
+    what it is named** — dispute E2-12-01. Four of the six cases below build
+    `Settings` under a deployment's `ENVIRONMENT`, and `.env.example`'s five
+    `OIDC_*` values name the in-repo mock identity provider, which ADR 0077's
+    validators refuse outside development. Without it those four raise
+    `ConfigurationError` here, the gateway is never constructed, no request
+    reaches either endpoint, and the failure reads as a selection defect while
+    saying nothing about selection.
+
+    That is `docs/MISTAKES.md` entry 22, and this is the repair the repository
+    already names: `tests/fixtures/mock_ai.py` says a test that builds `Settings`
+    as a deployment "has to move the AI provider as well as the identity
+    provider, or it stops in its own setup on a rule that is not its subject",
+    and every deployment row in `tests/unit/test_ai_provider_configuration.py`
+    requests it. The two development cases are unaffected, since those validators
+    do not fire there; the AI variables set below override the ones it brings, so
+    no case's subject moves.
     """
 
     def run(environment: str, live: bool) -> None:

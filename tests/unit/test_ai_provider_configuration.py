@@ -333,7 +333,26 @@ USERINFO_URLS = {
 # supplied by Actions itself rather than configured, so it is not a stored secret
 # in the sense CLAUDE.md's policy is about. Everything else is Todd's call, in
 # advance and in writing.
-PERMITTED_WORKFLOW_SECRETS = frozenset({"GITHUB_TOKEN"})
+#
+# **`AI_PROVIDER_API_KEY` was added on 2026-09-02, and this entry is the record of
+# the agreement rather than a convenience.** The secret exists in the repository,
+# the written go was given by the repository owner in conversation that day, and
+# the reference it authorises is exactly one: the `env:` block of the eval runner
+# step in `.github/workflows/ci.yml`. E2-12's scope made the sequencing a named
+# part of the work — "asked, then waited for, never provisional" — and its third
+# acceptance criterion requires the go to be quoted in the pull request before the
+# reference exists in the diff.
+#
+# The base URL and the model name beside it are deliberately *not* secrets:
+# `.env.example` documents both in the open, and keeping them readable is half of
+# what makes one floor measurement comparable to the next (ADR 0031).
+#
+# **A name, never a pattern.** This check goes on refusing the next unagreed
+# reference exactly as it refused this one; widening it to match a shape would
+# give up the property it exists for. Dispute E2-12-03 records the ruling and the
+# direction it settles — a set that grows by one reviewed name is the mechanism
+# working, not a hole in it.
+PERMITTED_WORKFLOW_SECRETS = frozenset({"GITHUB_TOKEN", "AI_PROVIDER_API_KEY"})
 
 # `${{ secrets.NAME }}`, in any of the spacings a workflow writes it.
 SECRET_REFERENCE = re.compile(r"\$\{\{\s*secrets\.([A-Za-z_][A-Za-z0-9_]*)")
