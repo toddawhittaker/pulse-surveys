@@ -167,3 +167,97 @@ database builds from the migration, and repeating the same class of mutation
 per row buys no new information. **Done when** nothing — this entry exists so
 the residue is findable, not to schedule work; a later battery that touches
 these tables should mutate the migration, not the model.
+
+## The bounce names no offending position, so the form coaches every comment it sent — E2-10
+
+Deferred by E2-10, which is the first thing to consume the bounce.
+
+SPEC §3.3's synchronous gate refuses one *comment*, and `app.api.student` answers
+it with `{"verdict", "message"}` — the verdict that refused it and
+`app.copy.submit`'s coaching sentence for that verdict. Neither member says
+**which** comment. A submission can carry two: §3.2's set has a free-text question
+after each rating, and a student who writes in both boxes and has one of them
+judged `insufficient` gets one 422 that does not distinguish them.
+
+So the form does the only honest thing available to it: the coaching is attached
+to **every comment field the submission actually carried**, announced once through
+a live region, with focus moved to the first of them and every other value left
+exactly as the student typed it. Where one comment was sent that is correct and
+precise. Where two were sent it is correct and imprecise — it asks a student to
+look again at a sentence that may have been fine.
+
+The alternative available today is worse rather than cheaper: guessing which
+comment was judged (the shorter one, the last one) would put a coaching sentence
+on a field the classifier never refused, and it would be right most of the time,
+which is what makes a guess like that survive review.
+
+**Done when** the 422's detail names the offending position — or positions, since
+a submission with two thin comments has two — and the form attaches the coaching
+to exactly those fields and to no others, with a test that sends two comments and
+requires the untouched one to carry no coaching. The change is on the write path
+(`app.services.submissions` raises `SubmissionBouncedError` from inside the loop
+over submitted comments, so it has the position) and in `app.api.student`'s
+detail, which makes it a heavy-lane ticket rather than this one.
+
+## The week eyebrow cannot say how long the course runs — E2-10
+
+Deferred by E2-10, and it is a gap in the read contract rather than a defect in
+the screen.
+
+`docs/DESIGN_BRIEF.md` writes the eyebrow as "WK 07 / 12 · closes Sun 11:59 PM",
+and `design/Usage Rules.md` §1 adds the quiet term-week sub-label. E2-09's
+`OpenSurvey` carries `course_week`, `term_week` and `closes_at`, and nothing that
+says **how many weeks the section runs for** — that number lives on the term
+calendar and the section's start letter (SPEC §2.2), neither of which reaches this
+answer. So the shipped eyebrow reads "WK 07 · TERM 11 · closes Sun 11:59 PM": the
+week a student is in, under both names, and when it shuts.
+
+Deriving the total in the frontend is the option not taken. The section code
+carries the start letter and the map from letter to length is the institution's,
+so a client-side derivation would be a second copy of `start_letter_map` in
+TypeScript — the shape `docs/MISTAKES.md` entry 19 is about, and one that reads
+right in review because the arithmetic is simple.
+
+**Done when** `OpenSurvey` carries the section's own week count and `WeekEyebrow`
+renders the brief's "WK 07 / 12", with the read path's test asserting the count
+against the seeded calendar rather than against the service that computed it. The
+member is one field on a schema and one read in `app.services.survey_read`, which
+puts it on a heavy-lane path.
+
+## The self-hosted faces: an unrecognized licence and a second copy nobody fetches — E2-10
+
+Deferred by E2-10, whose
+[ADR 0116](../../adr/0116-the-three-webfonts-are-self-hosted-in-the-bundle.md)
+records both. Neither is fixed there because both sit on paths a light-lane ticket
+may not touch — `scripts/ci/` for the first, and the second is a judgement about
+that same gate's neighbours.
+
+**The licence gate has no rule for OFL-1.1.** The three `@fontsource` packages
+declare the SIL Open Font License, and `scripts/ci/check_licenses.py`'s rule table
+does not name it, so all three classify `unknown` and appear in the report's "no
+recognizable license" list. That is a printed line rather than a failure — the
+gate is not run with `--strict-unknown` — so nothing is red today and nothing
+will be until somebody turns that flag on, at which point three permissive font
+packages fail the build. The licence is permissive and compatible with
+distributing this project under MIT (SPEC §10); it is simply not in the
+vocabulary.
+
+**And the OFL asks for something this build does not do.** Its clause 2 requires
+the licence and the copyright notice to travel with the font files when they are
+redistributed, and `frontend/dist` ships six woff2 files and no notice.
+
+**A second copy of every face ships and no supported browser fetches it.** Each
+`@fontsource` stylesheet lists woff2 and woff, so the build emits both: 119,100
+bytes of woff2 that browsers use and 147,028 bytes of woff that none of them
+does. It costs image size and nothing else — the bundle budget counts neither.
+
+**Done when** `check_licenses.py` classifies `OFL-1.1` and the spelled-out "SIL
+Open Font License" as permissive, with the near-miss control the rest of that
+table's rules get (a licence the rule must *not* match, run and seen to not
+match); **and** the built application ships the OFL text and copyright notices
+for the three families, with something asserting they are in `dist`; **and** the
+woff duplicates are either dropped — which means hand-writing the six
+`@font-face` rules and accepting the copy of the package's own declarations that
+ADR 0116 refuses today — or recorded as a deliberate cost in the licence and
+image-size sweep. E13's accessibility and licence pass is the natural owner of
+the first two.
