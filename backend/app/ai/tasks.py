@@ -58,9 +58,17 @@ from app.models.ai import Classification, ClassificationTask
 
 # The prompt this task renders, named as ADR 0031 spells a `prompt_version`: the
 # file's path stem under `app/ai/prompts/`, so the stored value names exactly one
-# immutable file (ADR 0032). Changing the prompt means adding `validity.v2.md`
+# immutable file (ADR 0032). Changing the prompt means adding the next version
 # beside it and changing this constant — never editing the file this names.
-VALIDITY_PROMPT_VERSION = "validity.v1"
+#
+# **It named `validity.v1` until the trim of 2026-09-02, and that is exactly the
+# move the paragraph above describes** (ADR 0120). `validity.v1.md` is still on
+# disk and still unedited, because classifications recorded against it have to
+# stay reproducible; `validity.v2.md` is the same instructions with the
+# documentation that was riding in every request taken out. Rows written before
+# the switch go on naming v1 and go on resolving to the text that produced them,
+# which is the whole property this constant exists to carry.
+VALIDITY_PROMPT_VERSION = "validity.v2"
 
 # Where the student's text goes, spelled exactly as `prompts/README.md` requires:
 # "The placeholder is `[[STUDENT_COMMENT]]`, replaced literally — with

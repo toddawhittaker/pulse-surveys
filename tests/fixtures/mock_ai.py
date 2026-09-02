@@ -324,8 +324,9 @@ class MockAiProvider:
         value = served_member(self.rules(), MARKER_LINE_NAMES, "the prompt's comment marker line")
         assert isinstance(value, str) and value.strip(), (
             f"`GET {RULES_PATH}` publishes {value!r} as the comment marker line. It is the line "
-            "`backend/app/ai/prompts/validity.v1.md` ends its comment section with, and the mock "
-            "reads the student's comment as everything after its last occurrence."
+            "the validity prompt ends its comment section with — whichever version "
+            "`app.ai.tasks` renders — and the mock reads the student's comment as everything "
+            "after its last occurrence."
         )
         return value
 

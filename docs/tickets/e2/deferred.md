@@ -407,8 +407,8 @@ The assertions in both files are correct today; only the prose is stale.
 
 ## The model identifier lives in three places and nothing ties them — E2-12
 
-The pinned model, `gpt-5-mini-2025-08-07`, is named in `.env.example`, in the
-eval step of `.github/workflows/ci.yml`, and in the provenance sentences of
+The model identifier is named in `.env.example`, in the eval step of
+`.github/workflows/ci.yml`, and in the provenance sentences of
 `tests/evals/validity/floors.py` — and no test compares any of the three to any
 other. The re-verification measured the gap directly: re-pointing either
 configuration site alone survives the whole suite, so a model swap in one place
@@ -417,22 +417,42 @@ prose went on saying otherwise. This is the compare-an-answer-with-itself
 defect the same round repaired inside `cases.py`, recurring one level out, in
 the shape the record already predicts for closed-set guards.
 
-Today all three sites agree and the floors were measured against exactly that
-snapshot, so nothing is wrong — the gap is in what holds them together.
+All three sites agree at any given moment, so nothing is wrong — the gap is in
+what holds them together.
+
+**The switch to `gpt-5.6-luna` on 2026-09-02 sharpened this rather than changing
+it**, and the entry is worth more now than when it was raised. The identifier was
+`gpt-5-mini-2025-08-07` then: a dated build, so the three sites could drift only
+if somebody edited one of them. Luna publishes no dated build (ADR 0120), so the
+name is an alias the provider can re-point with nobody editing anything — and the
+fourth thing that can now disagree with the other three is the weights, which no
+test can read. Tying the three written sites together is still the work; it is no
+longer sufficient, and whatever lands should say so rather than reading as
+complete coverage.
 
 **Done when** one test reads the model identifier from all three sites and
 fails when any two disagree, and a planted mismatch at each site is seen red.
 
 ## Floor headroom carries a measured variance point — for E10's recall-floor work
 
-The floors (precision 0.95, recall 0.94) were sized against one clean
-measurement (precision 1.000, fp 0) to tolerate two new errors of a kind and
-fire on the third. The first independent CI run of the same set, model and
-prompt scored precision 0.9815 (fp 1): one of the two tolerated errors is
-already spent, on run-to-run variance alone. The floors hold and the sizing
-argument worked as designed; the carried fact is that variance between
-identical runs is real and roughly one case per hundred, which E10 should fold
-into how it sizes the threat-recall floor rather than rediscovering it.
+The floors (precision 0.92, recall 0.90) were sized to tolerate two new
+errors of a kind plus a run-to-run variance allowance. Two independent
+pairs of runs now measure that variance. Under Luna/`validity.v2`, the
+fill measurement and CI run 33679136272 on commit 5f6a927 differed on
+**two** cases in ninety-eight — `ls-025` and `lv-008`, both answered
+`nonsense` then `insufficient`; the exact-agreement counts differ by only
+one because `ls-025` was wrong either way, so the agreement count is not
+the figure. Under mini/`validity.v1`, the first independent CI run scored
+precision 0.9815 against a fill of 1.000 — one false positive between
+identical runs.
 
-**Done when** E10's floor-setting records a variance allowance with at least
-two independent measured runs behind it.
+The carried fact for E10 is two-in-ninety-eight, and where it lands is
+the second half: both Luna moves were negative-to-negative and moved
+neither rate, the mini move hit a gated rate outright, and one of the two
+Luna movers was a positive-class case. Variance reaches everything, so a
+floor sized only against the rate a single pair happened to move will be
+sized short.
+
+**Done when** E10's floor-setting records a variance allowance with at
+least two independent measured runs behind it, on the model and prompt
+that floor governs.

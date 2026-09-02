@@ -188,6 +188,15 @@ pins a snapshot the vendor will eventually retire, and gets a refusal naming the
 model rather than a silent substitution — which is the direction this record
 takes everywhere else.
 
+**This paragraph is superseded in part by
+[0120](0120-the-provider-moves-to-luna-and-the-validity-prompt-is-trimmed.md)**
+(2026-09-02). The *preference* stands and is restated there; what changed is that
+it became unsatisfiable. The model the real triple names now publishes no dated
+build — checked three ways — so both sites carry a bare identifier and the
+property this paragraph argues for is unavailable rather than declined. 0120
+records it as a cost of that switch. Nothing else here moves: the split, the
+selection rule and the structured-output requirement are all unaffected.
+
 **Nine test modules and four fixtures were repaired for the rename**, and four
 committed integration modules moved with them, because a fixture that configures
 a test-process gateway is configuring the mock side by this decision's own rule.

@@ -1,51 +1,154 @@
-"""The comment-validity precision and recall floors — E2-12.
+"""The comment-validity precision and recall floors — measured on Luna under validity.v2.
 
-**Measured, not estimated.** One clean run over the 98 cases in `cases.py`, valid
-on the first pass: every case answered by `gpt-5-mini-2025-08-07` under
-`validity.v1`, none stamped by §3.3's character floor, so nothing in the figures
-below came from the twenty-five-character rule the set exists to beat. The
-prompt-version pin voided two earlier runs that a slow provider had floored
-(`docs/disputes/E2-12-06.md`); those produced no numbers and none of them are
-here.
+One clean run over the 98 cases in `cases.py`, valid on the first pass: every case
+answered by the model under `validity.v2`, none stamped by §3.3's character floor,
+so nothing in the figures below came from the twenty-five-character rule the set
+exists to beat.
 
     positive class `substantive` (ADR 0119)
     precision 1.000000   tp 53  fp 0
     recall    0.981481   fn 1   tn 44
-    exact agreement 96/98
+    exact agreement 96/98        95.3s wall, longest call 2.61s
 
-    per verdict:  substantive  p 1.0000  r 0.9815  (n 54)
-                  insufficient p 0.9630  r 1.0000  (n 26)
-                  nonsense     p 0.9444  r 0.9444  (n 18)
+    per verdict:  substantive  p 1.000  r 0.9815
+                  insufficient p 1.000  r 0.9615
+                  nonsense     p 0.900  r 1.0000
 
-**The floors are 0.95 and 0.94, and they are deliberately below what was
-measured.** A floor written at the measurement fails on the first disagreement in
-either direction — with 54 actual positives, one future false positive takes
-precision to 0.9815 and one more miss takes recall to 0.9630 — so a floor at the
-figures is a gate that goes red on ordinary movement and gets lowered the first
-time it does. That is the shape
-`.claude/review-fixtures/eval-floor-lowered.diff` is built to catch, and the way
-to not need it is to leave the headroom now rather than argue for it later.
+Both disagreements are the same mistake in the same direction — the model reaching
+for `nonsense`. `ls-025` is a substantive comment called nonsense, and it is the
+one miss inside the recall figure; `lv-008` is an insufficient comment called
+nonsense, which moves neither gated rate because both are negatives for the
+positive class. That blindness is unchanged and deliberate: §3.3 treats
+`insufficient` and `nonsense` identically for participation credit, and the
+per-verdict figures above are recorded so a later ticket that wants to gate on the
+distinction has a baseline. Nothing enforces them today.
 
-The headroom is stated as a count of errors, because that is what somebody
-reading a red gate has to reason about:
+**The miss moved, and it moved the right way.** Under `validity.v1` on
+`gpt-5-mini-2025-08-07` the miss was `ss-005` — twenty-four characters,
+substantive, called nonsense — a case in the short-substantive family this set
+exists to measure. That case is answered correctly now and the miss is a
+long-substantive one instead. It is recorded because it is the kind of thing that
+is invisible three months later.
 
-    precision 0.95   53/(53+2) = 0.9636 passes, 53/(53+3) = 0.9464 fails
-                     — two new false positives tolerated, the third fires
-    recall    0.94   51/54 = 0.9444 passes, 50/54 = 0.9259 fails
-                     — three total misses tolerated, the fourth fires; one is
-                       the measured miss, so two new ones
+**`ls-025` stayed a miss across both Luna runs, and it did not stay still.** An
+earlier version of this paragraph held it up as the stable one — a model defect
+rather than sampling — against `lv-008` as the variable one. A security re-check
+read both CI logs and found that wrong. The fill run answered `nonsense` to both
+cases, which the per-verdict table above corroborates on its own: `nonsense`
+precision 0.900 is two false positives, and those two are them. The second run
+answered `insufficient` to both.
 
-**Two new errors of a kind is the line, and the reason is that one clean run sits
-behind these numbers and no variance estimate across runs.** A single
-disagreement is inside what one measurement cannot tell from noise; a second of
-the same kind is a pattern, and this gate fires on prompt and model changes, which
-is exactly when a pattern means something. If a later ticket runs the set enough
-times to measure run-to-run variance, these are the numbers to revisit — upward,
-with the variance quoted.
+So both cases moved, and `ls-025` moved exactly as `lv-008` did. It stayed a miss
+only because both of its answers were wrong — it is a substantive comment called
+`nonsense` in one run and `insufficient` in the other, and recall cannot tell those
+apart. A case can be unstable and still look fixed, if the instability happens
+below the level the rate measures.
 
-**Precision is held at least as tightly as recall, which is the opposite of the
-threat task.** §3.3 validates synchronously: a student whose comment is judged
-insufficient is told so at submit time, with coaching copy and a chance to
+That is the sharpest thing these two runs say, and it is the opposite of what the
+first version of this paragraph claimed: **variance reaches a positive-class
+case** — one of the 54 the recall figure is computed over. A third run that
+answered `substantive` there would move recall to 1.000 with nothing having
+changed.
+
+## The floors: precision 0.92, recall 0.90
+
+Derived from this run's own counts by the three rules this file has carried since
+the deferral. The arithmetic is written out because a reader meeting a red gate
+has to be able to check it.
+
+**Rule 1 — two errors of a kind is the pattern threshold.** One new error is
+inside what a single measurement cannot tell from noise; a second of the same kind
+is a pattern, and this gate fires on prompt and model changes, which is exactly
+when a pattern means something.
+
+**Rule 3 — and the measured variance sits on top of that, not inside it.** Two
+identical runs of this set against **this** model and **this** prompt disagree
+with each other by two cases in ninety-eight. That is not uncertainty about the
+model's quality, it is the model: a rerun that changed nothing scores differently.
+So the allowance is the pattern threshold *plus* the variance — two errors of a
+kind plus two cases of variance, **four tolerated and the fifth firing**. A floor
+sized at the pattern threshold alone would let ordinary variance spend it: a
+single real regression on top of a rerun would fire the gate, and a gate that goes
+red on ordinary movement is a gate that gets lowered the first time it does.
+
+Subtracting the variance back out is the number that matters when a red arrives.
+Four tolerated less two of measured variance leaves **two of real-regression
+headroom**, which is rule 1's pattern threshold intact rather than eroded — the
+whole point of composing the two rules instead of letting the larger one win.
+
+**The two runs the figure comes from**, both `validity.v2` on `gpt-5.6-luna` over
+the same 98 cases:
+
+    the fill measurement          exact agreement 96/98   p 1.000  r 0.9815
+    CI run 33679136272 @ 5f6a927  exact agreement 97/98   p 1.000  r 0.9815
+
+Two cases answered differently between them, and both moved the same way —
+`nonsense` in the first run, `insufficient` in the second. `lv-008` is an
+insufficient comment, so its second answer was right and the exact-agreement count
+went up by one. `ls-025` is a substantive comment, so both of its answers were
+wrong and the count did not move for it at all.
+
+So the variance is **two cases in ninety-eight**, measured on the model and the
+prompt these floors govern. The exact-agreement counts differ by one and that is
+not the figure: a case can move without changing whether it agrees, and one of
+these two did exactly that.
+
+**An earlier version of this section said one case, and founded the rule on a
+mini/`validity.v1` pair** — a figure from a boundary this same file declares
+non-portable. A security review caught the provenance; a re-check against both CI
+logs then caught the count. Both corrections run the same way, toward more
+variance than was recorded. The mini pair stays below as corroboration, labelled
+as what it is, and it is the basis for nothing here.
+
+**The variance is granted to each rate independently, and that is an
+over-allowance rather than what these two runs strictly show.** Neither rate
+moved: precision was 1.000 and recall 0.9815 in both, because both moves were
+`nonsense` against `insufficient` and neither of those is the positive class. Read
+strictly from the rates alone, the variance allowance would be zero and the floors
+would be rule 1's 0.95 and 0.94.
+
+Two reasons that reading is refused, and the first is now enough on its own:
+
+- **One of the two movers is a positive-class case.** `ls-025` is one of the 54
+  cases recall is computed over, and its answer moved between two identical runs.
+  It did not move recall only because both answers were wrong; a third run
+  answering `substantive` there moves recall to 1.000 with nothing changed. That
+  is direct, same-boundary evidence that variance reaches the cases the gated
+  rates depend on — a rate that did not move is not a rate that cannot.
+- The asymmetry. Over-allowing costs a gate that tolerates one more error than it
+  strictly must. Under-allowing costs a gate that reds on a rerun, and a gate that
+  reds on ordinary movement is a gate that gets lowered — the failure rules 1 and
+  3 exist together to prevent.
+
+The mini/`validity.v1` pair corroborates the first reason from the other boundary:
+its variance event was a false positive appearing between identical runs, landing
+on a gated rate outright. It is useless as a *figure* here and it is no longer
+load-bearing for the *argument* either, which is why it sits below as history
+rather than in this list.
+
+The values below were briefly held one step tighter than this composition, while
+the corrected variance figure was ruled on; **the ruling of 2026-09-02 is that the
+floors follow the composition**, and they do. The alternative — capping the
+variance allowance and keeping the tighter pair — was considered and declined,
+because it leaves one error of real-regression headroom against a pattern
+threshold of two, which is the flaky-gate state rule 3 exists to prevent.
+
+    precision 0.92   53/(53+4) = 0.9298 passes — four false positives tolerated
+                     53/(53+5) = 0.9138 fails  — the fifth fires
+    recall    0.90   49/54     = 0.9074 passes — five total misses tolerated,
+                                                 which is four new ones
+                     48/54     = 0.8889 fails  — the sixth fires
+
+**These may tighten later, and that direction is the cheap one.** The variance
+allowance is two because two runs measured two cases; more runs refine that figure,
+and a smaller one licenses a higher floor. Moving them is a deliberate pull request
+whose subject is moving them either way — but tightening a floor on better evidence
+is the move this arrangement is meant to make easy, and loosening one is the move
+it is built to make hard.
+
+**Rule 2 — precision is held at least as tightly as recall**, which inverts the
+threat task's priority. §3.3 validates synchronously: a student whose comment is
+judged insufficient is told so at submit time, with coaching copy and a chance to
 rewrite, so a false negative is visible to the person it affects and recoverable
 by them. A false positive is not — participation credit awarded for "it was okay"
 is silent, reaches §3.4's grade passback, and nobody ever sees it. SPEC §9.3 makes
@@ -53,28 +156,47 @@ recall the strictest floor for threat and self-harm because a false negative the
 is a student in danger whose comment reached nobody; on this task the invisible
 error is the other one.
 
-**What these floors do not measure, said rather than implied.** Both are computed
-about the `substantive` class, so a comment the model called `nonsense` where the
-set says `insufficient` moves neither figure — and one of the two disagreements in
-the measured run, `ns-015`, is exactly that. §3.3 treats the two identically for
-participation credit, so the gate is blind to that distinction by design rather
-than by oversight. The per-verdict figures above are recorded so that a later
-ticket wanting to gate on it has a baseline; nothing enforces them today.
+**How that rule is satisfied here, stated exactly rather than claimed.** Both
+floors tolerate the same number of *new* errors of their own kind — four — and
+precision's is the numerically higher bar. It is not strictly tighter in error
+count, and it should not be: cutting precision's allowance would leave ordinary
+variance plus one real false positive firing the gate, which is the failure rule 1
+exists to prevent, and buying a stricter-looking number with it would be a bad
+trade. The argument is about the two floors relative to each other rather than
+about where either sits, so it survives the pair moving together.
 
-The other disagreement is `ss-005` — "Rubric fights the brief.", twenty-four
-characters, substantive, answered `nonsense`. It is stable across rounds, so it is
-a real model miss rather than sampling, and it sits in the short-substantive
-family the set exists to measure. It is the one miss inside the recall figure
-above, and it is worth knowing that the measured recall is not 1.0 because the
-classifier misses a case of exactly the kind SPEC §11 question 4 is about.
+## The model string, and the pin this run does not have
 
-**Moving these numbers is a deliberate pull request whose subject is moving
-them** (`CLAUDE.md`). Lowering one to make a run pass is what the review fixture
-plants, and a narrowed set is the same move wearing a costume —
+The provider is `gpt-5.6-luna`. **No dated snapshot of it exists**, so unlike
+`gpt-5-mini-2025-08-07` this name does not pin a set of weights: the provider can
+change what answers to it without anything here changing, and these floors would
+then be measuring a different model under the same name with nothing saying so.
+ADR 0031 makes `model_id` "the provider's own identifier for the model" precisely
+so §9.3 can compare runs of different models, and that comparison is weaker here
+than it was.
+
+It is recorded rather than worked around, because there is nothing to work around:
+a snapshot that does not exist cannot be pinned. The consequence is that an
+unexplained movement in these figures has one more possible cause than it used to,
+and the first question on a surprising red is whether the name still means what it
+meant. If a dated snapshot appears, pinning it is a one-line change here and in
+the configuration, and worth making.
+
+## Filling it in again
+
+Moving a floor is a deliberate pull request whose subject is moving it
+(`CLAUDE.md`). Lowering one to make a run pass is what
+`.claude/review-fixtures/eval-floor-lowered.diff` plants, and a narrowed set is
+the same move wearing a costume —
 `tests/unit/test_the_validity_eval_set_carries_the_cases_the_heuristic_gets_wrong.py`
-holds the set's size and both class counts against that. That the gate *can* go
-red is not taken on trust either: `tests/evals/validity/breach.py` is a set the
-current prompt fails by construction, run through the real path on demand.
+holds the set's size and both class counts against that. That the gate can go red
+is not taken on trust either: `tests/evals/validity/breach.py` is a set the current
+prompt fails by construction, run through the real path on demand.
+
+A re-measurement replaces the numbers and the note together. The note carries the
+model, the prompt version, the run basis, the arithmetic for each floor's
+headroom, and the variance figure with its provenance — and if the run count
+behind that variance is still two, it says two.
 """
 
 from __future__ import annotations
@@ -82,18 +204,34 @@ from __future__ import annotations
 from tests.evals.declarations import TaskFloors, enforced
 
 FLOORS: TaskFloors = enforced(
-    precision=0.95,
-    recall=0.94,
+    precision=0.92,
+    recall=0.90,
     note=(
-        "Measured against validity.v1 on gpt-5-mini-2025-08-07 over the 98 cases in "
-        "cases.py, in one clean run where every case was answered by the model and none "
-        "by §3.3's character floor: precision 1.000000 (tp 53, fp 0), recall 0.981481 "
-        "(fn 1, tn 44). The floors sit below those figures on purpose — 0.95 tolerates "
-        "two new false positives and fires on the third, 0.94 tolerates two new misses "
-        "and fires on the third — because a floor written at a single measurement's own "
-        "numbers goes red on the first ordinary disagreement and gets lowered the first "
-        "time it does. Precision is held at least as tightly as recall because §3.3 "
-        "validates at submit time: a false negative is shown to the student and "
-        "recoverable, a false positive is silent credit that reaches §3.4's passback."
+        "Measured against validity.v2 on gpt-5.6-luna over the 98 cases in cases.py, in "
+        "one clean run — a single run, not an average — where every case was answered by "
+        "the model and none by §3.3's character floor: precision 1.000000 (tp 53, fp 0), "
+        "recall 0.981481 (fn 1, tn 44). The measured run-to-run variance is two cases in "
+        "ninety-eight, on this same model and this same prompt, from two independent runs "
+        "— the fill measurement at 96/98 exact agreement and CI run 33679136272 on commit "
+        "5f6a927 at 97/98. Both ls-025 and lv-008 answered nonsense in the first and "
+        "insufficient in the second; the agreement counts differ by one only because "
+        "ls-025 was wrong either way, which is why the count is not the figure. Neither "
+        "rate moved, and the allowance is still granted to each separately: ls-025 is a "
+        "positive-class case, so variance demonstrably reaches the cases recall is "
+        "computed over. The floors follow the recorded composition — the pattern threshold "
+        "of two errors of a kind plus the variance of two, giving four tolerated and the "
+        "fifth firing, which leaves two of real-regression headroom once the variance is "
+        "subtracted back out. So precision 0.92 passes at 53/(53+4)=0.9298 and fails at "
+        "53/(53+5)=0.9138, and recall 0.90 passes at 49/54=0.9074 and fails at "
+        "48/54=0.8889. Ruled 2026-09-02, against the alternative of capping the allowance "
+        "and holding a tighter pair, which would have left one error of headroom against a "
+        "threshold of two — the flaky-gate state rule 3 exists to prevent. They may tighten "
+        "in a later deliberate pull request as more runs refine the variance figure. "
+        "Precision is held "
+        "at the numerically higher bar because §3.3 validates at submit time: a false "
+        "negative is shown to the student and recoverable, a false positive is silent "
+        "credit that reaches §3.4's passback. The model name pins no snapshot — no dated "
+        "gpt-5.6-luna exists — so these figures do not fix a set of weights, and that is a "
+        "known gap rather than an oversight."
     ),
 )

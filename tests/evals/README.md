@@ -70,15 +70,30 @@ directory of the cases it governs. `CLAUDE.md`: floors move only in a deliberate
 pull request whose subject is moving them, and the threat and self-harm recall
 floor is a hard gate whose lowering is the repository owner's call.
 
-The comment-validity floors are **precision 0.95 and recall 0.94**, measured
-against `validity.v1` on `gpt-5-mini-2025-08-07` in one clean run over the 98
-cases: precision 1.000000, recall 0.981481, nothing floored by the character rule.
-They sit below the measurement on purpose — 0.95 tolerates two new false positives
-and fires on the third, 0.94 tolerates two new misses and fires on the third —
-because a floor written at a single run's own numbers goes red on the first
-ordinary disagreement and gets lowered the first time it does.
-`tests/evals/validity/floors.py` carries the whole argument, including which
-errors these floors cannot see.
+The comment-validity floors are **precision 0.92 and recall 0.90**, measured
+against `validity.v2` on `gpt-5.6-luna` in one clean run over the 98 cases:
+precision 1.000000, recall 0.981481, nothing floored by the character rule.
+
+They tolerate four new errors of a kind each — precision fires at 53/(53+5) =
+0.9138, recall at 48/54 = 0.8889 — which is the pattern threshold of two plus the
+measured run-to-run variance of **two cases in ninety-eight**, taken on this same
+model and this same prompt from two independent runs: the fill measurement and CI
+run 33679136272. Subtract the variance back out and two errors of real-regression
+headroom remain, which is the point of composing the two rules rather than letting
+the larger one win.
+
+They may tighten in a later deliberate pull request as more runs refine the
+variance figure — that direction is the cheap one, and loosening is the one this
+arrangement is built to make hard.
+
+The previous pair, 0.95 and 0.94, was measured on `gpt-5-mini-2025-08-07` under
+`validity.v1` and was taken out rather than carried over: a floor that survives a
+model change and a prompt change is a number measured about something else. The
+set carried across; the threshold did not.
+
+`tests/evals/validity/floors.py` holds the arithmetic for each floor, the three
+sizing rules behind them, and one thing worth knowing before reading a red — the
+model name pins no dated snapshot, so these figures do not fix a set of weights.
 
 ## Proving it can go red
 

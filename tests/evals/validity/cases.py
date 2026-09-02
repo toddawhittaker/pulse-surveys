@@ -5,8 +5,22 @@ its eval set and threshold need real seeded data before E2 exits". This module i
 the seeded data. Ninety-eight synthetic student comments across §7.4's three
 verdicts, each a typed case whose `expected` is a `ValidityVerdict` out of
 `app.ai.contracts` rather than a string (SPEC §7.4, ADR 0030), and each pinned to
-`validity.v1` — the prompt file ADR 0032 makes immutable, so the set states which
+`validity.v2` — the prompt file ADR 0032 makes immutable, so the set states which
 text it was written against.
+
+**The pin moved from `validity.v1` on 2026-09-02, with the provider.** The
+follow-up to PR #148 switches the model to `gpt-5.6-luna` and trims the prompt to
+a new immutable version; ADR 0032 makes that an added file rather than an edit, so
+`validity.v1.md` is still on disk and every classification recorded against it can
+still be read. What cannot survive the move is the *measurement*: the floors in
+`floors.py` were taken on one model under one prompt, and neither half of that
+pair still holds. They go back to the placeholder, and this set is re-measured
+before either number is written again.
+
+The cases themselves do not move. They are comments and expected verdicts, and
+what a student wrote is not a function of which prompt classifies it — that is the
+whole reason the set is worth carrying across a prompt change rather than
+regrowing.
 
 **Every comment is invented.** None is a real submission, none carries a real
 person's name, and none names a real course, section or instructor. They are
@@ -56,7 +70,14 @@ from tests.evals.declarations import EvalCase
 # 0032 makes that file immutable once a classification cites it. Pinning it here
 # is what makes this set comparable across a prompt change rather than silently
 # re-measured under a different text.
-PROMPT_VERSION = "validity.v1"
+#
+# **It is a value rather than an import from `app.ai.tasks` on purpose.** A pin
+# that read the application's constant would follow every prompt bump silently and
+# could never disagree with it — which is the one thing it is for. Written down
+# here, a bump makes
+# `test_the_pinned_prompt_version_is_the_one_the_application_loads` red until
+# somebody says the set has been re-measured, and that red is the conversation.
+PROMPT_VERSION = "validity.v2"
 
 # ADR 0030: a verdict's *value* is the token stored, serialised and compared
 # everywhere outside Python, and an eval file is named as one of those places. The

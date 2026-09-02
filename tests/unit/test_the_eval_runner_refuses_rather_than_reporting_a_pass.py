@@ -63,6 +63,25 @@ NOT_A_REAL_KEY = "e2-12-unit-test-placeholder-not-a-credential"
 # `AI_PROVIDER_*` triple.
 PROVIDER_KEY_VARIABLE = "AI_PROVIDER_API_KEY"
 
+# The prompt versions this module's probes are pinned to, and the pair its drift
+# case is built from. **They are deliberately not any version the tool ships**, and
+# the prompt trim of 2026-09-02 is why that is now written down rather than left
+# to luck: these probes were spelled `validity.v1` and `validity.v2` until the set
+# moved to `validity.v2`, at which point the drift case's *wrong* version was the
+# real one and the module read as saying the shipped prompt is the mistake.
+#
+# Nothing was false — the probes never referred to the shipped prompt and every
+# case still passed — and that is exactly the problem: a name can drift into
+# meaning something it was never about, with nothing to notice. `probe.v*` cannot
+# collide with ADR 0032's `<task>.v<N>.md` scheme for any task this repository
+# has, and `test_the_probe_versions_are_not_the_shipped_one` refuses the collision
+# rather than trusting the spelling.
+#
+# Written here rather than derived from the shipped constant, because a probe that
+# followed the real version would go on colliding with it forever.
+PROBE_PROMPT_VERSION = "probe.v1"
+PROBE_DRIFTED_VERSION = "probe.v2"
+
 
 @pytest.fixture(autouse=True)
 def _a_stated_environment(configured_env: dict[str, str]) -> None:
@@ -239,7 +258,7 @@ def build_task(
     floors: Any,
     cases: Sequence[Any] = (),
     positive: Any = None,
-    prompt_version: str | None = "validity.v1",
+    prompt_version: str | None = PROBE_PROMPT_VERSION,
     classifier: Callable[[], Callable[[str], Any]] | None = None,
 ) -> Any:
     """One `EvalTask` for a probe, with the fields this module cares about named."""
@@ -265,7 +284,7 @@ def build_case(case_id: str, comment: str, expected: Any, prompt_version: str) -
 
 
 def balanced_set() -> tuple[Any, ...]:
-    """Four substantive cases and four that are not, pinned to `validity.v1`.
+    """Four substantive cases and four that are not, pinned to this module's probe version.
 
     Eight cases so that three right out of four answers is exactly 0.75, which is
     a number a float comparison can be equal to. The at-the-floor case below
@@ -275,14 +294,14 @@ def balanced_set() -> tuple[Any, ...]:
     substantive = cases_module.SUBSTANTIVE
     insufficient = cases_module.INSUFFICIENT
     return (
-        build_case("p-1", "substantive one", substantive, "validity.v1"),
-        build_case("p-2", "substantive two", substantive, "validity.v1"),
-        build_case("p-3", "substantive three", substantive, "validity.v1"),
-        build_case("p-4", "substantive four", substantive, "validity.v1"),
-        build_case("p-5", "insufficient one", insufficient, "validity.v1"),
-        build_case("p-6", "insufficient two", insufficient, "validity.v1"),
-        build_case("p-7", "insufficient three", insufficient, "validity.v1"),
-        build_case("p-8", "insufficient four", insufficient, "validity.v1"),
+        build_case("p-1", "substantive one", substantive, PROBE_PROMPT_VERSION),
+        build_case("p-2", "substantive two", substantive, PROBE_PROMPT_VERSION),
+        build_case("p-3", "substantive three", substantive, PROBE_PROMPT_VERSION),
+        build_case("p-4", "substantive four", substantive, PROBE_PROMPT_VERSION),
+        build_case("p-5", "insufficient one", insufficient, PROBE_PROMPT_VERSION),
+        build_case("p-6", "insufficient two", insufficient, PROBE_PROMPT_VERSION),
+        build_case("p-7", "insufficient three", insufficient, PROBE_PROMPT_VERSION),
+        build_case("p-8", "insufficient four", insufficient, PROBE_PROMPT_VERSION),
     )
 
 
@@ -307,7 +326,7 @@ def three_quarters_stub() -> Stub:
             "insufficient three": insufficient,
             "insufficient four": insufficient,
         },
-        "validity.v1",
+        PROBE_PROMPT_VERSION,
     )
 
 
@@ -716,7 +735,9 @@ def test_a_classifier_that_never_answers_the_positive_class_scores_zero_precisio
     rest of this module.
     """
     cases_module = validity_cases()
-    stub = Stub({case.comment: cases_module.INSUFFICIENT for case in balanced_set()}, "validity.v1")
+    stub = Stub(
+        {case.comment: cases_module.INSUFFICIENT for case in balanced_set()}, PROBE_PROMPT_VERSION
+    )
     floors = declarations().enforced(precision=0.10, recall=0.10, note="a probe's floor")
     task = build_task(floors=floors, cases=balanced_set(), positive=cases_module.SUBSTANTIVE)
 
@@ -758,7 +779,9 @@ def test_a_set_with_no_case_of_the_positive_class_is_refused() -> None:
     """
     cases_module = validity_cases()
     negatives = tuple(
-        build_case(f"n-{index}", f"insufficient {index}", cases_module.INSUFFICIENT, "validity.v1")
+        build_case(
+            f"n-{index}", f"insufficient {index}", cases_module.INSUFFICIENT, PROBE_PROMPT_VERSION
+        )
         for index in range(4)
     )
     floors = declarations().enforced(precision=0.5, recall=0.5, note="a probe's floor")
@@ -804,7 +827,9 @@ def test_recall_over_a_set_with_no_positive_case_is_zero_rather_than_one() -> No
     cases_module = validity_cases()
 
     negatives = tuple(
-        build_case(f"n-{index}", f"insufficient {index}", cases_module.INSUFFICIENT, "validity.v1")
+        build_case(
+            f"n-{index}", f"insufficient {index}", cases_module.INSUFFICIENT, PROBE_PROMPT_VERSION
+        )
         for index in range(4)
     )
     answers = [cases_module.INSUFFICIENT for _ in negatives]
@@ -825,13 +850,22 @@ def test_recall_over_a_set_with_no_positive_case_is_zero_rather_than_one() -> No
 
 
 def test_an_answer_produced_under_a_different_prompt_version_is_refused() -> None:
-    """A number measured against `validity.v2` is not a number about `validity.v1`.
+    """A number measured under one prompt version is not a number about another.
 
     ADR 0032 makes a committed prompt file immutable and a prompt change an
     *added* file, so the version a case is pinned to names exactly one text. A run
     whose answers come back under a later version has measured a different
     program, and comparing that figure against a floor grown on the old one is
     the comparison SPEC §9.3's gate is trying to make impossible.
+
+    **Both versions here are this module's own probes**, `probe.v1` and
+    `probe.v2`, and neither is a version the tool ships. They were spelled
+    `validity.v1` and `validity.v2` until the prompt trim of 2026-09-02 made the
+    second of those the real one — at which point this case read as saying the
+    shipped prompt is the mistake, while asserting something perfectly true. The
+    constants at the top of this file say why they are written down rather than
+    derived, and `test_the_probe_versions_are_not_the_shipped_one` refuses the
+    collision rather than trusting the spelling.
 
     The quiet version of this failure is the expensive one: the numbers still
     land in the floor's range, the gate goes green, and the prompt change it was
@@ -842,7 +876,9 @@ def test_an_answer_produced_under_a_different_prompt_version_is_refused() -> Non
     green:** an answer under the pinned version, asserted below.
     """
     cases_module = validity_cases()
-    stub = Stub({case.comment: cases_module.SUBSTANTIVE for case in balanced_set()}, "validity.v2")
+    stub = Stub(
+        {case.comment: cases_module.SUBSTANTIVE for case in balanced_set()}, PROBE_DRIFTED_VERSION
+    )
     floors = declarations().enforced(precision=0.1, recall=0.1, note="a probe's floor")
     task = build_task(floors=floors, cases=balanced_set(), positive=cases_module.SUBSTANTIVE)
 
@@ -851,8 +887,73 @@ def test_an_answer_produced_under_a_different_prompt_version_is_refused() -> Non
 
     message = str(refusal.value)
     assert (
-        "validity.v1" in message and "validity.v2" in message
+        PROBE_PROMPT_VERSION in message and PROBE_DRIFTED_VERSION in message
     ), f"refused without naming both versions, so the log cannot say what drifted:\n{message}"
+
+
+def test_the_probe_versions_are_not_the_shipped_one() -> None:
+    """A control on the two constants every probe in this module is built from.
+
+    **A red here means these tests are broken, not the code**, and the failure it
+    prevents is one that produces no red of its own. Every case in this module
+    invents its own prompt versions, deliberately, so that a real prompt bump does
+    not edit a module whose subject is refusals. That independence is only real
+    while the invented names differ from the shipped one — and nothing kept them
+    apart except that they happened to.
+
+    They stopped happening to on 2026-09-02. The probes were `validity.v1` and
+    `validity.v2`, the set moved to `validity.v2`, and the drift case's *wrong*
+    version became the version the tool actually renders. Nothing failed: the
+    probes never referred to the shipped prompt, the cases were consistent with
+    each other, and every test passed. What broke was what the module *said* —
+    a reader met a case built to demonstrate drift, pinned to the live version, and
+    had no way to tell whether that was deliberate.
+
+    The worse form is reachable from here. A probe equal to the shipped version
+    makes the drift case's two sides agree in one direction, so a runner that had
+    stopped comparing prompt versions at all would go on passing it — the
+    assertion would be satisfied by the collision rather than by the check.
+    `docs/MISTAKES.md` entry 3: a test passing for a reason unrelated to what it
+    asserts.
+
+    **The mutation this kills:** setting either probe constant to whatever the
+    application currently renders, which is what somebody tidying "inconsistent"
+    version strings would do. **The near miss that must stay green:** a real prompt
+    bump, which moves the shipped constant and leaves these two alone — the whole
+    point of writing them down.
+    """
+    from app.ai.tasks import VALIDITY_PROMPT_VERSION
+
+    cases_module = validity_cases()
+
+    collides = {
+        name: value
+        for name, value in (
+            ("PROBE_PROMPT_VERSION", PROBE_PROMPT_VERSION),
+            ("PROBE_DRIFTED_VERSION", PROBE_DRIFTED_VERSION),
+        )
+        if value in (VALIDITY_PROMPT_VERSION, cases_module.PROMPT_VERSION)
+    }
+    assert not collides, (
+        f"these probe versions are a version the tool ships: {collides}.\n"
+        f"  the application renders: {VALIDITY_PROMPT_VERSION!r}\n"
+        f"  the eval set is pinned to: {cases_module.PROMPT_VERSION!r}\n"
+        "\n"
+        "Every probe in this module invents its own version so that a prompt bump does not "
+        "edit a module about refusals. A probe equal to the shipped one gives that up "
+        "silently — nothing fails, and the drift case starts demonstrating drift between "
+        "the live prompt and itself.\n"
+        "\n"
+        "Change the probe, not the shipped version. `probe.v*` cannot collide with ADR "
+        "0032's `<task>.v<N>.md` scheme for any task this repository has."
+    )
+
+    assert PROBE_PROMPT_VERSION != PROBE_DRIFTED_VERSION, (
+        f"both probe versions are {PROBE_PROMPT_VERSION!r}, so the drift case pins a set and "
+        "answers under the same version. It would then assert that a matching version is "
+        "refused, which is the opposite of the rule, and the refusal it expects could only "
+        "come from something else."
+    )
 
 
 def test_an_answer_produced_under_the_pinned_prompt_version_is_graded() -> None:

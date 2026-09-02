@@ -127,9 +127,14 @@ def test_every_case_is_pinned_to_the_prompt_version_the_set_was_written_against(
 
     ADR 0031 makes the recorded version the prompt file's path stem, and ADR 0032
     makes that file immutable once a classification cites it — a prompt change is
-    an added file, never an edit. So `validity.v1` names exactly one text that
+    an added file, never an edit. So the pinned version names exactly one text that
     will still be readable when this set is re-run, and a case carrying no version
     or a different one is a case measured against a text nobody can reconstruct.
+
+    The version itself is not written here, and the prompt trim of 2026-09-02 is
+    why it should not be: this reads whatever `cases.py` pins, so a bump is one
+    edit in one place rather than a search through docstrings for a string that
+    has stopped being true.
 
     **What this compares is the cases against the set's own constant**, which
     makes it blind to that constant being wrong — the mutation battery changed
@@ -173,9 +178,17 @@ def test_the_pinned_prompt_version_is_the_one_the_application_loads(
 
     **A file on disk.** ADR 0031 makes the recorded version the prompt file's path
     stem and ADR 0032 makes that file immutable once a classification cites it, so
-    a version naming no file is a measurement nobody can reproduce. `validity.v1`
-    has to be `validity.v1.md` under `app/ai/prompts/`, which is the scheme ADR
-    0032 settles and the reason the extension is fixed there.
+    a version naming no file is a measurement nobody can reproduce. A pin of
+    `validity.vN` has to be `validity.vN.md` under `app/ai/prompts/`, which is the
+    scheme ADR 0032 settles and the reason the extension is fixed there.
+
+    **Both halves are red on a prompt bump, and both are the point.** The set was
+    repinned to `validity.v2` on 2026-09-02 with the provider switch, ahead of the
+    application constant and the file — so this fails twice over until the
+    implementer lands both, and it is the red that says the two sides have not met
+    yet. ADR 0032 keeps `validity.v1.md` on disk either way, so nothing about the
+    old measurement becomes unreadable; what this refuses is a *set* claiming to be
+    about a text the tool does not send.
 
     **The mutation this kills:** a `PROMPT_VERSION` that drifts from the
     application's — the whole set changes with it and every test that compares the
