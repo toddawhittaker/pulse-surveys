@@ -7,33 +7,49 @@
 `docs/MISTAKES.md` entry 9's rule is the whole design of this module: "Before
 citing a guard, execute it against the case you claim it stops and the case you
 claim it allows. A guard that has never been run is a comment." E2-05 built
-`uq_response_user_id_section_id_week_id` and asserts it with two `INSERT`s;
-what is unexecuted until here is the *submit path* meeting it — the branch where
-a request has decided there is no response yet, has classified a comment, and
-then finds that another request wrote one while it was doing so.
+`uq_response_user_id_section_id_week_id` and asserts it with two `INSERT`s; what
+is unexecuted until here is the *submit path* meeting it — the branch where a
+request has decided there is no response yet, has classified a comment, and then
+finds that another transaction wrote one while it was doing so.
 
-**The race window is opened deliberately rather than hoped for.** Both requests
-carry the mock's stall selector, so each spends the classifier's whole budget
-inside the handler; both have therefore looked for an existing response, found
-none, and are on their way to inserting one before either has committed. Without
-that the two requests serialise, the second is an ordinary in-window
-resubmission, and the constraint is never asked anything — which is why the
-overlap is **asserted** rather than assumed. A run where they did not overlap
-fails here saying so, instead of passing and reporting that a guard held.
+**The provocation is deterministic, and the version before it was not.** This
+module used to run two whole submissions in parallel and rely on the classifier's
+budget to keep both inside the handler until each had passed its lookup. The
+security fix round reordered the gating so classification runs *before* the
+insert, which collapsed the window the two requests raced in from seconds to
+microseconds: at 94809dc the test failed about three runs in ten, and the failure
+was not a defect. When the second thread's lookup landed after the first thread's
+commit it was an ordinary in-window resubmission answering 200 — one row, nothing
+wrong, and the constraint simply never asked anything. The overlap guard compared
+whole-request times and could not see that, so it reported the deliverable
+failing.
 
-**Two clients rather than two threads on one**, because a submission is a whole
-request and the point is two of them in flight; the two are built from one
-application factory against one database, which is the shape a second uvicorn
-worker has.
+**So the window is held open by a transaction rather than by a stopwatch.** This
+test opens a database transaction of its own, inserts the response row for the
+student's (section, week) and does **not** commit. The HTTP submission that
+follows cannot see that row — it is uncommitted — so it takes the branch this
+test is about: it looks, finds nothing, classifies, and inserts. The insert
+blocks on the unique index, waiting for the holding transaction to end. Only once
+the submission is *observably blocked* does this test commit, at which point the
+index refuses the blocked insert and the handler has to turn that into a 409.
+
+Nothing about that is timing-dependent. The point at which the commit happens is
+decided by watching Postgres report an ungranted lock, not by sleeping; a run
+where the submission never blocks fails saying so rather than passing.
+
+**The barrier and the overlap guard are gone**, with the device they served. Both
+existed to make two whole requests overlap and to notice when they had not, and
+neither proves anything about a race that is now provoked rather than hoped for.
 """
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, NamedTuple
+from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from fixtures.submit import (
+    RESPONSE_TABLE,
     SECTION_TABLE,
     SUBSTANTIVE_COMMENT,
     USER_TABLE,
@@ -41,25 +57,93 @@ from fixtures.submit import (
     a_valid_submission,
     copy_texts,
 )
+from fixtures.supervision import require_table, seed_row
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session
 
 pytestmark = pytest.mark.integration
 
-# How long a worker waits for its partner at the barrier before giving up. Long
-# enough that a slow container start is not what fails this, short enough that a
-# partner which never arrives is a failure rather than a hung suite.
-BARRIER_TIMEOUT_SECONDS = 30
+# How long to wait for the HTTP submission to reach its insert and block on the
+# unique index. Generous, because the request classifies a comment against the
+# mock before it inserts and a container start can be slow; bounded, because a
+# submission that never blocks is a test that cannot pose its question and has to
+# say so rather than wait for CI's own timeout.
+BLOCKED_DEADLINE_SECONDS = 30.0
+BLOCKED_POLL_SECONDS = 0.05
+
+# How long to wait for the blocked request to finish once the holding transaction
+# has committed. It is unblocked by then, so this only bounds a hang: a deadlock,
+# a lock timeout on the application's own connection, or a handler that swallowed
+# the violation and never answered.
+ANSWER_DEADLINE_SECONDS = 30.0
+
+# Postgres reports a transaction waiting on another transaction's uncommitted row
+# as an ungranted lock. Asked of this test's own connection, which is idle inside
+# the holding transaction and can see the whole cluster's locks.
+UNGRANTED_LOCKS = "SELECT count(*) FROM pg_locks WHERE NOT granted"
+
+# The instant the competing row carries in both its submission timestamps. Named
+# and equal rather than left to the shared seeding walker, because E2-05 checks
+# that `last_submitted_at` does not precede `first_submitted_at` and dispute
+# E2-05-01 records the walker filling one of the pair from a constant chosen for
+# `survey_window` — a row refused inside its own fixture, for a reason no
+# assertion here is about. Aware, because ADR 0019 refuses anything else.
+COMPETING_SUBMITTED_AT = datetime(2026, 8, 23, 22, 30, tzinfo=UTC)
 
 
-class Attempt(NamedTuple):
-    """One submission, with the wall-clock interval it occupied."""
+class Submission:
+    """One HTTP submission made on a thread, with whatever it answered."""
 
-    status: int
-    body: str
-    started: float
-    finished: float
+    def __init__(self, student: Any, answers: Any) -> None:
+        self.student = student
+        self.answers = answers
+        self.response: Any = None
+        self.failure: BaseException | None = None
+        self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        try:
+            self.response = self.student.submit(self.answers)
+        except BaseException as raised:
+            self.failure = raised
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def answered(self, timeout: float) -> Any:
+        """What the submission answered, or a failure naming why there is nothing."""
+        self.thread.join(timeout)
+        if self.thread.is_alive():
+            pytest.fail(
+                f"The submission was still running {timeout} seconds after the holding "
+                "transaction committed, so it is not waiting on that transaction any more. "
+                "Either the application's connection carries a `lock_timeout` and gave up, or "
+                "the handler caught the unique violation and never answered. The thread is a "
+                "daemon and will not hold the run open, but nothing here can say what it is "
+                "doing."
+            )
+        if self.failure is not None:
+            raise self.failure
+        return self.response
 
 
-def test_two_submissions_in_flight_leave_one_response_and_one_refusal(
+def wait_until_blocked(session: Session, deadline: float) -> bool:
+    """Poll until Postgres reports an ungranted lock, or the deadline passes.
+
+    This is what replaces a sleep. The submission's insert waits on the
+    uncommitted row's transaction, which Postgres reports as a lock it has not
+    granted; watching for that is watching for the exact state this test needs
+    before it commits, rather than guessing how long the classifier takes.
+    """
+    ends_at = time.monotonic() + deadline
+    while time.monotonic() < ends_at:
+        if int(session.execute(text(UNGRANTED_LOCKS)).scalar_one()) >= 1:
+            return True
+        time.sleep(BLOCKED_POLL_SECONDS)
+    return False
+
+
+def test_a_submission_that_meets_an_uncommitted_response_is_refused_as_a_duplicate(
     open_submit_tool: Any,
     submit_world: SubmitWorld,
     signed_in_student: Any,
@@ -67,127 +151,141 @@ def test_two_submissions_in_flight_leave_one_response_and_one_refusal(
     mock_ai_endpoint: Any,
     open_now: tuple[Any, Any],
     submit_contract: Any,
+    migrated_engine: Any,
+    metadata_tables: dict[str, Any],
 ) -> None:
-    """Two requests for one (student, section, week) produce one response, and one 409.
+    """The unique constraint refuses the submit path's insert, and the handler answers 409.
 
-    **The constraint is seen refusing.** One of the two requests reaches its
-    insert after the other has committed, and E2-05's uniqueness rule is what
-    stops it; the handler turns that into the duplicate refusal rather than into a
-    5xx. Both halves are asserted, because they fail differently: an unhandled
-    `IntegrityError` is a 500 with a stack trace where a student is standing, and
-    a route that swallows it is a submission silently lost.
+    **The constraint is seen refusing.** The submission's lookup runs while a
+    competing response row exists and is invisible to it, so the handler takes the
+    insert branch and meets `uq_response_user_id_section_id_week_id` head on. That
+    is the branch E2-05's schema tests cannot reach — they insert twice
+    themselves — and it is the one E2-08's work order calls "the backstop, not the
+    mechanism".
 
-    **The accepted half is the other request**, in the same test — one of the two
-    has to succeed, or "the constraint refused a duplicate" would be equally well
-    explained by a route that refuses everything under load.
+    **Both halves of the handler's answer are asserted**, because they fail
+    differently: an unhandled `IntegrityError` is a 500 with a stack trace where a
+    student is standing, and a violation caught and swallowed is a submission
+    silently lost. The registry's duplicate copy is asserted with them, because a
+    409 carrying no sentence is a refusal a student cannot act on.
 
-    **The mutation it kills:** the check-then-insert written without the
-    constraint behind it, which under two concurrent requests writes two rows for
-    one week — two votes in every §5 aggregate while §3.4's denominator stays at
-    one — and the `IntegrityError` left to escape, which is the same defect
-    wearing a 500.
+    **Three controls run before the assertion and none is ceremony.** Nothing is
+    blocked in the cluster when the test starts, so an ungranted lock later is
+    this submission and not the weather. The competing row is read back on the
+    holding connection, so "it was inserted" is a fact rather than an assumption.
+    And it is read for on a *different* connection and found absent, which is the
+    premise the whole device rests on: if the submission could see the row it
+    would take the resubmission branch and this would be a test of something else.
 
-    **What a red that names the overlap means:** the two requests serialised, so
-    this test could not pose its question. That is a defect in this test's timing
-    rather than in the path, and it is reported as itself rather than as a pass.
+    **The mutation it kills** is unchanged from the version this replaces: the
+    handler's `IntegrityError` translation dropped, so the violation escapes as a
+    500. It also kills the check-then-insert written with no constraint behind it,
+    which under two writers stores two rows for one week — two votes in every §5
+    aggregate while §3.4's participation denominator stays at one.
     """
     world = submit_world.build(opens_at=open_now[0], closes_at=open_now[1])
-    first_client = open_submit_tool(ai_base_url=mock_ai_endpoint.base_url)
-    second_client = open_submit_tool(ai_base_url=mock_ai_endpoint.base_url)
-    students = [
-        signed_in_student(first_client, world),
-        signed_in_student(second_client, world),
-    ]
-    submission = a_valid_submission(comment=f"{SUBSTANTIVE_COMMENT} {mock_ai.marker_for('stall')}")
-    barrier = threading.Barrier(len(students))
-
-    def attempt(student: Any) -> Attempt:
-        barrier.wait(timeout=BARRIER_TIMEOUT_SECONDS)
-        started = time.perf_counter()
-        answered = student.submit(submission)
-        return Attempt(answered.status_code, answered.text, started, time.perf_counter())
-
-    with ThreadPoolExecutor(max_workers=len(students)) as pool:
-        attempts = list(pool.map(attempt, students))
-
-    overlapped = attempts[0].started < attempts[1].finished and (
-        attempts[1].started < attempts[0].finished
-    )
-    assert overlapped, (
-        f"The two submissions did not overlap: {attempts[0].started:.2f}-"
-        f"{attempts[0].finished:.2f} against {attempts[1].started:.2f}-"
-        f"{attempts[1].finished:.2f}. They serialised, so the second was an ordinary in-window "
-        "resubmission and the uniqueness constraint was never asked anything. This test could not "
-        "pose its question — which is a defect in its timing, not a guard that held."
+    client = open_submit_tool(ai_base_url=mock_ai_endpoint.base_url)
+    student = signed_in_student(client, world)
+    submission = Submission(
+        student,
+        a_valid_submission(comment=f"{SUBSTANTIVE_COMMENT} {mock_ai.marker_for('substantive')}"),
     )
 
-    statuses = sorted(attempt.status for attempt in attempts)
-    server_errors = [attempt for attempt in attempts if attempt.status >= 500]
-    assert not server_errors, (
-        f"A racing submission answered {[a.status for a in server_errors]}: "
-        f"{[a.body[:200] for a in server_errors]}. The uniqueness constraint refusing is a "
-        "condition this path expects — the work order makes the handler 'turn it into the 409 "
-        "duplicate refusal' — and an unhandled `IntegrityError` is a stack trace where a student "
-        "is standing."
-    )
-    assert any(200 <= status < 300 for status in statuses), (
-        f"Neither racing submission succeeded ({statuses}). One of the two has to store the "
-        "response, or the refusal below says nothing about a duplicate."
-    )
-    assert submit_contract.conflict in statuses, (
-        f"The two racing submissions answered {statuses}. One of them reached its insert after "
-        "the other had committed, and E2-05's `(user, section, week)` uniqueness rule is what "
-        f"stops it — the work order makes that a {submit_contract.conflict}."
-    )
-
+    response_table = require_table(metadata_tables, RESPONSE_TABLE)
     student_id = world.student[world.key_of(USER_TABLE)]
     section_id = world.section[world.key_of(SECTION_TABLE)]
     week_id = world.week[world.key_of("week")]
+    keyed = (
+        (response_table.c["user_id"] == student_id)
+        & (response_table.c["section_id"] == section_id)
+        & (response_table.c["week_id"] == week_id)
+    )
+
+    holding = Session(bind=migrated_engine)
+    committed = False
+    try:
+        assert int(holding.execute(text(UNGRANTED_LOCKS)).scalar_one()) == 0, (
+            "Something in this cluster is already waiting on a lock before this test has done "
+            "anything. The commit below is triggered by an ungranted lock appearing, so a lock "
+            "that is already there would release the holding transaction before the submission "
+            "had blocked on it — and the submission would then be an ordinary resubmission."
+        )
+
+        seed_row(
+            holding,
+            metadata_tables,
+            RESPONSE_TABLE,
+            {},
+            user_id=student_id,
+            section_id=section_id,
+            week_id=week_id,
+            first_submitted_at=COMPETING_SUBMITTED_AT,
+            last_submitted_at=COMPETING_SUBMITTED_AT,
+        )
+        holding.flush()
+
+        held = holding.execute(select(response_table).where(keyed)).all()
+        assert len(held) == 1, (
+            f"The holding transaction sees {len(held)} response rows for this (student, section, "
+            "week) after inserting one. It has to hold exactly the row the submission will "
+            "collide with, or there is nothing for the unique index to refuse."
+        )
+        assert world.responses() == [], (
+            f"Another connection can already see {world.responses()}, so the row this test is "
+            "holding is not uncommitted. The submission's own lookup would find it, take the "
+            "resubmission branch, and never reach the insert this test is about — which is "
+            "exactly the way the previous version of this test went wrong."
+        )
+
+        submission.start()
+        blocked = wait_until_blocked(holding, BLOCKED_DEADLINE_SECONDS)
+
+        holding.commit()
+        committed = True
+
+        assert blocked, (
+            f"No ungranted lock appeared within {BLOCKED_DEADLINE_SECONDS} seconds, so the "
+            "submission never reached its insert and never blocked on the row this test was "
+            "holding. It could not pose its question — which is a defect in this test's "
+            "provocation rather than a guard that held. The likeliest causes are the submit path "
+            "refusing the request before it inserts (read the answer below), and the route "
+            "inserting on a connection outside this cluster."
+        )
+    finally:
+        if not committed:
+            holding.rollback()
+        holding.close()
+
+    answered = submission.answered(ANSWER_DEADLINE_SECONDS)
+
+    assert answered.status_code < 500, (
+        f"The submission answered {answered.status_code}: {answered.text[:300]!r}. The unique "
+        "constraint refusing is a condition this path expects and answers for — E2-08's work "
+        "order makes the handler 'turn it into the 409 duplicate refusal' — and an unhandled "
+        "`IntegrityError` is a stack trace where a student is standing."
+    )
+    assert answered.status_code == submit_contract.conflict, (
+        f"The submission answered {answered.status_code} rather than {submit_contract.conflict}. "
+        "Its insert was refused by `uq_response_user_id_section_id_week_id`, which is the "
+        f"backstop E2-05 built for exactly this. Body begins {answered.text[:400]!r}."
+    )
+
+    published = sorted(
+        key for key, value in copy_texts().items() if value and value in answered.text
+    )
+    assert len(published) == 1, (
+        f"The duplicate refusal served {answered.text[:300]!r}, and {len(published)} of the copy "
+        f"registry's strings appear in it ({published}). Criterion 4 covers this refusal as much "
+        "as any other: it is a sentence a student reads, and E2-11's inventory reads the registry."
+    )
+
     stored = [
         row
         for row in world.responses()
         if (row["user_id"], row["section_id"], row["week_id"]) == (student_id, section_id, week_id)
     ]
     assert len(stored) == 1, (
-        f"Two racing submissions left {len(stored)} responses for one (student, section, week): "
-        f"{stored}. SPEC §8 makes that triple unique, and two rows are two votes in every §5 "
-        "aggregate while §3.4's participation denominator stays at one week."
-    )
-
-    refusal = next(attempt for attempt in attempts if attempt.status == submit_contract.conflict)
-    published = sorted(key for key, text in copy_texts().items() if text and text in refusal.body)
-    assert len(published) == 1, (
-        f"The duplicate refusal served {refusal.body[:300]!r}, and {len(published)} of the copy "
-        f"registry's strings appear in it ({published}). Criterion 4 covers this refusal as much "
-        "as any other: it is a sentence a student reads, and E2-11's inventory reads the registry."
-    )
-
-
-def test_the_barrier_makes_two_threads_start_together() -> None:
-    """The control on this module's own machinery (`docs/MISTAKES.md` entry 3).
-
-    The overlap assertion above rests on two threads reaching the barrier and
-    being released together. A barrier that let one through early — a wrong party
-    count, a timeout swallowed — would make the test above report "they
-    serialised" against a path that is perfectly concurrent, and a reader would
-    spend the afternoon on the wrong module.
-
-    **A red here means this module is broken, not the submit path.**
-    """
-    barrier = threading.Barrier(2)
-    releases: list[float] = []
-
-    def wait_and_stamp(delay: float) -> None:
-        time.sleep(delay)
-        barrier.wait(timeout=BARRIER_TIMEOUT_SECONDS)
-        releases.append(time.perf_counter())
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        list(pool.map(wait_and_stamp, [0.0, 0.3]))
-
-    assert len(releases) == 2, f"The barrier released {len(releases)} threads, not two."
-    assert abs(releases[0] - releases[1]) < 0.2, (
-        f"The two threads were released {abs(releases[0] - releases[1]):.2f}s apart, though one "
-        "waited 0.3s longer than the other before arriving. A barrier that does not hold the "
-        "early thread cannot open the race window the test above depends on."
+        f"There are {len(stored)} responses for one (student, section, week): {stored}. SPEC §8 "
+        "makes that triple unique, and two rows are two votes in every §5 aggregate while §3.4's "
+        "participation denominator stays at one week."
     )
