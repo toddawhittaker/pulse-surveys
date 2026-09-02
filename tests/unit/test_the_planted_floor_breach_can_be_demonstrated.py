@@ -191,11 +191,16 @@ def test_every_breach_case_is_labelled_against_what_the_prompt_will_say() -> Non
 def test_the_planted_breach_fails_both_floors_when_the_model_answers_correctly() -> None:
     """The control that makes the live demonstration mean something.
 
-    A classifier that answers every breach case the way `validity.v1` will — the
-    plainly substantive comments `substantive`, the contentless ones
+    A classifier that answers every breach case the way any competent prompt will
+    — the plainly substantive comments `substantive`, the contentless ones
     `insufficient` — is run over the planted set against **the floors the real set
     is graded by**, and both must breach. No provider is reached: the point is to
     know what the live run will show before spending twenty calls on it.
+
+    The prompt version is deliberately not named. The breach fails by inverted
+    labels rather than by anything the prompt does, so it survives a prompt bump
+    untouched — which is the property the set was built for, and which the move to
+    `validity.v2` on 2026-09-02 exercised for the first time.
 
     Without this, a red demonstration is evidence of *something* — a refusal, an
     absent key, an outage — and nobody could say which; and a green one would be

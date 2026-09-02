@@ -157,9 +157,11 @@ class EvalCase:
     that silently never matches.
 
     `prompt_version` is the prompt file's path stem (ADR 0031), and ADR 0032
-    makes that file immutable once a classification cites it — so a case pinned
-    to `validity.v1` states which text it was written against, and a run under a
-    later prompt is a different measurement rather than the same one.
+    makes that file immutable once a classification cites it — so a pinned case
+    states which text it was written against, and a run under a later prompt is a
+    different measurement rather than the same one. No version is named here on
+    purpose: each task's set pins its own, and this field's contract does not move
+    when one of them bumps.
     """
 
     case_id: str

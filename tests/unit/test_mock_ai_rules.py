@@ -61,10 +61,35 @@ from fixtures.mock_ai import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# The prompt the mock's extraction rule is defined against. E0-12 ships it and
-# ADR 0031 makes the recorded `prompt_version` its path stem; E2-07 is out of
-# scope for changing it, and the drift test below only reads it.
-VALIDITY_PROMPT_PATH = REPO_ROOT / "backend" / "app" / "ai" / "prompts" / "validity.v1.md"
+# Where the prompts live. ADR 0031 makes the recorded `prompt_version` a file's
+# path stem and ADR 0032 fixes the extension, so a version resolves to exactly one
+# file here with no lookup table between them.
+PROMPTS_DIR = REPO_ROOT / "backend" / "app" / "ai" / "prompts"
+
+
+def validity_prompt_path() -> Path:
+    """The validity prompt the tool actually renders, not a version written down here.
+
+    **This was `validity.v1.md` as a literal until the prompt trim of 2026-09-02,
+    and the literal was the defect rather than the version.** ADR 0032 makes a
+    committed prompt immutable, so `validity.v1.md` stays on disk forever — which
+    means a test pinned to it goes on passing after the tool has moved to
+    `validity.v2`, guarding a file nothing sends. The drift it exists to catch
+    would then be live and invisible: the mock extracts the student's comment at
+    the marker line of whatever prompt it *receives*, so a trim that reworded or
+    dropped that line leaves every classification on a development stack answering
+    the extraction-failure 500, with this test green.
+
+    That is `docs/MISTAKES.md` entry 9's shape — a guard aimed at the case it used
+    to be about — and the repair is to ask the application which prompt it renders
+    rather than to remember. `app.ai.tasks.VALIDITY_PROMPT_VERSION` is the same
+    constant `tests/evals/live.py` sends and the same one the eval set's pin is
+    held against, so this is not a new coupling class in the suite.
+    """
+    from app.ai.tasks import VALIDITY_PROMPT_VERSION
+
+    return PROMPTS_DIR / f"{VALIDITY_PROMPT_VERSION}.md"
+
 
 # ---------------------------------------------------------------------------
 # **The one deliberate hand-copy this ticket allows.**
@@ -712,17 +737,29 @@ def test_a_prompt_with_no_marker_line_is_refused_loudly(mock_ai: MockAiProvider)
 
 
 def test_the_marker_line_the_mock_publishes_is_a_line_of_the_validity_prompt(
+    configured_env: dict[str, str],
     mock_ai: MockAiProvider,
 ) -> None:
     """The drift test: the mock's copy of the marker against the prompt's own text.
 
     The mock cannot import `backend/app/`, so the marker it extracts on is a
-    second copy of a string that lives in `backend/app/ai/prompts/validity.v1.md`.
-    E1-07's lesson is that a second copy is fine when something holds it against
-    the first, and fatal when nothing does: an edit to the prompt's comment
-    section that changed this line would leave every classification in the
-    development stack answering the extraction-failure 500 — or, worse, a partial
-    edit would leave the mock reading a boundary the prompt no longer has.
+    second copy of a string that lives in the validity prompt. E1-07's lesson is
+    that a second copy is fine when something holds it against the first, and
+    fatal when nothing does: an edit to the prompt's comment section that changed
+    this line would leave every classification in the development stack answering
+    the extraction-failure 500 — or, worse, a partial edit would leave the mock
+    reading a boundary the prompt no longer has.
+
+    **Which prompt is asked of the application rather than written down here**, and
+    the trim of 2026-09-02 is why. ADR 0032 keeps every committed prompt on disk
+    forever, so a path pinned to `validity.v1.md` goes on passing after the tool
+    has moved to `validity.v2` — guarding a file nothing sends while the drift it
+    exists to catch runs loose. `validity_prompt_path` says the rest.
+
+    **A trimmed prompt is exactly the change that breaks this**, which is the
+    point: if the new version reworded or dropped the marker line and the mock was
+    left alone, this goes red rather than the development stack going quietly
+    useless.
 
     **The mutation this kills:** the prompt's marker line reworded with the mock
     left alone, and the mock's constant retyped with a different dash, a
@@ -734,24 +771,33 @@ def test_the_marker_line_the_mock_publishes_is_a_line_of_the_validity_prompt(
     everything into everything — would report agreement between two strings that
     have nothing to do with each other.
 
-    **Nothing here writes to the prompt.** E2-07 puts prompt changes out of scope;
-    this reads it.
+    **Nothing here writes to the prompt.** This reads it.
+
+    `configured_env` is requested because resolving which prompt to read imports
+    `app.ai.tasks`, and a module that builds anything out of `Settings` at import
+    time would otherwise build it out of whatever the developer's shell held
+    (`docs/MISTAKES.md` entry 40). It is the first fixture in the signature so the
+    environment is in place before the mock is started.
     """
-    assert VALIDITY_PROMPT_PATH.is_file(), (
-        f"{VALIDITY_PROMPT_PATH} does not exist, so this test compares the mock's marker against "
-        "nothing and would report agreement whatever it says. E0-12 ships the versioned prompts "
-        "and ADR 0031 makes the recorded `prompt_version` the file's path stem."
+    prompt_path = validity_prompt_path()
+    assert prompt_path.is_file(), (
+        f"{prompt_path} does not exist, so this test compares the mock's marker against "
+        "nothing and would report agreement whatever it says.\n"
+        "\n"
+        "That path comes from `app.ai.tasks.VALIDITY_PROMPT_VERSION`, which is the prompt "
+        "the tool renders. A version naming no file is a configuration that cannot classify "
+        "anything, and ADR 0032's scheme is what makes the stem resolve to one file."
     )
-    lines = [line.strip() for line in VALIDITY_PROMPT_PATH.read_text(encoding="utf-8").splitlines()]
+    lines = [line.strip() for line in prompt_path.read_text(encoding="utf-8").splitlines()]
     assert len([line for line in lines if line]) > 5, (
-        f"{VALIDITY_PROMPT_PATH} holds {len(lines)} lines, which is not a prompt. A file that was "
+        f"{prompt_path} holds {len(lines)} lines, which is not a prompt. A file that was "
         "read as empty makes the comparison below meaningless."
     )
 
     marker = mock_ai.marker_line().strip()
     assert marker in lines, (
         f"The mock publishes {marker!r} as the line the student's comment follows, and no line of "
-        f"{VALIDITY_PROMPT_PATH.name} is that string. The mock extracts the comment as everything "
+        f"{prompt_path.name} is that string. The mock extracts the comment as everything "
         "after that marker's last occurrence, so a prompt that no longer ends its comment section "
         "with this line hands the mock a prompt it cannot read — every classification in the "
         "development stack then answers the extraction-failure 500."
