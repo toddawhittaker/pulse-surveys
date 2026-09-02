@@ -6,6 +6,13 @@ and each of the five routes renders its empty landing." SPEC §13 puts it in the
 one-line comment beside the module: `main.py` is "FastAPI app factory, router
 mount, SPA static serve".
 
+**The tree that criterion describes has moved on, and this is what it is now.**
+E2-10 replaced the student landing with the weekly survey screen, so the five
+role routes are four empty landing views and one real screen. Nothing asserted
+here moves with that: the seam is the same for every path under the mount, which
+is why the fallback case below reads a path naming no route at all beside the
+five.
+
 This module asserts the seam rather than the stack. What a browser sees is
 `tests/e2e/landing-views.spec.ts`, which needs a real build and a running Compose
 stack; what is asserted here is the property that spec cannot isolate — that the
@@ -159,8 +166,9 @@ def test_the_mount_root_serves_the_built_entry_document(
 
     The application is the only thing serving the built application — SPEC §13
     gives the factory the static serve, so there is no separate web server in the
-    Compose stack to fall back on. If this is a 404 the five landing views are
-    unreachable however well they are built, and E1's exit ("a student, an
+    Compose stack to fall back on. If this is a 404 the five role routes are
+    unreachable however well they are built — the four remaining landing views
+    and E2-10's survey screen alike — and E1's exit ("a student, an
     instructor and a Dean each land on the right (empty) view") cannot be
     demonstrated.
 
