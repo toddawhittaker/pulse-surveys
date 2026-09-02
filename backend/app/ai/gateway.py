@@ -115,7 +115,7 @@ from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import RunUsage
 
 from app.ai.contracts import AiTaskOutput, ContractModel
-from app.config import Settings, is_development
+from app.config import ConfigurationError, Settings, is_development
 
 OutputT = TypeVar("OutputT", bound=AiTaskOutput)
 
@@ -458,6 +458,7 @@ def _provider_for(settings: Settings, *, live: bool) -> _Provider:
     made that predicate the one reader of the one definition of the name.
     """
     if live or not is_development(settings):
+        _refuse_a_blank_real_endpoint(settings)
         return _Provider(
             base_url=settings.ai_provider_base_url,
             model_name=settings.ai_provider_model_name,
@@ -467,6 +468,56 @@ def _provider_for(settings: Settings, *, live: bool) -> _Provider:
         base_url=settings.mock_ai_provider_base_url,
         model_name=settings.mock_ai_provider_model_name,
         api_key=settings.mock_ai_provider_api_key,
+    )
+
+
+def _refuse_a_blank_real_endpoint(settings: Settings) -> None:
+    """Refuse a real triple with no endpoint, at the moment it is actually selected.
+
+    **This exists because `.env.example` now ships `AI_PROVIDER_BASE_URL` blank**
+    (E2-12's security review). The entry used to carry a working public endpoint,
+    and beside a blank key that let a deployment which configured everything else
+    and left the AI block alone start cleanly and post §3.3's prompts — the
+    student's comment text included — to a third party under this module's
+    placeholder bearer. Blanking the line makes a forgotten setting refuse instead,
+    and `Settings` already does that everywhere it can: outside development the
+    transport rule rejects a blank base URL at startup and the report names the
+    variable.
+
+    **It cannot do it in development, and that is deliberate rather than a gap
+    left open.** A development stack reads the mock triple, so a blank real
+    endpoint is the ordinary state of a clean checkout, and refusing it at
+    `Settings` construction would stop `docker compose up` from coming up at all —
+    SPEC §14.3's exit criterion. So the same guarantee is picked up here, at the
+    one place in development that genuinely needs a real endpoint: the gateway
+    that has just decided to read the real triple.
+
+    That is why it hangs off the selection rather than off the field. `live=False`
+    in development reads the mock and never reaches this; `live=True` — the eval
+    runner, and nothing else — does. Same blank, same environment, opposite
+    answers, and the flag is the whole difference.
+
+    **`ConfigurationError` rather than a gateway error**, because that is what this
+    is: a variable nobody filled in, not a provider that misbehaved. A caller
+    catching `AIGatewayError` on the submit path must not swallow it, and §3.3's
+    fail-open must not turn it into a character count — an unconfigured endpoint is
+    not an outage, and flooring it would hand out participation credit on a
+    misconfiguration.
+
+    No value is quoted, as in every refusal this project raises about
+    configuration: the message names the variable and says what to do, and the
+    thing it is refusing is empty in any case.
+    """
+    if settings.ai_provider_base_url.strip():
+        return
+    raise ConfigurationError(
+        "AI_PROVIDER_BASE_URL is blank, and this gateway was built to read the real "
+        "provider's triple — so there is no endpoint to send anything to.\n"
+        ".env.example ships it blank on purpose: an endpoint sitting there beside a blank "
+        "key is a deployment that forgot this block posting student comment text to a third "
+        "party without anybody choosing it. The address of the provider is in the comment "
+        "above the entry; copy it into your own .env, or set MOCK_AI_PROVIDER_BASE_URL and "
+        "build this gateway with live=False to classify through the in-repo mock instead."
     )
 
 
