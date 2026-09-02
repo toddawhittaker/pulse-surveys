@@ -407,8 +407,8 @@ The assertions in both files are correct today; only the prose is stale.
 
 ## The model identifier lives in three places and nothing ties them — E2-12
 
-The pinned model, `gpt-5-mini-2025-08-07`, is named in `.env.example`, in the
-eval step of `.github/workflows/ci.yml`, and in the provenance sentences of
+The model identifier is named in `.env.example`, in the eval step of
+`.github/workflows/ci.yml`, and in the provenance sentences of
 `tests/evals/validity/floors.py` — and no test compares any of the three to any
 other. The re-verification measured the gap directly: re-pointing either
 configuration site alone survives the whole suite, so a model swap in one place
@@ -417,8 +417,18 @@ prose went on saying otherwise. This is the compare-an-answer-with-itself
 defect the same round repaired inside `cases.py`, recurring one level out, in
 the shape the record already predicts for closed-set guards.
 
-Today all three sites agree and the floors were measured against exactly that
-snapshot, so nothing is wrong — the gap is in what holds them together.
+All three sites agree at any given moment, so nothing is wrong — the gap is in
+what holds them together.
+
+**The switch to `gpt-5.6-luna` on 2026-09-02 sharpened this rather than changing
+it**, and the entry is worth more now than when it was raised. The identifier was
+`gpt-5-mini-2025-08-07` then: a dated build, so the three sites could drift only
+if somebody edited one of them. Luna publishes no dated build (ADR 0120), so the
+name is an alias the provider can re-point with nobody editing anything — and the
+fourth thing that can now disagree with the other three is the weights, which no
+test can read. Tying the three written sites together is still the work; it is no
+longer sufficient, and whatever lands should say so rather than reading as
+complete coverage.
 
 **Done when** one test reads the model identifier from all three sites and
 fails when any two disagree, and a planted mismatch at each site is seen red.

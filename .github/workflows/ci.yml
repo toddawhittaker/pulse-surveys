@@ -1036,16 +1036,25 @@ jobs:
       # why the switch happened rather than a second output mode being added.
       # ADR 0118's consequences carry the measurement.
       #
-      # **The model is pinned to a snapshot and not to the floating alias.** A
+      # **The model wants to be pinned to a snapshot, and this one has none.** A
       # floor is a claim about a particular model: ADR 0031 records the provider's
       # own identifier on every classification precisely so that two runs can be
-      # told apart, and the same property applies to the thing being measured. The
-      # floors in `tests/evals/validity/floors.py` were measured against
-      # `gpt-5-mini-2025-08-07`, which is what the alias `gpt-5-mini` resolved to
-      # on 2026-09-02; when that alias moves, the floors are being compared
-      # against a model nobody measured, and a breach would be indistinguishable
-      # from a model change. Moving this pin is therefore re-measuring, and it
-      # belongs in a pull request whose subject is moving the floors.
+      # told apart, and the same property applies to the thing being measured.
+      # The previous model was pinned that way, as `gpt-5-mini-2025-08-07`.
+      #
+      # `gpt-5.6-luna` publishes no dated build. Checked on 2026-09-02 by listing
+      # the provider's models, by retrieving that model, and by reading a
+      # completion's envelope — one bare identifier every time, where the previous
+      # model's envelope resolved to its snapshot, and no `system_fingerprint`.
+      # So the value below is what the provider serves, and the property the pin
+      # bought is unavailable rather than traded away: the weights behind this
+      # name can move, and a floor breach would then be indistinguishable from a
+      # model change with nothing here able to tell. ADR 0120 carries it as a cost
+      # of the switch, and `.env.example` says the same beside its own entry.
+      #
+      # If a dated Luna build appears, pinning it here is the repair — and it is a
+      # re-measurement, so it belongs in a pull request whose subject is moving
+      # the floors.
       #
       # **Everything below the provider triple is here because `Settings()` is
       # constructed before any of it is read, and the runner reads none of it.**
@@ -1075,7 +1084,7 @@ jobs:
         env:
           AI_PROVIDER_API_KEY: ${{ secrets.AI_PROVIDER_API_KEY }}
           AI_PROVIDER_BASE_URL: 'https://api.openai.com/v1'
-          AI_PROVIDER_MODEL_NAME: 'gpt-5-mini-2025-08-07'
+          AI_PROVIDER_MODEL_NAME: 'gpt-5.6-luna'
           ENVIRONMENT: 'development'
           DATABASE_URL: 'postgresql+psycopg://unused:unused@localhost:5432/unused'
           REDIS_URL: 'redis://localhost:6379/0'
