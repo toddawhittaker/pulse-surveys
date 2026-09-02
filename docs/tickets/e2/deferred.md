@@ -5,6 +5,36 @@ here in the same PR, and E2-13 runs the cleanup pass over this file. Each entry
 names the ticket that owns it and what "done" means, so the deferral is a
 scheduled decision rather than a hope.
 
+## The gateway records no token usage, so no live run can report its own cost — E2-13
+
+Deferred by E2-12, and it became a real need during that ticket rather than a
+nicety: a spend ledger is now kept per live eval run, and no run can report
+against it. `AIGateway._ask` returns `(result.output, model_id)` and drops
+`result.usage()`; `run_task` returns the contract object alone; nothing logs it.
+So a run's input tokens, its output tokens, and — the figure that decides most of
+the bill — its cached input tokens are all unrecorded and unreconstructable
+afterwards.
+
+The data is one attribute away in a dependency already pinned. `pydantic_ai`
+2.35.3's `RunUsage` carries `input_tokens`, `output_tokens`, `cache_read_tokens`,
+`cache_write_tokens`, `requests`, `cost` and a `details` dict, and its OpenAI
+model maps the chat API's `prompt_tokens_details.cached_tokens` into
+`cache_read_tokens` — exactly the split a ledger prices separately, cached input
+billing at a tenth of uncached. `details` carries this model's reasoning tokens,
+which are billed and never appear in the answer body.
+
+It matters most on this path, and not only for bookkeeping: every eval request is
+the same ~4,175-character prompt with a short comment substituted, so about 99%
+of each call is an identical prefix and the cached fraction is likely to be
+material. Nothing can say how material without measuring it.
+
+**Done when** a live run can report its own input, output and cached-input token
+totals. Whether the gateway returns usage alongside the verdict, records it, or
+exposes it another way is the deciding ticket's call — it is application
+behaviour rather than test machinery, which is why it is not taken here — and
+whatever shape it takes has to keep the credential and the comment out of
+whatever it writes (SPEC §10, §4).
+
 ## `detect.outputs.evals` is published and read by nothing — E2-13
 
 Deferred by E2-12. That probe asked whether the eval runner module exists, and
