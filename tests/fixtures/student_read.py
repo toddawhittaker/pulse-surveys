@@ -57,6 +57,7 @@ development one, and every open/closed case in E2-09 moves that clock.
 
 import json
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from importlib import import_module
@@ -775,15 +776,71 @@ class StudentReadDoor:
             headers={"Authorization": f"Bearer {self.token}"},
         )
 
+    @contextmanager
+    def carrying_no_cookie(self) -> Iterator[None]:
+        """Empty this client's cookie jar for the body, and put it back afterwards.
+
+        **Without this, no request either module makes is credential-free.** E1-08
+        delivers a session two ways at once — `Set-Cookie: pulse_session` on the
+        landing redirect *and* the URL fragment the SPA reads — and `httpx` sends
+        jar cookies on every later request to the same host, so a read made
+        through the client the launch was driven with carries that student's valid
+        session whether or not it carries a header. `docs/disputes/E2-09-01.md`
+        measured it: the request this file called "no session at all" arrived
+        carrying `pulse_session` decoding to `{"door": "LAUNCH", "role": "STUDENT",
+        "sub": "mock-lms-user-learner"}`, was answered `200` with that student's
+        own survey, and the test failed against a correct implementation.
+
+        **A per-request `cookies={}` does not do it**, which is the part worth
+        writing down: `httpx` merges request cookies *over* the client's jar
+        rather than replacing it, so the jar's `pulse_session` is sent anyway. The
+        jar has to be swapped out and restored, which is what this does.
+
+        **Both refusal drivers use it, not only the anonymous one.** A request
+        carrying an instructor's Bearer token *and* a student's cookie is refused
+        for the right reason only because `session_from_request` reads Bearer
+        first — a test that leaned on that precedence would be measuring the
+        precedence rule rather than the role check. Emptied, each refusal carries
+        exactly one credential and it is the one the method's name says.
+
+        The student's own `get` above deliberately keeps the jar: there the cookie
+        and the Bearer token are the same person's session, which is the state a
+        real browser is in, and the ruling of 2026-09-01 confirms a
+        cookie-delivered session is a supported path rather than a leak.
+        """
+        import httpx
+
+        jar = self.tool.cookies
+        self.tool.cookies = httpx.Cookies()
+        try:
+            yield
+        finally:
+            self.tool.cookies = jar
+
     def get_as_an_instructor(self, path: str = STUDENT_READ_PATH) -> Any:
-        """The same read, carrying a session a real instructor landing issued."""
+        """The same read, carrying a session a real instructor landing issued and nothing else.
+
+        The token is minted **before** the jar is emptied, deliberately: minting it
+        drives a whole launch, and the login leg's own `state`/`nonce` cookie is
+        what the launch leg is judged against — a launch driven with an emptied jar
+        is refused for the handshake and this would fail in its own setup.
+        """
         if self._instructor_token is None:
             self._instructor_token = self._instructor()
-        return self.tool.get(path, headers={"Authorization": f"Bearer {self._instructor_token}"})
+        with self.carrying_no_cookie():
+            return self.tool.get(
+                path, headers={"Authorization": f"Bearer {self._instructor_token}"}
+            )
 
     def get_without_a_session(self, path: str = STUDENT_READ_PATH) -> Any:
-        """The same read, carrying no session at all."""
-        return self.tool.get(path)
+        """The same read, carrying no credential of any kind — no header, and no cookie.
+
+        Order-independent by construction: the jar is emptied whatever a previous
+        call left in it, so this is an anonymous request whether or not an
+        instructor launch has run first. See `carrying_no_cookie` for the incident.
+        """
+        with self.carrying_no_cookie():
+            return self.tool.get(path)
 
 
 @pytest.fixture

@@ -525,6 +525,20 @@ def test_a_session_that_is_not_this_students_is_refused_exactly_as_no_session_is
     path, with a student's session, answers `200`. A door that refused everybody
     would satisfy this test and fail every other one here, which is why the two
     live in one module.
+
+    **The anonymous case is measured twice, on either side of the instructor's
+    launch, and that is `docs/disputes/E2-09-01.md`'s repair asserted rather than
+    only arranged.** Minting the instructor's session drives a second launch,
+    whose landing sets `pulse_session` in the same client's cookie jar — so in the
+    first version of this test, where both refusals were built in one dict
+    literal, the anonymous request ran second and carried the *instructor's*
+    cookie. It was refused, the test passed, and what it measured was an
+    instructor's session twice: once by header and once by cookie. The credential-
+    free case was exercised nowhere in E2-09. `get_without_a_session` empties the
+    jar now, and taking the anonymous reading before and after the launch is what
+    says so out loud: two identical refusals mean the jar the launch filled
+    changed nothing, and a difference between them means this test is measuring
+    whatever a previous call left behind.
     """
     allowed = student_read_door.get()
     assert allowed.status_code == 200, (
@@ -533,9 +547,29 @@ def test_a_session_that_is_not_this_students_is_refused_exactly_as_no_session_is
         f"{allowed.text[:300]!r}."
     )
 
+    # Taken before the instructor's launch fills the cookie jar, and again after.
+    # The order is the subject here, so the three calls are separate statements
+    # rather than values in one literal.
+    anonymous_before = student_read_door.get_without_a_session()
+    instructor_refusal = student_read_door.get_as_an_instructor()
+    anonymous_after = student_read_door.get_without_a_session()
+
+    assert (anonymous_before.status_code, anonymous_before.text) == (
+        anonymous_after.status_code,
+        anonymous_after.text,
+    ), (
+        f"A request carrying no credential was answered {anonymous_before.status_code} "
+        f"{anonymous_before.text[:200]!r} before the instructor's launch and "
+        f"{anonymous_after.status_code} {anonymous_after.text[:200]!r} after it. The launch sets "
+        "`pulse_session` in this client's cookie jar, so a difference between the two means the "
+        "second request is carrying that cookie — which is exactly the defect "
+        "`docs/disputes/E2-09-01.md` found, and it makes whichever of these two readings runs "
+        "second a measurement of somebody else's session rather than of an anonymous request."
+    )
+
     refusals = {
-        "an instructor's session": student_read_door.get_as_an_instructor(),
-        "no session at all": student_read_door.get_without_a_session(),
+        "an instructor's session": instructor_refusal,
+        "no session at all": anonymous_after,
     }
     for what, answered in refusals.items():
         assert answered.status_code == REFUSED_STATUS, (
