@@ -499,15 +499,19 @@ services:
   # the platform: a profile would take it out of CI's base-file-only pass, the
   # one pass that runs what actually ships — and here that pass matters more than
   # for the other two, because `api`, `worker` and `beat` all build a `Settings`
-  # whose `AI_PROVIDER_BASE_URL` names this service in development.
+  # whose `MOCK_AI_PROVIDER_BASE_URL` names this service, and reach it in
+  # development.
   #
   # **This service will answer whatever the comment asks it to.** A student
   # comment carrying `mock-ai:500` makes it answer HTTP 500, and one carrying
   # `mock-ai:substantive` makes it award participation credit — that is what makes
   # it drivable from a test and what makes it unfit for anywhere else. What keeps
-  # it out of a deployment is not this file: `app/config.py` refuses an
-  # `AI_PROVIDER_BASE_URL` whose host is `mock-ai` anywhere `ENVIRONMENT` is not
-  # `development`, exactly as it already refuses `mock-idp` (ADR 0077, ADR 0113).
+  # it out of a deployment is not this file, and it is two rules rather than one.
+  # `app/config.py` refuses an `AI_PROVIDER_BASE_URL` whose host is `mock-ai` in
+  # every environment, exactly as it already refuses `mock-idp` (ADR 0077, ADR
+  # 0113, ADR 0118) — and `app/ai/gateway.py` reads `MOCK_AI_PROVIDER_BASE_URL`
+  # only where `ENVIRONMENT` is `development`, so the address a deployment may
+  # legitimately leave lying in its `.env` is one nothing there looks at.
   #
   # **No `environment:` at all**, which is one less than either other mock. They
   # each hold addresses — an issuer, a client id, where to send a browser — and

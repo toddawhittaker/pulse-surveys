@@ -66,6 +66,17 @@ block that diagnosed it, because Python prints a chained cause's message too:
 `raise ... from None` suppresses the display and leaves `__context__` set for
 anything that inspects the chain.
 
+**Two providers are configured, and one construction flag picks between them.**
+E2-07 put an OpenAI-compatible mock in the base Compose file and ADR 0113 makes it
+a service every deployment starts, so `.env.example` could point the application
+at it and a clean checkout could classify a comment without calling a model
+anybody pays for. Three variables cannot describe two endpoints, and the eval
+runner needs both at once — it must reach the real provider on a developer's
+machine, where everything else must reach the mock. So the configuration splits
+into `AI_PROVIDER_*` and `MOCK_AI_PROVIDER_*`, and `AIGateway(live=...)` selects.
+`_provider_for` below is the rule and the whole of the argument; ADR 0118 records
+it and supersedes ADR 0113's transport clause in part.
+
 **One client per thread, and the loop it was built for.** The asynchronous client
 underneath pools its connections, and a pooled connection belongs to the event
 loop it was opened on: reuse it from another loop and it raises, which the layers
@@ -78,12 +89,13 @@ import asyncio
 import json
 import threading
 from collections.abc import Iterator
+from dataclasses import dataclass
 from functools import cache
 from typing import Any, TypeVar
 
 import httpx
 import httpx2
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel, SecretStr, create_model
 from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.models.openai import OpenAIChatModel
@@ -91,7 +103,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
 
 from app.ai.contracts import AiTaskOutput, ContractModel
-from app.config import Settings
+from app.config import Settings, is_development
 
 OutputT = TypeVar("OutputT", bound=AiTaskOutput)
 
@@ -304,6 +316,65 @@ def _declared_names(payload: type[BaseModel]) -> frozenset[str]:
     return frozenset(names)
 
 
+@dataclass(frozen=True)
+class _Provider:
+    """The three values that name one endpoint: where, which model, and with what.
+
+    A value object rather than three arguments, because the whole point of ADR
+    0118's split is that these three travel together. The failure it exists to
+    make hard to write is a base URL from one triple beside a model name or a
+    credential from the other — a request that lands at the paid provider asking
+    for a model it does not serve, or at the mock carrying a paid credential.
+    Both look like a working gateway and neither goes red.
+    """
+
+    base_url: str
+    model_name: str
+    api_key: SecretStr | None
+
+
+def _provider_for(settings: Settings, *, live: bool) -> _Provider:
+    """Which of the two configured providers a gateway built this way reads.
+
+    ADR 0118's selection rule, in one place because it is one sentence and a
+    second copy is the one that would not be updated (`docs/MISTAKES.md` entry
+    13):
+
+      - `live=True` reads the real triple **in every environment**. That is the
+        eval runner's, and it has to hold on a developer's machine as much as in
+        CI, or `make evals` measures E2-07's twenty-five-character rule and writes
+        the score down as SPEC §9.3's precision and recall floor.
+      - `live=False` reads the mock triple in development and test, and the real
+        triple in a deployment. That is every other caller's: the submit path on a
+        development stack classifies through `mock-ai`, which is what lets
+        `docker compose up` on a clean checkout work with no paid credential (SPEC
+        §14.3) — and the same call in production reaches the provider the
+        institution pays for.
+
+    **Both halves of the second rule matter and neither is redundant.** Written on
+    the flag alone — `live=False` means the mock, everywhere — it points production
+    at a character counter. Written on the environment alone — development means
+    the mock, whatever the flag says — it points the eval runner at one. The rule
+    is the disjunction, and `tests/unit/test_the_gateway_reads_the_provider_triple_
+    the_flag_selects.py` holds all four combinations rather than the three that
+    disagree.
+
+    `is_development` rather than a comparison written here, because E0-37 item 2
+    made that predicate the one reader of the one definition of the name.
+    """
+    if live or not is_development(settings):
+        return _Provider(
+            base_url=settings.ai_provider_base_url,
+            model_name=settings.ai_provider_model_name,
+            api_key=settings.ai_provider_api_key,
+        )
+    return _Provider(
+        base_url=settings.mock_ai_provider_base_url,
+        model_name=settings.mock_ai_provider_model_name,
+        api_key=settings.mock_ai_provider_api_key,
+    )
+
+
 class _ThreadBound:
     """The event loop, the client and the agents one thread uses.
 
@@ -323,10 +394,10 @@ class _ThreadBound:
     rather than by comments.
     """
 
-    def __init__(self, settings: Settings) -> None:
-        key = settings.ai_provider_api_key
+    def __init__(self, chosen: _Provider) -> None:
+        key = chosen.api_key
         provider = OpenAIProvider(
-            base_url=settings.ai_provider_base_url,
+            base_url=chosen.base_url,
             api_key=key.get_secret_value() if key is not None else UNAUTHENTICATED,
         )
         # **The underlying client's own retry is turned off**, so that the number
@@ -344,7 +415,7 @@ class _ThreadBound:
         # second provider-library importer E0-13's sixth criterion is about.
         provider.client.max_retries = 0
         self.loop = asyncio.new_event_loop()
-        self.model = OpenAIChatModel(settings.ai_model_name, provider=provider)
+        self.model = OpenAIChatModel(chosen.model_name, provider=provider)
         self.agents: dict[type[AiTaskOutput], Agent[None, Any]] = {}
 
     def agent_for(self, output_model: type[AiTaskOutput]) -> Agent[None, Any]:
@@ -376,7 +447,9 @@ class AIGateway:
     """One client per thread against one OpenAI-compatible endpoint (SPEC §6.3, §7.4).
 
     Built from `Settings`, so the base URL, the model and the credential all come
-    from the environment and none of them is written down here. Nothing is
+    from the environment and none of them is written down here — and *which* of
+    the two configured endpoints they come from is the `live` flag's answer, which
+    `_provider_for` above holds. Nothing is
     constructed at import time: a module that built a client on import would need
     `AI_PROVIDER_BASE_URL` set to be importable at all, and CI's
     `migration-drift` job supplies the database variables alone.
@@ -389,15 +462,32 @@ class AIGateway:
     only when the garbage collector got to it.
     """
 
-    def __init__(self, settings: Settings | None = None) -> None:
-        """Read the configuration; build nothing until a thread asks."""
+    def __init__(self, settings: Settings | None = None, live: bool = False) -> None:
+        """Read the configuration, choose a provider, and build nothing until a thread asks.
+
+        **`live` decides which of the two configured providers this gateway
+        reaches** (ADR 0118), and `_provider_for` above holds the rule and the
+        argument for it. It is resolved here, once, rather than per call: the
+        selection is a property of the gateway, and a gateway that re-decided per
+        request could answer two comments from two endpoints.
+
+        **It defaults to `False` because every caller except the eval runner wants
+        that**, and the wrong default is expensive in a way nothing reports. A
+        default of `True` would send a clean `docker compose up` — and every test
+        that does not pass the flag — to a paid endpoint with a student's comment
+        in the body. Nothing goes red; it costs money and leaves the machine.
+        `tests/evals/live.py` is the one caller that passes `True`, and it passes
+        it explicitly rather than relying on the environment it happens to start
+        in.
+        """
         self._settings = settings or Settings()
+        self._provider = _provider_for(self._settings, live=live)
         self._local = threading.local()
 
     @property
     def model_name(self) -> str:
-        """The model this gateway asks for, as `AI_MODEL_NAME` spells it."""
-        return self._settings.ai_model_name
+        """The model this gateway asks for, from whichever triple it selected."""
+        return self._provider.model_name
 
     def run_task(
         self,
@@ -473,7 +563,7 @@ class AIGateway:
         """
         bound: _ThreadBound | None = getattr(self._local, "bound", None)
         if bound is None:
-            bound = _ThreadBound(self._settings)
+            bound = _ThreadBound(self._provider)
             self._local.bound = bound
         return bound
 
