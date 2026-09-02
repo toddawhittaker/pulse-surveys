@@ -985,6 +985,7 @@ class SignedInStudent:
         authenticated: bool = True,
         via: str = BEARER_SESSION,
         csrf: bool = True,
+        csrf_token: str | None = None,
     ) -> Any:
         """Post one submission and answer the response, whatever its status.
 
@@ -994,6 +995,16 @@ class SignedInStudent:
         header is not sent by a cross-site form, so a request that carries one
         is not a request a browser can be tricked into making, and the check has
         nothing to protect there.
+
+        **`csrf_token` puts a chosen value in both the cookie and the header**,
+        which is the only shape that can tell verification from a comparison. An
+        attacker who can make a browser send a cross-site request can also toss a
+        cookie, so they control both halves of a double submit; a check that
+        compares the two to each other passes for them. Only ADR 0089's HMAC
+        against *this* session's `jti` refuses it. Handing the value to both is
+        therefore not a convenience — a helper that set only the header would be
+        caught by a comparison, and the test would pass against a control that
+        does not hold (`docs/disputes/E2-08-06.md`, mutation M1c).
         """
         target = self.world.section if section is None else section
         section_id = target[self.world.key_of(SECTION_TABLE)]
@@ -1007,7 +1018,10 @@ class SignedInStudent:
         elif authenticated and via == COOKIE_SESSION:
             session_cookie, csrf_cookie = session_cookie_names()
             cookies[session_cookie] = self.token
-            if csrf:
+            if csrf_token is not None:
+                cookies[csrf_cookie] = csrf_token
+                headers[CSRF_HEADER] = csrf_token
+            elif csrf:
                 minted = csrf_token_for(self.token, self.secret)
                 cookies[csrf_cookie] = minted
                 headers[CSRF_HEADER] = minted
@@ -1304,6 +1318,14 @@ def registry_texts() -> Callable[[], dict[str, str]]:
 # this fixture instead of to the ticket.
 RECLASSIFY_FRAGMENTS = ("reclassif", "re_classif", "classif", "validity")
 
+# A task the walk below must find, whatever else it finds — the control that
+# makes "found nothing" mean something. `ping` has been a `@celery_app.task` in
+# `app.jobs.tasks` since E0-03 and `tests/unit/test_celery_app.py` asserts it is
+# one, so a walk that cannot see it is broken rather than looking at a module
+# that has lost its deliverable. If `ping` is ever renamed, this constant is the
+# one line that changes and the test that pins it is the one to read first.
+CERTAINLY_PRESENT_TASK = "ping"
+
 
 def reclassification_entry_point(module: Any) -> Any:
     """The one member of `app.jobs.tasks` that re-runs a floored classification.
@@ -1326,6 +1348,16 @@ def reclassification_entry_point(module: Any) -> Any:
     `derive_windows_for_all_sections`) out of the match, so a wrapper and the
     function it wraps do not compete — and `run.__module__` is the value that
     answers that question correctly.
+
+    **The walk is made to find a task that is certainly there, before it reports
+    that one is not.** That is `docs/MISTAKES.md` entry 35's rule and it is the
+    repair the `celery.local` defect did not get: a filter that excluded every
+    task in the module reported the deliverable missing, in the same words it
+    would have used had the deliverable really been missing, and nothing in the
+    message could tell the two apart. `ping` is the control because it is the one
+    task in this module that no ticket owns and none will remove — E0-03 shipped
+    it to prove the round trip. A guard that only ever reports absence cannot say
+    which mechanisms it can see; this one has to see one first.
     """
     candidates = {
         name: value
@@ -1334,6 +1366,21 @@ def reclassification_entry_point(module: Any) -> Any:
         and callable(getattr(value, "run", value))
         and getattr(getattr(value, "run", value), "__module__", "") == module.__name__
     }
+    if CERTAINLY_PRESENT_TASK not in candidates:
+        pytest.fail(
+            f"This walk over `app.jobs.tasks` cannot see `{CERTAINLY_PRESENT_TASK}`, which E0-03 "
+            f"shipped and `tests/unit/test_celery_app.py` asserts is a Celery task there. It sees "
+            f"{sorted(candidates)}, out of a module holding "
+            f"{sorted(name for name in vars(module) if not name.startswith('_'))}.\n\n"
+            "**So this is a defect in `reclassification_entry_point`, not in E2-08's async "
+            "re-classification.** Read it that way before reading anything else: the walk is "
+            "blind, and whatever it goes on to say about the re-classification being present or "
+            "absent is a statement it is not in a position to make. `docs/disputes/E2-08-02.md` "
+            "is the last time this happened — a Celery task proxy reports `celery.local` as its "
+            "`__module__`, so a filter asking the proxy rather than its `run` excluded every task "
+            "the module has ever defined. This control exists so that the next such filter fails "
+            "here, naming itself, rather than three lines further down naming somebody's ticket."
+        )
     for fragment in RECLASSIFY_FRAGMENTS:
         matched = {name: value for name, value in candidates.items() if fragment in name.lower()}
         if len(matched) == 1:

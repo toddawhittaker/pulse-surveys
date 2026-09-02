@@ -53,6 +53,7 @@ from fixtures.submit import (
     WORKLOAD_POSITION,
     SubmitWorld,
     a_valid_submission,
+    csrf_token_for,
 )
 
 pytestmark = pytest.mark.integration
@@ -944,11 +945,22 @@ def test_a_cookie_borne_submit_is_refused_without_the_csrf_token_and_accepted_wi
     on a cross-site form post; the double-submit pair is the only thing between
     that and any page on the internet writing a student's weekly survey.
 
-    **The two halves differ by the pair and by nothing else** — same student's
-    session, same body, same section, same open window, one carrying the cookie
-    and the `X-Pulse-CSRF` header and one carrying neither. The accepted half is
-    made by a second student so that the resubmission rule is not what either
-    half is measuring.
+    **Three submissions, and the third is the one that makes this a test of
+    verification.** The accepted one carries the pair; the second carries neither;
+    the third carries a *valid* token minted for **another session** — in both the
+    cookie and the header, because an attacker who can make a browser send a
+    cross-site request can also toss a cookie and therefore controls both halves
+    of a double submit. So a check that reads "a token is present", or one that
+    compares the cookie to the header, answers the third case exactly as it
+    answers the accepted one. Only ADR 0089's HMAC against *this* session's `jti`
+    refuses it, which is the whole of what that record buys: "a tossed cookie
+    without the secret still fails, and a token minted for one session does not
+    verify against another's `jti`."
+
+    Each submission differs from the accepted one in exactly one thing — the
+    token — with the same body, section, student class and open window. The
+    accepted half is made by a second student so that the resubmission rule is
+    not what any of the three is measuring.
 
     **The status is 403, and ADR 0089 is not where it comes from.** That record
     settles the mechanism, the `X-Pulse-CSRF` header and the binding to `jti` and
@@ -958,10 +970,20 @@ def test_a_cookie_borne_submit_is_refused_without_the_csrf_token_and_accepted_wi
     `WWW-Authenticate` challenge here would invite the client to do something that
     would not help, which is the same distinction the 401 tests above turn on.
 
-    **The mutation it kills:** the check omitted from the route — its state
-    today, with zero callers — and the check written as "a CSRF cookie is
-    present", which a cross-site attacker satisfies by tossing a cookie, since
-    the cookie travels on a cross-site request and the *header* does not.
+    **The mutations it kills:** the check omitted from the route; the check
+    applied to a presence rather than to a verification — `verify_csrf_token`
+    never called, which the security round's re-mutation battery measured
+    **surviving** the first version of this test, because that version only ever
+    sent the token and its absence (`docs/disputes/E2-08-06.md`, M1c); and the
+    verification performed without the binding to `jti`, which the third case
+    reaches because the token it sends is genuine under the same secret and wrong
+    only about whose session it is.
+
+    **What it still does not kill, said plainly:** a check that verifies the
+    header and ignores the cookie entirely. That is not a weakening — a
+    header-only check is *stronger* than a double submit, since the header is the
+    half a cross-site request cannot set — so there is no mutation there worth
+    naming, and this test would go on passing if the cookie half were dropped.
     """
     student = a_student_in_an_open_window(
         open_submit_tool, submit_world, signed_in_student, mock_ai_endpoint, open_now
@@ -984,12 +1006,36 @@ def test_a_cookie_borne_submit_is_refused_without_the_csrf_token_and_accepted_wi
         f"internet. Body begins {without.text[:400]!r}."
     )
     registry_key_of(without)
+
+    # A token that is genuine — minted through the tool's own primitive, under
+    # the same secret — and belongs to the *other* student's session. Sent as
+    # both the cookie and the header, so nothing short of verifying it against
+    # this session's `jti` can refuse it.
+    another_sessions_token = csrf_token_for(other.token, other.secret)
+    assert another_sessions_token != csrf_token_for(student.token, student.secret), (
+        "The two students' CSRF tokens are the same string, so the request below is not carrying "
+        "another session's token at all and this case could not pose its question. ADR 0089 binds "
+        "the token to the session's `jti` by HMAC, and two sessions have two `jti`s."
+    )
+    wrong = student.submit(submission, via=COOKIE_SESSION, csrf_token=another_sessions_token)
+
+    assert wrong.status_code == submit_contract.csrf_refused, (
+        f"A cookie-authenticated submission carrying another session's CSRF token was answered "
+        f"{wrong.status_code} rather than {submit_contract.csrf_refused}. The token is valid — it "
+        "was minted by this tool, under this secret — and it is bound to a different `jti`. A "
+        "check that accepts it is checking that a token is *present*, or that the cookie and the "
+        "header agree, and an attacker who can send a cross-site request can arrange both. ADR "
+        "0089: 'a token minted for one session does not verify against another's `jti`'. Body "
+        f"begins {wrong.text[:400]!r}."
+    )
+    registry_key_of(wrong)
+
     stored = [
         row for row in world.responses() if row["user_id"] == world.student[world.key_of("user")]
     ]
     assert stored == [], (
-        f"A submission refused for a missing CSRF token stored {stored}. The check is worth "
-        "nothing if the write has already happened by the time it runs."
+        f"A submission refused for a missing or wrong CSRF token stored {stored}. The check is "
+        "worth nothing if the write has already happened by the time it runs."
     )
 
 
@@ -1074,18 +1120,28 @@ def test_a_comment_over_the_length_bound_is_refused_before_the_provider_is_asked
     forced-verdict marker, which counts toward the length like any other
     character, so the two differ by exactly one character of padding.
 
-    **That no classification row is written is the assertion that the refusal
-    happened at the edge** (ADR 0062: "One parse, at the edge, into typed values").
-    A bound enforced *after* the provider call refuses the submission and has
-    already spent the request it was written to prevent, and a status assertion
-    alone cannot tell the two apart. The count is taken immediately before the
-    over-length submission and again after, so the accepted half's own
-    classification is not what is being counted.
+    **That no classification row is written says the refusal happened before the
+    provider was asked**, which is the property with a bill attached: a bound
+    enforced after the call refuses the submission and has already spent the
+    request it was written to prevent, and a status assertion alone cannot tell
+    the two apart. The count is taken immediately before the over-length
+    submission and again after, so the accepted half's own classification is not
+    what is being counted.
 
-    **The mutation it kills:** the bound placed on the service rather than on the
-    request model, or written as a truncation. A truncation is worse than no
-    bound: it stores words the student did not write under their name, and §5.1
-    shows them to the instructor.
+    **It does not say the bound is on the request model, and it used to claim it
+    did.** §3.3's gate runs after all value validation, so a bound in the service
+    also refuses before the provider is asked and also leaves no row — the
+    security round's re-mutation battery measured exactly that mutation surviving
+    this test (`docs/disputes/E2-08-06.md`, M2c). ADR 0062's "one parse, at the
+    edge, into typed values" is a claim about *where* the value is judged, and
+    only a test that reaches the request model can make it:
+    `tests/unit/test_a_submitted_comment_is_bounded_at_the_edge.py` is that test,
+    and it is where a bound moved into the service goes red.
+
+    **The mutations it kills:** the bound absent; the bound off by one in either
+    direction, which the exact pair above is for; and the bound written as a
+    truncation, which is worse than no bound — it stores words the student did
+    not write under their name, and §5.1 shows them to the instructor.
     """
     student = a_student_in_an_open_window(
         open_submit_tool, submit_world, signed_in_student, mock_ai_endpoint, open_now

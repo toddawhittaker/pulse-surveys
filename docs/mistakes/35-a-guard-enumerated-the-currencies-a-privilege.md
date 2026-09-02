@@ -4,8 +4,23 @@
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*10 occurrences recorded; five of them are catches. This file keeps the three
+*11 occurrences recorded; five of them are catches. This file keeps the three
 most recent instances; the rest live in git history.*
+
+*(Building E2-08, 2026-09-02. Three discovery walks in one ticket's test
+machinery each reported a deliverable missing while it was present, and each
+repair widened the walk by exactly the one level the last failure exposed: a
+Celery task filtered by `__module__`, which a task proxy reports as
+`celery.local` (`docs/disputes/E2-08-02.md`); a request model required to be
+*defined* in the route module, while SPEC §13 homes it in `app/schemas/`
+(`docs/disputes/E2-08-06.md`); then the same walk again, blind to the model
+being nested behind `list[...]` in the model it did find. None of the three
+applied this entry's rule when the walk was written — a discovery that
+enumerates candidates must *find* a subject certainly present, as a control —
+so every failure was a red naming the code instead of a red naming the walk,
+and each was caught by a run rather than by reading. The repair that ended it
+closed the class: both discovery helpers now carry a control asserting they
+find something the tree certainly holds.)*
 
 *(**A catch**, writing E2-03's refusal tests, 2026-09-01. The refusal test
 asserts that the raw foreign-key-violation shape is absent from the migration's
@@ -32,27 +47,6 @@ refuse the rest, so a module holding its marker any other way is red until it
 adopts the form, never silently approved. The control corollary is applied too:
 the sweep's planted tree carries a module for each currency, including the
 per-test-only one, and asserts exactly which are demanded and which are found.)*
-
-*(**A catch**, writing E0-19's tests — the Compose credential surface, two readers
-at once. The first enumerates the currencies a host bind mount can be declared
-in, and the rule turned it into a table of six with a sample for each, written so
-that **only its own mechanism** can resolve it: the `driver_opts` sample with
-`type: none` carries an `o:` with no `bind` in it, and the `o: bind` sample
-declares no `type:` at all, so deleting either half of the classifier turns
-exactly one control red while every refusal rule stays green. The inventory is a
-separate constant the sample table cannot shrink, which is the corollary the
-E0-34 instance below bought. The second reader is the one the entry's sharper
-half actually changed. Route 3 asks which variables a Compose file delivers to a
-container, and the natural shape — documented `.env.example` names checked
-against documented values — is blind to `db`, the one service that legitimately
-receives the superuser credential: it takes the pair by explicit interpolation
-into `POSTGRES_USER` and `POSTGRES_PASSWORD`, which are Postgres's names and are
-documented nowhere. So the design changed before it was written: the reader
-resolves the *value* a service is handed rather than matching documented names,
-and the control asserts it **finds** the credential arriving at `db`. Without the
-entry, that control could not have been written at all — the rule would have
-reported every application service clean while being unable to see a delivery
-anywhere, which is exactly "no role can do this *the one way I looked*".)*
 
 *(**The catch**, writing E0-34's tests — the guard that reads
 `backend/app/views_sql/*.sql` looking for an identity column. It enumerates two
