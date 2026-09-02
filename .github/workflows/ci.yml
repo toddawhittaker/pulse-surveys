@@ -104,6 +104,9 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # A push's own range. Not usable for the inert verdict, for the reason
+          # the script says below, and exactly right for the AI-surface one.
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -uo pipefail
           emit() { echo "$1=$2" >> "$GITHUB_OUTPUT"; echo "  $1 = $2"; }
@@ -131,13 +134,34 @@ jobs:
           # `base.sha` gives the whole delta rather than the last push, which is
           # why the saving this ticket is for is untouched: documentation-only
           # pull requests are the case it was measured on.
-          if [ "${EVENT_NAME:-}" != "pull_request" ]; then
-            echo "::notice::${EVENT_NAME:-unknown} is not a pull request, so the diff would be"
-            echo "::notice::incremental while the verdict is not. Every gate runs."
-            unknown
-            exit 0
-          fi
+          #
+          # **That argument is about `inert` and does not carry to `ai_surface`,
+          # which is E2-12's security review as a LOW with a bill attached.** Both
+          # questions used to leave here together, so every push to an epic branch
+          # — every ticket merge in this repository's ordinary flow — ran the full
+          # eval suite: about ninety-eight paid provider calls, in the one job
+          # holding the provider secret, while this file's own scoping paragraph
+          # said live calls happen only when the change touches what §9.3's gate
+          # names. The file contradicted itself and the contradiction cost money
+          # on every merge.
+          #
+          # The two questions differ in what an incremental diff can settle. "Is
+          # the whole tree inert" is not answerable from the last push; "did this
+          # push touch an AI path" is, because a push that touched one anywhere in
+          # its own range shows it. So `inert` still leaves here and `ai_surface`
+          # goes on to be decided from `before..HEAD`. Every genuine unknown below
+          # — no base, a base this clone does not hold, an all-zero `before`, a
+          # diff that failed — still answers `true` for it, and those routes were
+          # deliberately not narrowed.
+          decide_inert=true
           base="${PR_BASE_SHA:-}"
+          if [ "${EVENT_NAME:-}" != "pull_request" ]; then
+            echo "::notice::${EVENT_NAME:-unknown} is not a pull request, so the diff is"
+            echo "::notice::incremental while the inert verdict is not. Every expensive gate runs."
+            echo "::notice::The AI-surface question is decided from this push's own range."
+            decide_inert=false
+            base="${PUSH_BEFORE:-}"
+          fi
 
           # A new branch pushes an all-zero "before", and a missing base is an
           # empty string. Both mean there is nothing to diff against.
@@ -223,27 +247,38 @@ jobs:
           # land in the `*)` branch below, which is why nothing caught this.
           # The script rejects leading-dash arguments as well; both halves are
           # deliberate, because the script advertises a general command line.
-          if python3 scripts/ci/classify_changed_paths.py -- "${changed[@]}"; then
-            status=0
-          else
-            status=$?
-          fi
+          # **Asked only when the event can answer it.** A push reached this step
+          # with `decide_inert=false` and its verdict settled above, for the
+          # reason written there; running the classification anyway and throwing
+          # the answer away would leave a log line saying "inert" beside an
+          # emitted `false`, which is the kind of disagreement somebody later
+          # resolves in the wrong direction.
+          if [ "${decide_inert}" = "true" ]; then
+            if python3 scripts/ci/classify_changed_paths.py -- "${changed[@]}"; then
+              status=0
+            else
+              status=$?
+            fi
 
-          # Its contract is exit 0 for inert and exit 1 for not. Anything else is
-          # the classifier failing rather than answering, and that is worth a line
-          # in the log: every route out of here still runs every gate, so a broken
-          # classifier is invisible in the result and would otherwise look exactly
-          # like a repository whose every pull request touches code.
-          case "${status}" in
-            0) emit inert true ;;
-            1) emit inert false ;;
-            *)
-              echo "::warning::classify_changed_paths.py exited ${status}, which is neither of"
-              echo "::warning::its two answers. Every gate runs. This is a broken checker, not a"
-              echo "::warning::busy repository."
-              emit inert false
-              ;;
-          esac
+            # Its contract is exit 0 for inert and exit 1 for not. Anything else
+            # is the classifier failing rather than answering, and that is worth a
+            # line in the log: every route out of here still runs every gate, so a
+            # broken classifier is invisible in the result and would otherwise
+            # look exactly like a repository whose every pull request touches
+            # code.
+            case "${status}" in
+              0) emit inert true ;;
+              1) emit inert false ;;
+              *)
+                echo "::warning::classify_changed_paths.py exited ${status}, which is neither of"
+                echo "::warning::its two answers. Every gate runs. This is a broken checker, not a"
+                echo "::warning::busy repository."
+                emit inert false
+                ;;
+            esac
+          else
+            emit inert false
+          fi
 
           # The second question, over the same path list (E2-12). Same script,
           # same `if`, same `--`, same `case`, and every note above applies to it
@@ -260,6 +295,12 @@ jobs:
           # which runs SPEC §9.3's floors — the direction every failure route in
           # this step takes, because under-firing this gate is the threat and
           # self-harm recall floor not running on the change that most needs it.
+          #
+          # **This one is asked on a push as well**, unlike the question above,
+          # and `${changed[@]}` then holds the push's own range rather than a
+          # whole-tree delta. That is the difference the paragraph at the top of
+          # this step argues: an incremental diff cannot settle "is everything
+          # here documentation" and does settle "did this touch an AI path".
           if python3 scripts/ci/classify_changed_paths.py --classification ai-surface -- "${changed[@]}"; then
             ai_status=0
           else
