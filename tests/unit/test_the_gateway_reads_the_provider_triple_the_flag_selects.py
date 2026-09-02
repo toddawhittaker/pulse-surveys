@@ -592,6 +592,76 @@ def test_a_gateway_that_is_not_live_reads_the_real_triple_in_a_deployment(
     assert_reached(REAL_SIDE, real_endpoint, mock_endpoint, environment, live=False)
 
 
+def test_a_live_gateway_refuses_when_the_real_base_url_is_blank(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_env: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    mock_endpoint: RecordingProvider,
+) -> None:
+    """Where the refusal goes in development, once the real endpoint stops being shipped.
+
+    E2-12's security review took the working public endpoint off
+    `.env.example`'s `AI_PROVIDER_BASE_URL`: a deployment that configured
+    everything else and left the AI block alone — because it looked configured
+    already — was starting cleanly and posting §3.3's prompts, student comment text
+    included, to a third party under a placeholder bearer. In a deployment the
+    blank now refuses at `Settings` construction, which
+    `tests/unit/test_ai_provider_configuration.py` holds.
+
+    In development it must not refuse there: the stack reads the mock triple, and
+    SPEC §14.3 requires a clean checkout to come up. So the guarantee has to be
+    picked up again at the one place in development that genuinely needs a real
+    endpoint — `AIGateway(live=True)`, which is the eval runner and nothing else.
+    Without it, `make evals` on a fresh clone builds a gateway with no endpoint and
+    fails further in, at a socket or a client, with a message about a URL rather
+    than about a setting nobody filled in.
+
+    **Both directions, because a line is crossed here.** Same blank, same
+    environment, and the only difference is the flag: `live=True` refuses because
+    it reads the real triple, `live=False` does not because it reads the mock's. A
+    refusal that fired on both would break every development classification; one
+    that fired on neither leaves the eval runner failing obscurely on a fresh
+    clone.
+
+    **The mutation this kills:** validating the real base URL only at `Settings`
+    construction, so development never checks it and the flag reaches an empty
+    endpoint. **The near miss that must stay green:** the ordinary development
+    gateway, built first here and asserted throughout this module.
+    """
+    config = import_app_module("app.config")
+    if config is None:
+        pytest.fail("There is no `app.config` module.")
+    refusal = getattr(config, "ConfigurationError", None)
+    if refusal is None:
+        pytest.fail(
+            "`app.config` exposes no `ConfigurationError`, so this test cannot tell a refused "
+            "configuration from whatever else came out of the constructor."
+        )
+
+    for name, value in (
+        (ENVIRONMENT_VARIABLE, DEVELOPMENT),
+        (REAL_BASE_URL_VARIABLE, ""),
+        (REAL_MODEL_NAME_VARIABLE, REAL_MODEL_NAME),
+        (REAL_KEY_VARIABLE, REAL_CREDENTIAL),
+        (MOCK_BASE_URL_VARIABLE, mock_endpoint.base_url),
+        (MOCK_MODEL_NAME_VARIABLE, MOCK_MODEL_NAME),
+        (MOCK_KEY_VARIABLE, MOCK_CREDENTIAL),
+    ):
+        monkeypatch.setenv(name, value)
+
+    gateway_module = import_app_module(GATEWAY_MODULE)
+    if gateway_module is None:
+        pytest.fail(f"There is no `{GATEWAY_MODULE}` module. SPEC §13 places it.")
+    gateway_class = getattr(gateway_module, GATEWAY_CLASS, None)
+    if gateway_class is None:
+        pytest.fail(f"`{GATEWAY_MODULE}` exposes no `{GATEWAY_CLASS}`.")
+
+    gateway_class(**{LIVE_FLAG: False})
+
+    with pytest.raises(refusal):
+        gateway_class(**{LIVE_FLAG: True})
+
+
 @pytest.mark.parametrize("environment", DEPLOYMENT_ENVIRONMENTS)
 def test_a_live_gateway_reads_the_real_triple_in_a_deployment(
     classify_through: Callable[[str, bool], None],

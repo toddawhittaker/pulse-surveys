@@ -116,7 +116,32 @@ from pathlib import Path
 # Both are held by the same two controls below, which is why two reasons can share
 # one tuple: each name has to still be present in the file and each entry has to
 # still be blank.
-DELIBERATELY_BLANK_VARIABLES = ("AI_PROVIDER_API_KEY", "MOCK_AI_PROVIDER_API_KEY")
+#
+# **The third entry is E2-12's security review, and its blank means something
+# different again: it refuses rather than being read as absent.**
+# `AI_PROVIDER_BASE_URL` shipped carrying a working public endpoint. Beside a
+# blank `AI_PROVIDER_API_KEY`, that let a deployment which filled in the database,
+# the broker, the session secret and the identity provider — and left the AI block
+# alone, because it looked configured already — start cleanly and post §3.3's
+# prompts, student comment text included, to a third party under a placeholder
+# bearer token. Nothing failed, nothing warned, and SPEC §10's "no student PII in
+# logs" says nothing about a request body.
+#
+# The field is required with no default, so a blank refuses at startup and names
+# itself. That is the fix: the endpoint moves into the comment beside the entry,
+# where an operator copies it deliberately, and a deployment that forgets the AI
+# block stops rather than guessing. The mock's base URL is untouched — it has a
+# working default because the service it names is in this repository's own Compose
+# file, and a development stack has to come up (SPEC §14.3).
+#
+# Three reasons in one tuple now, and the controls below still hold every one of
+# them the same way: the name has to be present in the file, and the entry has to
+# be blank.
+DELIBERATELY_BLANK_VARIABLES = (
+    "AI_PROVIDER_API_KEY",
+    "MOCK_AI_PROVIDER_API_KEY",
+    "AI_PROVIDER_BASE_URL",
+)
 
 
 def load_settings_class() -> type:

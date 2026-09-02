@@ -281,23 +281,35 @@ def test_the_documented_configuration_no_longer_names_the_unqualified_model_vari
     )
 
 
-def test_the_real_providers_base_url_is_not_the_mock_and_the_mocks_is(
+def test_the_real_providers_base_url_is_documented_blank_and_the_mocks_is_the_mock(
     documented_env: dict[str, str], env_example_path: Path
 ) -> None:
-    """The two triples describe two different endpoints, and which is which is the point.
+    """The real endpoint is not shipped, the mock's is, and neither is the other.
 
     ADR 0113 refuses a provider base URL whose host is `mock-ai` outside
     development, because "the mock runs in every deployment that runs the base
     Compose file, and a deployment pointed at it would store a character count as
     a classification under a real prompt version and a real model id". The
-    configuration split extends that: the *real* triple may never name the mock in
-    any environment, because the eval runner reads it in development too.
+    configuration split extended that: the *real* triple may never name the mock
+    in any environment, because the eval runner reads it in development too.
 
-    So the documented values have to be the right way round. If
-    `AI_PROVIDER_BASE_URL` still names `mock-ai`, a local `make evals` measures
-    E2-07's character rule and calls the result SPEC §9.3's floor — and the person
-    running it has no way to tell, because the run succeeds and the numbers look
-    plausible.
+    **E2-12's security review found the same hazard with the polarity reversed,
+    and it is why `AI_PROVIDER_BASE_URL` is now documented blank.** The entry
+    shipped carrying a working public endpoint, and beside a blank
+    `AI_PROVIDER_API_KEY` that let a deployment which configured everything else
+    and left the AI block alone — because it looked configured already — start
+    cleanly and post §3.3's prompts, student comment text and all, to a third
+    party under a placeholder bearer. The field is required with no default, so a
+    blank refuses at startup and names itself; the endpoint belongs in the comment
+    beside the entry, where an operator copies it on purpose.
+
+    **The two properties are asserted separately, because they fail separately.**
+    That the real entry carries nothing is the new one. That the real entry, if it
+    ever carries anything, does not name the mock is the old one, and it is kept
+    rather than folded away: a blank passes it trivially today, and it is what
+    catches the next edit that fills the line in with the wrong address.
+    `test_the_documented_configuration_names_both_provider_triples` above holds
+    the entry present, so "blank" here cannot become "deleted".
 
     **The host is compared as a host** (ADR 0113, ADR 0077): a substring search
     would refuse `https://mock-ai.example.edu/v1`, an address a real institution
@@ -305,18 +317,31 @@ def test_the_real_providers_base_url_is_not_the_mock_and_the_mocks_is(
     `tests/unit/test_ai_provider_configuration.py` are what a host comparison
     survives.
 
-    **The mutation this kills:** rename the variables and leave both pointing at
-    the same value, which is what a search-and-replace produces. **The near miss
-    that must stay green:** any real provider at all in the first slot — nothing
-    here names a vendor.
+    **The mutation this kills:** put an endpoint back on the real line — any
+    endpoint, including a correct one, because the defect was that it started
+    rather than that it was wrong; and rename the variables while leaving both
+    pointing at one value, which is what a search-and-replace produces. **The near
+    miss that must stay green:** the endpoint written in the *comment* beside the
+    entry, which is where it now belongs and which `documented_env` does not read.
     """
     assert documented_env, f"{env_example_path} parsed to no variables at all."
 
     real = documented_env.get(REAL_TRIPLE[1], "")
     mock = documented_env.get(MOCK_TRIPLE[1], "")
-    assert real and mock, (
-        f"{env_example_path.name} documents `{REAL_TRIPLE[1]}`={real!r} and "
-        f"`{MOCK_TRIPLE[1]}`={mock!r}; both need a value for this to mean anything."
+
+    assert not real.strip(), (
+        f"{env_example_path.name} documents `{REAL_TRIPLE[1]}` as {real!r}, and it must be "
+        "blank.\n"
+        "\n"
+        "A working endpoint on that line, beside a blank key, is a deployment that "
+        "configured everything else and left the AI block alone starting cleanly and "
+        "sending §3.3's prompts — student comment text included — to a third party under a "
+        "placeholder bearer token. Nothing fails and nothing warns. The field is required "
+        "with no default, so blank refuses at startup and names itself, which is the "
+        "behaviour a forgotten setting should have.\n"
+        "\n"
+        "The endpoint belongs in the comment above the entry, where an operator copies it "
+        "deliberately."
     )
 
     assert host_of(real) != MOCK_HOST, (

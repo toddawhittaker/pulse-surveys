@@ -1455,6 +1455,91 @@ def test_the_development_environment_this_module_parametrises_over_is_the_one_ap
     )
 
 
+@pytest.mark.parametrize("environment", DEPLOYMENT_ENVIRONMENTS)
+def test_a_blank_provider_base_url_is_refused_in_a_deployment(
+    configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    environment: str,
+) -> None:
+    """E2-12's security review: a deployment that forgot the AI block stops instead of guessing.
+
+    `.env.example` shipped `AI_PROVIDER_BASE_URL` carrying a working public
+    endpoint. Beside a blank `AI_PROVIDER_API_KEY` — blank for a good reason, since
+    no credential may be committed — that produced the quietest failure in this
+    ticket: a deployment configures the database, the broker, the session secret
+    and the identity provider, leaves the AI block alone because it looks
+    configured already, and starts cleanly. Every §3.3 validation then posts a
+    student's comment to a third party under a placeholder bearer token. Nothing
+    raises, nothing warns, and SPEC §10's rule about PII in logs says nothing about
+    a request body.
+
+    The field is required with no default, so the fix is to ship the line blank:
+    the process refuses at startup and names the variable, which is what a
+    forgotten required setting is supposed to do. The endpoint moves into the
+    comment beside the entry, where an operator copies it on purpose.
+
+    **This is the deployment half of a pair.** The other half is below: in
+    development the same blank must be *accepted*, because the development stack
+    reads the mock triple and SPEC §14.3 requires a clean checkout to come up. A
+    rule that refused everywhere would take `docker compose up` down; one that
+    refused nowhere is the finding.
+
+    **The mutation this kills:** giving the field a default, or leaving the blank
+    acceptable in a deployment. **The near miss that must stay green:** any real
+    endpoint on that line in a deployment, which
+    `test_an_https_provider_url_is_accepted_wherever_it_points` already holds.
+    """
+    configure_provider(monkeypatch, "", with_key=True, environment=environment)
+
+    with pytest.raises(load_configuration_error()):
+        load_settings_class()()
+
+
+def test_a_blank_provider_base_url_is_accepted_in_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The development half: a clean checkout comes up with no real provider configured.
+
+    SPEC §14.3 requires `docker compose up` on a fresh clone to reach a launchable
+    system, and CI's e2e job runs `cp .env.example .env` verbatim. A development
+    stack classifies through the mock triple, so it needs no real endpoint at all —
+    and after E2-12's security review the documented real endpoint is blank.
+    Refusing it here would mean the file this repository ships cannot start the
+    stack this repository ships.
+
+    **Pairing this with the deployment rows above is what makes either mean
+    anything.** A rule that refused a blank everywhere passes those and breaks the
+    clean checkout; a rule that accepted one everywhere passes this and is the
+    security finding. The line is the environment, and both sides of it are
+    asserted.
+
+    The refusal does not disappear in development, it moves. A gateway built
+    `live=True` still needs the real endpoint, and
+    `tests/unit/test_the_gateway_reads_the_provider_triple_the_flag_selects.py`
+    holds that; the eval runner is the only caller that asks for one.
+
+    **The mutation this kills:** making the requirement unconditional, which stops
+    a clean checkout starting. **The near miss that must stay red:** the same blank
+    in a deployment, immediately above.
+    """
+    configure_provider(monkeypatch, "", with_key=False, environment=development_environment())
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        "`Settings` refused a blank `AI_PROVIDER_BASE_URL` in development. That is what "
+        "`.env.example` documents after E2-12's security review, and CI's e2e job copies "
+        "that file unedited — so refusing it means `docker compose up` on a clean checkout "
+        "does not start the API, which is SPEC §14.3's exit criterion for every epic.\n"
+        "\n"
+        "Nothing in development reads the real triple: `AIGateway(live=False)` takes the "
+        "mock's. The one caller that needs a real endpoint asks for it explicitly, and that "
+        "is where the refusal belongs."
+    )
+
+
 def test_the_development_stack_may_point_the_mock_triple_at_the_mock(
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,

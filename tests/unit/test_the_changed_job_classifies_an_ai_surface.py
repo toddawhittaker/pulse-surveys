@@ -126,6 +126,19 @@ AI_SURFACE_PATHS: tuple[tuple[str, str], ...] = (
     ("a floor declaration", "tests/evals/validity/floors.py"),
     ("the settings module that carries the model identifier", "backend/app/config.py"),
     ("the documented configuration surface, which names the model", ".env.example"),
+    # Added by E2-12's security review, as a LOW with a plain argument. This file
+    # carries the eval job's own wiring — which endpoint the run reaches, which
+    # model it asks for, the secret binding, the step conditions — and it was in
+    # neither the file set nor the directory set. So the one file that decides
+    # what CI measures could not fire the gate that measures it: a model pin
+    # changed here would ship without a single eval call, which is exactly the
+    # change SPEC §9.3's gate names.
+    #
+    # It is the trade `backend/app/config.py` already took, and the ticket's own
+    # words settle it — over-firing on an unrelated edit costs one eval run,
+    # under-firing on a model bump is §9.3's gate not running, and the second is
+    # the worse one by the ADR 0002 incident record.
+    ("the workflow that decides what the eval gate measures", ".github/workflows/ci.yml"),
 )
 
 # Paths that are not the AI surface. This half is the cost argument rather than
