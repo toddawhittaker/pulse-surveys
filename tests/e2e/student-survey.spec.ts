@@ -87,6 +87,12 @@ const INSIDE_THE_WINDOW = '2026-10-02T19:00';
 const COURSE_WEEK = '04';
 const TERM_WEEK = '07';
 
+// Monday morning, after that window closed at 23:59:59 on Sunday 4 October and
+// four days before the next one opens on Friday the 9th. SPEC §3.1: "missed
+// weeks cannot be back-filled", so at this instant the section has nothing to
+// answer and nothing to offer.
+const AFTER_THE_WINDOW = '2026-10-05T09:00';
+
 // How long the learner's enrollment is waited for, and how often it is retried.
 // The same instrument and the same numbers as `lti-launch.spec.ts`, for the same
 // reason: the roster sync runs in the worker, its latency is seconds, and this
@@ -115,8 +121,12 @@ const CONFIDENTIALITY =
   'Responses are confidential. Your instructor never sees your name with your answers.';
 const OPTIONAL_CREDIT_NOTE =
   'Optional, but written feedback counts toward full participation credit — a sentence or two is enough.';
+const REQUIRED_HELP =
+  'A low rating needs a why — a specific sentence is what earns participation credit and gives your instructor something to act on.';
 const REQUIRED_FLAG = 'Needed to submit';
 const SUBMITTED_TITLE = 'Your pulse is in';
+const SECTION_CLOSED_TITLE = 'Nothing to answer here right now';
+const SECTION_CLOSED_BODY = 'When the next survey for this course opens, it appears here.';
 
 // SPEC §3.2's first question, as `scripts/seed.py` transcribes it from the spec.
 // The altered wording below is this spec's own invention and is written to be
@@ -125,12 +135,12 @@ const SUBMITTED_TITLE = 'Your pulse is in';
 const SEEDED_FIRST_PROMPT = 'This week, my instructor supported my learning.';
 const ALTERED_FIRST_PROMPT = 'A different question entirely, seeded by the E2-10 end-to-end spec.';
 
-// The marker that makes the mock model provider call a comment `insufficient`
-// whatever its length (ADR 0113, `mock-ai/app/rules.py`). Used rather than a
-// short comment so that this case turns on the verdict rather than on §3.3's
-// character floor, and so that the *other* comment in the same submission can be
-// long and real.
-const FORCE_INSUFFICIENT = 'mock-ai:insufficient';
+// SPEC §3.3's own example of a comment that must be bounced, and E2-10's first
+// acceptance criterion's: "type 'it was okay' with a low rating and see the
+// bounce with its coaching copy". Eleven characters, so the mock provider's
+// published character rule calls it `insufficient` (ADR 0113,
+// `mock-ai/app/rules.py`) — the ordinary path rather than a forced verdict.
+const THIN_COMMENT = 'it was okay';
 
 // The placement `beforeAll` discovers and every test launches through.
 let placement = '';
@@ -315,12 +325,14 @@ test('a thin comment is coached where it was typed, the rest of the form survive
   const block = await landOnTheSurvey(page);
   await expectTheFormIsShowing(block);
 
-  // A high rating on the second question, so its comment is optional and can be
-  // left empty. That is what makes the coaching's placement readable: exactly
-  // one comment is submitted, so exactly one field may carry the sentence.
-  await chooseRating(block, 0, '3');
+  // A low rating on the first question and a thin comment beside it, which is
+  // the case SPEC §3.3 and this ticket's first acceptance criterion both write
+  // out. A high rating on the second leaves its comment optional and empty, and
+  // that is what makes the coaching's placement readable: exactly one comment is
+  // submitted, so exactly one field may carry the sentence.
+  await chooseRating(block, 0, '2');
   await chooseRating(block, 1, '5');
-  await typeComment(block, 0, `${FORCE_INSUFFICIENT} fine`);
+  await typeComment(block, 0, THIN_COMMENT);
   await typeComment(block, 1, '');
   await setSlider(block, '9');
 
@@ -366,14 +378,16 @@ test('a thin comment is coached where it was typed, the rest of the form survive
   // Everything else is exactly as it was typed. A bounce stores nothing (§3.3
   // refuses "before submission"), so losing the week's other answers here would
   // mean a student retyping all five questions because one sentence was thin.
-  await expect(block.getByRole('textbox').nth(0)).toHaveValue(`${FORCE_INSUFFICIENT} fine`);
-  await expect(block.getByRole('radio', { name: '3', exact: true }).first()).toBeChecked();
+  await expect(block.getByRole('textbox').nth(0)).toHaveValue(THIN_COMMENT);
+  await expect(block.getByRole('radio', { name: '2', exact: true }).first()).toBeChecked();
   await expect(block.getByRole('radio', { name: '5', exact: true }).nth(1)).toBeChecked();
   await expect(block.getByRole('slider')).toHaveValue('9');
 
-  // The fix, and the week goes in.
+  // The fix, and the week goes in. The field goes back to the state its rating
+  // puts it in — still required, because the rating is still a 2 — rather than
+  // staying coached.
   await typeComment(block, 0, 'The pacing in week three was too fast to finish the second assay.');
-  await expect(await commentHelp(block, 0)).toHaveText(OPTIONAL_CREDIT_NOTE);
+  await expect(await commentHelp(block, 0)).toHaveText(REQUIRED_HELP);
   await expect(announcement).toBeEmpty();
 
   await block.getByTestId(SUBMIT).click();
@@ -421,6 +435,85 @@ test('the question on screen is the versioned set the API serves, not a sentence
   const restored = page.getByTestId(SECTION_BLOCK);
   await expectTheFormIsShowing(restored);
   await expect(restored.getByText(SEEDED_FIRST_PROMPT, { exact: true })).toBeVisible();
+});
+
+test('a section with no window open says so, and offers nothing to answer', async ({ page }) => {
+  // The ticket's "no open window" state. The section is still reported — the
+  // enrollment does not come and go with the window, and a student is owed
+  // "there is nothing to answer this minute" rather than an answer that leaves
+  // out the course they are in.
+  try {
+    await setTheClockTo(page, AFTER_THE_WINDOW);
+    const block = await landOnTheSurvey(page);
+
+    await expect(block.getByText(SECTION_CLOSED_TITLE, { exact: true })).toBeVisible();
+    await expect(block.getByText(SECTION_CLOSED_BODY, { exact: true })).toBeVisible();
+
+    // Nothing to answer means nothing to answer with: no form, no submit, and no
+    // way back into a week that cannot be answered.
+    await expect(block.getByTestId(SUBMIT)).toHaveCount(0);
+    await expect(block.getByTestId(REVISE)).toHaveCount(0);
+    await expect(block.getByRole('slider')).toHaveCount(0);
+
+    // `design/Usage Rules.md` §4: "Missed weeks state facts and the next window;
+    // no guilt language." Nothing here counts what was missed or asks why.
+    expect(
+      (await block.innerText()).toLowerCase(),
+      'A student who missed a week is told what is true and nothing else. A countdown, a tally ' +
+        'of missed weeks, or the word "missed" itself is the guilt language that rule forbids.',
+    ).not.toMatch(/missed|overdue|late|you did not|remember to/);
+  } finally {
+    await setTheClockTo(page, INSIDE_THE_WINDOW);
+  }
+});
+
+test('a window that closes under an open form takes the form away and says why', async ({
+  page,
+}) => {
+  // The ticket's "window closed" state, reached the only way a student reaches
+  // it: with the form already open. SPEC §3.1 gives the week a hard close, so a
+  // submission a minute late is refused — and going on offering a submit button
+  // after that would be a trap.
+  try {
+    const block = await landOnTheSurvey(page);
+    await expectTheFormIsShowing(block);
+    await chooseRating(block, 0, '4');
+    await chooseRating(block, 1, '4');
+    await setSlider(block, '3');
+    await expect(block.getByTestId(SUBMIT)).toBeEnabled();
+
+    // The window shuts while the page sits there. A second page moves the clock
+    // so the form's own tab is not navigated away from.
+    const console_ = await page.context().newPage();
+    try {
+      await setTheClockTo(console_, AFTER_THE_WINDOW);
+    } finally {
+      await console_.close();
+    }
+
+    await block.getByTestId(SUBMIT).click();
+
+    await expect(block.getByTestId(SUBMIT)).toHaveCount(0);
+    await expect(block.getByText(SUBMITTED_TITLE, { exact: true })).toHaveCount(0);
+
+    // The sentence is `app.copy.submit`'s `submit.window_closed` and this spec
+    // holds no copy of it; what it pins is the meaning — the student is told the
+    // week has closed — and that the telling is not a shame state.
+    const said = (await block.innerText()).trim();
+    expect(
+      said,
+      'A refused submission that says nothing is a form that appears to have swallowed the week. ' +
+        'The server sends a sentence for this (SPEC §3.1, `submit.window_closed`) and the screen ' +
+        'is what puts it where the student is standing.',
+    ).toMatch(/closed/i);
+    expect(
+      said.toLowerCase(),
+      'SPEC §3.1 says a missed week cannot be back-filled; it does not say anybody failed. ' +
+        'Nothing in this product shames.',
+    ).not.toMatch(/reject|fail|invalid|wrong|error/);
+  } finally {
+    await setTheClockTo(page, INSIDE_THE_WINDOW);
+  }
 });
 
 /**
