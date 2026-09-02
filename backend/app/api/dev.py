@@ -32,8 +32,10 @@ template engine is in this project's locked dependency closure.
 E1 ships no product screen that renders a section's derived calendar, and SPEC
 §9.2's exit proof for "a synced section shows correct derived dates" is a browser
 proof, so the console grew one row per `section`: the dates and length §2.2's
-start letter derives, the modality, how many people are enrolled, and whether a
-roster address is stored. **No identity column of any kind** — not a subject, not
+start letter derives, the modality, how many people are enrolled, whether a
+roster address is stored, and — since E2-06 — whether that section's survey window
+is open at the effective clock and until when (§3.1). **No identity column of any
+kind** — not a subject, not
 a name, not an address, and not the stored roster address itself, which is a
 service endpoint carrying the platform's own context identifier. The enrolled
 figure is a count and comes from `public.section_enrollment_count`, the view §4.1
@@ -87,6 +89,7 @@ from app.lti.registration import launcher_origins
 from app.models.clock import ClockOverride
 from app.models.org import Course, Prefix, Section
 from app.services import clock
+from app.services.survey_windows import open_windows_now
 
 router = APIRouter(tags=["dev"])
 
@@ -140,6 +143,9 @@ SECTION_LENGTH_WEEKS_TESTID = "section-length-weeks"
 SECTION_MODALITY_TESTID = "section-modality"
 SECTION_ENROLLED_COUNT_TESTID = "section-enrolled-count"
 SECTION_ROSTER_ADDRESS_TESTID = "section-roster-address-stored"
+# E2-06's column: whether this section's survey window is open at the effective
+# clock, and until when. `tests/e2e/window-scheduling.spec.ts` reads it.
+SECTION_OPEN_WINDOW_TESTID = "section-open-window"
 
 # The clock section's `data-testid` vocabulary (E2-04). Spelled once here, and in
 # `tests/e2e/dev-clock.spec.ts` and the two Python suites that drive these routes;
@@ -174,6 +180,13 @@ NO_OVERRIDE_STATE = "The clock is real: no override is set."
 ADDRESS_STORED = "yes"
 ADDRESS_NOT_STORED = "no"
 
+# What the open-window cell says (E2-06). A section spends five days of every week
+# with no open survey, so `closed` is the ordinary reading rather than an error
+# state; the open reading carries the instant the window closes at, because "open"
+# on its own cannot be told from a cell that says "open" whatever the clock is.
+NO_OPEN_WINDOW = "closed"
+OPEN_WINDOW_PREFIX = "open until"
+
 # How many people each section holds, read from the view rather than counted off
 # `public.enrollment`. SPEC §4.1 invariant 4 — "aggregate language counts
 # sections, never instructors" — puts every count behind
@@ -194,10 +207,14 @@ _SECTION_ENROLLED_COUNTS = text(
 
 @dataclass(frozen=True, slots=True)
 class ConsoleSection:
-    """One row of the sections table: a section's calendar, a count, and a yes/no.
+    """One row of the sections table: a section's calendar, a count, a yes/no, a window.
 
     Nothing on it names a person. The count is an integer and the roster address
     is reduced to whether there is one before it ever leaves the database.
+
+    `open_window_closes_at` is E2-06's addition: the instant this section's open
+    survey window closes at, already in the institution's timezone, or `None` when
+    no window of the section is open at the effective clock.
     """
 
     prefix: str
@@ -209,11 +226,26 @@ class ConsoleSection:
     modality: str
     enrolled_count: int
     roster_address_stored: bool
+    open_window_closes_at: datetime | None
 
     @property
     def testid(self) -> str:
         """`dev-section-BIOL-215-R3WW` — the row key the browser specs address."""
         return f"{SECTION_ROW_TESTID_PREFIX}{self.prefix}-{self.number}-{self.code}"
+
+    @property
+    def open_window(self) -> str:
+        """`closed`, or `open until` the instant the open window closes at (E2-06).
+
+        The instant is written the way the clock section above writes one — ISO
+        8601 in the institution's timezone, offset included, to the second — so
+        the two readings on this page are in the same zone and comparable by eye,
+        and so the daylight-saving offset a window closes on is visible rather
+        than implied.
+        """
+        if self.open_window_closes_at is None:
+            return NO_OPEN_WINDOW
+        return f"{OPEN_WINDOW_PREFIX} {self.open_window_closes_at.isoformat(timespec='seconds')}"
 
     @property
     def label(self) -> str:
@@ -456,15 +488,22 @@ def roster_users(settings: Settings, http: httpx.Client) -> list[dict[str, Any]]
     return [user for user in users if isinstance(user, dict)]
 
 
-def console_sections(session: Session) -> list[ConsoleSection]:
-    """Every section, with its derived calendar and how many people are in it.
+def console_sections(session: Session, settings: Settings) -> list[ConsoleSection]:
+    """Every section, with its derived calendar, how many people are in it, and its window.
 
-    Two statements rather than one join, because the count comes from a view and
-    the calendar comes from the base tables, and joining a view into an ORM select
-    would mean spelling the view's column list twice. The count defaults to zero
-    for a section the view has no row for, which cannot happen — it is a
-    `LEFT JOIN` over `section` — and is written anyway so that a section is never
-    dropped from the page by a missing count.
+    Three statements rather than one join, because the count comes from a view, the
+    calendar comes from the base tables and the open window comes from a service,
+    and joining a view into an ORM select would mean spelling the view's column
+    list twice. The count defaults to zero for a section the view has no row for,
+    which cannot happen — it is a `LEFT JOIN` over `section` — and is written
+    anyway so that a section is never dropped from the page by a missing count.
+
+    **The open window is asked for the whole page at once**, through
+    `app.services.survey_windows.open_windows_now`, which reads the effective clock
+    once and answers by section id. Per section it would mean handing that service
+    a `Section` row, and the select below deliberately never loads one — the roster
+    address is reduced to a boolean in the database so it is not selected onto this
+    page's connection at all (ADR 0100).
 
     Ordered the way a person reads a timetable, so the table is stable between
     reloads and a spec polling it sees the same row in the same place.
@@ -472,6 +511,8 @@ def console_sections(session: Session) -> list[ConsoleSection]:
     counted: dict[UUID, int] = {
         row.section_id: row.enrolled_count for row in session.execute(_SECTION_ENROLLED_COUNTS)
     }
+    zone = ZoneInfo(settings.institution_timezone)
+    open_windows = open_windows_now(session, settings=settings)
     rows = session.execute(
         select(
             Section.id,
@@ -504,6 +545,11 @@ def console_sections(session: Session) -> list[ConsoleSection]:
             modality=modality.name,
             enrolled_count=counted.get(section_id, 0),
             roster_address_stored=stored,
+            open_window_closes_at=(
+                None
+                if section_id not in open_windows
+                else open_windows[section_id].closes_at.astimezone(zone)
+            ),
         )
         for (
             section_id,
@@ -537,6 +583,7 @@ def section_row(section: ConsoleSection) -> str:
             SECTION_ROSTER_ADDRESS_TESTID,
             ADDRESS_STORED if section.roster_address_stored else ADDRESS_NOT_STORED,
         )}"
+        f"{cell(SECTION_OPEN_WINDOW_TESTID, section.open_window)}"
         "</tr>"
     )
 
@@ -560,8 +607,9 @@ def sections_section(sections: list[ConsoleSection]) -> str:
     return f"""    <h2>Sections</h2>
     <p>
       What each section's code derives to (SPEC §2.2), how many people the last
-      roster sync enrolled, and whether a roster address is stored to sync from
-      (SPEC §7.3). Sections only — never the people in them.
+      roster sync enrolled, whether a roster address is stored to sync from
+      (SPEC §7.3), and whether this week's survey window is open at the clock
+      above (SPEC §3.1). Sections only — never the people in them.
     </p>
     <div class="scroller">
     <table>
@@ -574,6 +622,7 @@ def sections_section(sections: list[ConsoleSection]) -> str:
           <th scope="col">Modality</th>
           <th scope="col">Enrolled</th>
           <th scope="col">Roster address</th>
+          <th scope="col">Survey window</th>
         </tr>
       </thead>
       <tbody>
@@ -685,7 +734,7 @@ def dev_console(request: Request, session: Session = Depends(get_session)) -> HT
 {web}
 {launcher_section(launcher_origins(session))}
 {clock_section(session, settings)}
-{sections_section(console_sections(session))}"""
+{sections_section(console_sections(session, settings))}"""
     return HTMLResponse(page(body))
 
 

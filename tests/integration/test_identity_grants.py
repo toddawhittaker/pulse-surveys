@@ -3352,6 +3352,42 @@ MEMBER_OF_ROLES = """
 #     policed inventory of
 #     `tests/unit/test_the_org_views_are_read_only_through_the_grant.py`.
 #     Decided and spent in E2-04, ruled in `docs/disputes/E2-04-02.md`.
+#   - `pulse_app` **reads and inserts** `survey_window`, the table E2-06 fills, and
+#     holds no `UPDATE` and no `DELETE` on it. The entry above predicted this one —
+#     "E2 will do it again when the first student write path needs a grant on
+#     `response`" — and it arrives one table early, because the development console
+#     reads windows and the Celery worker writes them.
+#     `docs/disputes/E2-06-03.md` is its record: the branch was run without the
+#     grant and eight tests across the three development-console modules failed with
+#     `permission denied for table survey_window` behind a 500, one of them
+#     `invariant`-marked, so `pytest -m invariant` and
+#     `scripts/ci/check_invariants.py` were red too. The grant is issued by revision
+#     `c9b4e0a71d38`, so a fresh database reproduces it.
+#     **A verb per caller, and both were measured.** `SELECT` has two readers: the
+#     `/dev` console's open-window column, and the derivation's own "which windows
+#     does this section already have", which is what makes the hourly reconciler
+#     idempotent instead of a repeated `INSERT` refused by
+#     `uq_survey_window_section_id_week_id`. `INSERT` is the derivation writing one.
+#     Applying exactly these two and changing nothing else turned those three
+#     modules green; neither verb is spare.
+#     **`UPDATE`, `DELETE` and `TRUNCATE` are withheld, and that is the assertion**,
+#     as on `classification`, on `clock_override` and on E1-10's group. SPEC §3.1:
+#     "Missed weeks cannot be back-filled (this keeps the signal weekly and the
+#     grading unambiguous)." Without `UPDATE` this connection structurally cannot
+#     move a `closes_at` and reopen a week that has closed; without `DELETE` it
+#     cannot remove a window that a response (E2-08) or a participation denominator
+#     (§3.4) has already been counted against. It is also what makes E2-06's "an
+#     existing `(section_id, week_id)` row is skipped, never rewritten" a property of
+#     the database rather than a rule the next writer has to remember — re-deriving
+#     after a calendar edit is E11's, ruled at the E2 breakdown on 2026-08-31, and
+#     this connection could not do it if it tried.
+#     **What this table carries, for §4.1.** `id`, `section_id`, `week_id`,
+#     `term_id`, `opens_at` and `closes_at` — three references to structure and two
+#     timestamps. No person, no subject, no name, no address. It carries no
+#     identity-marked column and no view reads it, so there is no join from a window
+#     to a person on this connection.
+#     Decided and spent in E2-06, ruled in `docs/disputes/E2-06-03.md`; ADR 0111
+#     records the ticket's decisions, this grant and its withheld verbs among them.
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -3381,6 +3417,8 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "clock_override", "SELECT"),
         (APPLICATION_ROLE, "clock_override", "INSERT"),
         (APPLICATION_ROLE, "clock_override", "DELETE"),
+        (APPLICATION_ROLE, "survey_window", "SELECT"),
+        (APPLICATION_ROLE, "survey_window", "INSERT"),
     }
 )
 

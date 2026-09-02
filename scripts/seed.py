@@ -138,7 +138,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session
 
-from app.config import DEVELOPMENT_ENVIRONMENT
+from app.config import DEVELOPMENT_ENVIRONMENT, Settings
 from app.models.base import Base
 from app.models.identity import (
     AssignmentRole,
@@ -160,6 +160,7 @@ from app.models.org import College, Course, Department, Institution, Prefix, Sec
 from app.models.survey import Question, QuestionKind, QuestionSet
 from app.models.term import StartLetterMap, Term, Week, week_rows_for_term
 from app.services.section_codes import apply_section_code
+from app.services.survey_windows import derive_windows_for_all_sections
 
 # The repository root, from `scripts/seed.py`. Named rather than searched for,
 # for the reason `backend/migrations/env.py` gives about `find_dotenv()`: a
@@ -1527,6 +1528,31 @@ def seed_sections(
     return nodes
 
 
+def seed_survey_windows(session: Session) -> None:
+    """Derive a survey window for every seeded section's every course week (E2-06).
+
+    Runs after `seed_sections` because it derives from what that wrote: a section's
+    length and its start date, read against the term's calendar (SPEC §2.2), give
+    the Fridays and Sundays SPEC §3.1 opens and closes on.
+
+    **Here as well as on the hourly beat entry**, which is the same call. Without
+    it a freshly seeded stack holds sections and no windows until the next half
+    past the hour, so `/dev`'s open-window column reads `closed` for every section
+    and the browser proof of the weekly cycle has nothing to drive.
+    `app.services.survey_windows.derive_windows_for_all_sections` is the one writer
+    of that table, so this script writes no window itself — the same shape as
+    `apply_section_code` above.
+
+    **`Settings()` is built here rather than threaded from `main`.** The service
+    takes the institution's timezone the way every caller of it does, as settings,
+    and pydantic reads them from the process environment with `.env` filling in —
+    the same two sources `resolved_configuration` merges for this script's own
+    three variables. It is the one `Settings` this file constructs, and a missing
+    variable stops the seed by name rather than seeding a window in the wrong zone.
+    """
+    derive_windows_for_all_sections(session, settings=Settings())
+
+
 def seed_mock_platform(session: Session, configuration: Mapping[str, str]) -> LtiPlatform:
     """Register the in-repo mock platform, and refuse anywhere but a development box.
 
@@ -1935,6 +1961,11 @@ def seed(session: Session, configuration: Mapping[str, str]) -> None:
     writes for the same reason they run first: it writes, so it goes once a
     refusal has had its chance to cost nothing. It hangs off nothing else here,
     because SPEC §3.2's instrument belongs to no institution.
+
+    `seed_survey_windows` takes none either, and builds the one `app.config.Settings`
+    this script constructs — the window derivation needs the institution's timezone
+    (SPEC §3.1) and takes settings the way every other caller of that service does.
+    It runs straight after `seed_sections` because it derives from what that wrote.
     """
     check_calendar_fits()
     mock = seed_mock_platform(session, configuration)
@@ -1944,6 +1975,7 @@ def seed(session: Session, configuration: Mapping[str, str]) -> None:
     nodes = seed_containment(session)
     term = seed_calendar(session, nodes["institution", INSTITUTION_NAME])
     seed_sections(session, term, nodes, demo.deployment)
+    seed_survey_windows(session)
     people = seed_people(session, configuration)
     seed_assignments(session, people, nodes)
     seed_lead_faculty_mappings(session, people, nodes)

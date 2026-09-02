@@ -48,11 +48,12 @@ docstring. So a term's "institution timezone reference" is `institution_id`: the
 term names the institution, and the institution's timezone is configuration. A
 per-term timezone column would be a second place for one value to live.
 
-**Not here, on purpose.** Windows are not scheduled — `survey_window` carries the
-columns and the constraints, and the logic that fills them is E2. A week carries
-no dates: nothing needs them yet, and the section-date arithmetic that might is
-E0-07's, over `start_letter_map`. The Fall 2026 seed map (§2.2) is fixture and
-seed data (E0-17), never rows in a migration.
+**Not here, on purpose.** Windows are not scheduled here — `survey_window` carries
+the columns and the constraints, and the logic that fills them is
+`app.services.survey_windows` (E2-06). A week carries no dates: nothing needs them
+yet, and the section-date arithmetic that might is E0-07's, over
+`start_letter_map`. The Fall 2026 seed map (§2.2) is fixture and seed data
+(E0-17), never rows in a migration.
 """
 
 from collections.abc import Mapping
@@ -223,8 +224,12 @@ class SurveyWindow(UuidPrimaryKey, Base):
     One window per section per week, which is what `UNIQUE (section_id, week_id)`
     says and the whole of what it says. §3.1's stronger rule — a student sees
     exactly one open survey at a time per section — also needs the windows not to
-    overlap in time, which no constraint here expresses; that falls to the
-    scheduling in E2, which is the only thing that sets these two columns.
+    overlap in time, which no constraint here expresses; that falls to
+    `app.services.survey_windows` (E2-06), the only thing that sets these two
+    columns, where consecutive Friday-to-Sunday spans cannot overlap by
+    construction and
+    `tests/integration/test_at_most_one_survey_window_is_open_at_a_time.py`
+    asserts it rather than assuming it.
 
     **The section and the week belong to the same term, and the server refuses a
     window where they do not.** ADR 0018 named this as the rule this table had
@@ -240,9 +245,10 @@ class SurveyWindow(UuidPrimaryKey, Base):
     **`term_id` is NOT NULL, and that is what makes both limbs bite.** Postgres
     evaluates a composite foreign key under `MATCH SIMPLE`, which skips the check
     entirely when any column of the key is null — so a nullable term column would
-    be a documented way to store the very row this refuses. The table is empty in
-    every environment, so the column arrived with no backfill and no server
-    default.
+    be a documented way to store the very row this refuses. The table was empty in
+    every environment when E2-05 added the column, so it arrived with no backfill
+    and no server default — E2-06 is what began writing these rows, and a seeded
+    development stack has carried them since.
 
     **No `ON UPDATE` action on either limb.** A section or a week whose term is
     edited under an open window is a change to be refused rather than followed:
@@ -252,7 +258,8 @@ class SurveyWindow(UuidPrimaryKey, Base):
     `start_letter_map` above, where the carried value is a copy of the term's
     length that nobody sets on purpose.
 
-    **Nothing here schedules anything.** E2-06 computes these instants; this
+    **Nothing here schedules anything.** `app.services.survey_windows` computes
+    these instants from the section's calendar and §3.1's rhythm (E2-06); this
     table is where they land, with the constraints that make a nonsensical row
     unwritable.
     """

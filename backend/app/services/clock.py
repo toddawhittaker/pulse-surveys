@@ -5,7 +5,10 @@ survey window opens Friday 18:00 and closes Sunday 23:59:59 there, a section's
 term is decided by the day a launch arrives, and an enrollment is live on a day
 rather than at an instant. Those readings used to be direct
 `datetime.now(...)` calls scattered across three services. They come through
-here now, and E2-06's window logic is written against this module from the start.
+here now, and E2-06's window logic is written against this module from the start —
+`app.services.survey_windows` reads it and never the system clock, which
+`tests/unit/test_the_window_service_asks_the_clock_for_the_time.py` enforces over
+that one module.
 
 **Two functions, because the codebase asks two questions.** `now` is the current
 instant in UTC and `today` is the current date in `settings.institution_timezone`.
@@ -37,10 +40,10 @@ the clock. The rule for a reviewer is short: **a new direct `datetime.now` in
 scheduling or visibility code is the thing to ask about.**
 
 **A module of its own under `services/`, and §13's list names none that fits.**
-Time is cross-cutting — provisioning, the roster sync and `authz` all read it
-today, and E2-06's scheduling will — so it belongs to no one of them, and putting
-it inside any would make the other two import a peer service for a question that
-has nothing to do with that peer's subject.
+Time is cross-cutting — provisioning, the roster sync, `authz` and E2-06's window
+scheduling all read it — so it belongs to no one of them, and putting it inside
+any would make the others import a peer service for a question that has nothing
+to do with that peer's subject.
 """
 
 from datetime import UTC, date, datetime

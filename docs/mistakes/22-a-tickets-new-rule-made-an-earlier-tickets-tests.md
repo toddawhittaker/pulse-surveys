@@ -1,12 +1,21 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 8**
+**Caught: 9**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*7 instances recorded; the 5 most recent are below, newest first — except the
+*8 instances recorded; the 5 most recent are below, newest first — except the
 E0-18 PR 2 one, which sits further down beside the consequence it illustrates.
-The 2 earliest are in this file's git history and in the pull requests they cite.*
+The 3 earliest are in this file's git history and in the pull requests they cite.*
+
+*(**2026-09-01, E2-06 (`e2/window-scheduling`).** The ticket adds a third Celery
+beat entry, and `tests/unit/test_celery_app.py` asserts the schedule's contents
+as an *equality* — deliberately, so that a new job cannot land without a
+conversation. That equality is on the implementer's side of the test wall in
+the heavy lane. Acting on this entry, the test author rewrote it in the same
+change: the entry set is now an equality over task names, with the new entry
+found by its task rather than by a schedule key the ticket does not settle.
+Without it the implementer would have met a red test they may not repair.)*
 
 *(Writing E2-05's tests (2026-09-01), found by asking this entry's question of
 a discovery walk's fixed point rather than of a fixture. E2-05's
@@ -54,20 +63,6 @@ that ticket's own scope rather than as a surprise the implementer meets in a
 runner. **A rule that narrows what a configuration object accepts is a
 write-time rule**: fixtures build configuration the same way they build rows, and
 defaults are what makes the collision wide rather than narrow.)*
-
-*(Writing E0-28's tests, and the collision was found by asking this entry's
-question of an *assertion* rather than of a row. E0-28 item 1 makes exactly one
-seeded NRPS member carry no enrollment extension at all, and E0-15's
-`test_the_enrollment_window_ends_the_dropped_member_and_nobody_else` builds its
-`keyless` list as `"end" not in (enrollment_of(member) or {})` — which is true of
-a member with no window, so the new seed turns that test red inside its own
-reading of the roster, in a module the ticket is not otherwise editing. `grep -n
-'enrollment_of' tests/` found it before anything was written. It is amended in the
-same change as the seed test that requires the new member, which the implementer
-could not have done: the repair is inside `tests/`, and the person who meets the
-red is the one agent forbidden to touch it. The amendment is narrow and says so —
-a member that carries a window and no `end` key still fails, which is the mutation
-the assertion exists for.)*
 
 **What happened.** Twice in E0-11, from two unrelated mechanisms, with the same
 consequence: the ticket cannot be finished green and the implementer cannot fix
