@@ -15,9 +15,10 @@ import type { Landing } from '../lib/landings';
  * Accessibility is in-slice (SPEC §14.2 item 4), not deferred to E13: one
  * `main` landmark, labelled by the view's own heading, and exactly one
  * first-level heading inside it. Nothing here is interactive, so there is
- * nothing for a keyboard to reach past — the first screen with a control is
- * E2's survey, and the focus ring it will need is already in
- * `design/tokens.css`.
+ * nothing for a keyboard to reach past. The first screen with controls arrived
+ * in E2-10 — `routes/student/StudentWeeklySurvey.tsx`, which is its own landmark
+ * and does not use this component — and it takes its focus ring from
+ * `design/tokens.css` as this one predicted.
  */
 const HEADING_ID = 'pulse-landing-heading';
 
