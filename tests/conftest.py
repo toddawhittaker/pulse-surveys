@@ -66,6 +66,10 @@ boundary: `metadata_tables` is asked for by both.
     socket, plus the non-mock provider a deployment-environment test needs.
   - `fixtures/ai_tasks.py` — E2-07: the comment-validity task, found rather than
     named, and ADR 0056's failure classes looked up by name.
+  - `fixtures/submit.py` — E2-08: the section, window, question set and enrolled
+    student a submission needs, committed; the tool built with the AI provider
+    and broker a test chose; a minted student session; and the submit route
+    found through the module the work order settles rather than through a path.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -96,4 +100,5 @@ pytest_plugins = (
     "fixtures.survey_windows",
     "fixtures.mock_ai",
     "fixtures.ai_tasks",
+    "fixtures.submit",
 )
