@@ -4,14 +4,15 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!--
-      No stylesheet link and no font link. The three faces docs/DESIGN_BRIEF.md
-      names are declared in design/tokens.css with fallbacks that are already on
-      the machine, and loading the webfonts themselves is deferred: Pulse renders
-      inside somebody's LMS in an iframe, so a font fetch from here is a
-      third-party request made on a student's behalf from inside their
-      institution's page. E0-18 made the same call for the server-rendered
-      landings. docs/tickets/e1/deferred.md carries the decision and its
-      "done when".
+      No stylesheet link and no font link, and since E2-10 the second half of
+      that is a decision rather than a deferral. The three faces
+      docs/DESIGN_BRIEF.md names are self-hosted: the weights and the latin
+      subset are imported from src/main.tsx, so the bundler emits them beside
+      the bundle and the browser fetches them from this origin. A <link> to a
+      font host would be a third-party request made on a student's behalf from
+      inside their institution's page, which is what E0-18 declined to do for
+      the server-rendered landings and what ADR 0116 declines here.
+      design/tokens.css is still where the families are named.
     -->
     <title>Pulse Surveys</title>
   </head>
