@@ -33,10 +33,12 @@ SERVICE_NAME = "mock-ai"
 SUMMARY = "A development-only OpenAI-compatible endpoint for the §7.4 tasks (SPEC §9.2)."
 
 # The model this endpoint says it serves, echoed back when a request asks for
-# something else. `.env.example` documents `AI_MODEL_NAME=mock-validity-v1`, which
-# is the value a development stack actually sends; this is the fallback for a
-# client that names no model, and it is the same string so that a reader meeting
-# either one recognises it.
+# something else. `.env.example` documents
+# `MOCK_AI_PROVIDER_MODEL_NAME=mock-validity-v1` — spelled `AI_MODEL_NAME` until
+# the configuration split of E2-12, which gave the real provider and this mock a
+# triple each (ADR 0118) — and that is the value a development stack actually
+# sends. This is the fallback for a client that names no model, and it is the
+# same string so that a reader meeting either one recognises it.
 #
 # **A real-looking name on purpose.** `app.ai.gateway` records the model an
 # answer reports as half of every classification's audit pair (ADR 0031) and

@@ -60,6 +60,48 @@ rule a deployment that forgot the variable is pointed at a container the base
 Compose file starts in every deployment, which is what ADR 0077 found for the
 identity provider and refused to leave standing for it.
 
+**The configuration split of 2026-09-02 moves one of those two rules and doubles
+several others, and the ruling rather than any new test is the reason.** The real
+provider and the in-repo mock now have a triple each —
+`AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}` and
+`MOCK_AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}` — `AIGateway` takes a `live`
+flag, and selection is settled: `live=False` reads the mock triple in development
+and test, `live=True` reads the real triple in every environment. Three
+consequences land in this file, and the second is a strengthening rather than a
+rename:
+
+- **Two keys, so every rule about "the key" becomes two rules.** The discovery
+  design does not change — neither variable is written down here — but what is
+  found is now a key per side, and a rule that held for one of them and not the
+  other would be a masked credential beside an unmasked one. The sides are told
+  apart by the `MOCK_` prefix the ruling gives them, which keeps the finding
+  derived rather than transcribed.
+- **The catalog rule gets stricter: the real triple refuses the `mock-ai` host in
+  *every* environment, development included.** It used to be conditioned on the
+  environment, and the whole reason was that `.env.example` had one base URL and
+  pointed it at the mock so the development stack could classify. That value now
+  lives on `MOCK_AI_PROVIDER_BASE_URL`, so the exemption has nothing left to
+  protect — and the eval runner reads the real triple on a developer's machine
+  too, where a `mock-ai` address would measure a character count and record it as
+  SPEC §9.3's floor.
+- **The mock triple is unread outside development and test, which in this module
+  is visible as an absence:** the catalog rule and the transport rule are rules
+  about the real base URL, and `MOCK_AI_PROVIDER_BASE_URL` naming the mock in a
+  deployment is not refused, because nothing there reads it. Asserted as a pair
+  with the line above, since a rule that refused both would take the development
+  stack down and one that refused neither would be no rule at all.
+
+**What this module cannot see, and where it is seen instead.** That a
+`live=False` gateway in a deployment actually *reads* the real triple, and that a
+`live=True` one reads it in development, are properties of the gateway rather
+than of `Settings`, and nothing here builds a gateway.
+`tests/unit/test_the_gateway_reads_the_provider_triple_the_flag_selects.py`
+builds one, points the two triples at two loopback endpoints and asks which of
+them was called; the flag the eval runner passes to its own is asserted in
+`tests/unit/test_the_eval_runner_builds_a_live_gateway.py`. The division is worth
+knowing when one of the three goes red: a rule can attach to the wrong variable
+here while selection is perfectly correct there, and the reverse.
+
 **So every test whose subject is one of those two rules states the environment it
 runs under** (`docs/MISTAKES.md` entry 40), and each is written so that exactly
 one rule can be what fires: the mock-name rows carry `https`, because a cleartext
@@ -169,7 +211,27 @@ REQUIRED_DEPLOYMENT_VARIABLE = "DATABASE_URL"
 # The base URL, and the shapes the transport rule has to sort. `.env.example`
 # already names the whole range of deployments this has to serve: "a hosted
 # provider, a proxy, or a local server such as vLLM or Ollama".
+#
+# **Two of them since the split.** The first is the real provider's and is the
+# subject of every transport and catalog rule below. The second is the mock's, and
+# it is here for exactly one pair of tests: the development stack points it at
+# `mock-ai`, and a deployment may leave it pointed there because nothing outside
+# development and test reads it.
 AI_PROVIDER_BASE_URL_VARIABLE = "AI_PROVIDER_BASE_URL"
+MOCK_AI_PROVIDER_BASE_URL_VARIABLE = "MOCK_AI_PROVIDER_BASE_URL"
+
+# How a found key variable or field says which provider it describes. The ruling
+# gives the mock's triple this prefix, so the side is derived from the name rather
+# than transcribed — which is what keeps the discovery design in this file intact:
+# neither variable is written down, and what is written down is the one thing the
+# ruling fixes about both.
+MOCK_VARIABLE_PREFIX = "MOCK_"
+
+# The two sides, as labels a failure message can name. Written out so that "one
+# key per side" is a closed set rather than however many happen to be found.
+REAL_SIDE = "the real provider"
+MOCK_SIDE = "the in-repo mock"
+PROVIDER_SIDES = (REAL_SIDE, MOCK_SIDE)
 
 # A host that is certainly not this machine — and a needle as well as a host,
 # because the refusal must quote neither the URL nor the key. It has to share no
@@ -271,7 +333,26 @@ USERINFO_URLS = {
 # supplied by Actions itself rather than configured, so it is not a stored secret
 # in the sense CLAUDE.md's policy is about. Everything else is Todd's call, in
 # advance and in writing.
-PERMITTED_WORKFLOW_SECRETS = frozenset({"GITHUB_TOKEN"})
+#
+# **`AI_PROVIDER_API_KEY` was added on 2026-09-02, and this entry is the record of
+# the agreement rather than a convenience.** The secret exists in the repository,
+# the written go was given by the repository owner in conversation that day, and
+# the reference it authorises is exactly one: the `env:` block of the eval runner
+# step in `.github/workflows/ci.yml`. E2-12's scope made the sequencing a named
+# part of the work — "asked, then waited for, never provisional" — and its third
+# acceptance criterion requires the go to be quoted in the pull request before the
+# reference exists in the diff.
+#
+# The base URL and the model name beside it are deliberately *not* secrets:
+# `.env.example` documents both in the open, and keeping them readable is half of
+# what makes one floor measurement comparable to the next (ADR 0031).
+#
+# **A name, never a pattern.** This check goes on refusing the next unagreed
+# reference exactly as it refused this one; widening it to match a shape would
+# give up the property it exists for. Dispute E2-12-03 records the ruling and the
+# direction it settles — a set that grows by one reviewed name is the mechanism
+# working, not a hole in it.
+PERMITTED_WORKFLOW_SECRETS = frozenset({"GITHUB_TOKEN", "AI_PROVIDER_API_KEY"})
 
 # `${{ secrets.NAME }}`, in any of the spacings a workflow writes it.
 SECRET_REFERENCE = re.compile(r"\$\{\{\s*secrets\.([A-Za-z_][A-Za-z0-9_]*)")
@@ -328,14 +409,57 @@ def development_environment() -> str:
     return DEVELOPMENT_ENVIRONMENT
 
 
+def side_of(name: str) -> str:
+    """Which provider a found key variable or field describes.
+
+    The `MOCK_` prefix the configuration split gives the mock's triple, and
+    nothing else. Derived rather than transcribed so that this file goes on
+    *finding* the keys instead of naming them — the interlock below is only worth
+    anything because neither name is written here.
+    """
+    return MOCK_SIDE if name.upper().startswith(MOCK_VARIABLE_PREFIX) else REAL_SIDE
+
+
 def documented_key_variables(documented_env: Mapping[str, str]) -> list[str]:
-    """Every `.env.example` entry whose name reads as the AI provider key."""
+    """Every `.env.example` entry whose name reads as an AI provider key."""
     return sorted(
         name
         for name in documented_env
         if any(word in name.upper() for word in PROVIDER_KEY_WORDS)
         and any(word in name.upper() for word in PROVIDER_KEY_QUALIFIERS)
     )
+
+
+def documented_key_variables_by_side(documented_env: Mapping[str, str]) -> dict[str, str]:
+    """The documented key entry for each side, or a failure naming what was found.
+
+    Exactly one per side. Two entries on one side is an ambiguity this file cannot
+    resolve — every masking rule below would have to pick one — and a side with
+    none is a provider whose credential nothing documents, which is the state
+    `tests/unit/test_env_example_sync.py` exists to refuse from the other
+    direction.
+    """
+    found: dict[str, list[str]] = {side: [] for side in PROVIDER_SIDES}
+    for name in documented_key_variables(documented_env):
+        found[side_of(name)].append(name)
+
+    wrong = {side: names for side, names in found.items() if len(names) != 1}
+    if wrong:
+        pytest.fail(
+            f"`.env.example` documents {dict(found)} as AI provider keys, and this file needs "
+            "exactly one per side.\n"
+            "\n"
+            "The configuration split of 2026-09-02 gives the real provider and the in-repo mock a "
+            "triple each, so there are two credentials to mask rather than one, and every leak "
+            "rule below is asserted about both. A side with no entry is a provider whose key "
+            "nothing documents; a side with two is an ambiguity this file cannot resolve, and the "
+            "pull request should say what the second is for.\n"
+            "\n"
+            "If a key is spelled with a word `PROVIDER_KEY_WORDS` does not reach, or a side is "
+            "marked some way other than the `MOCK_` prefix, those two constants at the top of this "
+            "file are the lines that change."
+        )
+    return {side: names[0] for side, names in found.items()}
 
 
 def settings_key_fields(settings_cls: type) -> dict[str, Any]:
@@ -363,20 +487,46 @@ def variable_for(name: str, info: Any) -> str:
     return name.upper()
 
 
-def one_key_field(settings_cls: type) -> tuple[str, Any]:
-    """The single provider-key field, or a failure naming the criterion."""
+def key_fields_by_side(settings_cls: type) -> dict[str, tuple[str, Any]]:
+    """The provider-key field for each side, or a failure naming the criterion.
+
+    Exactly one per side, for the reason `documented_key_variables_by_side` gives:
+    a rule that masked one credential and not the other would ship a masked key
+    beside an unmasked one, and every leak assertion in this module would report
+    the tree clean.
+    """
     fields = settings_key_fields(settings_cls)
-    if len(fields) != 1:
+    found: dict[str, list[str]] = {side: [] for side in PROVIDER_SIDES}
+    for name in fields:
+        found[side_of(name)].append(name)
+
+    wrong = {side: names for side, names in found.items() if len(names) != 1}
+    if wrong:
         pytest.fail(
-            f"`Settings` has {len(fields)} fields that read as the AI provider key "
-            f"({sorted(fields)}); it declares {sorted(getattr(settings_cls, 'model_fields', {}))}. "
+            f"`Settings` has {dict(found)} fields that read as an AI provider key; it declares "
+            f"{sorted(getattr(settings_cls, 'model_fields', {}))}, and this file needs exactly one "
+            "per side.\n"
+            "\n"
             "E0-13's scope: 'Provider configuration from `Settings`: base URL, model, and a "
-            "masked key', and the epic README adds that '`.env.example` entry needs a `Settings` "
-            "field resolving it before the sync test will accept it'. If the field is spelled "
-            "with a word `PROVIDER_KEY_WORDS` in this file does not reach, that constant is the "
-            "one line that changes."
+            "masked key', and the epic README adds that an '`.env.example` entry needs a "
+            "`Settings` field resolving it before the sync test will accept it'. The "
+            "configuration split of 2026-09-02 makes that two providers rather than one.\n"
+            "\n"
+            "If a field is spelled with a word `PROVIDER_KEY_WORDS` does not reach, or a side is "
+            "marked some way other than the `MOCK_` prefix, those two constants at the top of "
+            "this file are the lines that change."
         )
-    return next(iter(fields.items()))
+    return {side: (names[0], fields[names[0]]) for side, names in found.items()}
+
+
+def real_key_field(settings_cls: type) -> tuple[str, Any]:
+    """The real provider's key field.
+
+    Named separately because `configure_provider` below needs exactly it: every
+    transport and catalog rule in this module is a rule about the *real* base URL,
+    so the key that travels with it is the real one.
+    """
+    return key_fields_by_side(settings_cls)[REAL_SIDE]
 
 
 def leaked_fragments(text: str, secret: str, size: int = LEAK_FRAGMENT_LENGTH) -> list[str]:
@@ -458,28 +608,39 @@ def test_settings_resolves_the_documented_provider_key_variable(
     Neither name is written into this file. The entry is found by the words in its
     name and the field by the words in its own, and what is asserted is that they
     meet.
+
+    **The interlock is per side since the configuration split of 2026-09-02**, and
+    the guarantee is unchanged rather than weakened: there are two credentials
+    now, and each one's documented entry has to be the variable its own field
+    reads. A single interlock over two keys would be satisfied by a real-provider
+    field resolving the mock's entry, which is a masked credential meeting the
+    wrong documentation.
     """
-    entries = documented_key_variables(documented_env)
-    assert entries, (
-        "`.env.example` documents no variable that reads as the AI provider key. E0-13's scope: "
-        "'Provider configuration from `Settings`: base URL, model, and a masked key', and its "
-        "definition of done: '`.env.example` gains the AI provider variables with placeholder "
-        "values.' The file has been holding the place since E0-01 — 'the provider key is not "
-        "read yet — the gateway and its masked key land in E0-13'."
-    )
-    assert len(entries) == 1, (
-        f"`.env.example` documents {entries}, and this file cannot tell which is the provider "
-        "key. One key, one entry: say in the pull request what the others are for."
-    )
+    assert documented_env, "`.env.example` is missing or parsed to nothing."
 
-    name, info = one_key_field(load_settings_class())
-    resolved = variable_for(name, info)
+    entries = documented_key_variables_by_side(documented_env)
+    fields = key_fields_by_side(load_settings_class())
 
-    assert resolved == entries[0], (
-        f"`Settings.{name}` resolves {resolved!r}, and `.env.example` documents the provider key "
-        f"as {entries[0]!r}. An entry no setting reads is an entry that documents nothing, and a "
-        "field reading a variable the file does not document is configuration nobody can find "
-        "(ADR 0008)."
+    mismatched: list[str] = []
+    for side in PROVIDER_SIDES:
+        name, info = fields[side]
+        resolved = variable_for(name, info)
+        if resolved != entries[side]:
+            mismatched.append(
+                f"  {side}: `Settings.{name}` resolves {resolved!r}, `.env.example` documents "
+                f"{entries[side]!r}"
+            )
+
+    assert not mismatched, "\n".join(
+        [
+            "A provider key's field and its documented entry are not the same variable:",
+            *mismatched,
+            "",
+            "An entry no setting reads is an entry that documents nothing, and a field reading a "
+            "variable the file does not document is configuration nobody can find (ADR 0008). "
+            "Every masking assertion below would then be made about a value the application "
+            "never sees.",
+        ]
     )
 
 
@@ -494,18 +655,33 @@ def test_the_provider_key_is_still_readable_by_the_application(
     permanently redacted string, satisfies that on its own and leaves every hosted
     provider unreachable. It is `docs/MISTAKES.md` entry 23 in advance — a value
     validated, masked, and read by nothing.
+
+    **Both keys, since the configuration split of 2026-09-02.** A gateway built
+    `live=True` authenticates with the real provider's and one built `live=False`
+    in development with the mock's, so a key readable on one side and redacted on
+    the other leaves exactly one of those two unable to reach anything — and which
+    one depends on the environment, which is the hardest kind of failure to see.
     """
     settings_cls = load_settings_class()
-    name, info = one_key_field(settings_cls)
-    monkeypatch.setenv(variable_for(name, info), FAKE_PROVIDER_CREDENTIAL)
+    fields = key_fields_by_side(settings_cls)
+    for name, info in fields.values():
+        monkeypatch.setenv(variable_for(name, info), FAKE_PROVIDER_CREDENTIAL)
 
     settings = settings_cls()
 
-    assert FAKE_PROVIDER_CREDENTIAL in revealed(getattr(settings, name)), (
-        f"`settings.{name}` no longer carries the key it was configured with — it holds "
-        f"{getattr(settings, name)!r}. Hiding a credential from serialisation must not hide it "
-        "from the code that authenticates with it, or the gateway reaches no hosted provider at "
-        "all."
+    unreadable = [
+        f"  {side}: `settings.{name}` holds {getattr(settings, name)!r}"
+        for side, (name, _) in fields.items()
+        if FAKE_PROVIDER_CREDENTIAL not in revealed(getattr(settings, name))
+    ]
+    assert not unreadable, "\n".join(
+        [
+            "These provider keys no longer carry the value they were configured with:",
+            *unreadable,
+            "",
+            "Hiding a credential from serialisation must not hide it from the code that "
+            "authenticates with it, or the gateway reaches no provider at all on that side.",
+        ]
     )
 
 
@@ -537,16 +713,35 @@ def test_the_provider_key_does_not_appear_in_settings_serialisation(
     it, a needle sharing a word with the field names being rendered makes this
     assertion false for every possible implementation, and the failure reads
     exactly like a leak.
+
+    **Both keys are configured with the needle, since the configuration split of
+    2026-09-02.** One rendering, two credentials in it, and any fragment found is
+    reported whichever side it came from — because a `model_dump()` that masks the
+    real provider's key and prints the mock's is still a credential in the log
+    aggregator, and the mock's key is a real credential wherever somebody points
+    that triple at something other than the in-repo mock.
     """
     settings_cls = load_settings_class()
-    name, info = one_key_field(settings_cls)
-    monkeypatch.setenv(variable_for(name, info), FAKE_PROVIDER_CREDENTIAL)
+    fields = key_fields_by_side(settings_cls)
+    for name, info in fields.values():
+        monkeypatch.setenv(variable_for(name, info), FAKE_PROVIDER_CREDENTIAL)
 
     settings = settings_cls()
-    assert FAKE_PROVIDER_CREDENTIAL in revealed(getattr(settings, name)), (
-        f"`settings.{name}` did not take the value this test configured, so the rendering below "
-        "would contain no key whatever the masking does. That is a gap in this file — or the "
-        f"field does not read {variable_for(name, info)!r} — rather than a leak that was avoided."
+    untaken = [
+        f"  {side}: `settings.{name}` holds {getattr(settings, name)!r}, and this test set "
+        f"{variable_for(name, info)!r}"
+        for side, (name, info) in fields.items()
+        if FAKE_PROVIDER_CREDENTIAL not in revealed(getattr(settings, name))
+    ]
+    assert not untaken, "\n".join(
+        [
+            "These fields did not take the value this test configured, so the rendering below "
+            "would contain no key whatever the masking does:",
+            *untaken,
+            "",
+            "That is a gap in this file — or a field reading a variable it does not document — "
+            "rather than a leak that was avoided.",
+        ]
     )
 
     rendered = SERIALISATIONS[surface](settings)
@@ -633,10 +828,15 @@ def test_a_refused_configuration_does_not_print_the_provider_key(
     field in E2 would have turned this red against a correctly masked key.
     `test_the_needle_matches_nothing_a_refused_configuration_prints` below is what
     now sees that, without waiting for a validator to exist.
+
+    **Both keys are in scope of the raised error since the configuration split of
+    2026-09-02**, so both are configured with the needle here. A startup traceback
+    does not distinguish them: whichever one a validator renders reaches the same
+    container log.
     """
     settings_cls = load_settings_class()
-    name, info = one_key_field(settings_cls)
-    monkeypatch.setenv(variable_for(name, info), FAKE_PROVIDER_CREDENTIAL)
+    for name, info in key_fields_by_side(settings_cls).values():
+        monkeypatch.setenv(variable_for(name, info), FAKE_PROVIDER_CREDENTIAL)
     monkeypatch.delenv(REQUIRED_DEPLOYMENT_VARIABLE, raising=False)
 
     with pytest.raises(Exception) as refused:
@@ -751,20 +951,27 @@ def configure_provider(
     *,
     with_key: bool = True,
     environment: str | None = None,
+    variable: str = AI_PROVIDER_BASE_URL_VARIABLE,
 ) -> None:
-    """Point the provider at `base_url`, with or without a key, in a named environment.
+    """Point a provider at `base_url`, with or without a key, in a named environment.
 
     `environment` is optional and every test whose subject is one of the two
     environment-conditioned rules passes it (`docs/MISTAKES.md` entry 40). Left
     unset, the value is `.env.example`'s own, laid down by `configured_env` — which
     is right for the rules that do not read it, and is stated in the module
     docstring rather than repeated on each of them.
+
+    `variable` is the real provider's base URL unless a caller says otherwise,
+    because every transport and catalog rule in this module is a rule about the
+    real triple. The one pair of tests whose subject is the mock's triple passes
+    `MOCK_AI_PROVIDER_BASE_URL_VARIABLE`, and the key follows the real side either
+    way: the mock's own key is not what makes a base URL legal or illegal, and
+    setting it here would put a second variable into rules that are not about it.
     """
-    settings_cls = load_settings_class()
-    name, info = one_key_field(settings_cls)
+    name, info = real_key_field(load_settings_class())
     if environment is not None:
         monkeypatch.setenv(ENVIRONMENT_VARIABLE, environment)
-    monkeypatch.setenv(AI_PROVIDER_BASE_URL_VARIABLE, base_url)
+    monkeypatch.setenv(variable, base_url)
     if with_key:
         monkeypatch.setenv(variable_for(name, info), FAKE_PROVIDER_CREDENTIAL)
     else:
@@ -1248,47 +1455,246 @@ def test_the_development_environment_this_module_parametrises_over_is_the_one_ap
     )
 
 
-def test_the_development_stack_may_point_the_provider_at_the_mock(
+@pytest.mark.parametrize("environment", DEPLOYMENT_ENVIRONMENTS)
+def test_a_blank_provider_base_url_is_refused_in_a_deployment(
+    configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    environment: str,
+) -> None:
+    """E2-12's security review: a deployment that forgot the AI block stops instead of guessing.
+
+    `.env.example` shipped `AI_PROVIDER_BASE_URL` carrying a working public
+    endpoint. Beside a blank `AI_PROVIDER_API_KEY` — blank for a good reason, since
+    no credential may be committed — that produced the quietest failure in this
+    ticket: a deployment configures the database, the broker, the session secret
+    and the identity provider, leaves the AI block alone because it looks
+    configured already, and starts cleanly. Every §3.3 validation then posts a
+    student's comment to a third party under a placeholder bearer token. Nothing
+    raises, nothing warns, and SPEC §10's rule about PII in logs says nothing about
+    a request body.
+
+    The field is required with no default, so the fix is to ship the line blank:
+    the process refuses at startup and names the variable, which is what a
+    forgotten required setting is supposed to do. The endpoint moves into the
+    comment beside the entry, where an operator copies it on purpose.
+
+    **This is the deployment half of a pair.** The other half is below: in
+    development the same blank must be *accepted*, because the development stack
+    reads the mock triple and SPEC §14.3 requires a clean checkout to come up. A
+    rule that refused everywhere would take `docker compose up` down; one that
+    refused nowhere is the finding.
+
+    **The mutation this kills:** giving the field a default, or leaving the blank
+    acceptable in a deployment. **The near miss that must stay green:** any real
+    endpoint on that line in a deployment, which
+    `test_an_https_provider_url_is_accepted_wherever_it_points` already holds.
+    """
+    configure_provider(monkeypatch, "", with_key=True, environment=environment)
+
+    with pytest.raises(load_configuration_error()):
+        load_settings_class()()
+
+
+def test_a_blank_provider_base_url_is_accepted_in_development(
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Acceptance criterion 1's configuration half: `.env.example`'s value builds.
+    """The development half: a clean checkout comes up with no real provider configured.
 
-    `http://mock-ai:8000/v1` is what E2-07 documents and what CI's e2e job copies
-    to `.env`, and it is refused by the rule as E0-37 left it — cleartext, to a
-    host that is not this machine. So this row is the whole reason the transport
-    rule changes at all, and it is the one that must stay green afterwards: a red
-    here means `docker compose up` from a clean checkout does not start the API,
-    which is SPEC §14.3's exit criterion for every epic.
+    SPEC §14.3 requires `docker compose up` on a fresh clone to reach a launchable
+    system, and CI's e2e job runs `cp .env.example .env` verbatim. A development
+    stack classifies through the mock triple, so it needs no real endpoint at all —
+    and after E2-12's security review the documented real endpoint is blank.
+    Refusing it here would mean the file this repository ships cannot start the
+    stack this repository ships.
 
-    **The mutation this kills:** the catalog rule written without the environment
-    condition, which refuses the development stack too and passes every refusal
-    test below. **The near miss that must stay red:** the identical URL in a
-    deployment, which is the next test.
+    **Pairing this with the deployment rows above is what makes either mean
+    anything.** A rule that refused a blank everywhere passes those and breaks the
+    clean checkout; a rule that accepted one everywhere passes this and is the
+    security finding. The line is the environment, and both sides of it are
+    asserted.
+
+    The refusal does not disappear in development, it moves. A gateway built
+    `live=True` still needs the real endpoint, and
+    `tests/unit/test_the_gateway_reads_the_provider_triple_the_flag_selects.py`
+    holds that; the eval runner is the only caller that asks for one.
+
+    **The mutation this kills:** making the requirement unconditional, which stops
+    a clean checkout starting. **The near miss that must stay red:** the same blank
+    in a deployment, immediately above.
+    """
+    configure_provider(monkeypatch, "", with_key=False, environment=development_environment())
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        "`Settings` refused a blank `AI_PROVIDER_BASE_URL` in development. That is what "
+        "`.env.example` documents after E2-12's security review, and CI's e2e job copies "
+        "that file unedited — so refusing it means `docker compose up` on a clean checkout "
+        "does not start the API, which is SPEC §14.3's exit criterion for every epic.\n"
+        "\n"
+        "Nothing in development reads the real triple: `AIGateway(live=False)` takes the "
+        "mock's. The one caller that needs a real endpoint asks for it explicitly, and that "
+        "is where the refusal belongs."
+    )
+
+
+def test_the_development_stack_may_point_the_mock_triple_at_the_mock(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """E2-07 acceptance criterion 1's configuration half: `.env.example`'s value builds.
+
+    `http://mock-ai:8000/v1` is what `.env.example` documents and what CI's e2e job
+    copies to `.env`, and a red here means `docker compose up` from a clean
+    checkout does not start the API — SPEC §14.3's exit criterion for every epic.
+    That guarantee is exactly what it was; what changed on 2026-09-02 is which
+    variable holds the address. The configuration split moved it to
+    `MOCK_AI_PROVIDER_BASE_URL`, so this test asks the question of that variable.
+
+    **It is now half of a pair, and the other half is the test below.** The
+    address is legal *here* and illegal on the real triple in every environment,
+    and those two together are what the split buys: the development stack still
+    classifies, and nothing that reaches a paid provider can be pointed at a
+    character counter.
+
+    **The mutation this kills:** applying the catalog rule to the mock's own base
+    URL, which refuses the development stack and passes every refusal test in this
+    module. **The near miss that must stay red:** the identical URL on
+    `AI_PROVIDER_BASE_URL`, immediately below.
     """
     configure_provider(
-        monkeypatch, DEVELOPMENT_MOCK_AI_URL, with_key=False, environment=development_environment()
+        monkeypatch,
+        DEVELOPMENT_MOCK_AI_URL,
+        with_key=False,
+        environment=development_environment(),
+        variable=MOCK_AI_PROVIDER_BASE_URL_VARIABLE,
     )
 
     settings = load_settings_class()()
 
     assert settings is not None, (
-        f"`Settings` refused {DEVELOPMENT_MOCK_AI_URL} in development. That is the address E2-07 "
-        "documents in `.env.example`, the address CI's e2e job runs the stack with, and the only "
+        f"`Settings` refused {DEVELOPMENT_MOCK_AI_URL} on "
+        f"{MOCK_AI_PROVIDER_BASE_URL_VARIABLE} in development. That is the address "
+        "`.env.example` documents, the address CI's e2e job runs the stack with, and the only "
         "provider a development machine has — refusing it leaves the stack unable to start."
     )
 
 
-@pytest.mark.parametrize("environment", DEPLOYMENT_ENVIRONMENTS)
+def test_the_mock_triple_may_still_name_the_mock_in_a_deployment(
+    configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nothing outside development reads the mock's triple, so its value is no rule's business.
+
+    The configuration split settles selection: `AIGateway(live=False)` reads the
+    mock triple in development and test, and the real triple in a deployment;
+    `live=True` reads the real triple always. So in a deployment nothing consults
+    `MOCK_AI_PROVIDER_BASE_URL` at all, and refusing its value there would refuse a
+    variable the process is not going to look at — including on every deployment
+    that simply copied `.env.example` forward, which is the ordinary case.
+
+    **This is the permissive half of a pair and it is worth nothing alone.** The
+    strict half is the test below: the *real* base URL naming `mock-ai` is refused
+    in every environment. A rule that refused both would take the development stack
+    down; a rule that refused neither would leave a deployment classifying against
+    a character counter. What this file can see is that the rules attach to the
+    real triple and not to the mock's.
+
+    **What this cannot see, and where it is seen.** That a deployment's gateway
+    *actually reads* the real triple is a property of `AIGateway`, not of
+    `Settings`, and nothing in this module builds one.
+    `tests/unit/test_the_gateway_reads_the_provider_triple_the_flag_selects.py
+    ::test_a_gateway_that_is_not_live_reads_the_real_triple_in_a_deployment` is
+    that assertion, and the two are not substitutes: this one would pass over a
+    gateway that read the mock triple happily, and that one would pass over a
+    `Settings` that refused every deployment at startup.
+
+    **The mutation this kills:** applying the catalog rule to every base-URL
+    setting rather than to the real one, which passes the refusal tests below and
+    stops a deployment starting from an unedited `.env.example`.
+    """
+    configure_provider(
+        monkeypatch,
+        DEVELOPMENT_MOCK_AI_URL,
+        with_key=False,
+        environment=DEPLOYMENT_ENVIRONMENTS[0],
+        variable=MOCK_AI_PROVIDER_BASE_URL_VARIABLE,
+    )
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        f"`Settings` refused {DEVELOPMENT_MOCK_AI_URL} on "
+        f"{MOCK_AI_PROVIDER_BASE_URL_VARIABLE} in {DEPLOYMENT_ENVIRONMENTS[0]!r}. Nothing outside "
+        "development and test reads that triple, so its value is not what stops a deployment "
+        "reaching the mock — the rule on the real base URL is, and it is asserted below. "
+        "Refusing this one stops a deployment that copied `.env.example` forward from starting "
+        "at all."
+    )
+
+
+def test_the_real_provider_may_not_be_pointed_at_the_mock_even_in_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The catalog rule got stricter on 2026-09-02, and this is the environment it gained.
+
+    It used to be conditioned on the environment, and the exemption had one job:
+    `.env.example` had a single provider base URL, it pointed at the mock, and a
+    development stack had to be able to start. That address now lives on
+    `MOCK_AI_PROVIDER_BASE_URL` — asserted immediately above — so the exemption
+    protects nothing and costs something real.
+
+    What it costs is the eval gate. `tests/evals/runner.py` builds its gateway
+    `live=True`, which reads the real triple *in every environment including a
+    developer's machine*, so a `mock-ai` address there makes `make evals` measure
+    E2-07's twenty-five-character rule and write the score down as SPEC §9.3's
+    precision and recall floor. The run succeeds, the numbers look plausible, and
+    nothing says the model was never asked.
+
+    **The pair, and neither half means much alone:** the mock's own triple accepts
+    this address in development (above), and the real triple refuses it there
+    (here). One line crossed, both directions asserted.
+
+    **The mutation this kills:** leaving the environment condition on the catalog
+    rule when the split moved the address out from under it — which passes every
+    other test in this module, since every other row that exercises the rule is
+    already in a deployment. **The near miss that must stay green:**
+    `NON_MOCK_AI_URL_SPELLINGS`, where the host merely contains the service name.
+    """
+    configure_provider(
+        monkeypatch,
+        MOCK_AI_URL_SPELLINGS["the development stack's address over TLS"],
+        with_key=False,
+        environment=development_environment(),
+    )
+
+    with pytest.raises(load_configuration_error()):
+        load_settings_class()()
+
+
+@pytest.mark.parametrize("environment", ("development", *DEPLOYMENT_ENVIRONMENTS))
 @pytest.mark.parametrize("spelling", list(MOCK_AI_URL_SPELLINGS))
-def test_a_url_addressing_the_mock_provider_is_refused_outside_development(
+def test_a_url_addressing_the_mock_provider_is_refused_in_every_environment(
     configured_env: dict[str, str],
     deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     spelling: str,
     environment: str,
 ) -> None:
-    """A deployment pointed at the mock stops at startup, however the URL is spelled.
+    """A process whose real provider names the mock stops at startup, however the URL is spelled.
+
+    **The environment row was added on 2026-09-02 and the rest is unchanged.** The
+    rule was conditioned on the environment because `.env.example`'s single base
+    URL pointed at the mock; the configuration split moved that address to
+    `MOCK_AI_PROVIDER_BASE_URL`, so the exemption has nothing left to protect and
+    the real triple refuses the mock everywhere. The reasoning, and the pair that
+    makes the strengthening safe, are in
+    `test_the_real_provider_may_not_be_pointed_at_the_mock_even_in_development`
+    above; the four spellings below are why the rule is about the *host*.
 
     The ticket's security-relevant note: "nothing may point production at it." The
     base Compose file starts `mock-ai` in every deployment (ADR 0038), so this is

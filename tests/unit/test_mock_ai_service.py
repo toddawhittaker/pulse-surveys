@@ -48,17 +48,32 @@ from urllib.parse import urlsplit
 
 import pytest
 from fixtures.mock_ai import (
-    AI_MODEL_NAME_VARIABLE,
-    AI_PROVIDER_BASE_URL_VARIABLE,
     CONTAINER_PORT,
+    MOCK_AI_PROVIDER_API_KEY_VARIABLE,
+    MOCK_AI_PROVIDER_BASE_URL_VARIABLE,
+    MOCK_AI_PROVIDER_MODEL_NAME_VARIABLE,
     PUBLISHED_HOST_PORT,
 )
 
-# The provider key's variable, and the placeholder text a "not filled in yet"
-# value carries. E2-07 leaves the key blank in `.env.example` because the mock
-# authenticates nobody, and `.env.example` already documents what a blank value
-# means: "Leave it empty when the endpoint authenticates nobody".
-AI_PROVIDER_API_KEY_VARIABLE = "AI_PROVIDER_API_KEY"
+# **This module moved to the `MOCK_AI_PROVIDER_*` triple, and the reason is the
+# names rather than any new test.** The configuration split ruled on 2026-09-02
+# gives the real provider and the in-repo mock a triple each —
+# `AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}` and
+# `MOCK_AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}` — and strikes `AI_MODEL_NAME`,
+# which said which model without saying whose.
+#
+# Every assertion in this file is about the endpoint a development stack and CI's
+# e2e job reach, and that endpoint is this repository's own `mock-ai` service. The
+# ruling puts the description of that endpoint under the mock's names in every
+# environment, and puts the real triple explicitly out of reach of the `mock-ai`
+# host — so an assertion here that `AI_PROVIDER_BASE_URL` names `mock-ai` now
+# asserts the exact thing the ruling forbids. What each test claims is unchanged:
+# the documented mock endpoint resolves inside the Compose network, its key is
+# blank because it authenticates nobody, and its model name is a value rather than
+# something to fill in.
+#
+# The placeholder words below are unchanged: they are what a "not filled in yet"
+# value reads like, and that has nothing to do with which provider is being named.
 PLACEHOLDER_WORDS = ("replace", "your-", "example")
 
 # The loopback address the override may bind a published port to. The general
@@ -126,7 +141,7 @@ def test_the_base_compose_file_builds_the_mock_ai_service_from_this_repository(
     merges the development override, so a `mock-ai` declared only there comes up
     on a developer's machine and in the merged CI pass and nowhere else — and the
     `docker` job's base-file-only pass then starts a backend whose
-    `AI_PROVIDER_BASE_URL` names a service that is not running. ADR 0038 puts the
+    `MOCK_AI_PROVIDER_BASE_URL` names a service that is not running. ADR 0038 puts the
     mocks in the base file, and the ticket's own security note asks the pull
     request to defend the merged configuration rather than one file.
 
@@ -319,20 +334,20 @@ def test_the_documented_provider_url_points_the_development_stack_at_the_mock(
         base_compose, mock_ai_service, "E2-07 adds it."
     ), "There is no service to compare the documented host against."
 
-    configured = documented_env.get(AI_PROVIDER_BASE_URL_VARIABLE)
+    configured = documented_env.get(MOCK_AI_PROVIDER_BASE_URL_VARIABLE)
     assert configured, (
-        f"`.env.example` documents no {AI_PROVIDER_BASE_URL_VARIABLE}. It is a required setting "
+        f"`.env.example` documents no {MOCK_AI_PROVIDER_BASE_URL_VARIABLE}. It is a required setting "
         "and the file is what CI copies to `.env`."
     )
     parsed = urlsplit(configured)
     assert parsed.hostname == mock_ai_service, (
-        f"`.env.example` points {AI_PROVIDER_BASE_URL_VARIABLE} at host {parsed.hostname!r} and "
+        f"`.env.example` points {MOCK_AI_PROVIDER_BASE_URL_VARIABLE} at host {parsed.hostname!r} and "
         f"the mock provider runs as the Compose service {mock_ai_service!r}. A container on this "
         "network reaches it by that name and by nothing else, so any other host is a development "
         "stack that classifies nothing — or that reaches a real provider and spends real tokens."
     )
     assert parsed.scheme == "http", (
-        f"`.env.example` points {AI_PROVIDER_BASE_URL_VARIABLE} at scheme {parsed.scheme!r}. The "
+        f"`.env.example` points {MOCK_AI_PROVIDER_BASE_URL_VARIABLE} at scheme {parsed.scheme!r}. The "
         "mock terminates no TLS; `https` to it fails to connect, which is a four-second stall per "
         "submit rather than a classification."
     )
@@ -361,14 +376,14 @@ def test_the_documented_provider_key_is_blank_because_the_mock_authenticates_nob
     developer think the development stack needs a key.
     """
     assert documented_env, ".env.example is missing or parsed to nothing."
-    assert AI_PROVIDER_API_KEY_VARIABLE in documented_env, (
-        f"`.env.example` no longer documents {AI_PROVIDER_API_KEY_VARIABLE}. A `Settings` field "
+    assert MOCK_AI_PROVIDER_API_KEY_VARIABLE in documented_env, (
+        f"`.env.example` no longer documents {MOCK_AI_PROVIDER_API_KEY_VARIABLE}. A `Settings` field "
         "with no documented entry fails `tests/unit/test_env_example_sync.py`, and the key is "
         "still what a deployment configures for a hosted provider — it is blank here, not gone."
     )
-    assert documented_env[AI_PROVIDER_API_KEY_VARIABLE] == "", (
-        f"`.env.example` documents {AI_PROVIDER_API_KEY_VARIABLE} as "
-        f"{documented_env[AI_PROVIDER_API_KEY_VARIABLE]!r}. The development stack talks to a mock "
+    assert documented_env[MOCK_AI_PROVIDER_API_KEY_VARIABLE] == "", (
+        f"`.env.example` documents {MOCK_AI_PROVIDER_API_KEY_VARIABLE} as "
+        f"{documented_env[MOCK_AI_PROVIDER_API_KEY_VARIABLE]!r}. The development stack talks to a mock "
         "that authenticates nobody, and the file's own rule for that case is a blank value, read "
         "as absent."
     )
@@ -379,8 +394,12 @@ def test_the_documented_model_name_is_a_value_and_not_a_thing_to_fill_in(
 ) -> None:
     """The model name has to work unedited, because CI never edits it.
 
-    `AI_MODEL_NAME` was a placeholder — `replace-with-your-model-id` — for as long
-    as there was no endpoint in the stack to name a model on. The e2e job copies
+    The mock's model name was a placeholder — `replace-with-your-model-id` — for
+    as long as there was no endpoint in the stack to name a model on. It was
+    spelled `AI_MODEL_NAME` when this test was written and is
+    `MOCK_AI_PROVIDER_MODEL_NAME` since the configuration split ruled on
+    2026-09-02; the old name is recorded here rather than erased, because the
+    property has a history and the rename did not change it. The e2e job copies
     this file verbatim, so a placeholder is what the gateway would send as the
     model it is asking for, and what it would record as half of every
     classification's audit pair (ADR 0031).
@@ -391,11 +410,11 @@ def test_the_documented_model_name_is_a_value_and_not_a_thing_to_fill_in(
     E2 writes.
     """
     assert documented_env, ".env.example is missing or parsed to nothing."
-    configured = documented_env.get(AI_MODEL_NAME_VARIABLE, "")
-    assert configured, f"`.env.example` documents no {AI_MODEL_NAME_VARIABLE}."
+    configured = documented_env.get(MOCK_AI_PROVIDER_MODEL_NAME_VARIABLE, "")
+    assert configured, f"`.env.example` documents no {MOCK_AI_PROVIDER_MODEL_NAME_VARIABLE}."
     lowered = configured.lower()
     assert not any(word in lowered for word in PLACEHOLDER_WORDS), (
-        f"`.env.example` documents {AI_MODEL_NAME_VARIABLE} as {configured!r}, which reads as a "
+        f"`.env.example` documents {MOCK_AI_PROVIDER_MODEL_NAME_VARIABLE} as {configured!r}, which reads as a "
         "value somebody is meant to replace. CI's e2e job copies this file unedited, so the "
         "development stack asks the mock for that model name and records it as the `model_id` of "
         "every classification (ADR 0031)."

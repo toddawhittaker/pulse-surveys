@@ -215,14 +215,31 @@ e2e: node-deps ## Playwright against the Compose stack (stack must be up and see
 	$(call banner,Playwright e2e)
 	@npx playwright test
 
+# **This target costs money, and it is the only one here that does.** It calls
+# the real provider once per eval case — about a hundred requests — because SPEC
+# §9.3's floors are measured against a model and nothing else. Every other test
+# command in this file reaches the loopback stub or the in-repo mock and leaves
+# neither the machine nor your account.
+#
+# The tolerance is gone with E2-12, which lands the runner and the sets: the
+# recipe used to check whether `tests/evals/runner.py` existed and print a skip
+# if it did not, and skipping a gate whose code has landed is what ADR 0002 makes
+# an acceptance criterion to remove. A missing runner is a red now, saying which
+# module is missing.
+#
+# `.env` is loaded here, and only here among the test targets. The runner builds
+# its gateway `live=True`, which reads AI_PROVIDER_BASE_URL,
+# AI_PROVIDER_MODEL_NAME and AI_PROVIDER_API_KEY in every environment (ADR
+# 0118) — and `.env` is where a developer's real provider credential lives. The
+# variables are exported into the recipe's own shell and nowhere else; nothing
+# here echoes one, and the runner refuses plainly, naming the variable, when the
+# key is absent or blank rather than reporting a pass over a run that reached
+# nothing. README.md says what it costs and when CI fires it for you.
 .PHONY: evals
-evals: ## AI eval runner with per-task precision/recall floors
+evals: ## AI eval runner with per-task precision/recall floors (calls the real provider; costs money)
 	$(call banner,AI evals)
-	@if [ -f tests/evals/runner.py ]; then \
-		$(PYTHON) -m tests.evals.runner --enforce-floors; \
-	else \
-		$(call skip,no tests/evals runner yet); \
-	fi
+	@set -a; . ./.env; set +a; \
+		$(PYTHON) -m tests.evals.runner --enforce-floors
 
 # ---------------------------------------------------------------------------
 # Build gates

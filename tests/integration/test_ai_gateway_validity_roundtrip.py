@@ -22,7 +22,7 @@ interface question for the ticket rather than something to guess at.
 one seam the ticket does name.** Its scope says "provider-agnostic client against
 an OpenAI-compatible base URL" and "Provider configuration from `Settings`: base
 URL, model, and a masked key", so a test drives the provider by pointing
-`AI_PROVIDER_BASE_URL` at a server it controls. What the stub deliberately does
+`MOCK_AI_PROVIDER_BASE_URL` at a server it controls. What the stub deliberately does
 *not* decide is how the gateway asks for structured output: it answers whatever
 the request asked for, putting the task's JSON in the assistant message's content
 **and**, when the request carries tools, in a tool call named after the tool the
@@ -133,8 +133,30 @@ CONTRACTS_MODULE = "app.ai.contracts"
 # one.
 GATEWAY_ERROR_BASE = "AIGatewayError"
 
-# `.env.example` documents it and E0-01 ships the `Settings` field behind it.
-AI_PROVIDER_BASE_URL_VARIABLE = "AI_PROVIDER_BASE_URL"
+# `.env.example` documents both and E0-01 ships the `Settings` fields behind them.
+#
+# **This module is on the mock triple, and the ruling rather than the endpoint is
+# what puts it there.** The configuration split of 2026-09-02 gives the real
+# provider and the in-repo mock a triple each —
+# `AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}` and
+# `MOCK_AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}` — strikes the unqualified
+# `AI_MODEL_NAME`, which said which model without saying whose, and settles
+# selection: `AIGateway(live=False)` reads the mock triple in development and
+# test, and the real triple only in a deployment.
+#
+# Every gateway in this file is a `live=False` one built inside a test process, so
+# the triple it reads is the mock's whatever the endpoint on the other end
+# happens to be. The stub below is a private loopback server standing in for a
+# hosted provider, which makes it a plausible *subject* for the real triple and
+# does not make it one: what decides is which variables the gateway under test
+# consults, and in this process that is settled.
+#
+# **The `live=True` path is exercised by `tests/evals/`'s own machinery, not
+# here** — that is the one caller which always reads the real triple, and
+# `tests/unit/test_the_eval_runner_builds_a_live_gateway.py` is where the flag it
+# passes is asserted.
+MOCK_AI_PROVIDER_BASE_URL_VARIABLE = "MOCK_AI_PROVIDER_BASE_URL"
+MOCK_AI_PROVIDER_MODEL_NAME_VARIABLE = "MOCK_AI_PROVIDER_MODEL_NAME"
 
 # The exceptions that mean the gateway fell over rather than reported. E0-13 names
 # no error type, so requiring one would pin an interface the ticket leaves open;
@@ -243,7 +265,7 @@ STUB_MODEL_ID = "e0-13-stub-model-7c1f"
 # cannot produce: a green test rather than a red one.
 #
 # The exception-chain half was surviving on capitalisation alone: the gateway
-# writes `AI_PROVIDER_BASE_URL` and `AIProviderRefusedError`, both of which miss a
+# writes `MOCK_AI_PROVIDER_BASE_URL` and `AIProviderRefusedError`, both of which miss a
 # lowercase needle, and one lowercased error message would have turned it red for
 # a reason that has nothing to do with a credential.
 #
@@ -618,8 +640,8 @@ def ai_environment(
     look for.
     """
     values = {
-        AI_PROVIDER_BASE_URL_VARIABLE: stub_provider.base_url,
-        "AI_MODEL_NAME": STUB_MODEL_ID,
+        MOCK_AI_PROVIDER_BASE_URL_VARIABLE: stub_provider.base_url,
+        MOCK_AI_PROVIDER_MODEL_NAME_VARIABLE: STUB_MODEL_ID,
     }
     for name in provider_key_variables(documented_env):
         values[name] = FAKE_PROVIDER_CREDENTIAL
@@ -1289,7 +1311,7 @@ def test_a_validity_call_against_the_stub_returns_the_validity_contract(
 
     assert stub_provider.calls, (
         "The validity task returned without sending the stub provider anything. E0-13's first "
-        f"criterion is a round trip: `AI_PROVIDER_BASE_URL` was {stub_provider.base_url}, and a "
+        f"criterion is a round trip: `MOCK_AI_PROVIDER_BASE_URL` was {stub_provider.base_url}, and a "
         "task that answers without asking is not the thing this ticket exists to build."
     )
     assert isinstance(result, contract), (
@@ -1357,7 +1379,7 @@ def test_the_returned_object_carries_the_prompt_version_and_the_model_that_produ
     )
     assert STUB_MODEL_ID in str(model_id), (
         f"The task recorded a model ID of {model_id!r}, which does not name the model that "
-        f"answered — `AI_MODEL_NAME` was {STUB_MODEL_ID!r} and the stub answered as it. §9.3's "
+        f"answered — `MOCK_AI_PROVIDER_MODEL_NAME` was {STUB_MODEL_ID!r} and the stub answered as it. §9.3's "
         "eval floors compare runs of different models, so a model ID that does not identify one "
         "makes the comparison meaningless."
     )
@@ -2053,7 +2075,7 @@ def test_a_provider_that_cannot_be_reached_raises_rather_than_flooring(
     async re-classification it defers to would fail the same way.
 
     The provider is made unreachable rather than slow by stopping the stub, so the
-    port in `AI_PROVIDER_BASE_URL` refuses the connection immediately. **The
+    port in `MOCK_AI_PROVIDER_BASE_URL` refuses the connection immediately. **The
     timeout tests above are this test's control**: they are what says the
     sanctioned case still floors, so a gateway that simply stopped flooring
     everything would fail there rather than pass here.
@@ -2491,7 +2513,7 @@ def test_a_connect_that_never_completes_raises_rather_than_flooring(
         # client out of `Settings()` at import reads the environment once, and
         # `import_app_module` is what makes that observable rather than a matter
         # of which test ran first.
-        monkeypatch.setenv(AI_PROVIDER_BASE_URL_VARIABLE, unreachable)
+        monkeypatch.setenv(MOCK_AI_PROVIDER_BASE_URL_VARIABLE, unreachable)
         base = gateway_error_base(import_app_module)
         task = validity_task(import_app_module)
 
@@ -2679,7 +2701,7 @@ def test_a_validity_call_reaches_nothing_off_this_machine(
 ) -> None:
     """Criterion 5, first half: no test makes a live network call.
 
-    Asserted rather than arranged. Pointing `AI_PROVIDER_BASE_URL` at a stub is
+    Asserted rather than arranged. Pointing `MOCK_AI_PROVIDER_BASE_URL` at a stub is
     the arrangement; what this adds is a guard under the call, so that a gateway
     reaching a hosted provider — a default base URL, a discovery request, a
     hardcoded host — fails here instead of billing somebody and leaking a
@@ -3411,7 +3433,7 @@ def test_an_honest_model_name_is_recorded_as_the_provider_reported_it(
     stored = {stored_text(value) for value in row.values() if value is not None}
     assert HONEST_MODEL_ID in stored, (
         f"The provider answered as {HONEST_MODEL_ID!r} and the row records {row!r}, which does not "
-        f"carry it — `AI_MODEL_NAME` was {STUB_MODEL_ID!r}. ADR 0031: the recorded value is 'the "
+        f"carry it — `MOCK_AI_PROVIDER_MODEL_NAME` was {STUB_MODEL_ID!r}. ADR 0031: the recorded value is 'the "
         "provider's own identifier for the model, as the provider spells it', because §9.3's eval "
         "floors compare runs of different models. A gateway that records what it asked for rather "
         "than what answered reports every run under one name, and the dated build that produced a "
@@ -3503,7 +3525,7 @@ def test_a_provider_cannot_choose_what_the_classification_records_as_its_model(
     )
     assert stored_text(row[model_column]) == STUB_MODEL_ID, (
         f"A provider reporting {case} had it written into `{CLASSIFICATION_TABLE}."
-        f"{model_column}` as {row[model_column]!r}; the configured `AI_MODEL_NAME` is "
+        f"{model_column}` as {row[model_column]!r}; the configured `MOCK_AI_PROVIDER_MODEL_NAME` is "
         f"{STUB_MODEL_ID!r}. §7.4 makes the model ID an audit value, and an audit value the "
         "audited party writes is not one — 200,000 characters is an unbounded row, whitespace "
         "identifies nothing, a newline forges a log line in this system's voice, and a null byte "
@@ -3595,7 +3617,7 @@ def test_a_provider_cannot_report_the_marker_that_means_no_model_answered(
     assert stored_text(forged[model_column]) == STUB_MODEL_ID, (
         f"A provider claiming the floor's marker had `{CLASSIFICATION_TABLE}.{model_column}` "
         f"recorded as {forged[model_column]!r}. A reported name that cannot be believed is "
-        f"replaced by the configured `AI_MODEL_NAME` ({STUB_MODEL_ID!r}), which is at least true "
+        f"replaced by the configured `MOCK_AI_PROVIDER_MODEL_NAME` ({STUB_MODEL_ID!r}), which is at least true "
         "about what was asked — and not by a third value that would need its own meaning."
     )
 

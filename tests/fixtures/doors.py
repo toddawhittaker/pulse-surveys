@@ -367,10 +367,16 @@ def deployed_identity_provider(
     stops in its own setup on a rule that is not its subject.
 
     **It also requests `deployed_ai_provider`, which is E2-07 arriving with the
-    same problem one ticket later.** `.env.example` now points
-    `AI_PROVIDER_BASE_URL` at `http://mock-ai:8000/v1`, and a deployment refuses
-    that value twice over — for naming the mock, and for being cleartext off this
-    machine. Every test that requests this fixture is a test running as a
+    same problem one ticket later.** `.env.example` points
+    `MOCK_AI_PROVIDER_BASE_URL` at `http://mock-ai:8000/v1` — the variable was
+    spelled `AI_PROVIDER_BASE_URL` until the configuration split of 2026-09-02
+    gave the real provider and the mock a triple each — and a deployment refuses
+    that value twice over, for naming the mock and for being cleartext off this
+    machine. Whether the refusal still fires once the mock's triple is *unread*
+    outside development is the selection half of that split and is not settled
+    here; this fixture is correct either way, since all it does is name a provider
+    that is not the mock. Every test that requests this fixture is a test running
+    as a
     deployment, which is exactly the set that has to move both providers, so the
     two travel together rather than every such module gaining a second
     declaration. The names stay separate because the two are separate

@@ -5,6 +5,94 @@ here in the same PR, and E2-13 runs the cleanup pass over this file. Each entry
 names the ticket that owns it and what "done" means, so the deferral is a
 scheduled decision rather than a hope.
 
+## The gateway records no token usage, so no live run can report its own cost — E2-13
+
+Deferred by E2-12, and it became a real need during that ticket rather than a
+nicety: a spend ledger is now kept per live eval run, and no run can report
+against it. `AIGateway._ask` returns `(result.output, model_id)` and drops
+`result.usage`; `run_task` returns the contract object alone; nothing logs it.
+So a run's input tokens, its output tokens, and — the figure that decides most of
+the bill — its cached input tokens are all unrecorded and unreconstructable
+afterwards.
+
+The data is one attribute away in a dependency already pinned. `pydantic_ai`
+2.35.3's `RunUsage` carries `input_tokens`, `output_tokens`, `cache_read_tokens`,
+`cache_write_tokens`, `requests`, `cost` and a `details` dict, and its OpenAI
+model maps the chat API's `prompt_tokens_details.cached_tokens` into
+`cache_read_tokens` — exactly the split a ledger prices separately, cached input
+billing at a tenth of uncached. `details` carries this model's reasoning tokens,
+which are billed and never appear in the answer body.
+
+It matters most on this path, and not only for bookkeeping: every eval request is
+the same ~4,175-character prompt with a short comment substituted, so about 99%
+of each call is an identical prefix and the cached fraction is likely to be
+material. Nothing can say how material without measuring it.
+
+**The application half landed inside E2-12** rather than waiting, ruled onto this
+ticket with the `E2-12-06` repair: `AIGateway.run_task_with_usage` returns the
+validated output paired with a `TaskUsage`, and `run_task` is that method with the
+second half dropped, so no existing caller changed. Cached reads are their own
+field rather than folded into the input total. The type is this project's and not
+`pydantic_ai`'s `RunUsage`, because a public method returning the library's class
+would put its name in every caller that annotates the result, and
+`tests/unit/test_provider_library_is_confined_to_the_gateway.py` asserts that
+exactly one module under `backend/app/` names that library at all.
+
+**One limit is documented rather than closed**, and it was measured before it was
+written down: a retried call under-reports by the attempts that failed. Usage
+reaches this process on the run result, a request that raises produces no run
+result, and none of the library's exceptions carries a figure — so a
+shape-violating attempt's tokens are unavailable to anybody here, and `requests`
+means "requests this figure covers" rather than "requests made".
+
+**Done when** a live eval run prints its own input, output and cached-input token
+totals in the run report, which is the half that lives in the eval tree and is the
+test author's. Whatever prints it has to keep the credential and the comment out
+of what it writes (SPEC §10, §4) — `TaskUsage` carries counts only, and its
+`details` holds integers by construction, so there is nothing in it to leak.
+
+## `detect.outputs.evals` is published and read by nothing — E2-13
+
+Deferred by E2-12. That probe asked whether the eval runner module exists, and
+the `evals` job's steps waited on it while that file was still to be written.
+The file is committed now, so waiting on it is exactly the tolerance ADR 0002
+says the ticket landing the code must remove: with the clause in place a deleted
+runner switches SPEC §9.3's floors off and the job reports success, where
+without it the run fails on the import and says so. The clause went; the output
+stayed, because the detect-probe module asserts the whole set of outputs that
+job emits and withdrawing one is a change on the other side of the heavy lane's
+test wall.
+
+What is left is the shape that job's own comment condemns — a boolean nobody
+consults, whose wrongness produces no symptom at all, so nobody finds out it is
+wrong and the next gate wired to it inherits an answer nothing has ever checked.
+The state is written down at the output itself rather than left to be
+rediscovered.
+
+**Done when** the output and the probe line that fills it are removed together
+and `PROBES` in that module drops `EVALS` in the same change — or a reason to
+keep it is recorded there, and that reason would have to be a reader.
+
+## SPEC §11 open question 4 is answered in its set and not yet in its threshold — E2-13
+
+Deferred by E2-12, and it is a residue with a date on it rather than an open
+problem. §11 question 4 asks for the production "substantive" definition and
+says "its eval set and threshold need real seeded data before E2 exits". The set
+exists: ninety-eight typed cases pinned to `validity.v1`, including the two
+families the twenty-five-character heuristic gets wrong by construction, and ADR
+0119 settles which class the pair of numbers is about. The threshold is measured
+against the live provider by E2-12 and written into the validity floor
+declaration, which is behind the heavy lane's test wall — so the measurement
+travels back to the test author rather than being written down by the
+implementer who took it, which is the separation that keeps a floor from being
+chosen to fit a run.
+
+**Done when** the measured floors are in that declaration with the sentence
+saying what the run scored and how much headroom they leave, the runner passes
+`--enforce-floors` against them, and SPEC §11 question 4 is marked
+settled-for-v1 by a spec edit — a change to `docs/SPEC.md`, and so not the
+implementer's to make.
+
 ## Nothing ties an `answer`'s filled column to its question's kind — E2-08
 
 Deferred by E2-05 (PR #140), raised by that PR's security review. The schema
@@ -316,3 +404,35 @@ of `backend/` kept it out of these).
 ticket whose lane covers each file — a heavy ticket touching `backend/app/main.py`
 for the first, any test-author phase touching that test module for the second.
 The assertions in both files are correct today; only the prose is stale.
+
+## The model identifier lives in three places and nothing ties them — E2-12
+
+The pinned model, `gpt-5-mini-2025-08-07`, is named in `.env.example`, in the
+eval step of `.github/workflows/ci.yml`, and in the provenance sentences of
+`tests/evals/validity/floors.py` — and no test compares any of the three to any
+other. The re-verification measured the gap directly: re-pointing either
+configuration site alone survives the whole suite, so a model swap in one place
+would measure the floors against a model nobody measured while the provenance
+prose went on saying otherwise. This is the compare-an-answer-with-itself
+defect the same round repaired inside `cases.py`, recurring one level out, in
+the shape the record already predicts for closed-set guards.
+
+Today all three sites agree and the floors were measured against exactly that
+snapshot, so nothing is wrong — the gap is in what holds them together.
+
+**Done when** one test reads the model identifier from all three sites and
+fails when any two disagree, and a planted mismatch at each site is seen red.
+
+## Floor headroom carries a measured variance point — for E10's recall-floor work
+
+The floors (precision 0.95, recall 0.94) were sized against one clean
+measurement (precision 1.000, fp 0) to tolerate two new errors of a kind and
+fire on the third. The first independent CI run of the same set, model and
+prompt scored precision 0.9815 (fp 1): one of the two tolerated errors is
+already spent, on run-to-run variance alone. The floors hold and the sizing
+argument worked as designed; the carried fact is that variance between
+identical runs is real and roughly one case per hundred, which E10 should fold
+into how it sizes the threat-recall floor rather than rediscovering it.
+
+**Done when** E10's floor-setting records a variance allowance with at least
+two independent measured runs behind it.

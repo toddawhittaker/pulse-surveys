@@ -255,8 +255,9 @@ known-first-party = ["app"]
 # ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.13"
-mypy_path = "backend"
-files = ["backend/app"]
+mypy_path = "backend:."
+files = ["backend/app", "tests/evals"]
+explicit_package_bases = true
 plugins = ["pydantic.mypy"]
 warn_unused_configs = true
 warn_redundant_casts = true

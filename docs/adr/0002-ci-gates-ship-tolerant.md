@@ -116,3 +116,26 @@ cannot lie about what exists.
   needed no edits as they flipped.
 - The pattern generalizes badly beyond bootstrap. Once E0 is complete, a new
   tolerant gate should be treated as a smell rather than as this precedent.
+
+## The last tolerance is gone — E2-12, 2026-09-02
+
+The `evals` job printed a notice saying the first eval set and the floors that
+gate on it were still to come, and reported success. E2-12 lands both, and the
+notice went in the same change, which is what the decision above asks of the
+ticket that lands the code. That job's steps now run the real runner behind a
+step-level condition — the diff is not inert, and either it touches the AI
+surface or the run was dispatched by hand — and a floor breach is a red gate.
+
+**Nothing in `.github/workflows/ci.yml` is tolerant any more**, so the closing
+line above stops being a forecast and becomes the standing rule: a new tolerant
+gate needs its own argument, made in a ticket, rather than a pointer to this
+record.
+
+Two shapes look like the pattern and are not, said here so they are not read as
+counter-examples. A step switched off because every changed path is inert
+documentation (E0-38), and a step switched off because no changed path is the AI
+surface (E2-12), are scoping decisions with a classification behind them — and
+each classification is itself executed over planted trees, which is what the
+second consequence above says a tolerant gate's probe must be. The difference is
+that a tolerant gate reports success over work it *could not* do, and these
+report success over work that did not need doing.

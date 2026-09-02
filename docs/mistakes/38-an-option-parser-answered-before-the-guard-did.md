@@ -1,10 +1,26 @@
 # Entry 38. An option parser answered before the guard did, and its answer was the permissive one
 
-**Caught: 0**
+**Caught: 1**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*1 instance recorded.*
+*2 instances recorded, newest first.*
+
+*(**2026-09-02, E2-12 (`e2/eval-floors`), caught before it landed.** The same
+script grows a second classification, deciding whether SPEC §9.3's eval floors
+run — the gate `CLAUDE.md` calls a hard one. Acting on this entry, the test
+author asked the leading-dash question of the *new* question rather than
+assuming E0-38's fix covered it, and asked it in the shape this entry's closing
+paragraph prescribes: a bare `-h`, a `-h` sitting beside a prompt edit, a path
+spelled like the new option's own name, and the near miss that separates the fix
+from doing nothing — an ordinary path containing dashes, which must stay
+classified. The implementer then routed both guards through the single
+leading-dash refusal already in the script and the single `--` already in the
+workflow, rather than writing a second copy for the second question, and
+executed the whole table against the built script. Counted as a catch: without
+the case, the new code path had no reason to inherit either half, and a
+dash-named file beside a prompt edit would have exited 0 — the answer that lets
+the floors stay off — with the required check green.)*
 
 *(E0-38, found by the security review after the build was green, two live
 scratch-branch pushes had confirmed the behaviour, and a fifteen-row mutation

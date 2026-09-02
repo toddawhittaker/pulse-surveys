@@ -23,14 +23,23 @@ this module asserts is that the branch is *gone* rather than that it is correct:
   where `tsc` and `eslint` have been reading `playwright.config.ts` and the §9.2
   specs since E0-40, and nothing else.
 
-**The `evals` gate is this module's control and not an oversight.** SPEC §14.3
-gives the AI eval floors to E2 — "turns the AI eval floors enforcing, the last CI
-tolerance E0 left" — so that job is still legitimately tolerant, and the reader
-below is required to find its tolerance before its verdict about the two frontend
-jobs is believed. A reader that could not see a tolerance branch would report both
-frontend jobs clean over a workflow that had not been touched (`docs/MISTAKES.md`
-entry 35: require the control to find the thing on a subject that certainly has
-it).
+**The reader is proved sighted on a written-down sample, and it used to be proved
+on the `evals` job.** SPEC §14.3 gave the AI eval floors to E2 — "turns the AI
+eval floors enforcing, the last CI tolerance E0 left" — so that job was the one
+place a tolerance branch certainly existed, and the reader had to find it before
+its verdict about the two frontend jobs was believed (`docs/MISTAKES.md` entry
+35: require the control to find the thing on a subject that certainly has it).
+
+E2-12 is the ticket that removes it, so the control's subject expired exactly as
+the repository always intended. The requirement did not change; what it reads did.
+It is now the retired branch held as a literal, asserted to match, with two steps
+beside it asserted not to — an enforcing step, and E0-38's documentation
+short-circuit notice, which carries one of the predicate's two properties and is
+what a reader that dropped the `and` would report as a tolerance on every
+expensive gate in the file. Dispute E2-12-05 records the ruling, and the sample is
+strictly stronger than the borrowing: it goes on exercising the reader after the
+tree has stopped containing an example, which is the state every removed tolerance
+leaves behind.
 
 **What lives elsewhere.** Which probe each gate waits on, and the `Makefile`'s copy
 of the same conditions, are
@@ -58,10 +67,75 @@ FRONTEND_BUILD_JOB = "frontend-build"
 LINT_FRONTEND_JOB = "lint-frontend"
 FLIPPED_JOBS = (FRONTEND_BUILD_JOB, LINT_FRONTEND_JOB)
 
-# The job that is still tolerant, and why. E2 turns the eval floors enforcing;
-# until then this is where a tolerance branch certainly exists, which is what makes
-# it the control.
-STILL_TOLERANT_JOB = "evals"
+# ---------------------------------------------------------------------------
+# The reader's control, as three written-down samples.
+#
+# **It used to be the `evals` job, and dispute E2-12-05 is why it is not.** That
+# job was the one place a tolerance branch certainly existed — SPEC §14.3 left the
+# AI eval floors to E2 — so the reader was required to find one there before its
+# silence about the two frontend jobs meant anything. The requirement was right and
+# the supply was borrowed: E2-12 is the ticket whose whole subject is that the last
+# tolerance goes, so the control's subject was always going to expire, and it has.
+# ADR 0002 now records that nothing in the workflow is tolerant, which is the end
+# state the pattern was designed to reach.
+#
+# A sample is strictly stronger than the borrowing was. It proves the reader
+# recognises a tolerance *and* that it does not recognise everything, and it goes
+# on doing both after the tree has stopped containing an example — which is the
+# state every removed tolerance leaves behind. It is the shape
+# `test_a_documentation_only_diff_does_not_run_the_expensive_gates.py` already uses
+# for its sweep, in `READS_A_DOCUMENT_DIRECTLY` and its two siblings.
+# ---------------------------------------------------------------------------
+
+# ADR 0002's tolerance branch, copied whole out of the `evals` job as it stood
+# before E2-12 removed it: the step's own `name`, `if` and `run`.
+#
+# The `run` block held two `::notice::` lines and this sample carries the first,
+# which is the one the shape turns on — a gate saying it did not run because the
+# thing it checks is not in the tree. The second explained the provider secret and
+# says nothing about tolerance.
+A_TOLERANCE_BRANCH: dict[str, Any] = {
+    "name": "No eval sets yet",
+    "if": "needs.detect.outputs.evals != 'true' && needs.changed.outputs.inert != 'true'",
+    "run": (
+        'echo "::notice::No tests/evals runner yet. E0-13 builds the gateway; the first '
+        "eval set and the floors that gate on it are E2's, and this job stays tolerant "
+        'until then."\n'
+    ),
+}
+
+# What must *not* read as a tolerance, so the reader is shown to be discriminating
+# as well as sighted. Both are steps this workflow carries today, copied in the
+# same shape.
+#
+# The enforcing step has neither property. The short-circuit notice has one of the
+# two — it prints a `::notice::` and its condition reads E0-38's classification
+# rather than a `detect` probe — and it is the sharper of the pair, because it is
+# what a predicate that dropped the `and` would report as a tolerance on every
+# expensive gate in the file.
+AN_ENFORCING_STEP: dict[str, Any] = {
+    "name": "Eval runner (per-task floors; threat recall is a hard gate)",
+    "if": (
+        "needs.changed.outputs.inert != 'true' && "
+        "(needs.changed.outputs.ai_surface == 'true' || "
+        "github.event_name == 'workflow_dispatch')"
+    ),
+    "run": "python -m tests.evals.runner --enforce-floors\n",
+}
+
+A_SHORT_CIRCUIT_NOTICE: dict[str, Any] = {
+    "name": "Inert diff, so the eval floors did not run",
+    "if": "needs.changed.outputs.inert == 'true'",
+    "run": (
+        'echo "::notice::Every changed path is inert documentation (E0-38), so no eval '
+        'floor was checked."\n'
+    ),
+}
+
+NOT_A_TOLERANCE = {
+    "an enforcing step": AN_ENFORCING_STEP,
+    "E0-38's documentation short-circuit notice": A_SHORT_CIRCUIT_NOTICE,
+}
 
 # The scripts the frontend workspace declares and the fast gate runs. `build` is
 # what `frontend-build` has always named — ADR 0083's narrowed probe asks the
@@ -140,12 +214,17 @@ def prints_a_notice_guarded_by_a_probe(step: dict[str, Any]) -> bool:
     condition reads a `detect` output — which is what a tolerance is, an `else` on
     the question "is the thing this gate checks in the tree at all".
 
-    This is the shape the `evals` control looks for, and it is written to be
-    indifferent to whether the same condition also carries E0-38's classification
-    clause. A tolerant expensive gate reasonably carries both — print the notice
-    when the diff was worth checking and there was nothing to check — and a
-    predicate that refused to recognise a two-clause condition would report the
-    one job that certainly is tolerant as fully enforcing.
+    It is written to be indifferent to whether the same condition also carries
+    E0-38's classification clause. A tolerant expensive gate reasonably carries
+    both — print the notice when the diff was worth checking and there was nothing
+    to check — and a predicate that refused to recognise a two-clause condition
+    would report a genuinely tolerant job as fully enforcing. `A_TOLERANCE_BRANCH`
+    at the top of this module is exactly that two-clause shape, which is why the
+    control is run against it rather than against something simpler.
+
+    The `and` is the other half, and `NOT_A_TOLERANCE` is what holds it: a notice
+    alone is E0-38's short-circuit, which is honest, and a `detect` output alone
+    is a gate deciding whether to do work rather than reporting that it did not.
     """
     return bool(NOTICE in script_of(step) and DETECT_OUTPUT.search(condition_of(step)))
 
@@ -225,10 +304,13 @@ def test_the_frontend_gates_consult_no_probe_and_print_no_tolerance_notice(
     gates off in silence for anybody who changes what the probe reads — which is
     exactly how E0-40 happened, three tickets ago, in this file.
 
-    **The control is the `evals` job**, which SPEC §14.3 leaves tolerant until E2.
-    The reader has to find a tolerance branch there before its silence about these
-    two jobs means anything; a reader that recognised no tolerance at all would
-    report a workflow nobody had edited as fully enforcing.
+    **The control runs first and it is two-sided.** The reader has to recognise a
+    tolerance branch, and has to not recognise two steps that are not one, before
+    its silence about these two jobs means anything: a reader that saw no tolerance
+    anywhere and one that saw a tolerance everywhere report the same clean
+    workflow. Both samples are written down at the top of this module — the
+    retired `evals` branch and the two negatives — because E2-12 removed the last
+    live tolerance from the file (dispute E2-12-05).
 
     **The mutation this kills:** delete the notice steps and leave
     `if: needs.detect.outputs.frontend == 'true'` on the real ones — or the
@@ -246,23 +328,41 @@ def test_the_frontend_gates_consult_no_probe_and_print_no_tolerance_notice(
         "in the same change rather than leaving this module looking for something that is gone."
     )
 
-    control = [
-        label_of(step, index)
-        for index, step in enumerate(steps_of(jobs.get(STILL_TOLERANT_JOB)))
-        if prints_a_notice_guarded_by_a_probe(step)
-    ]
-    assert control, "\n".join(
+    assert prints_a_notice_guarded_by_a_probe(A_TOLERANCE_BRANCH), "\n".join(
         [
-            f"This reader found no tolerance branch in the `{STILL_TOLERANT_JOB}` job, which is "
-            "the one job that certainly still has one.",
+            "This reader does not recognise ADR 0002's tolerance branch in a sample copied "
+            "whole out of the `evals` job as it stood before E2-12 removed it:",
+            f"  if:  {A_TOLERANCE_BRANCH['if']}",
+            f"  run: {A_TOLERANCE_BRANCH['run'].strip()[:160]}",
             "",
-            "SPEC §14.3 gives the AI eval floors to E2 — 'turns the AI eval floors enforcing, the "
-            "last CI tolerance E0 left' — so until then that gate probes for the eval sets and "
-            "prints ADR 0002's notice when they are not there.",
+            "It has gone blind, and a blind reader reports the two frontend jobs clean over a "
+            "workflow nobody had edited — `docs/MISTAKES.md` entry 35: require the control to "
+            "find the thing on a subject that certainly has it.",
             "",
-            "Either that has changed, which is a larger finding than this ticket and worth "
-            "knowing, or this reader cannot recognise a tolerance branch — in which case it would "
-            "report the two frontend jobs clean over a workflow nobody had edited.",
+            "The sample is written down rather than read out of the workflow because the "
+            "workflow no longer has one. E2-12 removed the last tolerance in the file, which is "
+            "what SPEC §14.3 and ADR 0002 both say that ticket is for (dispute E2-12-05).",
+        ]
+    )
+
+    recognised = [
+        name
+        for name, sample in NOT_A_TOLERANCE.items()
+        if prints_a_notice_guarded_by_a_probe(sample)
+    ]
+    assert not recognised, "\n".join(
+        [
+            f"This reader calls these a tolerance branch, and none of them is one: {recognised}",
+            "",
+            "A reader that answered yes to everything would satisfy the control above and then "
+            "report every gate in the file as tolerant — the same silence as a blind one, "
+            "arriving from the other side.",
+            "",
+            "The short-circuit notice is the one to read twice. It prints a `::notice::` and its "
+            f"condition names `needs.changed.outputs.{CLASSIFICATION}` rather than a `detect` "
+            "probe, so it has one of the predicate's two properties. A gate that did not run "
+            "because the diff was documentation has something true to say; a gate that reported "
+            "success over work it could not do does not.",
         ]
     )
 
@@ -305,7 +405,7 @@ def test_the_frontend_gates_consult_no_probe_and_print_no_tolerance_notice(
             "These steps print a notice about work that did not run, with nothing deciding "
             "whether it did:",
             *tolerated,
-            f"  the tolerance the control found in `{STILL_TOLERANT_JOB}`: {control}",
+            f"  the shape the reader was proved sighted on: {A_TOLERANCE_BRANCH['name']!r}",
             "",
             "ADR 0002's tolerant gate is a condition and a notice together, and this is the half "
             "of the removal that leaves no symptom: the guard goes, the step that said 'nothing "

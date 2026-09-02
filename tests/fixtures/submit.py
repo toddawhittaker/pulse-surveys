@@ -31,11 +31,21 @@ module's subject, and a fixture that encoded it would be a second implementation
 for the tests to agree with (`docs/MISTAKES.md` entry 30).
 
 **The environment** (`docs/MISTAKES.md` entry 40): `open_submit_tool` states
-`ENVIRONMENT`, `INSTITUTION_TIMEZONE`, `AI_PROVIDER_BASE_URL` and `REDIS_URL`
-itself, on top of `configured_env`'s documented file, and rides `tool_doors` for
-the container's database coordinates. Nothing here reads `os.environ` except for
-the session secret, which is read back out of the same documented mapping the
-application was built from.
+`ENVIRONMENT`, `INSTITUTION_TIMEZONE`, `MOCK_AI_PROVIDER_BASE_URL` and
+`REDIS_URL` itself, on top of `configured_env`'s documented file, and rides
+`tool_doors` for the container's database coordinates. Nothing here reads
+`os.environ` except for the session secret, which is read back out of the same
+documented mapping the application was built from.
+
+**The provider address is the mock's, and the ruling rather than the endpoint is
+what decides that.** The configuration split of 2026-09-02 gives the real
+provider and the in-repo mock a triple each and settles selection:
+`AIGateway(live=False)` reads `MOCK_AI_PROVIDER_*` in development and test.
+`open_submit_tool` states `ENVIRONMENT=development` in its own body, so the
+variable the tool it builds will consult is the mock's — whatever is listening on
+the other end, and including the closed port `unreachable_ai_provider` hands it.
+That case is about what the application does when *its* provider is unreachable,
+and in a test process its provider is the mock triple.
 
 **The broker is pointed at a closed port by default, and that is deliberate.**
 `.env.example` names the Compose service `redis`, which does not resolve here, so
@@ -66,7 +76,7 @@ from fixtures.doors import (
     PLATFORM_JWKS_URL_COLUMNS,
     door_column_named,
 )
-from fixtures.mock_ai import AI_PROVIDER_BASE_URL_VARIABLE
+from fixtures.mock_ai import MOCK_AI_PROVIDER_BASE_URL_VARIABLE
 from fixtures.routing import every_route
 from fixtures.supervision import foreign_key_columns, require_table, single_primary_key
 from fixtures.survey_windows import (
@@ -371,7 +381,14 @@ def closed_loopback_address() -> str:
 
 @pytest.fixture
 def unreachable_ai_provider() -> str:
-    """An `AI_PROVIDER_BASE_URL` on a closed loopback port. See `closed_loopback_address`."""
+    """A `MOCK_AI_PROVIDER_BASE_URL` on a closed loopback port.
+
+    See `closed_loopback_address` for why a released port rather than a mock. The
+    variable is the mock triple's because a test process's `live=False` gateway
+    reads that triple (the configuration split of 2026-09-02); what this fixture
+    is *about* is unchanged — the application's own provider refusing a connection
+    immediately.
+    """
     return f"http://{closed_loopback_address()}/v1"
 
 
@@ -779,7 +796,7 @@ def open_submit_tool(
             door_contract.settings["public_base_url"]: door_contract.public_base_url,
             ENVIRONMENT_VARIABLE: DEVELOPMENT,
             INSTITUTION_TIMEZONE_VARIABLE: INSTITUTION_TIMEZONE,
-            AI_PROVIDER_BASE_URL_VARIABLE: ai_base_url,
+            MOCK_AI_PROVIDER_BASE_URL_VARIABLE: ai_base_url,
             REDIS_URL_VARIABLE: unreachable_broker if redis_url is None else redis_url,
             **extra,
         }
