@@ -17,7 +17,10 @@ htmlcov/
 .coverage
 .coverage.*
 coverage.xml
-reports/
+# Anchored: CI's junit and licence reports land only at the root, and a bare
+# reports/ would silently untrack a source directory of that name anywhere —
+# frontend/src/copy/reports/ is exactly where E4's copy files would go.
+/reports/
 *.egg-info/
 
 # Node
