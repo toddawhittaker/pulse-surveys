@@ -75,7 +75,9 @@ against `validity.v2` on `gpt-5.6-luna` in one clean run over the 98 cases:
 precision 1.000000, recall 0.981481, nothing floored by the character rule. They
 sit below the measurement by the pattern threshold plus the measured variance —
 two new errors of a kind plus one for run-to-run disagreement, so three are
-tolerated and the fourth fires.
+tolerated and the fourth fires. That variance is one case in ninety-eight,
+measured on this same model and this same prompt from two independent runs: the
+fill measurement and CI run 33679136272.
 
 The previous pair, 0.95 and 0.94, was measured on `gpt-5-mini-2025-08-07` under
 `validity.v1` and was taken out rather than carried over: a floor that survives a

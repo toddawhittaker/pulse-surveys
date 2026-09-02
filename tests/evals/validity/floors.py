@@ -27,9 +27,13 @@ distinction has a baseline. Nothing enforces them today.
 `gpt-5-mini-2025-08-07` the miss was `ss-005` — twenty-four characters,
 substantive, called nonsense — a case in the short-substantive family this set
 exists to measure. That case is answered correctly now and the miss is a
-long-substantive one instead. It is one run against one run, so it is an
-observation rather than a result, and it is recorded because it is the kind of
-thing that is invisible three months later.
+long-substantive one instead. It is recorded because it is the kind of thing that
+is invisible three months later.
+
+`ls-025` was the miss in both Luna runs, which is what makes it a model miss
+rather than sampling; `lv-008` was a disagreement in one and not the other, which
+is what makes it variance. The two behave differently and the pair of runs is what
+tells them apart — one run could not have.
 
 ## The floors: precision 0.94, recall 0.92
 
@@ -43,18 +47,59 @@ is a pattern, and this gate fires on prompt and model changes, which is exactly
 when a pattern means something.
 
 **Rule 3 — and the measured variance sits on top of that, not inside it.** Two
-identical runs of this set against the same model and prompt disagree with each
-other at about one case per hundred. That is not uncertainty about the model's
-quality, it is the model: a rerun that changed nothing scores differently. So the
-allowance is the pattern threshold *plus* the variance — two new errors of a kind,
-plus one — and the floor fires on the fourth. A floor sized at the pattern
+identical runs of this set against **this** model and **this** prompt disagree
+with each other by one case in ninety-eight. That is not uncertainty about the
+model's quality, it is the model: a rerun that changed nothing scores differently.
+So the allowance is the pattern threshold *plus* the variance — two new errors of
+a kind, plus one — and the floor fires on the fourth. A floor sized at the pattern
 threshold alone would let ordinary variance spend half its headroom, so a single
 real regression on top of a rerun would fire it; and a gate that goes red on
 ordinary movement is a gate that gets lowered the first time it does.
 
-The variance is granted to each rate independently, which is the conservative
-reading: one disagreement per hundred is a count of disagreements, and nothing
-says which rate a given one lands on, so each is sized as though it could take it.
+**The two runs the figure comes from**, both `validity.v2` on `gpt-5.6-luna` over
+the same 98 cases:
+
+    the fill measurement          exact agreement 96/98   p 1.000  r 0.9815
+    CI run 33679136272 @ 5f6a927  exact agreement 97/98   p 1.000  r 0.9815
+
+One case answered differently between them: `lv-008`, `nonsense` in the first and
+`insufficient` in the second. `ls-025` was the miss in both. So the variance is one
+case in ninety-eight — one per hundred — measured on the model and the prompt these
+floors govern, which is what this file's own placeholder demanded of whoever filled
+it and what the first version of this section did not deliver.
+
+**That first version founded the rule on a mini/`validity.v1` pair**, which this
+same file declares non-portable two paragraphs above. A security review caught it,
+and it was right about the record even though the number happened to survive. The
+mini pair appears below as corroboration, labelled as what it is; it is the basis
+for nothing here.
+
+**The variance is granted to each rate independently, and that is a deliberate
+over-allowance rather than what these two runs strictly show.** Both Luna runs
+scored precision 1.000 and recall 0.9815 — identical — because the case that moved
+was `insufficient` against `nonsense`, a negative-to-negative swap touching neither
+gated rate. Read strictly from this pair alone the variance allowance would be
+zero, and the floors would be rule 1's 0.95 and 0.94.
+
+Three reasons that reading is refused, and the second decides it:
+
+- One variance event is one sample. That it landed off both rates is not evidence
+  that it cannot land on one; there are 54 positives in this set, and an answer
+  moving on any of them moves recall.
+- **It has already landed on a gated rate, on the other boundary.** The first
+  independent CI run under mini/`validity.v1` scored precision 0.9815 against a
+  fill measurement of 1.000 — one false positive, appearing between identical
+  runs. That is a cross-boundary observation and it is useless as a *figure* here;
+  as evidence about the *shape* of variance it is direct, and it says the gated
+  rates are reachable.
+- The asymmetry. Over-allowing costs a gate that tolerates one more error than it
+  strictly must. Under-allowing costs a gate that reds on a rerun — and a gate that
+  reds on ordinary movement is a gate that gets lowered, which is the failure rules
+  1 and 3 exist together to prevent.
+
+If a third and fourth Luna run put the variance on a gated rate, or keep it off
+one, that is the measurement worth having and these numbers are worth revisiting
+against it.
 
     precision 0.94   53/(53+3) = 0.9464 passes — three false positives tolerated
                      53/(53+4) = 0.9298 fails  — the fourth fires
@@ -127,9 +172,15 @@ FLOORS: TaskFloors = enforced(
         "one clean run — a single run, not an average — where every case was answered by "
         "the model and none by §3.3's character floor: precision 1.000000 (tp 53, fp 0), "
         "recall 0.981481 (fn 1, tn 44). The floors sit below those figures by the pattern "
-        "threshold plus the measured variance: two new errors of a kind, plus one for the "
-        "run-to-run disagreement of about one case per hundred observed between two "
-        "identical runs of this set, giving three tolerated and the fourth firing. So "
+        "threshold plus the measured variance: two new errors of a kind, plus one for "
+        "run-to-run disagreement, giving three tolerated and the fourth firing. The "
+        "variance figure is one case in ninety-eight, measured on this same model and this "
+        "same prompt from two independent runs — the fill measurement at 96/98 exact "
+        "agreement and CI run 33679136272 on commit 5f6a927 at 97/98, differing on lv-008 "
+        "alone. It is granted to each rate separately even though that one case touched "
+        "neither, because a single event is not evidence that variance cannot reach a "
+        "gated rate and the mini/validity.v1 pair shows it doing so; the module docstring "
+        "argues it. So "
         "precision 0.94 passes at 53/(53+3)=0.9464 and fails at 53/(53+4)=0.9298, and "
         "recall 0.92 passes at 50/54=0.9259 and fails at 49/54=0.9074. Precision is held "
         "at the numerically higher bar because §3.3 validates at submit time: a false "

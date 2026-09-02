@@ -435,14 +435,19 @@ fails when any two disagree, and a planted mismatch at each site is seen red.
 
 ## Floor headroom carries a measured variance point — for E10's recall-floor work
 
-The floors (precision 0.95, recall 0.94) were sized against one clean
-measurement (precision 1.000, fp 0) to tolerate two new errors of a kind and
-fire on the third. The first independent CI run of the same set, model and
-prompt scored precision 0.9815 (fp 1): one of the two tolerated errors is
-already spent, on run-to-run variance alone. The floors hold and the sizing
-argument worked as designed; the carried fact is that variance between
-identical runs is real and roughly one case per hundred, which E10 should fold
-into how it sizes the threat-recall floor rather than rediscovering it.
+The floors (precision 0.94, recall 0.92) were sized against one clean
+measurement to tolerate two new errors of a kind plus one for run-to-run
+variance, firing on the fourth. Two data points now stand behind that
+allowance. Under mini/`validity.v1`, the first independent CI run scored
+precision 0.9815 against a fill measurement of 1.000 — one false positive
+between identical runs, landing on a gated rate. Under Luna/`validity.v2`,
+CI run 33679136272 on commit 5f6a927 scored 97/98 against the fill's 96/98
+— one case moving, `lv-008`, landing on neither gated rate. The carried
+fact for E10 is both halves: variance between identical runs is real at
+roughly one case per hundred, and *where* it lands varies, so a floor
+sized only against the rate a single pair happened to move will be sized
+short.
 
-**Done when** E10's floor-setting records a variance allowance with at least
-two independent measured runs behind it.
+**Done when** E10's floor-setting records a variance allowance with at
+least two independent measured runs behind it, on the model and prompt
+that floor governs.
