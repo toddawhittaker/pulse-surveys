@@ -1,0 +1,334 @@
+"""The eval runner CI calls: `python -m tests.evals.runner --enforce-floors` — E2-12.
+
+SPEC §9.3's gate, made executable. It walks `tests/evals/registry.py`, grades each
+task that has both a set and a floor, and compares what it measured against what
+was declared.
+
+**Every way out of here that is not a graded comparison raises `EvalRefusalError`, and
+a refusal exits non-zero.** That is the whole design, and it is aimed at one
+failure: a run that reports success over work it did not do. The routes are
+
+  - a floor declared with no set to measure it over;
+  - the placeholder floor nobody has filled in yet;
+  - a deferred slot that has acquired a set or a number;
+  - a set with no case of the positive class, so recall cannot be computed;
+  - a missing or blank `AI_PROVIDER_API_KEY`;
+  - an answer produced under a prompt version the set is not pinned to;
+  - a task with a floor and a set and nothing that can run it.
+
+`docs/MISTAKES.md` entry 34's cousin, and E2-12's scope says it in one sentence:
+"an AI-touching PR without the secret is a red gate naming what is missing, not a
+quiet pass".
+
+**`--enforce-floors` is accepted and enforcement does not depend on it.** The flag
+is in the documented invocation and in `.github/workflows/ci.yml`, so it is
+accepted rather than rejected; what it must not be is the switch that turns the
+gate on. A gate whose enforcement rides on a flag is a gate that a copied command
+line, a shortened Makefile recipe or a tired edit can disable while still looking
+like it ran — and this one carries SPEC §9.3's floors. So the runner enforces
+whether or not it is passed, and losing the flag from CI costs nothing.
+
+**The credential.** `.env.example` documents a blank `AI_PROVIDER_API_KEY` as
+legitimate, because the mock and a local model server authenticate nobody. That
+is true of the application and false of this runner: it always builds a live
+gateway, and a live gateway with no credential is a run against a provider that
+will refuse it. So blank is refused here and the refusal names the variable.
+
+**No `print`.** `T20` is on for `tests/**` in `pyproject.toml` and this module is
+a program rather than an application, so it writes to `sys.stdout` directly.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
+
+from app.ai.contracts import CommentValidityOutput
+from tests.evals.declarations import EvalRefusalError, EvalTask, FloorStatus, TaskFloors
+from tests.evals.measure import Measurement, holds_a_positive_case, measure
+from tests.evals.registry import TASKS
+
+# The variable the live gateway's credential arrives in (`.env.example`,
+# `AI_PROVIDER_*` triple). Named here rather than read through `Settings` so that
+# the refusal below happens before anything builds a gateway, and so that the
+# message can name the variable an operator actually has to set.
+PROVIDER_KEY_VARIABLE = "AI_PROVIDER_API_KEY"
+
+
+@dataclass(frozen=True)
+class TaskReport:
+    """What one task came to on this run."""
+
+    task: str
+    floors: TaskFloors
+    measurement: Measurement | None
+    breaches: tuple[str, ...]
+
+    @property
+    def graded(self) -> bool:
+        """Whether this run actually measured anything for this task."""
+        return self.measurement is not None
+
+
+@dataclass(frozen=True)
+class Report:
+    """Every task's outcome, and whether the run as a whole may report success."""
+
+    tasks: tuple[TaskReport, ...]
+
+    @property
+    def passed(self) -> bool:
+        """True only when no floor was breached. A deferred slot is not a breach."""
+        return not any(task.breaches for task in self.tasks)
+
+    def text(self) -> str:
+        """The run, as lines an operator reads in a CI log."""
+        lines = ["SPEC §9.3 eval floors"]
+        for task in self.tasks:
+            lines.append(f"  {task.task}: {task.floors.status.value}")
+            if task.measurement is not None:
+                measurement = task.measurement
+                lines.append(
+                    f"    {measurement.cases} cases — "
+                    f"precision {measurement.precision:.4f} "
+                    f"(floor {task.floors.precision}), "
+                    f"recall {measurement.recall:.4f} "
+                    f"(floor {task.floors.recall})"
+                )
+                lines.append(
+                    f"    tp {measurement.true_positives} "
+                    f"fp {measurement.false_positives} "
+                    f"fn {measurement.false_negatives} "
+                    f"tn {measurement.true_negatives}"
+                )
+                for case_id, expected, answered in measurement.disagreements:
+                    lines.append(f"    disagreed on {case_id}: expected {expected}, got {answered}")
+            else:
+                lines.append(f"    ungraded — {task.floors.note}")
+            for breach in task.breaches:
+                lines.append(f"    BREACH: {breach}")
+        lines.append("VERDICT: pass" if self.passed else "VERDICT: fail")
+        return "\n".join(lines)
+
+
+def declaration_problems(task: EvalTask) -> list[str]:
+    """Everything wrong with one task's declaration, before anything is run.
+
+    Structural rather than measured: none of these needs a provider, a credential
+    or a model, so all of them are found on a machine with no network at all.
+    """
+    floors = task.floors
+    problems: list[str] = []
+
+    if floors.status is FloorStatus.DEFERRED:
+        if task.cases:
+            problems.append(
+                f"`{task.name}` holds {len(task.cases)} cases and a deferred floor. The set "
+                "arrived and the number did not, so this task would be reported and never "
+                "graded — set the floor, or take the set out until there is one."
+            )
+        if floors.carries_numbers:
+            problems.append(
+                f"`{task.name}` has a deferred floor carrying numbers "
+                f"(precision {floors.precision}, recall {floors.recall}). A slot held open "
+                "for another epic states no floor; a number here is a floor nobody measured."
+            )
+        return problems
+
+    if not task.cases:
+        problems.append(
+            f"`{task.name}` declares a floor and has no eval set, so there is nothing to "
+            "measure it over. E2-12: the runner refuses to report a task with a floor and "
+            "no set rather than passing it silently."
+        )
+
+    if floors.status is FloorStatus.AWAITING_MEASUREMENT:
+        problems.append(
+            f"`{task.name}`'s floor is the placeholder and has never been filled in. "
+            f"{floors.note}"
+        )
+        return problems
+
+    if floors.precision is None or floors.recall is None:
+        problems.append(
+            f"`{task.name}` is declared enforced and states "
+            f"precision {floors.precision}, recall {floors.recall}. SPEC §9.3's gate is "
+            "both numbers; half a floor is not one."
+        )
+
+    if task.cases and not holds_a_positive_case(task.cases, task.positive):
+        problems.append(
+            f"`{task.name}`'s set holds no case whose expected verdict is "
+            f"{task.positive!r}, so recall cannot be measured over it and any figure "
+            "reported would be about nothing."
+        )
+
+    if task.cases and task.prompt_version is None:
+        problems.append(
+            f"`{task.name}` has a set and no prompt version. ADR 0031 makes the recorded "
+            "version the prompt file's stem and ADR 0032 makes that file immutable, so a "
+            "set that does not say which prompt it was written against cannot be compared "
+            "against a later run."
+        )
+
+    drifted = sorted(
+        {case.prompt_version for case in task.cases if case.prompt_version != task.prompt_version}
+    )
+    if drifted:
+        problems.append(
+            f"`{task.name}` is pinned to {task.prompt_version!r} and holds cases pinned to "
+            f"{drifted}. A set spanning two prompt versions produces one number about two "
+            "measurements."
+        )
+
+    return problems
+
+
+def _classifier_for(
+    task: EvalTask, overrides: Mapping[str, Callable[[str], CommentValidityOutput]] | None
+) -> Callable[[str], CommentValidityOutput]:
+    """The callable that answers one comment for this task."""
+    if overrides is not None and task.name in overrides:
+        return overrides[task.name]
+    if task.classifier is None:
+        raise EvalRefusalError(
+            f"`{task.name}` declares a floor and a set and nothing that can run it. A task "
+            "the runner cannot execute is a floor that can never be measured, which is a "
+            "gate in name only."
+        )
+    return task.classifier()
+
+
+def _answer(task: EvalTask, comment: str, case_id: str, pinned: str | None, classify: Any) -> Any:
+    """One answer, with its prompt version checked against the case's pin."""
+    output = classify(comment)
+    try:
+        answered_under = output.prompt_version
+    except AttributeError as failure:
+        raise EvalRefusalError(
+            f"`{task.name}` case {case_id}: the object the task returned carries no "
+            f"`prompt_version` ({output!r}). ADR 0031 makes it a required field on every "
+            "contract, and without it a measurement cannot say which prompt produced it."
+        ) from failure
+
+    if pinned is not None and answered_under != pinned:
+        raise EvalRefusalError(
+            f"`{task.name}` case {case_id} is pinned to prompt {pinned!r} and the gateway "
+            f"answered under {answered_under!r}. ADR 0032 makes a committed prompt file "
+            "immutable, so this is a run against a different prompt rather than a rerun of "
+            "the same one: regrow the set against the new version and measure a new floor, "
+            "rather than reading this number as comparable."
+        )
+    return output.verdict
+
+
+def evaluate(
+    tasks: Sequence[EvalTask] = TASKS,
+    *,
+    classifiers: Mapping[str, Callable[[str], CommentValidityOutput]] | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> Report:
+    """Grade every gradable task and compare each against its floor.
+
+    Raises `EvalRefusalError` rather than returning a report whenever something makes
+    the run unmeasurable. `classifiers` substitutes a task's live classifier,
+    which is how the unit tests reach the enforcement logic without a provider;
+    nothing in CI passes it.
+    """
+    values = os.environ if environ is None else environ
+
+    problems = [problem for task in tasks for problem in declaration_problems(task)]
+    if problems:
+        raise EvalRefusalError("\n".join(["the eval declarations are not runnable:", *problems]))
+
+    anything_to_grade = any(task.floors.status is FloorStatus.ENFORCED for task in tasks)
+
+    if anything_to_grade and not values.get(PROVIDER_KEY_VARIABLE, "").strip():
+        raise EvalRefusalError(
+            f"{PROVIDER_KEY_VARIABLE} is missing or blank, so no eval floor was measured. "
+            f"The eval runner always builds a live gateway, and {PROVIDER_KEY_VARIABLE} is "
+            "the credential it sends. Set it in `.env` for a local run, or supply the "
+            "repository secret for a CI run. This is a refusal rather than a skip: a pull "
+            "request that touches the AI surface and cannot reach a provider has not met "
+            "SPEC §9.3's gate, and reporting it green would say that it had."
+        )
+
+    reports: list[TaskReport] = []
+    for task in tasks:
+        if task.floors.status is not FloorStatus.ENFORCED:
+            reports.append(
+                TaskReport(task=task.name, floors=task.floors, measurement=None, breaches=())
+            )
+            continue
+
+        classify = _classifier_for(task, classifiers)
+        answers = [
+            _answer(task, case.comment, case.case_id, case.prompt_version, classify)
+            for case in task.cases
+        ]
+        measurement = measure(task.cases, answers, task.positive)
+
+        breaches: list[str] = []
+        if task.floors.precision is not None and measurement.precision < task.floors.precision:
+            breaches.append(
+                f"precision {measurement.precision:.4f} is below the floor "
+                f"{task.floors.precision}"
+            )
+        if task.floors.recall is not None and measurement.recall < task.floors.recall:
+            breaches.append(
+                f"recall {measurement.recall:.4f} is below the floor {task.floors.recall}"
+            )
+
+        reports.append(
+            TaskReport(
+                task=task.name,
+                floors=task.floors,
+                measurement=measurement,
+                breaches=tuple(breaches),
+            )
+        )
+
+    return Report(tasks=tuple(reports))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """The command line. One flag, and it changes nothing — see the module docstring."""
+    parser = argparse.ArgumentParser(
+        prog="python -m tests.evals.runner",
+        description=(
+            "Run SPEC §9.3's eval sets against the live provider and compare each task "
+            "against its declared precision and recall floors."
+        ),
+    )
+    parser.add_argument(
+        "--enforce-floors",
+        action="store_true",
+        help=(
+            "Accepted for the documented invocation. Floors are enforced whether or not "
+            "this is passed: a gate whose enforcement rides on a flag can be switched off "
+            "by an edit to a command line, and this one carries SPEC §9.3's floors."
+        ),
+    )
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the evals and answer 0 for a pass, 1 for a breach or a refusal."""
+    build_parser().parse_args(argv)
+
+    try:
+        report = evaluate()
+    except EvalRefusalError as refusal:
+        sys.stdout.write(f"eval run refused\n{refusal}\n")
+        return 1
+
+    sys.stdout.write(f"{report.text()}\n")
+    return 0 if report.passed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
