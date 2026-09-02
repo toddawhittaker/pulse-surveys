@@ -154,6 +154,15 @@ stored" while the number was open; the security round ruled 422 and the tests no
 assert it, so a bounce that starts answering 400 or 409 is a change somebody makes
 deliberately and moves this paragraph with.
 
+**Keeping the bounced verdict makes those rows unbounded per attempt**, since
+nothing limits how often a student may be coached and try again — they are
+unlinkable by design (`answer_id` NULL, and no user, section, week or comment text
+on the row), reachable only with a live enrollment, one already-paid provider call
+each, and unable to move `response.is_valid` or enter the re-classification sweep,
+but they do land in any aggregation over `classification` that does not exclude
+them, §6.1's drift panel included; `docs/tickets/e2/deferred.md` carries the
+linkage-or-cap ruling that would close it.
+
 **A bounced comment's *text* is outside the reach of §5.2's moderation and §6.2's
 Care queue, and this record does not decide that it should be.** The verdict is
 kept and the words are not: `classification` carries no comment text and ADR 0055

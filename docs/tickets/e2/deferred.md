@@ -34,6 +34,68 @@ ADR 0110 already gives up for the ranges, from the same statement, so it is one
 exposure rather than two. A later ticket that takes the mechanism should take it
 for the bounds and the kind together.
 
+## A bounced submission's verdict rows are unbounded per attempt — a linkage-or-cap ruling is owed
+
+Deferred by E2-08's security re-pass, which raised it as a MEDIUM and accepted it
+as residue on the reasons below rather than as a fix withheld.
+
+Since the fix round, a bounce commits the classification that refused it (SPEC
+§7.4's audit pair, [ADR 0114](../../adr/0114-an-unclassifiable-comment-refuses-rather-than-floors.md)),
+and nothing limits how many times one student may attempt and be bounced. A
+student typing "ok", being coached, and typing "ok." again writes a row each time,
+and the count is bounded only by their patience.
+
+**What that is not.** The rows are unlinkable by design: `answer_id` is NULL
+because no answer exists, the row carries no user, no section, no week and no
+comment text, so the growth is not a set of a person's refused words accumulating
+anywhere. It is reachable only with a valid student session and a live enrollment
+in the section, both established before the provider is asked, so it is not an
+unauthenticated lever. Each row is one provider call the tool has already made and
+paid for, so the row is a record of spend rather than a multiplier of it. And a
+bounced row can move nothing: `response.is_valid` is computed from verdicts naming
+an answer, and the re-classification sweep selects on `answer_id IS NOT NULL`, so
+these rows enter neither.
+
+**What it is.** They land in any aggregation over `classification` that does not
+exclude them — §6.1's drift panel samples verdicts across tasks and would sample a
+population weighted toward whatever students retype most, and a per-model or
+per-prompt-version count reads them as classifications that judged something.
+
+**Done when** the owner has ruled between the two available answers — link the
+rows to the attempt that produced them (which is a new key, a new grant question
+and a new confidentiality question, since ADR 0055 refused even a fingerprint of a
+comment) or cap the attempts a window will classify — **and** the epic that owns
+the drift surface either filters these rows out of its aggregation or bounds them,
+naming this entry where it does.
+
+## Nothing structurally forces the next mutating route onto the CSRF dependency — a sweep is owed
+
+Deferred by E2-08's security re-pass as a LOW, and it is about the shape of the
+guard rather than about this route: the submit path carries
+`app.api.deps.csrf_verified_student` and is correct.
+
+`require_student` and `csrf_verified_student` sit beside each other in the same
+module, and the difference between them is the double-submit check ADR 0089 makes
+live because the session cookie is `SameSite=None`. That difference is deliberate
+— a read path has nothing for the check to protect, and E2-09's student read path
+carries the plain one — but nothing in the tree makes a *writing* route reach for
+the checked one. The next mutating route is one import away from being unprotected,
+and it would be unprotected in exactly the way that reads as fine in review: a
+route with `require_student` on it looks guarded.
+
+This is the closed-set shape twice over. The safe default is not the shorter name,
+and the inventory of which routes need the check is currently a thing each author
+remembers.
+
+**Done when** a sweep test walks the built application's routes — through
+`fixtures.routing.every_route`, since an included router carries no `path` on the
+pinned FastAPI — and requires every route whose methods include `POST`, `PUT`,
+`PATCH` or `DELETE` either to depend on `csrf_verified_student` or to appear on a
+named exemption list with a reason per entry, in the shape
+`REACHED_TABLES_THAT_CARRY_NOTHING` already uses: asserted in both directions, so
+an exemption for a route that no longer exists fails as loudly as a route that
+grew a mutating method without one.
+
 ## A bounced comment's text reaches neither moderation nor the Care queue — a ruling is owed
 
 Deferred by E2-08's security fix round, and it is a **question rather than a
