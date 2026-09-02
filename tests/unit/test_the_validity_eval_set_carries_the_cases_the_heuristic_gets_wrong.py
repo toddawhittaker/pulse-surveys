@@ -38,6 +38,11 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# Where ADR 0032 puts the prompts, and where the version a case is pinned to has
+# to resolve to a file. SPEC §13: "`ai/prompts/` — versioned prompt templates, one
+# file per task+version".
+PROMPTS_DIRECTORY = REPO_ROOT / "backend" / "app" / "ai" / "prompts"
+
 # "Size to spend, not to ceremony: on the order of a hundred cases" (E2-12's
 # scope). A range rather than a number, because the exact count is not a
 # criterion and pinning one would make every added case a failing test — but the
@@ -126,6 +131,13 @@ def test_every_case_is_pinned_to_the_prompt_version_the_set_was_written_against(
     will still be readable when this set is re-run, and a case carrying no version
     or a different one is a case measured against a text nobody can reconstruct.
 
+    **What this compares is the cases against the set's own constant**, which
+    makes it blind to that constant being wrong — the mutation battery changed
+    `PROMPT_VERSION` and killed nothing here, because every case is built from it
+    and the comparison is the set against itself (`docs/MISTAKES.md` entry 19).
+    `test_the_pinned_prompt_version_is_the_one_the_application_loads` below is what
+    holds the constant against something outside this directory.
+
     **The mutation this kills:** drop the pin from the case type, or let cases
     default to whatever the gateway happens to answer under — which is the shape
     that reads correct and makes every run self-consistent and incomparable.
@@ -140,6 +152,61 @@ def test_every_case_is_pinned_to_the_prompt_version_the_set_was_written_against(
         f"the set is pinned to {pinned!r} and holds cases pinned to {drifted}. A set "
         "spanning two prompt versions produces one precision figure about two different "
         "programs."
+    )
+
+
+def test_the_pinned_prompt_version_is_the_one_the_application_loads(
+    cases_module: ModuleType,
+) -> None:
+    """The pin names the prompt the run will actually be made under, and a file that exists.
+
+    The test above compares the cases against `PROMPT_VERSION`, so it cannot see
+    that constant being wrong — every case is built from it. Two things outside this
+    directory settle whether it is right, and both are checked here.
+
+    **The application's constant.** `app.ai.tasks.VALIDITY_PROMPT_VERSION` is what
+    `tests/evals/live.py` renders and sends, so a set pinned to anything else is a
+    set that refuses on its first case: the runner compares each answer's recorded
+    version against the case's pin, and they would never match. That refusal is
+    correct and it is a slow way to find a typo — this is the fast one, and it needs
+    no provider.
+
+    **A file on disk.** ADR 0031 makes the recorded version the prompt file's path
+    stem and ADR 0032 makes that file immutable once a classification cites it, so
+    a version naming no file is a measurement nobody can reproduce. `validity.v1`
+    has to be `validity.v1.md` under `app/ai/prompts/`, which is the scheme ADR
+    0032 settles and the reason the extension is fixed there.
+
+    **The mutation this kills:** a `PROMPT_VERSION` that drifts from the
+    application's — the whole set changes with it and every test that compares the
+    set against itself stays green. **The near miss that must stay green:** a real
+    prompt bump, where the application, the file and this constant move together in
+    one reviewed change, which is exactly what ADR 0032 asks a prompt change to
+    look like.
+    """
+    from app.ai.tasks import VALIDITY_PROMPT_VERSION
+
+    pinned = cases_module.PROMPT_VERSION
+    assert pinned == VALIDITY_PROMPT_VERSION, (
+        f"the set is pinned to {pinned!r} and `app.ai.tasks` renders "
+        f"{VALIDITY_PROMPT_VERSION!r}. Every case would be answered under a version the "
+        "set does not name, so the runner refuses on the first one and no floor is ever "
+        "measured."
+    )
+
+    prompt = PROMPTS_DIRECTORY / f"{pinned}.md"
+    present = (
+        sorted(path.name for path in PROMPTS_DIRECTORY.iterdir())
+        if PROMPTS_DIRECTORY.is_dir()
+        else "nothing — that directory does not exist"
+    )
+    assert prompt.is_file(), (
+        f"the set is pinned to {pinned!r} and there is no {prompt.name} in "
+        f"{PROMPTS_DIRECTORY.relative_to(REPO_ROOT)}, which holds {present}.\n"
+        "\n"
+        "ADR 0031 makes the recorded version the prompt file's path stem and ADR 0032 makes "
+        "that file immutable once a classification cites it. A version naming no file is a "
+        "measurement nobody can reproduce, which is the whole thing the pin buys."
     )
 
 

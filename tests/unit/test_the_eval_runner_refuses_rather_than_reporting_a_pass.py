@@ -183,6 +183,29 @@ class StubUsage:
     details: Mapping[str, int] = field(default_factory=lambda: {"reasoning_tokens": 3})
 
 
+class RecordingEvaluate:
+    """Stands in for `evaluate` and remembers whether `main` called it.
+
+    The count is what makes the flag test possible at all: an exit code cannot
+    tell a run that graded and passed from a run that never happened, and those
+    two are exactly what `if args.enforce_floors:` around the call would produce.
+
+    It answers with whatever it was built with — a `Report` to be returned, or an
+    exception to be raised — so one class covers the pass, the breach and the
+    refusal without a closure per case.
+    """
+
+    def __init__(self, outcome: Any) -> None:
+        self.outcome = outcome
+        self.calls: list[tuple[Any, ...]] = []
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        self.calls.append(args)
+        if isinstance(self.outcome, BaseException):
+            raise self.outcome
+        return self.outcome
+
+
 class Stub:
     """A classifier that answers from a table and counts what it was asked.
 
@@ -679,6 +702,14 @@ def test_a_classifier_that_never_answers_the_positive_class_scores_zero_precisio
     classifier which never awards participation credit clear a precision floor of
     any height — a gate that a broken provider passes.
 
+    **The value is asserted, not only the verdict, and the mutation battery is
+    why.** `return 1.0` for the empty denominator survived a version of this test
+    that checked `not report.passed` alone: the same classifier scores recall 0.0
+    as well, recall breached its floor, the report failed, and the test was green
+    over a precision of 1.0. A report verdict is a disjunction, so it can only ever
+    tell you that *something* was wrong. The figure is what this test is about, so
+    the figure is what it reads.
+
     **The mutation this kills:** `return 1.0` for a zero denominator, which is
     what several metric libraries do by default. **The near miss that must stay
     green:** a classifier that gets some positives right, asserted throughout the
@@ -690,6 +721,20 @@ def test_a_classifier_that_never_answers_the_positive_class_scores_zero_precisio
     task = build_task(floors=floors, cases=balanced_set(), positive=cases_module.SUBSTANTIVE)
 
     report = runner().evaluate([task], classifiers={"probe": stub}, environ=keyed())
+
+    measurement = report.tasks[0].measurement
+    assert measurement is not None, f"the task was not graded at all:\n{report.text()}"
+    assert measurement.true_positives == 0 and measurement.false_positives == 0, (
+        f"this classifier was meant to make no positive claim at all, and it made "
+        f"{measurement.true_positives + measurement.false_positives}. The empty "
+        "denominator is not reached, so nothing below is about it."
+    )
+    assert measurement.precision == 0.0, (
+        f"precision over a classifier that answered the positive class zero times is "
+        f"{measurement.precision}. Undefined resolves toward failing here: at 1.0 a model "
+        "that never awards participation credit clears a precision floor of any height, "
+        "which is a gate a broken provider passes."
+    )
 
     assert not report.passed, (
         "a classifier that never answered the positive class cleared a precision floor:\n"
@@ -725,6 +770,58 @@ def test_a_set_with_no_case_of_the_positive_class_is_refused() -> None:
     assert "recall" in str(
         refusal.value
     ), f"refused, and not about the unmeasurable recall:\n{refusal.value}"
+
+
+def test_recall_over_a_set_with_no_positive_case_is_zero_rather_than_one() -> None:
+    """The branch the refusal above makes unreachable, asserted where it can be reached.
+
+    `measure` resolves recall's empty denominator to 0.0, and the runner never
+    lets it: `declaration_problems` refuses a set with no positive case before any
+    classifier is built, which is the right order — a set like that is broken
+    rather than badly scored. The two together mean the constant is never executed
+    through `evaluate`, and the mutation battery found exactly that: changing it to
+    1.0 killed nothing, because the paired test above raises before the arithmetic
+    runs.
+
+    So this reaches it the only way left, by calling `measure` directly. That is
+    not a weaker test than going through the runner — it is the same function the
+    runner calls, over the same shape of input, and it is the only route to a line
+    the refusal is deliberately standing in front of.
+
+    **It matters because the refusal is not the only caller `measure` will ever
+    have.** A later task type, a resumed run, a report rebuilt from stored answers:
+    each is a way to reach this function without passing the declaration check, and
+    a recall of 1.0 over a set with nothing to recall would clear SPEC §9.3's
+    strictest floor by holding no positive cases at all — which is
+    `.claude/review-fixtures/eval-floor-lowered.diff`'s "narrowed set" taken to its
+    end point.
+
+    **The mutation this kills:** `return 1.0` for recall's zero denominator.
+    **The near miss that must stay green:** any set holding at least one positive
+    case, where the denominator is real and the figure means something.
+    """
+    measure_module = eval_module("tests.evals.measure")
+    cases_module = validity_cases()
+
+    negatives = tuple(
+        build_case(f"n-{index}", f"insufficient {index}", cases_module.INSUFFICIENT, "validity.v1")
+        for index in range(4)
+    )
+    answers = [cases_module.INSUFFICIENT for _ in negatives]
+
+    measurement = measure_module.measure(negatives, answers, cases_module.SUBSTANTIVE)
+
+    assert measurement.true_positives == 0 and measurement.false_negatives == 0, (
+        "this set was meant to hold no case of the positive class, so recall's denominator "
+        f"is empty. It came to {measurement.true_positives + measurement.false_negatives}, "
+        "which means the branch below is not the one being read."
+    )
+    assert measurement.recall == 0.0, (
+        f"recall over a set with no positive case is {measurement.recall}. Undefined "
+        "resolves toward failing: at 1.0, a set narrowed until it holds nothing to recall "
+        "clears any recall floor perfectly, which is how a floor gets lowered without the "
+        "number moving."
+    )
 
 
 def test_an_answer_produced_under_a_different_prompt_version_is_refused() -> None:
@@ -889,8 +986,15 @@ def test_a_task_that_was_not_graded_prints_no_cost() -> None:
     zero is the most misleading of the plausible values — it reads as "this ran and
     was free" rather than "this did not run".
 
-    **The mutation this kills:** printing the usage block unconditionally, which
-    puts `0 input tokens` under SPEC §9.3's threat slot on every run.
+    **This case does not reach the zero-call guard**, and the mutation battery is
+    what established that: a deferred task takes `text()`'s ungraded branch, which
+    never calls `usage_lines` at all, so deleting that guard killed nothing here.
+    The test below is the one that reaches it. Both are kept, because they are
+    about different lines — this one about which branch `text()` takes, that one
+    about what the guard does once execution is inside it.
+
+    **The mutation this kills:** printing the usage block from the ungraded branch,
+    which puts `0 input tokens` under SPEC §9.3's threat slot on every run.
     """
     floors = declarations().deferred(note="E10 sets this.")
     task = build_task(name="threat", floors=floors, cases=())
@@ -900,6 +1004,58 @@ def test_a_task_that_was_not_graded_prints_no_cost() -> None:
     assert (
         "input tokens" not in report.text()
     ), f"a task the runner never ran carries a cost line:\n{report.text()}"
+
+
+def test_a_graded_task_that_spent_nothing_prints_no_cost_either() -> None:
+    """The zero-call guard inside `usage_lines`, reached where `evaluate` cannot reach it.
+
+    `usage_lines` returns nothing when no call was made, and through `evaluate`
+    that state does not arise: a graded task has an enforced floor, an enforced
+    floor with no set is refused, and a set with cases produces one call each. The
+    mutation battery found the consequence — deleting the guard killed nothing,
+    because the only test aimed at it used a deferred task and `text()` never
+    reached the function.
+
+    So the report is built directly, graded and with empty totals. That is not a
+    contrived shape: `text()` renders whatever report it is handed, and a resumed
+    run, a report rebuilt from stored answers, or a task type that grades without
+    calling a provider all arrive here. The guard exists for them, and until now
+    nothing executed it.
+
+    Zero is the wrong thing to print for the same reason as in the deferred case
+    and a worse one here: `0 input tokens` under a task that *did* grade reads as a
+    run that reached the model and cost nothing, which is not a state this system
+    has.
+
+    **The mutation this kills:** dropping the `if usage.calls == 0` guard, so a
+    graded task with no usage prints a row of zeroes. **The near miss that must
+    stay green:** a graded task that did spend something, asserted in
+    `test_the_report_says_what_the_run_cost_with_the_cached_share_kept_separate`.
+    """
+    runner_module = runner()
+    declarations_module = declarations()
+    measure_module = eval_module("tests.evals.measure")
+
+    graded = runner_module.TaskReport(
+        task="probe",
+        floors=declarations_module.enforced(precision=0.5, recall=0.5, note="a probe's floor"),
+        measurement=measure_module.measure((), (), validity_cases().SUBSTANTIVE),
+        breaches=(),
+        usage=declarations_module.UsageTotals(),
+    )
+    text = runner_module.Report(tasks=(graded,)).text()
+
+    assert graded.graded, (
+        "this report was meant to be a graded one, so that `text()` takes the branch "
+        "calling `usage_lines`. If it is not, this test reads the same branch as the "
+        "deferred case above and asserts nothing new."
+    )
+    assert "input tokens" not in text and "provider request" not in text, (
+        f"a graded task that made no call carries a cost line:\n{text}\n"
+        "\n"
+        "`0 input tokens` under a task that graded reads as a run that reached the model "
+        "and cost nothing, which is not a state this system has."
+    )
 
 
 def test_enforcement_does_not_depend_on_the_command_line_flag() -> None:
@@ -915,9 +1071,18 @@ def test_enforcement_does_not_depend_on_the_command_line_flag() -> None:
     `evaluate` — the function that does the comparing — has no parameter that
     could turn the comparison off.
 
-    **The mutation this kills:** `if args.enforce_floors:` around the comparison,
-    which is the obvious implementation of the flag's own name and leaves
-    `python -m tests.evals.runner` exiting 0 over an unenforced set.
+    **Neither of those executes `main`, and the mutation battery is what made
+    that plain.** Wrapping `main`'s call to `evaluate` in `if
+    args.enforce_floors:` survived this test entirely: the parser still accepted
+    both spellings, `evaluate`'s signature still had no switch in it, and
+    `python -m tests.evals.runner` still exited 0 over a set nothing had graded.
+    That is `docs/MISTAKES.md` entry 9 in the place it is least excusable — a
+    docstring naming a mutation, beside assertions that cannot see it.
+    `test_the_command_line_runs_the_evals_with_or_without_the_flag` below is the
+    one that runs the program.
+
+    **The mutation this kills:** an `enforce`-shaped parameter on `evaluate`.
+    Everything else about the flag is that test's.
     """
     module = runner()
     parser = module.build_parser()
@@ -933,3 +1098,83 @@ def test_enforcement_does_not_depend_on_the_command_line_flag() -> None:
         "enforcement is unconditional, because the alternative is a gate a command-line "
         "edit disables silently."
     )
+
+
+def test_the_command_line_runs_the_evals_with_or_without_the_flag(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`main` is executed, both spellings, and the exit code comes from the report.
+
+    The test above reads the parser and a signature; this one runs the program,
+    because the mutation that matters lives in neither. `if args.enforce_floors:`
+    around `main`'s call to `evaluate` leaves the parser correct, the signature
+    correct, and the gate off — `python -m tests.evals.runner` exits 0 having
+    graded nothing, on every pull request that touches the AI surface.
+
+    `evaluate` is replaced with a recorder so nothing here reaches a provider, and
+    the recorder is what makes the assertion possible: an exit code alone cannot
+    tell a run that graded and passed from a run that never happened. Three
+    outcomes are driven, and each is asserted under both spellings —
+
+      - a report with no breach, which must exit 0;
+      - a report with a breach, which must exit 1;
+      - a refusal, which must exit 1.
+
+    The pair is what pins it. A `main` that returned 0 unconditionally passes the
+    first outcome; one that returned 1 unconditionally passes the other two; only
+    both directions together say the exit code is derived from the report.
+
+    **The mutation this kills:** gating `main`'s evaluation on the flag, in either
+    direction, and returning a status the report did not produce. **The near miss
+    that must stay green:** the flag being accepted and changing nothing, which is
+    the design.
+    """
+    module = runner()
+    declarations_module = declarations()
+
+    def report_with(breaches: tuple[str, ...]) -> Any:
+        return module.Report(
+            tasks=(
+                module.TaskReport(
+                    task="probe",
+                    floors=declarations_module.deferred(note="a probe's slot"),
+                    measurement=None,
+                    breaches=breaches,
+                ),
+            )
+        )
+
+    outcomes: tuple[tuple[str, Any, int], ...] = (
+        ("a report with no breach", report_with(()), 0),
+        ("a report with a breach", report_with(("precision 0.1000 is below the floor 0.9",)), 1),
+        (
+            "a refusal",
+            declarations_module.EvalRefusalError("no credential, so nothing was measured"),
+            1,
+        ),
+    )
+
+    for description, outcome, expected_status in outcomes:
+        for argv in ([], ["--enforce-floors"]):
+            recorder = RecordingEvaluate(outcome)
+            monkeypatch.setattr(module, "evaluate", recorder)
+            status = module.main(argv)
+            capsys.readouterr()
+
+            assert recorder.calls, (
+                f"`main({argv})` returned {status} without evaluating anything, over "
+                f"{description}.\n"
+                "\n"
+                "That is the flag becoming load-bearing: the parser still accepts both "
+                "spellings and `evaluate` still has no switch in it, and the gate is off. "
+                "`python -m tests.evals.runner` then exits over a set nothing graded, on "
+                "exactly the pull requests SPEC §9.3's floors exist for."
+            )
+            assert status == expected_status, (
+                f"`main({argv})` exited {status} over {description}, and {expected_status} "
+                "is what that report means.\n"
+                "\n"
+                "The exit code has to come from the report rather than from the command "
+                "line: a status that ignores the report is a gate whose answer does not "
+                "depend on what it measured."
+            )
