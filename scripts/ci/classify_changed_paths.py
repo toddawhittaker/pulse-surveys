@@ -12,7 +12,9 @@ Ticket E2-12 asks the second: **did it touch the AI surface?** SPEC §9.3's eval
 floors are the one gate in this pipeline that calls a paid provider, about a
 hundred requests a run, and §9.3 scopes them to "prompt or model changes". So the
 live eval steps run on a diff that touches `backend/app/ai/`, `tests/evals/`, or
-either of the two files that carry the model identifier — and on nothing else.
+one of the three files that say which model is asked and how — the settings
+module, the documented configuration surface, and the workflow that carries the
+eval job's own wiring — and on nothing else.
 
 Usage:
     classify_changed_paths.py [--classification inert|ai-surface] -- <changed path>...
@@ -156,7 +158,19 @@ AI_SURFACE_DIRECTORIES = ("backend/app/ai/", "tests/evals/")
 # same one.** `.env.example.local` and `backend/app/config.py.bak` are files
 # somebody will plausibly create, and a single prefix comparison collapses the two
 # rules into one and fires on both.
-AI_SURFACE_FILES = frozenset({"backend/app/config.py", ".env.example"})
+#
+# **The workflow joined this set in E2-12's security review**, and the argument is
+# the one the two entries above already carry. `.github/workflows/ci.yml` holds
+# the eval job's own wiring — which endpoint the run reaches, which model it asks
+# for, the secret binding, the step conditions — and it was in neither this set
+# nor the directory set. So the single file that decides what CI measures could
+# not fire the gate that measures it, and a model pin edited there would have
+# shipped without one eval call: exactly the change SPEC §9.3's gate is named
+# after. The cost is that an unrelated workflow edit now pays for an eval run,
+# which is the trade the ticket settles in as many words — over-firing costs one
+# run, under-firing is the gate not running, and the second is worse by the ADR
+# 0002 incident record.
+AI_SURFACE_FILES = frozenset({"backend/app/config.py", ".env.example", ".github/workflows/ci.yml"})
 
 
 def is_inert(path: str) -> bool:
