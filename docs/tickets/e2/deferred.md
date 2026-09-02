@@ -300,3 +300,19 @@ protecting itself rather than a fix.
 understood — or refuses to move `last_submitted_at` backwards at all, and a test
 drives a resubmission under a rewound clock and requires something other than a
 500. The fix is in `app.services.submissions`, which is a heavy-lane path.
+
+## Two records still say "the five landing views" — E2-10
+
+E2-10 replaced the student landing with the survey screen, so two records now
+describe a tree that no longer exists: the `SinglePageApp` docstring in
+`backend/app/main.py` and the module docstring of
+`tests/unit/test_the_spa_is_served_from_the_app_factory.py` both count five
+landing views where there are now four plus a survey screen. Neither file is a
+light-lane path, so the light ticket that falsified the sentences could not
+correct them (the lane rule in `CLAUDE.md`; the same rule that kept this PR out
+of `backend/` kept it out of these).
+
+**Done when** both docstrings describe the tree as it is, corrected by the next
+ticket whose lane covers each file — a heavy ticket touching `backend/app/main.py`
+for the first, any test-author phase touching that test module for the second.
+The assertions in both files are correct today; only the prose is stale.
