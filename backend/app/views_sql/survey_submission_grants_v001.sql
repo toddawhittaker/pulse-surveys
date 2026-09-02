@@ -1,0 +1,108 @@
+-- What the application may do to a weekly submission — ticket E2-08, SPEC §3.2,
+-- §3.3, §8, ADR 0001, ADR 0009, ADR 0055, ADR 0110, ADR 0115.
+--
+-- E2-08 is the first code that touches public.response and public.answer, and the
+-- first that reads public.question and public.question_set. E2-05 created all four
+-- and granted the runtime role nothing on any of them, deliberately: until this
+-- ticket nothing submitted a survey and nothing rendered one. Without this file
+-- every statement the submit path issues is refused by Postgres with 42501 rather
+-- than by anything the ticket is about.
+--
+-- **question and question_set: SELECT, and nothing else.**
+--
+--   - SELECT on `question` is the whole of ADR 0110's decision made operational.
+--     That record puts no range check on `answer` because "a CHECK cannot read
+--     another table", and makes `question.minimum_value`, `maximum_value` and
+--     `step` "the only statement of the ranges in the system" — so the write path
+--     has to read them, and §3.2's conditional rule ("Required if Q1 ≤ 2") is two
+--     more columns on the same row.
+--   - SELECT on `question_set` is how the set in force is found: §3.2 ships one
+--     version and the table is versioned for a feature that has not arrived, so
+--     the read is "the highest version" and nothing else.
+--   - **No INSERT, UPDATE or DELETE on either**, and that is the interesting half.
+--     The instrument is §3.2's, written by a migration and by `scripts/seed.py`
+--     under the bootstrap identity. A connection that could edit a question could
+--     edit the wording every stored answer was given under, or widen a range after
+--     the answers inside it were collected — and every report §5.1 draws would be
+--     reading answers to a question that no longer exists in the form it was asked.
+--
+-- **response: SELECT, INSERT, UPDATE.**
+--
+--   - SELECT is how a resubmission finds the row it is revising, and how §3.4's
+--     participation score will be counted.
+--   - INSERT is the first submission of a week.
+--   - UPDATE is the two columns a later write changes: `last_submitted_at` when a
+--     student revises inside the window, and `is_valid` when the async
+--     re-classification finally gets a model's verdict for a comment the floor
+--     stood in for (§3.3).
+--   - **DELETE stays withheld.** §3.1 makes a missed week unfillable and §3.4
+--     counts "valid weeks completed ÷ weeks elapsed" over exactly these rows, so a
+--     week that has been answered may not stop having been answered. What a
+--     retention policy eventually removes is the retention epic's decision, made on
+--     a surface an administrator drives; withholding the verb is what keeps it from
+--     being made by accident on the connection every screen runs on.
+--
+-- **answer: SELECT, INSERT, UPDATE, DELETE.**
+--
+--   - SELECT is the read a resubmission makes of what is already stored, and the
+--     read the re-classification sweep makes to find a floored comment's text.
+--   - INSERT is a question answered for the first time.
+--   - DELETE is a question answered before and left blank now. It is granted and it
+--     is narrow in practice: `classification.answer_id` is `ON DELETE RESTRICT`, so
+--     the database itself refuses to remove an answer a model has judged, and
+--     ADR 0115 records that the submit path refuses that case in words rather than
+--     letting the constraint surface under a student.
+--   - **UPDATE is granted too, and it is the verb this file most owes an
+--     explanation for**: ADR 0115 makes a resubmission revise its answer rows in
+--     place precisely because the deletion above is refused for a judged comment.
+--     Revising the value a student submitted is what a resubmission *is* (SPEC §3.3
+--     permits it inside the window), and the row's two foreign keys — the response
+--     it belongs to and the question it answers — are not what UPDATE is spent on;
+--     what changes is one of the three value columns.
+--
+-- **classification is untouched here.** `classification_grants_v001.sql` already
+-- gives pulse_app `SELECT, INSERT` and withholds `UPDATE` and `DELETE`, which is
+-- what makes ADR 0055's append-only rule a property of the database. E2-08 adds a
+-- column to that table and no privilege to it: a re-run writes a new row, and the
+-- floored row it re-runs stays exactly as it was written.
+--
+-- **A grant on base tables rather than on read views**, the same exception every
+-- grants file before it takes (`survey_window_grants_v001.sql`,
+-- `lti_registration_grants_v001.sql`, `clock_override_grants_v001.sql`). SPEC §4.1
+-- routes an *identity* read path through a view, and the reason is identity: a view
+-- selects the columns a caller may see and omits the ones §8 protects. These four
+-- tables carry no name, no address and no LMS subject — `response.user_id` is a
+-- foreign key, and the identity behind it sits on `user_identity`, which pulse_app
+-- reaches through no statement at all. The scoping that keeps one student out of
+-- another's week is this path's own enrollment check and E2-09's read path, not a
+-- view over the row.
+--
+-- **pulse_care is granted nothing.** The Care queue reaches a threat comment and
+-- the audited reveal (ADR 0001, SPEC §6.2). Whether a student's week counts for
+-- participation is no part of that surface, and the one role in the cluster that
+-- can resolve a student's name gets no privilege it has no use for.
+--
+-- **USAGE ON SCHEMA public is not granted again here.** identity_grants_v001.sql
+-- grants it to pulse_app and identity_grants_v002.sql restates it; an ACL entry
+-- records no history, so a third grant would be indistinguishable from those and
+-- any matching revoke would remove all of them.
+--
+-- **This widens what pulse_app can reach, and it is meant to be visible.**
+-- `RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py` is
+-- the hand-written record every base-table grant is compared against as an equality
+-- in both directions, deliberately not derived from these `.sql` files so that a
+-- widening cannot justify itself. These nine entries have to be recorded there in
+-- the same change, and that edit is on the far side of the test wall for E2-08's
+-- implementer: it is raised as `docs/disputes/E2-08-03.md`, the same shape
+-- `docs/disputes/E2-06-03.md` took for `survey_window`.
+--
+-- **The downgrade has something to revoke.** All four tables are E2-05's and
+-- outlive this revision, so a privilege granted here would survive a downgrade that
+-- drops nothing. The revision's `downgrade()` writes the REVOKE rather than a
+-- second file, because ADR 0041 makes a versioned file the immutable record of what
+-- an upgrade applied and an un-grant is not a record of anything.
+
+GRANT SELECT ON public.question_set TO pulse_app;
+GRANT SELECT ON public.question TO pulse_app;
+GRANT SELECT, INSERT, UPDATE ON public.response TO pulse_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.answer TO pulse_app;

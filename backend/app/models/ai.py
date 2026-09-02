@@ -16,13 +16,17 @@ nothing else, so the connection the API and the worker hold cannot `UPDATE` or
 `DELETE` a row however the application is written
 ([ADR 0055](../../../docs/adr/0055-a-classification-row-names-its-task-and-no-comment.md)).
 
-**The row names no comment yet, and that is deliberate.** `response` and `answer`
-(SPEC §8) arrive with E2, so there is nothing for a foreign key to point at. The
-two ways to write a subject anyway are both worse than the absence — a nullable
+**The row names the comment it judged, and E2-08 is what made that possible.**
+`classification` shipped without a subject: `response` and `answer` (SPEC §8)
+arrived with E2, so there was nothing for a foreign key to point at, and the two
+ways to write a subject anyway were both worse than the absence — a nullable
 `answer_id` that nothing ever fills, or a hash of the comment text, which is a
-re-identification vector over strings as short and as repetitive as "it was
-okay". ADR 0055 records the choice; E2 adds the column with the reference it can
-finally make.
+re-identification vector over strings as short and as repetitive as "it was okay".
+ADR 0055 recorded the choice and promised the reference to E2. `answer_id` is that
+reference. It stays **nullable**, because the rows written before E2-08 name no
+answer and there is nothing to backfill them from; every row this system writes
+from E2-08 onward carries it, and the async re-classification finds a floored
+verdict's comment through it.
 
 **Nothing here reads configuration or opens a connection.** `Base` comes from
 `app.models.base` rather than from `app.db`, which builds an engine out of
@@ -35,8 +39,9 @@ safe to import for the same reason: it declares Pydantic models and reads nothin
 
 from datetime import datetime
 from enum import StrEnum
+from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Enum, Text, text
+from sqlalchemy import CheckConstraint, Enum, ForeignKey, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.ai.contracts import ValidityVerdict
@@ -112,6 +117,18 @@ class Classification(UuidPrimaryKey, Base):
     # value (ADR 0019).
     classified_at: Mapped[datetime] = mapped_column(
         AwareDateTime, nullable=False, server_default=text("now()")
+    )
+    # The comment this verdict is about (ADR 0055's promised reference, added by
+    # E2-08). Nullable for the rows written before there was an `answer` table to
+    # point at, and indexed because the read this column exists for is by answer:
+    # "every verdict about this comment", which is how the async re-classification
+    # finds the floored ones and how a disputed participation grade is answered.
+    #
+    # `RESTRICT`, like every other foreign key on the survey tables: nothing here
+    # removes an audit row by removing something else, and what a retention policy
+    # eventually deletes is the retention epic's decision to make out loud.
+    answer_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("answer.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     task: Mapped[ClassificationTask] = mapped_column(
         Enum(ClassificationTask, name="classification_task"), nullable=False

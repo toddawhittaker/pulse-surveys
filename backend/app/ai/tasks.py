@@ -37,6 +37,7 @@ classification together or stores neither.
 
 import threading
 from importlib.resources import files
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -199,8 +200,17 @@ def record_classification(
     session: Session,
     task: ClassificationTask,
     output: CommentValidityOutput,
+    *,
+    answer_id: UUID | None = None,
 ) -> Classification:
     """Store one verdict, with the pair that says what produced it (SPEC §8).
+
+    `answer_id` is the comment the verdict is about — ADR 0055's promised
+    reference, which E2-08 added the column for. It is optional in the signature
+    and not in the design: every caller that has an `answer` row passes it, and it
+    defaults to `None` only because the rows written before E2 exist and name
+    nothing. A verdict stored with no subject is a verdict the async
+    re-classification cannot find and a disputed grade cannot be answered from.
 
     Appended, never updated: a re-run under a new prompt version is what §6.1's
     drift panel and §9.3's eval floors compare against the earlier answer, and an
@@ -214,6 +224,7 @@ def record_classification(
     commit here would take that choice away from it.
     """
     row = Classification(
+        answer_id=answer_id,
         task=task,
         verdict=output.verdict.value,
         prompt_version=output.prompt_version,
@@ -228,6 +239,8 @@ def classify_comment_validity(
     session: Session,
     comment: str,
     gateway: AIGateway | None = None,
+    *,
+    answer_id: UUID | None = None,
 ) -> CommentValidityOutput:
     """§7.4's comment-validity task: substantive / insufficient / nonsense.
 
@@ -249,6 +262,10 @@ def classify_comment_validity(
     caller that passes nothing gets `process_gateway()`, which is the one this
     process shares. Building one per comment is a connection pool per comment,
     and that shape was measured leaking sockets in E0-13's review.
+
+    `answer_id` is the `answer` row this comment was submitted on, stored on the
+    verdict so that the row names what it judged (ADR 0055, E2-08). See
+    `record_classification` for why it has a default at all.
     """
     gateway = gateway or process_gateway()
     try:
@@ -261,5 +278,5 @@ def classify_comment_validity(
     except AIProviderUnavailableError:
         output = character_floor(comment)
 
-    record_classification(session, ClassificationTask.COMMENT_VALIDITY, output)
+    record_classification(session, ClassificationTask.COMMENT_VALIDITY, output, answer_id=answer_id)
     return output
