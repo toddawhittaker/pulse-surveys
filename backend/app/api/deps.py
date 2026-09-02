@@ -109,6 +109,7 @@ from app.services.identity import (
 )
 from app.services.session import (
     SessionClaims,
+    bearer_token,
     fragment_redirect,
     issue_csrf_token,
     issue_session,
@@ -116,10 +117,14 @@ from app.services.session import (
     set_csrf_cookie,
     set_session_cookie,
     verified_session,
+    verify_csrf_token,
 )
 
 __all__ = [
     "BEARER_SCHEME",
+    "CSRF_HEADER",
+    "CSRF_REFUSED_KEY",
+    "CSRF_REFUSED_STATUS",
     "FOUND",
     "LOGIN_COOKIE_LIFETIME_SECONDS",
     "LTI_LOGIN_COOKIE",
@@ -133,6 +138,7 @@ __all__ = [
     "carried_across",
     "carry_across",
     "clear_carried",
+    "csrf_verified_student",
     "landing_with_session",
     "no_access",
     "no_access_page",
@@ -740,6 +746,16 @@ BEARER_SCHEME = "Bearer"
 # The registry key of the one sentence both refusals below serve.
 NOT_A_STUDENT_KEY = "student.not_a_student"
 
+# What a cookie-borne write with no valid double-submit token is answered, and the
+# header that token is echoed in (ADR 0089; the status is ADR 0114's, which is the
+# record of this route's answer table). **403 and not 401**: the session is valid
+# and the *request* is not, so a `WWW-Authenticate` challenge would invite the
+# client to present a credential it has already presented correctly. There is no
+# challenge header on this refusal for the same reason.
+CSRF_REFUSED_STATUS = 403
+CSRF_HEADER = "X-Pulse-CSRF"
+CSRF_REFUSED_KEY = "student.request_not_verified"
+
 
 def require_student(request: Request) -> SessionClaims:
     """The verified session on `request`, if it is a student's; otherwise a 401.
@@ -772,5 +788,61 @@ def require_student(request: Request) -> SessionClaims:
             status_code=NOT_A_STUDENT_STATUS,
             detail=COPY[NOT_A_STUDENT_KEY].text,
             headers={"WWW-Authenticate": BEARER_SCHEME},
+        )
+    return claims
+
+
+def csrf_verified_student(request: Request) -> SessionClaims:
+    """`require_student`, plus ADR 0089's double-submit check when the session came by cookie.
+
+    **What a route carries this for, and why it is not folded into
+    `require_student`.** Cross-site request forgery is a defence for *writes*: it
+    stops a page on the internet making a browser perform an action with the
+    session the browser already holds. A read path has nothing for it to protect,
+    and requiring the token there would refuse ordinary navigation for no gain, so
+    the two are separate dependencies and a route says which it means. E2-09's
+    student read path carries `require_student`; this one is carried by the write.
+
+    **The check applies to the cookie carrier and not to the Bearer one, by
+    construction.** ADR 0089 gives one session two carriers: the SPA "captures
+    the fragment into `sessionStorage` … and sends it as `Authorization: Bearer`
+    thereafter", and the cookie exists for everything else. A cross-site form, an
+    image tag or a redirect cannot make a browser attach an `Authorization`
+    header, so a request that carries one is not a request a browser can be
+    tricked into making and there is nothing here to defend. The cookie is a
+    different matter: ADR 0089 makes it `SameSite=None` because the tool lives
+    inside the LMS's cross-site iframe for the whole visit, which is precisely the
+    attribute that lets any origin's form post carry it.
+
+    Which carrier was used is asked of `app.services.session.bearer_token` — the
+    same function `session_from_request` reads the session through — so the
+    exemption cannot widen by one of the two growing a spelling the other does
+    not know (`docs/MISTAKES.md` entry 13).
+
+    **The header is verified, not compared to the cookie.** ADR 0089 binds the
+    token to the session's `jti` by HMAC, and that binding is the whole defence:
+    an attacker who can set a cookie on this origin can set *both* halves of a
+    plain double-submit pair, and comparing a caller-supplied header to a
+    caller-supplied cookie proves nothing on its own — the same reasoning this
+    module already gives for signing the web door's login cookie. What they cannot
+    do is mint a value that verifies against this session's `jti` without the
+    secret. The cookie is still set beside the header (`set_csrf_cookie`) because
+    that is how the SPA has the value to echo; nothing here reads it.
+
+    **A missing token and a wrong one get the same answer**, for the reason the
+    401 above gives twice over: a refusal that distinguished them would tell an
+    attacker whether their forgery was well formed, which is what
+    `verify_csrf_token`'s constant-time comparison is protecting one layer down.
+    """
+    claims = require_student(request)
+    if bearer_token(request) is not None:
+        return claims
+
+    presented = request.headers.get(CSRF_HEADER)
+    secret: bytes = request.app.state.session_secret
+    if not presented or not verify_csrf_token(presented, claims.jti, secret):
+        raise HTTPException(
+            status_code=CSRF_REFUSED_STATUS,
+            detail=COPY[CSRF_REFUSED_KEY].text,
         )
     return claims

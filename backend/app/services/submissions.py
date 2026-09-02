@@ -20,6 +20,15 @@ and marked it invalid would be the "silently penalized after the fact" the same
 sentence forbids. The rollback is written here rather than left to the session's
 teardown, so "nothing was stored" is a property of this module.
 
+**The one thing a bounce does keep is the verdict that bounced it** (ADR 0114).
+The gate runs before any write, so a bounced submission never creates a response
+or an answer to roll back, and the verdict is recorded against no answer — which
+is the only place in this module that commits, and the docstring at that line says
+why. What is *not* kept is the comment's text: ADR 0055 keeps a classification row
+free of it, and the limitation that leaves — a bounced comment reaches neither
+§5.2's moderation nor §6.2's Care queue — is stated in ADR 0114 and carried in
+`docs/tickets/e2/deferred.md` rather than decided here.
+
 **A resubmission revises its answer rows in place** rather than deleting them and
 inserting fresh ones, and
 [ADR 0115](../../../docs/adr/0115-a-resubmission-revises-its-answers-in-place.md)
@@ -60,9 +69,10 @@ from app.services import clock
 from app.services.survey_windows import open_window_for_section
 from app.services.validity import (
     ClassifierUnavailableError,
-    classify_submitted_comment,
     recompute_response_validity,
+    record_verdict,
     refusing_verdict,
+    verdict_for_submitted_comment,
     was_floored,
 )
 
@@ -84,9 +94,10 @@ UNIQUE_VIOLATION = "23505"
 # Which of `answer`'s three value columns each question shape is answered in.
 # Read off `QuestionKind` rather than off the position, because §3.2's set is
 # versioned and a later set's question 3 need not be a rating.
+COMMENT_COLUMN = "comment_text"
 VALUE_COLUMN_OF_KIND: Mapping[QuestionKind, str] = {
     QuestionKind.LIKERT: "rating",
-    QuestionKind.COMMENT: "comment_text",
+    QuestionKind.COMMENT: COMMENT_COLUMN,
     QuestionKind.WORKLOAD: "workload_hours",
 }
 
@@ -439,6 +450,42 @@ def store_submission(
         session.rollback()
         raise
 
+    # §3.3's synchronous gate runs **before** anything is written, and the order is
+    # the whole of how a bounce keeps its verdict (ADR 0114). Nothing below this
+    # point happens for a submission that does not pass the gate, so a bounce
+    # cannot roll a response back — there is none — and the one row it does leave
+    # is the audit record §7.4 requires, written against no answer because there is
+    # no answer to name.
+    verdicts: dict[UUID, CommentValidityOutput] = {}
+    try:
+        for question_id, (column, value) in values.items():
+            if column != COMMENT_COLUMN:
+                continue
+            verdicts[question_id] = verdict_for_submitted_comment(str(value), gateway)
+    except ClassifierUnavailableError:
+        # ADR 0114: the provider could not be asked, and this is one of the cases
+        # ADR 0056 keeps outside §3.3's floor. Nothing has been written yet, and the
+        # rollback ends the read transaction rather than undoing work — so a student
+        # who is told to try again in a minute is not retrying over a row they were
+        # never told existed, and that is true by construction here rather than by
+        # the caller remembering.
+        session.rollback()
+        raise
+
+    bounced = refusing_verdict(verdicts.values())
+    if bounced is not None:
+        session.rollback()
+        # The one place this module commits, and the exception is deliberate. The
+        # rule "the caller owns the transaction" exists so that a response and its
+        # answers are stored together or not at all; a bounce stores neither, and
+        # what is committed here is only the verdicts that refused it. Losing them
+        # is the one way to break `classification`'s append-only guarantee that
+        # ADR 0055's grant cannot catch, because the row is never committed at all.
+        for output in verdicts.values():
+            record_verdict(session, output, answer_id=None)
+        session.commit()
+        raise SubmissionBouncedError(bounced)
+
     instant = clock.now(session, settings=settings)
     response = _existing_response(
         session, student_id=student_id, section_id=section.id, week_id=window.week_id
@@ -478,36 +525,19 @@ def store_submission(
         session.rollback()
         raise
 
-    outputs: list[CommentValidityOutput] = []
-    try:
-        for answer in written.values():
-            if answer.comment_text is None:
-                continue
-            outputs.append(
-                classify_submitted_comment(
-                    session, comment=answer.comment_text, answer_id=answer.id, gateway=gateway
-                )
-            )
-    except ClassifierUnavailableError:
-        # ADR 0114: the provider could not be asked, and this is one of the cases
-        # ADR 0056 keeps outside §3.3's floor. The response and its answers are
-        # rolled back here rather than left to the caller, so a student who is told
-        # to try again in a minute is not resubmitting over a row they were never
-        # told existed.
-        session.rollback()
-        raise
-
-    bounced = refusing_verdict(outputs)
-    if bounced is not None:
-        session.rollback()
-        raise SubmissionBouncedError(bounced)
+    # The verdicts obtained above, recorded now that there are answer rows for them
+    # to name (ADR 0055's promised reference). One row per comment and one model
+    # call per comment: the judging happened once, before the write, and this is
+    # the only place it is stored on the accepted path.
+    for question_id, output in verdicts.items():
+        record_verdict(session, output, answer_id=written[question_id].id)
 
     stored = StoredSubmission(
         response_id=response.id,
         is_valid=recompute_response_validity(session, response),
         first_submitted_at=response.first_submitted_at,
         last_submitted_at=response.last_submitted_at,
-        floored=any(was_floored(output) for output in outputs),
+        floored=any(was_floored(output) for output in verdicts.values()),
     )
     logger.info(
         "stored a weekly submission for section %s week %s (valid=%s, floored=%s)",

@@ -33,6 +33,12 @@ anybody but the reader.
 honest retryable refusal. They are named in E2-08's work order, so they are the
 two spellings this module may not choose.
 
+**Two entries here are refusals a student meets without having done anything
+wrong**, and both are written that way: `student.request_not_verified` is a
+cross-site request forgery defence firing, which the person at the keyboard cannot
+distinguish from a hiccup, and `submit.classifier_down` is a provider being down.
+Neither says the reader made a mistake, because neither of them did.
+
 **`student.not_a_student` lives in this module rather than one of its own**
 because this is the surface it is served on: the student API's one write route.
 E2-09 adds the read path's module beside this one and the two share the key.
@@ -52,6 +58,18 @@ __all__ = ["COPY"]
 # routes exist for which role.
 NOT_A_STUDENT = "not signed in as a student"
 
+# What a cookie-borne write carrying no valid double-submit token is told (ADR
+# 0089, ADR 0114's status table). One sentence for a missing token and a wrong
+# one, because the two must not be distinguishable: an attacker probing which of
+# their forgeries is closer is exactly what a constant-time comparison a layer
+# down is protecting. It says what happened without naming a header the person
+# reading it cannot set, and the action it offers is the one that works — the
+# page reloads, the tool mints a fresh token, and the submission goes through.
+REQUEST_NOT_VERIFIED = (
+    "This request could not be verified as one you made, so nothing was submitted. "
+    "Reload the page and try again."
+)
+
 # ADR 0114's refusal, for the provider failures ADR 0056 keeps outside the §3.3
 # floor. Three things in one sentence, and each is load-bearing: the check did not
 # happen (so the student is not told their comment was judged), the answers are
@@ -66,6 +84,7 @@ COPY: Mapping[str, CopyEntry] = {
     entry.key: entry
     for entry in (
         CopyEntry(key="student.not_a_student", text=NOT_A_STUDENT),
+        CopyEntry(key="student.request_not_verified", text=REQUEST_NOT_VERIFIED),
         CopyEntry(key="submit.classifier_down", text=CLASSIFIER_DOWN),
         # §3.3's two refused verdicts. Each says what a useful answer looks like
         # and gives one example in quotation marks, and neither says anything

@@ -235,19 +235,14 @@ def record_classification(
     return row
 
 
-def classify_comment_validity(
-    session: Session,
+def comment_validity_verdict(
     comment: str,
     gateway: AIGateway | None = None,
-    *,
-    answer_id: UUID | None = None,
 ) -> CommentValidityOutput:
-    """§7.4's comment-validity task: substantive / insufficient / nonsense.
+    """§7.4's comment-validity task, judged and not yet recorded.
 
-    One call in, one validated object out, one row stored. §3.3 gates
-    participation on the verdict, and refuses an `insufficient` comment to the
-    student's face at submit time with coaching copy — so what this returns
-    decides both what a student is told and what a section's validity rate says.
+    One call in, one validated object out, and **no row and no session** — which
+    is the whole of what separates this from `classify_comment_validity` below.
 
     On an endpoint that was reached and could not classify — it did not answer
     in time, or it answered to say it is temporarily unavailable — the character
@@ -263,20 +258,53 @@ def classify_comment_validity(
     process shares. Building one per comment is a connection pool per comment,
     and that shape was measured leaking sockets in E0-13's review.
 
-    `answer_id` is the `answer` row this comment was submitted on, stored on the
-    verdict so that the row names what it judged (ADR 0055, E2-08). See
-    `record_classification` for why it has a default at all.
+    **Why the judging is separable at all**, since the pair below was one function
+    until E2-08's security round: the submit path has to know the verdict *before*
+    it knows whether an `answer` row will exist to name. A comment §3.3 bounces
+    stores no answer and no response, and the verdict that bounced it still has to
+    be recorded — §7.4 rests auditability on "a specific prompt version and model
+    ID produced a specific classification". Splitting the call from the write is
+    what lets the caller record the same single call against an answer or against
+    none, without asking the model twice and without a second copy of the floor
+    rule anywhere. The taxonomy stays here, in one place, where ADR 0056 put it.
     """
     gateway = gateway or process_gateway()
     try:
-        output = gateway.run_task(
+        return gateway.run_task(
             prompt=render_prompt(VALIDITY_PROMPT_VERSION, comment),
             prompt_version=VALIDITY_PROMPT_VERSION,
             output_model=CommentValidityOutput,
             timeout=VALIDITY_TIMEOUT_SECONDS,
         )
     except AIProviderUnavailableError:
-        output = character_floor(comment)
+        return character_floor(comment)
 
+
+def classify_comment_validity(
+    session: Session,
+    comment: str,
+    gateway: AIGateway | None = None,
+    *,
+    answer_id: UUID | None = None,
+) -> CommentValidityOutput:
+    """§7.4's comment-validity task: judge one comment and store the verdict.
+
+    The two halves above and below composed — `comment_validity_verdict` decides
+    and `record_classification` writes — which is the whole of what this function
+    is. §3.3 gates participation on the verdict, and refuses an `insufficient`
+    comment to the student's face at submit time with coaching copy, so what this
+    returns decides both what a student is told and what a section's validity rate
+    says.
+
+    Callers that want both in one step use this, which is every caller that
+    already knows what the verdict will be recorded against: the async
+    re-classification sweep, and any later task. E2-08's submit path calls the two
+    halves separately, for the reason `comment_validity_verdict` gives.
+
+    `answer_id` is the `answer` row this comment was submitted on, stored on the
+    verdict so that the row names what it judged (ADR 0055, E2-08). See
+    `record_classification` for why it has a default at all.
+    """
+    output = comment_validity_verdict(comment, gateway)
     record_classification(session, ClassificationTask.COMMENT_VALIDITY, output, answer_id=answer_id)
     return output

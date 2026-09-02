@@ -33,7 +33,23 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-__all__ = ["SubmissionAccepted", "SubmissionRequest", "SubmittedAnswer"]
+__all__ = ["COMMENT_MAXIMUM_LENGTH", "SubmissionAccepted", "SubmissionRequest", "SubmittedAnswer"]
+
+# How long a submitted comment may be. SPEC §3.2 makes both comments free text and
+# gives them no length, and an unbounded one is a request body that reaches the
+# model: a bill, a latency inside SPEC §10's 2.5-second whole-round-trip budget,
+# and a prompt surface, all sized by whoever is typing. 4000 characters is several
+# times the longest weekly comment a student writes and small enough that none of
+# those three is a lever. It is enforced here rather than in the service so that an
+# over-long comment is refused *before* the provider is asked — ADR 0062's one
+# parse at the edge, and the difference between preventing the request and paying
+# for it — and it refuses rather than truncating, because a truncation stores words
+# the student did not write under their name and §5.1 shows those to the instructor.
+#
+# Not a configuration knob: an operator who could raise it would be raising
+# somebody else's bill and spending this route's own latency budget, and §6.3's
+# configuration surface does not name it.
+COMMENT_MAXIMUM_LENGTH = 4000
 
 
 class SubmittedAnswer(BaseModel):
@@ -43,13 +59,18 @@ class SubmittedAnswer(BaseModel):
     is so is checked in the service beside the rest of the rules rather than here:
     the refusal a student sees for it is one of `app.copy`'s sentences, and a
     Pydantic validator's own message is not.
+
+    **The one bound that does live here is the comment's length**, and the reason
+    is the opposite of the one above: it is worth refusing before anything reads
+    the body rather than in a service the request has already paid to reach. See
+    `COMMENT_MAXIMUM_LENGTH`.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     position: int = Field(ge=1)
     rating: int | None = None
-    comment_text: str | None = None
+    comment_text: str | None = Field(default=None, max_length=COMMENT_MAXIMUM_LENGTH)
     workload_hours: Decimal | None = None
 
 

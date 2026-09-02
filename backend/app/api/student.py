@@ -17,8 +17,13 @@ rather than about the survey. The mapping is a table rather than a chain of `if`
 that a reason with no status is a `KeyError` at the one place that would show it,
 not a silent 500.
 
-**Three statuses are worth their own sentence.**
+**Four statuses are worth their own sentence.**
 
+  - **403 when a cookie-borne submission carries no valid double-submit token** —
+    ADR 0089's check, which this route is the first mutating endpoint to consume,
+    and which `app.api.deps.csrf_verified_student` applies. A Bearer-authenticated
+    request is exempt by construction, because no cross-site page can make a
+    browser attach an `Authorization` header.
   - **404 for a section the student is not enrolled in**, with the same body a
     section id that names nothing gets. SPEC §4.1 item 1, asserted from E2 because
     this is the first student-visible path: a 403 here, or a 404 whose body differed,
@@ -47,7 +52,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_student
+from app.api.deps import csrf_verified_student
 from app.config import Settings
 from app.copy.submit import COPY
 from app.db import get_session
@@ -99,7 +104,7 @@ def submit_weekly_survey(
     request: Request,
     submission: SubmissionRequest,
     response: Response,
-    claims: SessionClaims = Depends(require_student),
+    claims: SessionClaims = Depends(csrf_verified_student),
     session: Session = Depends(get_session),
 ) -> SubmissionAccepted:
     """Store one student's answers to one section's open weekly survey.

@@ -27,6 +27,18 @@ a comment the floor calls too brief is refused with the same sentence a model's
 would be — the student can fix it, and the alternative is storing a submission
 this system has already decided does not count.
 
+**And a bounce keeps the verdict that produced it.** The judging is separate from
+the recording (`verdict_for_submitted_comment` and `record_verdict`) so that the
+submit path can ask the model once and then decide where the row goes: against the
+`answer` row on an accepted submission, and against nothing on a bounced one,
+where §3.3 stores nothing as submitted. Discarding it was the natural shape and
+the wrong one — §7.4 rests auditability on "a specific prompt version and model ID
+produced a specific classification", and a rolled-back row is the one way to lose
+that which ADR 0055's grant cannot prevent, because the row is never committed at
+all. ADR 0114 records the rule, and the limitation it leaves: the bounced comment's
+*text* is not stored, so it is outside the reach of §5.2's moderation and §6.2's
+Care queue.
+
 **What `response.is_valid` says.** The latest verdict of each submitted comment,
 and nothing else. A comment left blank has no verdict and no effect (§3.3 in as
 many words), and a response with no comments at all is valid.
@@ -60,7 +72,13 @@ from app.ai.gateway import (
     AIProviderUnreachableError,
     AIResponseInvalidError,
 )
-from app.ai.tasks import FLOOR_MODEL_ID, FLOOR_PROMPT_VERSION, classify_comment_validity
+from app.ai.tasks import (
+    FLOOR_MODEL_ID,
+    FLOOR_PROMPT_VERSION,
+    classify_comment_validity,
+    comment_validity_verdict,
+    record_classification,
+)
 from app.models.ai import Classification, ClassificationTask
 from app.models.survey import Answer, Response
 
@@ -68,11 +86,12 @@ __all__ = [
     "REFUSED_VERDICTS",
     "REFUSED_VERDICT_TOKENS",
     "ClassifierUnavailableError",
-    "classify_submitted_comment",
     "enqueue_reclassification",
     "reclassify_floored_comments",
     "recompute_response_validity",
+    "record_verdict",
     "refusing_verdict",
+    "verdict_for_submitted_comment",
     "was_floored",
 ]
 
@@ -115,25 +134,52 @@ class ClassifierUnavailableError(Exception):
     """
 
 
-def classify_submitted_comment(
-    session: Session,
-    *,
-    comment: str,
-    answer_id: UUID,
-    gateway: AIGateway | None = None,
+def verdict_for_submitted_comment(
+    comment: str, gateway: AIGateway | None = None
 ) -> CommentValidityOutput:
     """One submitted comment's verdict, with `ClassifierUnavailableError` for ADR 0056's raises.
 
-    A thin boundary over `app.ai.tasks.classify_comment_validity`, and the whole of
-    what it adds is the taxonomy decision: the availability shapes floor inside that
-    function and never arrive here, and the three that do arrive become one
-    exception this path answers for. The verdict row is written by that function,
-    naming `answer_id`, so this module writes no audit row of its own.
+    A thin boundary over `app.ai.tasks.comment_validity_verdict`, and the whole of
+    what it adds is the taxonomy decision: the availability shapes floor inside
+    that function and never arrive here, and the three that do arrive become one
+    exception this path answers for.
+
+    **It judges and stores nothing**, which is what lets the submit path decide
+    where the row goes once it knows whether the submission was accepted — see
+    `record_verdict` below.
     """
     try:
-        return classify_comment_validity(session, comment, gateway, answer_id=answer_id)
+        return comment_validity_verdict(comment, gateway)
     except UNCLASSIFIABLE as failure:
         raise ClassifierUnavailableError(str(failure)) from failure
+
+
+def record_verdict(
+    session: Session, output: CommentValidityOutput, *, answer_id: UUID | None
+) -> None:
+    """Store one verdict, against the answer it judged or against nothing.
+
+    `answer_id` is the `answer` row on an accepted submission, and `None` on a
+    bounced one — where SPEC §3.3 stores nothing as submitted, so there is no
+    answer row for the verdict to name. ADR 0055's rule that a classification "names
+    no comment" is what makes the second case legal: the column is nullable, and
+    the comment's **text** is deliberately not stored beside it, because a comment
+    is "short and often formulaic … so a digest of one is recoverable by dictionary
+    in seconds".
+
+    Why a bounced verdict is stored at all: §7.4 rests auditability on "a specific
+    prompt version and model ID produced a specific classification", and a student
+    bounced three times is three model calls that were made, answered and paid for.
+    A bounce that discarded them would leave §6.1's drift panel sampling none of
+    them and an administrator asking why a student's comment keeps being refused
+    with no row to look at. ADR 0114 records the rule and the limitation it leaves.
+
+    One line, and it exists so that `app.services.submissions` reaches
+    `app.ai.tasks.record_classification` — still the one place a classification row
+    is written — through this module rather than importing the AI layer to write an
+    audit row.
+    """
+    record_classification(session, ClassificationTask.COMMENT_VALIDITY, output, answer_id=answer_id)
 
 
 def was_floored(output: CommentValidityOutput) -> bool:
