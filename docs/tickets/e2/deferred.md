@@ -34,6 +34,38 @@ ADR 0110 already gives up for the ranges, from the same statement, so it is one
 exposure rather than two. A later ticket that takes the mechanism should take it
 for the bounds and the kind together.
 
+## A bounced comment's text reaches neither moderation nor the Care queue — a ruling is owed
+
+Deferred by E2-08's security fix round, and it is a **question rather than a
+finding**: nothing is broken, and both answers to it are safety decisions the spec
+does not make.
+
+SPEC §3.3 bounces a comment the classifier calls `insufficient` or `nonsense`
+before submission, and the ticket's Scope makes that store nothing. The round
+added one exception — the verdict that bounced it is kept, because SPEC §7.4 rests
+auditability on "a specific prompt version and model ID produced a specific
+classification" and a rolled-back row is the one way to lose an append-only row
+that ADR 0055's grant cannot prevent. The comment's **text** is still not stored:
+ADR 0055 refused even a fingerprint of one on `classification`, "recoverable by
+dictionary in seconds" over strings this short, and
+[ADR 0114](../../adr/0114-an-unclassifiable-comment-refuses-rather-than-floors.md)
+records the consequence as an open limitation rather than a decision.
+
+The consequence is this. §5.2's moderation pass and §6.2's route to the Care queue
+both run over stored comments, so a student whose comment discloses harm and is
+bounced for being too brief is a student the Care path never sees, and "the
+answers are still in the form" is not the same as anyone having read them. Against
+that, §4 and ADR 0055 keep a student's words in one place under one set of rules,
+and storing refused text creates a second — with a retention question, a grant
+question and a reveal question of its own.
+
+**Done when** the owner has ruled which of those governs a comment the student was
+told did not count, and the ticket that implements the ruling is named in the
+breakdown. If the ruling is that bounced text must reach §6.2's path, that ticket
+owns where it is stored, who may read it and what removes it; if the ruling is
+that it must not, ADR 0114's paragraph becomes a decision rather than a limitation
+and this entry closes with it.
+
 ## The launch-path roster enqueue still waits six seconds on a broker that is down — unowned
 
 Deferred by E2-08 (the submit path), found while building its own enqueue against

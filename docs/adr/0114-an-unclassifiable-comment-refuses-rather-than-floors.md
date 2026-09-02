@@ -46,18 +46,39 @@ before the refusal is raised, so the student's answers are still in the form in
 front of them and no row exists that they were not told about.
 
 **A comment the classifier judges `insufficient` or `nonsense` bounces with HTTP
-422**, carrying the verdict and that verdict's coaching copy, and storing nothing.
-422 rather than 400: the request was understood and its content was not acceptable,
-which is the same reading every other value refusal on this route takes. The
-verdict rides in the body rather than in the status because there are two verdicts
-and §3.3 requires two different sentences.
+422**, carrying the verdict and that verdict's coaching copy, and storing no
+response and no answer. 422 rather than 400: the request was understood and its
+content was not acceptable, which is the same reading every other value refusal on
+this route takes. The verdict rides in the body rather than in the status because
+there are two verdicts and §3.3 requires two different sentences.
+
+**A bounce keeps the classification that produced it, against no answer.** Added
+2026-09-02 by this ticket's security round. The gate runs before anything is
+written, so a bounced submission creates no response and no answer to roll back,
+and the verdict — a model's or the character floor's alike — is recorded with
+`answer_id` NULL, which ADR 0055 already permits ("the row names no comment"). The
+row is the record SPEC §7.4 rests auditability on: "a specific prompt version and
+model ID produced a specific classification". A student bounced three times is
+three model calls that were made, answered and paid for, and discarding them is
+the one way to lose an append-only row that ADR 0055's grant cannot prevent —
+`UPDATE` and `DELETE` are withheld, and a row that is never committed needs
+neither.
 
 The rest of the route's answer table follows the same principle and is recorded
-here so it is in one place: 401 for a request with no student session, 404 for a
-section the student cannot reach *and* for a section id that names nothing (SPEC
-§4.1 item 1 — the two must be indistinguishable), 409 for a closed window and for
-the duplicate the uniqueness constraint refuses, and 422 for every value the
-question rows reject.
+here so it is in one place: **403** when a cookie-borne submission carries no
+valid `X-Pulse-CSRF` token (added 2026-09-02 by the security round — ADR 0089
+settles the double-submit mechanism, the header and the binding to `jti` and
+settles no status; 403 rather than 401 because the session is *valid* and the
+request is not, so a `WWW-Authenticate` challenge would invite the client to
+re-present a credential that was already correct, and a Bearer-authenticated
+request is exempt by construction because no cross-site page can make a browser
+attach an `Authorization` header); 401 for a request with no student session; 404
+for a section the student cannot reach *and* for a section id that names nothing
+(SPEC §4.1 item 1 — the two must be indistinguishable); 409 for a closed window,
+for the duplicate the uniqueness constraint refuses, and for the withdrawal
+[ADR 0115](0115-a-resubmission-revises-its-answers-in-place.md) refuses; and 422
+for every value the question rows reject, for a comment over the 4000-character
+bound the request model carries, and for the bounce above.
 
 ## Alternatives rejected
 
@@ -98,6 +119,19 @@ Rejected because 409 on this route already means "the state of your week is not
 what you think it is" — a closed window, a response another request stored — and a
 bounce is neither.
 
+**Discarding a bounce's classification with the rest of the transaction.** The
+natural shape, and the one this route shipped with until the security round: raise,
+and let the request's transaction roll back. It makes every other assertion about a
+bounce pass — nothing is stored, which is what §3.3 asks — and it silently drops
+the audit row §7.4 requires, through a mechanism nobody chose rather than a
+decision anybody made.
+
+**Storing the bounced comment's text beside the preserved verdict**, so that a
+refused comment could be moderated. Not rejected on its merits, and **not decided
+here at all** — see the limitation below. ADR 0055 refused a comment fingerprint on
+`classification` on confidentiality grounds, and storing the text itself is a
+larger version of the same question; it is the owner's, not this record's.
+
 ## Consequences
 
 **A provider that is down in a way ADR 0056 does not floor blocks submission
@@ -114,12 +148,35 @@ refuses with this record's 503 and stores nothing. Both run against the stack, a
 so does the unreachable row, whose address is a closed loopback port because a mock
 that answers cannot mint a connection that fails.
 
-**The bounce's status is now pinned by this record rather than by the tests.**
-E2-08's suite deliberately asserts only "a client error, the registry's coaching
-text, nothing stored", so 422 is this record's to change; a later ticket that moves
-it moves this paragraph with it.
+**The bounce's status is pinned by this record and asserted by the suite.**
+E2-08's tests asserted only "a client error, the registry's coaching text, nothing
+stored" while the number was open; the security round ruled 422 and the tests now
+assert it, so a bounce that starts answering 400 or 409 is a change somebody makes
+deliberately and moves this paragraph with.
 
-**E2-10's form has a contract it can build against.** A 503 with `Retry-After`
-means "keep what is on screen and offer to retry"; a 422 with a verdict means
-"show this sentence beside the comment field"; a 409 means "reload, the week has
-moved". Nothing in that list requires the form to read a message and guess.
+**A bounced comment's *text* is outside the reach of §5.2's moderation and §6.2's
+Care queue, and this record does not decide that it should be.** The verdict is
+kept and the words are not: `classification` carries no comment text and ADR 0055
+refused even a fingerprint of one, "recoverable by dictionary in seconds" over
+strings this short. So a comment that is bounced as `nonsense` — or as
+`insufficient` — is never stored anywhere, and the moderation pass that routes a
+threat or a self-harm disclosure to Care (§6.2) runs over stored comments. A
+student whose comment discloses harm and is bounced for being too brief is a
+student the Care path never sees, and "the answers are still in the form" is not
+the same as anyone having read them.
+
+**Stated as an open limitation rather than settled**, because both directions are
+safety decisions the spec does not make. §6.2 says a Care disclosure must reach the
+queue; §4 and ADR 0055 say a student's words are stored in one place under one set
+of rules, and storing refused text creates a second. Which of those governs a
+comment the student was told did not count is the owner's ruling, not this
+record's — the same boundary ADR 0056 drew when it left the submit path's behaviour
+to E2 rather than deciding it in E0-13. It is carried in
+`docs/tickets/e2/deferred.md` with a done-when so it is scheduled rather than
+remembered, and nothing in E2-08 depends on which way it goes.
+
+**E2-10's form has a contract it can build against.** A 403 means "reload and try
+again"; a 503 with `Retry-After` means "keep what is on screen and offer to retry";
+a 422 with a verdict means "show this sentence beside the comment field"; a 409
+means "reload, the week has moved". Nothing in that list requires the form to read
+a message and guess.
