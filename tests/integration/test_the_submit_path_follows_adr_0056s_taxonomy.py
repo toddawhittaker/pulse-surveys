@@ -41,6 +41,9 @@ from typing import Any
 
 import pytest
 from fixtures.submit import (
+    ANSWER_TABLE,
+    CHARACTER_FLOOR,
+    CLASSIFICATION_TABLE,
     SUBSTANTIVE_COMMENT,
     USER_TABLE,
     SubmitWorld,
@@ -577,6 +580,130 @@ def test_the_re_classification_lands_a_second_row_over_a_floored_answer(
         f"{len(before)} the submit path wrote. §3.3 promises a floored submission is 'then "
         "classified async', and ADR 0055 makes `classification` append-only so a re-run is a new "
         "row rather than an edit."
+    )
+
+
+def test_a_bounce_keeps_the_verdict_that_produced_it(
+    open_submit_tool: Any,
+    submit_world: SubmitWorld,
+    signed_in_student: Any,
+    mock_ai: Any,
+    mock_ai_endpoint: Any,
+    open_now: tuple[Any, Any],
+    submit_contract: Any,
+) -> None:
+    """A bounced submission stores no response and keeps the classification that bounced it.
+
+    SPEC §8 makes `classification` append-only and ADR 0055 makes the grant what
+    enforces it — "`SELECT, INSERT` on the table and nothing else, so the
+    connection the API and the worker hold cannot `UPDATE` or `DELETE` a row
+    however the application is written". A bounce that rolls its whole
+    transaction back is the third way to lose the row, and the one no grant can
+    stop: the verdict is never committed at all.
+
+    What that costs is the record §7.4 rests auditability on — "a specific prompt
+    version and model ID produced a specific classification for a specific
+    comment". A student bounced three times is three model calls that were made,
+    paid for and answered, with nothing anywhere saying so: §6.1's drift panel
+    samples across tasks and would sample none of them, and an admin asking why a
+    student says the tool keeps refusing their comment has no row to look at.
+
+    **`answer_id` is `NULL` on these rows and that is the design**, not an
+    omission: nothing is stored as submitted on a bounce, so there is no `answer`
+    row for the verdict to name. ADR 0055's rule that "the row names no comment"
+    is what makes that legal — the column is nullable, and the *text* is
+    deliberately not stored beside it, because a comment is "short and often
+    formulaic … so a digest of one is recoverable by dictionary in seconds".
+
+    **Both bounces are made, and their audit pairs are compared.** A comment the
+    model calls `insufficient`, and a comment short enough that the character
+    floor calls it `insufficient` while the provider answers 503 — ADR 0054 puts
+    the floor's verdict at `substantive` or `insufficient` and never `nonsense`,
+    so the floored path bounces too, which is the near miss this pair is written
+    against. Both have to leave a row: an implementation that kept the model's row
+    and rolled back the floor's would pass a test that only made the first
+    submission. The two pairs differ for the reason ADR 0054 gives — a floored row
+    names the floor in its prompt version and model id — and comparing them is how
+    that is asserted without either test holding a copy of the two strings.
+
+    **The mutation it kills:** the bounce implemented as "raise, and let the
+    request's transaction roll back". It is the natural way to write it, it makes
+    every other assertion in this ticket pass, and it silently discards the audit
+    row §7.4 requires — which is `docs/MISTAKES.md` entry 2's shape reached
+    through a mechanism nobody chose.
+    """
+    student = a_student(
+        open_submit_tool,
+        submit_world,
+        signed_in_student,
+        open_now,
+        ai_base_url=mock_ai_endpoint.base_url,
+    )
+    world = student.world
+
+    def rows_added_by(submit: Any) -> list[dict[str, Any]]:
+        """Every `classification` row one submission left behind."""
+        before = {row["id"] for row in world.rows_of(CLASSIFICATION_TABLE)}
+        answered = submit()
+        assert answered.status_code == submit_contract.unprocessable, (
+            f"The submission was answered {answered.status_code} rather than "
+            f"{submit_contract.unprocessable}. §3.3 bounces a comment the classifier will not "
+            f"call substantive, before submission. Body begins {answered.text[:400]!r}."
+        )
+        return [row for row in world.rows_of(CLASSIFICATION_TABLE) if row["id"] not in before]
+
+    judged = rows_added_by(
+        lambda: student.submit(a_valid_submission(comment=marked(mock_ai, "insufficient")))
+    )
+    assert len(judged) == 1, (
+        f"A bounce on a verdict the model produced left {len(judged)} classification rows: "
+        f"{judged}. The model was asked, it answered, and SPEC §7.4 requires that every "
+        "classification store the prompt version and model ID that produced it — a bounce that "
+        "rolls the row back leaves the call unrecorded and unbillable to anything."
+    )
+
+    # A comment below SPEC §3.3's character heuristic, carrying the selector that
+    # makes the provider answer 503. ADR 0056 floors on that status; ADR 0054
+    # puts the floor's verdict at `insufficient` below the threshold; §3.3
+    # bounces on `insufficient`. So this is the floored path arriving at the same
+    # outcome by a different route, and it is the near miss.
+    unavailable = mock_ai.marker_for("503")
+    short = f"{unavailable} brief"
+    assert len(short) < CHARACTER_FLOOR, (
+        f"{short!r} is {len(short)} characters and SPEC §3.3's heuristic floor is "
+        f"{CHARACTER_FLOOR}. This half of the test needs a comment the *floor* calls "
+        "insufficient; a longer one would floor to `substantive`, be accepted, and this would "
+        "stop being a test about a bounce at all."
+    )
+
+    floored = rows_added_by(lambda: student.submit(a_valid_submission(comment=short)))
+    assert len(floored) == 1, (
+        f"A bounce on a floored verdict left {len(floored)} classification rows: {floored}. The "
+        "provider was unavailable, the character heuristic decided, and ADR 0054 makes that "
+        "decision 'a `CommentValidityOutput` like any other' — E2 has one shape to read, whichever "
+        "produced it, and one row to store."
+    )
+
+    assert world.responses() == [], (
+        f"A bounced submission stored {world.responses()}. The ticket's Scope: 'nothing is stored "
+        "as submitted on a bounce'."
+    )
+    assert world.rows_of(ANSWER_TABLE) == [], (
+        f"A bounced submission stored {world.rows_of(ANSWER_TABLE)} answers. Without a response "
+        "there is nothing for them to belong to."
+    )
+    for row in (*judged, *floored):
+        assert row["answer_id"] is None, (
+            f"A bounce's classification row names answer {row['answer_id']!r}. Nothing is stored "
+            "on a bounce, so there is no `answer` row for it to name — a value here points at a "
+            "row that does not exist, or at somebody else's."
+        )
+
+    assert world.audit_pair_of(judged[0]) != world.audit_pair_of(floored[0]), (
+        f"A bounce the model produced and a bounce the character floor produced carry the same "
+        f"prompt version and model id: {world.audit_pair_of(judged[0])}. ADR 0054 exists so that "
+        "'a reader can tell the two apart with no schema knowledge', and a floor row that looks "
+        "like a model's is a classification that never happened, filed as one that did."
     )
 
 

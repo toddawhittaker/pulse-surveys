@@ -26,10 +26,13 @@ comment text and in nothing else. The marker strings are read off the mock's own
 `/mock/rules` through `marker_for`, never copied.
 
 **Statuses.** 401, 404, 409 and 422 are E2-08's work order, transcribed in
-`tests/fixtures/submit.py`. The status a *bounce* answers with is not settled
-anywhere, so the two bounce tests assert what the criterion says — a client
-error, the registry's coaching text, and nothing stored — and deliberately do not
-pin the number.
+`tests/fixtures/submit.py`. Two more were open while this module was first
+written and both were ruled in the security fix round: a **bounce is 422** — the
+work order named that status without saying a bounce was one of its cases, and
+these tests asserted only "a client error" until it was settled — and a failed
+CSRF check is **403**, which ADR 0114's status table records because ADR 0089
+settles the double-submit mechanism and no status. Every refusal in this module
+now asserts a number rather than a range.
 """
 
 from typing import Any
@@ -37,6 +40,10 @@ from uuid import uuid4
 
 import pytest
 from fixtures.submit import (
+    BEARER_SESSION,
+    CLASSIFICATION_TABLE,
+    COMMENT_MAXIMUM_LENGTH,
+    COOKIE_SESSION,
     COURSE_COMMENT_POSITION,
     COURSE_RATING_POSITION,
     INSTRUCTOR_COMMENT_POSITION,
@@ -164,6 +171,7 @@ def test_a_comment_the_classifier_refuses_bounces_with_the_registrys_coaching_co
     mock_ai: Any,
     mock_ai_endpoint: Any,
     open_now: tuple[Any, Any],
+    submit_contract: Any,
     registry_key_of: Any,
     verdict: str,
 ) -> None:
@@ -178,10 +186,11 @@ def test_a_comment_the_classifier_refuses_bounces_with_the_registrys_coaching_co
     it a bounce is equally well explained by a route that refuses everything, and
     the parametrised pair would agree with it twice.
 
-    **The status is deliberately not pinned.** E2-08's work order settles 401,
-    404, 409, 422 and 503 and does not say which one a bounce is, so what is
-    asserted is the criterion: a client error, the coaching copy the registry
-    holds, and no response stored.
+    **The status is 422, ruled in this ticket's security fix round.** E2-08's work
+    order settled 401, 404, 409, 422 and 503 and said which refusal each belonged
+    to without saying which one a bounce is; this test asserted only "a client
+    error" until that gap was closed. It asserts the number now, so a bounce that
+    starts answering 409 or 400 is a change somebody has to make deliberately.
 
     **The mutation it kills:** a bounce that stores the response anyway and marks
     it invalid — "silently penalized after the fact" in as many words — and a
@@ -199,10 +208,11 @@ def test_a_comment_the_classifier_refuses_bounces_with_the_registrys_coaching_co
 
     bounced = student.submit(a_valid_submission(comment=marked(mock_ai, verdict)))
 
-    assert 400 <= bounced.status_code < 500, (
-        f"A comment the classifier called {verdict!r} was answered {bounced.status_code}. §3.3 "
-        "bounces it before submission; a 2xx is the submission being accepted and a 5xx is the "
-        f"student meeting an error. Body begins {bounced.text[:400]!r}."
+    assert bounced.status_code == submit_contract.unprocessable, (
+        f"A comment the classifier called {verdict!r} was answered {bounced.status_code} rather "
+        f"than {submit_contract.unprocessable}. §3.3 bounces it before submission; a 2xx is the "
+        "submission being accepted and a 5xx is the student meeting an error. Body begins "
+        f"{bounced.text[:400]!r}."
     )
     key = registry_key_of(bounced)
     assert verdict in key.lower(), (
@@ -900,3 +910,219 @@ def test_a_session_that_is_not_a_students_gets_the_same_answer_as_no_session_at_
         "response', because the difference between them is a statement about what this route is."
     )
     assert world.responses() == [], "A non-student session wrote a response."
+
+
+# ---------------------------------------------------------------------------
+# ADR 0089's double-submit check, which this route is the first to consume.
+# ---------------------------------------------------------------------------
+
+
+def test_a_cookie_borne_submit_is_refused_without_the_csrf_token_and_accepted_with_it(
+    open_submit_tool: Any,
+    submit_world: SubmitWorld,
+    signed_in_student: Any,
+    mock_ai: Any,
+    mock_ai_endpoint: Any,
+    open_now: tuple[Any, Any],
+    submit_contract: Any,
+    registry_key_of: Any,
+) -> None:
+    """ADR 0089: "E2's first mutating endpoint consumes the check." This is that endpoint.
+
+    > **CSRF, live because of `SameSite=None`:** a double-submit token bound to
+    > the session's `jti` by HMAC (`issue_csrf_token`/`verify_csrf_token`). A
+    > tossed cookie without the secret still fails, and a token minted for one
+    > session does not verify against another's `jti`. Its cookie is not
+    > `HttpOnly` — the SPA echoes it in `X-Pulse-CSRF`. E2's first mutating
+    > endpoint consumes the check; E1-15 carries the line so it cannot arrive
+    > unowned.
+
+    The check exists and, until this route, had **no caller** — which is
+    `docs/MISTAKES.md` entry 2 exactly: a primitive that is written, unit-tested
+    and never reached is a convention. The cookie is `SameSite=None` because the
+    tool lives in a cross-site iframe for the whole visit, so a browser sends it
+    on a cross-site form post; the double-submit pair is the only thing between
+    that and any page on the internet writing a student's weekly survey.
+
+    **The two halves differ by the pair and by nothing else** — same student's
+    session, same body, same section, same open window, one carrying the cookie
+    and the `X-Pulse-CSRF` header and one carrying neither. The accepted half is
+    made by a second student so that the resubmission rule is not what either
+    half is measuring.
+
+    **The status is 403, and ADR 0089 is not where it comes from.** That record
+    settles the mechanism, the `X-Pulse-CSRF` header and the binding to `jti` and
+    settles no status; this ticket's security fix round ruled 403 and **ADR 0114's
+    status table records it** beside the refusals that record already carries. 403
+    rather than 401 because the session is valid and the *request* is not — a
+    `WWW-Authenticate` challenge here would invite the client to do something that
+    would not help, which is the same distinction the 401 tests above turn on.
+
+    **The mutation it kills:** the check omitted from the route — its state
+    today, with zero callers — and the check written as "a CSRF cookie is
+    present", which a cross-site attacker satisfies by tossing a cookie, since
+    the cookie travels on a cross-site request and the *header* does not.
+    """
+    student = a_student_in_an_open_window(
+        open_submit_tool, submit_world, signed_in_student, mock_ai_endpoint, open_now
+    )
+    world = student.world
+    other = signed_in_student(student.client, world, world.another_student())
+    submission = a_valid_submission(comment=marked(mock_ai, "substantive"))
+
+    with_the_token = other.submit(submission, via=COOKIE_SESSION, csrf=True)
+    accepted(with_the_token, "A cookie-borne submission carrying ADR 0089's double-submit pair")
+
+    without = student.submit(submission, via=COOKIE_SESSION, csrf=False)
+
+    assert without.status_code == submit_contract.csrf_refused, (
+        f"A cookie-authenticated submission carrying no CSRF token was answered "
+        f"{without.status_code} rather than {submit_contract.csrf_refused}. ADR 0089 makes the "
+        "session cookie `SameSite=None` — the tool is inside a cross-site iframe for the whole "
+        "visit — so a browser sends it on a cross-site form post, and the double-submit pair is "
+        "the only thing that distinguishes the student's own request from any page on the "
+        f"internet. Body begins {without.text[:400]!r}."
+    )
+    registry_key_of(without)
+    stored = [
+        row for row in world.responses() if row["user_id"] == world.student[world.key_of("user")]
+    ]
+    assert stored == [], (
+        f"A submission refused for a missing CSRF token stored {stored}. The check is worth "
+        "nothing if the write has already happened by the time it runs."
+    )
+
+
+def test_a_bearer_borne_submit_needs_no_csrf_token(
+    open_submit_tool: Any,
+    submit_world: SubmitWorld,
+    signed_in_student: Any,
+    mock_ai: Any,
+    mock_ai_endpoint: Any,
+    open_now: tuple[Any, Any],
+) -> None:
+    """The exemption, and it is the near-miss pair for the test above.
+
+    ADR 0089's cookieless path: "the SPA captures the fragment into
+    `sessionStorage`, strips it from the address bar, and sends it as
+    `Authorization: Bearer` thereafter. `session_from_request` reads the Bearer
+    header before the cookie, so the Bearer path carries the session with no
+    cookie required." A Bearer header is not something a cross-site form or an
+    image tag can make a browser send, so a request carrying one is not a request
+    a browser can be tricked into making, and there is nothing for the check to
+    protect.
+
+    **Without this half the fix has an obvious wrong shape that passes.**
+    Requiring the token unconditionally refuses every request the SPA actually
+    makes — ADR 0089 says the SPA does not depend on the cookie at all — so the
+    product would be broken for the one client it has while the test above went
+    green. It is also the shape that reads as "more secure" in review, which is
+    why it is written down rather than left to judgement.
+
+    **The request carries no cookie at all**, which the fixture clears before and
+    after every submission: a leftover CSRF cookie from another request would
+    make this pass while the route was in fact demanding one.
+
+    **The mutation it kills:** the check applied to every request rather than to
+    a cookie-authenticated one.
+    """
+    student = a_student_in_an_open_window(
+        open_submit_tool, submit_world, signed_in_student, mock_ai_endpoint, open_now
+    )
+    world = student.world
+
+    answered = student.submit(
+        a_valid_submission(comment=marked(mock_ai, "substantive")),
+        via=BEARER_SESSION,
+        csrf=False,
+    )
+
+    accepted(answered, "A Bearer-authenticated submission carrying no CSRF token")
+    assert len(world.responses()) == 1, (
+        f"The submission left {len(world.responses())} responses. ADR 0089 makes Bearer the path "
+        "the SPA uses for every request after the launch, so a route that refuses it refuses the "
+        "only client this product has."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The bound on a submitted comment. ADR 0062: parsed once, at the edge.
+# ---------------------------------------------------------------------------
+
+
+def test_a_comment_over_the_length_bound_is_refused_before_the_provider_is_asked(
+    open_submit_tool: Any,
+    submit_world: SubmitWorld,
+    signed_in_student: Any,
+    mock_ai: Any,
+    mock_ai_endpoint: Any,
+    open_now: tuple[Any, Any],
+    submit_contract: Any,
+) -> None:
+    """A comment of 4000 characters is accepted and one of 4001 is refused, unasked.
+
+    SPEC §3.2 makes both comments free text and gives them no length, so an
+    unbounded comment is a request body that reaches the model: a bill, a latency
+    inside SPEC §10's 2.5-second budget, and a prompt surface, all chosen by
+    whoever is typing. The bound is 4000 characters, ruled in this ticket's
+    security fix round.
+
+    **The boundary is the pair, and it is exact.** 4000 is accepted and 4001 is
+    refused, so a bound written `<` where it should be `<=` fails at the accepted
+    half rather than passing here — the off-by-one is the whole reason a bound
+    gets a test rather than a review comment. Both comments carry the mock's
+    forced-verdict marker, which counts toward the length like any other
+    character, so the two differ by exactly one character of padding.
+
+    **That no classification row is written is the assertion that the refusal
+    happened at the edge** (ADR 0062: "One parse, at the edge, into typed values").
+    A bound enforced *after* the provider call refuses the submission and has
+    already spent the request it was written to prevent, and a status assertion
+    alone cannot tell the two apart. The count is taken immediately before the
+    over-length submission and again after, so the accepted half's own
+    classification is not what is being counted.
+
+    **The mutation it kills:** the bound placed on the service rather than on the
+    request model, or written as a truncation. A truncation is worse than no
+    bound: it stores words the student did not write under their name, and §5.1
+    shows them to the instructor.
+    """
+    student = a_student_in_an_open_window(
+        open_submit_tool, submit_world, signed_in_student, mock_ai_endpoint, open_now
+    )
+    world = student.world
+    other = signed_in_student(student.client, world, world.another_student())
+    marker = mock_ai.marker_for("substantive")
+
+    def comment_of(length: int) -> str:
+        assert length > len(marker), (
+            f"A comment of {length} characters cannot carry the mock's {marker!r} selector, which "
+            f"is {len(marker)} characters. Without the selector the mock judges by its own length "
+            "threshold and this test stops being about the tool's bound."
+        )
+        built = marker + "a" * (length - len(marker))
+        assert len(built) == length, f"Built a comment of {len(built)} characters, not {length}."
+        return built
+
+    at_the_bound = other.submit(a_valid_submission(comment=comment_of(COMMENT_MAXIMUM_LENGTH)))
+    accepted(at_the_bound, f"A comment of exactly {COMMENT_MAXIMUM_LENGTH} characters")
+
+    before = len(world.rows_of(CLASSIFICATION_TABLE))
+    over = student.submit(a_valid_submission(comment=comment_of(COMMENT_MAXIMUM_LENGTH + 1)))
+
+    assert over.status_code == submit_contract.unprocessable, (
+        f"A comment of {COMMENT_MAXIMUM_LENGTH + 1} characters was answered {over.status_code} "
+        f"rather than {submit_contract.unprocessable}. One character over the bound is the case "
+        f"the bound exists for. Body begins {over.text[:400]!r}."
+    )
+    stored = [
+        row for row in world.responses() if row["user_id"] == world.student[world.key_of("user")]
+    ]
+    assert stored == [], f"An over-length comment stored {stored}."
+    assert len(world.rows_of(CLASSIFICATION_TABLE)) == before, (
+        f"The over-length submission left {len(world.rows_of(CLASSIFICATION_TABLE))} "
+        f"classification rows where there were {before}. A row means the comment reached the "
+        "provider — the request was sent, paid for and judged — and only then refused, which is "
+        "the whole of what this bound was added to prevent. ADR 0062 puts the parse at the edge "
+        "precisely so a value is judged before anything downstream acts on it."
+    )

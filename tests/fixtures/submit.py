@@ -126,6 +126,43 @@ CLASSIFIER_DOWN_STATUS = 503
 RETRY_AFTER_SECONDS = "60"
 BEARER_SCHEME = "Bearer"
 
+# The status a failed CSRF check answers with, ruled in E2-08's security fix
+# round and recorded in ADR 0114's status table. ADR 0089 settles the double-
+# submit mechanism, the `X-Pulse-CSRF` header and the binding to `jti`, and
+# settles no status — which is why the number belongs to a record of this
+# ticket's rather than being inferred here. 403 rather than 401: the session is
+# valid and the *request* is not, so a `WWW-Authenticate` challenge inviting the
+# client to sign in again would be an instruction it cannot act on.
+CSRF_REFUSED_STATUS = 403
+
+# ADR 0089's two carriers for one session, named so a test can say which it
+# means. "`session_from_request` reads the Bearer header before the cookie, so
+# the Bearer path carries the session with no cookie required."
+BEARER_SESSION = "bearer"
+COOKIE_SESSION = "cookie"
+
+# The header the double-submit token is echoed in, spelled by ADR 0089: the CSRF
+# cookie "is not `HttpOnly` — the SPA echoes it in `X-Pulse-CSRF`". Transcribed
+# from the record rather than chosen here, and it is the same string
+# `tests/integration/test_lti_launch_door.py` quotes when it asserts that cookie
+# is readable by a script.
+CSRF_HEADER = "X-Pulse-CSRF"
+
+# SPEC §3.3's own number for the prototype heuristic the fail-open floor keeps:
+# "The prototype's ≥25-character heuristic is a placeholder only; production
+# substantiveness is the classifier's call, with the character heuristic retained
+# solely as the fail-open floor below." Transcribed from the section rather than
+# read off `app.ai.tasks`, so a test about the floor's *verdict* is not agreeing
+# with the implementation about where the floor sits.
+CHARACTER_FLOOR = 25
+
+# The bound a submitted comment is refused above, ruled in E2-08's security fix
+# round: 4000 characters, checked at the edge before any provider call. A comment
+# is free text with no length rule anywhere in SPEC §3.2, and an unbounded one is
+# a request body that reaches the model — which is a bill, a latency and a prompt
+# surface all at once.
+COMMENT_MAXIMUM_LENGTH = 4000
+
 # SPEC §10: "survey submit p95 < 2.5s including synchronous validity check". Not
 # reconciled with §3.3's 2s classifier figure — that sentence says in as many
 # words not to.
@@ -276,6 +313,7 @@ class SubmitContract(NamedTuple):
     classifier_down_key: str
     comment_already_judged_key: str
     unauthenticated: int
+    csrf_refused: int
     not_found: int
     conflict: int
     unprocessable: int
@@ -299,6 +337,7 @@ def submit_contract() -> SubmitContract:
         classifier_down_key=CLASSIFIER_DOWN_KEY,
         comment_already_judged_key=COMMENT_ALREADY_JUDGED_KEY,
         unauthenticated=UNAUTHENTICATED_STATUS,
+        csrf_refused=CSRF_REFUSED_STATUS,
         not_found=NOT_FOUND_STATUS,
         conflict=CONFLICT_STATUS,
         unprocessable=UNPROCESSABLE_STATUS,
@@ -831,23 +870,110 @@ def issue_student_session(
     return issue(**values)
 
 
+def session_cookie_names() -> tuple[str, str]:
+    """`SESSION_COOKIE` and `CSRF_COOKIE`, read out of the module both doors issue through.
+
+    Imported rather than spelled, the way `tests/integration/test_web_login_door.py`
+    and `test_landing_resolves_from_assignments.py` already read them: E1-08 owns
+    the two names and a copy here would be a fourth place for them to drift.
+    """
+    try:
+        from app.services.session import CSRF_COOKIE, SESSION_COOKIE
+    except ImportError as missing:  # pragma: no cover - a red, not a branch
+        pytest.fail(
+            f"`app.services.session` does not export the cookie names ({missing}). E1-08's module "
+            "layout puts `SESSION_COOKIE`/`CSRF_COOKIE` there and both doors set them."
+        )
+    return SESSION_COOKIE, CSRF_COOKIE
+
+
+def csrf_token_for(session_token: str, secret: bytes) -> str:
+    """The double-submit token ADR 0089 binds to one session's `jti`.
+
+    > CSRF, live because of `SameSite=None`: a double-submit token bound to the
+    > session's `jti` by HMAC (`issue_csrf_token`/`verify_csrf_token`). A tossed
+    > cookie without the secret still fails, and a token minted for one session
+    > does not verify against another's `jti`.
+
+    So the token is *minted through the tool's own primitive* rather than composed
+    here. A fixture that built the HMAC itself would be a second implementation
+    for the check to agree with (`docs/MISTAKES.md` entry 19), and it would go on
+    passing if the binding to `jti` were dropped — which is half of what the
+    primitive is for.
+
+    The `jti` comes back from `verified_session`, and the parameters are bound by
+    name for the reason `issue_student_session` binds its own that way: E1-08's
+    interface ruling names the two functions and spells no signature, so a
+    parameter this cannot fill stops with a message naming it rather than being
+    guessed at.
+    """
+    import inspect
+
+    import app.services.session as session_module
+
+    issue = getattr(session_module, "issue_csrf_token", None)
+    if not callable(issue):
+        pytest.fail(
+            "`app.services.session` exposes no `issue_csrf_token`; it exposes "
+            f"{sorted(n for n in vars(session_module) if not n.startswith('_'))}. ADR 0089 names "
+            "`issue_csrf_token`/`verify_csrf_token` as the double-submit pair, and E2's first "
+            "mutating endpoint is what consumes the check."
+        )
+    claims = session_module.verified_session(session_token, secret)
+    if claims is None:
+        pytest.fail(
+            "`verified_session` refused the token this suite minted, so there is no `jti` to bind "
+            "a CSRF token to. `test_the_minted_session_verifies_as_the_seeded_student` is where "
+            "that is diagnosed."
+        )
+
+    available = {"jti": claims.jti, "secret": secret}
+    aliases = {"jti": ("jti", "session_jti", "sid", "session_id"), "secret": ("secret", "key")}
+    values: dict[str, Any] = {}
+    for parameter in inspect.signature(issue).parameters.values():
+        if parameter.kind in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD):
+            continue
+        role = next(
+            (name for name, names in aliases.items() if parameter.name in names),
+            None,
+        )
+        if role is None:
+            if parameter.default is not parameter.empty:
+                continue
+            pytest.fail(
+                f"`issue_csrf_token` requires a parameter `{parameter.name}` this fixture has "
+                f"nothing to fill from; it is offering {sorted(available)}. ADR 0089 makes the "
+                "token 'bound to the session's `jti` by HMAC', so those two are what a mint "
+                "should need — a third required input is an interface question for the ticket."
+            )
+        else:
+            values[parameter.name] = available[role]
+    return str(issue(**values))
+
+
 class SignedInStudent:
     """A student, the tool they submit through, and the world they submit into."""
 
-    def __init__(self, client: Any, world: SubmitWorld, token: str) -> None:
+    def __init__(self, client: Any, world: SubmitWorld, token: str, secret: bytes) -> None:
         self.client = client
         self.world = world
         self.token = token
+        self.secret = secret
 
     @property
     def authorization(self) -> dict[str, str]:
-        """The one header a submission carries.
+        """The Bearer header a submission carries by default.
 
-        Bearer and not the session cookie, and the work order is why: an absent
-        or invalid session is refused with `WWW-Authenticate: Bearer`, which is a
-        statement about the scheme this API is presented a session under. It also
-        keeps every test here clear of E1-08's CSRF pair, which guards a
-        cookie-borne session and is not this ticket's subject.
+        Bearer and not the session cookie for most of this suite, and the work
+        order is why: an absent or invalid session is refused with
+        `WWW-Authenticate: Bearer`, which is a statement about the scheme this
+        API is presented a session under. ADR 0089 makes it the path the SPA
+        actually uses — "the SPA captures the fragment into `sessionStorage` …
+        and sends it as `Authorization: Bearer` thereafter" — and
+        `session_from_request` "reads the Bearer header before the cookie".
+
+        The cookie path is reachable through `submit(via=COOKIE_SESSION)`, and it
+        is the one E1-08's CSRF pair guards.
         """
         return {"authorization": f"{BEARER_SCHEME} {self.token}"}
 
@@ -857,13 +983,53 @@ class SignedInStudent:
         *,
         section: Any = None,
         authenticated: bool = True,
+        via: str = BEARER_SESSION,
+        csrf: bool = True,
     ) -> Any:
-        """Post one submission and answer the response, whatever its status."""
+        """Post one submission and answer the response, whatever its status.
+
+        `via` decides which of ADR 0089's two carriers the session rides, and
+        `csrf` whether the double-submit pair goes with it. The two are separate
+        arguments because the exemption is a property of the *carrier*: a Bearer
+        header is not sent by a cross-site form, so a request that carries one
+        is not a request a browser can be tricked into making, and the check has
+        nothing to protect there.
+        """
         target = self.world.section if section is None else section
         section_id = target[self.world.key_of(SECTION_TABLE)]
         template = submit_route(self.client)
         url, body = submission_request(template, section_id, answers, self.world)
-        return self.client.post(url, json=body, headers=self.authorization if authenticated else {})
+
+        headers: dict[str, str] = {}
+        cookies: dict[str, str] = {}
+        if authenticated and via == BEARER_SESSION:
+            headers.update(self.authorization)
+        elif authenticated and via == COOKIE_SESSION:
+            session_cookie, csrf_cookie = session_cookie_names()
+            cookies[session_cookie] = self.token
+            if csrf:
+                minted = csrf_token_for(self.token, self.secret)
+                cookies[csrf_cookie] = minted
+                headers[CSRF_HEADER] = minted
+        elif authenticated:
+            pytest.fail(
+                f"`submit(via={via!r})` names no carrier this fixture knows. ADR 0089 gives a "
+                f"session two: {BEARER_SESSION!r} and {COOKIE_SESSION!r}."
+            )
+
+        # Set on the client and cleared afterwards rather than passed per
+        # request: httpx deprecates a per-request `cookies` argument, and
+        # `filterwarnings = ["error::DeprecationWarning"]` in `pyproject.toml`
+        # turns a deprecation into a failed test. Cleared in a `finally` so a
+        # cookie set for one request cannot authenticate the next one — which is
+        # exactly the near miss the Bearer exemption test would otherwise pass on.
+        self.client.cookies.clear()
+        try:
+            for name, value in cookies.items():
+                self.client.cookies.set(name, value)
+            return self.client.post(url, json=body, headers=headers)
+        finally:
+            self.client.cookies.clear()
 
     def submit_timed(self, answers: Mapping[int, Any], **kwargs: Any) -> tuple[Any, float]:
         """The same submission, with the wall-clock seconds it took."""
@@ -1003,14 +1169,15 @@ def signed_in_student(
         client: Any, world: SubmitWorld, student: Any = None, *, role_name: str = "STUDENT"
     ) -> SignedInStudent:
         row = world.student if student is None else student
+        secret = session_secret(configured_env)
         token = issue_student_session(
-            secret=session_secret(configured_env),
+            secret=secret,
             issuer=PLATFORM_ISSUER,
             subject=row["lms_user_id"],
             user_id=row[world.key_of(USER_TABLE)],
             role_name=role_name,
         )
-        return SignedInStudent(client, world, token)
+        return SignedInStudent(client, world, token, secret)
 
     return sign_in
 
