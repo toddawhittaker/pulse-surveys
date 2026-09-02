@@ -277,18 +277,46 @@ def derive_section_calendar(session: Session, code: str, term: TermRow) -> Secti
     )
 
 
-def term_week_for_course_week(session: Session, code: str, term: TermRow, course_week: int) -> int:
+def week_of_the_term(course_week: int, *, section_start: date, term_start: date) -> int:
     """Which week of the term a section's own week `course_week` falls in.
 
-    SPEC §2.2's two week axes. A course-level page plots "WK 01…" with a quiet
-    "TERM 04…" sub-label, and an aggregate page plots the term axis with one
-    line per start cohort; this is the arithmetic that keeps two charts of the
-    same data from disagreeing. Course week 1 of a section starting five weeks
-    into its term is term week 6 — the week, not the five-week difference.
+    **SPEC §2.2's two week axes, as arithmetic over two dates and nothing else.**
+    A course-level page plots "WK 01…" with a quiet "TERM 04…" sub-label, and an
+    aggregate page plots the term axis with one line per start cohort; this is
+    the one place that mapping is computed, so two charts of the same data cannot
+    disagree about it. Course week 1 of a section starting five weeks into its
+    term is term week 6 — the week, not the five-week difference.
 
-    The offset is whole weeks between the two start dates, so a section whose
-    map row does not sit on a term-week boundary is counted into the term week
-    its first day falls in rather than being rounded up into the next one.
+    The offset is whole weeks between the two start dates, so a section that does
+    not sit on a term-week boundary is counted into the term week its first day
+    falls in rather than being rounded up into the next one.
+
+    **Two dates rather than a section code**, so that a caller holding a section's
+    already-derived `start_date` (SPEC §8: `apply_section_code` is the only thing
+    that writes it) does not have to re-read the term's start-letter map to ask
+    this. `term_week_for_course_week` below is the same question asked from a
+    code, and it answers by calling this; E2-06's window derivation asks it from
+    the columns. Neither re-derives the arithmetic.
+    """
+    weeks_in = (section_start - term_start).days // _DAYS_PER_WEEK
+    return course_week + weeks_in
+
+
+def term_week_for_course_week(session: Session, code: str, term: TermRow, course_week: int) -> int:
+    """Which week of the term a code's course week `course_week` falls in.
+
+    `week_of_the_term` above with the section's start date read out of its code
+    and its term's map first, and the course week checked against the length that
+    map row gives — which is the half a caller holding only a code cannot do
+    itself.
+
+    **The two names are deliberately not variations on one word.**
+    `tests/fixtures/section_codes.py` finds the axis converter E0-07 shipped by
+    looking for the one callable whose name carries `term_week`, and stops rather
+    than choosing if two do; that fixture is behind the test wall, so the second
+    function carries a name of its own instead (`docs/MISTAKES.md` entry 22 — a
+    new rule making an earlier ticket's test unrunnable, with the repair on the
+    other side).
     """
     calendar = derive_section_calendar(session=session, code=code, term=term)
     if not 1 <= course_week <= calendar.length_weeks:
@@ -298,8 +326,7 @@ def term_week_for_course_week(session: Session, code: str, term: TermRow, course
         )
 
     _, term_start, _ = _term_dates(term)
-    weeks_in = (calendar.start_date - term_start).days // _DAYS_PER_WEEK
-    return course_week + weeks_in
+    return week_of_the_term(course_week, section_start=calendar.start_date, term_start=term_start)
 
 
 def apply_section_code(session: Session, section: Section) -> Section:

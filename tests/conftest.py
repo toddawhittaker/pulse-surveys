@@ -59,6 +59,9 @@ boundary: `metadata_tables` is asked for by both.
     deploys, moved here in E2-04 when a second module needed a broker.
   - `fixtures/clock.py` — E2-04: the `clock_override` row a test chose the values
     of, committed or not, and `Settings` built under an environment the test named.
+  - `fixtures/survey_windows.py` — E2-06: SPEC §3.1's Fall 2026 window calendar
+    written out by hand as UTC instants, and the term, weeks and cohort sections
+    a derivation is run over.
   - `fixtures/mock_ai.py` — E2-07's mock AI provider, in process and on a loopback
     socket, plus the non-mock provider a deployment-environment test needs.
   - `fixtures/ai_tasks.py` — E2-07: the comment-validity task, found rather than
@@ -90,6 +93,7 @@ pytest_plugins = (
     "fixtures.landing",
     "fixtures.celery_broker",
     "fixtures.clock",
+    "fixtures.survey_windows",
     "fixtures.mock_ai",
     "fixtures.ai_tasks",
 )

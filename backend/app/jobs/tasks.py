@@ -2,8 +2,9 @@
 
 `ping` exists only to prove the round trip and `effective_now` only to prove that
 the worker reads the same clock the tool does (E2-04); `purge_launch_nonces` is
-E1-08's daily maintenance of the two launch tables, and the two `sync_*` tasks are
-E1-11's roster pull. Async classification, summaries, and grade passback (§7.4,
+E1-08's daily maintenance of the two launch tables, the two `sync_*` tasks are
+E1-11's roster pull, and `derive_survey_windows` is E2-06's hourly reconciler over
+the weekly rhythm (§3.1). Async classification, summaries, and grade passback (§7.4,
 §3.4) are E3 and E13's work, and each of those is a call into `app/services/`
 from here rather than domain logic written in this file — which is exactly the
 shape every task below takes: it opens a session and calls a service.
@@ -19,6 +20,7 @@ from app.lti.in_flight import purge_expired_launch_states
 from app.lti.replay_guard import purge_expired_nonces
 from app.services import clock
 from app.services.roster_sync import sync_all_rosters, sync_section
+from app.services.survey_windows import derive_windows_for_all_sections
 
 
 @celery_app.task
@@ -46,7 +48,8 @@ def effective_now() -> str:
     **A permanent stack probe, on `ping`'s justification** (E0-03): it proves a
     round trip that is not provable any other way. `ping` proves the broker path;
     this proves that the clock a worker reads is the clock the tool moved, which is
-    where E2-06's weekly scheduling will run.
+    where E2-06's weekly scheduling runs — `derive_survey_windows` below is that
+    job, on this same connection and this same clock.
 
     **A string and not a `datetime`**, because Celery here is configured with the
     JSON serializer and a `datetime` would fail inside the worker rather than at the
@@ -125,4 +128,31 @@ def sync_section_roster(section_id: str) -> None:
     settings = Settings()
     with SessionLocal() as session:
         sync_section(session, UUID(section_id), settings=settings)
+        session.commit()
+
+
+@celery_app.task
+def derive_survey_windows() -> None:
+    """Derive every section's survey windows from its calendar (E2-06, SPEC §3.1).
+
+    The hourly reconciler `app.jobs.schedules` runs on `crontab(minute="30")`. A
+    section that appeared in the middle of a term — a staff launch or a roster sync
+    creates one at any hour — gets its windows without anybody running anything, and
+    a pass that finds nothing new writes nothing, because the derivation skips a
+    `(section_id, week_id)` that already has a row.
+
+    A thin wrapper, like the two tasks above: the session, the configuration and the
+    commit are this task's, and every decision — the rhythm, the two week axes, what
+    to do about a term short of `week` rows — is
+    `app.services.survey_windows`'s, which is the one writer of that table.
+
+    **One commit at the end rather than one per section**, and the walk already
+    survives a section that fails: `derive_windows_for_all_sections` runs each
+    section in its own savepoint and logs the ones it could not derive. What a
+    per-section commit would buy is keeping the sections written so far when the
+    *worker* dies mid-run, and the next hour re-derives everything either way.
+    """
+    settings = Settings()
+    with SessionLocal() as session:
+        derive_windows_for_all_sections(session, settings=settings)
         session.commit()

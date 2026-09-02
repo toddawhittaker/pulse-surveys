@@ -1,12 +1,12 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 9**
+**Caught: 10**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*8 instances recorded; the 5 most recent are below, newest first — except the
+*9 instances recorded; the 5 most recent are below, newest first — except the
 E0-18 PR 2 one, which sits further down beside the consequence it illustrates.
-The 3 earliest are in this file's git history and in the pull requests they cite.*
+The 4 earliest are in this file's git history and in the pull requests they cite.*
 
 *(**2026-09-01, E2-07 (`e2/mock-ai-provider`).** The ticket's two new
 configuration rules — a deployment refuses a plain-http provider URL and
@@ -16,6 +16,15 @@ stopped in its own setup on a rule that is not its subject, with the repair on
 the read-only side of the wall. Acting on this entry, the test author routed
 the repair through the two shared deployment fixtures in the same tests-first
 change, so the implementer never meets a red they may not fix.)*
+
+*(**2026-09-01, E2-06 (`e2/window-scheduling`).** The ticket adds a third Celery
+beat entry, and `tests/unit/test_celery_app.py` asserts the schedule's contents
+as an *equality* — deliberately, so that a new job cannot land without a
+conversation. That equality is on the implementer's side of the test wall in
+the heavy lane. Acting on this entry, the test author rewrote it in the same
+change: the entry set is now an equality over task names, with the new entry
+found by its task rather than by a schedule key the ticket does not settle.
+Without it the implementer would have met a red test they may not repair.)*
 
 *(Writing E2-05's tests (2026-09-01), found by asking this entry's question of
 a discovery walk's fixed point rather than of a fixture. E2-05's
@@ -44,25 +53,6 @@ the seed writes — the second is the sharper catch, because nothing would ever
 have turned red. Both repairs are inside `tests/`, in modules the ticket does
 not otherwise edit, and landed in the ticket's own test round rather than as a
 surprise the implementer meets in a runner and cannot repair.)*
-
-*(Found while building E0-39 (Batch I, 2026-08-22; that ticket has not merged),
-and it is the largest blast radius this entry has recorded. E0-39 makes five
-`oidc_*` settings required and refuses a mock identity provider's address outside
-a development environment — a rule about **what `Settings` will accept**, which is
-the configuration equivalent of a rule about what the database will store. At
-least six merged test modules construct a non-development `Settings` against the
-mock's addresses in their own fixtures, for reasons that have nothing to do with
-the identity provider: they wanted a non-development environment for something
-else and took the defaults for everything they were not testing. Every one of them
-goes red inside its own setup, in modules the ticket is not otherwise editing, and
-every repair is on the other side of the test wall. It was caught before any
-implementation by the test author grepping the read-only suite for the
-constructions the new rule would refuse — the sweep this entry prescribes, run at
-the moment it is cheap — and it is repaired as a partitioned fixture-only round in
-that ticket's own scope rather than as a surprise the implementer meets in a
-runner. **A rule that narrows what a configuration object accepts is a
-write-time rule**: fixtures build configuration the same way they build rows, and
-defaults are what makes the collision wide rather than narrow.)*
 
 **What happened.** Twice in E0-11, from two unrelated mechanisms, with the same
 consequence: the ticket cannot be finished green and the implementer cannot fix
