@@ -5,6 +5,48 @@ here in the same PR, and E2-13 runs the cleanup pass over this file. Each entry
 names the ticket that owns it and what "done" means, so the deferral is a
 scheduled decision rather than a hope.
 
+## `detect.outputs.evals` is published and read by nothing — E2-13
+
+Deferred by E2-12. That probe asked whether the eval runner module exists, and
+the `evals` job's steps waited on it while that file was still to be written.
+The file is committed now, so waiting on it is exactly the tolerance ADR 0002
+says the ticket landing the code must remove: with the clause in place a deleted
+runner switches SPEC §9.3's floors off and the job reports success, where
+without it the run fails on the import and says so. The clause went; the output
+stayed, because the detect-probe module asserts the whole set of outputs that
+job emits and withdrawing one is a change on the other side of the heavy lane's
+test wall.
+
+What is left is the shape that job's own comment condemns — a boolean nobody
+consults, whose wrongness produces no symptom at all, so nobody finds out it is
+wrong and the next gate wired to it inherits an answer nothing has ever checked.
+The state is written down at the output itself rather than left to be
+rediscovered.
+
+**Done when** the output and the probe line that fills it are removed together
+and `PROBES` in that module drops `EVALS` in the same change — or a reason to
+keep it is recorded there, and that reason would have to be a reader.
+
+## SPEC §11 open question 4 is answered in its set and not yet in its threshold — E2-13
+
+Deferred by E2-12, and it is a residue with a date on it rather than an open
+problem. §11 question 4 asks for the production "substantive" definition and
+says "its eval set and threshold need real seeded data before E2 exits". The set
+exists: ninety-eight typed cases pinned to `validity.v1`, including the two
+families the twenty-five-character heuristic gets wrong by construction, and ADR
+0119 settles which class the pair of numbers is about. The threshold is measured
+against the live provider by E2-12 and written into the validity floor
+declaration, which is behind the heavy lane's test wall — so the measurement
+travels back to the test author rather than being written down by the
+implementer who took it, which is the separation that keeps a floor from being
+chosen to fit a run.
+
+**Done when** the measured floors are in that declaration with the sentence
+saying what the run scored and how much headroom they leave, the runner passes
+`--enforce-floors` against them, and SPEC §11 question 4 is marked
+settled-for-v1 by a spec edit — a change to `docs/SPEC.md`, and so not the
+implementer's to make.
+
 ## Nothing ties an `answer`'s filled column to its question's kind — E2-08
 
 Deferred by E2-05 (PR #140), raised by that PR's security review. The schema

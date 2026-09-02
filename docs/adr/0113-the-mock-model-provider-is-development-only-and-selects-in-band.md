@@ -1,6 +1,13 @@
 # 0113 — The mock model provider is development-only, and selects its wrong answers in band
 
-**Status:** Accepted
+**Status:** Accepted, and **superseded in part by
+[0118](0118-the-provider-configuration-splits-in-two.md)** (E2-12, 2026-09-02).
+One clause moves and the rest stands: the catalog rule below is unconditional
+now, because 0118 gives the mock a configuration triple of its own and the
+development exemption existed only so that this record's single base URL could
+name `mock-ai`. Everything else here — in-band selection, the argument for the
+mock existing at all, and the transport rule's own development exemption, which
+was never about the mock — is unchanged and is still the record.
 **Date:** 2026-09-01
 **Tickets:** E2-07
 
@@ -49,6 +56,11 @@ mirror the identity provider's, which ADR 0077 put on its four URLs:
   host is compared as a normalised component through `url_host`, so port, scheme,
   path and case are not part of the question and `https://mock-ai.example.edu/v1`
   — an ordinary institutional address — is not refused.
+  **This is the clause [0118](0118-the-provider-configuration-splits-in-two.md)
+  supersedes.** The validator is `no_real_provider_url_addresses_the_mock_model`
+  now, it refuses in every environment including development, and the address
+  this exemption was written for moved to `MOCK_AI_PROVIDER_BASE_URL`, which
+  carries no such rule because nothing outside development and test reads it.
 
 `environment` moves to the head of its block in `Settings`. pydantic validates in
 declaration order and `info.data` holds only fields already validated, so a rule

@@ -1,12 +1,28 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 10**
+**Caught: 11**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*9 instances recorded; the 5 most recent are below, newest first — except the
+*10 instances recorded; the 5 most recent are below, newest first — except the
 E0-18 PR 2 one, which sits further down beside the consequence it illustrates.
-The 4 earliest are in this file's git history and in the pull requests they cite.*
+The 5 earliest are in this file's git history and in the pull requests they cite.*
+
+*(**2026-09-02, E2-12 (`e2/eval-floors`).** The ticket's configuration split
+strikes the spelling `AI_MODEL_NAME` and gives the mock endpoint a triple of its
+own, so assertions naming the old variable, and fixtures that configure a
+test-process gateway under the real triple's names, describe spellings the
+ruling removed. Acting on this entry, the test author swept for them before
+writing anything and repaired nine files in a commit of their own — then
+measured the blast radius rather than counting the diff, and found that one of
+the nine carries four more with it: the renamed assignment in the submit
+fixture reddens four committed integration modules that consume it, thirteen
+files rather than nine. Those four are green at HEAD and red only with the
+repair, so they were named as must-go-green in the implementer's work order
+instead of reading later as an unrelated regression. Counted as a catch: the
+sweep turned a class of reds the implementer may not repair into one
+attributable commit, and the four-module tail is the half a naive reading of the
+diff would have missed.)*
 
 *(**2026-09-01, E2-07 (`e2/mock-ai-provider`).** The ticket's two new
 configuration rules — a deployment refuses a plain-http provider URL and
@@ -40,19 +56,6 @@ implementer never meets a red they are forbidden to fix. Counted as a catch:
 without this entry's sweep, the tests would have shipped green-looking and the
 red would have surfaced in the implementer's runner as an apparent defect in
 the migration.)*
-
-*(Writing E1-06's tests (2026-08-25), found by this entry's prescribed sweep —
-`grep -rn 'auth_token_url' tests/` before anything was written. E1-05 seeded the
-mock registration's `auth_token_url` as NULL on purpose, and two merged modules
-assert that fact: `test_demo_seed_script.py` requires the column NULL in as many
-words, and `test_registration_address_constraints.py` carries the NULL in its
-`DEVELOPMENT_REGISTRATION` fixture beside three docstrings calling it
-deliberate. E1-06 fills the column with the mock's token endpoint, so the first
-module goes red on its assertion and the second quietly stops describing the row
-the seed writes — the second is the sharper catch, because nothing would ever
-have turned red. Both repairs are inside `tests/`, in modules the ticket does
-not otherwise edit, and landed in the ticket's own test round rather than as a
-surprise the implementer meets in a runner and cannot repair.)*
 
 **What happened.** Twice in E0-11, from two unrelated mechanisms, with the same
 consequence: the ticket cannot be finished green and the implementer cannot fix
