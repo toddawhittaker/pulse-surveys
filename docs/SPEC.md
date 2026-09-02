@@ -199,7 +199,7 @@ Each attention card names its rule and stream and links to that section's Monday
 
 - LTI health: registration status, recent launches with outcome (success / signature failure / clock skew), NRPS and AGS call logs with response codes.
 - Job dashboard: scheduled and background jobs (report generation, grade passback, classification backlog, retention) with status, duration, retry counts.
-- AI provider metrics: request volume, latency, error rate, token spend, per-task breakdown (validity / moderation / summary / coaching).
+- AI provider metrics: request volume, latency, error rate, token spend with cached reads counted and priced separately from uncached input, computed cost per task and in total, per-task breakdown (validity / moderation / summary / coaching). The provider's rate card (per-million input, cached-input, and output prices) lives on the §6.3 configuration surface beside the provider it prices.
 - Classifier drift panel: weekly sample of classifications for human spot-review, with an override control that feeds an eval set (§9.3).
 
 ### 6.2 Threat and self-harm queue (Care role)

@@ -58,8 +58,9 @@ from typing import Any
 # The boundary the student's comment starts at
 # ---------------------------------------------------------------------------
 
-# The last line of `backend/app/ai/prompts/validity.v1.md`'s own instructions —
-# everything after it is the student's comment, running to the end of the
+# The last line of the rendered validity prompt's own instructions (the version
+# `app.ai.tasks` currently renders) — everything after it is the student's
+# comment, running to the end of the
 # message.
 #
 # **This is a second copy of a string that lives in the backend, and it is
@@ -192,7 +193,7 @@ def extract_comment(prompt: str) -> str:
         raise ExtractionError(
             "This prompt carries no copy of the line the student's comment follows, so there is "
             "nothing here to classify. The line is: "
-            f"{MARKER_LINE!r}. `backend/app/ai/prompts/validity.v1.md` ends its instructions with "
+            f"{MARKER_LINE!r}. The rendered validity prompt ends its instructions with "
             "it and `mock-ai/app/rules.py` copies it; a prompt that no longer does has drifted "
             "away from this mock."
         )
