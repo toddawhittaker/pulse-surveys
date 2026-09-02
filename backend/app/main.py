@@ -48,7 +48,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
 from app import __version__
-from app.api import auth, dev, health, lti
+from app.api import auth, dev, health, lti, student
 from app.config import Settings, is_development
 from app.db import SessionLocal
 from app.lti.registration import launcher_origins
@@ -295,6 +295,10 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(lti.router)
     app.include_router(auth.router)
+    # The student's own screens (E2-09). Behind `app.api.deps.require_student`
+    # rather than behind a check of its own, which is what puts every route it
+    # serves inside SPEC §4.1 item 1's sweep the day the route is written.
+    app.include_router(student.router)
     # The developer test console. Always registered; the handler gates itself on
     # `ENVIRONMENT == development` and answers 404 elsewhere, so production is
     # indistinguishable from a route that does not exist (ADR 0074).
