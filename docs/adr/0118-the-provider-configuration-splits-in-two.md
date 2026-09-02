@@ -172,6 +172,22 @@ run reaches the loopback stub or `mock-ai`, and both answer whatever they are
 asked — so a provider that cannot serve the gateway is green everywhere until a
 live eval run meets it.
 
+**The model on the real triple is a dated snapshot and not the vendor's floating
+alias**, in `.env.example` and on the eval runner's workflow step alike. That is
+this record's decision applied to the second field of the triple rather than a
+separate one: a SPEC §9.3 floor is a claim about a particular model, and ADR 0031
+already makes the provider's own identifier part of what a classification
+records so that two runs can be told apart. `tests/evals/validity/floors.py` was
+measured against `gpt-5-mini-2025-08-07` — what `gpt-5-mini` resolved to on
+2026-09-02 — and an alias left in either place would let the weights move
+underneath a fixed floor, at which point a breach and a model change look
+identical and the floor's provenance sentence is false. So moving the pin *is*
+re-measuring the floors, and belongs in a pull request whose subject is moving
+them (`CLAUDE.md`). The cost is that a deployment copying `.env.example` forward
+pins a snapshot the vendor will eventually retire, and gets a refusal naming the
+model rather than a silent substitution — which is the direction this record
+takes everywhere else.
+
 **Nine test modules and four fixtures were repaired for the rename**, and four
 committed integration modules moved with them, because a fixture that configures
 a test-process gateway is configuring the mock side by this decision's own rule.

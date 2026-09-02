@@ -994,12 +994,57 @@ jobs:
       # provider named here before that ruling answered HTTP 400 to it, which is
       # why the switch happened rather than a second output mode being added.
       # ADR 0118's consequences carry the measurement.
+      #
+      # **The model is pinned to a snapshot and not to the floating alias.** A
+      # floor is a claim about a particular model: ADR 0031 records the provider's
+      # own identifier on every classification precisely so that two runs can be
+      # told apart, and the same property applies to the thing being measured. The
+      # floors in `tests/evals/validity/floors.py` were measured against
+      # `gpt-5-mini-2025-08-07`, which is what the alias `gpt-5-mini` resolved to
+      # on 2026-09-02; when that alias moves, the floors are being compared
+      # against a model nobody measured, and a breach would be indistinguishable
+      # from a model change. Moving this pin is therefore re-measuring, and it
+      # belongs in a pull request whose subject is moving the floors.
+      #
+      # **Everything below the provider triple is here because `Settings()` is
+      # constructed before any of it is read, and the runner reads none of it.**
+      # SPEC §6.3's configuration surface is one class validated as a whole at
+      # startup, so a process that only wants a model call still has to satisfy
+      # the database, Redis, session and identity-provider fields; the alternative
+      # is a second configuration path, which dispute E2-12-01's reasoning refuses
+      # and which would be a way for a deployment to start without the checks. The
+      # nine values are obviously fake, address nothing that exists on a runner,
+      # and hold no credential — the eval job starts no services and opens no
+      # connection, and none of these is consulted between process start and the
+      # provider call. They were not guessed: `Settings()` was constructed under
+      # exactly this environment and each one removed in turn, keeping only those
+      # whose absence still refuses.
+      #
+      # **`ENVIRONMENT: development` is load-bearing and does not send the run to
+      # the mock.** It is the environment where the identity-provider validators
+      # do not fire, which is what lets a loopback authorization endpoint stand in
+      # at all — measured, a deployment name refuses `OIDC_AUTHORIZATION_ENDPOINT`
+      # outright, because that value is resolved by a browser and loopback there
+      # is the reader's own machine (ADR 0077). Which provider the run reaches is
+      # a separate question with a separate answer: `AIGateway(live=True)` reads
+      # the `AI_PROVIDER_*` triple in *every* environment (ADR 0118), so this says
+      # nothing about `mock-ai` and the eval run still measures the real model.
       - name: Eval runner (per-task floors; threat recall is a hard gate)
         if: needs.changed.outputs.inert != 'true' && (needs.changed.outputs.ai_surface == 'true' || github.event_name == 'workflow_dispatch')
         env:
           AI_PROVIDER_API_KEY: ${{ secrets.AI_PROVIDER_API_KEY }}
           AI_PROVIDER_BASE_URL: 'https://api.openai.com/v1'
-          AI_PROVIDER_MODEL_NAME: 'gpt-5-mini'
+          AI_PROVIDER_MODEL_NAME: 'gpt-5-mini-2025-08-07'
+          ENVIRONMENT: 'development'
+          DATABASE_URL: 'postgresql+psycopg://unused:unused@localhost:5432/unused'
+          REDIS_URL: 'redis://localhost:6379/0'
+          SESSION_SECRET: 'eval-run-issues-no-sessions'
+          INSTITUTION_TIMEZONE: 'America/New_York'
+          OIDC_ISSUER: 'http://localhost:8081'
+          OIDC_AUTHORIZATION_ENDPOINT: 'http://localhost:8081/oidc/authorize'
+          OIDC_TOKEN_ENDPOINT: 'http://localhost:8081/oidc/token'
+          OIDC_JWKS_URL: 'http://localhost:8081/oidc/jwks'
+          OIDC_CLIENT_ID: 'eval-run-logs-nobody-in'
         run: python -m tests.evals.runner --enforce-floors
 
   # ==========================================================================
