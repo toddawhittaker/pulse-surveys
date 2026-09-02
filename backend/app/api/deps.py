@@ -95,7 +95,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import jwt
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
@@ -104,6 +104,7 @@ from starlette.responses import Response
 
 from app.config import Settings, is_development
 from app.copy.student_read import NOT_A_STUDENT
+from app.copy.submit import COPY
 from app.services.authz import Door, LandingRole, resolve_landing
 from app.services.identity import (
     ResolvedIdentity,
@@ -112,6 +113,7 @@ from app.services.identity import (
 )
 from app.services.session import (
     SessionClaims,
+    bearer_token,
     fragment_redirect,
     issue_csrf_token,
     issue_session,
@@ -119,9 +121,14 @@ from app.services.session import (
     set_csrf_cookie,
     set_session_cookie,
     verified_session,
+    verify_csrf_token,
 )
 
 __all__ = [
+    "BEARER_SCHEME",
+    "CSRF_HEADER",
+    "CSRF_REFUSED_KEY",
+    "CSRF_REFUSED_STATUS",
     "FOUND",
     "LOGIN_COOKIE_LIFETIME_SECONDS",
     "LTI_LOGIN_COOKIE",
@@ -135,6 +142,7 @@ __all__ = [
     "carried_across",
     "carry_across",
     "clear_carried",
+    "csrf_verified_student",
     "landing_with_session",
     "no_access",
     "no_access_page",
@@ -260,9 +268,14 @@ def clear_carried(response: Response, name: str) -> None:
 # are not signed in" is a fact about who holds the token, and a path that answers
 # the two differently tells whoever is trying tokens that one of them was real.
 # The scheme is `Bearer` because that is how the session travels inside the LMS's
-# cross-site iframe, where no cookie survives (E1-08's cookieless path).
+# cross-site iframe, where no cookie survives (E1-08's cookieless path) — and
+# because RFC 6750 §3 makes the challenge how a client learns which scheme to
+# present a credential under. 403 would say "you are somebody, and not somebody
+# who may do this", which is a statement about the caller neither of the two
+# student routes makes.
 NOT_A_STUDENT_STATUS = 401
-NOT_A_STUDENT_CHALLENGE = {"WWW-Authenticate": "Bearer"}
+BEARER_SCHEME = "Bearer"
+NOT_A_STUDENT_CHALLENGE = {"WWW-Authenticate": BEARER_SCHEME}
 
 
 def require_student(request: Request) -> SessionClaims:
@@ -293,6 +306,14 @@ def require_student(request: Request) -> SessionClaims:
     **It says nothing about the person it is refusing.** No section, no subject,
     no role — a refusal says no, and one that described what it was refusing on
     behalf of would be the disclosure the read path behind it exists to prevent.
+    `app.services.session.session_from_request` already collapses "no token", "a
+    token this deployment did not sign" and "an expired one" into a single `None`
+    for the same reason.
+
+    Returns `SessionClaims` — the claims object the doors already issue, not a
+    type of its own. What the submit path needs from it is `user_id`, which E1-12
+    put there as "the launch-side row", and a second wrapper around it would be a
+    second answer to "who is this" for the two modules to disagree about.
     """
     session = session_from_request(request, request.app.state.session_secret)
     if session is None or session.role is not LandingRole.STUDENT:
@@ -777,3 +798,88 @@ async def landing_with_session(
     set_session_cookie(response, token, settings)
     set_csrf_cookie(response, issue_csrf_token(session.jti, secret), settings)
     return response
+
+
+# ---------------------------------------------------------------------------
+# The write half of the student scoping above: what a mutating student route
+# carries on top of `require_student` (E2-08).
+# ---------------------------------------------------------------------------
+
+# What a cookie-borne write with no valid double-submit token is answered, and the
+# header that token is echoed in (ADR 0089; the status is ADR 0114's, which is the
+# record of this route's answer table). **403 and not 401**: the session is valid
+# and the *request* is not, so a `WWW-Authenticate` challenge would invite the
+# client to present a credential it has already presented correctly. There is no
+# challenge header on this refusal for the same reason.
+CSRF_REFUSED_STATUS = 403
+CSRF_HEADER = "X-Pulse-CSRF"
+CSRF_REFUSED_KEY = "student.request_not_verified"
+
+
+def csrf_verified_student(
+    request: Request, claims: SessionClaims = Depends(require_student)
+) -> SessionClaims:
+    """`require_student`, plus ADR 0089's double-submit check when the session came by cookie.
+
+    **What a route carries this for, and why it is not folded into
+    `require_student`.** Cross-site request forgery is a defence for *writes*: it
+    stops a page on the internet making a browser perform an action with the
+    session the browser already holds. A read path has nothing for it to protect,
+    and requiring the token there would refuse ordinary navigation for no gain, so
+    the two are separate dependencies and a route says which it means. E2-09's
+    student read path carries `require_student`; this one is carried by the write.
+
+    **`require_student` is *declared* as a dependency rather than called**, and the
+    difference is what SPEC §4.1 item 1's sweep sees. That sweep builds its
+    inventory of student-visible routes by walking each route's FastAPI `Dependant`
+    graph for this module's `require_student` object, so a plain Python call to it
+    from inside this function resolves the session identically at run time and
+    leaves the route carrying it **invisible to the sweep** — a student-visible
+    path with nothing asserting §4.1 over it (`docs/MISTAKES.md` entry 2). Declared
+    here, the write route joins the inventory the day it is registered, with
+    nothing to remember. FastAPI resolves the sub-dependency first and hands its
+    result in, so what arrives in `claims` is exactly what a direct call returned:
+    a 401 from `require_student` is raised before this body runs.
+
+    **The check applies to the cookie carrier and not to the Bearer one, by
+    construction.** ADR 0089 gives one session two carriers: the SPA "captures
+    the fragment into `sessionStorage` … and sends it as `Authorization: Bearer`
+    thereafter", and the cookie exists for everything else. A cross-site form, an
+    image tag or a redirect cannot make a browser attach an `Authorization`
+    header, so a request that carries one is not a request a browser can be
+    tricked into making and there is nothing here to defend. The cookie is a
+    different matter: ADR 0089 makes it `SameSite=None` because the tool lives
+    inside the LMS's cross-site iframe for the whole visit, which is precisely the
+    attribute that lets any origin's form post carry it.
+
+    Which carrier was used is asked of `app.services.session.bearer_token` — the
+    same function `session_from_request` reads the session through — so the
+    exemption cannot widen by one of the two growing a spelling the other does
+    not know (`docs/MISTAKES.md` entry 13).
+
+    **The header is verified, not compared to the cookie.** ADR 0089 binds the
+    token to the session's `jti` by HMAC, and that binding is the whole defence:
+    an attacker who can set a cookie on this origin can set *both* halves of a
+    plain double-submit pair, and comparing a caller-supplied header to a
+    caller-supplied cookie proves nothing on its own — the same reasoning this
+    module already gives for signing the web door's login cookie. What they cannot
+    do is mint a value that verifies against this session's `jti` without the
+    secret. The cookie is still set beside the header (`set_csrf_cookie`) because
+    that is how the SPA has the value to echo; nothing here reads it.
+
+    **A missing token and a wrong one get the same answer**, for the reason the
+    401 above gives twice over: a refusal that distinguished them would tell an
+    attacker whether their forgery was well formed, which is what
+    `verify_csrf_token`'s constant-time comparison is protecting one layer down.
+    """
+    if bearer_token(request) is not None:
+        return claims
+
+    presented = request.headers.get(CSRF_HEADER)
+    secret: bytes = request.app.state.session_secret
+    if not presented or not verify_csrf_token(presented, claims.jti, secret):
+        raise HTTPException(
+            status_code=CSRF_REFUSED_STATUS,
+            detail=COPY[CSRF_REFUSED_KEY].text,
+        )
+    return claims

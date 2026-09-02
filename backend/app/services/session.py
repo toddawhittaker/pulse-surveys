@@ -65,6 +65,7 @@ __all__ = [
     "SESSION_COOKIE",
     "SESSION_LIFETIME_SECONDS",
     "SessionClaims",
+    "bearer_token",
     "clear_session_cookie",
     "fragment_redirect",
     "issue_csrf_token",
@@ -305,6 +306,32 @@ def clear_session_cookie(response: Response) -> None:
     response.delete_cookie(SESSION_COOKIE, path="/")
 
 
+def bearer_token(request: Request) -> str | None:
+    """The token in `request`'s `Authorization: Bearer` header, or `None` for no such header.
+
+    Split out of `session_from_request` below, whose behaviour is unchanged and
+    which is now expressed through it. Two callers need the *same* answer to "did
+    this session arrive as a Bearer token", and they need it for different
+    reasons: this module reads the session, and `app.api.deps` decides whether
+    ADR 0089's double-submit check applies — a Bearer header is not something a
+    cross-site form or an image tag can make a browser send, so a request carrying
+    one is not a request a browser can be tricked into making. Two readings of
+    that question, in two modules, is `docs/MISTAKES.md` entry 13's shape: the day
+    one of them starts accepting a different spelling, the exemption widens and
+    nothing goes red.
+
+    A `None` answer means "no Bearer header at all", which is not the same as a
+    Bearer header carrying nothing: an `Authorization: Bearer` with an empty value
+    answers the empty string, so a caller asking "did this arrive by cookie" gets
+    `False` for it and the request is judged on the credential it actually
+    presented.
+    """
+    authorization = request.headers.get("authorization")
+    if authorization and authorization[:7].lower() == "bearer ":
+        return authorization[7:].strip()
+    return None
+
+
 def session_from_request(request: Request, secret: bytes) -> SessionClaims | None:
     """The verified session carried by `request`: Bearer header first, cookie fallback.
 
@@ -320,9 +347,9 @@ def session_from_request(request: Request, secret: bytes) -> SessionClaims | Non
     verifies on every later request, which is what lets a session survive
     navigation between landing routes.
     """
-    authorization = request.headers.get("authorization")
-    if authorization and authorization[:7].lower() == "bearer ":
-        return verified_session(authorization[7:].strip(), secret)
+    presented = bearer_token(request)
+    if presented is not None:
+        return verified_session(presented, secret)
     return verified_session(request.cookies.get(SESSION_COOKIE), secret)
 
 

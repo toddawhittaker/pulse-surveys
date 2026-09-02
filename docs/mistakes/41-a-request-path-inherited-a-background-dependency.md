@@ -1,10 +1,48 @@
 # Entry 41. A request path inherited a background job's dependency, at that dependency's default retry policy
 
-**Caught: 0**
+**Caught: 1**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*1 instance recorded.*
+*2 instances recorded; one of them is a catch. Newest first.*
+
+*(**A catch**, and a correction to this entry's own rule, writing E2-08's submit
+path, 2026-09-01. §3.3 accepts a submission on the character floor when the
+provider is down and classifies it later, so the route enqueues a
+re-classification — a call this entry's rule is written about, and the rule is
+what put `retry=False`, `ignore_result=True` and a broad `except` into the code
+before any test ran. Without the entry the line would have been `task.delay(...)`
+bare, which is exactly the first instance below.*
+
+*What the entry additionally saved is the part worth recording. Its corollary
+says to read the timing as well as the result, and the timing said the three
+protections were not enough: with all three in place, `apply_async(retry=False,
+ignore_result=True)` against a closed loopback port raised
+`kombu.exceptions.OperationalError` after **6.04 seconds**. `retry=False` governs
+the publish; the publish reaches `kombu.Connection.default_channel`, which runs
+`_ensure_connection` under kombu's own defaults (`interval_start=2,
+interval_step=2`) before the publish is attempted, so a broker that refuses
+instantly is retried on a schedule nothing in the three flags touches. Six
+seconds is under the twenty this entry was written about and over SPEC §10's
+2.5-second budget for the whole submit round trip — the same failure, quieter.*
+
+*The repair is a fourth protection, now in the rule: publish on a connection made
+for the call. `celery_app.connection_for_write(transport_options={"max_retries":
+0, "socket_connect_timeout": 1.0, "socket_timeout": 1.0}, connect_timeout=1.0)`,
+with the connection handed to `apply_async`. Measured: the same closed port
+**0.037s**; a blackholed address, where the refusal never arrives, **1.04s**
+instead of the operating system's own timeout — `connect_timeout` alone does not
+bound that, the redis transport reads `socket_connect_timeout` out of
+`transport_options`; a broker that answers publishes in **0.046s**. Scoped to the
+connection and never to `celery_app.conf`, because a worker whose broker blips
+must reconnect rather than give up. Had the entry not said to time it, the six
+seconds would have shipped behind three protections that look complete, and the
+budget assertion is the only thing in the suite that would have noticed.*
+
+*`app.services.roster_sync.request_section_sync` — the enqueue the first
+instance below fixed — still has the three-protection shape and the same six
+seconds on the launch path. It is a shared module outside E2-08, so it is carried
+in `docs/tickets/e2/deferred.md` with a done-when rather than changed there.)*
 
 *(E1-11, found by running the whole suite after every one of the ticket's own
 suites was green.*
@@ -65,9 +103,18 @@ which is the one thing `app.services.provisioning` is built never to produce.
 **A request path may not be able to fail because a background dependency was
 unavailable, and it may not wait to find out.** When a handler enqueues work,
 publish with retries off, keep the result backend out of it for a task whose
-answer nobody reads, and catch broadly — the request has already done its own job
-by then, and the scheduled run is what covers the gap. State in the docstring
-which of the three is doing what, because each of them looks removable on its own.
+answer nobody reads, publish on a connection made for the call with its own
+retries off and its socket timeouts bounded, and catch broadly — the request has
+already done its own job by then, and the scheduled run is what covers the gap.
+State in the docstring which of the four is doing what, because each of them looks
+removable on its own.
+
+**And measure the enqueue against a closed port rather than trusting the flags.**
+The third protection is here because the other three were shipped, believed, and
+then timed: a publish flag governs the publish, and the client library opens the
+connection under a retry policy of its own before the publish is attempted. That
+is the same failure this entry is about, one layer down, and it survives every
+reading of the code.
 
 **And the corollary, which is how this was found:** a change that adds a call to a
 shared entry point is not verified by the suites of the ticket that made it. Run

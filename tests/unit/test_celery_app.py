@@ -375,13 +375,32 @@ ROSTER_SYNC_MINUTE = "0"
 WINDOW_DERIVATION_TASK_NAME = f"{TASKS_MODULE}.derive_survey_windows"
 WINDOW_DERIVATION_MINUTE = "30"
 
+# E2-08's entry: the async half of SPEC §3.3's fail-open, running
+# `app.jobs.tasks.reclassify_floored_comments` on `crontab(minute="45")`. Every
+# comment the character floor stood in for is asked of a model again, found by
+# ADR 0054's audit pair. The submit path publishes this same task the moment it
+# stores a floored submission; this entry is what makes the promise good when
+# that publish does not go out, since it is made with retries off and caught
+# broadly (`docs/MISTAKES.md` entry 41) — "the request has already done its own
+# job by then, and the scheduled run covers the gap". Without it a floored
+# verdict stands forever whenever the broker was down at the moment of
+# submission, and §3.3's "then classified async" is a sentence rather than a
+# behaviour. Minute 45 because 0 and 30 already belong to two jobs that each walk
+# every section in the institution.
+#
+# **The key is not asserted, for the reason E2-06's is not:** E2-08's work order
+# settles the task name (ruling 15) and settles no schedule key, so the entry is
+# found by the task it runs.
+RECLASSIFICATION_TASK_NAME = f"{TASKS_MODULE}.reclassify_floored_comments"
+RECLASSIFICATION_MINUTE = "45"
 
-def test_the_beat_schedule_holds_exactly_the_three_entries_that_have_landed(
+
+def test_the_beat_schedule_holds_exactly_the_four_entries_that_have_landed(
     configured_env: dict[str, str],
     import_app_module: Callable[[str], ModuleType | None],
     celery_application_in: Callable[[ModuleType], Any],
 ) -> None:
-    """E1-08 landed the first entry, E1-11 the second and E2-06 the third; this test is the record.
+    """E1-08 landed the first entry, E1-11 the second, E2-06 the third and E2-08 the fourth.
 
     **Rewritten by E1-08, per this test's own instruction at E0-03.** The
     original docstring: "This test is a record with a shelf life, and that is
@@ -406,20 +425,35 @@ def test_the_beat_schedule_holds_exactly_the_three_entries_that_have_landed(
     appears in the middle of a term — a launch or a roster sync creates one at any
     hour — and E2-06 deliberately does not hook the writer into those flows, which
     would put its diff inside E2-02's ingestion surface. ADR 0111 records the
-    choice and the staleness it accepts. Of the jobs E0-03 named, Monday reports
-    are still E4's and retention purges still E13's; if one of those has now landed
+    choice and the staleness it accepts.
+
+    **E2-08 is the fourth, and the instruction is being followed a third time.**
+    `app.jobs.tasks.reclassify_floored_comments` on `crontab(minute="45")`, which
+    sweeps the classifications the character floor decided and asks a model about
+    each comment again. It is the async half of SPEC §3.3's one sanctioned
+    fail-open — "the submission is accepted, then classified async" — and it is
+    not decoration on the enqueue the submit path already makes: that publish goes
+    out with retries off and its failure is swallowed, precisely so a broker that
+    is down cannot fail or delay a student's submission (`docs/MISTAKES.md` entry
+    41), which leaves this entry as the only thing that makes the promise good
+    when the publish does not go out. Of the jobs E0-03 named, Monday reports are
+    still E4's and retention purges still E13's; if one of those has now landed
     too, this test is again the record that has to change with it.
 
     **An equality rather than a superset, and E1-11 paid for that choice while
-    E2-06 pays for it again.** Widening it to "contains these" would let a fourth
-    entry land with no diff here, and an entry in this mapping is a job that runs
-    against every section in the institution on a cadence nobody at the keyboard
-    sees. Being made to edit this test is the whole point of the equality.
+    E2-06 and E2-08 have each paid for it since.** Widening it to "contains these"
+    would let a fifth entry land with no diff here, and an entry in this mapping
+    is a job that runs against every section in the institution on a cadence
+    nobody at the keyboard sees. Being made to edit this test is the whole point
+    of the equality — and it is why the equality is over the *tasks* rather than
+    over the keys: a task is what actually runs, and it is what each of the four
+    tickets settled.
 
-    **The third entry is found by its task and not by its key**, because E2-06's
-    work order settles the task name, the module and the cadence and settles no
-    name for the schedule key. Asserting a key here would pin an identifier the
-    ticket leaves open; asserting the task is asserting what the ticket says.
+    **The third and fourth entries are found by their tasks and not by their
+    keys**, because E2-06's work order and E2-08's each settle the task name, the
+    module and the cadence and settle no name for the schedule key. Asserting a
+    key here would pin an identifier the ticket leaves open; asserting the task is
+    asserting what the ticket says.
 
     The name-and-task assertion is the strong half of the pair and is not
     left to stand on its own: a module that does not exist produces an empty
@@ -441,16 +475,22 @@ def test_the_beat_schedule_holds_exactly_the_three_entries_that_have_landed(
 
     tasks = sorted(str(member(entry, "task")) for entry in entries.values())
     expected_tasks = sorted(
-        {PURGE_NONCES_TASK_NAME, ROSTER_SYNC_TASK_NAME, WINDOW_DERIVATION_TASK_NAME}
+        {
+            PURGE_NONCES_TASK_NAME,
+            ROSTER_SYNC_TASK_NAME,
+            WINDOW_DERIVATION_TASK_NAME,
+            RECLASSIFICATION_TASK_NAME,
+        }
     )
     assert tasks == expected_tasks, (
         f"The beat schedule runs {tasks}, not exactly {expected_tasks} — its keys are "
         f"{sorted(entries)}. E1-08 landed the daily purge of the launch replay ledger (ADR 0089), "
-        "E1-11 the hourly roster sync SPEC §7.3 asks for, and E2-06 the hourly survey-window "
-        "reconciler that reaches a section which appeared mid-term. No other ticket has landed "
-        "one: reports are E4, retention is E13. If one of those has now landed too, this test is "
-        "again the record that has to change with it — say which ticket owns the new entry and "
-        "assert what it is, rather than widening this equality to a superset check."
+        "E1-11 the hourly roster sync SPEC §7.3 asks for, E2-06 the hourly survey-window "
+        "reconciler that reaches a section which appeared mid-term, and E2-08 the hourly sweep of "
+        "floored classifications that is SPEC §3.3's 'then classified async'. No other ticket has "
+        "landed one: reports are E4, retention is E13. If one of those has now landed too, this "
+        "test is again the record that has to change with it — say which ticket owns the new "
+        "entry and assert what it is, rather than widening this equality to a superset check."
     )
 
     assert {PURGE_NONCES_SCHEDULE_KEY, ROSTER_SYNC_SCHEDULE_KEY} <= set(entries), (
@@ -507,6 +547,25 @@ def test_the_beat_schedule_holds_exactly_the_three_entries_that_have_landed(
         "better an hour apart than on the same tick. A `timedelta(hours=1)` is not the same "
         "schedule either: it drifts with every restart, so which minute a section's windows are "
         "reconciled at depends on when beat last came up."
+    )
+
+    sweeps = [
+        entry for entry in entries.values() if member(entry, "task") == RECLASSIFICATION_TASK_NAME
+    ]
+    assert len(sweeps) == 1, (
+        f"{len(sweeps)} beat entries run {RECLASSIFICATION_TASK_NAME!r}; the schedule holds "
+        f"{sorted(entries)}. E2-08 lands one hourly sweep, and two entries running it would ask "
+        "the provider about every floored comment in the institution twice an hour — which is a "
+        "bill as well as a load, on exactly the provider whose outage produced the floored rows."
+    )
+    sweep_schedule = member(sweeps[0], "schedule")
+    assert getattr(sweep_schedule, "minute", None) == {int(RECLASSIFICATION_MINUTE)}, (
+        f"The re-classification sweep is scheduled as {sweep_schedule!r}. E2-08 settles "
+        f'`crontab(minute="{RECLASSIFICATION_MINUTE}")` — minute 45 because 0 and 30 already '
+        "belong to the roster sync and the window reconciler, and three jobs that each walk the "
+        "whole institution are better apart than on one tick. A `timedelta(hours=1)` is not the "
+        "same schedule: it drifts with every restart, so how long a student's floored verdict "
+        "stands before a model is asked about it depends on when beat last came up."
     )
 
 

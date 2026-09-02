@@ -51,6 +51,17 @@ arm when moderation lands.
 the text. E2 adds the column, `NOT NULL`, with the foreign key it can finally
 point at.
 
+> **Amended 2026-09-01 (E2-08).** The column landed, and it landed **nullable**
+> rather than `NOT NULL`. The reason is this record's own rejected alternative seen
+> from the other side: there is nothing to backfill the rows written before E2-08
+> from, so a `NOT NULL` column would either refuse the migration on any database
+> holding one or invent a subject for it. Every row this system writes from E2-08
+> onward carries the reference, and the sweep that finds floored verdicts filters
+> on its presence. Nothing else here changes: the reference is real, it names an
+> `answer` and not a person, and append-only is still a grant. The `ON DELETE
+> RESTRICT` on it turned out to decide more than this record anticipated — see
+> [ADR 0115](0115-a-resubmission-revises-its-answers-in-place.md).
+
 **Append-only is a grant.** `classification_grants_v001.sql` gives `pulse_app`
 `SELECT, INSERT` on the table and nothing else, so the connection the API and the
 worker hold cannot `UPDATE` or `DELETE` a row however the application is written.

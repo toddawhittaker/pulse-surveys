@@ -1,26 +1,34 @@
-"""The words this product says to a person, in one discoverable place — E2-09.
+"""Every sentence this backend shows a person, in one place a guard can enumerate.
 
-SPEC §4.1 items 4 and 5 are rules about *vocabulary*: aggregate language counts
-sections rather than instructors and never ranks; confidentiality copy appears
-exactly once per surface, in plain words. Both are checked over an inventory of
-the strings this product actually ships, and a string spelled inside a handler is
-a string that inventory cannot see. So a user-facing string lives here, and the
-module it lives in is found by walking this package.
+SPEC §4.1 items 4 and 5 are rules about *words* — what a surface may say about a
+student, and where the confidentiality line appears — and E2-11 ships an inventory
+that reads them. An inventory can only read strings it can find, so this package is
+the one place a user-facing string lives: a route serves copy by key lookup and
+never as an inline sentence, and a refusal whose words are written at its raise
+site is a refusal the inventory cannot see.
 
-**Two names and nothing else.** `CopyEntry` is what an entry is — a key and the
-text under it — and `copy_modules()` is how every entry is found. There is
-deliberately **no central list** of entries: a list is a second place to register
-a string, and the string that matters is always the one somebody forgot to add to
-it. A module dropped into this package is inventoried the moment it is written.
+**Two things live here and nothing else.** `CopyEntry`, which is what one string
+is, and `copy_modules()`, which is how the package's contents are found. Each
+surface adds one module beside this one defining `COPY: Mapping[str, CopyEntry]`
+keyed by dotted keys. E2-08 adds `submit.py`, E2-09 adds `student_read.py`, and
+E2-10 adds its own.
 
 **The key is a name, not a sentence.** `student.not_a_student` says which surface
 and which event; what it *says* to a person is `text`, and the two are separated
 so that rewording a refusal is one edit here rather than an edit in a router. Keys
 are dotted and grouped by surface, so an inventory can be read by surface.
 
-**Frozen.** Copy is read at import time by whatever renders it and by whatever
-audits it, and an entry a caller could mutate is an entry that says one thing to
-the reader and another to the audit.
+**There is deliberately no central list of the modules.** `copy_modules()`
+enumerates the package directory, so the inventory's reach cannot be shrunk by an
+edit to the thing it inventories — a hand-written tuple is a list a surface can be
+dropped from, and the dropped surface then ships with nothing counting its words
+(`docs/MISTAKES.md` entry 35). The enumeration is the whole reason the registry is
+a package rather than a module.
+
+**Nothing here reads configuration, opens a connection or imports an application
+module.** A copy module is constants; one that needed `Settings` to state a
+sentence would be a defect, and it would make this package unimportable from
+`migrations/env.py`'s environment the way `app.models.ai` warns about.
 """
 
 import pkgutil
@@ -31,14 +39,20 @@ from types import ModuleType
 __all__ = ["CopyEntry", "copy_modules"]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CopyEntry:
-    """One user-facing string, under the name the product refers to it by.
+    """One user-facing string, and the key it is served and inventoried by.
 
     `key` is the stable name — `<surface>.<event>` — and `text` is what a person
-    reads. Nothing else: a description, a surface, or a "shown where" field would
-    each be a fact about the string that has to be kept true, and the inventory
-    that reads these entries is looking for the words.
+    reads.
+
+    Frozen, because the inventory reads the registry at one moment and the
+    application serves it at another: an entry that can be rewritten after import
+    is an entry those two can disagree about.
+
+    Two fields and no third. A rule carried on a copy entry — a severity, an
+    audience, a flag saying "this one is exempt" — is a rule living where the
+    inventory does not look, and the inventory is the whole point of the shape.
     """
 
     key: str
@@ -46,12 +60,12 @@ class CopyEntry:
 
 
 def copy_modules() -> tuple[ModuleType, ...]:
-    """Every module in this package, imported, in a stable order.
+    """Every copy module in this package, found rather than listed, in a stable order.
 
-    **Discovery rather than registration**, which is the whole design: an
-    inventory built from a hand-kept list is short by exactly the module somebody
-    forgot to add, and the copy rules of SPEC §4.1 are worth nothing over an
-    inventory that quietly misses a surface. A module filed here is found.
+    The directory is the inventory. `pkgutil.iter_modules` walks this package's
+    own `__path__`, so a module added beside `submit.py` is enumerated by existing
+    and a module deleted stops being enumerated by not existing — neither needs
+    anybody to remember a list.
 
     Sorted by name so the order is the same on every machine and in every run —
     `pkgutil.iter_modules` answers in directory order, which is not one.

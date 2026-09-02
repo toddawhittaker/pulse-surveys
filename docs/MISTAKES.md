@@ -348,13 +348,19 @@ the fixtures that should have set it.
 
 ## 41. A request path inherited a background job's dependency, at that dependency's default retry policy
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/41-a-request-path-inherited-a-background-dependency.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/41-a-request-path-inherited-a-background-dependency.md)
 
 **Rule.** A request path may not be able to fail because a background dependency
 was unavailable, and it may not wait to find out. When a handler enqueues work,
 publish with retries off, keep the result backend out of it for a task whose
-answer nobody reads, and catch broadly — the request has already done its own job
-by then, and the scheduled run covers the gap. A client library's defaults are
+answer nobody reads, **publish on a connection made for the call, with its own
+retries off and its socket timeouts bounded**, and catch broadly — the request has
+already done its own job by then, and the scheduled run covers the gap. The third
+of those four was added after the other three were measured and found
+insufficient: a publish flag governs the publish, while the client library opens
+the connection under a retry policy of its own *before* the publish is attempted,
+so a broker refusing instantly still costs seconds. Time the enqueue against a
+closed port rather than trusting the flags. A client library's defaults are
 written for the context that library is usually called from, and a worker's
 defaults on a request path turn a dependency that is *down* into a request that is
 *hanging*. And the corollary: a change that adds a call to a shared entry point is

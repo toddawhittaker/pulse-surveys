@@ -3,11 +3,12 @@
 `ping` exists only to prove the round trip and `effective_now` only to prove that
 the worker reads the same clock the tool does (E2-04); `purge_launch_nonces` is
 E1-08's daily maintenance of the two launch tables, the two `sync_*` tasks are
-E1-11's roster pull, and `derive_survey_windows` is E2-06's hourly reconciler over
-the weekly rhythm (§3.1). Async classification, summaries, and grade passback (§7.4,
-§3.4) are E3 and E13's work, and each of those is a call into `app/services/`
-from here rather than domain logic written in this file — which is exactly the
-shape every task below takes: it opens a session and calls a service.
+E1-11's roster pull, `derive_survey_windows` is E2-06's hourly reconciler over the
+weekly rhythm (§3.1), and `reclassify_floored_comments` is E2-08's async half of
+§3.3's fail-open. Summaries and grade passback (§7.4, §3.4) are E4 and E3's work,
+and each of those is a call into `app/services/` from here rather than domain logic
+written in this file — which is exactly the shape every task below takes: it opens
+a session and calls a service.
 """
 
 from datetime import UTC, datetime
@@ -21,6 +22,9 @@ from app.lti.replay_guard import purge_expired_nonces
 from app.services import clock
 from app.services.roster_sync import sync_all_rosters, sync_section
 from app.services.survey_windows import derive_windows_for_all_sections
+from app.services.validity import (
+    reclassify_floored_comments as sweep_unresolved_floored_comments,
+)
 
 
 @celery_app.task
@@ -156,3 +160,37 @@ def derive_survey_windows() -> None:
     with SessionLocal() as session:
         derive_windows_for_all_sections(session, settings=settings)
         session.commit()
+
+
+@celery_app.task
+def reclassify_floored_comments() -> int:
+    """Re-run every comment §3.3's fail-open floor stood in for (E2-08, SPEC §3.3).
+
+    "on provider timeout, the heuristic floor applies and the submission is
+    accepted, **then classified async**." This is that second half, and it is run
+    from two places for one reason each: the submit path publishes it the moment it
+    stores a floored submission, so a provider that has come back is used within
+    seconds; and `app.jobs.schedules` runs it hourly, because the request-side
+    publish is made with retries off and swallowed if the broker is down
+    (`docs/MISTAKES.md` entry 41), so the schedule is what makes the promise good
+    when it fails.
+
+    A thin wrapper, like every task above: the session, the configuration and the
+    commit are this task's, and which comments are unresolved, how each is re-run
+    and what it does to `response.is_valid` are all
+    `app.services.validity`'s — the module the submit path's synchronous half
+    already reads, so the two halves cannot disagree about what a floored row is.
+
+    **One commit at the end, over a walk that already survives a comment that
+    fails.** Each comment runs inside its own savepoint in the service and a
+    failure there is logged and stepped over, so the commit stores whatever the
+    pass managed; the next run picks up whatever is still unresolved, because that
+    is a fact about the stored rows rather than about this process.
+
+    Answers how many comments were re-run, which is what a worker log line and an
+    operator asking "is the backlog moving" both want.
+    """
+    with SessionLocal() as session:
+        reclassified = sweep_unresolved_floored_comments(session)
+        session.commit()
+        return reclassified

@@ -3415,7 +3415,9 @@ MEMBER_OF_ROLES = """
 #     `survey_window`. A read path that structurally cannot write is a read path
 #     that cannot alter a submission it was only meant to display, and it cannot
 #     back-fill a missed week (§3.1) or move a question's wording out from under
-#     the `answer` rows keyed to it (§3.2's versioned set).
+#     the `answer` rows keyed to it (§3.2's versioned set). The write verbs the
+#     entry below adds are E2-08's submit path's, and they are granted by that
+#     ticket's own revision rather than widened here.
 #     **What `SELECT` on `response` and `answer` is not.** It is not a widening of
 #     what a student can see: §4.1 item 1's scoping is the read's `WHERE` clause —
 #     E2-05's `(user_id, section_id, week_id)` key with the author left in — and
@@ -3431,6 +3433,57 @@ MEMBER_OF_ROLES = """
 #     read needed it.
 #     Decided and spent in E2-09, ruled in `docs/disputes/E2-09-02.md`; precedent
 #     `docs/disputes/E2-04-02.md` and `docs/disputes/E2-06-03.md`.
+#   - `pulse_app` also **writes and revises** `response` and `answer`, on top of
+#     the reads the entry above grants — the four tables E2-08's submit path
+#     touches are `question_set`, `question`, `response` and `answer`, and this is
+#     the arrival the `survey_window` entry predicted ("E2 will do it again when
+#     the first student write path needs a grant on `response`").
+#     This is the first student write path in the product, and
+#     [ADR 0110](../../docs/adr/0110-answer-values-are-validated-by-the-write-path.md)
+#     names the shape in advance: "`pulse_app` is granted nothing on `answer` by
+#     E2-05's migration at all, and E2-08 grants the privilege its own path needs
+#     beside the code that justifies it — the same shape ADR 0055 gives
+#     `classification`."
+#     **A verb per caller, and each was measured** by asking what fails without
+#     it; the branch was run with the grants file removed from the revision and
+#     the route answers 500 on its first `SELECT` against `question_set`.
+#     `question_set` `SELECT` finds the set in force and `question` `SELECT` reads
+#     ADR 0110's `minimum_value`, `maximum_value`, `step` and the conditional-rule
+#     columns — that record makes those three "the only statement of the ranges in
+#     the system", and validating against them means reading them. `response`
+#     `SELECT` finds a resubmission's existing row, `INSERT` writes the first
+#     submission of a week, and `UPDATE` writes `last_submitted_at` on a
+#     resubmission and `is_valid` when the async sweep revises a floored verdict.
+#     `answer` `SELECT` reads the rows a resubmission revises and the comment text
+#     the sweep re-classifies, `INSERT` writes a question answered for the first
+#     time, `UPDATE` is
+#     [ADR 0115](../../docs/adr/0115-a-resubmission-revises-its-answers-in-place.md)'s
+#     in-place revision, and `DELETE` removes a question answered before and left
+#     blank now.
+#     **What is withheld is the assertion**, as on `classification`, on
+#     `clock_override` and on `survey_window`. `response` `DELETE` is **not**
+#     granted: SPEC §3.1 makes a missed week unfillable and §3.4 counts these rows,
+#     so this connection structurally cannot remove a week a participation score
+#     has already been computed from. Nothing beyond `SELECT` is granted on
+#     `question` or `question_set` — the instrument is written by a migration and
+#     by the seed, under the bootstrap identity — so a route cannot edit the
+#     question it is validating against. `classification` gains a column in this
+#     ticket and no privilege: it keeps `SELECT, INSERT` and stays append-only,
+#     which is what makes ADR 0115's refusal-rather-than-delete the only way a
+#     judged comment can go, since a referential action on that table is an
+#     `UPDATE` this role does not hold.
+#     **What these tables carry, for §4.1.** `question_set` and `question` hold the
+#     instrument — a version, an ordinal, question text, bounds — and nothing about
+#     anybody. `response` holds the three keys SPEC §8's uniqueness rule is written
+#     over, two submission timestamps and `is_valid`; `answer` holds a response, a
+#     question and exactly one of a rating, a comment or a workload figure. The
+#     student's identity is a foreign key on `response` and the identity behind it
+#     sits on `user_identity`, which `pulse_app` is granted no `SELECT` on — the
+#     same argument `enrollment`'s entry makes, and the one
+#     `tests/integration/test_identity_column_marker.py` records for both tables.
+#     Decided and spent in E2-08, ruled in `docs/disputes/E2-08-03.md`; the whole
+#     argument for each verb, and for the ones withheld beside them, is in
+#     `backend/app/views_sql/survey_submission_grants_v001.sql`.
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -3466,7 +3519,12 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "question_set", "SELECT"),
         (APPLICATION_ROLE, "question", "SELECT"),
         (APPLICATION_ROLE, "response", "SELECT"),
+        (APPLICATION_ROLE, "response", "INSERT"),
+        (APPLICATION_ROLE, "response", "UPDATE"),
         (APPLICATION_ROLE, "answer", "SELECT"),
+        (APPLICATION_ROLE, "answer", "INSERT"),
+        (APPLICATION_ROLE, "answer", "UPDATE"),
+        (APPLICATION_ROLE, "answer", "DELETE"),
     }
 )
 

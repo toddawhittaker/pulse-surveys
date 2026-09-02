@@ -55,6 +55,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Enum,
     ForeignKey,
@@ -294,6 +295,15 @@ class Response(UuidPrimaryKey, Base):
     **Resubmission semantics are E2-08's**, which owns what a second submit does
     to the answers. This table gives it the two columns and the ordering rule and
     nothing more.
+
+    **`is_valid` is §3.3's verdict about the whole submission**, added by E2-08
+    with the path that writes it. It is a stored answer rather than a query over
+    `classification` because §3.4's participation score is computed over these
+    rows and the verdicts behind it are append-only — "the latest classification
+    of each of this response's comments" is a window function every reader would
+    otherwise have to get right. What keeps the stored answer honest is that one
+    module writes it: `app.services.validity`, at submit and again when the async
+    re-classification revises a floored verdict.
     """
 
     __tablename__ = "response"
@@ -329,6 +339,18 @@ class Response(UuidPrimaryKey, Base):
     )
     first_submitted_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)
     last_submitted_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)
+    # Whether this submission counts for participation (§3.3, §3.4), written by
+    # the submit path alone from the classification verdicts of the comments it
+    # carried. NOT NULL and no server default, for both halves of the reason the
+    # timestamps above carry none: E3's participation formula reads this column,
+    # and a default would let a row that nothing decided about look decided.
+    #
+    # It moves after the fact, and that is the point rather than an oversight: a
+    # submission accepted on §3.3's fail-open floor is stored valid and the async
+    # re-classification revises it when a model finally judges the comment
+    # (`app.services.validity`). A blank optional comment never affects it —
+    # §3.3 says so in as many words — because there is no verdict to read.
+    is_valid: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
 class Answer(UuidPrimaryKey, Base):
