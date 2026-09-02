@@ -29,26 +29,46 @@ continuation of an entry whose value is on the next line, or the close — and
 anything else raises `CopyParseError` naming the file, the line and the line's
 text.
 
-**Below the literal, code is read for quotes rather than for shape.** A copy file
-carries helpers after its mapping — E2-10's `studentSurvey.ts` closes its literal
-and then exports a `keyof typeof` key type, a `copy()` lookup and a `fillCopy()`
-that substitutes `{placeholder}` holes. Those are not strings and there is no
-reason to refuse them; a parser that demanded a shape of them would be red on the
-shipped file for doing something reasonable. So the rule below the literal is
-narrower and blunter than the one above it: **a code line passes only if it
-carries no quote character at all** — no `'`, no `"`, no backtick. A sentence
-written into a helper (`return 'Nothing is open this week.'`) is a shipped string
-the inventory cannot govern, and it is refused loudly rather than passed over,
-which is the whole reason "allow everything after the close" was not the answer.
+**Outside the literal, code is read for quotes rather than for shape, and the
+rule is the same above it and below it.** A copy file carries helpers after its
+mapping — E2-10's `studentSurvey.ts` closes its literal and then exports a `keyof
+typeof` key type, a `copy()` lookup and a `fillCopy()` that substitutes
+`{placeholder}` holes. Those are not strings and there is no reason to refuse
+them. So outside the literal **a code line passes only if it carries no quote
+character at all** — no `'`, no `"`, no backtick. A sentence written into a
+helper (`return 'Nothing is open this week.'`) is a shipped string the inventory
+cannot govern, and it is refused loudly rather than passed over, which is why
+"allow everything after the close" was not the answer.
 
-Two costs, stated rather than discovered. A post-literal line whose only quote is
-in a trailing `// it's fine` comment is refused, and so is a legitimate helper
-that needs a string for something other than copy — a separator, a locale tag. In
-either case the refusal names the line, and the answer is to move the string into
-the literal or to teach the exception here, in the change that introduces it.
-Comments are unaffected: block and line comments are consumed before this rule is
-reached, which is why the backticks inside `fillCopy`'s own documentation are not
-a refusal.
+**One rule and not two**, because the first version of this parser had a
+prefix-matched allowance above the literal (`import`, `type`, `interface`) that
+skipped such a line whole — so `type Mood = 'Great week' | 'Rough week';` parsed
+clean while the identical sentence below the literal was refused. A guard with
+two rules for one question is a guard defeated at whichever end is weaker, and
+the fail-closed end is the one to keep.
+
+Three costs, stated rather than discovered. A line whose only quote sits in a
+trailing `// it's fine` comment is refused; so is a helper that legitimately
+needs a string for something other than copy; and so is an `import` with a
+quoted module path, which is why this rule is affordable only because the shipped
+copy files have no imports. Each refusal names the line, and the answer is to
+move the string into the literal or to triage the exception here, in the change
+that introduces it. Comments are unaffected: block and line comments are consumed
+before this rule is reached, which is why the backticks inside `fillCopy`'s own
+documentation are not a refusal.
+
+**The frontend enumeration is recursive, over the whole TypeScript family, and
+the coverage rule does not consult it.** A one-level `*.ts` glob missed a copy
+file in a subdirectory and a copy file spelled `.tsx`, and the rule that was
+supposed to catch that compared the glob's answer with the same glob's answer —
+so it agreed with itself and two shipped surfaces were invisible. The walk now
+descends and reads `.ts`, `.tsx`, `.mts` and `.cts`; and
+`files_the_collector_did_not_read` walks **everything** under the copy
+directory, at any depth and of any suffix, requiring each file to be one the
+collector actually parsed. The copy directory holds copy, so a `.json`, a `.md`
+or a suffix nobody thought of is a red rather than a silence. The two
+enumerations answer different questions on purpose: one asks what to parse, the
+other asks what was missed.
 
 **The files are enumerated by globbing the directory, never by asking git.** A
 violation planted to prove this suite can go red is an untracked file, and a
@@ -72,12 +92,19 @@ from fixtures.submit import COPY_PACKAGE, copy_texts
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Where the frontend keeps its externalized strings, and what a copy file is
-# called. E2-10 put `studentSurvey.ts` here and E2-11 reads the directory rather
-# than that file: a second surface arrives as a second file, and an inventory
-# that named one file would be an inventory the next ticket shrinks by accident.
+# Where the frontend keeps its externalized strings. E2-10 put `studentSurvey.ts`
+# here and E2-11 reads the directory rather than that file: a second surface
+# arrives as a second file, and an inventory that named one file would be an
+# inventory the next ticket shrinks by accident.
 FRONTEND_COPY_DIRECTORY = REPO_ROOT / "frontend" / "src" / "copy"
-FRONTEND_COPY_GLOB = "*.ts"
+
+# The whole TypeScript family, because a copy file that changed suffix is a copy
+# file. `.tsx` is the one that matters — a copy module beside a component would
+# take it as a matter of course — and `.mts`/`.cts` are here because excluding
+# them would be choosing which two of four spellings the guard can see. The
+# walk is recursive: `frontend/src/copy/reports/aggregate.ts` is copy in the copy
+# directory, and a one-level glob reported the tree clean over exactly that file.
+COPY_FILE_SUFFIXES = (".ts", ".tsx", ".mts", ".cts")
 
 # The characters a TypeScript string may be delimited by. Backticks are refused
 # rather than read: a template literal can interpolate, so its text is not a
@@ -85,10 +112,21 @@ FRONTEND_COPY_GLOB = "*.ts"
 STRAIGHT_QUOTES = "'\""
 BACKTICK = chr(0x60)
 
-# Every character a string may open with. Below the literal, a code line carrying
-# any of the three is refused — see the module docstring for the rule and what it
-# costs.
+# Every character a string may open with. Outside the literal — above it and
+# below it alike — a code line carrying any of the three is refused. See the
+# module docstring for the rule and what it costs.
 QUOTE_CHARACTERS = STRAIGHT_QUOTES + BACKTICK
+
+# The two halves of a UTF-16 surrogate pair. A padlock can be written as two
+# four-digit escapes rather than one — the high half then the low half — and
+# decoding each on its own produces two lone surrogates that no sweep for the
+# lock character can match, while the browser renders the padlock exactly as it
+# renders the literal one. So the pair is recombined here, and a half with no
+# partner is refused: a lone surrogate is not text, and passing one through would
+# be this parser reporting a character no reader will ever see.
+HIGH_SURROGATES = range(0xD800, 0xDC00)
+LOW_SURROGATES = range(0xDC00, 0xE000)
+SURROGATE_BASE = 0x10000
 
 # One exported object literal per copy file, discovered by shape rather than by
 # name — `export const STUDENT_SURVEY_COPY = {`. The name is not pinned because
@@ -103,17 +141,12 @@ OPENING = re.compile(
 # `}`, `};`, `} as const;`, `} as const satisfies Record<string, string>;`.
 CLOSING = re.compile(r"^\}(?:\s+as\s+const)?(?:\s+satisfies\s+[^;]+?)?\s*;?\s*$")
 
-# What may appear outside the literal, other than blank lines and comments. A
-# copy file is a header, an import or two, and one mapping; anything else is
-# either a second home for strings or a shape this parser has not been taught,
-# and both are refusals rather than lines to pass over.
-OUTSIDE_STATEMENT = re.compile(r"^(?:import|export\s+type|type|interface)\b")
-
 # The escapes a JavaScript string may spell a character with, other than the
 # numeric ones handled beside them. `\u{1F512}` matters more than it looks:
 # without it, a lock emoji written as an escape would reach the iconography sweep
-# in §4.1 item 5 as the four characters `u`, `{`, `1`... and the sweep would
-# report the surface clean. A parser that mis-decodes is a collector gone blind.
+# in §4.1 item 5 as the ordinary characters of an escape sequence, and the sweep
+# would report the surface clean. A parser that mis-decodes is a collector gone
+# blind.
 SIMPLE_ESCAPES = {
     "n": "\n",
     "t": "\t",
@@ -199,12 +232,53 @@ def read_escape(fragment: str, index: int, where: str, line: str) -> tuple[str, 
     return SIMPLE_ESCAPES.get(marker, marker), index + 2
 
 
+def is_surrogate(character: str, half: range) -> bool:
+    """Whether `character` is one code unit and falls in one half of the surrogate range."""
+    return len(character) == 1 and ord(character) in half
+
+
+def joined_surrogates(high: str, low: str) -> str:
+    """The one character a high and a low surrogate stand for together."""
+    high_part = (ord(high) - HIGH_SURROGATES.start) << 10
+    low_part = ord(low) - LOW_SURROGATES.start
+    return chr(SURROGATE_BASE + high_part + low_part)
+
+
+def read_surrogate_pair(
+    high: str, fragment: str, index: int, where: str, line: str
+) -> tuple[str, int]:
+    """The character a high surrogate and the escape after it stand for.
+
+    A high surrogate with no low surrogate following is refused. Decoding it on
+    its own would put a lone surrogate in the collected text: not a character any
+    reader sees, and — for the padlock spelled this way — not one the iconography
+    sweep in §4.1 item 5 can match either, while the browser renders the icon.
+    """
+    partner = ""
+    if index < len(fragment) and fragment[index] == "\\":
+        partner, index = read_escape(fragment, index, where, line)
+    if not is_surrogate(partner, LOW_SURROGATES):
+        raise CopyParseError(
+            refusal(
+                where,
+                line,
+                "carries the high half of a surrogate pair with no low half after it, which is "
+                "not a character anything can render or sweep",
+            )
+        )
+    return joined_surrogates(high, partner), index
+
+
 def read_string_literal(fragment: str, where: str, line: str) -> tuple[str, str]:
     """The string literal `fragment` begins with, decoded, and whatever follows it.
 
     Decoded rather than returned raw, because the rules downstream are about the
     characters a student reads: `\\u{1F512}` is a lock on the screen and would be
-    six ordinary characters to a sweep reading the source.
+    the ordinary characters of an escape sequence to a sweep reading the source.
+
+    **Surrogate pairs are joined here**, so that the same padlock written as two
+    four-digit escapes decodes to the same one character as the brace form and the
+    literal. A half with no partner is refused rather than passed through.
     """
     if not fragment:
         raise CopyParseError(refusal(where, line, "expects a quoted string and holds nothing"))
@@ -227,6 +301,17 @@ def read_string_literal(fragment: str, where: str, line: str) -> tuple[str, str]
         char = fragment[index]
         if char == "\\":
             decoded, index = read_escape(fragment, index, where, line)
+            if is_surrogate(decoded, HIGH_SURROGATES):
+                decoded, index = read_surrogate_pair(decoded, fragment, index, where, line)
+            elif is_surrogate(decoded, LOW_SURROGATES):
+                raise CopyParseError(
+                    refusal(
+                        where,
+                        line,
+                        "carries the low half of a surrogate pair with no high half before it, "
+                        "which is not a character anything can render or sweep",
+                    )
+                )
             read.append(decoded)
             continue
         if char == quote:
@@ -303,33 +388,25 @@ def parse_copy_module(text: str, source: str) -> dict[str, str]:
                 inside = True
                 opened = True
                 continue
-            if opened:
-                # Below the literal: the file's helpers. Read for quotes rather
-                # than for shape — see the module docstring. The `OPENING` check
-                # above runs first, so a second literal is still refused as one
-                # rather than passing here for holding no quote.
-                carried = sorted({quote for quote in QUOTE_CHARACTERS if quote in line})
-                if carried:
-                    raise CopyParseError(
-                        refusal(
-                            where,
-                            raw,
-                            f"is code below the copy literal carrying {carried}; a string written "
-                            "outside the literal is a string the inventory cannot govern, and "
-                            "§4.1 items 4 and 5 would never be checked over it",
-                        )
+            # Outside the literal, above it or below it: the file's declarations
+            # and its helpers. Read for quotes rather than for shape — see the
+            # module docstring, and the paragraph there on why this is one rule
+            # and not two. The `OPENING` check above runs first, so a second
+            # literal is still refused as one rather than passing here for
+            # holding no quote.
+            carried = sorted({quote for quote in QUOTE_CHARACTERS if quote in line})
+            if carried:
+                raise CopyParseError(
+                    refusal(
+                        where,
+                        raw,
+                        f"is code {'below' if opened else 'above'} the copy literal carrying "
+                        f"{carried}; a string written outside the literal is a string the "
+                        "inventory cannot govern, and §4.1 items 4 and 5 would never be checked "
+                        "over it",
                     )
-                continue
-            if OUTSIDE_STATEMENT.match(line):
-                continue
-            raise CopyParseError(
-                refusal(
-                    where,
-                    raw,
-                    "is a top-level statement above the copy literal; a string held here is a "
-                    "string the inventory never sees",
                 )
-            )
+            continue
 
         if pending_key is not None:
             value, remainder = read_string_literal(line, where, raw)
@@ -390,10 +467,13 @@ def record_entry(entries: dict[str, str], key: str, value: str, where: str, line
 
 
 def frontend_copy_files(directory: Path) -> list[Path]:
-    """Every copy file in `directory`, by glob, refusing a directory with none.
+    """Every copy file under `directory`, at any depth, refusing a directory with none.
 
-    By glob and not by `git ls-files`: a planted file used to prove this suite
-    goes red is untracked, and an enumeration that asked git would not see it.
+    On disk and not through `git ls-files`: a planted file used to prove this
+    suite goes red is untracked, and an enumeration that asked git would not see
+    it. Recursive and over the whole TypeScript family, because a one-level
+    `*.ts` glob reported a clean tree over a copy file in a subdirectory and a
+    copy file spelled `.tsx`.
     """
     if not directory.is_dir():
         raise CopyInventoryError(
@@ -401,15 +481,58 @@ def frontend_copy_files(directory: Path) -> list[Path]:
             "E2-10 puts the survey surface's strings in `frontend/src/copy/studentSurvey.ts`; if "
             "the directory has moved, `FRONTEND_COPY_DIRECTORY` moves with it."
         )
-    found = sorted(directory.glob(FRONTEND_COPY_GLOB))
+    found = sorted(
+        path
+        for path in directory.rglob("*")
+        if path.is_file() and path.suffix.lower() in COPY_FILE_SUFFIXES
+    )
     if not found:
         raise CopyInventoryError(
-            f"{display(directory)} holds no {FRONTEND_COPY_GLOB} file, so the frontend half of "
-            "the inventory is empty. Every rule over it would then be a statement about nothing "
-            "(`docs/MISTAKES.md` entry 3), which is why this is a refusal rather than an empty "
-            "list."
+            f"{display(directory)} holds no {list(COPY_FILE_SUFFIXES)} file at any depth, so the "
+            "frontend half of the inventory is empty. Every rule over it would then be a "
+            "statement about nothing (`docs/MISTAKES.md` entry 3), which is why this is a refusal "
+            "rather than an empty list."
         )
     return found
+
+
+def every_file_under_the_copy_directory(directory: Path) -> list[Path]:
+    """Everything under `directory`, at any depth, whatever its suffix.
+
+    The second enumeration, and deliberately not the one above. The coverage rule
+    that is supposed to catch a copy file the collector missed cannot be built out
+    of the collector's own answer — that version agreed with itself, and a
+    subdirectory and a `.tsx` shipped invisibly under it.
+    """
+    if not directory.is_dir():
+        raise CopyInventoryError(
+            f"{display(directory)} is not a directory, so this walk read nothing and every file "
+            "it might have reported is a file it never saw."
+        )
+    found = sorted(path for path in directory.rglob("*") if path.is_file())
+    if not found:
+        raise CopyInventoryError(
+            f"{display(directory)} holds no files at all, so the coverage rule over it is a "
+            "statement about nothing."
+        )
+    return found
+
+
+def files_the_collector_did_not_read(directory: Path) -> list[str]:
+    """Every file under `directory` that the collector did not parse a string out of.
+
+    The copy directory holds copy. A file of a suffix the collector does not
+    read, or one nested where it does not look, is a shipped surface nothing
+    governs — so it is named here rather than passed over. The comparison is
+    between two independent walks: what the collector parsed, against everything
+    that is there.
+    """
+    read_from = {string.source for string in collect_frontend_copy(directory)}
+    return sorted(
+        display(path)
+        for path in every_file_under_the_copy_directory(directory)
+        if display(path) not in read_from
+    )
 
 
 def collect_frontend_copy(directory: Path) -> list[CopyString]:

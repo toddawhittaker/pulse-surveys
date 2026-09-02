@@ -96,6 +96,8 @@ from fixtures.copy_inventory import (
     collect_frontend_copy,
     collect_shipped_copy,
     display,
+    every_file_under_the_copy_directory,
+    files_the_collector_did_not_read,
     frontend_copy_files,
     parse_copy_module,
     prefix_of,
@@ -276,21 +278,27 @@ CURLY_APOSTROPHE = chr(0x2019)
 OPEN_LITERAL = "export const SAMPLE_COPY = {"
 CLOSE_LITERAL = "} as const satisfies Record<string, string>;"
 
-# A file written the way E2-10's is: a header comment, an import, dotted keys in
-# one flat literal, a value carried onto its own line, an escaped apostrophe, a
-# typographic apostrophe, a placeholder hole the screen fills, a trailing comment
-# and a comment line of its own — and, below the literal, the helpers a copy file
-# exports beside its mapping. The tail is shaped after `studentSurvey.ts`'s own: a
-# `keyof typeof` key type, and a substitution helper whose documentation carries
-# backticks and whose body carries a regex and no string at all. Those helpers are
-# the reason the rule below the literal is about quotes rather than about shape.
+# A file written the way E2-10's is: a header comment, a quote-free declaration
+# above the literal, dotted keys in one flat literal, a value carried onto its own
+# line, an escaped apostrophe, a typographic apostrophe, a placeholder hole the
+# screen fills, a trailing comment and a comment line of its own — and, below the
+# literal, the helpers a copy file exports beside its mapping. The tail is shaped
+# after `studentSurvey.ts`'s own: a `keyof typeof` key type, and a substitution
+# helper whose documentation carries backticks and whose body carries a regex and
+# no string at all.
+#
+# **Both regions outside the literal are represented, and both are quote-free.**
+# That is the accepted half of one rule rather than of two: the parser applies the
+# same no-quote test above the literal and below it, so the sample has to show a
+# passing line on each side and the refusal cases have to show a refused line on
+# each side.
 A_COPY_FILE = "\n".join(
     [
         "/**",
         " * A sample copy module, shaped the way the shipped ones are.",
         " */",
         "",
-        "import type { Something } from '../types';",
+        "type SampleValue = string;",
         "",
         OPEN_LITERAL,
         "  'sample.heading': 'Your weekly check-in',",
@@ -337,6 +345,7 @@ AN_ESCAPED_FILE = "\n".join(
     [
         "export const ESCAPED_COPY = {",
         "  'escaped.brace': 'a \\u{1F512} lock',",
+        "  'escaped.pair': 'a \\uD83D\\uDD12 lock',",
         "  'escaped.four': 'a \\u0041 letter',",
         "  'escaped.hex': 'a \\x41 letter',",
         "  'escaped.backslash': 'one \\\\ backslash',",
@@ -345,8 +354,13 @@ AN_ESCAPED_FILE = "\n".join(
     ]
 )
 
+# The four spellings of one padlock and two ordinary escapes. `escaped.brace` and
+# `escaped.pair` must decode to the *same* character as each other and as the
+# literal one: a browser renders all three identically, so a sweep that sees only
+# some of them is a sweep with a spelling-shaped hole in it.
 AN_ESCAPED_FILES_ENTRIES = {
     "escaped.brace": "a " + chr(0x1F512) + " lock",
+    "escaped.pair": "a " + chr(0x1F512) + " lock",
     "escaped.four": "a A letter",
     "escaped.hex": "a A letter",
     "escaped.backslash": "one \\ backslash",
@@ -375,9 +389,21 @@ REFUSED_SHAPES = {
     "a statement inside the literal": "\n".join(
         [OPEN_LITERAL, "  const weeks = 12;", CLOSE_LITERAL]
     ),
-    "a statement above the literal": "\n".join(
+    # Above the literal. The first is the reviewer's own demonstration: under the
+    # prefix-matched allowance this parser used to carry, a `type` line was
+    # skipped whole and these two sentences shipped ungoverned, while the same
+    # sentences below the literal were refused. One rule, both regions.
+    "a quoted sentence above the literal": "\n".join(
         [
-            "const WEEKS = 12;",
+            "type Mood = 'Great week' | 'Rough week';",
+            OPEN_LITERAL,
+            "  'sample.heading': 'Your weekly check-in',",
+            CLOSE_LITERAL,
+        ]
+    ),
+    "a constant sentence above the literal": "\n".join(
+        [
+            "const EMPTY_STATE = 'Nothing is open this week.';",
             OPEN_LITERAL,
             "  'sample.heading': 'Your weekly check-in',",
             CLOSE_LITERAL,
@@ -417,7 +443,16 @@ REFUSED_SHAPES = {
         ]
     ),
     "a file exporting no object literal": "\n".join(
-        ["// a copy file that forgot to export anything", "import type { Something } from './t';"]
+        ["// a copy file that forgot to export anything", "type Something = string;"]
+    ),
+    # The two halves of a surrogate pair, each on its own. Neither is a character
+    # anything renders, so decoding one into the collected text would put a thing
+    # in the inventory that no reader will ever see and no sweep can match.
+    "a high surrogate with no low one after it": "\n".join(
+        [OPEN_LITERAL, "  'sample.heading': 'a \\uD83D lock',", CLOSE_LITERAL]
+    ),
+    "a low surrogate with no high one before it": "\n".join(
+        [OPEN_LITERAL, "  'sample.heading': 'a \\uDD12 lock',", CLOSE_LITERAL]
     ),
     "a file exporting two object literals": "\n".join(
         [
@@ -615,27 +650,44 @@ def test_the_parser_reads_a_copy_file_written_the_way_the_shipped_one_is() -> No
 
 
 def test_the_parser_decodes_the_escapes_a_character_can_hide_in() -> None:
-    """A lock written `\\u{1F512}` is a lock on the screen, and must be one here.
+    """A lock written as an escape is a lock on the screen, and must be one here.
 
-    Item 5 forbids lock iconography. A sweep over undecoded source text would see
-    `u`, `{`, `1`, `F`, `5`, `1`, `2`, `}` and report the surface clean, which is
-    a rule defeated by a spelling.
+    Item 5 forbids lock iconography, and a sweep over undecoded source text would
+    report the surface clean over a padlock that renders — a rule defeated by a
+    spelling. **The spelling families, and which control covers each:**
 
-    **The mutation it kills:** dropping the `\\u`, `\\u{...}` or `\\x` branch from
-    `read_escape`, which turns the iconography sweep below into a sweep nothing
-    can fail. **A red here means this module is broken, not that the copy is.**
+      - the literal character: `A_LOCKED_SENTENCE`, in the iconography sweep's own
+        control;
+      - the brace escape `\\u{1F512}`: `escaped.brace` here;
+      - **the surrogate pair** `\\uD83D\\uDD12`: `escaped.pair` here. This is the
+        one the fresh-context review found shipping past the sweep — each half
+        decoded on its own is a lone surrogate, so the joined character never
+        appeared and nothing matched the lock;
+      - a half of that pair with no partner: refused, in
+        `test_the_parser_refuses_a_shape_it_cannot_read`;
+      - an ordinary BMP escape (`\\u0041`) and a hex escape (`\\x41`): the two
+        letter entries here, which must go on decoding correctly — a repair for
+        the pair that broke the plain four-digit case would be a worse bug than
+        the one it fixed.
+
+    **The mutations it kills:** dropping the `\\u`, `\\u{...}` or `\\x` branch
+    from `read_escape`; and decoding surrogate halves separately, which is what
+    made the sweep silent. **A red here means this module is broken, not that the
+    copy is.**
     """
     read = parse_copy_module(AN_ESCAPED_FILE, "a sample copy file")
     assert read == AN_ESCAPED_FILES_ENTRIES, (
         f"The parser read {read!r}.\n"
         f"  expected: {AN_ESCAPED_FILES_ENTRIES!r}\n"
         "\n"
-        "The first entry is the one that matters: an escaped lock has to arrive as the lock "
-        "character, or item 5's iconography sweep passes over it."
+        "The two lock entries are what matter: an escaped lock has to arrive as the lock "
+        "character however it is spelled, or item 5's iconography sweep passes over it."
     )
-    assert chr(0x1F512) in read["escaped.brace"], (
-        "The escaped lock did not decode to the lock character, so a string could carry one past "
-        "the sweep by spelling it as an escape."
+    unswept = [key for key in ("escaped.brace", "escaped.pair") if not iconography_in(read[key])]
+    assert not unswept, (
+        f"The iconography sweep sees no lock in {unswept} after parsing. A string can then carry "
+        "a padlock past §4.1 item 5 by choosing a spelling: the brace form, or the surrogate pair "
+        "that a browser renders identically to the literal character."
     )
 
 
@@ -664,30 +716,88 @@ def test_the_parser_refuses_a_shape_it_cannot_read(shape: str) -> None:
         parse_copy_module(REFUSED_SHAPES[shape], f"a sample copy file holding {shape}")
 
 
-def test_the_frontend_glob_finds_the_copy_files_that_are_there(tmp_path: Path) -> None:
-    """The accepted direction of the enumeration, and the reason it is a glob.
+def test_the_frontend_enumeration_finds_every_copy_file_at_every_depth(tmp_path: Path) -> None:
+    """The accepted direction, and the two evasions the first version admitted.
 
     A violation planted to prove this suite can go red is an untracked file, so an
     enumeration that asked git would not see it and the proof run would come back
     green — which reads as "the finding was wrong" rather than "the guard is
-    blind".
+    blind". So the walk is on disk.
 
-    **The mutation it kills:** swapping the directory glob for `git ls-files`, or
-    for a named list of files. **A red here means this module is broken, not that
-    the copy is.**
+    **It is also recursive and reads the whole TypeScript family**, because the
+    fresh-context review shipped an item 4 violation and a padlock past the first
+    version twice: once in `frontend/src/copy/reports/aggregate.ts`, a
+    subdirectory a one-level glob never entered, and once in a `.tsx` beside the
+    survey's own copy. Both are copy in the copy directory, and the suite was 41
+    green with both planted.
+
+    **The mutation it kills:** narrowing the walk back to one level, to one
+    suffix, or to `git ls-files`. **A red here means this module is broken, not
+    that the copy is.**
     """
-    (tmp_path / "tracked.ts").write_text(A_COPY_FILE, encoding="utf-8")
-    (tmp_path / "planted.ts").write_text(A_COPY_FILE, encoding="utf-8")
+    (tmp_path / "studentSurvey.ts").write_text(A_COPY_FILE, encoding="utf-8")
+    (tmp_path / "beside.tsx").write_text(A_COPY_FILE, encoding="utf-8")
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "aggregate.mts").write_text(A_COPY_FILE, encoding="utf-8")
     (tmp_path / "notes.md").write_text("not a copy file", encoding="utf-8")
 
-    found = [path.name for path in frontend_copy_files(tmp_path)]
-    assert found == ["planted.ts", "tracked.ts"], (
-        f"The enumeration found {found} in a directory holding two copy files and one note. It "
-        "reads the directory, so a file nobody has committed is a file the inventory sees."
+    found = sorted(path.name for path in frontend_copy_files(tmp_path))
+    assert found == ["aggregate.mts", "beside.tsx", "studentSurvey.ts"], (
+        f"The enumeration found {found} in a directory holding three copy files — one nested, one "
+        "`.tsx`, one `.ts` — and one note. Each of the first three is a shipped surface's strings, "
+        "and a walk that misses any of them reports a clean tree over copy it never read."
     )
 
 
-def test_the_frontend_glob_refuses_a_directory_with_no_copy_file(tmp_path: Path) -> None:
+def test_the_coverage_rule_accepts_a_directory_the_collector_read_whole(tmp_path: Path) -> None:
+    """The accepted direction of the second enumeration.
+
+    A coverage rule that reported every file as unread would be red over a
+    compliant tree and would be deleted rather than fixed.
+
+    **The mutation it kills:** a `display()` that answers differently on the two
+    sides of the comparison, which would make every file look unread. **A red
+    here means this module is broken, not that the copy is.**
+    """
+    (tmp_path / "studentSurvey.ts").write_text(A_COPY_FILE, encoding="utf-8")
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "aggregate.tsx").write_text(A_COPY_FILE, encoding="utf-8")
+
+    assert files_the_collector_did_not_read(tmp_path) == [], (
+        "The coverage rule reported "
+        f"{files_the_collector_did_not_read(tmp_path)} unread in a directory whose every file the "
+        "collector parses."
+    )
+
+
+def test_the_coverage_rule_refuses_a_file_the_collector_cannot_read(tmp_path: Path) -> None:
+    """The refused direction: a file of an unexpected suffix is red, never invisible.
+
+    The copy directory holds copy. A `.json` catalogue or a `.md` of sample
+    sentences there is a shipped surface the collector does not parse, and the
+    honest answer is to say so rather than to leave it outside the inventory —
+    which is what "sweep the suffixes we thought of" gives you, one level out
+    (`docs/mistakes/` — a closed-set guard is defeated one level out).
+
+    **The mutation it kills:** building the coverage rule out of the collector's
+    own enumeration, so that it compares an answer with itself and agrees. That
+    is the version the review defeated with two files. **A red here means this
+    module is broken, not that the copy is.**
+    """
+    (tmp_path / "studentSurvey.ts").write_text(A_COPY_FILE, encoding="utf-8")
+    (tmp_path / "catalogue.json").write_text('{"student_survey.heading": "hi"}', encoding="utf-8")
+    (tmp_path / "samples").mkdir()
+    (tmp_path / "samples" / "sentences.md").write_text("A sentence.", encoding="utf-8")
+
+    unread = files_the_collector_did_not_read(tmp_path)
+    assert sorted(Path(name).name for name in unread) == ["catalogue.json", "sentences.md"], (
+        f"The coverage rule reported {unread} over a directory holding one copy file, a JSON "
+        "catalogue and a Markdown sample. Both of the latter are strings in the copy directory "
+        "that no rule in this module reads."
+    )
+
+
+def test_the_frontend_enumeration_refuses_a_directory_with_no_copy_file(tmp_path: Path) -> None:
     """The refused direction: an empty enumeration is a failure, never a pass.
 
     Every rule below is of the form "no collected string does X", and an inventory
@@ -1281,28 +1391,41 @@ def test_the_backend_half_of_the_inventory_covers_every_module_in_the_copy_packa
 
 @pytest.mark.invariant
 def test_the_frontend_half_of_the_inventory_covers_every_file_in_the_copy_directory() -> None:
-    """The same rule for the frontend: every copy file is read, or the run says so.
+    """The same rule for the frontend: every file is read, or the run says so.
 
-    Acceptance criterion 3 again, from the other side. The directory is globbed
+    Acceptance criterion 3 again, from the other side. The directory is walked
     rather than listed, so a file added to it is inventoried the day it lands and
     a file that cannot be parsed stops the run instead of dropping out of it. That
     is what makes the surface list unshrinkable: there is no list.
 
-    **The mutation it kills:** a collector that names one file, or that skips a
-    file it cannot parse — either leaves a shipped screen's strings outside §4.1
-    items 4 and 5 entirely. **What makes it non-vacuous:** the glob's own two
-    controls, one for a directory with files and one for a directory without.
-    """
-    files = frontend_copy_files(FRONTEND_COPY_DIRECTORY)
-    assert files, f"{display(FRONTEND_COPY_DIRECTORY)} holds no copy file to read."
+    **The comparison is between two independent walks**, and that is the whole of
+    what this test is worth. The first version compared the collector's glob with
+    the same glob and therefore agreed with itself: a copy file in a subdirectory
+    and a copy file spelled `.tsx` each shipped an item 4 violation and a padlock
+    with the suite 41 green. What is asserted now is that **everything** under the
+    copy directory — any depth, any suffix — is a file the collector parsed.
 
-    collected = collect_frontend_copy(FRONTEND_COPY_DIRECTORY)
-    read_from = {string.source for string in collected}
-    assert read_from == {display(path) for path in files}, (
-        f"The inventory read strings from {sorted(read_from)} and the copy directory holds "
-        f"{sorted(display(path) for path in files)}.\n"
+    **The mutations it kills:** narrowing the collector's walk to one level or one
+    suffix (the missed file is then reported here); and rebuilding this rule out
+    of the collector's own enumeration, which is the shape that made it silent.
+    **What makes it non-vacuous:** the two controls above, one for a directory
+    read whole and one holding files the collector cannot read, plus the walk's
+    own refusal of an empty directory.
+    """
+    files = every_file_under_the_copy_directory(FRONTEND_COPY_DIRECTORY)
+    assert files, f"{display(FRONTEND_COPY_DIRECTORY)} holds no file to read."
+
+    unread = files_the_collector_did_not_read(FRONTEND_COPY_DIRECTORY)
+    assert not unread, (
+        f"These files are under {display(FRONTEND_COPY_DIRECTORY)} and the inventory read no "
+        f"string out of any of them: {unread}.\n"
         "\n"
-        "Every file in that directory is a shipped surface's copy. One that contributes nothing is "
-        "either a file the parser silently gave up on or a mapping with nothing in it, and both "
-        "leave strings on a screen that no rule here reads."
+        "That directory holds copy. A file the collector does not parse is a shipped surface's "
+        "strings with §4.1 items 4 and 5 asserted over nothing — whether it is nested where the "
+        "walk did not look, spelled with a suffix nobody listed, or a format this parser does not "
+        "read at all.\n"
+        "\n"
+        "If such a file is legitimate, it does not belong in the copy directory, or the collector "
+        "is taught to read it — in the change that introduces it, with a control in both "
+        "directions. Widening what this rule ignores is not one of the answers."
     )
