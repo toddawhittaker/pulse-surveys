@@ -1,0 +1,92 @@
+-- What the application may read to answer a student's own weekly survey —
+-- ticket E2-09, SPEC §3.1, §3.2, §4.1 item 1, ADR 0001, ADR 0009, ADR 0041.
+--
+-- E2-09 is the first code that reads any of these five relations. `GET
+-- /student/survey` answers one question — for this reader, right now, what is
+-- there? — and it runs on the connection `pulse_app` holds, so without this file
+-- every one of its statements is refused by Postgres with 42501 rather than by
+-- anything the ticket is about. Measured, not assumed: the read path's fourteen
+-- new test items fail that way without it.
+--
+-- **SELECT and nothing else, on all five.** This ticket only reads. E2-08 is the
+-- write half — the submit path — and the verbs it needs on `response` and
+-- `answer` are granted by its own revision with the code that spends them, which
+-- is the rule every grants file in this tree follows: a privilege lands in the
+-- change that uses it, never in advance.
+--
+--   - `week` — the term-week number a survey window is over. The window names its
+--     week and the week carries the number, and SPEC §2.2's course-week axis is
+--     computed from it; re-deriving the number from the window's instants would be
+--     a second reading of §3.1's rhythm. **This grant was already missing before
+--     E2-09**: `app.services.survey_windows.derive_windows_for_section` selects
+--     `week` rows on this same connection, so the hourly derivation was reachable
+--     only where something else had already been granted. It lands here because
+--     this is the ticket whose read needs it; that it repairs an earlier gap is
+--     stated rather than left to be found.
+--   - `question_set` and `question` — SPEC §3.2's five questions and the version
+--     they ship under. A form handed a window and no questions cannot be filled
+--     in.
+--   - `response` and `answer` — the reader's **own** submission, so E2-10 can
+--     render the resubmit case pre-filled. The scoping is not in this file: the
+--     read is keyed on `(user_id, section_id, week_id)` together, which is E2-05's
+--     uniqueness key with the author left in, and
+--     `tests/integration/test_the_student_read_path_names_nothing_outside_the_enrollment.py`
+--     is what proves a classmate's answers do not come back.
+--
+-- **The withheld verbs are the load-bearing half.**
+--
+--   - No `UPDATE` and no `DELETE` on `response` or `answer`: no statement this
+--     connection can issue revises or removes a submission through the *read*
+--     path. SPEC §3.1 says a missed week cannot be back-filled and §4 keys every
+--     response to its author; a read that could write is a read that could rewrite
+--     somebody's answers.
+--   - Nothing at all beyond `SELECT` on `question_set`, `question` or `week`. The
+--     question set is standardized and versioned (§3.2) and the term calendar is
+--     institution configuration (§2.2) — both are an administrator's to edit on a
+--     surface E11 builds, not something a request-time read path can touch. With
+--     no `UPDATE` the application role structurally cannot reword a question under
+--     answers already given to it, and cannot renumber a week under windows
+--     already derived against it.
+--
+-- **Base tables rather than read views**, the same exception the grants before it
+-- take (`survey_window_grants_v001.sql`, `clock_override_grants_v001.sql`,
+-- `tool_signing_key_grants_v001.sql`). SPEC §4.1 routes an *identity* read path
+-- through a view, and the reason is identity: a view selects the columns a caller
+-- may see and omits the ones §8 protects. None of these five carries a name, an
+-- address or a subject — a week is a number, a question is wording, and a response
+-- is keyed to a `user` row this connection cannot read the identity of. And the
+-- reader here is reading **themself**: ADR 0001's separation constrains instructor
+-- and leadership reads of other people, and a view over these tables would select
+-- every column of its source and exist only to satisfy the shape of the rule.
+--
+-- **This widens what pulse_app can reach, and it is meant to be visible.**
+-- `RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py`
+-- is the hand-written record every base-table grant is compared against as an
+-- equality in both directions, deliberately not derived from these `.sql` files so
+-- that a widening cannot justify itself. These five entries have to be recorded
+-- there in the same change, and that edit is on the far side of the test wall for
+-- this lane's implementer: it is raised as `docs/disputes/E2-09-02.md`, the same
+-- shape `docs/disputes/E2-06-03.md` took for `survey_window` and
+-- `docs/disputes/E2-04-02.md` for `clock_override`.
+--
+-- **pulse_care is granted nothing.** The Care queue reaches a threat comment and
+-- the audited reveal (ADR 0001, SPEC §6.2); which questions a form asks, and what
+-- an ordinary student answered this week, are no part of that surface, and the
+-- role that can reach a student's name gets no privilege it has no use for.
+--
+-- **USAGE ON SCHEMA public is not granted again here.** identity_grants_v001.sql
+-- grants it to pulse_app and identity_grants_v002.sql restates it; an ACL entry
+-- records no history, so a third grant would be indistinguishable from those and
+-- any matching revoke would remove all of them.
+--
+-- **The downgrade has something to revoke.** All five tables outlive this
+-- revision, so a privilege granted here would survive a downgrade that drops
+-- nothing. The revision's `downgrade()` writes the REVOKE rather than a second
+-- file, because ADR 0041 makes a versioned file the immutable record of what an
+-- upgrade applied and an un-grant is not a record of anything.
+
+GRANT SELECT ON public.week TO pulse_app;
+GRANT SELECT ON public.question_set TO pulse_app;
+GRANT SELECT ON public.question TO pulse_app;
+GRANT SELECT ON public.response TO pulse_app;
+GRANT SELECT ON public.answer TO pulse_app;
