@@ -2,8 +2,19 @@
 
 SPEC §9.2 makes an e2e run self-contained in Compose, and E2-07 adds the third
 external dependency's stand-in: an OpenAI-compatible endpoint the stack can point
-`AI_PROVIDER_BASE_URL` at. This module is how the suite reaches it, and it holds
-three separate things because three different kinds of test need them.
+`MOCK_AI_PROVIDER_BASE_URL` at. This module is how the suite reaches it, and it
+holds three separate things because three different kinds of test need them.
+
+**Two triples, since the configuration split ruled on 2026-09-02.** The real
+provider is described by `AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}` and the mock
+by `MOCK_AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}`; `AI_MODEL_NAME` is a
+spelling that ruling struck, because it said which model without saying whose and
+there are two providers configured now. This file names both sides rather than
+one, and that is not bookkeeping: `deployed_ai_provider` below describes a
+provider that is deliberately **not** the mock and therefore takes the real
+names, while everything that points a development stack at this service takes the
+mock's. A file that held one pair would have to lend it to both, which is how a
+model name from one provider ends up beside a base URL from the other.
 
 **The application, in process.** `mock_ai` builds the mock's FastAPI application
 through `import_mock_application` — the same machinery both other mocks use, and
@@ -33,8 +44,9 @@ it against the served document — the `ALL_SELECTORS` pair
 `tests/integration/test_mock_lms_wrong_launches.py` already uses.
 
 **`deployed_ai_provider` is the other half of this file and is about the
-backend.** E2-07 points `.env.example`'s `AI_PROVIDER_BASE_URL` at the mock, and
-the same ticket refuses that value outside development — so every test that
+backend.** E2-07 pointed `.env.example`'s single provider base URL at the mock —
+`MOCK_AI_PROVIDER_BASE_URL` since the split — and the same ticket refuses that
+value outside development, so every test that
 builds `Settings` under a deployment's `ENVIRONMENT` now has to move the AI
 provider as well as the identity provider, or it stops in its own setup on a rule
 that is not its subject. That is `docs/MISTAKES.md` entry 22 exactly, and the
@@ -129,14 +141,33 @@ REQUESTED_MODEL = "mock-validity-v1-e2-07-probe"
 # mock honest to the stub the roundtrip test already models.
 OUTPUT_TOOL_NAME = "final_result"
 
+# The two triples, since the configuration split ruled on 2026-09-02. The real
+# provider's names and the mock's, kept apart here so that no caller has to lend
+# one side's constant to the other.
+#
+# `AI_MODEL_NAME_VARIABLE` is gone rather than aliased: it named a spelling the
+# ruling struck, and leaving an alias behind would let a call site go on
+# configuring "the model" without saying whose — which is the ambiguity the split
+# exists to remove, surviving under a name that reads as harmless.
+AI_PROVIDER_BASE_URL_VARIABLE = "AI_PROVIDER_BASE_URL"
+AI_PROVIDER_MODEL_NAME_VARIABLE = "AI_PROVIDER_MODEL_NAME"
+AI_PROVIDER_API_KEY_VARIABLE = "AI_PROVIDER_API_KEY"
+
+MOCK_AI_PROVIDER_BASE_URL_VARIABLE = "MOCK_AI_PROVIDER_BASE_URL"
+MOCK_AI_PROVIDER_MODEL_NAME_VARIABLE = "MOCK_AI_PROVIDER_MODEL_NAME"
+MOCK_AI_PROVIDER_API_KEY_VARIABLE = "MOCK_AI_PROVIDER_API_KEY"
+
 # An AI provider that is not the mock, for a test that runs as a deployment and
 # is about something else. `.example.edu` resolves nowhere and nothing here
 # fetches it; `https` because E0-37 item 12 refuses cleartext off this machine.
-AI_PROVIDER_BASE_URL_VARIABLE = "AI_PROVIDER_BASE_URL"
-AI_MODEL_NAME_VARIABLE = "AI_MODEL_NAME"
+#
+# **The real triple's names, and that is the point of the fixture.** It exists to
+# say "this process is a deployment and is not pointed at the in-repo mock", so
+# describing it under the mock's own variables would be the fixture asserting the
+# opposite of its name.
 DEPLOYED_AI_PROVIDER = {
     AI_PROVIDER_BASE_URL_VARIABLE: "https://ai.example.edu/v1",
-    AI_MODEL_NAME_VARIABLE: "a-real-deployments-model",
+    AI_PROVIDER_MODEL_NAME_VARIABLE: "a-real-deployments-model",
 }
 
 
@@ -495,7 +526,7 @@ def mock_ai_rules(mock_ai: MockAiProvider) -> dict[str, Any]:
 
 @pytest.fixture
 def mock_ai_endpoint(mock_ai: MockAiProvider) -> Iterator[Endpoint]:
-    """The mock on a loopback socket, with an `AI_PROVIDER_BASE_URL` to point at it.
+    """The mock on a loopback socket, with a `MOCK_AI_PROVIDER_BASE_URL` to point at it.
 
     For the tests whose subject is the *gateway's* reaction to what the mock
     answers: the gateway is a real HTTP client and cannot reach an ASGI

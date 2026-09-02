@@ -40,7 +40,8 @@ behaviour, not an implementation choice: the explicit alias if the field has
 one, otherwise the configured `env_prefix` plus the field name. Comparison is
 case-insensitive, so `case_sensitive` either way is fine.
 
-**One rule here has a named exemption, and it is the only one in this module.**
+**One rule here has a named exemption, and it is the only rule in this module that
+has one.**
 `test_every_documented_variable_has_a_placeholder_value` required a non-empty
 value for every entry, and dispute E2-07-01 measured that against
 `AI_PROVIDER_API_KEY`, whose *correct* documented value is the empty string: a
@@ -57,6 +58,15 @@ valueless entry still fails, which is what it is really guarding — and the
 exemption is a literal tuple rather than a condition, because the next such entry
 (an SMTP password against a mail catcher, which authenticates nobody either) is
 already foreseeable and belongs in a reviewed diff on that line.
+
+**The tuple holds two entries as of 2026-09-02, and the second is that foreseen
+diff arriving early.** The configuration split gives the real provider and the
+in-repo mock a triple each, so the one provider-key entry becomes two:
+`MOCK_AI_PROVIDER_API_KEY` is blank for dispute E2-07-01's own reason — the mock
+authenticates nobody — and `AI_PROVIDER_API_KEY`, which now names a real hosted
+provider, is blank for a different one: a real credential may never be committed
+(CLAUDE.md, SPEC §10). Two reasons, one answer, and both held by the same two
+controls below.
 
 An exemption of that shape is the thing `docs/MISTAKES.md` entry 35 is about: it
 can go stale, and a stale exemption reports exactly what a live one reports. So
@@ -83,7 +93,30 @@ from pathlib import Path
 # member is held against the file by the two controls below: an exemption is a
 # rule that can go stale, and a stale one reports exactly what a live one reports
 # (`docs/MISTAKES.md` entry 35).
-DELIBERATELY_BLANK_VARIABLES = ("AI_PROVIDER_API_KEY",)
+#
+# **The second entry arrived with the configuration split ruled on 2026-09-02, and
+# it is the foreseen case rather than a new argument.** That ruling gives the real
+# provider and the in-repo mock a triple each —
+# `AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}` and
+# `MOCK_AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}` — so the one key entry becomes
+# two, and both are correctly blank for reasons that are not the same one:
+#
+#   MOCK_AI_PROVIDER_API_KEY  dispute E2-07-01's reason exactly. The endpoint is
+#                             the in-repo mock and it authenticates nobody, so a
+#                             blank is the documented way to say so.
+#   AI_PROVIDER_API_KEY       a different reason with the same answer. This one
+#                             names a real hosted provider now, and a real
+#                             credential may never be committed (CLAUDE.md,
+#                             SPEC §10) — so the documented value is blank and an
+#                             operator fills it in `.env` or a secret store.
+#                             `tests/evals/runner.py` refuses plainly when it is,
+#                             which is what stops a blank here reading as "no key
+#                             needed" on the one path that needs one.
+#
+# Both are held by the same two controls below, which is why two reasons can share
+# one tuple: each name has to still be present in the file and each entry has to
+# still be blank.
+DELIBERATELY_BLANK_VARIABLES = ("AI_PROVIDER_API_KEY", "MOCK_AI_PROVIDER_API_KEY")
 
 
 def load_settings_class() -> type:
@@ -256,9 +289,13 @@ def test_every_documented_variable_has_a_placeholder_value(
     **Except where the empty string is the value.** Dispute E2-07-01: this rule
     was written over a file in which every entry needed a value, and E2-07 added
     the first one whose correct documented value is blank — a blank
-    `AI_PROVIDER_API_KEY` is how this codebase says the endpoint authenticates
-    nobody. `DELIBERATELY_BLANK_VARIABLES` above is that list, and the reason the
-    rule reads a tuple rather than a condition is written there.
+    `MOCK_AI_PROVIDER_API_KEY` is how this codebase says the endpoint
+    authenticates nobody. (It was spelled `AI_PROVIDER_API_KEY` when that dispute
+    was ruled; the configuration split of 2026-09-02 gave the mock its own triple
+    and left the real provider's key blank for a different reason — no credential
+    is committed.) `DELIBERATELY_BLANK_VARIABLES` above is that list, both reasons
+    are written there, and so is why the rule reads a tuple rather than a
+    condition.
 
     **What the rule still catches, which is what it is for:** a new entry added
     with nothing after the `=`. That is the accident this test was written
@@ -295,7 +332,7 @@ def test_every_deliberately_blank_variable_is_actually_blank(
 
     **A red here means the exemption is stale, not that the file is wrong.** An
     exemption list is a rule that stops being true without anything failing:
-    `AI_PROVIDER_API_KEY` acquiring a placeholder again would leave this tuple
+    either provider key acquiring a placeholder again would leave this tuple
     excusing an entry that no longer needs excusing, and the sweep above would go
     on reporting the whole file clean — the same silence a correct file produces.
     `docs/MISTAKES.md` entry 35's rule is that a guard which only ever reports
@@ -324,7 +361,8 @@ def test_every_deliberately_blank_variable_is_actually_blank(
     assert not carrying, (
         f"These entries are exempted from the placeholder rule and are not blank: {carrying}. The "
         "exemption exists because the empty string is their documented value — a blank "
-        "`AI_PROVIDER_API_KEY` means the endpoint authenticates nobody (dispute E2-07-01). An "
+        "`MOCK_AI_PROVIDER_API_KEY` means the endpoint authenticates nobody (dispute E2-07-01), "
+        "and a blank `AI_PROVIDER_API_KEY` means no real credential is committed. An "
         "exempted entry that carries a value is an exemption doing nothing except making the "
         "sweep above blind to that name."
     )

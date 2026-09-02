@@ -19,10 +19,26 @@ the reason the mock mints both — E2-08's tests need the near miss.
 
 **Nothing here patches the backend.** The ticket's own point is that "the gateway
 cannot tell this mock from a provider", so every case below is driven by the
-comment text alone, through the configuration a deployment uses:
-`AI_PROVIDER_BASE_URL` pointed at an endpoint. The endpoint is the mock's own
-application on a loopback socket (`tests/fixtures/mock_ai.py` says what that
-harness reproduces and what it does not).
+comment text alone, through ordinary configuration: a provider base URL pointed at
+an endpoint. The endpoint is the mock's own application on a loopback socket
+(`tests/fixtures/mock_ai.py` says what that harness reproduces and what it does
+not).
+
+**Which variable that is moved on 2026-09-02, and the reason is the name rather
+than any new test.** The configuration split gives the real provider and the
+in-repo mock a triple each — `AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}` and
+`MOCK_AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}` — and strikes `AI_MODEL_NAME`,
+which said which model without saying whose. This module's fixture below states
+`ENVIRONMENT=development` in its own body and points at the `mock-ai`
+application, so the side it exercises is not an inference: it is the mock's, and
+the ruled names for the mock's side are the `MOCK_*` ones. The base URL moves with
+the model name because the two describe one endpoint — a model name from one
+triple beside a base URL from the other is not a repair, it is a gateway
+configured half from each.
+
+E2-07's claim is untouched by any of this. The gateway still cannot tell this
+service from a provider by anything it *answers*; what the split changes is which
+variable tells the gateway where to look.
 
 **The markers are read from the mock, not written here.** Acceptance criterion 3,
 and the one deliberate copy of the vocabulary this ticket allows lives in
@@ -45,9 +61,9 @@ from typing import Any
 import pytest
 from fixtures.clock import DEVELOPMENT, ENVIRONMENT_VARIABLE
 from fixtures.mock_ai import (
-    AI_MODEL_NAME_VARIABLE,
-    AI_PROVIDER_BASE_URL_VARIABLE,
     INSUFFICIENT,
+    MOCK_AI_PROVIDER_BASE_URL_VARIABLE,
+    MOCK_AI_PROVIDER_MODEL_NAME_VARIABLE,
     SUBSTANTIVE,
     Endpoint,
     MockAiProvider,
@@ -94,13 +110,21 @@ def gateway_against_the_mock(
     `ENVIRONMENT` is set rather than inherited (`docs/MISTAKES.md` entry 40).
     The address here is a loopback one, which every environment accepts, so
     nothing below turns on the value — but E2-07 makes `ENVIRONMENT` decide
-    whether an `AI_PROVIDER_BASE_URL` is refused at all, and a suite that left it
+    whether a provider base URL is refused at all, and a suite that left it
     to whatever `.env.example` happened to say would be one edit away from
     failing in its own setup.
+
+    **It is also what decides which triple these two lines belong to.** The
+    configuration split ruled on 2026-09-02 has a gateway read the
+    `MOCK_AI_PROVIDER_*` triple in development and test, so a fixture that
+    declares itself development and points at the `mock-ai` application is the
+    mock's side by its own statement rather than by inference. The value the
+    variable carries has not changed, and neither has anything this module
+    asserts.
     """
     monkeypatch.setenv(ENVIRONMENT_VARIABLE, DEVELOPMENT)
-    monkeypatch.setenv(AI_PROVIDER_BASE_URL_VARIABLE, mock_ai_endpoint.base_url)
-    monkeypatch.setenv(AI_MODEL_NAME_VARIABLE, MODEL_NAME)
+    monkeypatch.setenv(MOCK_AI_PROVIDER_BASE_URL_VARIABLE, mock_ai_endpoint.base_url)
+    monkeypatch.setenv(MOCK_AI_PROVIDER_MODEL_NAME_VARIABLE, MODEL_NAME)
     return mock_ai_endpoint
 
 

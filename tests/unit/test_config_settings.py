@@ -49,6 +49,19 @@ import pytest
 # a subset of what is documented, not as an exact set: an implementer who also
 # needs, say, an AI provider API key is not blocked by this test.
 #
+# **`AI_MODEL_NAME` was renamed here, and the reason is the name and not a test.**
+# The configuration split ruled on 2026-09-02 gives the real provider and the
+# in-repo mock a triple each — `AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}` and
+# `MOCK_AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}` — so `AI_MODEL_NAME` is a
+# spelling that ruling struck. It said which model without saying whose, which was
+# honest while one endpoint was configured and is ambiguous now that two are. Both
+# tuples below keep the **real** triple's name, because both are about what a
+# deployment configures: the mock's triple has a working default (it is a service
+# in this repository's own Compose file), so it is deliberately absent from
+# `DEPLOYMENT_SPECIFIC_VARIABLES` — a default that works is exactly what that
+# tuple exists to refuse, and the mock's is the one setting for which a working
+# default is correct.
+#
 # Benchmark min-N is two numbers, not one: SPEC §11 open question 1 puts the
 # mechanism in §5.1 and leaves the values unsettled, suggesting 3 sections and
 # 15 respondents as starting points. Both are env-driven precisely so settling
@@ -61,7 +74,7 @@ ENUMERATED_CONFIGURATION_VARIABLES = (
     "ENVIRONMENT",
     "LOG_LEVEL",
     "AI_PROVIDER_BASE_URL",
-    "AI_MODEL_NAME",
+    "AI_PROVIDER_MODEL_NAME",
     "N_THRESHOLD_DEFAULT",
     "BENCHMARK_MIN_SECTIONS_DEFAULT",
     "BENCHMARK_MIN_RESPONDENTS_DEFAULT",
@@ -78,7 +91,7 @@ DEPLOYMENT_SPECIFIC_VARIABLES = (
     "AI_PROVIDER_BASE_URL",
     "INSTITUTION_TIMEZONE",
     "ENVIRONMENT",
-    "AI_MODEL_NAME",
+    "AI_PROVIDER_MODEL_NAME",
 )
 
 # The other side of the split, asserted rather than merely omitted, so nobody
