@@ -30,24 +30,35 @@ service, and neither costs anything or leaves the machine.
 ## What it costs
 
 One model call per case, per graded task. The comment-validity set is 98 cases,
-so a full run is 98 calls of a few hundred tokens each — cents, not dollars, at
-any provider this project would use. The design that keeps it that way is the
-firing condition above: hundreds of live calls on every merge is exactly what
-this arrangement refuses.
+so a full run is 98 calls — cents, not dollars, at any provider this project
+would use. The design that keeps it that way is the firing condition above:
+hundreds of live calls on every merge is exactly what this arrangement refuses.
 
-A run is not free of wall clock either. The calls are sequential and the
-classifier's own budget is p95 under two seconds (§3.3), so expect a couple of
-minutes.
+**The run reports its own figures, so this does not have to be estimated.** Each
+answered case comes back with the gateway's `TaskUsage` beside the verdict, and
+the report prints the totals: input tokens with the cache-read share shown inside
+them rather than added to them, output tokens, and the number of provider
+requests. Two things about that line matter before anyone compares it with an
+invoice — a cache read is a *part* of the input count, and a call the gateway
+retried contributes only the request that answered, so the figures are a floor on
+what the run cost rather than a complete account of it. The line says so itself.
+
+A run is not free of wall clock either. The calls are sequential, and the eval
+timeout is sixty seconds rather than §3.3's four: that budget is a student's, and
+using it here let a merely slow answer be replaced by a character count. Two full
+runs were voided that way before the two timeouts were separated
+(`docs/disputes/E2-12-06.md`). Expect a few minutes.
 
 ## The layout
 
-- `declarations.py` — the case, floor and task types. Three floor states, and
-  the module docstring argues why three rather than two.
+- `declarations.py` — the case, floor and task types, and the usage totals a run
+  accumulates. Three floor states, and the module docstring argues why three
+  rather than two.
 - `measure.py` — precision and recall over one task's answers.
-- `live.py` — the gateway built `live=True`, and the validity task found rather
-  than named.
+- `live.py` — the gateway built `live=True`, and the one call the run makes into
+  it, at the eval timeout rather than the submit path's.
 - `registry.py` — every task the runner walks.
-- `runner.py` — the command line, the refusals, and the comparison.
+- `runner.py` — the command line, the refusals, the comparison, and the cost.
 - `validity/` — SPEC §3.3's comment-validity set and its floor.
 - `threat/` — SPEC §9.3's strictest floor, as a slot with no set and no number.
   E10 sets it.

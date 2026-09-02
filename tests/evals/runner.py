@@ -34,6 +34,14 @@ is true of the application and false of this runner: it always builds a live
 gateway, and a live gateway with no credential is a run against a provider that
 will refuse it. So blank is refused here and the refusal names the variable.
 
+**The report says what the run cost.** Each answered case comes back with the
+gateway's `TaskUsage` beside the verdict, and the totals are printed with the
+cache read shown as a share of the input rather than added to it — it is a part of
+`input_tokens`, not something extra. The line also says plainly that a retried
+call contributes only the request that answered, so the figures are a floor on
+what the run cost rather than a complete account of it. `tests/evals/README.md`'s
+cost expectations are measured from this rather than estimated.
+
 **No `print`.** `T20` is on for `tests/**` in `pyproject.toml` and this module is
 a program rather than an application, so it writes to `sys.stdout` directly.
 """
@@ -44,13 +52,28 @@ import argparse
 import os
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.ai.contracts import CommentValidityOutput
-from tests.evals.declarations import EvalRefusalError, EvalTask, FloorStatus, TaskFloors
+from tests.evals.declarations import (
+    EvalRefusalError,
+    EvalTask,
+    FloorStatus,
+    TaskFloors,
+    TaskUsageLike,
+    UsageTotals,
+)
 from tests.evals.measure import Measurement, holds_a_positive_case, measure
 from tests.evals.registry import TASKS
+
+# What a classifier answers: the validated output, and what the call cost.
+#
+# The pair rather than the output alone, because a run that cannot say what it
+# spent leaves the README's cost expectations an estimate — and because the two
+# come back from one gateway call, so carrying them separately would mean either a
+# second call or a hidden accumulator.
+Classifier = Callable[[str], tuple[CommentValidityOutput, TaskUsageLike]]
 
 # The variable the live gateway's credential arrives in (`.env.example`,
 # `AI_PROVIDER_*` triple). Named here rather than read through `Settings` so that
@@ -67,6 +90,7 @@ class TaskReport:
     floors: TaskFloors
     measurement: Measurement | None
     breaches: tuple[str, ...]
+    usage: UsageTotals = field(default_factory=UsageTotals)
 
     @property
     def graded(self) -> bool:
@@ -105,6 +129,7 @@ class Report:
                     f"fn {measurement.false_negatives} "
                     f"tn {measurement.true_negatives}"
                 )
+                lines.extend(usage_lines(task.usage))
                 for case_id, expected, answered in measurement.disagreements:
                     lines.append(f"    disagreed on {case_id}: expected {expected}, got {answered}")
             else:
@@ -113,6 +138,36 @@ class Report:
                 lines.append(f"    BREACH: {breach}")
         lines.append("VERDICT: pass" if self.passed else "VERDICT: fail")
         return "\n".join(lines)
+
+
+def usage_lines(usage: UsageTotals) -> list[str]:
+    """What one task's run cost, as lines an operator reads beside the rates.
+
+    **The cache read is reported as a share of the input rather than beside it**,
+    because that is what it is: `cache_read_tokens` counts tokens that are part of
+    `input_tokens` and were served from the provider's cache. Adding the two would
+    overstate a run by the cheapest thing in it, and nobody could reconcile the
+    figure with an invoice.
+
+    **And the caveat is printed rather than left to be discovered.** A call the
+    gateway retried reports the usage of the request that answered, so `requests`
+    can be lower than the number of attempts the provider actually billed. That
+    makes these figures a floor on what the run cost. Saying so costs one line;
+    implying completeness costs the first person who compares this against a bill.
+    """
+    if usage.calls == 0:
+        return []
+    cached = (
+        f", {usage.cache_read_tokens} of them served from cache" if usage.cache_read_tokens else ""
+    )
+    written = f", {usage.cache_write_tokens} written to cache" if usage.cache_write_tokens else ""
+    return [
+        f"    cost: {usage.input_tokens} input tokens{cached}{written}, "
+        f"{usage.output_tokens} output, {usage.total_tokens} total",
+        f"    over {usage.requests} provider request(s) for {usage.calls} case(s) — a "
+        "retried call contributes only the request that answered, so this is a floor on "
+        "what the run cost rather than a complete account of it",
+    ]
 
 
 def declaration_problems(task: EvalTask) -> list[str]:
@@ -188,9 +243,7 @@ def declaration_problems(task: EvalTask) -> list[str]:
     return problems
 
 
-def _classifier_for(
-    task: EvalTask, overrides: Mapping[str, Callable[[str], CommentValidityOutput]] | None
-) -> Callable[[str], CommentValidityOutput]:
+def _classifier_for(task: EvalTask, overrides: Mapping[str, Classifier] | None) -> Classifier:
     """The callable that answers one comment for this task."""
     if overrides is not None and task.name in overrides:
         return overrides[task.name]
@@ -203,9 +256,21 @@ def _classifier_for(
     return task.classifier()
 
 
-def _answer(task: EvalTask, comment: str, case_id: str, pinned: str | None, classify: Any) -> Any:
-    """One answer, with its prompt version checked against the case's pin."""
-    output = classify(comment)
+def _answer(
+    task: EvalTask, comment: str, case_id: str, pinned: str | None, classify: Any
+) -> tuple[Any, TaskUsageLike]:
+    """One answer and what it cost, with its prompt version checked against the case's pin.
+
+    **The pin is the reason two full runs were voided rather than reported**
+    (dispute E2-12-06), and it is unchanged by that repair. It caught an eval path
+    that reached the model through §3.3's submit path, where a slow answer is
+    replaced by a character count carrying `character-floor` as its version — a
+    substitution that produces plausible numbers and biases them toward the two
+    families this set exists to measure. `tests/evals/live.py` now calls the
+    gateway directly, and this stays exactly as it was: it is the thing that would
+    catch the next such substitution, whatever route it arrived by.
+    """
+    output, usage = classify(comment)
     try:
         answered_under = output.prompt_version
     except AttributeError as failure:
@@ -223,13 +288,13 @@ def _answer(task: EvalTask, comment: str, case_id: str, pinned: str | None, clas
             "the same one: regrow the set against the new version and measure a new floor, "
             "rather than reading this number as comparable."
         )
-    return output.verdict
+    return output.verdict, usage
 
 
 def evaluate(
     tasks: Sequence[EvalTask] = TASKS,
     *,
-    classifiers: Mapping[str, Callable[[str], CommentValidityOutput]] | None = None,
+    classifiers: Mapping[str, Classifier] | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> Report:
     """Grade every gradable task and compare each against its floor.
@@ -266,10 +331,14 @@ def evaluate(
             continue
 
         classify = _classifier_for(task, classifiers)
-        answers = [
-            _answer(task, case.comment, case.case_id, case.prompt_version, classify)
-            for case in task.cases
-        ]
+        answers: list[Any] = []
+        usage = UsageTotals()
+        for case in task.cases:
+            verdict, spent = _answer(
+                task, case.comment, case.case_id, case.prompt_version, classify
+            )
+            answers.append(verdict)
+            usage = usage.plus(spent)
         measurement = measure(task.cases, answers, task.positive)
 
         breaches: list[str] = []
@@ -289,6 +358,7 @@ def evaluate(
                 floors=task.floors,
                 measurement=measurement,
                 breaches=tuple(breaches),
+                usage=usage,
             )
         )
 

@@ -39,7 +39,8 @@ from __future__ import annotations
 import importlib
 import inspect
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -157,6 +158,31 @@ def output(verdict: Any, prompt_version: str) -> Any:
         )
 
 
+@dataclass(frozen=True)
+class StubUsage:
+    """What a stubbed call reports it cost.
+
+    The shape of `app.ai.gateway.TaskUsage` — the fields
+    `tests/evals/declarations.py`'s `TaskUsageLike` protocol names — supplied here
+    rather than imported, because nothing in this module reaches a provider and a
+    real `TaskUsage` would be a value with no run behind it. The numbers are
+    arbitrary and distinct so that a total which dropped or double-counted one
+    field is visible in the sum.
+
+    `cache_read_tokens` is deliberately a *part* of `input_tokens` and not
+    additional, which is the property the report's "of them served from cache"
+    wording depends on.
+    """
+
+    input_tokens: int = 100
+    output_tokens: int = 10
+    cache_read_tokens: int = 40
+    cache_write_tokens: int = 5
+    total_tokens: int = 110
+    requests: int = 1
+    details: Mapping[str, int] = field(default_factory=lambda: {"reasoning_tokens": 3})
+
+
 class Stub:
     """A classifier that answers from a table and counts what it was asked.
 
@@ -164,6 +190,14 @@ class Stub:
     provider was reached is a refusal that already spent money and already sent a
     student-shaped comment off the machine, and nothing about the returned report
     tells the two apart.
+
+    **It answers with a `(output, usage)` pair since dispute E2-12-06**, because
+    that is what the eval path returns now: `tests/evals/live.py` calls
+    `gateway.run_task_with_usage` rather than going through §3.3's submit path,
+    where a slow answer was being replaced by a character count. Nothing this
+    module asserts moved with it — the refusals, the pin and the floor
+    comparisons are all unchanged — and the usage half is here so that the shape
+    the runner consumes is the shape it will meet in a live run.
     """
 
     def __init__(self, answers: dict[str, Any], prompt_version: str) -> None:
@@ -171,9 +205,9 @@ class Stub:
         self.prompt_version = prompt_version
         self.asked: list[str] = []
 
-    def __call__(self, comment: str) -> Any:
+    def __call__(self, comment: str) -> tuple[Any, StubUsage]:
         self.asked.append(comment)
-        return output(self.answers[comment], self.prompt_version)
+        return output(self.answers[comment], self.prompt_version), StubUsage()
 
 
 def build_task(
@@ -780,6 +814,92 @@ def test_the_shipped_registry_holds_the_validity_set_and_the_deferred_threat_slo
         f"the deferred slot `{threat.name}` carries {len(threat.cases)} cases. Setting that "
         "floor is E10's."
     )
+
+
+def test_the_report_says_what_the_run_cost_with_the_cached_share_kept_separate() -> None:
+    """Dispute E2-12-06's addition: the run reports its own usage, and does not overstate it.
+
+    `tests/evals/README.md` states what an eval run costs. Until the gateway
+    handed the usage back, that was an estimate; the whole point of summing it here
+    is that the number in the log is the run's own.
+
+    **The cache read must be reported as a share of the input and never added to
+    it.** `cache_read_tokens` counts tokens that are part of `input_tokens` and
+    were served from the provider's cache, so a total that adds them overstates
+    every run by the cheapest thing in it — and the overstatement is invisible,
+    because the figure still looks like a plausible token count. The stub's numbers
+    are chosen so the two readings differ: eight cases at 100 input and 40 cached
+    is 800, and the wrong reading is 1120.
+
+    **And the retry caveat is asserted as text**, because it is the sentence that
+    stops somebody reconciling this against an invoice and concluding the invoice
+    is wrong. A call the gateway retried reports the usage of the request that
+    answered, so these figures are a floor rather than a complete account.
+
+    **The mutation this kills:** `input_tokens + cache_read_tokens` in the total,
+    and dropping the caveat line so the figures read as complete. **The near miss
+    that must stay green:** any wording of the line — this asserts the numbers and
+    that the caveat is present, not how either is phrased.
+    """
+    floors = declarations().enforced(precision=0.5, recall=0.5, note="a probe's floor")
+    cases = balanced_set()
+    task = build_task(floors=floors, cases=cases, positive=validity_cases().SUBSTANTIVE)
+
+    report = runner().evaluate(
+        [task], classifiers={"probe": three_quarters_stub()}, environ=keyed()
+    )
+
+    spent = report.tasks[0].usage
+    per_call = StubUsage()
+    assert spent.calls == len(cases), (
+        f"the run answered {len(cases)} cases and counted {spent.calls}. A total over fewer "
+        "calls than the set holds is a cost report about a different run."
+    )
+    assert spent.input_tokens == per_call.input_tokens * len(cases), (
+        f"input tokens summed to {spent.input_tokens} and the stub reported "
+        f"{per_call.input_tokens} on each of {len(cases)} calls. If it came to "
+        f"{(per_call.input_tokens + per_call.cache_read_tokens) * len(cases)}, the cache read "
+        "was added to the input rather than counted inside it."
+    )
+    assert spent.cache_read_tokens == per_call.cache_read_tokens * len(cases), (
+        f"cache reads summed to {spent.cache_read_tokens}; the stub reported "
+        f"{per_call.cache_read_tokens} per call."
+    )
+
+    text = report.text()
+    assert (
+        str(spent.input_tokens) in text and str(spent.output_tokens) in text
+    ), f"the report does not print the token totals it accumulated:\n{text}"
+    assert str(spent.cache_read_tokens) in text, (
+        "the report does not print the cached share separately. A run whose input was mostly "
+        f"served from cache costs a fraction of one that was not, and the log cannot say "
+        f"which this was:\n{text}"
+    )
+    assert "retried" in text and "floor" in text, (
+        "the report does not say that a retried call contributes only the request that "
+        "answered. Without that sentence the figures read as a complete account of what the "
+        f"run cost, and the first retry makes that false:\n{text}"
+    )
+
+
+def test_a_task_that_was_not_graded_prints_no_cost() -> None:
+    """The pair for the above: a deferred slot spent nothing, so it reports nothing.
+
+    A cost line under a task the runner never ran is a number about no calls, and
+    zero is the most misleading of the plausible values — it reads as "this ran and
+    was free" rather than "this did not run".
+
+    **The mutation this kills:** printing the usage block unconditionally, which
+    puts `0 input tokens` under SPEC §9.3's threat slot on every run.
+    """
+    floors = declarations().deferred(note="E10 sets this.")
+    task = build_task(name="threat", floors=floors, cases=())
+
+    report = runner().evaluate([task], classifiers={}, environ=keyed())
+
+    assert (
+        "input tokens" not in report.text()
+    ), f"a task the runner never ran carries a cost line:\n{report.text()}"
 
 
 def test_enforcement_does_not_depend_on_the_command_line_flag() -> None:

@@ -28,9 +28,67 @@ graded, which is why the states above are three rather than two.
 from __future__ import annotations
 
 import enum
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
+from typing import Any, Protocol
+
+
+class TaskUsageLike(Protocol):
+    """What one gateway call reports about what it cost.
+
+    The shape of `app.ai.gateway.TaskUsage`, stated structurally rather than
+    imported, so that this module stays free of the application while the runner
+    still type-checks a real `TaskUsage` against it at the one call site that
+    produces one. A renamed or dropped field there is a type error here, which is
+    the same guarantee SPEC §9.3 asks of the eval cases themselves.
+
+    **`cache_read_tokens` is a part of `input_tokens` and not additional**, which
+    is why `UsageTotals` below reports it as "of which" rather than adding it in.
+    Getting that backwards double-counts the cheapest half of a run and turns a
+    cost report into an overstatement nobody can reconcile with an invoice.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    total_tokens: int
+    requests: int
+    details: Mapping[str, int]
+
+
+@dataclass(frozen=True)
+class UsageTotals:
+    """What a whole eval run cost, accumulated one answered case at a time.
+
+    `calls` is how many cases were answered and `requests` is what the gateway
+    reported across them. They are not the same number and the report says so: a
+    call the gateway retried contributes the usage of the request that *answered*,
+    so these figures are a floor on what the run cost rather than a complete
+    account of it. Stating that is cheaper than implying completeness and being
+    wrong the first time a retry happens.
+    """
+
+    calls: int = 0
+    requests: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    total_tokens: int = 0
+
+    def plus(self, usage: TaskUsageLike) -> UsageTotals:
+        """These totals with one more answered call's usage added."""
+        return replace(
+            self,
+            calls=self.calls + 1,
+            requests=self.requests + usage.requests,
+            input_tokens=self.input_tokens + usage.input_tokens,
+            output_tokens=self.output_tokens + usage.output_tokens,
+            cache_read_tokens=self.cache_read_tokens + usage.cache_read_tokens,
+            cache_write_tokens=self.cache_write_tokens + usage.cache_write_tokens,
+            total_tokens=self.total_tokens + usage.total_tokens,
+        )
 
 
 class FloorStatus(enum.Enum):
@@ -122,7 +180,10 @@ class EvalTask:
 
     `classifier` builds the live callable that answers one comment. It is a
     factory rather than a callable so that nothing constructs a gateway — or
-    reads a credential — for a task the runner is not going to grade.
+    reads a credential — for a task the runner is not going to grade. What it
+    builds answers with a `(output, usage)` pair: the two come back from one
+    gateway call, and carrying them separately would mean either a second call or
+    an accumulator hidden inside the closure.
     """
 
     name: str
