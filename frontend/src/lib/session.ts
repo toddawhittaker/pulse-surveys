@@ -15,8 +15,9 @@
  * every fetch — the backend's `session_from_request` reads the Bearer header
  * before any cookie, so this path carries the session with no cookie required.
  *
- * This is entry plumbing, not application logic: there is nothing to fetch in E1,
- * and what a real request looks like is E2's to decide against a real screen.
+ * This is entry plumbing, not application logic. E1 had nothing to fetch and
+ * left what a real request looks like to E2's first real screen; `api/student.ts`
+ * is that answer, and `authorizationHeader` is what it spreads into both calls.
  */
 
 /** Where the captured session lives for the tab's lifetime. */

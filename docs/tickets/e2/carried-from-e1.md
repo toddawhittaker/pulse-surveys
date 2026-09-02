@@ -103,12 +103,15 @@ forced. Source: `docs/tickets/e1/deferred.md`, E1-03 item 1, and
 peerDependencies` admits 7.x.
 **Done when:** triage entry 3's.
 
-## The three webfonts are declared and not loaded
+## The three webfonts are declared and not loaded — CLOSED by E2-10
 
-The five landing views render in fallback faces; self-hosting versus
-shipping fallbacks is decided against E2's first real screen. Source:
-`docs/tickets/e1/deferred.md`, E1-04 item 1.
-**Owner:** E2. **Done when:** the deferred entry's.
+Closed 2026-09-02: E2-10 self-hosts the three faces via pinned
+`@fontsource` packages, per ADR 0116; the deferred entry's done-when is
+met and written up in place in `docs/tickets/e1/deferred.md`, E1-04
+item 1. (This entry originally read "the five landing views render in
+fallback faces"; they no longer do, and the student landing is now the
+survey screen.)
+**Owner:** E2. **Done when:** the deferred entry's — met.
 
 ## The security response headers — closed inside E1; only the E11 residue below is carried
 

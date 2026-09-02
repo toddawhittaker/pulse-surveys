@@ -167,3 +167,152 @@ database builds from the migration, and repeating the same class of mutation
 per row buys no new information. **Done when** nothing — this entry exists so
 the residue is findable, not to schedule work; a later battery that touches
 these tables should mutate the migration, not the model.
+
+## The bounce names no offending position, so the form coaches every comment it sent — E2-10
+
+Deferred by E2-10, which is the first thing to consume the bounce.
+
+SPEC §3.3's synchronous gate refuses one *comment*, and `app.api.student` answers
+it with `{"verdict", "message"}` — the verdict that refused it and
+`app.copy.submit`'s coaching sentence for that verdict. Neither member says
+**which** comment. A submission can carry two: §3.2's set has a free-text question
+after each rating, and a student who writes in both boxes and has one of them
+judged `insufficient` gets one 422 that does not distinguish them.
+
+So the form does the only honest thing available to it: the coaching is attached
+to **every comment field the submission actually carried**, announced once through
+a live region, with focus moved to the first of them and every other value left
+exactly as the student typed it. Where one comment was sent that is correct and
+precise. Where two were sent it is correct and imprecise — it asks a student to
+look again at a sentence that may have been fine.
+
+The alternative available today is worse rather than cheaper: guessing which
+comment was judged (the shorter one, the last one) would put a coaching sentence
+on a field the classifier never refused, and it would be right most of the time,
+which is what makes a guess like that survive review.
+
+**Done when** the 422's detail names the offending position — or positions, since
+a submission with two thin comments has two — and the form attaches the coaching
+to exactly those fields and to no others, with a test that sends two comments and
+requires the untouched one to carry no coaching. The change is on the write path
+(`app.services.submissions` raises `SubmissionBouncedError` from inside the loop
+over submitted comments, so it has the position) and in `app.api.student`'s
+detail, which makes it a heavy-lane ticket rather than this one.
+
+## The week eyebrow cannot say how long the course runs — E2-10
+
+Deferred by E2-10, and it is a gap in the read contract rather than a defect in
+the screen.
+
+`docs/DESIGN_BRIEF.md` writes the eyebrow as "WK 07 / 12 · closes Sun 11:59 PM",
+and `design/Usage Rules.md` §1 adds the quiet term-week sub-label. E2-09's
+`OpenSurvey` carries `course_week`, `term_week` and `closes_at`, and nothing that
+says **how many weeks the section runs for** — that number lives on the term
+calendar and the section's start letter (SPEC §2.2), neither of which reaches this
+answer. So the shipped eyebrow reads "WK 07 · TERM 11 · closes Sun 11:59 PM": the
+week a student is in, under both names, and when it shuts.
+
+Deriving the total in the frontend is the option not taken. The section code
+carries the start letter and the map from letter to length is the institution's,
+so a client-side derivation would be a second copy of `start_letter_map` in
+TypeScript — the shape `docs/MISTAKES.md` entry 19 is about, and one that reads
+right in review because the arithmetic is simple.
+
+**Done when** `OpenSurvey` carries the section's own week count and `WeekEyebrow`
+renders the brief's "WK 07 / 12", with the read path's test asserting the count
+against the seeded calendar rather than against the service that computed it. The
+member is one field on a schema and one read in `app.services.survey_read`, which
+puts it on a heavy-lane path.
+
+## The self-hosted faces: an unrecognized licence and a second copy nobody fetches — E2-10
+
+Deferred by E2-10, whose
+[ADR 0116](../../adr/0116-the-three-webfonts-are-self-hosted-in-the-bundle.md)
+records both. Neither is fixed there because both sit on paths a light-lane ticket
+may not touch — `scripts/ci/` for the first, and the second is a judgement about
+that same gate's neighbours.
+
+**The licence gate has no rule for OFL-1.1.** The three `@fontsource` packages
+declare the SIL Open Font License, and `scripts/ci/check_licenses.py`'s rule table
+does not name it, so all three classify `unknown` and appear in the report's "no
+recognizable license" list. That is a printed line rather than a failure — the
+gate is not run with `--strict-unknown` — so nothing is red today and nothing
+will be until somebody turns that flag on, at which point three permissive font
+packages fail the build. The licence is permissive and compatible with
+distributing this project under MIT (SPEC §10); it is simply not in the
+vocabulary.
+
+**And the OFL asks for something this build does not do.** Its clause 2 requires
+the licence and the copyright notice to travel with the font files when they are
+redistributed, and `frontend/dist` ships six woff2 files and no notice.
+
+**A second copy of every face ships and no supported browser fetches it.** Each
+`@fontsource` stylesheet lists woff2 and woff, so the build emits both: 119,100
+bytes of woff2 that browsers use and 147,028 bytes of woff that none of them
+does. It costs image size and nothing else — the bundle budget counts neither.
+
+**Done when** `check_licenses.py` classifies `OFL-1.1` and the spelled-out "SIL
+Open Font License" as permissive, with the near-miss control the rest of that
+table's rules get (a licence the rule must *not* match, run and seen to not
+match); **and** the built application ships the OFL text and copyright notices
+for the three families, with something asserting they are in `dist`; **and** the
+woff duplicates are either dropped — which means hand-writing the six
+`@font-face` rules and accepting the copy of the package's own declarations that
+ADR 0116 refuses today — or recorded as a deliberate cost in the licence and
+image-size sweep. E13's accessibility and licence pass is the natural owner of
+the first two.
+
+## A resubmission under a rewound development clock answers 500 — E2-10
+
+Found by E2-10 while driving its own end-to-end spec, and it is a defect in a
+development-only path rather than one a student can reach.
+
+[ADR 0109](../../adr/0109-the-dev-clock-is-a-database-offset-not-a-freeze.md)
+makes the development clock an **offset** rather than a freeze, so setting it to
+the same pretended minute a second time — an hour later in real time — produces
+an effective now a little *earlier* than the first run had drifted to. A student
+who submits under the first setting and revises under the second writes a
+`response` row whose `last_submitted_at` precedes its own `first_submitted_at`,
+and `response`'s `ck_response_last_submission_is_not_before_the_first` refuses
+it. `app.services.submissions` has no branch for that, so it surfaces as a
+`psycopg.errors.CheckViolation` out of the flush and the route answers **500**.
+
+Measured on this branch, on the composed stack: a resubmission after the clock
+was re-set to `2026-10-02T19:00` wrote
+`first_submitted_at = 2026-10-02 23:00:04.017127+00` against
+`last_submitted_at = 2026-10-02 23:00:00.841879+00`, three seconds apart in the
+wrong direction, and the API answered 500 with the constraint name in the log.
+
+**What it is not.** Real time does not run backwards, so no deployment reaches
+this: the clock override is refused outside development (ADR 0109), and the check
+constraint is doing exactly the job it was written for — the row is wrong and the
+database says so. Nothing is stored, and the student's answers stay in the form.
+
+**What it is.** A 500 where a refusal belongs, on the surface a developer walks a
+section through a term on. It is also the shape that makes a demo look broken:
+the person who moved the clock has no way to know that the week they are looking
+at was answered under a later reading of the same minute. `tests/e2e/student-survey.spec.ts`
+works around it by clearing the week before each of its cases, which is a spec
+protecting itself rather than a fix.
+
+**Done when** the write path either refuses this in words — one of
+`app.copy.submit`'s sentences, with a status that says the request was
+understood — or refuses to move `last_submitted_at` backwards at all, and a test
+drives a resubmission under a rewound clock and requires something other than a
+500. The fix is in `app.services.submissions`, which is a heavy-lane path.
+
+## Two records still say "the five landing views" — E2-10
+
+E2-10 replaced the student landing with the survey screen, so two records now
+describe a tree that no longer exists: the `SinglePageApp` docstring in
+`backend/app/main.py` and the module docstring of
+`tests/unit/test_the_spa_is_served_from_the_app_factory.py` both count five
+landing views where there are now four plus a survey screen. Neither file is a
+light-lane path, so the light ticket that falsified the sentences could not
+correct them (the lane rule in `CLAUDE.md`; the same rule that kept this PR out
+of `backend/` kept it out of these).
+
+**Done when** both docstrings describe the tree as it is, corrected by the next
+ticket whose lane covers each file — a heavy ticket touching `backend/app/main.py`
+for the first, any test-author phase touching that test module for the second.
+The assertions in both files are correct today; only the prose is stale.
