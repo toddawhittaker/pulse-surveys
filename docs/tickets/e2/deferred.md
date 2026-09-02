@@ -404,3 +404,35 @@ of `backend/` kept it out of these).
 ticket whose lane covers each file — a heavy ticket touching `backend/app/main.py`
 for the first, any test-author phase touching that test module for the second.
 The assertions in both files are correct today; only the prose is stale.
+
+## The model identifier lives in three places and nothing ties them — E2-12
+
+The pinned model, `gpt-5-mini-2025-08-07`, is named in `.env.example`, in the
+eval step of `.github/workflows/ci.yml`, and in the provenance sentences of
+`tests/evals/validity/floors.py` — and no test compares any of the three to any
+other. The re-verification measured the gap directly: re-pointing either
+configuration site alone survives the whole suite, so a model swap in one place
+would measure the floors against a model nobody measured while the provenance
+prose went on saying otherwise. This is the compare-an-answer-with-itself
+defect the same round repaired inside `cases.py`, recurring one level out, in
+the shape the record already predicts for closed-set guards.
+
+Today all three sites agree and the floors were measured against exactly that
+snapshot, so nothing is wrong — the gap is in what holds them together.
+
+**Done when** one test reads the model identifier from all three sites and
+fails when any two disagree, and a planted mismatch at each site is seen red.
+
+## Floor headroom carries a measured variance point — for E10's recall-floor work
+
+The floors (precision 0.95, recall 0.94) were sized against one clean
+measurement (precision 1.000, fp 0) to tolerate two new errors of a kind and
+fire on the third. The first independent CI run of the same set, model and
+prompt scored precision 0.9815 (fp 1): one of the two tolerated errors is
+already spent, on run-to-run variance alone. The floors hold and the sizing
+argument worked as designed; the carried fact is that variance between
+identical runs is real and roughly one case per hundred, which E10 should fold
+into how it sizes the threat-recall floor rather than rediscovering it.
+
+**Done when** E10's floor-setting records a variance allowance with at least
+two independent measured runs behind it.
