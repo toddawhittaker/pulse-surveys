@@ -3388,6 +3388,49 @@ MEMBER_OF_ROLES = """
 #     to a person on this connection.
 #     Decided and spent in E2-06, ruled in `docs/disputes/E2-06-03.md`; ADR 0111
 #     records the ticket's decisions, this grant and its withheld verbs among them.
+#   - `pulse_app` **reads** `week`, `question_set`, `question`, `response` and
+#     `answer`, and holds no other verb on any of the five. These are E2-09's
+#     student read path — the one `GET` that answers "for me, right now, what is
+#     there?" — and the entry above predicted them by name: "E2 will do it again
+#     when the first student write path needs a grant on `response`". It is the
+#     read path that arrives first, so the verbs are `SELECT` and only `SELECT`;
+#     E2-08's submit needs `INSERT` and `UPDATE` on `response` and `answer` and
+#     they land in that ticket's own revision, with the code that issues them.
+#     `docs/disputes/E2-09-02.md` is the record, and each of the five was measured
+#     load-bearing one relation at a time: held out, the branch fails with
+#     `permission denied for table week` behind a 500 on twelve of E2-09's
+#     fourteen items; granted one at a time, Postgres refuses the next relation in
+#     turn — `week`, then `question_set`, then `question`, then `response`, then
+#     `answer`, then nothing. No verb here is spare.
+#     **A statement per grant.** `week` is the term-week number a window is over,
+#     which SPEC §2.2 makes a *row's own* `number` rather than something to
+#     re-derive from the window's instants — a second reading of §3.1's rhythm
+#     agrees with the first only while both are right, and §2.2's two week axes
+#     are what E2-09 answers under `course_week` and `term_week`.
+#     `question_set` and `question` are SPEC §3.2's five questions, which E2-10
+#     renders from this one read. `response` and `answer` are the reader's **own**
+#     submission, for the resubmit case.
+#     **`INSERT`, `UPDATE`, `DELETE` and `TRUNCATE` are withheld on all five, and
+#     that is the assertion**, as on `classification`, `clock_override` and
+#     `survey_window`. A read path that structurally cannot write is a read path
+#     that cannot alter a submission it was only meant to display, and it cannot
+#     back-fill a missed week (§3.1) or move a question's wording out from under
+#     the `answer` rows keyed to it (§3.2's versioned set).
+#     **What `SELECT` on `response` and `answer` is not.** It is not a widening of
+#     what a student can see: §4.1 item 1's scoping is the read's `WHERE` clause —
+#     E2-05's `(user_id, section_id, week_id)` key with the author left in — and
+#     `test_the_student_read_path_names_nothing_outside_the_enrollment.py` is the
+#     assertion that a classmate's stored submission does not come back. Neither
+#     table carries an identity-marked column: a `response` names a section, a
+#     week and the `user_id` §4 keys it to, and that key is what makes it the
+#     reader's own rather than somebody's name.
+#     **One of the five closes a gap that predates the ticket**, recorded rather
+#     than quietly fixed: `app.services.survey_windows.derive_windows_for_section`
+#     has selected `week` on this connection since E2-06's hourly beat, and no
+#     revision had ever granted it. It lands here because this is the ticket whose
+#     read needed it.
+#     Decided and spent in E2-09, ruled in `docs/disputes/E2-09-02.md`; precedent
+#     `docs/disputes/E2-04-02.md` and `docs/disputes/E2-06-03.md`.
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -3419,6 +3462,11 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "clock_override", "DELETE"),
         (APPLICATION_ROLE, "survey_window", "SELECT"),
         (APPLICATION_ROLE, "survey_window", "INSERT"),
+        (APPLICATION_ROLE, "week", "SELECT"),
+        (APPLICATION_ROLE, "question_set", "SELECT"),
+        (APPLICATION_ROLE, "question", "SELECT"),
+        (APPLICATION_ROLE, "response", "SELECT"),
+        (APPLICATION_ROLE, "answer", "SELECT"),
     }
 )
 
