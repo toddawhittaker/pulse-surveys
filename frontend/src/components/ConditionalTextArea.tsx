@@ -34,6 +34,7 @@ export type CommentState = 'optional' | 'required' | 'bounce';
 export function ConditionalTextArea({
   id,
   state,
+  required,
   value,
   bounceMessage,
   onChange,
@@ -41,15 +42,23 @@ export function ConditionalTextArea({
   /** The textarea's own id; the screen focuses a bounced field by it. */
   readonly id: string;
   readonly state: CommentState;
+  /**
+   * Whether §3.2's conditional rule makes this comment required right now.
+   *
+   * Separate from `state`, and it has to be: a comment the classifier bounced
+   * may be one the rating beside it never required, and telling an optional
+   * field it is "needed to submit" because it was coached is a false statement
+   * about what the form will accept.
+   */
+  readonly required: boolean;
   readonly value: string;
   /** SPEC §3.3's coaching sentence, as the server sent it. Only on `bounce`. */
   readonly bounceMessage?: string;
   readonly onChange: (value: string) => void;
 }): JSX.Element {
   const helpId = `${id}-help`;
-  const required = state !== 'optional';
   return (
-    <div className="pulse-comment" data-state={state}>
+    <div className="pulse-comment" data-state={state} data-required={required}>
       <label htmlFor={id}>
         {copy('student_survey.comment_label')}
         {required ? (

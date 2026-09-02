@@ -147,6 +147,17 @@ export function sectionTestid(sectionCode: string): string {
   return `survey-section-${sectionCode}`;
 }
 
+/**
+ * Where a spec finds the two things the form says about a submission that did
+ * not go through: SPEC §3.3's coaching, announced once, and the server's
+ * sentence for a refusal that left the answers where they were.
+ */
+export const BOUNCE_ANNOUNCEMENT_TESTID = 'survey-bounce-announcement';
+export const REFUSAL_TESTID = 'survey-refusal';
+
+/** Where a spec finds the way back into a week it has already answered. */
+export const REVISE_TESTID = 'survey-revise';
+
 /** SPEC §3.3's gate having refused this submission, and which fields it lands on. */
 interface Bounce {
   /** `app.copy.submit`'s coaching sentence, as the server sent it. */
@@ -232,27 +243,49 @@ function OpenSurveyForm({
     setRefusal(outcome.message);
   }
 
+  // The eyebrow stands above every one of these states, because the week is the
+  // one fact that is true in all of them — `docs/DESIGN_BRIEF.md` puts it before
+  // anything else on the screen, and a submitted week that stopped saying which
+  // week it was would be the layout losing the term's rhythm at the moment it
+  // matters.
+  const eyebrow = (
+    <WeekEyebrow
+      courseWeek={survey.course_week}
+      termWeek={survey.term_week}
+      closesAt={survey.closes_at}
+    />
+  );
+
   if (closed !== null) {
-    return <StateNotice variant="flat" body={closed} />;
+    return (
+      <>
+        {eyebrow}
+        <StateNotice variant="flat" body={closed} />
+      </>
+    );
   }
 
   if (!showForm) {
     return (
-      <StateNotice
-        variant="beat"
-        title={copy('student_survey.submitted_title')}
-        body={copy('student_survey.submitted_body')}
-      >
-        <button
-          type="button"
-          className="pulse-secondary"
-          onClick={() => {
-            setShowForm(true);
-          }}
+      <>
+        {eyebrow}
+        <StateNotice
+          variant="beat"
+          title={copy('student_survey.submitted_title')}
+          body={copy('student_survey.submitted_body')}
         >
-          {copy('student_survey.submitted_revise')}
-        </button>
-      </StateNotice>
+          <button
+            type="button"
+            className="pulse-secondary"
+            data-testid={REVISE_TESTID}
+            onClick={() => {
+              setShowForm(true);
+            }}
+          >
+            {copy('student_survey.submitted_revise')}
+          </button>
+        </StateNotice>
+      </>
     );
   }
 
@@ -263,22 +296,23 @@ function OpenSurveyForm({
 
   return (
     <div className="pulse-survey-form">
-      <WeekEyebrow
-        courseWeek={survey.course_week}
-        termWeek={survey.term_week}
-        closesAt={survey.closes_at}
-      />
+      {eyebrow}
 
       {/* One live region for the whole form, so §3.3's coaching is announced
           once when it arrives rather than once per field carrying it. The region
           is in the document from the first render: a region added at the moment
           it has something to say is a region assistive technology has not been
           watching. */}
-      <p className="pulse-bounce-announcement" role="status" aria-live="polite">
+      <p
+        className="pulse-bounce-announcement"
+        data-testid={BOUNCE_ANNOUNCEMENT_TESTID}
+        role="status"
+        aria-live="polite"
+      >
         {bounce?.message ?? ''}
       </p>
       {refusal === null ? null : (
-        <p className="pulse-refusal" role="alert">
+        <p className="pulse-refusal" data-testid={REFUSAL_TESTID} role="alert">
           {refusal}
         </p>
       )}
@@ -343,15 +377,13 @@ function QuestionField({
 
   if (question.kind === 'comment') {
     const coached = bounce !== null && bounce.positions.includes(question.position);
-    const state: CommentState = coached
-      ? 'bounce'
-      : isCommentRequired(question, values)
-        ? 'required'
-        : 'optional';
+    const required = isCommentRequired(question, values);
+    const state: CommentState = coached ? 'bounce' : required ? 'required' : 'optional';
     return (
       <ConditionalTextArea
         id={id}
         state={state}
+        required={required}
         value={raw}
         bounceMessage={coached ? bounce.message : undefined}
         onChange={(value) => {

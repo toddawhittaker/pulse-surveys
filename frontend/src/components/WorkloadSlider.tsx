@@ -59,10 +59,14 @@ export function WorkloadSlider({
   const label = copy('student_survey.workload_label');
   const unit = copy('student_survey.workload_unit');
   const readout = value === null ? copy('student_survey.workload_unanswered') : `${value} ${unit}`;
+  // The scale's ends and the spoken hint drop trailing zeros — "0 to 40 hours,
+  // in steps of 0.5" rather than "0.0 to 40.0". The *readout* keeps the step's
+  // precision, because that number changes under the thumb and a digit that
+  // comes and goes moves everything beside it.
   const rangeHint = fillCopy('student_survey.workload_range_hint', {
-    minimum: format(minimum, places),
-    maximum: format(maximum, places),
-    step: format(step, places),
+    minimum: plain(minimum),
+    maximum: plain(maximum),
+    step: plain(step),
   });
 
   return (
@@ -99,9 +103,9 @@ export function WorkloadSlider({
         }}
       />
       <div className="pulse-workload-ends" id={`${id}-hint`}>
-        <span>{`${format(minimum, places)} ${unit}`}</span>
+        <span>{`${plain(minimum)} ${unit}`}</span>
         <span className="pulse-workload-hint">{rangeHint}</span>
-        <span>{`${format(maximum, places)} ${unit}`}</span>
+        <span>{`${plain(maximum)} ${unit}`}</span>
       </div>
     </div>
   );
@@ -123,4 +127,9 @@ function decimalPlaces(step: string | null): number {
 /** One number in the question's own precision. */
 function format(value: number, places: number): string {
   return Number.isFinite(value) ? value.toFixed(places) : '';
+}
+
+/** One number as it is written in prose: no trailing zeros. */
+function plain(value: number): string {
+  return Number.isFinite(value) ? String(value) : '';
 }

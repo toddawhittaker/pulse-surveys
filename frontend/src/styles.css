@@ -324,7 +324,7 @@
     color: var(--marigold-deep);
   }
 
-  .pulse-comment[data-state='optional'] .pulse-comment-flag {
+  .pulse-comment[data-required='false'] .pulse-comment-flag {
     display: none;
   }
 

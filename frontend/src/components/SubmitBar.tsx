@@ -27,6 +27,14 @@ import { copy } from '../copy/studentSurvey';
  * quotes no deadline — the window's own close is in the eyebrow above, from the
  * API, and a second statement of it here would be a copy to keep in step.
  */
+
+/**
+ * Where a spec finds the action. The label changes between a first submission
+ * and a revision, so addressing the button by its words would be a spec holding
+ * a copy of two governed strings in order to click one thing.
+ */
+export const SUBMIT_TESTID = 'survey-submit';
+
 export function SubmitBar({
   label,
   disabled,
@@ -42,7 +50,13 @@ export function SubmitBar({
 }): JSX.Element {
   return (
     <div className="pulse-submit-bar">
-      <button type="button" className="pulse-submit" disabled={disabled} onClick={onSubmit}>
+      <button
+        type="button"
+        className="pulse-submit"
+        data-testid={SUBMIT_TESTID}
+        disabled={disabled}
+        onClick={onSubmit}
+      >
         {busy ? copy('student_survey.submitting') : label}
       </button>
       <p className="pulse-confidentiality">{copy('student_survey.confidentiality')}</p>
