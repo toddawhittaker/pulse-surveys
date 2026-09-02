@@ -405,6 +405,12 @@ ticket whose lane covers each file — a heavy ticket touching `backend/app/main
 for the first, any test-author phase touching that test module for the second.
 The assertions in both files are correct today; only the prose is stale.
 
+**Corrected by E2-11**, the next ticket whose lane covered both files: the
+`SinglePageApp` docstring now counts four landing views plus the survey screen,
+and the stale sentence in the test module — which sat in
+`test_the_mount_root_serves_the_built_entry_document`'s docstring rather than
+the module's — says the same. Prose only in both files.
+
 ## The model identifier lives in three places and nothing ties them — E2-12
 
 The model identifier is named in `.env.example`, in the eval step of
