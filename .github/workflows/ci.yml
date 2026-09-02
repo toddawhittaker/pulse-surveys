@@ -8,6 +8,14 @@ on:
   push:
     branches:
       - 'epic/**'
+  # E2-12 scope (b): the eval floors run "on demand via `workflow_dispatch`".
+  # Firing them on AI-touching diffs is the right default and is not enough on
+  # its own — a provider changes a model behind a stable identifier, a floor
+  # needs re-measuring before it is moved, a key is rotated and somebody has to
+  # know the wiring still works. None of those is a diff, and without a manual
+  # trigger the only way to run the gate would be to push a change to a file
+  # that does not need changing.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -62,6 +70,16 @@ jobs:
       # off rather than being skipped — the `ci` job's comment says why a
       # job-level `if:` would fail the required check instead.
       inert: ${{ steps.diff.outputs.inert }}
+      # `true` when the diff touched anything SPEC §9.3's eval floors measure:
+      # the AI package, the eval tree, or either of the two files that carry the
+      # model identifier. Read by the `evals` job alone, which is the one gate
+      # here that calls a paid provider (E2-12).
+      #
+      # **Declaring it and never filling it is the quiet failure.** Every reader
+      # would hold the empty string, `'' == 'true'` is false, the live eval steps
+      # would never run again, and the job would report success — so every route
+      # out of the step below emits both classifications rather than one.
+      ai_surface: ${{ steps.diff.outputs.ai_surface }}
     steps:
       # Full history, because the step below diffs against the base commit and a
       # shallow clone does not have it. A few seconds here against the fifteen
@@ -90,6 +108,18 @@ jobs:
           set -uo pipefail
           emit() { echo "$1=$2" >> "$GITHUB_OUTPUT"; echo "  $1 = $2"; }
 
+          # "We do not know what changed", said in both classifications at once.
+          # Every early exit below is that answer, and each one has to give it
+          # twice: the two outputs have opposite polarities — `inert=false` runs
+          # the six expensive gates, `ai_surface=true` runs the eval steps — so a
+          # route that emitted one and forgot the other would leave the forgotten
+          # reader holding the empty string. `'' == 'true'` is false and
+          # `'' != 'true'` is true, so forgetting `inert` runs everything and
+          # forgetting `ai_surface` silently stops SPEC §9.3's floors ever
+          # running again, with the job green. One function rather than two lines
+          # repeated at five sites (`docs/MISTAKES.md` entry 13).
+          unknown() { emit inert false; emit ai_surface true; }
+
           # **Only a pull request may be inert.** A push event's base is
           # `github.event.before`, which is the previous head of the branch, so
           # the diff is incremental while the verdict is not. Land a
@@ -104,7 +134,7 @@ jobs:
           if [ "${EVENT_NAME:-}" != "pull_request" ]; then
             echo "::notice::${EVENT_NAME:-unknown} is not a pull request, so the diff would be"
             echo "::notice::incremental while the verdict is not. Every gate runs."
-            emit inert false
+            unknown
             exit 0
           fi
           base="${PR_BASE_SHA:-}"
@@ -113,13 +143,13 @@ jobs:
           # empty string. Both mean there is nothing to diff against.
           if [ -z "${base}" ] || [ "${base}" = "0000000000000000000000000000000000000000" ]; then
             echo "::notice::no base commit to diff against; every gate runs."
-            emit inert false
+            unknown
             exit 0
           fi
 
           if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
             echo "::notice::base commit ${base} is not in this clone; every gate runs."
-            emit inert false
+            unknown
             exit 0
           fi
 
@@ -142,7 +172,7 @@ jobs:
           # stays inert, which is what trimming that directory looks like.
           if ! git diff --no-renames --name-only -z "${base}" HEAD > /tmp/changed-paths.z; then
             echo "::notice::could not diff against ${base}; every gate runs."
-            emit inert false
+            unknown
             exit 0
           fi
           # Also in an `if`, for the reason the classifier invocation below is:
@@ -151,7 +181,7 @@ jobs:
           # required check going red. No bare command is left in it.
           if ! mapfile -t -d '' changed < /tmp/changed-paths.z; then
             echo "::notice::could not read the changed-path list; every gate runs."
-            emit inert false
+            unknown
             exit 0
           fi
 
@@ -215,11 +245,58 @@ jobs:
               ;;
           esac
 
+          # The second question, over the same path list (E2-12). Same script,
+          # same `if`, same `--`, same `case`, and every note above applies to it
+          # unchanged — including the two that were paid for: `python3` rather
+          # than `python`, because this job runs no `actions/setup-python`; and
+          # `--` before the paths, because argparse answers before the script's
+          # own logic does and a repository file named `-h` would exit 0.
+          #
+          # **Only the meaning of the exits differs, and it does not.** Exit 0 is
+          # "the gates this question decides may short-circuit" for both
+          # classifications, which is what lets the two `case` statements be read
+          # the same way; here that means "no changed path is an AI surface, so
+          # the live eval steps may stay off". A neither-answer exit emits `true`,
+          # which runs SPEC §9.3's floors — the direction every failure route in
+          # this step takes, because under-firing this gate is the threat and
+          # self-harm recall floor not running on the change that most needs it.
+          if python3 scripts/ci/classify_changed_paths.py --classification ai-surface -- "${changed[@]}"; then
+            ai_status=0
+          else
+            ai_status=$?
+          fi
+
+          case "${ai_status}" in
+            0) emit ai_surface false ;;
+            1) emit ai_surface true ;;
+            *)
+              echo "::warning::classify_changed_paths.py --classification ai-surface exited"
+              echo "::warning::${ai_status}, which is neither of its two answers. The eval floors"
+              echo "::warning::run. This is a broken checker, not a repository nobody has"
+              echo "::warning::touched."
+              emit ai_surface true
+              ;;
+          esac
+
   detect:
     name: Detect what exists
     runs-on: ubuntu-latest
     outputs:
       node: ${{ steps.d.outputs.node }}
+      # **This probe has had no reader since E2-12, and it is published anyway.**
+      # It asked whether `tests/evals/runner.py` exists, and the `evals` job's
+      # steps waited on it while that file was still to be written. The file is
+      # committed now, so waiting on it is precisely the tolerance ADR 0002 says
+      # the ticket landing the code must remove: with the clause in place, a
+      # deleted runner switches SPEC §9.3's floors off and the job reports
+      # success, where without it the run fails on the import and says so. The
+      # clause therefore went, and this line did not, because
+      # tests/unit/test_the_detect_probes_see_the_files_their_jobs_run.py asserts
+      # the whole set of outputs this job emits and withdrawing one is a change on
+      # the other side of that module's wall. That is stated here rather than left
+      # to be rediscovered: a boolean nobody consults is a probe whose wrongness
+      # produces no symptom, which is the failure this job's own comment below is
+      # about, and it is E2-13's to close.
       evals: ${{ steps.d.outputs.evals }}
     steps:
       - uses: actions/checkout@v7
@@ -818,6 +895,40 @@ jobs:
           path: playwright-report/
           if-no-files-found: ignore
 
+  # E2-12 turns this job enforcing, and it is ADR 0002's last tolerance. Until
+  # now it printed a `::notice::` saying the first eval set and the floors that
+  # gate on it "are E2's, and this job stays tolerant until then", and reported
+  # success. That sentence is false in the change that lands the set, and ADR
+  # 0002 makes removing a tolerance an acceptance criterion of the ticket that
+  # lands the code rather than a tidy-up for later.
+  #
+  # **This job is the one gate in this pipeline that calls a paid provider**, at
+  # about a hundred requests a run, so it is the one gate whose steps are
+  # conditioned on more than "was the diff inert". Three clauses, and each is
+  # doing separate work:
+  #
+  #   * `needs.changed.outputs.inert != 'true'` — E0-38's short-circuit, kept and
+  #     not replaced. Two committed modules require every expensive gate to keep
+  #     it, and one of them reads its operator.
+  #   * `needs.changed.outputs.ai_surface == 'true'` — E2-12's clause. SPEC §9.3
+  #     scopes the floors to "prompt or model changes"; this is that question
+  #     asked of the diff.
+  #   * `github.event_name == 'workflow_dispatch'` — the manual run, which fires
+  #     the steps whatever the diff says, because a dispatch has no meaningful
+  #     diff at all.
+  #
+  # **The inert clause leads every condition, and that is a real constraint.**
+  # `test_a_documentation_only_diff_does_not_run_the_expensive_gates.py` reads
+  # the sense of an expensive gate's guard by taking the *first* comparison of a
+  # `needs.changed.outputs.*` reference against `'true'`. Leading with
+  # `ai_surface == 'true'` hands that reader an `==`, it concludes this gate runs
+  # only on documentation, and a correct guard reds a committed module. The
+  # boolean is identical either way.
+  #
+  # **The condition is at step level and must stay there.** E0-36 made the
+  # aggregate `ci` check treat `skipped` as a failure, so a job-level `if:` fails
+  # the one check branch protection points at on every pull request that does not
+  # touch the AI surface.
   evals:
     name: Test · AI eval floors
     needs: [changed, detect, fast-gate]
@@ -829,19 +940,30 @@ jobs:
         if: needs.changed.outputs.inert == 'true'
         run: echo "::notice::Every changed path is inert documentation (E0-38), so no eval floor was checked."
 
-      - name: No eval sets yet
-        if: needs.detect.outputs.evals != 'true' && needs.changed.outputs.inert != 'true'
+      # The not-fired case, which is an ordinary and expected outcome rather than
+      # a tolerance: most pull requests here change no prompt and no model, and
+      # SPEC §9.3's gate is scoped to the ones that do.
+      #
+      # **This script deliberately does not use the word the sibling guard reads.**
+      # `test_a_documentation_only_diff_does_not_run_the_expensive_gates.py` flags
+      # any step that is switched off by an inert diff, prints a `::notice::`,
+      # explains the *inert* classification and does not run the gate's command —
+      # it reads that shape as a skip-notice guarded backwards. A notice about the
+      # AI-surface classification is a different notice, and saying so plainly is
+      # what keeps the two apart.
+      - name: This diff touches no AI surface, so the eval floors did not run
+        if: needs.changed.outputs.inert != 'true' && needs.changed.outputs.ai_surface != 'true' && github.event_name != 'workflow_dispatch'
         run: |
-          echo "::notice::No tests/evals runner yet. E0-13 builds the gateway; the first eval set and the floors that gate on it are E2's, and this job stays tolerant until then."
-          echo "::notice::Running the eval suite needs a provider API key as a repository secret and a secrets.* reference in this workflow. Under the secrets policy in CLAUDE.md that is Todd's call, so it is proposed, not wired."
+          echo "::notice::No changed path is under backend/app/ai/ or the eval tree, and neither backend/app/config.py nor .env.example changed, so SPEC §9.3's floors measured nothing. This is the scoped behaviour, not a tolerance: the floors call a paid provider about a hundred times a run and §9.3 scopes them to prompt or model changes."
+          echo "::notice::To measure them anyway, run this workflow by hand (Actions, Run workflow)."
 
       - uses: actions/setup-python@v7
-        if: needs.detect.outputs.evals == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.changed.outputs.inert != 'true' && (needs.changed.outputs.ai_surface == 'true' || github.event_name == 'workflow_dispatch')
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install backend (locked)
-        if: needs.detect.outputs.evals == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.changed.outputs.inert != 'true' && (needs.changed.outputs.ai_surface == 'true' || github.event_name == 'workflow_dispatch')
         run: |
           pip install --require-hashes -r requirements-dev.txt
           pip install -e . --no-deps --no-build-isolation
@@ -851,8 +973,26 @@ jobs:
       # threat/self-harm recall floor is the strictest in the suite (§9.3): a
       # false negative there is a student in danger whose comment reached
       # nobody, which is why it is a hard gate and never a warning.
+      #
+      # **The three environment values, and why one of them is a secret and two
+      # are not.** `AI_PROVIDER_API_KEY` is a credential and lives in the
+      # repository's secrets; the repository owner created it and gave the
+      # written go on 2026-09-02, which is what CLAUDE.md's secrets policy
+      # requires before a `secrets.*` expression may appear here — asked, then
+      # waited for, never provisional. The base URL and the model name are not
+      # credentials: `.env.example` documents both in the open, and putting them
+      # here rather than in a secret keeps the log able to say which endpoint and
+      # which model a floor was measured against, which is half of what makes one
+      # run comparable to the next (ADR 0031).
+      #
+      # The runner refuses plainly when the key is absent or blank, naming the
+      # variable, rather than reporting a pass over a run that reached nothing.
       - name: Eval runner (per-task floors; threat recall is a hard gate)
-        if: needs.detect.outputs.evals == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.changed.outputs.inert != 'true' && (needs.changed.outputs.ai_surface == 'true' || github.event_name == 'workflow_dispatch')
+        env:
+          AI_PROVIDER_API_KEY: ${{ secrets.AI_PROVIDER_API_KEY }}
+          AI_PROVIDER_BASE_URL: 'https://api.deepseek.com/v1'
+          AI_PROVIDER_MODEL_NAME: 'deepseek-v4-flash'
         run: python -m tests.evals.runner --enforce-floors
 
   # ==========================================================================
