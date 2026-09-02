@@ -499,6 +499,17 @@ def test_a_resubmission_inside_the_window_replaces_the_prior_answers(
     **The mutation it kills:** `last_submitted_at` written to both columns on a
     resubmission, which loses the moment the student first answered and makes
     every "was this revised" query answer no.
+
+    **What this asserts is the criterion, not the mechanism, and ADR 0115 is why
+    that distinction earns its keep.** E2-08's work order settled the mechanism as
+    delete-the-answer-rows-and-insert-fresh; the ticket's own
+    `classification.answer_id` under `ON DELETE RESTRICT` makes that impossible
+    the first time a classified comment is revised, so the implementer's ADR
+    replaces it with a revision in place. Nothing here moves: "the stored workload
+    is the second submission's" and "one response row" are true of either
+    mechanism and false of a path that appends or that leaves the first value
+    standing. A test written against the delete would have had to be rewritten by
+    the ADR, which is the shape `docs/MISTAKES.md` entry 1 is about.
     """
     student = a_student_in_an_open_window(
         open_submit_tool, submit_world, signed_in_student, mock_ai_endpoint, open_now
@@ -564,13 +575,17 @@ def test_a_resubmission_after_the_window_closes_is_refused(
     row moves the comparison from the other side.
 
     **The stored answers are read back afterwards**, because "refuses" has to mean
-    the first submission survives untouched. A route that deleted the answers and
-    then discovered the window was closed would answer 409 and lose the student's
-    week.
+    the first submission survives untouched. A route that had already revised the
+    answer rows in place (ADR 0115) and only then discovered the window was closed
+    would answer 409 and hand back the second submission's values under the first
+    submission's timestamps — the student's week overwritten by a submission that
+    was refused. The comparison is against the whole row set rather than against a
+    count, so a revision that left the number of rows unchanged is caught.
 
     **The mutation it kills:** the window check made only on the insert branch, so
-    a resubmission — which takes the update branch — is accepted for as long as
-    the row exists.
+    a resubmission — which takes the revise branch — is accepted for as long as
+    the row exists. And the window check made after the write rather than before
+    it, which is the one the assertion below is aimed at.
     """
     student = a_student_in_an_open_window(
         open_submit_tool, submit_world, signed_in_student, mock_ai_endpoint, open_now
@@ -596,8 +611,123 @@ def test_a_resubmission_after_the_window_closes_is_refused(
     stored_after = world.answers_of(world.responses()[0])
     assert stored_after == stored_before, (
         f"The stored answers changed under a refused resubmission: {stored_before} became "
-        f"{stored_after}. A refusal that has already deleted the prior answers costs the student "
-        "the week it was protecting."
+        f"{stored_after}. A refusal that has already revised the prior answers (ADR 0115) costs "
+        "the student the week it was protecting."
+    )
+
+
+def test_a_comment_that_has_been_classified_cannot_be_withdrawn_by_a_resubmission(
+    open_submit_tool: Any,
+    submit_world: SubmitWorld,
+    signed_in_student: Any,
+    mock_ai: Any,
+    mock_ai_endpoint: Any,
+    open_now: tuple[Any, Any],
+    submit_contract: Any,
+    registry_texts: Any,
+) -> None:
+    """ADR 0115's product rule: a judged comment can be revised and cannot be emptied.
+
+    > A question answered before and not now has its row deleted — **unless a
+    > classification names it**, which is checked before anything is deleted. That
+    > case is refused with its own reason and its own sentence
+    > (`submit.comment_already_judged`, HTTP 409), rather than left to surface as
+    > a constraint error under a student.
+
+    The rule is not an acceptance criterion of this ticket; it is a rule the
+    ticket *creates*, and it is asserted here because a rule that ships with
+    nothing asserting it is `docs/MISTAKES.md` entry 2 in as many words. What
+    makes it a rule rather than a preference is `classification.answer_id` under
+    `ON DELETE RESTRICT`: without the check, the delete reaches Postgres and a
+    student meets a 500 on the first resubmission that empties a comment anybody
+    has ever classified.
+
+    **The judgement is shown, not assumed.** A `classification` row naming the
+    comment is read back before the withdrawal is attempted — otherwise a 409
+    would be equally well explained by a route that refuses every resubmission,
+    and `docs/MISTAKES.md` entry 9's rule is that a guard is executed against the
+    case it is claimed to stop rather than cited.
+
+    **The second submission also revises the rating**, from 4 to 5, and both are
+    above §3.2's "Required if Q1 ≤ 2" threshold — so the comment stays optional
+    and the refusal cannot be the missing-required-field 422 wearing a different
+    number. That revision is also what makes the stored-row comparison say
+    something: it is a change the route would have applied had it not refused.
+
+    **The stored rows are compared whole, against the whole-refusal reading.** ADR
+    0115 refuses "that case", and the natural reading is that the resubmission is
+    refused rather than partly applied — a refusal a student is shown while their
+    rating has quietly moved is two different answers to one request. If the
+    implementation applies the rest and refuses only the withdrawal, this is where
+    that surfaces: the 409 and the copy pass and the comparison below fails. That
+    is a disagreement about what the ADR means, and it belongs in a dispute that
+    settles it explicitly rather than in a test quietly widened to accept both.
+
+    **The mutation it kills:** the classification-existence check dropped from in
+    front of the delete. ADR 0115 rejects `ON DELETE SET NULL` and `ON DELETE
+    CASCADE` by name — the first rewrites an append-only audit row through a path
+    the grants cannot see, the second erases the record that a model judged an
+    earlier comment — so with the check gone there is no legal way for the delete
+    to succeed, and the student meets a constraint error instead of a sentence.
+    """
+    student = a_student_in_an_open_window(
+        open_submit_tool, submit_world, signed_in_student, mock_ai_endpoint, open_now
+    )
+    world = student.world
+
+    first = a_valid_submission(comment=marked(mock_ai, "substantive"))
+    first[INSTRUCTOR_RATING_POSITION] = LEAVES_THE_COMMENT_OPTIONAL + 1
+    accepted(student.submit(first), "A first submission carrying a comment")
+
+    stored_before = world.answers_of(world.responses()[0])
+    comments = [row for row in stored_before if row["comment_text"] is not None]
+    assert len(comments) == 1, (
+        f"The first submission stored {len(comments)} comment answers: {stored_before}. This test "
+        "withdraws exactly one comment, so a different number means the withdrawal below is not "
+        "the thing being refused."
+    )
+    judged = world.classifications_of(comments[0])
+    assert judged, (
+        "No classification names the comment the first submission stored, so there is nothing for "
+        "ADR 0115's rule to be about and a refusal below could only be about something else. The "
+        "mock was told to answer `substantive`, so §3.3's synchronous gating should have recorded "
+        "a verdict against this answer through `classification.answer_id`."
+    )
+
+    withdrawn = a_valid_submission(comment=None)
+    withdrawn[INSTRUCTOR_RATING_POSITION] = IN_RANGE_RATING
+    refused = student.submit(withdrawn)
+
+    assert refused.status_code == submit_contract.conflict, (
+        f"Withdrawing a comment that has been classified was answered {refused.status_code} "
+        f"rather than {submit_contract.conflict}. ADR 0115 refuses it 'with its own reason and "
+        "its own sentence ... rather than left to surface as a constraint error under a student', "
+        f"and a 5xx here is that constraint error arriving unhandled. Body begins "
+        f"{refused.text[:400]!r}."
+    )
+    published = registry_texts()
+    assert submit_contract.comment_already_judged_key in published, (
+        f"The copy registry publishes no `{submit_contract.comment_already_judged_key}` — it "
+        f"publishes {sorted(published)}. ADR 0115 settles that key, and the sentence it holds is "
+        "a product rule a student meets rather than an error they have to decode."
+    )
+    expected = published[submit_contract.comment_already_judged_key]
+    assert expected in refused.text, (
+        f"The refusal served {refused.text[:300]!r}, which does not carry the registry's "
+        f"`{submit_contract.comment_already_judged_key}` text {expected!r}. Criterion 4 covers "
+        "this refusal as much as any other."
+    )
+
+    stored_after = world.answers_of(world.responses()[0])
+    assert stored_after == stored_before, (
+        f"The stored answers changed under a refused withdrawal: {stored_before} became "
+        f"{stored_after}. Two things this is about, and they fail the same way. The comment has "
+        "to still be there — ADR 0115's whole point is that 'a comment cannot be withdrawn once "
+        "it has been classified; it can only be revised', and a withdrawal that succeeded would "
+        "either lose the verdict's subject or leave the student's words in the instructor's "
+        "report (§5.1) believing they had removed them. And the rating has to be unrevised: this "
+        "request was refused, and a refusal that applied the rest of the submission is two "
+        "answers to one request, with the student shown the one that says nothing happened."
     )
 
 

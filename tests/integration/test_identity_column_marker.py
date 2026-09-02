@@ -2563,10 +2563,20 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
     # without these two entries the report would name them and the repair would
     # be on the other side of the test wall from the ticket that caused it
     # (`docs/MISTAKES.md` entry 22).
+    #
+    # **E2-08 makes it three**, and it is the walk rather than the table that
+    # moved: `classification.answer_id` is ADR 0055's promised reference, added by
+    # that ticket, so `answer_id` puts `classification` three hops from `user` and
+    # the fixed point reaches a table it had never reached before. The row itself
+    # is unchanged in what it is about — a verdict — and the reachability is a
+    # statement about foreign keys rather than about access: E2-08 grants that
+    # table no privilege at all, and it keeps the `SELECT, INSERT` ADR 0055 gave
+    # it. `docs/disputes/E2-08-04.md` is the record.
     "response": CarriesNothing(
         (
             "first_submitted_at",
             "id",
+            "is_valid",
             "last_submitted_at",
             "section_id",
             "user_id",
@@ -2578,7 +2588,11 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
         "foreign key, and the identity behind it sits on `user_identity`, which `pulse_app` is "
         "granted no `SELECT` on. Note that this is the table SPEC §4 is written about — the "
         "de-identification rules are about what a *view* of it may carry, which the bound-column "
-        "rule above governs, not about a column on the row.",
+        "rule above governs, not about a column on the row. The column pin expired this entry "
+        "once already and did exactly what it is for: E2-08 added `is_valid`, §3.3's verdict "
+        "about the submission as a whole — a boolean about a week, carrying nothing about who "
+        "submitted it, and the column §3.4's participation score reads "
+        "(`docs/disputes/E2-08-04.md`).",
     ),
     "answer": CarriesNothing(
         ("comment_text", "id", "question_id", "rating", "response_id", "workload_hours"),
@@ -2588,6 +2602,19 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
         "— but it is not an identity *column* in this convention's sense: it holds no key to a "
         "person, and marking it would put every comment in the set the identity-separated views "
         "may not read, which is the opposite of what §5.1 requires of the instructor report.",
+    ),
+    "classification": CarriesNothing(
+        ("answer_id", "classified_at", "id", "model_id", "prompt_version", "task", "verdict"),
+        "A model's verdict about one comment, with the prompt version and model ID SPEC §7.4 "
+        "requires of it, and `answer_id` — E2-08's addition, ADR 0055's promised reference — "
+        "which names the comment rather than the person. The identity is two more hops away "
+        "through `answer.response_id` and `response.user_id`, and it is `user_identity` that "
+        "holds it, which `pulse_app` is granted no `SELECT` on. Marking anything here would put "
+        "every verdict in the set the identity-separated views may not read, which is the "
+        "opposite of what §5.1 and §6.1 need, so an entry is the right record and a marker is "
+        "not. `pulse_app` reads and appends this table and can neither update nor delete a row "
+        "(ADR 0055), which is what makes the audit trail an audit trail; what a *view* over it "
+        "may join to is the bound-column rule above, not this entry.",
     ),
     "role_assignment": CarriesNothing(
         (

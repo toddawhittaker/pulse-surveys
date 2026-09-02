@@ -67,6 +67,7 @@ from fixtures.doors import (
     door_column_named,
 )
 from fixtures.mock_ai import AI_PROVIDER_BASE_URL_VARIABLE
+from fixtures.routing import every_route
 from fixtures.supervision import foreign_key_columns, require_table, single_primary_key
 from fixtures.survey_windows import (
     COHORT_SECTION_MODALITY,
@@ -102,6 +103,14 @@ COPY_MODULES_FUNCTION = "copy_modules"
 COPY_MAPPING_NAME = "COPY"
 NOT_A_STUDENT_KEY = "student.not_a_student"
 CLASSIFIER_DOWN_KEY = "submit.classifier_down"
+
+# The third key spelled by a record rather than by role, and the only one settled
+# after these tests were written:
+# [ADR 0115](../../docs/adr/0115-a-resubmission-revises-its-answers-in-place.md)
+# refuses the withdrawal of a comment a classification names, "with its own
+# reason and its own sentence (`submit.comment_already_judged`, HTTP 409), rather
+# than left to surface as a constraint error under a student".
+COMMENT_ALREADY_JUDGED_KEY = "submit.comment_already_judged"
 
 # The work order's refusal statuses. Each is settled there by name:
 # "refusals are HTTP 422 for missing-required/out-of-range/off-step ..., 409 for
@@ -265,6 +274,7 @@ class SubmitContract(NamedTuple):
     copy_mapping_name: str
     not_a_student_key: str
     classifier_down_key: str
+    comment_already_judged_key: str
     unauthenticated: int
     not_found: int
     conflict: int
@@ -287,6 +297,7 @@ def submit_contract() -> SubmitContract:
         copy_mapping_name=COPY_MAPPING_NAME,
         not_a_student_key=NOT_A_STUDENT_KEY,
         classifier_down_key=CLASSIFIER_DOWN_KEY,
+        comment_already_judged_key=COMMENT_ALREADY_JUDGED_KEY,
         unauthenticated=UNAUTHENTICATED_STATUS,
         not_found=NOT_FOUND_STATUS,
         conflict=CONFLICT_STATUS,
@@ -869,10 +880,28 @@ def submit_route(client: Any) -> str:
     so the module is the fact this reads and the path is whatever the ticket's
     author registered it at. A constant here would be this suite choosing an
     address the ticket left open.
+
+    **The walk is `fixtures.routing.every_route`, and this file no longer has one
+    of its own.** On the pinned `fastapi` 0.141.1, `include_router` appends a
+    single `_IncludedRouter` carrying no `path`, no `methods` and no `endpoint`,
+    so a walk over `application.routes` sees only what the factory registered
+    directly — FastAPI's four documentation paths and nothing else. Written that
+    way, this helper answered "`app.api.student` defines 0 POST routes" with the
+    route built and with it absent alike, so it discriminated nothing about this
+    ticket (`docs/MISTAKES.md` entry 24). That reading was ruled on in
+    `docs/disputes/E2-04-01.md`, and the ruling required one shared helper rather
+    than a repair per caller; this was the third walk written the blind way, and
+    `docs/disputes/E2-08-01.md` is where it was caught. `docs/MISTAKES.md` entry
+    13 is the rule — one helper, reached from every place that asks the question.
+
+    **The flattening does not widen what is asserted.** An application whose
+    routers were never registered appends no `_IncludedRouter` to recurse into,
+    so the near miss this exists to catch — a module that defines a route nothing
+    registers — fails here exactly as before.
     """
     routes = [
         route
-        for route in getattr(client.app, "routes", [])
+        for route in every_route(client.app)
         if "POST" in (getattr(route, "methods", None) or set())
         and getattr(getattr(route, "endpoint", None), "__module__", None) == STUDENT_API_MODULE
     ]
@@ -880,7 +909,7 @@ def submit_route(client: Any) -> str:
         registered = sorted(
             f"{sorted(getattr(route, 'methods', None) or [])} {getattr(route, 'path', '?')} "
             f"({getattr(getattr(route, 'endpoint', None), '__module__', '?')})"
-            for route in getattr(client.app, "routes", [])
+            for route in every_route(client.app)
         )
         pytest.fail(
             f"`{STUDENT_API_MODULE}` defines {len(routes)} POST routes on the built application; "
@@ -942,8 +971,12 @@ def submission_answers(answers: Mapping[int, Any], world: SubmitWorld) -> list[d
     return built
 
 
-def a_valid_submission(*, comment: str, instructor_rating: int = 4) -> dict[int, Any]:
+def a_valid_submission(*, comment: str | None, instructor_rating: int = 4) -> dict[int, Any]:
     """The five answers of an ordinary submission, with the comment the caller chose.
+
+    `comment=None` is a submission that carries no instructor comment at all,
+    which is legal at any Likert above §3.2's threshold and is how ADR 0115's
+    withdrawal is posed: a question answered before and not now.
 
     The instructor rating defaults to 4, which is above §3.2's "Required if Q1 ≤ 2"
     threshold, so the comment beside it is *optional* — a test about a bounce is
@@ -1112,13 +1145,27 @@ def reclassification_entry_point(module: Any) -> Any:
     Celery task is an object rather than a function and a walk that looked only
     for functions would find nothing and report the deliverable missing when it
     is there.
+
+    **The module filter asks the task's `run`, not the task.** `@celery_app.task`
+    on an unfinalized app hands back a `celery.local.PromiseProxy`, and
+    `__module__` is an attribute of the *class*, so the lookup finds
+    `PromiseProxy`'s own — `'celery.local'` — and never reaches the proxy's
+    `__getattr__`. Asked of the proxy, this filter excluded every task the module
+    has ever defined, `ping` included, and then reported the deliverable missing
+    over an empty candidate list: a discovery that could never find anything,
+    which is what `docs/MISTAKES.md` entry 35 exists for. `docs/disputes/
+    E2-08-02.md` carries the measurement. The filter's purpose is unchanged — it
+    keeps the *imported* service functions (`sync_all_rosters`,
+    `derive_windows_for_all_sections`) out of the match, so a wrapper and the
+    function it wraps do not compete — and `run.__module__` is the value that
+    answers that question correctly.
     """
     candidates = {
         name: value
         for name, value in vars(module).items()
         if not name.startswith("_")
         and callable(getattr(value, "run", value))
-        and getattr(value, "__module__", getattr(module, "__name__", "")) == module.__name__
+        and getattr(getattr(value, "run", value), "__module__", "") == module.__name__
     }
     for fragment in RECLASSIFY_FRAGMENTS:
         matched = {name: value for name, value in candidates.items() if fragment in name.lower()}
