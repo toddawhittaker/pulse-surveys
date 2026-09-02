@@ -93,31 +93,38 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import jwt
+from fastapi import HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from starlette.responses import Response
 
 from app.config import Settings, is_development
-from app.services.authz import Door, resolve_landing
+from app.copy.submit import COPY
+from app.services.authz import Door, LandingRole, resolve_landing
 from app.services.identity import (
     ResolvedIdentity,
     identity_behind_a_launch,
     person_behind_a_web_login,
 )
 from app.services.session import (
+    SessionClaims,
     fragment_redirect,
     issue_csrf_token,
     issue_session,
+    session_from_request,
     set_csrf_cookie,
     set_session_cookie,
     verified_session,
 )
 
 __all__ = [
+    "BEARER_SCHEME",
     "FOUND",
     "LOGIN_COOKIE_LIFETIME_SECONDS",
     "LTI_LOGIN_COOKIE",
+    "NOT_A_STUDENT_KEY",
+    "NOT_A_STUDENT_STATUS",
     "OIDC_LOGIN_COOKIE",
     "PAGE",
     "REFUSED",
@@ -133,6 +140,7 @@ __all__ = [
     "no_account_page",
     "refusal_page",
     "refused",
+    "require_student",
     "with_query",
 ]
 
@@ -713,3 +721,56 @@ async def landing_with_session(
     set_session_cookie(response, token, settings)
     set_csrf_cookie(response, issue_csrf_token(session.jti, secret), settings)
     return response
+
+
+# ---------------------------------------------------------------------------
+# Role scoping: the dependency a student-only route carries. §13's second phrase
+# for this module, arriving with the first screen that needs it (E2-08).
+# ---------------------------------------------------------------------------
+
+# What a request with no student session is answered. 401 and not 403, and the
+# `WWW-Authenticate` challenge is why: RFC 6750 §3 makes the challenge how a
+# client learns the scheme it should present a credential under, and this API is
+# presented a session as a Bearer token (SPEC §7.3's cookieless path). 403 would
+# say "you are somebody, and not somebody who may do this", which is a statement
+# about the caller that this route deliberately never makes.
+NOT_A_STUDENT_STATUS = 401
+BEARER_SCHEME = "Bearer"
+
+# The registry key of the one sentence both refusals below serve.
+NOT_A_STUDENT_KEY = "student.not_a_student"
+
+
+def require_student(request: Request) -> SessionClaims:
+    """The verified session on `request`, if it is a student's; otherwise a 401.
+
+    **An absent session, an invalid one and somebody else's are one answer.** The
+    same status, the same challenge and the same sentence, because the differences
+    between them are all statements about this route: a body naming the role would
+    tell the holder of any session which surfaces exist for which role, and a 403
+    for a valid non-student session against a 401 for no session would say the same
+    thing in the status line. `app.services.session.session_from_request` already
+    collapses "no token", "a token this deployment did not sign" and "an expired
+    one" into a single `None` for the same reason.
+
+    **The role comes from the session and not from a claim the platform wrote.**
+    `LandingRole` is resolved at the door out of Pulse's own records (E1-13, ADR
+    0098) and sealed into the token; what this reads is that resolution.
+
+    The sentence is looked up in `app.copy` rather than written here, because a
+    student reads it and E2-11's inventory has to be able to find every string a
+    student reads.
+
+    Returns `SessionClaims` — the claims object the doors already issue, not a
+    type of its own. What a submit path needs from it is `user_id`, which E1-12
+    put there as "the launch-side row", and a second wrapper around it would be a
+    second answer to "who is this" for the two modules to disagree about.
+    """
+    claims = session_from_request(request, request.app.state.session_secret)
+    if claims is None or claims.role is not LandingRole.STUDENT:
+        raise HTTPException(
+            status_code=NOT_A_STUDENT_STATUS,
+            detail=COPY[NOT_A_STUDENT_KEY].text,
+            headers={"WWW-Authenticate": BEARER_SCHEME},
+        )
+    return claims
