@@ -42,6 +42,16 @@ call contributes only the request that answered, so the figures are a floor on
 what the run cost rather than a complete account of it. `tests/evals/README.md`'s
 cost expectations are measured from this rather than estimated.
 
+**`--demonstrate-breach` runs the planted breach and never exits 0.**
+`docs/MISTAKES.md` entry 9 is why it exists: a floor that has only ever been seen
+passing is a comment, so E2-12 asks for the flip to be proven by breaking as well
+as by clearing. The set it runs is `tests/evals/validity/breach.py`, whose every
+expected verdict is deliberately wrong; it is not in the registry, so an ordinary
+run cannot reach it, and it is imported only inside that branch. A breach exits 1
+because a breached floor is a failed run — and so does a breach that failed to
+breach, with a louder message, because a demonstration that proved nothing is
+worse than none.
+
 **No `print`.** `T20` is on for `tests/**` in `pyproject.toml` and this module is
 a program rather than an application, so it writes to `sys.stdout` directly.
 """
@@ -366,7 +376,7 @@ def evaluate(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """The command line. One flag, and it changes nothing — see the module docstring."""
+    """The command line. Two flags, and neither can turn the gate off."""
     parser = argparse.ArgumentParser(
         prog="python -m tests.evals.runner",
         description=(
@@ -383,12 +393,73 @@ def build_parser() -> argparse.ArgumentParser:
             "by an edit to a command line, and this one carries SPEC §9.3's floors."
         ),
     )
+    parser.add_argument(
+        "--demonstrate-breach",
+        action="store_true",
+        help=(
+            "Run the planted breach set instead of the registry, through the real "
+            "provider, to watch these floors refuse a run. Never exits 0: a breach is a "
+            "failure, and a breach that did not breach is a failure too."
+        ),
+    )
     return parser
+
+
+def demonstrate_breach() -> int:
+    """Run the planted breach through the real path and answer non-zero either way.
+
+    `docs/MISTAKES.md` entry 9: a guard that has never been executed against the
+    case it claims to stop is a comment. This is that execution, and E2-12's scope
+    asks for it — the flip is "proven by breaking, both ways", the real set green
+    and a planted breach red, through the same runner and the same provider.
+
+    **It cannot exit 0, and the two ways of failing say different things.** A
+    breach is the demonstration succeeding, and it exits 1 because a breached floor
+    is a failed run and this mode must not be a way to make one look like a pass. A
+    breach that did *not* breach exits 1 with a louder message: the floors let
+    twenty deliberately mislabelled cases through, so either the run never reached
+    the model or the floors are not gating anything, and both are worse findings
+    than the demonstration was after.
+
+    The breach set is imported here rather than at module scope so that an ordinary
+    run never loads it. It is out of `registry.TASKS` as well, which is the
+    inertness that matters — this import is the belt to that brace.
+    """
+    from tests.evals.validity.breach import BREACH_TASK
+
+    try:
+        report = evaluate([BREACH_TASK])
+    except EvalRefusalError as refusal:
+        sys.stdout.write(f"the breach demonstration was refused before it could run\n{refusal}\n")
+        return 1
+
+    sys.stdout.write(f"{report.text()}\n")
+    if report.passed:
+        sys.stdout.write(
+            "DEMONSTRATION FAILED: the planted breach did not breach.\n"
+            "Every expected verdict in tests/evals/validity/breach.py is deliberately "
+            "wrong — ten plainly substantive comments labelled insufficient and ten "
+            "contentless ones labelled substantive — so a run that clears the floors "
+            "means either that nothing reached the model or that the floors are not "
+            "gating what they claim to. Both are larger findings than this mode was "
+            "looking for.\n"
+        )
+        return 1
+
+    sys.stdout.write(
+        "DEMONSTRATION SUCCEEDED: the floors refused a run, through the real provider "
+        "and the real prompt. This exits non-zero because a breached floor is a failed "
+        "run; that is what was being shown.\n"
+    )
+    return 1
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the evals and answer 0 for a pass, 1 for a breach or a refusal."""
-    build_parser().parse_args(argv)
+    arguments = build_parser().parse_args(argv)
+
+    if arguments.demonstrate_breach:
+        return demonstrate_breach()
 
     try:
         report = evaluate()

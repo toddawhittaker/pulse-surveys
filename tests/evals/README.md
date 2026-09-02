@@ -70,10 +70,28 @@ directory of the cases it governs. `CLAUDE.md`: floors move only in a deliberate
 pull request whose subject is moving them, and the threat and self-harm recall
 floor is a hard gate whose lowering is the repository owner's call.
 
-The comment-validity floor is **not set yet**. It ships as a placeholder and the
-runner refuses on it, because a floor picked before anything was measured is a
-number chosen to make the first run pass. `tests/evals/validity/floors.py` says
-what filling it in looks like.
+The comment-validity floors are **precision 0.95 and recall 0.94**, measured
+against `validity.v1` on `gpt-5-mini-2025-08-07` in one clean run over the 98
+cases: precision 1.000000, recall 0.981481, nothing floored by the character rule.
+They sit below the measurement on purpose — 0.95 tolerates two new false positives
+and fires on the third, 0.94 tolerates two new misses and fires on the third —
+because a floor written at a single run's own numbers goes red on the first
+ordinary disagreement and gets lowered the first time it does.
+`tests/evals/validity/floors.py` carries the whole argument, including which
+errors these floors cannot see.
+
+## Proving it can go red
+
+```
+python -m tests.evals.runner --demonstrate-breach
+```
+
+A floor that has only ever been seen passing is a comment (`docs/MISTAKES.md`
+entry 9), so `tests/evals/validity/breach.py` is a set the current prompt fails by
+construction: twenty cases whose expected verdicts are every one of them
+deliberately wrong. It is not in the registry, so an ordinary run cannot reach it,
+and the mode never exits 0 — a breach is a failed run, and a breach that did not
+breach is a louder failure still.
 
 ## What a refusal means
 
@@ -82,3 +100,8 @@ a task it did not grade — a missing credential, a floor with no set, an unfill
 placeholder and an answer produced under the wrong prompt version are all
 refusals, not skips. An AI-touching pull request that cannot reach a provider is
 a red gate saying so.
+
+The prompt-version refusal has already earned its keep: it voided two full runs
+that a slow provider had floored, before either could report a number
+(`docs/disputes/E2-12-06.md`). Both would otherwise have produced plausible
+figures measured partly by a character counter.
