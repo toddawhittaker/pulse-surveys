@@ -77,6 +77,17 @@ into `AI_PROVIDER_*` and `MOCK_AI_PROVIDER_*`, and `AIGateway(live=...)` selects
 `_provider_for` below is the rule and the whole of the argument; ADR 0118 records
 it and supersedes ADR 0113's transport clause in part.
 
+**What a call cost is available and is not forced on anyone.** `run_task` returns
+the validated object and nothing else, which is what every caller in the
+application wants; `run_task_with_usage` returns that object paired with a
+`TaskUsage`, and is the same method with the second half kept. The provider
+reports what it billed and this module used to discard it, so no caller could say
+what a run cost — which became a real gap rather than a tidy one when SPEC §9.3's
+eval floors started spending about a hundred live calls a run. Cached input reads
+are their own field there rather than folded into the input total, because on a
+prompt that is ~99% identical prefix they are most of the difference between the
+cheap case and the expensive one.
+
 **One client per thread, and the loop it was built for.** The asynchronous client
 underneath pools its connections, and a pooled connection belongs to the event
 loop it was opened on: reuse it from another loop and it raises, which the layers
@@ -88,7 +99,7 @@ holds the loop, the client and the agents together for exactly that reason.
 import asyncio
 import json
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from functools import cache
 from typing import Any, TypeVar
@@ -101,6 +112,7 @@ from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedMode
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
+from pydantic_ai.usage import RunUsage
 
 from app.ai.contracts import AiTaskOutput, ContractModel
 from app.config import Settings, is_development
@@ -252,6 +264,89 @@ class AIProviderRefusedError(AIGatewayError):
     treated it as one would turn a permanently misconfigured credential into
     every comment being classified by the character floor with nothing saying so.
     """
+
+
+@dataclass(frozen=True)
+class TaskUsage:
+    """What one call to this gateway cost, in the units the provider counted it in.
+
+    **Why this exists at all.** The provider reports what it billed and the
+    gateway used to drop it: `_ask` returned the answer and the model id and threw
+    the rest away, so no caller could say what a run cost. E2-12's eval runner is
+    the caller that made that a problem rather than an omission — SPEC §9.3's
+    floors are measured by about a hundred live calls, and the README's cost
+    expectations were an estimate nobody could check.
+
+    **Why it is this project's own type and not `pydantic_ai`'s `RunUsage`.**
+    Returning the library's class would put its name in the signature of a public
+    method, and then in every caller that annotates the result — while
+    `tests/unit/test_provider_library_is_confined_to_the_gateway.py` asserts that
+    exactly one module under `backend/app/` names the provider library at all.
+    That sweep is E0-13's sixth criterion and the enforcing half of §7.4's "keep
+    the gateway interface thin enough that replacing it is a day's work". A task
+    module that recorded usage on a row would trip it directly; the eval runner
+    sits outside `backend/app/` and would not, and would still be coupled to a
+    library it has no business knowing about. So the fields are copied across the
+    boundary once, here, in the one module allowed to see both sides.
+
+    **Cached reads are their own field and are not folded into `input_tokens`.**
+    They are the same tokens counted at a different price, and on this prompt they
+    are most of the bill: every validity request is one ~4,200-character prompt
+    with a short comment substituted, so nearly all of it is an identical prefix.
+    A total that hid the split would make the cheap case and the expensive case
+    report the same number. `input_tokens` is the provider's own input total and
+    `cache_read_tokens` is the part of it that was served from cache — that is how
+    the library normalises OpenAI's `prompt_tokens_details.cached_tokens`, and the
+    arithmetic between them is the caller's business, not this module's.
+
+    **`details` is safe to hand out**, which is worth saying in a module where
+    most things are not. The provider library builds it by keeping only integer
+    members of the usage payload, so it holds counts and never text — no prompt,
+    no answer, nothing a student wrote. It carries whatever else the provider
+    counted, `reasoning_tokens` among them for models that bill them and never
+    show them in the answer body.
+
+    Every field is zero when a provider reports no usage, which is what an
+    OpenAI-compatible endpoint that omits the block produces. Zero therefore means
+    "not reported" as well as "nothing spent", and the two are not distinguished:
+    a caller that needs to tell them apart has `requests`.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    total_tokens: int
+    requests: int
+    details: Mapping[str, int]
+
+
+def _task_usage(reported: RunUsage) -> TaskUsage:
+    """Copy the provider library's usage across the boundary `TaskUsage` draws.
+
+    A function rather than a constructor on the class, so that no signature on the
+    public type names `RunUsage` — see that class's docstring for why the name
+    stays inside this module.
+
+    `total_tokens` is carried rather than re-derived. It is the library's own
+    property today (`input_tokens + output_tokens`), and computing it again here
+    would be this project holding its expectation in a copy of the thing it is
+    copying (`docs/MISTAKES.md` entry 19) — a definition that widened to include
+    audio or cache-write tokens would then disagree with itself across two
+    modules, silently and in the direction of under-reporting.
+
+    `details` is copied into a plain dict rather than shared, so a caller cannot
+    reach back into the library's object through it.
+    """
+    return TaskUsage(
+        input_tokens=reported.input_tokens,
+        output_tokens=reported.output_tokens,
+        cache_read_tokens=reported.cache_read_tokens,
+        cache_write_tokens=reported.cache_write_tokens,
+        total_tokens=reported.total_tokens,
+        requests=reported.requests,
+        details=dict(reported.details),
+    )
 
 
 @cache
@@ -527,22 +622,84 @@ class AIGateway:
         `AIProviderRefusedError` if the answer was a status about this request;
         and `AIResponseInvalidError` if it kept answering with something that is
         not the contract. ADR 0056 has the table.
+
+        **What this call cost is not returned here**, and that is what
+        `run_task_with_usage` below is for. This signature is what every caller in
+        the application uses and none of them has anything to do with a token
+        count, so the pair stays out of their way; this method is that one's
+        result with the second half dropped, rather than a second implementation
+        of it.
+        """
+        answer, _ = self.run_task_with_usage(
+            prompt=prompt,
+            prompt_version=prompt_version,
+            output_model=output_model,
+            timeout=timeout,
+        )
+        return answer
+
+    def run_task_with_usage(
+        self,
+        *,
+        prompt: str,
+        prompt_version: str,
+        output_model: type[OutputT],
+        timeout: float,
+    ) -> tuple[OutputT, TaskUsage]:
+        """`run_task`, and what the provider says it billed for it.
+
+        Same call, same arguments, same failures — see `run_task` above for all of
+        it, because this is where that method's body lives and that one is this
+        one with the usage dropped. Written that way round so the retry loop and
+        the audit-pair merge exist once: a second copy is the one that would not
+        be updated when ADR 0031 grows a third audit field.
+
+        **What is reported is the successful request, and a retried call
+        under-reports by exactly the attempts that failed.** That is a limit of the
+        provider library rather than a choice made here, and it was measured
+        before being written down: usage reaches this module on the run result,
+        and a request that raises produces no run result — `UnexpectedModelBehavior`,
+        `ModelHTTPError` and `ModelAPIError` carry `args` and, on one of them,
+        `retry_after`, and none of them carries a usage figure. So the tokens a
+        shape-violating attempt burned are not available to anybody in this
+        process, and a ledger built on this has to read `requests` as "requests
+        this figure covers" rather than "requests made".
+
+        It matters least where it is used most: a shape violation is rare, and the
+        eval runner's set is one field of one enum, which is about as hard to
+        violate as a contract gets. It would matter more for a task with a wide
+        output, and the note is here so that whoever wires the second one knows
+        what the number does and does not include.
+
+        **Nothing is reported for a call that failed outright**, for the same
+        reason one level up: every failure path raises, and the figure would have
+        to ride on the exception. Those exceptions are built from static text
+        deliberately — nothing raised in this module carries the credential, the
+        prompt or the answer — and widening what they hold is not something to do
+        in passing for a number nobody has asked for yet.
+
+        The caller that needs this today is SPEC §9.3's eval runner, which makes
+        about a hundred live calls per run and until now could not say what any of
+        them cost.
         """
         problem = ""
         for _ in range(SHAPE_VIOLATION_ATTEMPTS):
             try:
-                payload, model_id = self._ask(
+                payload, model_id, reported = self._ask(
                     prompt=prompt, output_model=output_model, timeout=timeout
                 )
             except AIResponseInvalidError as invalid:
                 problem = str(invalid)
                 continue
-            return output_model.model_validate(
-                {
-                    **payload.model_dump(),
-                    "prompt_version": prompt_version,
-                    "model_id": model_id,
-                }
+            return (
+                output_model.model_validate(
+                    {
+                        **payload.model_dump(),
+                        "prompt_version": prompt_version,
+                        "model_id": model_id,
+                    }
+                ),
+                _task_usage(reported),
             )
 
         raise AIResponseInvalidError(
@@ -569,8 +726,8 @@ class AIGateway:
 
     def _ask(
         self, *, prompt: str, output_model: type[OutputT], timeout: float
-    ) -> tuple[BaseModel, str]:
-        """Send one request; return the task's own output and which model produced it.
+    ) -> tuple[BaseModel, str, RunUsage]:
+        """Send one request; return the task's output, which model produced it, and what it cost.
 
         Every branch names the failure and its class, and the raise happens
         *after* the `except` block rather than inside it. Inside, Python would
@@ -632,7 +789,11 @@ class AIGateway:
             # not resolve". Only some of that is §3.3's fail-open case.
             failure, message = _unanswered_outcome(unanswered)
         else:
-            return result.output, self._reported_model(result)
+            # `usage` is a property on the result rather than a method, and it is
+            # the usage of the whole agent run — which is one request here, since
+            # the agent is built `retries=0` and this gateway spends its own
+            # attempts in the loop above.
+            return result.output, self._reported_model(result), result.usage
 
         raise failure(message)
 

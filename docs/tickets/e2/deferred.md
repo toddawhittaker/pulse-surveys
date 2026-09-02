@@ -10,7 +10,7 @@ scheduled decision rather than a hope.
 Deferred by E2-12, and it became a real need during that ticket rather than a
 nicety: a spend ledger is now kept per live eval run, and no run can report
 against it. `AIGateway._ask` returns `(result.output, model_id)` and drops
-`result.usage()`; `run_task` returns the contract object alone; nothing logs it.
+`result.usage`; `run_task` returns the contract object alone; nothing logs it.
 So a run's input tokens, its output tokens, and — the figure that decides most of
 the bill — its cached input tokens are all unrecorded and unreconstructable
 afterwards.
@@ -28,12 +28,28 @@ the same ~4,175-character prompt with a short comment substituted, so about 99%
 of each call is an identical prefix and the cached fraction is likely to be
 material. Nothing can say how material without measuring it.
 
-**Done when** a live run can report its own input, output and cached-input token
-totals. Whether the gateway returns usage alongside the verdict, records it, or
-exposes it another way is the deciding ticket's call — it is application
-behaviour rather than test machinery, which is why it is not taken here — and
-whatever shape it takes has to keep the credential and the comment out of
-whatever it writes (SPEC §10, §4).
+**The application half landed inside E2-12** rather than waiting, ruled onto this
+ticket with the `E2-12-06` repair: `AIGateway.run_task_with_usage` returns the
+validated output paired with a `TaskUsage`, and `run_task` is that method with the
+second half dropped, so no existing caller changed. Cached reads are their own
+field rather than folded into the input total. The type is this project's and not
+`pydantic_ai`'s `RunUsage`, because a public method returning the library's class
+would put its name in every caller that annotates the result, and
+`tests/unit/test_provider_library_is_confined_to_the_gateway.py` asserts that
+exactly one module under `backend/app/` names that library at all.
+
+**One limit is documented rather than closed**, and it was measured before it was
+written down: a retried call under-reports by the attempts that failed. Usage
+reaches this process on the run result, a request that raises produces no run
+result, and none of the library's exceptions carries a figure — so a
+shape-violating attempt's tokens are unavailable to anybody here, and `requests`
+means "requests this figure covers" rather than "requests made".
+
+**Done when** a live eval run prints its own input, output and cached-input token
+totals in the run report, which is the half that lives in the eval tree and is the
+test author's. Whatever prints it has to keep the credential and the comment out
+of what it writes (SPEC §10, §4) — `TaskUsage` carries counts only, and its
+`details` holds integers by construction, so there is nothing in it to leak.
 
 ## `detect.outputs.evals` is published and read by nothing — E2-13
 
