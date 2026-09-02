@@ -14,23 +14,40 @@ launch issued rather than one this file minted — which is also why no test in
 either module has to know how `issue_session` spells its arguments.
 
 **What this fixture chooses, and what it refuses to choose.** It seeds rows: a
-term, two sections of it, one window each, a question set, an enrollment, and a
-classmate's submission. Those are *inputs* to the read path and the tests read
-them back as outputs, which is what a read-path test is; nothing here encodes
-what the answer should look like. The two things a test could be about — which
-instant the clock pretends, and whether the student has submitted anything — are
-not decided here: `pretend` takes the instant, and `submit_own` is a call the
-test makes or does not (`docs/MISTAKES.md` entry 30).
+term, two sections of it, one window each, a question set, three people with an
+enrollment each, and two submissions that are not the reader's. Those are *inputs*
+to the read path and the tests read them back as outputs, which is what a
+read-path test is; nothing here encodes what the answer should look like. The two
+things a test could be about — which instant the clock pretends, and whether the
+student has submitted anything — are not decided here: `pretend` takes the
+instant, and `submit_own` is a call the test makes or does not
+(`docs/MISTAKES.md` entry 30).
 
 **The two sections are siblings under one course, on purpose.** `Fall2026`
 (`tests/fixtures/survey_windows.py`) seeds every section it is asked for under
 one containment chain, so section B differs from section A in its own row and in
 nothing above it — which is the shape a query that joins on the course, or on the
 term, or on the week, answers with both. Both carry a window over the same term
-week, so at the instant a test reads, **B is open too**: a read path that has
-lost its enrollment predicate has something to return, and the sweep in
-`test_the_student_read_path_names_nothing_outside_the_enrollment.py` is what says
-it did not.
+week, so at the instant a test reads, B is open too.
+
+**Three people, and the third one is the whole of what makes the headline
+mutation die.** The reader and a classmate are enrolled in section A; a third
+person is enrolled in section B and has submitted there. That third enrollment was
+missing when this file was first written, and the mutation battery measured what
+it cost: with `Enrollment.user_id == user_id` deleted from the read's own
+`_live_enrollments`, the query returned *every* live enrollment — and every live
+enrollment was in section A, so the widened read reached exactly the rows the
+correct read reaches and all 2430 tests stayed green. The paragraph that used to
+stand here claimed a lost enrollment predicate would have something to return,
+and that was true only of the join-widened variants — a read widened to the
+course, to the term or to the week — which the same battery killed.
+
+So the rule is seeded as rows rather than asserted as prose: **for every way of
+losing the student predicate there is a B-shaped row to leak** — a section, a
+window, an enrollment, and a stored submission, none of them the reader's.
+`test_the_student_read_path_names_nothing_outside_the_enrollment.py` requires
+those rows to exist before it reports that they did not come back, so the shape
+this file has to keep is an assertion over there rather than a sentence here.
 
 **Term week 13 is chosen because two of SPEC §2.2's cohorts are live in it and
 neither one starts there.** `D` runs fifteen weeks from term week 4 and `Q` runs
@@ -250,6 +267,13 @@ EXPECTED_TERM_WEEK = 13
 # member it is still seeing (ADR 0020).
 ENROLLED_SINCE: date = SEEDED_COHORTS[ENROLLED_COHORT][2]
 
+# And when the third person appears on the other section's roster: that section's
+# own first day, which is later and is still before every pretended instant. Their
+# enrollment has to be **live** at the moment a test reads, or a read that dropped
+# its student predicate would filter the row out on the liveness test instead and
+# the mutation would survive for a second reason.
+OTHER_SECTION_ENROLLED_SINCE: date = SEEDED_COHORTS[UNENROLLED_COHORT][2]
+
 # When a submission was made: inside the window, an hour before the instant the
 # reads are taken at. E2-05 puts no server default on either column, so both are
 # written here.
@@ -289,6 +313,18 @@ OWN_COMMENT = "E2-09 own comment: the pacing in week 13 was too fast for me"
 OWN_WORKLOAD = Decimal("7.5")
 CLASSMATE_COMMENT = "E2-09 classmate comment: I have never understood the readings"
 CLASSMATE_WORKLOAD = Decimal("13.5")
+
+# And the third person's, submitted in the section the reader is **not** enrolled
+# in. **This pair is the mutation battery's finding written as data.** A read that
+# has lost `Enrollment.user_id == user_id` returns every live enrollment there is;
+# unless somebody is enrolled in the other section, every one of those is still
+# the reader's own section and the widened read is indistinguishable from the
+# correct one. These are the values that come back when it is not.
+#
+# `21.5` shares no digits-and-point run with `7.5` or `13.5`, so no one of the
+# three can be found inside another.
+OTHER_SECTION_COMMENT = "E2-09 other-section comment: the group work never got organised"
+OTHER_SECTION_WORKLOAD = Decimal("21.5")
 
 # The shortest stored string these fixtures will hand a test as something to
 # search a response for. A section code is four characters (`61WW`), which is the
@@ -489,6 +525,10 @@ class StudentReadWorld:
         self.user_id: Any = None
         self.subject: str = ""
         self.classmate_id: Any = None
+        self.other_section_student_id: Any = None
+        self.enrolled_enrollment: Any = None
+        self.other_enrollment: Any = None
+        self.other_section_response: Any = None
         self.term: Any = None
         self.week: Any = None
         self.enrolled_section: Any = None
@@ -514,23 +554,52 @@ class StudentReadWorld:
     def other_section_code(self) -> str:
         return f"{UNENROLLED_COHORT}{COHORT_SECTION_ORDINAL}{COHORT_SECTION_MODALITY}"
 
-    def anything_shaped_like_the_other_section(self) -> set[str]:
-        """Every string that names the section this student is **not** enrolled in.
+    def mine(self) -> set[str]:
+        """Every string that belongs to the reader's own side of the two sections.
 
-        The difference between B's own values and A's, so that everything the two
-        share — the term, the course above them, the week their windows are over,
-        the containment chain — is excluded and what is left belongs to B alone.
-        A scan built the other way would report the term identifier as a leak and
-        be red against every correct answer.
+        Subtracted from the other section's values below, so that everything the
+        two share — the term, the course above them, the week their windows are
+        over, the containment chain — is excluded and what is left belongs to the
+        other section alone. A scan built the other way would report the term
+        identifier as a leak and be red against every correct answer.
         """
-        mine = (
+        return (
             telling_values(self.enrolled_section)
             | telling_values(self.enrolled_window)
             | telling_values(self.week)
             | telling_values(self.term)
+            | telling_values(self.enrolled_enrollment)
         )
+
+    def anything_shaped_like_the_other_sections_student(self) -> set[str]:
+        """The rows that reach the answer only if the read stops filtering by student.
+
+        **The mutation battery's finding, as a set of values.** The section, the
+        window and the code below are reachable by a read widened to the course,
+        the term or the week; *these* are reachable by a read that dropped
+        `Enrollment.user_id == user_id` and by nothing else — the third person's
+        own enrollment row, and the submission they made in the other section.
+        Without them that mutation returns the same rows as the correct read and
+        survives every test in this ticket, which is exactly what happened.
+        """
+        return (
+            telling_values(self.other_enrollment)
+            | {OTHER_SECTION_COMMENT, str(OTHER_SECTION_WORKLOAD)}
+        ) - self.mine()
+
+    def anything_shaped_like_the_other_section(self) -> set[str]:
+        """Every string that names the section this student is **not** enrolled in.
+
+        Its own row and its window, which a widened join reaches; and the third
+        person's enrollment and submission, which only a lost student predicate
+        reaches. One set, because §4.1 item 1 is one rule — nothing from a section
+        the student is not in — and a test that scanned for one half would be
+        silent about whichever mutation produced the other.
+        """
         theirs = telling_values(self.other_section) | telling_values(self.other_window)
-        return {value for value in theirs if value not in mine}
+        return {
+            value for value in theirs if value not in self.mine()
+        } | self.anything_shaped_like_the_other_sections_student()
 
     def anything_shaped_like_a_classmates_answer(self) -> set[str]:
         """The values a classmate's stored submission would put on a page."""
@@ -625,20 +694,28 @@ class StudentReadWorld:
         # entry 30's mirror image: what is searched for must be what is there).
         self.question_texts = [row[column] for row in self.questions]
 
-    def seed_submission(self, *, user_id: Any, comment: str, workload: Decimal) -> Any:
+    def seed_submission(
+        self, *, user_id: Any, comment: str, workload: Decimal, section_id: Any = None
+    ) -> Any:
         """One whole submission — a `response` and two `answer` rows — for one person.
 
         Two answers rather than one because a leak travels in two currencies: a
         comment is a string and a workload is a number, and a scan that searched
         only for strings would walk past the second (the mutation that survived
         `test_the_dev_console_names_nobody.py`, one value over).
+
+        `section_id` defaults to the reader's own section, which is where the
+        classmate's submission goes; the third person's goes in the other one, and
+        the caller says so rather than this method inferring it from the user.
         """
         response = self.rows.seed(
             RESPONSE_TABLE,
             {},
             **{
                 RESPONSE_USER_COLUMN: user_id,
-                RESPONSE_SECTION_COLUMN: self.enrolled_section_id,
+                RESPONSE_SECTION_COLUMN: (
+                    self.enrolled_section_id if section_id is None else section_id
+                ),
                 RESPONSE_WEEK_COLUMN: key_of(self.tables, WEEK_TABLE, self.week),
                 FIRST_SUBMITTED_COLUMN: SUBMITTED_AT,
                 LAST_SUBMITTED_COLUMN: SUBMITTED_AT,
@@ -880,7 +957,7 @@ def student_read_door(
 
     world = StudentReadWorld(committed_rows, metadata_tables).build(subject=subject)
     world.user_id = web_identity.user(platform_id=platform_id, subject=subject)
-    enrol.enrol(
+    world.enrolled_enrollment = enrol.enrol(
         user_id=world.user_id,
         section_id=world.enrolled_section_id,
         started_on=ENROLLED_SINCE,
@@ -902,6 +979,29 @@ def student_read_door(
     )
     world.seed_submission(
         user_id=world.classmate_id, comment=CLASSMATE_COMMENT, workload=CLASSMATE_WORKLOAD
+    )
+
+    # And somebody in the **other** section, with a submission there. Not decoration
+    # and not realism for its own sake: this is the only row set a read that has
+    # dropped `Enrollment.user_id == user_id` can reach and a correct read cannot.
+    # Without it every live enrollment in the database is the reader's own, the
+    # widened query answers exactly what the correct one answers, and the mutation
+    # survives the whole ticket — which the battery measured before this person
+    # existed. Their enrollment starts on their own section's first day.
+    world.other_section_student_id = web_identity.user(
+        platform_id=platform_id, subject=f"{subject}-e2-09-other-section"
+    )
+    world.other_enrollment = enrol.enrol(
+        user_id=world.other_section_student_id,
+        section_id=world.other_section_id,
+        started_on=OTHER_SECTION_ENROLLED_SINCE,
+        ended_on=None,
+    )
+    world.other_section_response = world.seed_submission(
+        user_id=world.other_section_student_id,
+        comment=OTHER_SECTION_COMMENT,
+        workload=OTHER_SECTION_WORKLOAD,
+        section_id=world.other_section_id,
     )
 
     overrides = committed_clock_overrides

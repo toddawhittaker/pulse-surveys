@@ -32,21 +32,35 @@ section" is a statement about no routes at all.
 
 **The two-section pair is what gives "another section" its meaning.** The same
 student is enrolled in section A and not in section B; the two are siblings of one
-course in one term, and **both have a window open at the instant these reads are
-taken**, so a read path that has lost its enrollment predicate has something to
-return. Everything B-shaped must be absent from every answer — from the body, and
+course in one term, and both have a window open at the instant these reads are
+taken. Everything B-shaped must be absent from every answer — from the body, and
 from the *shape of a refusal* too: a request naming section B that is answered
 differently from a request naming a section that does not exist has confirmed B
 exists, which is the disclosure whether or not the data follows (ADR 0074/0079,
 and `backend/app/api/dev.py`'s own 404-with-no-distinction pattern).
 
-**The mutation this module exists to kill** is the loosened enrollment predicate:
-the read assembly's query over `enrollment` with its `user_id` filter dropped, or
-widened to the course, or to the term. Each of those returns section B to a
-student who is not in it, and each is a plausible thing to write. The near miss
-each test must survive is a read that returned *nothing* — a refusal, an empty
-list, a 500 — which names no other section either; so every test below first
-requires the answer to name the section the student **is** in.
+**The mutation this module exists to kill** is the loosened enrollment predicate,
+and it has two shapes that need different rows to catch. A read **widened past
+the enrollment** — joined on the course, on the term, or on the week — reaches
+section B's own row and its window. A read that **keeps the join and loses the
+student**, `Enrollment.user_id == user_id` deleted, reaches every live enrollment
+there is; it returns section B only if somebody other than this reader is
+enrolled in it.
+
+**The second shape survived the first version of this module**, and the sentence
+that used to stand here — that a read which lost its enrollment predicate has
+something to return — was true only of the first. The fixture then put both of
+its enrollments in section A, so the widened query returned exactly the rows the
+correct query returns and all 2430 tests stayed green under the mutation. The
+repair is a third person enrolled in section B with a submission there, and
+`test_no_student_visible_route_names_a_section_the_student_is_not_enrolled_in`
+asserts those rows exist before it reports that they did not come back — a
+property of the fixture stated as an assertion rather than as prose, because
+prose is what was wrong.
+
+The near miss each test must survive is a read that returned *nothing* — a
+refusal, an empty list, a 500 — which names no other section either; so every
+test below first requires the answer to name the section the student **is** in.
 
 **Two denials here are not item 1's**, and they are here rather than next door
 because they are §4 denials about the same one read path and a module half inside
@@ -70,11 +84,14 @@ from fixtures.routing import every_route
 from fixtures.student_read import (
     AUTHENTICATE_HEADER,
     AUTHENTICATE_SCHEME,
+    OTHER_SECTION_COMMENT,
+    OTHER_SECTION_WORKLOAD,
     REFUSED_STATUS,
     STUDENT_READ_PATH,
     StudentReadDoor,
     around,
     response_surface,
+    telling_values,
 )
 
 pytestmark = [pytest.mark.invariant, pytest.mark.integration, pytest.mark.lti]
@@ -255,30 +272,50 @@ def test_no_student_visible_route_names_a_section_the_student_is_not_enrolled_in
 
     The student is enrolled in one section and not in its sibling. Both are
     sections of the same course in the same term, both carry a window that is open
-    at the instant this reads, and both have a question set to serve — so the
-    other section is not absent from the answer because there was nothing to say
-    about it. It is absent because the read path is scoped to this student's own
+    at the instant this reads, both have a question set to serve, and **somebody
+    else is enrolled in the other one and has submitted there** — so the other
+    section is not absent from the answer because there was nothing to say about
+    it. It is absent because the read path is scoped to this student's own
     enrollment.
 
-    **The mutation this kills — the headline one for this ticket.** The read
-    assembly's enrollment predicate, loosened: the `user_id` filter dropped, or
-    the query widened from the student's enrollment to the section's course or to
-    the term. Every one of those returns section B here, and every one of them is
-    an ordinary thing to write. **The near misses it must survive**: an answer
-    that names the enrolled section and nothing else (asserted green below), and a
-    scan looking for strings the two sections *share* — the term, the course, the
-    week their windows are over — which would report a correct answer as a leak,
-    which is why the needle set is B's values minus A's.
+    **The mutations this kills — the headline ones for this ticket**, and they are
+    two different defects that this test has to catch separately:
+
+      - the read **widened past the enrollment** — joined on the section's course,
+        on the term, or on the week — which reaches the other section's own row
+        and its window;
+      - the read that **kept the join and lost the student**: `Enrollment.user_id
+        == user_id` deleted from `_live_enrollments`, so every live enrollment
+        comes back rather than this reader's. That one reaches the *third
+        person's* enrollment and their stored submission, and nothing else.
+
+    **The second of those survived the first version of this test, and the reason
+    is worth stating rather than quietly fixing.** The fixture then seeded two
+    enrollments and both were in the reader's own section, so with the `user_id`
+    predicate deleted the widened query returned exactly the rows the correct
+    query returns and the whole suite stayed green — a mutation this test's own
+    docstring claimed to kill (`docs/MISTAKES.md` entry 2 arriving through entry
+    1: a record describing a guarantee nothing enforced). The repair is a third
+    person, enrolled in the other section with a submission there, and the guard
+    below is what keeps it: the needle set must contain something only a lost
+    student predicate can reach, asserted rather than assumed.
+
+    **The near misses it must survive**: an answer that names the enrolled section
+    and nothing else (asserted green below), and a scan looking for strings the
+    two sections *share* — the term, the course, the week their windows are over —
+    which would report a correct answer as a leak, which is why the needle set is
+    the other side's values minus the reader's.
 
     **What makes a green mean something, in order.** The answer has to be a 200
     naming the student's own section, so a refusal cannot pass this by carrying
-    nothing. And the needle set has to contain the other section's identifier and
-    its §2.2 code, so the scan is looking for the things that identify a section
-    rather than for whatever happened to be on the row. There is deliberately no
-    planted-string canary beside those two: the scan is a plain substring test
-    over a surface that has already been required non-empty and required to
-    contain a value of the same kind, so a plant would be an assertion that cannot
-    fail rather than a guard — the canary belongs where a *pattern* could go blind
+    nothing. The needle set has to contain the other section's identifier and its
+    §2.2 code, so the scan is looking for the things that identify a section. And
+    it has to contain the third person's rows, or the second mutation above has
+    nothing to leak and this test is silent about it. There is deliberately no
+    planted-string canary beside those: the scan is a plain substring test over a
+    surface that has already been required non-empty and required to contain a
+    value of the same kind, so a plant would be an assertion that cannot fail
+    rather than a guard — the canary belongs where a *pattern* could go blind
     (`docs/MISTAKES.md` entry 3), and there is no pattern here.
 
     **This sweep is over the routes it can drive, and that is a disclosed limit.**
@@ -323,6 +360,35 @@ def test_no_student_visible_route_names_a_section_the_student_is_not_enrolled_in
         "person, and it is what an answer would carry if it rendered one."
     )
 
+    # The guard the mutation battery bought. The two above are reachable by a read
+    # widened past the enrollment; these are reachable only by a read that kept
+    # the join and dropped the student, and without them that mutation has nothing
+    # to leak into a surface and survives this test in silence.
+    only_by_dropping_the_student = world.anything_shaped_like_the_other_sections_student()
+    assert only_by_dropping_the_student <= forbidden and only_by_dropping_the_student, (
+        f"Reachable only by a lost student predicate: {sorted(only_by_dropping_the_student)}. "
+        f"Searched for by this test: {sorted(forbidden)}.\n\n"
+        "Somebody other than this reader has to be enrolled in the other section, with a submission "
+        "there, or `Enrollment.user_id == user_id` can be deleted from the read's own "
+        "`_live_enrollments` and the widened query returns exactly the rows the correct one "
+        "returns — every live enrollment being the reader's own. That is the state the mutation "
+        "battery found, with this test green and its docstring claiming otherwise; "
+        "`tests/fixtures/student_read.py` seeds the third person, and this assertion is what stops "
+        "them being removed as surplus."
+    )
+    unstored = world.not_stored({OTHER_SECTION_COMMENT, str(OTHER_SECTION_WORKLOAD)})
+    assert not unstored, (
+        f"The other section's student has not stored {unstored} in the `answer` table, so the "
+        "search set above names values nothing wrote and the mutation it exists for has nothing to "
+        f"return. What is stored: {sorted(world.stored_answer_values())[:8]}."
+    )
+    assert str(world.other_section_id) in telling_values(world.other_enrollment), (
+        f"The third person's enrollment row does not name the other section "
+        f"({world.other_section_id}); it carries {sorted(telling_values(world.other_enrollment))}. "
+        "An enrollment seeded against the wrong section leaves nobody in the sibling at all, which "
+        "is the state this repair exists to end."
+    )
+
     scanned: list[str] = []
     for route in routes:
         path = getattr(route, "path", "")
@@ -345,13 +411,15 @@ def test_no_student_visible_route_names_a_section_the_student_is_not_enrolled_in
         assert not leaked, (
             f"`GET {path}` named {len(leaked)} value(s) belonging to a section this student is not "
             f"enrolled in: {leaked[:5]}. The first sits in {around(surface, leaked[0])!r}.\n\n"
-            "SPEC §4.1 item 1: students never see other sections, in any surface. The two sections "
-            "here are siblings of one course in one term and both have an open window, so an "
-            "answer carrying the other one is a query that joined on the course, on the term, or "
-            "on the week — or an enrollment predicate that lost its `user_id` filter — rather than "
-            "on this student's own enrollment.\n\n"
+            "SPEC §4.1 item 1: students never see other sections, in any surface.\n\n"
+            "**Which mutation, read off what leaked.** The other section's own identifier, its "
+            "§2.2 code or its window is a read widened past the enrollment — joined on the course, "
+            "on the term, or on the week, all three of which the two sections share. The third "
+            "person's enrollment or their stored answer is a read that kept the join and lost the "
+            "student: `Enrollment.user_id == user_id` gone from `_live_enrollments`, so every live "
+            "enrollment came back rather than this reader's.\n\n"
             "Everything the two sections share is excluded from the search, so what is reported "
-            "here belongs to the other section alone."
+            "here belongs to the other side alone."
         )
         scanned.append(path)
 
@@ -456,8 +524,11 @@ def test_a_classmates_submission_is_never_in_this_students_answer(
     `(section, week)` and not over `(student, section, week)` — the same three
     columns E2-05 made `response` unique on, with the student left out. It is the
     natural mistake, it reads correctly, and in a section of one it is invisible;
-    here the classmate's answer is the only one there is, so it is what comes
-    back.
+    here the classmate's is the only submission stored against this section and
+    this week, so it is what such a lookup comes back with. (A third person has
+    submitted in the *other* section; that one is the neighbouring test's subject,
+    and it is what a lost enrollment predicate reaches rather than a lost
+    submission predicate.)
 
     **This is also the "no submission of my own" half of E2-09's boundary pair.**
     The student has not submitted, so what the answer must carry is *nothing* in
