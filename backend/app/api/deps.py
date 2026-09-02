@@ -95,7 +95,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import jwt
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
@@ -816,7 +816,9 @@ CSRF_HEADER = "X-Pulse-CSRF"
 CSRF_REFUSED_KEY = "student.request_not_verified"
 
 
-def csrf_verified_student(request: Request) -> SessionClaims:
+def csrf_verified_student(
+    request: Request, claims: SessionClaims = Depends(require_student)
+) -> SessionClaims:
     """`require_student`, plus ADR 0089's double-submit check when the session came by cookie.
 
     **What a route carries this for, and why it is not folded into
@@ -826,6 +828,18 @@ def csrf_verified_student(request: Request) -> SessionClaims:
     and requiring the token there would refuse ordinary navigation for no gain, so
     the two are separate dependencies and a route says which it means. E2-09's
     student read path carries `require_student`; this one is carried by the write.
+
+    **`require_student` is *declared* as a dependency rather than called**, and the
+    difference is what SPEC §4.1 item 1's sweep sees. That sweep builds its
+    inventory of student-visible routes by walking each route's FastAPI `Dependant`
+    graph for this module's `require_student` object, so a plain Python call to it
+    from inside this function resolves the session identically at run time and
+    leaves the route carrying it **invisible to the sweep** — a student-visible
+    path with nothing asserting §4.1 over it (`docs/MISTAKES.md` entry 2). Declared
+    here, the write route joins the inventory the day it is registered, with
+    nothing to remember. FastAPI resolves the sub-dependency first and hands its
+    result in, so what arrives in `claims` is exactly what a direct call returned:
+    a 401 from `require_student` is raised before this body runs.
 
     **The check applies to the cookie carrier and not to the Bearer one, by
     construction.** ADR 0089 gives one session two carriers: the SPA "captures
@@ -858,7 +872,6 @@ def csrf_verified_student(request: Request) -> SessionClaims:
     attacker whether their forgery was well formed, which is what
     `verify_csrf_token`'s constant-time comparison is protecting one layer down.
     """
-    claims = require_student(request)
     if bearer_token(request) is not None:
         return claims
 
