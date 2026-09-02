@@ -265,7 +265,7 @@ Every E1 pull request that defers something adds it here in the same PR.
    the "done when" required. Measured on the branch: the payload
    `scripts/ci/check_bundle_size.py` counts grows by **219 bytes gzipped** (the
    six `@font-face` rules), and the faces themselves are **119,100 bytes of
-   woff2** the gate does not count; the budget is green at 93,572 of 163,840.
+   woff2** the gate does not count; the budget is green at 93,678 of 163,840.
    Two residues are recorded in `../e2/deferred.md` rather than fixed here,
    because both sit on a heavy-lane path: the licence gate has no rule for
    OFL-1.1, and a second copy of every face ships as woff that no supported

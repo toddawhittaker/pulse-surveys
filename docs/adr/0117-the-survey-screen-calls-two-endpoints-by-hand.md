@@ -93,6 +93,6 @@ right response then is to look at the count of calls again rather than to grow a
 fourth copy of a fetch helper; this record is what that decision argues with.
 
 **The bundle stays free of a data layer.** The gzipped initial payload after this
-ticket is 93,572 bytes against a 163,840-byte budget, and none of it is a client
+ticket is 93,678 bytes against a 163,840-byte budget, and none of it is a client
 or a cache. That headroom was reserved for SPEC §7.6's component inventory, not
 for infrastructure.

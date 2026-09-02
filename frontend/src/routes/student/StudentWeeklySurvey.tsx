@@ -44,6 +44,14 @@ import { copy } from '../../copy/studentSurvey';
  * coaching on the comment fields, the rest of the form untouched — or one of
  * `app.copy.submit`'s sentences shown where the student is standing.
  *
+ * **A read the server refused is none of those.** A 401 gets its own state, and
+ * the reason it is called out here is that collapsing it into the calm one is an
+ * easy and quiet mistake: the two look alike on screen and only one of them is a
+ * claim this page is entitled to make. The session lives an hour, a window
+ * stands open for days, and "there is no survey open for you yet" told to a
+ * student whose session has simply run out is this screen answering a question
+ * it was refused. So the refusal says which page can answer instead.
+ *
  * **This replaces the student landing view.** The landmark keeps E0-18's
  * `pulse-landing-student` testid, which five end-to-end specs address to say a
  * student landed; the heading and the between-terms sentence are E1-04's
@@ -66,6 +74,7 @@ const HEADING_ID = 'pulse-student-survey-heading';
 type Load =
   | { readonly kind: 'loading' }
   | { readonly kind: 'sections'; readonly sections: readonly EnrolledSection[] }
+  | { readonly kind: 'session-ended' }
   | { readonly kind: 'unavailable' };
 
 export function StudentWeeklySurvey(): JSX.Element {
@@ -77,11 +86,15 @@ export function StudentWeeklySurvey(): JSX.Element {
       if (!live) return;
       if (answer.kind === 'view') {
         setLoad({ kind: 'sections', sections: answer.view.sections });
-      } else if (answer.kind === 'no-session') {
-        // Nobody is *sent* here without a session, so this is somebody who
-        // navigated to the address. The honest answer is the same one somebody
-        // between terms gets: there is nothing here for you right now.
-        setLoad({ kind: 'sections', sections: [] });
+      } else if (answer.kind === 'session-ended') {
+        // **Never the empty-week state.** A refused read and an empty week are
+        // different facts, and only one of them entitles this page to say what
+        // is due. The session a launch issues lives an hour while a window
+        // stands open for days, so the ordinary way here is a student coming
+        // back to yesterday's tab — and "there is no survey open for you yet"
+        // would be this screen answering, authoritatively and wrongly, a
+        // question it had just been refused.
+        setLoad({ kind: 'session-ended' });
       } else {
         setLoad({ kind: 'unavailable' });
       }
@@ -106,6 +119,15 @@ function ScreenBody({ load }: { readonly load: Load }): JSX.Element {
       <p className="pulse-survey-status" role="status">
         {copy('student_survey.loading')}
       </p>
+    );
+  }
+  if (load.kind === 'session-ended') {
+    return (
+      <StateNotice
+        variant="flat"
+        title={copy('student_survey.session_ended_title')}
+        body={copy('student_survey.session_ended_body')}
+      />
     );
   }
   if (load.kind === 'unavailable') {

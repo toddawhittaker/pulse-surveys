@@ -64,6 +64,11 @@ const SECTION_LABEL = 'BIOL-215-R3WW';
 const SECTION_CODE = 'R3WW';
 const SECTION_BLOCK = `survey-section-${SECTION_CODE}`;
 
+// The screen's own landmark — E0-18's testid, which the survey inherited from the
+// landing view it replaced. Addressed for the states that render no section block
+// at all.
+const STUDENT_VIEW = 'pulse-landing-student';
+
 // The minute this spec pretends it is, and the two week numbers that follow from
 // it. **Transcribed from the seeded calendar, not computed from the code under
 // test** (`docs/MISTAKES.md` entry 19).
@@ -127,6 +132,20 @@ const REQUIRED_FLAG = 'Needed to submit';
 const SUBMITTED_TITLE = 'Your pulse is in';
 const SECTION_CLOSED_TITLE = 'Nothing to answer here right now';
 const SECTION_CLOSED_BODY = 'When the next survey for this course opens, it appears here.';
+
+// What a read the server refused says, and the sentence it must never say
+// instead. E2-10's security review: a 401 that renders the calm empty-week state
+// tells a student whose session has run out that nothing is due, on a week they
+// still have time to answer.
+const SESSION_ENDED_TITLE = 'Open this from your course';
+const SESSION_ENDED_BODY =
+  'This page is not signed in, so it cannot say what is due. Open Pulse Surveys from inside your course in the LMS, and this week’s questions will be here.';
+const CALM_EMPTY_WEEK = 'There is no survey open for you yet. When one opens, it appears here.';
+
+// Where the SPA keeps the session it lifted out of the launch fragment (E1-08,
+// `frontend/src/lib/session.ts`). Spelled the same way `support/doors.ts` spells
+// it; this spec writes to it to age a session out.
+const SESSION_STORAGE_KEY = 'pulse.session';
 
 // SPEC §3.2's first question, as `scripts/seed.py` transcribes it from the spec.
 // The altered wording below is this spec's own invention and is written to be
@@ -514,6 +533,65 @@ test('a window that closes under an open form takes the form away and says why',
   } finally {
     await setTheClockTo(page, INSIDE_THE_WINDOW);
   }
+});
+
+test('a session the server will not accept says which page can answer, never that nothing is due', async ({
+  page,
+}) => {
+  // E2-10's security review, as a case. The session a launch issues lives an
+  // hour (`SESSION_LIFETIME_SECONDS`) and a survey window stands open from
+  // Friday evening to Sunday night, so the ordinary way to meet a 401 here is a
+  // student coming back to yesterday's tab inside a window that is still open.
+  //
+  // **The state this must not render is the calm one.** "There is no survey open
+  // for you yet" is a claim about the week, and a page whose read was refused
+  // has not been told anything about the week. Asserting its absence is the
+  // whole point of the case: a screen that collapsed the refusal back into the
+  // empty-week state would satisfy every other assertion here.
+
+  // A real launch first, so the tab is one a student actually reached and the
+  // window really is open. The survey on screen is the control: it says this
+  // student, this section and this clock would otherwise show a form, so what
+  // changes below is the session and nothing else.
+  const block = await landOnTheSurvey(page);
+  await expectTheFormIsShowing(block);
+
+  // Now age the session out. A token the server will not verify is what an
+  // expired one looks like from here — `require_student` answers 401 to both,
+  // deliberately and identically, so that a caller cannot tell a stale session
+  // from a forged one.
+  await page.evaluate(
+    ([key, token]) => {
+      window.sessionStorage.setItem(key, token);
+    },
+    [SESSION_STORAGE_KEY, 'not.a.session'],
+  );
+  await page.reload();
+
+  const refused = page.getByTestId(STUDENT_VIEW);
+  await expect(refused).toBeVisible();
+  await expect(refused.getByText(SESSION_ENDED_TITLE, { exact: true })).toBeVisible();
+  await expect(refused.getByText(SESSION_ENDED_BODY, { exact: true })).toBeVisible();
+
+  // The claim that must not be made, and the form that must not be offered.
+  await expect(
+    refused.getByText(CALM_EMPTY_WEEK, { exact: true }),
+    'A read the server refused rendered the calm empty-week state. That sentence says the week ' +
+      'holds nothing, which is a fact this page was not given: the request was refused before ' +
+      'any window was read. A student whose hour-long session ran out inside a window that is ' +
+      'open for days would be told, authoritatively, that there is nothing to answer.',
+  ).toHaveCount(0);
+  await expect(refused.getByTestId(SUBMIT)).toHaveCount(0);
+  await expect(refused.getByTestId(SECTION_BLOCK)).toHaveCount(0);
+
+  // Calm, and nobody at fault: the register rule holds here as everywhere else
+  // on this surface. Nothing went wrong — a session simply ran out.
+  expect(
+    (await refused.innerText()).toLowerCase(),
+    'A session running out is not a failure a student committed. `design/Usage Rules.md` §4 ' +
+      'keeps student surfaces plain and blameless, and an expiry is the easiest place to slip ' +
+      'into the language of error.',
+  ).not.toMatch(/reject|fail|invalid|denied|forbidden|unauthori/);
 });
 
 /**

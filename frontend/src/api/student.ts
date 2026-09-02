@@ -121,17 +121,23 @@ export interface SubmissionRequest {
 /**
  * What the read answered.
  *
- * `no-session` is separated from `unavailable` because the two are different
- * facts and the screen says different things about them: nobody is *sent* to
- * `/app/student` without a session — the doors resolve a role and redirect with
- * one (ADR 0086) — so a request with none is somebody who navigated there, and
- * the calm "nothing open for you yet" is the honest answer. A read that failed
- * for any other reason is not an empty week, and saying so would be how a
- * student misses a survey they could have answered.
+ * **Three outcomes and not two, because "nothing is due" is a claim.** A 401 is
+ * `session-ended`: the request carried no session this path would accept, so the
+ * honest answer is that this page cannot say what is due and where to get a page
+ * that can. It is emphatically *not* an empty week — the session a launch issues
+ * lives an hour and a window stands open for days, so the ordinary way to meet
+ * this is a student reloading yesterday's tab, and telling them "there is no
+ * survey open for you yet" is an authoritative sentence about a question this
+ * page was refused an answer to. The submit path never made that mistake; it
+ * maps its own 401 to a refusal, and this is the read path catching up.
+ *
+ * `unavailable` is every other failed read, for the same reason narrowed: a read
+ * that failed is not an empty week either, and saying so would be how a student
+ * misses a survey they could have answered.
  */
 export type SurveyRead =
   | { readonly kind: 'view'; readonly view: StudentSurveyView }
-  | { readonly kind: 'no-session' }
+  | { readonly kind: 'session-ended' }
   | { readonly kind: 'unavailable' };
 
 /**
@@ -226,7 +232,7 @@ export async function readStudentSurvey(): Promise<SurveyRead> {
     return { kind: 'unavailable' };
   }
 
-  if (response.status === UNAUTHORIZED_STATUS) return { kind: 'no-session' };
+  if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
   if (!response.ok) return { kind: 'unavailable' };
 
   const body = await jsonBody(response);

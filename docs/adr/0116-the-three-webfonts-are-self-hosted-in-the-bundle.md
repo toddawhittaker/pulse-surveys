@@ -94,9 +94,9 @@ competes with one it does.
 **The counted payload grows by 219 bytes gzipped, and the uncounted assets by
 119 KB.** Measured on this branch: the initial payload
 `scripts/ci/check_bundle_size.py` counts — the entry chunk plus the stylesheet —
-is **93,572 bytes gzipped with the faces and 93,353 without them**, so the six
+is **93,678 bytes gzipped with the faces and 93,459 without them**, so the six
 `@font-face` rules are the whole of the decision's effect on the budget. The
-budget stays comfortably green (entry 89,705 of 131,072; total 93,572 of
+budget stays comfortably green (entry 89,811 of 131,072; total 93,678 of
 163,840). The faces themselves are **119,100 bytes of woff2**, emitted as
 separate assets that the gate does not measure. That is the honest number for
 this decision and it is stated here because the gate cannot state it: a font

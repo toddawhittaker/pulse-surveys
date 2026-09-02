@@ -69,6 +69,23 @@ export const STUDENT_SURVEY_COPY = {
   'student_survey.unavailable':
     'This week’s survey could not be loaded just now. Reload the page to try again.',
 
+  // What a 401 from the read path says. The session a launch issues lives an
+  // hour and a survey window stands open for days, so the ordinary way to meet
+  // this is a student coming back to yesterday's tab — and the one thing this
+  // page must not do then is say what is due, because it was refused the answer.
+  // So it says which page can. Second person, plain, nobody at fault: nothing
+  // went wrong here, and nothing in these two sentences reads as an error.
+  //
+  // `app.copy.student_read`'s `student.not_a_student` is the server's sentence
+  // for the same refusal and is deliberately not what this renders. That one
+  // answers a request; this one has to tell the person looking at a rendered
+  // page what to do next in it, and it has to say so even when the 401 carried
+  // no body at all — which is what a proxy or a gateway in front of the tool
+  // answers with.
+  'student_survey.session_ended_title': 'Open this from your course',
+  'student_survey.session_ended_body':
+    'This page is not signed in, so it cannot say what is due. Open Pulse Surveys from inside your course in the LMS, and this week’s questions will be here.',
+
   // The mono eyebrow (docs/DESIGN_BRIEF.md: "WK 07 / 12 · closes Sun 11:59 PM").
   // Three words, because the numbers beside them are the API's.
   'student_survey.week_label': 'WK',
