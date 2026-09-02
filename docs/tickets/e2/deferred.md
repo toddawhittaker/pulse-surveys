@@ -261,3 +261,42 @@ woff duplicates are either dropped — which means hand-writing the six
 ADR 0116 refuses today — or recorded as a deliberate cost in the licence and
 image-size sweep. E13's accessibility and licence pass is the natural owner of
 the first two.
+
+## A resubmission under a rewound development clock answers 500 — E2-10
+
+Found by E2-10 while driving its own end-to-end spec, and it is a defect in a
+development-only path rather than one a student can reach.
+
+[ADR 0109](../../adr/0109-the-dev-clock-is-a-database-offset-not-a-freeze.md)
+makes the development clock an **offset** rather than a freeze, so setting it to
+the same pretended minute a second time — an hour later in real time — produces
+an effective now a little *earlier* than the first run had drifted to. A student
+who submits under the first setting and revises under the second writes a
+`response` row whose `last_submitted_at` precedes its own `first_submitted_at`,
+and `response`'s `ck_response_last_submission_is_not_before_the_first` refuses
+it. `app.services.submissions` has no branch for that, so it surfaces as a
+`psycopg.errors.CheckViolation` out of the flush and the route answers **500**.
+
+Measured on this branch, on the composed stack: a resubmission after the clock
+was re-set to `2026-10-02T19:00` wrote
+`first_submitted_at = 2026-10-02 23:00:04.017127+00` against
+`last_submitted_at = 2026-10-02 23:00:00.841879+00`, three seconds apart in the
+wrong direction, and the API answered 500 with the constraint name in the log.
+
+**What it is not.** Real time does not run backwards, so no deployment reaches
+this: the clock override is refused outside development (ADR 0109), and the check
+constraint is doing exactly the job it was written for — the row is wrong and the
+database says so. Nothing is stored, and the student's answers stay in the form.
+
+**What it is.** A 500 where a refusal belongs, on the surface a developer walks a
+section through a term on. It is also the shape that makes a demo look broken:
+the person who moved the clock has no way to know that the week they are looking
+at was answered under a later reading of the same minute. `tests/e2e/student-survey.spec.ts`
+works around it by clearing the week before each of its cases, which is a spec
+protecting itself rather than a fix.
+
+**Done when** the write path either refuses this in words — one of
+`app.copy.submit`'s sentences, with a status that says the request was
+understood — or refuses to move `last_submitted_at` backwards at all, and a test
+drives a resubmission under a rewound clock and requires something other than a
+500. The fix is in `app.services.submissions`, which is a heavy-lane path.
