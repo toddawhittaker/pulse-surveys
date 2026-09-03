@@ -1,13 +1,24 @@
 """The launch that triggers a sync because of who launched — E1-12, criterion 6.
 
-SPEC §7.3: "A launch by an instructor **or any leadership role** triggers a roster
-sync; a **student** launch does not. The roster service address arrives as a claim
-on that launch and is **stored**, which is what gives the scheduled job the
-discovery it otherwise lacks." E1-10 built the instructor half and left the
-leadership half stated and dormant, because resolving a launching subject to a live
-`role_assignment` needs the `sub` → `user` → `person` link only this ticket builds
-(ADR 0091: "until then a dean's launch discovers nothing… E1-12 carries the
-accept-side criterion"). This module is that criterion.
+SPEC §7.3: "A launch by an instructor triggers a roster sync; a launch by a
+leadership role triggers one only inside the launcher's own purview (§2.1) — an
+out-of-purview leadership launch records a `context_outside_purview` defect and
+binds nothing (ADR 0108…). A **student** launch triggers nothing. The roster
+service address arrives as a claim on that launch and is **stored**, which is what
+gives the scheduled job the discovery it otherwise lacks." E1-10 built the
+instructor half and left the leadership half stated and dormant, because resolving
+a launching subject to a live `role_assignment` needs the `sub` → `user` →
+`person` link only this ticket builds (ADR 0091: "until then a dean's launch
+discovers nothing… E1-12 carries the accept-side criterion"). This module is that
+criterion.
+
+**Every launch driven here sits inside the launcher's own purview by
+construction** — the dean's assignment names the college the launched prefix sits
+under, as the E2-02 paragraph below sets out — which is why the leadership limb
+*stores* the address in these tests rather than recording the
+`context_outside_purview` defect ADR 0108 gives an out-of-purview launch; that
+refusal half of the sentence, in both directions, is asserted next door in
+`tests/integration/test_a_staff_launch_binds_only_inside_the_launchers_purview.py`.
 
 **The distinguishing fact is the assignment, and the two tests differ by exactly
 it.** Both drive the same launch — the same platform, the same context, the same
@@ -87,9 +98,11 @@ pytestmark = [pytest.mark.integration, pytest.mark.lti]
 # `sys.path`, and an import error is not a red.
 
 # The two roles this module hangs on a linked person. `DEAN` is one of §2.1's
-# supervision chain and is what §7.3's "any leadership role" is about; `CARE` sits
-# outside the graph entirely (§2.1) and is the near miss — a live assignment,
-# legitimately held, that authorizes nothing about a roster.
+# supervision chain and is what §7.3's "a launch by a leadership role" is about —
+# quoted as the section now reads, since the 2026-09-03 ruling conditioned that
+# limb on the launcher's own purview and struck the wording this comment used to
+# carry. `CARE` sits outside the graph entirely (§2.1) and is the near miss — a
+# live assignment, legitimately held, that authorizes nothing about a roster.
 LEADERSHIP_ROLE = "DEAN"
 NON_LEADERSHIP_ROLE = "CARE"
 
