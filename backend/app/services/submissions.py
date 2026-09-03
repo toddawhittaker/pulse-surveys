@@ -518,6 +518,16 @@ def store_submission(
             user_id=student_id,
             section_id=section.id,
             week_id=window.week_id,
+            # E2-16's term rule, from the window rather than from the section, and
+            # it is the cheapest correct source as well as the nearest: the row is
+            # already loaded, so it costs no read, and `survey_window` is the one
+            # row in this schema whose section, week and term the database has
+            # already made agree (E2-05's composite keys, ADR 0018). This response
+            # names that window's section and that window's week, so its term is
+            # theirs by construction. `section.term_id` is a second answer to the
+            # same question — equal today, and equal only because the window's own
+            # constraints say so.
+            term_id=window.term_id,
             first_submitted_at=instant,
             last_submitted_at=instant,
             # Set so the row can be written at all; `recompute_response_validity`

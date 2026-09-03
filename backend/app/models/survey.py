@@ -59,12 +59,14 @@ from sqlalchemy import (
     CheckConstraint,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
+    Uuid,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -284,13 +286,23 @@ class Response(UuidPrimaryKey, Base):
     revised has the same value in both — so the rule is `>=` and a strict `>`
     would refuse every first submission there will ever be.
 
-    **No link to `survey_window`, and no cross-term rule of its own.** A response
-    belongs to a section and a week; whether that pair had an open window when it
-    arrived is a question about *time*, which a foreign key cannot ask, and
-    E2-08's write path consults the window before it writes. Adding a
-    `survey_window_id` here would make a response unwritable for a section whose
-    window E2-06 has not opened, which is a rule about scheduling stored in the
-    wrong table.
+    **No link to `survey_window`.** A response belongs to a section and a week;
+    whether that pair had an open window when it arrived is a question about
+    *time*, which a foreign key cannot ask, and E2-08's write path consults the
+    window before it writes. Adding a `survey_window_id` here would make a response
+    unwritable for a section whose window E2-06 has not opened, which is a rule
+    about scheduling stored in the wrong table.
+
+    **The section and the week do have to belong to one term**, and since E2-16
+    the database is what says so. The paragraph here used to read "and no
+    cross-term rule of its own", and the boundary review wrote the row it
+    permitted: a response naming a section in one term and a week in another,
+    accepted by insert. SPEC §2.2 puts the week axis inside a term, so that row
+    records a submission against a week its own section's calendar does not
+    contain, and §3.4's ratio is then counted over two calendars. The mechanism is
+    the one `survey_window` has carried since E2-05 and ADR 0018 is written about —
+    a `term_id` on the row and two composite foreign keys — because a `CHECK`
+    cannot read another table.
 
     **Resubmission semantics are E2-08's**, which owns what a second submit does
     to the answers. This table gives it the two columns and the ordering rule and
@@ -308,6 +320,22 @@ class Response(UuidPrimaryKey, Base):
 
     __tablename__ = "response"
     __table_args__ = (
+        # E2-16's term rule, and the pair is `survey_window`'s spelled the same
+        # way: each reference is checked against the term the row claims, so a
+        # section in one term paired with a week in another is refused by one limb
+        # or the other. They replace the plain single-column foreign keys E2-05
+        # gave the two columns, rather than sitting beside them — one check per
+        # reference, and the composite one is strictly the stronger.
+        ForeignKeyConstraint(
+            ["section_id", "term_id"],
+            ["section.id", "section.term_id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["week_id", "term_id"],
+            ["week.id", "week.term_id"],
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint("user_id", "section_id", "week_id"),
         # The read every report and every window-close job makes: this section's
         # responses for this week. `uq_response_user_id_section_id_week_id` leads
@@ -327,16 +355,25 @@ class Response(UuidPrimaryKey, Base):
         ForeignKey("user.id", ondelete="RESTRICT"), nullable=False
     )
     # Not indexed on its own either: it leads `ix_response_section_id_week_id`.
-    section_id: Mapped[UUID] = mapped_column(
-        ForeignKey("section.id", ondelete="RESTRICT"), nullable=False
-    )
+    # Referenced by the composite key in `__table_args__` rather than by a
+    # `ForeignKey` here, exactly as `survey_window.section_id` is.
+    section_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     # Indexed, and this is the same justification `survey_window.week_id` carries
-    # in `app/models/term.py`: the other read is by week — everything submitted
-    # in the week that has just closed, which §3.4 recomputes participation from
-    # — and this column leads no constraint and no composite index.
-    week_id: Mapped[UUID] = mapped_column(
-        ForeignKey("week.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
+    # in `app/models/term.py`: the read this anticipates is by week — everything
+    # submitted in the week that has just closed, which is what SPEC §3.4's
+    # "recomputed after each week closes" will ask for. **E3 is where that read is
+    # built; nothing in the tree makes it today** (E2-16 item 6, which keeps the
+    # index and corrects the tense this comment used to claim). The column leads
+    # no constraint and no composite index, so nothing else would serve it.
+    week_id: Mapped[UUID] = mapped_column(Uuid, nullable=False, index=True)
+    # The term the section and the week have to agree on. Carried rather than
+    # derived, because a `CHECK` cannot read another table — the whole of ADR 0018
+    # — and `NOT NULL` because Postgres evaluates a composite foreign key under
+    # `MATCH SIMPLE`, which skips the check entirely when any key column is null:
+    # a nullable column here would be a way around the rule it exists to add. Not
+    # indexed on its own: no read starts from a term here, and the two composite
+    # foreign keys each index nothing by themselves.
+    term_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     first_submitted_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)
     last_submitted_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)
     # Whether this submission counts for participation (§3.3, §3.4), written by
