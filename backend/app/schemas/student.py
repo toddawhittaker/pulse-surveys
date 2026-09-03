@@ -132,10 +132,18 @@ class EnrolledSection(BaseModel):
 
     section_id: UUID = Field(description="The section row.")
     section_code: str = Field(description="The section code a person reads (SPEC §2.2).")
+    # The description is worded to keep a comma out of the position immediately
+    # before the word "section". `tests/unit/test_the_org_views_are_read_only_through_the_grant.py`
+    # sweeps every non-docstring string in `backend/app/` for a policed relation
+    # in a position that reads it, and one of the positions it counts is
+    # `,\s*` — so the prose list "prefix, number, section code" reads to that
+    # sweep as a comma-separated `FROM` list naming the `section` relation. The
+    # sweep is deliberately broad and is right to be; this is prose bending
+    # around it rather than the guard being narrowed.
     course_label: str = Field(
         description=(
-            "The reader's own course as a person names it: prefix, number, section code, "
-            "title, term name."
+            "The reader's own course as a person names it: prefix, number, the section "
+            "code, title and term name."
         )
     )
     survey_is_open: bool = Field(

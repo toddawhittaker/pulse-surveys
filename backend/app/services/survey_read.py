@@ -33,8 +33,10 @@ course, a term or another person. The two filters that carry the whole rule are:
 **Widening this join is how another person's sections reach a student's page, and
 E2-17 widened it once — upward, out of the section, and no further.** The
 enrollment read now also carries the course a section belongs to and the prefix
-that course belongs to, so the heading can say "BIOL 215 — Cell Biology" instead
-of the bare §2.2 code `R3WW`. The rule that makes that safe is a property of the
+that course belongs to, so the heading can say "BIOL 215 R3WW — Cell Biology,
+Fall 2026" instead of the bare §2.2 code `R3WW`. (FIX-01 respelled that label
+and added the term's name; the term was already joined, so nothing widened
+again.) The rule that makes that safe is a property of the
 direction: both new joins hang off a row the enrollment predicate has already
 chosen (`section.course_id`, then `course.prefix_id`), each on a single-valued
 foreign key, so they add columns to rows the scoping selected and cannot add

@@ -198,7 +198,9 @@
   }
 
   /* The mono eyebrow: uppercase, letterspaced, spruce-60. The course week leads
-   * and the term week and the closing instant follow it quietly. */
+   * and the term week and the closing instant follow it quietly. Each week axis
+   * names itself in words since FIX-01 — "COURSE WK 04, TERM WK 07" — so the
+   * uppercasing here is on copy that is already uppercase and changes nothing. */
   .pulse-eyebrow {
     display: flex;
     flex-wrap: wrap;
