@@ -41,13 +41,13 @@ env:
 
 jobs:
   # --------------------------------------------------------------------------
-  # What exists yet? The jobs still listed here are tolerant of a tree that has
-  # not been built. As each E0 ticket lands, flip the matching `allow-missing`
-  # step in that job from tolerant to enforcing — the job body is already
-  # written — and drop the probe with it, so this list shrinks to nothing.
-  #
-  # Gone already: `migrations` and `pytests`. E0-04 turned the `migration-drift`
-  # and `test` jobs on, and they now run unconditionally.
+  # What exists yet? One probe remains: `node`, which asks whether the root
+  # `package.json` exists and gates the Node-side audit and licence steps. Every
+  # other tolerance this header once listed is gone — `migrations` and `pytests`
+  # with E0-04, the e2e gate with E0-18, the four frontend gates with E1-04, the
+  # AI eval floors with E2-12, and the readerless `evals` probe with E2-13. ADR
+  # 0002's closing section names the surviving probe and the rule that a new
+  # tolerant gate needs its own argued ticket.
   # --------------------------------------------------------------------------
   # E0-38: what *changed*, as against what `detect` below answers, which is what
   # exists. A documentation-only pull request ran pytest against testcontainers,
@@ -324,21 +324,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       node: ${{ steps.d.outputs.node }}
-      # **This probe has had no reader since E2-12, and it is published anyway.**
-      # It asked whether `tests/evals/runner.py` exists, and the `evals` job's
-      # steps waited on it while that file was still to be written. The file is
-      # committed now, so waiting on it is precisely the tolerance ADR 0002 says
-      # the ticket landing the code must remove: with the clause in place, a
-      # deleted runner switches SPEC §9.3's floors off and the job reports
-      # success, where without it the run fails on the import and says so. The
-      # clause therefore went, and this line did not, because
-      # tests/unit/test_the_detect_probes_see_the_files_their_jobs_run.py asserts
-      # the whole set of outputs this job emits and withdrawing one is a change on
-      # the other side of that module's wall. That is stated here rather than left
-      # to be rediscovered: a boolean nobody consults is a probe whose wrongness
-      # produces no symptom, which is the failure this job's own comment below is
-      # about, and it is E2-13's to close.
-      evals: ${{ steps.d.outputs.evals }}
     steps:
       - uses: actions/checkout@v7
 
@@ -394,19 +379,18 @@ jobs:
           # change as its last reader rather than being left emitting.
           echo "Probing repository layout (SPEC §13):"
           if [ -f package.json ]; then emit node true; else emit node false; fi
-          # The exact module the job imports, in the shape the manifest probes
-          # already use. Stricter than "some Python exists under tests/evals",
-          # and deliberately: a tree with `__init__.py` and no runner would make
-          # that glob answer true and the job then fails on the import.
-          if [ -f tests/evals/runner.py ]; then emit evals true; else emit evals false; fi
           #
-          # There is deliberately no `e2e` probe and no `frontend` one. PR #61
-          # made the Playwright gate unconditional on the specs being present and
-          # E1-04 made the four frontend gates enforcing, so in each case nothing
-          # consumed the output any more; a boolean nobody reads is a probe whose
-          # wrongness has no symptom, which is the failure this comment's first
-          # paragraph is about. E0-40 decision 5 removed the first, E1-04 the
-          # second.
+          # There is deliberately no `e2e` probe, no `frontend` one and no
+          # `evals` one. PR #61 made the Playwright gate unconditional on the
+          # specs being present, E1-04 made the four frontend gates enforcing,
+          # and E2-12 committed `tests/evals/runner.py` and made the eval job
+          # enforcing on the changed-paths classification — so in each case
+          # nothing consumed the output any more; a boolean nobody reads is a
+          # probe whose wrongness has no symptom, which is the failure this
+          # comment's first paragraph is about. E0-40 decision 5 removed the
+          # first, E1-04 the second, and E2-13 the third, each in the change
+          # that took away its last reader or as soon after as the test wall
+          # allowed.
 
   # ==========================================================================
   # FAST GATES — everything else waits on these.

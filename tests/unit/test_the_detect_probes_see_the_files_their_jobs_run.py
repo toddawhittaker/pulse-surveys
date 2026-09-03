@@ -1,4 +1,4 @@
-"""Each `detect` probe sees the file its own job runs — E0-36 findings 1 and 2, E0-40, E1-04.
+"""Each `detect` probe sees the file its own job runs — E0-36 findings 1 and 2, E0-40, E1-04, E2-13.
 
 The `detect` job probes the tree and emits booleans; each gate job runs its real
 steps only when its boolean is true, and prints a `::notice::` otherwise (ADR
@@ -33,16 +33,25 @@ truth about where Node code lives:
   that boolean stopped reading it — and an emitted boolean nothing consults is a
   probe whose wrongness has no symptom, which is why it is withdrawn in the same
   change rather than left emitting.
-- **`evals`** — unchanged. E2 turns the AI eval floors enforcing (SPEC §14.3), so
-  that gate is still legitimately tolerant and its probe still decides something.
+- **`evals` is gone, and E2-13 is what removed it.** It asked whether
+  `tests/evals/runner.py` existed, and the `evals` job's steps waited on it while
+  that file was still to be written. E2-12 committed the runner and made the job
+  enforcing: the tolerance clause went, because ADR 0002 makes removing one an
+  acceptance criterion of the ticket that lands the code, and the job now gates on
+  E0-38's changed-paths classification instead. The output stayed behind, because
+  withdrawing it means editing this closed set and that was on the other side of
+  the heavy lane's test wall. So since E2-12 the probe has had no reader at all,
+  which is the shape this module's own history condemns twice over.
 - **`e2e` is gone.** PR #61 made the Playwright gate unconditional on the specs
   being present, so nothing has consumed that output since; an emitted boolean
   nothing reads is a probe whose wrongness has no symptom.
 
-**The cases plant their own trees and none of them reads this repository.** One of
-the three probes answers about a file that exists here today and two about files
-that do not, and a battery that read the real tree would assert the state of the
-checkout rather than the logic of the probe.
+**The cases plant their own trees and none of them reads this repository.** The
+one surviving probe answers about a file that exists here today, and most of the
+trees below hold files that this checkout also holds — so a battery that read the
+real tree would assert the state of the checkout rather than the logic of the
+probe, and would report every withdrawn probe as correctly absent for no better
+reason than that nobody planted anything.
 
 **Executed, not read.** The probe is pulled out of the parsed workflow, run under
 `bash` with `GITHUB_OUTPUT` pointed at a temp file, and judged by what it emits. A
@@ -80,6 +89,14 @@ the repair each time was to make it see. A probe with nothing left to decide is 
 same hazard reached from the other end, because the honest answer to a question
 nobody asks is not to answer it.
 
+**E2-13 is the fifth ticket in this file's history, and it removes for the second
+time.** `evals` is the last probe to lose its readership, and the direction is
+E1-04's rather than E0-36's: nothing had gone blind, the question simply stopped
+being asked. What is left after it is a single probe, `node`, guarding two
+supply-chain gates — and the eval trees stay planted below for the reason the
+frontend trees did, because a tree the withdrawn probe would have answered `true`
+over is the only tree that catches it outliving its readers.
+
 **The probe has a second copy, and the mutation battery found it unguarded.** The
 `Makefile` carries the same condition for `lint`, `typecheck`, `audit` and
 `licenses`, so that `make ci` and the workflow agree; reverting either copy to
@@ -115,13 +132,14 @@ import pytest
 
 DETECT_JOB = "detect"
 
-# The probes the `detect` job emits, as E0-40 settles them. This is a closed set:
-# every case below compares the whole mapping, so an output that lingers after the
-# gate reading it is gone fails as loudly as one that never arrives.
+# The probes the `detect` job emits, as E0-40 settles them and E1-04 and E2-13
+# narrow them. This is a closed set: every case below compares the whole mapping,
+# so an output that lingers after the gate reading it is gone fails as loudly as
+# one that never arrives.
 NODE = "node"
 FRONTEND = "frontend"
 EVALS = "evals"
-PROBES = (NODE, EVALS)
+PROBES = (NODE,)
 
 # Probes that were emitted and are not any more. Named here rather than merely left
 # out of `PROBES`, so that the failure a lingering probe produces says which one it
@@ -131,8 +149,11 @@ PROBES = (NODE, EVALS)
 # being present, and nothing had consumed the boolean since. `frontend` goes in
 # E1-04 for the same reason arrived at from the other direction — its two
 # consumers, the production build and the bundle budget, stop being tolerant, so
-# the question it asks is no longer asked by anything.
-WITHDRAWN = ("e2e", FRONTEND)
+# the question it asks is no longer asked by anything. `evals` goes in E2-13, and
+# it is the one that was left emitting after its reader had already gone: E2-12
+# landed the runner, made the job enforcing and deleted the clause that read this
+# boolean, and the output outlived it by a ticket.
+WITHDRAWN = ("e2e", FRONTEND, EVALS)
 
 # A `name=value` line as the probe writes it into `$GITHUB_OUTPUT`.
 EMITTED = re.compile(r"^(?P<name>[A-Za-z0-9_-]+)=(?P<value>.*)$")
@@ -173,11 +194,18 @@ PlantedFile = str | tuple[str, str]
 # The first case is the one that makes the rest mean anything: over a tree with
 # nothing in it every probe must answer false. A probe that answered true to
 # everything would satisfy every other case here perfectly.
+#
+# **The eval trees are kept now that `evals` is gone, on the same argument the
+# frontend trees are kept on.** A tree holding `tests/evals/runner.py` is the one
+# tree in this table over which a surviving copy of that probe would answer
+# `true`, so it is where a probe that outlived its reader is caught as a wrong
+# *answer* rather than merely reported missing from an `outputs:` block. Deleting
+# those rows along with the probe would take the catch away with it.
 CASES: tuple[tuple[str, tuple[PlantedFile, ...], dict[str, str]], ...] = (
     (
         "an empty repository",
         (),
-        {NODE: "false", EVALS: "false"},
+        {NODE: "false"},
     ),
     (
         "the tree PR #61 left: a manifest, a lockfile and TypeScript at the root",
@@ -187,67 +215,67 @@ CASES: tuple[tuple[str, tuple[PlantedFile, ...], dict[str, str]], ...] = (
             "playwright.config.ts",
             "tests/e2e/lms/launch.spec.ts",
         ),
-        {NODE: "true", EVALS: "false"},
+        {NODE: "true"},
     ),
     (
         "a root package manifest and nothing else",
         ("package.json",),
-        {NODE: "true", EVALS: "false"},
+        {NODE: "true"},
     ),
     (
         "the workspace stub E1-02 landed: a frontend manifest with nothing to build",
         ((FRONTEND_MANIFEST, WORKSPACE_STUB),),
-        {NODE: "false", EVALS: "false"},
+        {NODE: "false"},
     ),
     (
         "the E1-04 scaffold: a frontend manifest that declares a build",
         ((FRONTEND_MANIFEST, SCAFFOLD_WITH_A_BUILD),),
-        {NODE: "false", EVALS: "false"},
+        {NODE: "false"},
     ),
     (
         "the tree E1-02 left: the root toolchain and the workspace stub beside it",
         ("package.json", (FRONTEND_MANIFEST, WORKSPACE_STUB)),
-        {NODE: "true", EVALS: "false"},
+        {NODE: "true"},
     ),
     (
         "both, once the E1-04 scaffold fills the workspace member",
         ("package.json", (FRONTEND_MANIFEST, SCAFFOLD_WITH_A_BUILD)),
-        {NODE: "true", EVALS: "false"},
+        {NODE: "true"},
     ),
     (
         "a frontend manifest that is not a manifest at all",
         (FRONTEND_MANIFEST,),
-        {NODE: "false", EVALS: "false"},
+        {NODE: "false"},
     ),
     (
         "a package manifest in some other subdirectory",
         ("tools/package.json",),
-        {NODE: "false", EVALS: "false"},
+        {NODE: "false"},
     ),
     (
-        "the eval runner that `python -m tests.evals.runner` imports",
+        "the eval runner E2-12 committed, which no probe answers for any more",
         ("tests/evals/__init__.py", "tests/evals/runner.py"),
-        {NODE: "false", EVALS: "true"},
+        {NODE: "false"},
     ),
     (
         "an eval set in a subdirectory beside the runner",
         ("tests/evals/__init__.py", "tests/evals/runner.py", "tests/evals/validity/cases.py"),
-        {NODE: "false", EVALS: "true"},
+        {NODE: "false"},
     ),
     (
         "an eval directory holding no Python at all",
         ("tests/evals/README.md",),
-        {NODE: "false", EVALS: "false"},
+        {NODE: "false"},
     ),
     (
         "e2e specs, which no probe answers for any more",
         ("tests/e2e/lms/launch.spec.ts", "tests/e2e/idp/login.spec.ts"),
-        {NODE: "false", EVALS: "false"},
+        {NODE: "false"},
     ),
     (
         "an e2e directory holding no specs",
         ("tests/e2e/README.md",),
-        {NODE: "false", EVALS: "false"},
+        {NODE: "false"},
     ),
 )
 
@@ -831,13 +859,15 @@ def test_every_detect_probe_answers_true_over_a_tree_that_holds_what_its_job_run
     production build would then run `npm run build` in a directory that does not
     exist. `frontend/package.json` alone must still leave `node` false.
 
-    **E1-04 withdraws the `frontend` probe and keeps both of its trees.** The
-    workspace stub and the scaffold that declares a `build` are the two trees that
-    probe told apart, and the second is the only tree in this table over which a
-    surviving copy of it would answer `true`. Since every case compares the whole
-    emitted mapping, planting that tree is what catches a probe that outlived its
-    readers — a boolean nothing consults is one whose wrongness produces no
-    symptom, and the next gate wired to it inherits an answer nobody has checked.
+    **E1-04 withdraws the `frontend` probe and keeps both of its trees, and E2-13
+    does the same for `evals`.** The workspace stub and the scaffold that declares
+    a `build` are the two trees the first probe told apart; the runner and the eval
+    set beside it are the two the second answered `true` over. Each is the only
+    tree in this table a surviving copy of its probe would fire on. Since every
+    case compares the whole emitted mapping, planting those trees is what catches a
+    probe that outlived its readers — a boolean nothing consults is one whose
+    wrongness produces no symptom, and the next gate wired to it inherits an answer
+    nobody has checked.
 
     **The empty-tree case comes first and it is the case the others rest on.**
     Several cases below assert that a probe answers *true*, and a probe that
@@ -845,14 +875,15 @@ def test_every_detect_probe_answers_true_over_a_tree_that_holds_what_its_job_run
     tolerance in this pipeline into a permanent lie in the other direction.
 
     **The whole emitted mapping is compared, not the key each case is named for.**
-    That is how a withdrawn probe is caught: neither `e2e` nor `frontend` has a
-    reader left, and a boolean nothing reads is one whose wrongness has no symptom.
-    If either is still emitted, every case here fails.
+    That is how a withdrawn probe is caught: none of `e2e`, `frontend` or `evals`
+    has a reader left, and a boolean nothing reads is one whose wrongness has no
+    symptom. If any of them is still emitted, every case here fails.
 
     **The mutation this survives:** point the `node` probe at
     `frontend/package.json`, or at `[ -f package.json ] || [ -f frontend/package.json ]`,
     which is the tempting one-line version of the split and makes two questions one;
-    or leave the `frontend` probe in the job after its consumers stopped reading it.
+    or leave the `frontend` or `evals` probe in the job after its consumers stopped
+    reading it.
     **The near miss that must stay green:** any spelling of the same question —
     `[ -f package.json ]`, `test -f ./package.json`, a `find -maxdepth 1` — since
     this judges what the probe emits and not how it decides.
@@ -913,6 +944,12 @@ def test_every_detect_probe_answers_true_over_a_tree_that_holds_what_its_job_run
             "because the one holding a manifest with a `build` script is the one a surviving copy "
             "of the probe would answer `true` over.",
             "",
+            f"`{EVALS}` is gone too, and E2-13 removed it: E2-12 committed "
+            "`tests/evals/runner.py`, made the `evals` job enforcing and deleted the clause that "
+            "read this boolean, leaving an output nothing consults. The eval trees are still "
+            "planted here for the same reason the frontend ones are — they are the trees a "
+            "surviving copy would answer `true` over.",
+            "",
             f"The comparison is over the whole mapping, so {list(WITHDRAWN)} showing up here is a "
             "probe that outlived its reader rather than a harmless extra line.",
             "",
@@ -925,7 +962,7 @@ def test_every_detect_probe_answers_true_over_a_tree_that_holds_what_its_job_run
 def test_the_detect_job_publishes_no_probe_that_nothing_reads(
     ci_workflow_path: Path, ci_workflow: dict[str, Any]
 ) -> None:
-    """E0-40 decision 5 and E1-04: a probe goes when its last reader does.
+    """E0-40 decision 5, E1-04 and E2-13: a probe goes when its last reader does.
 
     PR #61 made the Playwright gate unconditional on the specs being present —
     they are committed, so §9.2's both-doors requirement is enforced rather than
@@ -938,10 +975,21 @@ def test_the_detect_job_publishes_no_probe_that_nothing_reads(
     nothing has ever checked. E0-36 found `evals` and `e2e` wrong; the repair
     landed, and then one of the readers went away.
 
+    **`evals` is E2-13's, and it is the instance where the two halves came apart
+    by a whole ticket.** E2-12 committed the eval runner, made the `evals` job
+    enforcing on E0-38's changed-paths classification and deleted the step that
+    read this boolean — the removal ADR 0002 requires of the ticket landing the
+    code. The output it filled stayed, because withdrawing it means editing
+    `PROBES` above and that is on the other side of the heavy lane's test wall.
+    So for one ticket the pipeline published a probe with no reader anywhere, and
+    `docs/tickets/e2/deferred.md` carries the entry that says so. Its done-when is
+    this: the output and the probe line that fills it are removed together, and
+    `PROBES` drops `EVALS` in the same change.
+
     The set is asserted closed in both directions. A missing `node` is a gate that
-    cannot run; a lingering `e2e` or `frontend` is a probe nobody reads; an output
-    nobody here has heard of is a decision that was made without the ticket, and
-    it fails with the name in the message rather than passing quietly.
+    cannot run; a lingering `e2e`, `frontend` or `evals` is a probe nobody reads;
+    an output nobody here has heard of is a decision that was made without the
+    ticket, and it fails with the name in the message rather than passing quietly.
 
     **The mutation this survives:** leave the withdrawn line in the job's
     `outputs:` block after deleting the probe that fills it, which is the half of
@@ -961,15 +1009,17 @@ def test_the_detect_job_publishes_no_probe_that_nothing_reads(
     published = set((job.get("outputs") or {}).keys())
     assert published == set(PROBES), "\n".join(
         [
-            f"The `{DETECT_JOB}` job publishes {sorted(published)} and E0-40 and E1-04 between "
-            f"them settle {sorted(PROBES)}.",
+            f"The `{DETECT_JOB}` job publishes {sorted(published)} and E0-40, E1-04 and E2-13 "
+            f"between them settle {sorted(PROBES)}.",
             f"  missing:  {sorted(set(PROBES) - published) or 'nothing'}",
             f"  lingering: {sorted(published - set(PROBES)) or 'nothing'}",
             "",
             f"{list(WITHDRAWN)} are the ones to expect here. `e2e` has been consumed by nothing "
             "since PR #61 made the Playwright gate unconditional (E0-40 decision 5); `frontend` "
             "loses its last two readers in E1-04, which lands the scaffold and makes the "
-            "production build and the bundle budget enforcing.",
+            "production build and the bundle budget enforcing; and `evals` lost its only reader "
+            "in E2-12, which committed the eval runner and made that job enforcing, so E2-13 "
+            "withdraws the output and the probe line that fills it together.",
             "",
             f"`{NODE}` missing is the other direction: `npm audit` and the licence scan have "
             "nothing to wait on, so either they run unconditionally — a decision, and one for a "

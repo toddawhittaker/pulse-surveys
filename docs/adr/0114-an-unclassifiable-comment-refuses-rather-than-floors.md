@@ -1,8 +1,8 @@
 # 0114 — A comment the provider cannot be asked about refuses; it does not floor
 
 **Status:** Accepted
-**Date:** 2026-09-01
-**Tickets:** E2-08
+**Date:** 2026-09-01; the bounced-text question it left open was ruled 2026-09-03
+**Tickets:** E2-08; E2-13 for the ruling
 
 ## Context
 
@@ -127,10 +127,12 @@ the audit row §7.4 requires, through a mechanism nobody chose rather than a
 decision anybody made.
 
 **Storing the bounced comment's text beside the preserved verdict**, so that a
-refused comment could be moderated. Not rejected on its merits, and **not decided
-here at all** — see the limitation below. ADR 0055 refused a comment fingerprint on
+refused comment could be moderated. ADR 0055 refused a comment fingerprint on
 `classification` on confidentiality grounds, and storing the text itself is a
-larger version of the same question; it is the owner's, not this record's.
+larger version of the same question. This record left it open when it was first
+written, because the answer is a safety decision the spec does not make; it was
+ruled on 2026-09-03 and the text is not stored. The ruling and the grounds it was
+accepted on are in the consequences below.
 
 ## Consequences
 
@@ -164,7 +166,7 @@ them, §6.1's drift panel included; `docs/tickets/e2/deferred.md` carries the
 linkage-or-cap ruling that would close it.
 
 **A bounced comment's *text* is outside the reach of §5.2's moderation and §6.2's
-Care queue, and this record does not decide that it should be.** The verdict is
+Care queue, and that is the accepted cost of the decision below.** The verdict is
 kept and the words are not: `classification` carries no comment text and ADR 0055
 refused even a fingerprint of one, "recoverable by dictionary in seconds" over
 strings this short. So a comment that is bounced as `nonsense` — or as
@@ -174,15 +176,39 @@ student whose comment discloses harm and is bounced for being too brief is a
 student the Care path never sees, and "the answers are still in the form" is not
 the same as anyone having read them.
 
-**Stated as an open limitation rather than settled**, because both directions are
-safety decisions the spec does not make. §6.2 says a Care disclosure must reach the
-queue; §4 and ADR 0055 say a student's words are stored in one place under one set
-of rules, and storing refused text creates a second. Which of those governs a
-comment the student was told did not count is the owner's ruling, not this
-record's — the same boundary ADR 0056 drew when it left the submit path's behaviour
-to E2 rather than deciding it in E0-13. It is carried in
-`docs/tickets/e2/deferred.md` with a done-when so it is scheduled rather than
-remembered, and nothing in E2-08 depends on which way it goes.
+**Bounced comment text is not stored. Ruled 2026-09-03, and this paragraph is the
+record of it.** The question was left open when this record was first written,
+because both directions are safety decisions the spec does not make: §6.2 says a
+Care disclosure must reach the queue, while §4 and ADR 0055 say a student's words
+are stored in one place under one set of rules, and storing refused text creates a
+second — with a retention question, a grant question and a reveal question of its
+own. Three grounds were accepted with the ruling, and two of them are guards
+that MATURE in later epics rather than facts about today — the E2 boundary
+review's security pass caught an earlier version of this paragraph stating
+them in the present tense, and this paragraph is the corrected record. **Today
+no comment is screened for harm at all**: the submit path runs the validity
+classifier only, the moderation pass that will route a threat or a self-harm
+disclosure to Care (§5.2, §6.2) is E6's and E10's and is called from nothing,
+so a bounced comment is unscreened exactly as every stored comment is
+unscreened. The grounds, honestly tensed: **when the moderation pass exists,
+text the classifier judges harmful will be screened from the stored path** —
+§3.3's gate bounces `insufficient` and `nonsense` only, so a disclosure long
+enough to be judged substantive is submitted and stored, and the exposed case
+is a disclosure short enough or garbled enough to be refused. **E10's recall
+floor, when it is set, is the guard on mislabeling** that narrow case: a
+disclosure classified as `nonsense` is a recall miss, and SPEC §9.3 makes that
+rate a hard gate once E10 gives it a set and a value — today
+`tests/evals/threat/floors.py` is a deferred declaration with no cases, which
+is the refuse-to-silently-pass structure E2-12 built, not a measurement. And
+**a student's words stay in one store under one set of rules**, which is the
+property §4 and ADR 0055 are built on and the one a second store would end.
+The alternative — a store for refused text, with its own retention, grant and
+reveal rules — is refused for a case the maturing grounds narrow to a measured
+rate on a gated surface. **What schedules the revisit, since a rate nobody
+measures can never be missed**: `docs/tickets/e3/carried-from-e2.md` hands E10
+a named check — its threat-floor work takes the bounce-before-screening path
+into the floor's scope or reopens this ruling. It also reopens if §3.3's
+bounce set widens beyond `insufficient` and `nonsense`.
 
 **E2-10's form has a contract it can build against.** A 403 means "reload and try
 again"; a 503 with `Retry-After` means "keep what is on screen and offer to retry";

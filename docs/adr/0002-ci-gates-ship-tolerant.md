@@ -126,10 +126,16 @@ ticket that lands the code. That job's steps now run the real runner behind a
 step-level condition — the diff is not inert, and either it touches the AI
 surface or the run was dispatched by hand — and a floor breach is a red gate.
 
-**Nothing in `.github/workflows/ci.yml` is tolerant any more**, so the closing
-line above stops being a forecast and becomes the standing rule: a new tolerant
-gate needs its own argument, made in a ticket, rather than a pointer to this
-record.
+**One tolerance survives, and this record names it rather than rounding it to
+zero** (the E2 boundary review corrected this paragraph, which briefly claimed
+"nothing is tolerant any more"): the `node` detect probe still gates the
+Node-side steps — `setup-node`, `npm ci`, `npm audit`, and the Node half of the
+licence scan — so a tree with no root `package.json` passes those steps having
+audited nothing. It is guarded in both directions by
+`tests/unit/test_the_detect_probes_see_the_files_their_jobs_run.py`, and it is a
+tolerance all the same. With that one named, the closing line above stops being
+a forecast and becomes the standing rule: a new tolerant gate needs its own
+argument, made in a ticket, rather than a pointer to this record.
 
 Two shapes look like the pattern and are not, said here so they are not read as
 counter-examples. A step switched off because every changed path is inert

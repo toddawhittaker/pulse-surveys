@@ -51,6 +51,16 @@ test author's. Whatever prints it has to keep the credential and the comment out
 of what it writes (SPEC §10, §4) — `TaskUsage` carries counts only, and its
 `details` holds integers by construction, so there is nothing in it to leak.
 
+**CLOSED: the done-when was already met when this cleanup pass read the file.**
+The eval half landed with E2-12's later work rather than with the entry that asked
+for it. `tests/evals/runner.py:153-178` is `usage_lines`, which prints the input
+total, the share of it served from cache, what was written to cache, the output
+total and the overall total for each task, and the report calls it per task at
+`runner.py:142`. The retry caveat this entry names is printed beside the figures
+rather than left to be discovered: a retried call reports only the request that
+answered, so the line says the numbers are a floor on the run's cost. Nothing in
+the printed lines carries a credential or a comment — the type holds counts only.
+
 ## `detect.outputs.evals` is published and read by nothing — E2-13
 
 Deferred by E2-12. That probe asked whether the eval runner module exists, and
@@ -73,6 +83,15 @@ rediscovered.
 and `PROBES` in that module drops `EVALS` in the same change — or a reason to
 keep it is recorded there, and that reason would have to be a reader.
 
+**CLOSED by E2-13.** The test-side half withdrew `EVALS` from `PROBES` and moved
+it to the module's withdrawn set, and the workflow half removed the `evals:` line
+from the `detect` job's `outputs:` block together with the
+`[ -f tests/evals/runner.py ]` emit that filled it. No reader was found to keep it
+for: every `needs.detect.outputs.*` reference in the workflow was read, and they
+name `node` and the `frontend` output that E1-04 withdrew. The step's closing
+paragraph now accounts for three withdrawn probes rather than two, so the file
+still says why each one went and when.
+
 ## SPEC §11 open question 4 is answered in its set and not yet in its threshold — E2-13
 
 Deferred by E2-12, and it is a residue with a date on it rather than an open
@@ -92,6 +111,18 @@ saying what the run scored and how much headroom they leave, the runner passes
 `--enforce-floors` against them, and SPEC §11 question 4 is marked
 settled-for-v1 by a spec edit — a change to `docs/SPEC.md`, and so not the
 implementer's to make.
+
+**CLOSED by E2-13.** The floor declaration carries the measured numbers with the
+sentences saying what the run scored and how much headroom they leave, and the
+runner enforces against them. The spec edit landed here on written approval given
+2026-09-03: §11 item 4 keeps its number and now reads settled-for-v1 — ninety-eight
+typed cases pinned to `validity.v2`, precision 0.92 and recall 0.90 measured
+against the live provider, `tests/evals/validity/floors.py` named as the record of
+the measurement — with the condition that reopens it, a model or prompt change,
+written into the item. One thing the entry did not anticipate travelled with it:
+the set is pinned to `validity.v2` rather than the `validity.v1` this entry names,
+because the prompt moved after the entry was written. The floor headroom entry
+below carries the variance measurement that goes to E10 and stays open.
 
 ## Nothing ties an `answer`'s filled column to its question's kind — E2-08
 
@@ -156,6 +187,22 @@ comment) or cap the attempts a window will classify — **and** the epic that ow
 the drift surface either filters these rows out of its aggregation or bounds them,
 naming this entry where it does.
 
+**Ruled 2026-09-03: the rows are bounded by a cap on the attempts a window will
+classify.** Linkage is rejected, in ADR 0055's direction — tying a bounced verdict
+to the attempt that produced it is a new key over a student's refused words, and
+that record already refused a fingerprint of one on the same table. So the first
+half of the done-when is answered and the second is not, and **this entry stays
+open** for both remaining halves:
+
+- **The cap itself.** Its value belongs to the ticket that implements it, because
+  a number chosen here would be chosen without the coaching flow in front of it;
+  that ticket is scheduled in a later breakdown, and it owns what a student sees
+  when the cap is reached, which is a copy decision as much as a limit.
+- **The drift surface's filter.** Unchanged: the epic that owns §6.1's drift panel
+  either excludes these rows from its aggregation or bounds them, naming this entry
+  where it does. A cap makes the population finite; it does not make an aggregation
+  over `classification` stop counting verdicts that judged nothing.
+
 ## Nothing structurally forces the next mutating route onto the CSRF dependency — a sweep is owed
 
 Deferred by E2-08's security re-pass as a LOW, and it is about the shape of the
@@ -199,7 +246,7 @@ that ADR 0055's grant cannot prevent. The comment's **text** is still not stored
 ADR 0055 refused even a fingerprint of one on `classification`, "recoverable by
 dictionary in seconds" over strings this short, and
 [ADR 0114](../../adr/0114-an-unclassifiable-comment-refuses-rather-than-floors.md)
-records the consequence as an open limitation rather than a decision.
+recorded the consequence as an open limitation rather than a decision.
 
 The consequence is this. §5.2's moderation pass and §6.2's route to the Care queue
 both run over stored comments, so a student whose comment discloses harm and is
@@ -215,6 +262,22 @@ breakdown. If the ruling is that bounced text must reach §6.2's path, that tick
 owns where it is stored, who may read it and what removes it; if the ruling is
 that it must not, ADR 0114's paragraph becomes a decision rather than a limitation
 and this entry closes with it.
+
+**CLOSED by the ruling of 2026-09-03: bounced comment text is not stored**, so it
+is the second branch above. ADR 0114 carries the decision and the three grounds it
+was accepted on, stated in their honest tense after the E2 boundary review's
+security pass caught two of them written as present facts: the moderation pass
+that will screen stored text for harm is E6's and E10's and is called from
+nothing today, and the threat recall floor is a deferred empty declaration until E10
+sets it — so today a bounced comment is unscreened exactly as every stored
+comment is. The third ground stands in the present: a student's words stay in one
+store under one set of rules. Because a rate nobody measures can never be missed,
+the revisit is scheduled rather than assumed: `../e3/carried-from-e2.md` hands
+E10 a named check — its threat-floor work takes the bounce-before-screening path
+into the floor's scope or reopens the ruling — and the ruling also reopens if
+§3.3's bounce set widens past `insufficient` and `nonsense`. The two module
+docstrings that repeated the open question — `app.services.validity` and
+`app.services.submissions` — say the same as the record now.
 
 ## The launch-path roster enqueue still waits six seconds on a broker that is down — unowned
 

@@ -46,10 +46,11 @@ on the pair that produced a verdict. Because the gate runs before the write, tha
 is achieved by never creating the rows rather than by rolling them back.
 
 What is *not* kept is the comment's text: ADR 0055 keeps a classification row free
-of it, and the limitation that leaves — a bounced comment reaches neither §5.2's
-moderation nor §6.2's Care queue — is stated in ADR 0114 and carried in
-`docs/tickets/e2/deferred.md` rather than decided here. Nor is the count of those
-rows bounded per attempt, which is the same file's other entry.
+of it, and what that costs — a bounced comment reaches neither §5.2's moderation
+nor §6.2's Care queue — was ruled on 2026-09-03 and is recorded in ADR 0114 as a
+decision with its grounds. The count of those rows is still unbounded per attempt;
+`docs/tickets/e2/deferred.md` carries that entry, and the ruling on it is a cap
+whose value belongs to the ticket that implements it.
 
 **A resubmission revises its answer rows in place** rather than deleting them and
 inserting fresh ones, and

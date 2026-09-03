@@ -35,9 +35,9 @@ where §3.3 stores nothing as submitted. Discarding it was the natural shape and
 the wrong one — §7.4 rests auditability on "a specific prompt version and model ID
 produced a specific classification", and a rolled-back row is the one way to lose
 that which ADR 0055's grant cannot prevent, because the row is never committed at
-all. ADR 0114 records the rule, and the limitation it leaves: the bounced comment's
-*text* is not stored, so it is outside the reach of §5.2's moderation and §6.2's
-Care queue.
+all. ADR 0114 records the rule and what it costs, ruled 2026-09-03: the bounced
+comment's *text* is not stored, so it is outside the reach of §5.2's moderation and
+§6.2's Care queue.
 
 **What `response.is_valid` says.** The latest verdict of each submitted comment,
 and nothing else. A comment left blank has no verdict and no effect (§3.3 in as
