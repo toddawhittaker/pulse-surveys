@@ -37,11 +37,34 @@ is `NOT NULL` because Postgres evaluates a composite foreign key under `MATCH
 SIMPLE`, which skips the check entirely when any key column is null: a nullable
 column would be a way around the rule this revision exists to add.
 
-**The new column needs no backfill and no server default.** `survey_window` is
-empty in every environment — nothing writes a window until E2-06 — so the column
-is added `NOT NULL` in one statement. A revision run against a database that
-somehow held a window row would fail loudly on that statement, which is the
-right outcome: there would be no term to fill in.
+**The new column is backfilled, and the sentence this paragraph used to carry was
+false by the time it was written.** It read that `survey_window` "is empty in
+every environment — nothing writes a window until E2-06 — so the column is added
+`NOT NULL` in one statement". E2-06 landed and windows have been stored ever
+since: the development database held 188 of them when the E2 boundary review
+measured this revision, and adding the column `NOT NULL` in one statement aborts
+with a `NotNullViolation` on every one of them. So the column is added nullable,
+filled from `section.term_id` — which is `NOT NULL` and covers every window,
+because a window's section is what its term has to agree with anyway — and only
+then made `NOT NULL`.
+
+**The downgrade preserves, and the upgrade restores** (E2-16, the same house
+pattern `b8c41f7d2e05` is the worked example of). What this revision's downgrade
+removes is not derivable from what it leaves: `survey_window.term_id` disappears,
+and `question_set`, `question`, `response` and `answer` are dropped whole, taking
+every stored submission with them. Each is copied into a scratch table first and
+put back by the upgrade, keyed by the row's own primary key, so a down-and-up
+trip is an identity rather than a data loss followed by a plausible-looking
+migration.
+
+**Both halves are edits to this revision rather than a new one, deliberately.**
+A later revision can add a column, and it cannot repair a `downgrade()` — the
+broken path *is* this file's, and it is the one a new revision could never be
+reached through. What has already run everywhere is this revision's `upgrade()`
+against an empty database, where every backfill and every restore below is a
+no-op; CI builds from empty for the same reason. So the edit changes nothing that
+has happened and repairs the two paths that have never run anywhere: the
+downgrade, and the re-upgrade after one.
 
 **Written by hand rather than taken from autogenerate as it stands.** The
 timestamp columns are `sa.DateTime(timezone=True)` spelled out, because the model
@@ -105,9 +128,163 @@ WEEK_FK = "fk_survey_window_week_id_week"
 SECTION_TERM_FK = "fk_survey_window_section_id_term_id_section"
 WEEK_TERM_FK = "fk_survey_window_week_id_term_id_week"
 
+# ---------------------------------------------------------------------------
+# What the downgrade keeps, and where. None of these tables is in
+# `Base.metadata` and none is meant to be: each exists only between a downgrade
+# and the upgrade that restores from it, and the upgrade drops it — so a database
+# standing at head never has one and `alembic check` never sees it.
+# ---------------------------------------------------------------------------
+
+# Every window's term, keyed by the window's own primary key. Keyed rather than
+# merely kept: restoring two windows' terms onto each other would leave the set of
+# stored terms exactly right and put each window in the other's term, which the
+# composite foreign keys below would then happily accept if both sections and
+# weeks moved together — a corruption arriving through a migration instead of
+# through a write.
+WINDOW_TERM_PRESERVED = "survey_window_term_preserved"
+
+# The four tables the downgrade drops whole, in the order rows have to be put
+# back: a parent before the child that references it. Each entry is the table, the
+# columns a row is restored into, the expressions the preserve reads, and the
+# expressions the restore writes — three lists rather than one because
+# `question.kind` cannot be carried as it stands.
+#
+# **`question.kind` is preserved as text and cast back.** A scratch table holding
+# a `question_kind` column is a column using the type, and the `DROP TYPE` at the
+# end of `downgrade` is refused while any column uses it. Casting is not a
+# convenience here: without it the downgrade fails on its last statement, having
+# already dropped the four tables.
+_QUESTION_SET_COLUMNS = "id, version"
+_QUESTION_COLUMNS = (
+    "id, question_set_id, position, kind, name, prompt, required_if_position, "
+    "required_if_at_most, minimum_value, maximum_value, step"
+)
+_QUESTION_PRESERVED_COLUMNS = (
+    "id, question_set_id, position, kind::text AS kind, name, prompt, required_if_position, "
+    "required_if_at_most, minimum_value, maximum_value, step"
+)
+_QUESTION_RESTORED_COLUMNS = (
+    "id, question_set_id, position, kind::question_kind, name, prompt, required_if_position, "
+    "required_if_at_most, minimum_value, maximum_value, step"
+)
+# `response`'s column list is this revision's own and stops there. `is_valid`
+# (`f1a3c7d02b64`) and `term_id` (`b1e7d4a90c26`) are added by later revisions and
+# are therefore already gone by the time this downgrade runs — each of those
+# revisions answers for its own column.
+_RESPONSE_COLUMNS = "id, user_id, section_id, week_id, first_submitted_at, last_submitted_at"
+_ANSWER_COLUMNS = "id, response_id, question_id, rating, comment_text, workload_hours"
+
+DROPPED_WHOLE = (
+    ("question_set", _QUESTION_SET_COLUMNS, _QUESTION_SET_COLUMNS, _QUESTION_SET_COLUMNS),
+    ("question", _QUESTION_COLUMNS, _QUESTION_PRESERVED_COLUMNS, _QUESTION_RESTORED_COLUMNS),
+    ("response", _RESPONSE_COLUMNS, _RESPONSE_COLUMNS, _RESPONSE_COLUMNS),
+    ("answer", _ANSWER_COLUMNS, _ANSWER_COLUMNS, _ANSWER_COLUMNS),
+)
+
+
+def _preserved_name(table: str) -> str:
+    """Where one dropped table's rows wait between a downgrade and the upgrade."""
+    return f"{table}_preserved"
+
+
+def _preserve_the_dropped_tables() -> str:
+    """Copy every row of the four tables this revision created, before they are dropped.
+
+    `DROP TABLE IF EXISTS` first, for `b8c41f7d2e05`'s reason: the upgrade drops
+    these on the way out, so an ordinary down-up-down-up journey meets nothing —
+    but a journey where the upgrade did not run, or did not finish, would otherwise
+    fail on `CREATE TABLE` or leave a second copy of every row beside the first,
+    and the operator would find out on the trip after the one that went wrong.
+    """
+    statements = []
+    for table, _restore_into, preserved, _restored in DROPPED_WHOLE:
+        kept = _preserved_name(table)
+        statements.append(
+            f"DROP TABLE IF EXISTS public.{kept};\n"
+            f"CREATE TABLE public.{kept} AS SELECT {preserved} FROM public.{table};"
+        )
+    return "\n".join(statements)
+
+
+def _restore_the_dropped_tables() -> str:
+    """Put every preserved row back, parents first, and take the scratch tables away.
+
+    One PL/pgSQL block for `b8c41f7d2e05`'s reason: `alembic upgrade --sql` has to
+    carry this, and it has to do the right thing on a database that never went
+    down, where the scratch tables are simply absent. `to_regclass` answers NULL
+    for a table that is not there rather than raising, which is what makes that
+    check a branch instead of an error.
+    """
+    body = []
+    for table, restore_into, _preserved, restored in DROPPED_WHOLE:
+        kept = _preserved_name(table)
+        body.append(
+            f"    IF to_regclass('public.{kept}') IS NOT NULL THEN\n"
+            f"        INSERT INTO public.{table} ({restore_into})\n"
+            f"        SELECT {restored} FROM public.{kept};\n"
+            f"        DROP TABLE public.{kept};\n"
+            f"    END IF;"
+        )
+    return "DO $$\nBEGIN\n" + "\n".join(body) + "\nEND\n$$;"
+
+
+# Keep every window's term before the column goes, and put it back afterwards.
+#
+# The restore runs **before** the backfill below, so a window whose term was
+# preserved gets its own term back and the backfill sees nothing left to fill.
+# The two answer the same question for different databases: the restore is for one
+# that has been here before, and the backfill is for one that has not.
+PRESERVE_THE_WINDOW_TERMS = f"""
+DROP TABLE IF EXISTS public.{WINDOW_TERM_PRESERVED};
+CREATE TABLE public.{WINDOW_TERM_PRESERVED} (
+    survey_window_id uuid PRIMARY KEY,
+    term_id uuid NOT NULL
+);
+INSERT INTO public.{WINDOW_TERM_PRESERVED} (survey_window_id, term_id)
+SELECT id, term_id FROM public.survey_window;
+"""
+
+RESTORE_THE_WINDOW_TERMS = f"""
+DO $$
+BEGIN
+    IF to_regclass('public.{WINDOW_TERM_PRESERVED}') IS NULL THEN
+        RETURN;
+    END IF;
+
+    UPDATE public.survey_window AS w
+       SET term_id = kept.term_id
+      FROM public.{WINDOW_TERM_PRESERVED} AS kept
+     WHERE kept.survey_window_id = w.id;
+
+    DROP TABLE public.{WINDOW_TERM_PRESERVED};
+END
+$$;
+"""
+
+# Every window still without a term takes its section's, which is the only answer
+# there is: the composite foreign key created two statements later says the two
+# have to agree, so a window whose section is in a term is a window in that term.
+# `section.term_id` is `NOT NULL` (E0-06) and every window references a section, so
+# this covers every row — verified against the development database's 188 windows,
+# which is where the abort this replaces was measured.
+BACKFILL_THE_WINDOW_TERMS = """
+UPDATE public.survey_window AS w
+   SET term_id = s.term_id
+  FROM public.section AS s
+ WHERE s.id = w.section_id
+   AND w.term_id IS NULL
+"""
+
 
 def upgrade() -> None:
-    """Apply this revision: the four survey tables, then the window's term rule."""
+    """Apply this revision: the four survey tables, then the window's term rule.
+
+    **The restores come after the tables and before anything reads them**, and the
+    window's term is restored before it is backfilled. Both are no-ops on a
+    database that has never been downgraded — the scratch tables are simply not
+    there — which is every database this revision has actually run against, CI's
+    included.
+    """
     op.create_table(
         "question_set",
         sa.Column("id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False),
@@ -222,6 +399,8 @@ def upgrade() -> None:
         ),
     )
 
+    op.execute(_restore_the_dropped_tables())
+
     # ADR 0018's rule, in the order the server needs it: the referenced uniques
     # first, then the column that carries the term, then the limbs. The plain
     # foreign keys go last, after the composite ones that replace them, so there
@@ -229,7 +408,13 @@ def upgrade() -> None:
     # unreferenced.
     op.create_unique_constraint(SECTION_TERM_UNIQUE, "section", ["id", "term_id"])
     op.create_unique_constraint(WEEK_TERM_UNIQUE, "week", ["id", "term_id"])
-    op.add_column("survey_window", sa.Column("term_id", sa.Uuid(), nullable=False))
+    # Added nullable, filled, then made NOT NULL. Adding it NOT NULL in one
+    # statement is what stranded a database holding windows; see this revision's
+    # docstring.
+    op.add_column("survey_window", sa.Column("term_id", sa.Uuid(), nullable=True))
+    op.execute(RESTORE_THE_WINDOW_TERMS)
+    op.execute(BACKFILL_THE_WINDOW_TERMS)
+    op.alter_column("survey_window", "term_id", nullable=False)
     op.create_foreign_key(
         SECTION_TERM_FK,
         "survey_window",
@@ -261,7 +446,17 @@ def downgrade() -> None:
 
     The tables are dropped children first: every foreign key here is `RESTRICT`,
     so dropping `question_set` before `question` would be refused.
+
+    **Nothing is discarded.** Every window's term, and every row of the four
+    tables, is copied into a scratch table first and put back by `upgrade`. A
+    downgrade here used to lose every stored submission and every window's term
+    outright, and the re-upgrade then re-added `term_id` `NOT NULL` over the
+    windows it had emptied — so the database was stranded below every revision E2
+    added, with the responses already gone. The scratch tables stay while the
+    database sits at the older revision, which is where the values live in the
+    meantime; the upgrade is the only thing that removes them.
     """
+    op.execute(PRESERVE_THE_WINDOW_TERMS)
     op.create_foreign_key(
         SECTION_FK, "survey_window", "section", ["section_id"], ["id"], ondelete="RESTRICT"
     )
@@ -274,6 +469,7 @@ def downgrade() -> None:
     op.drop_constraint(WEEK_TERM_UNIQUE, "week", type_="unique")
     op.drop_constraint(SECTION_TERM_UNIQUE, "section", type_="unique")
 
+    op.execute(_preserve_the_dropped_tables())
     op.drop_table("answer")
     op.drop_index(op.f("ix_response_week_id"), table_name="response")
     op.drop_index("ix_response_section_id_week_id", table_name="response")
