@@ -110,10 +110,22 @@ class OpenSurvey(BaseModel):
 
 
 class EnrolledSection(BaseModel):
-    """One section this reader is enrolled in today, and its survey state."""
+    """One section this reader is enrolled in today, and its survey state.
+
+    **`course_label` is the reader's own enrollment metadata and nobody else's**
+    (E2-17 item 5). It is composed from the course row above *this* section and
+    the prefix row above that course, both reached by following the section's own
+    foreign keys upward, so the only course any answer can name is one the reader
+    is enrolled in. §4.1 item 1 is what that has to hold against, and
+    `tests/integration/test_the_course_label_names_nothing_outside_the_students_enrollment.py`
+    is where it is measured, inside the isolated invariant pass.
+    """
 
     section_id: UUID = Field(description="The section row.")
     section_code: str = Field(description="The section code a person reads (SPEC §2.2).")
+    course_label: str = Field(
+        description="The reader's own course as a person names it: prefix, number, title."
+    )
     survey_is_open: bool = Field(
         description="Whether a survey is open for this section at this moment."
     )
