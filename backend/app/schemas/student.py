@@ -113,21 +113,39 @@ class EnrolledSection(BaseModel):
     """One section this reader is enrolled in today, and its survey state.
 
     **`course_label` is the reader's own enrollment metadata and nobody else's**
-    (E2-17 item 5). It is composed from the course row above *this* section and
-    the prefix row above that course, both reached by following the section's own
-    foreign keys upward, so the only course any answer can name is one the reader
-    is enrolled in. §4.1 item 1 is what that has to hold against, and
+    (E2-17 item 5, respelled by FIX-01 item 2). It is composed from the section's
+    own row, the course row above it, the prefix row above that course and the
+    term the section belongs to — every one of them reached by following the
+    section's own foreign keys upward, so the only course any answer can name is
+    one the reader is enrolled in. §4.1 item 1 is what that has to hold against,
+    and
     `tests/integration/test_the_course_label_names_nothing_outside_the_students_enrollment.py`
     is where it is measured, inside the isolated invariant pass.
+
+    **`next_window_opens_at` is this section's own next window and no other's**
+    (FIX-01 item 4). It is the opening instant of the first materialized
+    `survey_window` for *this* section that has not opened yet, and it is null
+    both while a survey is open and when nothing is ahead. The same scoping
+    argument covers it: a "when does the next one open" lookup that stopped
+    naming the section would put another section's calendar on this page.
     """
 
     section_id: UUID = Field(description="The section row.")
     section_code: str = Field(description="The section code a person reads (SPEC §2.2).")
     course_label: str = Field(
-        description="The reader's own course as a person names it: prefix, number, title."
+        description=(
+            "The reader's own course as a person names it: prefix, number, section code, "
+            "title, term name."
+        )
     )
     survey_is_open: bool = Field(
         description="Whether a survey is open for this section at this moment."
+    )
+    next_window_opens_at: datetime | None = Field(
+        description=(
+            "When this section's next survey opens, or null while one is open and when "
+            "nothing is ahead."
+        )
     )
     open_survey: OpenSurvey | None = Field(
         description="The open survey, or null when none is open."
@@ -141,8 +159,20 @@ class StudentSurveyView(BaseModel):
     several and the form asks about all of them at once. An empty list is an
     ordinary answer: somebody between terms is enrolled in nothing today and is
     told so, rather than refused.
+
+    **`institution_timezone` is deployment configuration, not person data**
+    (FIX-01 item 4). SPEC §3.1 puts every window at a wall-clock time in the
+    institution's zone, and the screen renders the next opening with an
+    abbreviation derived from the date; a browser handed an instant and no zone
+    renders it in the reader's own, so a student travelling — or one whose
+    laptop is set to UTC — would be told an hour nobody's institution keeps. It
+    is the same string for every reader of the deployment and says nothing about
+    any of them.
     """
 
     sections: list[EnrolledSection] = Field(
         description="The reader's live enrollments, in section-code order."
+    )
+    institution_timezone: str = Field(
+        description="The IANA zone this deployment's survey windows are written in (SPEC §8)."
     )

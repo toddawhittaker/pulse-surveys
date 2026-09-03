@@ -70,7 +70,7 @@ enrolled from tonight a calendar day out. `clock.today` is the one place that
 conversion lives.
 """
 
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
 
 from sqlalchemy import or_, select
@@ -91,7 +91,7 @@ from app.schemas.student import (
 )
 from app.services import clock
 from app.services.section_codes import week_of_the_term
-from app.services.survey_windows import open_window_for_section
+from app.services.survey_windows import next_window_for_section, open_window_for_section
 
 __all__ = ["survey_for_student"]
 
@@ -123,7 +123,7 @@ def survey_for_student(session: Session, *, user_id: UUID, settings: Settings) -
             session, user_id=user_id, today=today
         )
     ]
-    return StudentSurveyView(sections=sections)
+    return StudentSurveyView(sections=sections, institution_timezone=settings.institution_timezone)
 
 
 def _live_enrollments(
@@ -208,8 +208,11 @@ def _section_view(
     return EnrolledSection(
         section_id=section.id,
         section_code=section.lms_section_code,
-        course_label=_course_label(course=course, prefix=prefix),
+        course_label=_course_label(course=course, prefix=prefix, section=section, term=term),
         survey_is_open=window is not None,
+        next_window_opens_at=_next_window_opens_at(session, section=section, settings=settings)
+        if window is None
+        else None,
         open_survey=(
             None
             if window is None
@@ -218,22 +221,59 @@ def _section_view(
     )
 
 
-def _course_label(*, course: Course, prefix: Prefix) -> str:
-    """How a student's own course names itself on their page — E2-17 item 5.
+def _next_window_opens_at(
+    session: Session, *, section: Section, settings: Settings
+) -> datetime | None:
+    """When this section's next survey opens, for a section whose survey is shut.
 
-    "BIOL 215 — Cell Biology": the prefix code, the LMS number, an em dash, the
-    LMS title. The heading rendered a bare section code until this ticket, and a
-    §2.2 code names a section to the timetable rather than to the person answering
-    the survey.
+    FIX-01 item 4. The closed-state placeholder used to say only "when the next
+    survey for this course opens, it appears here" while the system held the row
+    that names the minute; this is that row's instant, and `None` when there is
+    nothing ahead — the state the undated sentence is kept for.
 
-    All three parts are `NOT NULL` on their rows, so there is no absent-part case
+    **Asked only when no window is open**, which is the caller's `if` above
+    rather than a rule inside the lookup: a section with a form on screen is not
+    a section waiting for one, and a page that offered this week's questions and
+    announced next week's opening beside them would be showing two states at
+    once.
+
+    **A second clock reading per section, deliberately.** The open-window read
+    above takes its own, so a section is asked "are you open?" and "what is
+    next?" a few microseconds apart. Threading one instant through both would
+    make this module a second place the meaning of "now" is decided, and the two
+    questions are only ever answered a microsecond apart on a clock whose
+    resolution is a window boundary days wide.
+    """
+    window = next_window_for_section(session, section, settings=settings)
+    return None if window is None else window.opens_at
+
+
+def _course_label(*, course: Course, prefix: Prefix, section: Section, term: Term) -> str:
+    """How a student's own course names itself on their page — FIX-01 item 2.
+
+    "MATH 140 E1FF — College Algebra, Fall 2026": the prefix code, the LMS
+    number, the §2.2 section code, an em dash, the LMS title, a comma and the
+    term's name. That order is the owner's ruling of 2026-09-03. E2-17 composed
+    "BIOL 215 — Cell Biology" and the heading carried the section code in a
+    separate span beside it; the page never said which term it was about, and
+    the ruling folds the code into the one string and adds the term.
+
+    All five parts are `NOT NULL` on their rows, so there is no absent-part case
     to fall back from. `lms_title` is `NOT NULL` too and a platform may send a
     context with no title, which E1-10 handles at ingestion by writing "PREFIX
     NUMBER" and marking `title_is_fallback` — so the worst this composes is
-    "BIOL 215 — BIOL 215", which is the ingestion's stated fallback showing
-    through and not a hole here.
+    "BIOL 215 R3WW — BIOL 215, Fall 2026", which is the ingestion's stated
+    fallback showing through and not a hole here.
+
+    **The term is the section's own**, handed down from the row
+    `_live_enrollments` joined through `section.term_id`. A term looked up any
+    other way would be a second pairing between a section and its term for the
+    label to get wrong.
     """
-    return f"{prefix.code} {course.lms_number} — {course.lms_title}"
+    return (
+        f"{prefix.code} {course.lms_number} {section.lms_section_code} — "
+        f"{course.lms_title}, {term.name}"
+    )
 
 
 def _open_survey(

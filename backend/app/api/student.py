@@ -147,7 +147,10 @@ def student_survey(
     student landing is reached through an enrollment (ADR 0028), so a `STUDENT`
     session without one is a token from before that resolution existed; the honest
     answer is that this reader is enrolled in nothing, and the dangerous one would
-    be a query with its scoping left empty.
+    be a query with its scoping left empty. That answer still carries the
+    deployment's `institution_timezone` (FIX-01 item 4), because it is
+    configuration rather than anything about the reader and the contract makes it
+    a member of every answer.
 
     **Synchronous, and FastAPI runs it in a threadpool.** The session is
     synchronous (ADR 0013) and every statement here is a blocking read, so a
@@ -157,7 +160,7 @@ def student_survey(
     settings: Settings = request.app.state.settings
     response.headers["Cache-Control"] = "no-store"
     if claims.user_id is None:
-        return StudentSurveyView(sections=[])
+        return StudentSurveyView(sections=[], institution_timezone=settings.institution_timezone)
     return survey_for_student(session, user_id=UUID(claims.user_id), settings=settings)
 
 
