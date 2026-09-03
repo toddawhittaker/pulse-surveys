@@ -58,6 +58,32 @@ MOST_CASES = 140
 # ordinary text.
 MOCK_MARKER_PREFIX = "mock-ai:"
 
+# The number of cases each hard family shipped with — ticket E2-18.
+#
+# The other set-shape guards in this module hold the total (80-140), ten cases per
+# class, and each hard family non-empty. A ninety-eight-case set keeping *one*
+# short-substantive case and *one* long-vacuous case clears every one of them, and
+# it is a different measurement: the two families that carry the whole point of
+# the set become rounding error, and SPEC §9.3's precision and recall are taken
+# almost entirely over cases the character rule already gets right. That is a
+# lowered floor wearing a costume, the same move
+# `.claude/review-fixtures/eval-floor-lowered.diff` plants, and until E2-18 the
+# only thing standing against it was a non-empty check.
+#
+# The numbers are the committed set's own sizes, so adding cases is green and
+# removing them is red. **A deliberate narrowing is allowed and moves these
+# numbers in the pull request that narrows the set**, beside the re-measured
+# floors — a set and the floors measured over it move together or neither moves.
+#
+# The keys are the family tokens rather than the constants because
+# `cases.py` is imported through a fixture; the test below requires them to be
+# exactly the two families the set's own module names as hard, so a family rename
+# cannot quietly drop a floor.
+HARD_FAMILY_FLOORS = {
+    "short_substantive": 12,
+    "long_vacuous": 12,
+}
+
 
 def eval_module(name: str) -> ModuleType:
     """Import one of `tests/evals/`'s modules, or fail naming the deliverable.
@@ -451,6 +477,15 @@ def test_the_character_heuristic_cannot_score_perfectly_on_this_set(
     character rule scores 1.0 on. **The near miss that must stay green:** any set
     that keeps one case of each hard family, since this asserts the property and
     not the case count.
+
+    **That near miss is a gap in this test and is no longer a gap in the module.**
+    A set holding one short-substantive and one long-vacuous case is wrong in both
+    directions, so it passes here and should — the property this test asserts is
+    about the heuristic's score rather than about the set's size, and widening it
+    to cover both would make one red mean two things.
+    `test_each_hard_family_still_holds_the_cases_it_shipped_with` (ticket E2-18) is
+    what refuses that set, and it is the reason this paragraph is a statement of
+    scope rather than a concession.
     """
     measure_module = eval_module("tests.evals.measure")
     cases = cases_module.CASES
@@ -506,4 +541,65 @@ def test_the_set_holds_enough_of_both_classes_for_a_rate_to_mean_anything(
     assert len(negatives) >= 10, (
         f"the set holds {len(negatives)} cases outside the positive class. Precision over "
         "that few is a rate a single answer can swing."
+    )
+
+
+def test_each_hard_family_still_holds_the_cases_it_shipped_with(
+    cases_module: ModuleType,
+) -> None:
+    """The two families the set exists for keep their size, not merely a member — ticket E2-18.
+
+    Every other structural guard in this module is satisfied by a set that has been
+    hollowed out where it matters. The total stays in range if the easy families
+    grow to fill the space; ten per class stays true because the easy families
+    carry both classes; and each hard family's own test asserts only that it is
+    non-empty. So a ninety-eight-case set with one short-substantive case and one
+    long-vacuous case is green everywhere and is a different measurement — the
+    cases the character rule gets wrong stop being two-fifths of the negatives and
+    become noise, and SPEC §9.3's precision and recall are then mostly a report on
+    the cases it gets right.
+
+    **This is a narrowed set, which is a lowered floor with better manners.** It is
+    the move `.claude/review-fixtures/eval-floor-lowered.diff` plants, and
+    `CLAUDE.md` puts moving an eval floor in its own pull request for the same
+    reason: whether the gate got easier must be visible in the diff of the thing
+    that decides it.
+
+    **The boundary family has no row here on purpose.** Its size is already pinned
+    by `test_the_boundary_family_straddles_the_character_floor_in_both_directions`,
+    which requires four distinct length-and-verdict combinations and so cannot be
+    satisfied by fewer than four cases. A floor here would restate that guard and
+    give two reds for one defect.
+
+    **The mutation this kills:** delete cases from `_SHORT_SUBSTANTIVE` or
+    `_LONG_VACUOUS` and pad the total out of the easy families, which passes every
+    other test in this module and in the eval suite. **The near miss that must stay
+    green:** adding cases to either family, or rewording the ones that are there,
+    since this asserts a minimum rather than a count.
+    """
+    named_hard_families = {cases_module.SHORT_SUBSTANTIVE, cases_module.LONG_VACUOUS}
+    assert set(HARD_FAMILY_FLOORS) == named_hard_families, (
+        f"this module holds floors for {sorted(HARD_FAMILY_FLOORS)} and `cases.py` names "
+        f"{sorted(named_hard_families)} as the families the character rule gets wrong. A "
+        "floor keyed to a family the set no longer has is a floor over zero cases that never "
+        "fires, and a family with no floor is the one that can be emptied."
+    )
+
+    below = [
+        (family, floor, sum(1 for case in cases_module.CASES if case.family == family))
+        for family, floor in sorted(HARD_FAMILY_FLOORS.items())
+        if sum(1 for case in cases_module.CASES if case.family == family) < floor
+    ]
+    assert not below, (
+        f"these hard families hold fewer cases than they shipped with, as "
+        f"(family, floor, cases now): {below}.\n"
+        "\n"
+        "E2-12's scope names them as 'the two the 25-character rule misclassifies by "
+        "construction'. Thinning one does not fail any other test here — the total stays in "
+        "range and both classes keep their ten — and it makes SPEC §9.3's floors easier to "
+        "clear without changing a number anybody reviews.\n"
+        "\n"
+        "If the set is being narrowed on purpose, move the floor in `HARD_FAMILY_FLOORS` in "
+        "the pull request that narrows it, saying which cases went and why, and re-measure "
+        "the floors the smaller set is supposed to hold."
     )
