@@ -50,13 +50,27 @@ test that only read the tables could not tell a launch that refused to bind from
 launch that was refused outright, and those are opposite outcomes for the person
 holding the browser.
 
-**Deliberately not marked `invariant`.** The §4.1 pass is CI's isolated run of the
-confidentiality *denials*, and the E1 boundary review recorded this finding's character
-in as many words: "write/ingest integrity, not a read leak — the roster is never
-disclosed to the trigger, and the INSTRUCTOR row goes to the section's real teacher".
-What these tests assert is that a row is not written and an address is not stored, which
-is neither a read path nor a disclosure. Marking them would widen what that pass means
-on the strength of a resemblance.
+**Marked `invariant` from E2-14, and this paragraph used to say the opposite.** As
+written for E2-02 it read that marking these tests would widen what the §4.1 pass means
+"on the strength of a resemblance": the pass is CI's isolated run of the confidentiality
+*denials*, and the E1 boundary review had recorded this finding's character as
+"write/ingest integrity, not a read leak — the roster is never disclosed to the trigger,
+and the INSTRUCTOR row goes to the section's real teacher". That argument was about the
+*finding*. It is not the argument for the rule these tests turned out to be the only
+behavioural cover of.
+
+What changed is a measurement. The E2 boundary review mutated
+`app.services.authz.leadership_grant_covers` to answer `True` unconditionally and found
+it **surviving the entire isolated pass** (`docs/tickets/e2/boundary-review.md`, HIGH,
+confirmed), with this module — unmarked — the only thing that killed it. That predicate
+is the live enforcement point of SPEC §4.1 invariant 2, "A Lead Faculty assignment never
+grants sibling leads' courses, at any point in the purview union", and the lead-faculty
+test below is that invariant driven end to end through a real launch. So the marker
+rests on the item these tests enforce rather than on a resemblance to a denial, which is
+the distinction the old paragraph was drawing and the reason it is restated rather than
+deleted. The predicate is now asserted directly as well, in
+`test_the_leadership_grant_covers_no_sibling_leads_course.py`; both are in the pass,
+because a launch-driving test and a unit-grain one fail for different reasons.
 
 **Nothing about the mock's seed is transcribed.** The context label, the course number,
 the section code and the roster address are read off the launch the platform signed, and
@@ -79,7 +93,7 @@ from typing import Any
 
 import pytest
 
-pytestmark = [pytest.mark.integration, pytest.mark.lti]
+pytestmark = [pytest.mark.integration, pytest.mark.lti, pytest.mark.invariant]
 
 # `launch_driver`, `launch_ground`, `provisioning_contract` and `provisioned_rows` come
 # from `tests/fixtures/provisioning.py`; `web_identity` from

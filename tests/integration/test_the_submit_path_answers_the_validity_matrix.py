@@ -13,6 +13,17 @@ off-step value, and a request that is not a student's. ADR 0056's taxonomy is
 `test_two_submissions_cannot_both_become_a_response.py`; the clock is
 `test_a_submission_is_stamped_by_the_clock_service.py`.
 
+**One cell of the matrix above lives next door, and E2-14 is why.** The
+foreign-section cell — "a section the student is not enrolled in answers exactly
+as an unknown one" — is a SPEC §4.1 denial, and it held its `invariant` marker on
+the test rather than on this module, which is the currency
+`tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`
+refuses. It moved unchanged to
+`test_the_submit_paths_refusal_names_nothing_about_another_section.py`, whose
+name carries a denial shape so that the sweep governs it; that module's docstring
+records the direction and why widening the shape list was rejected. Nothing about
+the cell changed, and it is collected into the isolated pass exactly as it was.
+
 **Every refused cell is written beside an accepted one** (`docs/MISTAKES.md`
 entry 3, and the near-miss pairs E2-08's traps name). A 422 says only that the
 route refused something; the submission that differs from it in one value is what
@@ -36,7 +47,6 @@ now asserts a number rather than a range.
 """
 
 from typing import Any
-from uuid import uuid4
 
 import pytest
 from fixtures.submit import (
@@ -744,70 +754,12 @@ def test_a_comment_that_has_been_classified_cannot_be_withdrawn_by_a_resubmissio
 
 # ---------------------------------------------------------------------------
 # Scoping. SPEC §4.1's discipline: a section the student cannot reach is
-# indistinguishable from one that does not exist.
+# indistinguishable from one that does not exist. That cell —
+# `test_a_section_the_student_is_not_enrolled_in_answers_exactly_as_an_unknown_one`
+# — is in `test_the_submit_paths_refusal_names_nothing_about_another_section.py`
+# from E2-14, unchanged; this module's docstring says why it moved. It is
+# mentioned here rather than left to be missed by a reader walking the matrix.
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.invariant
-def test_a_section_the_student_is_not_enrolled_in_answers_exactly_as_an_unknown_one(
-    open_submit_tool: Any,
-    submit_world: SubmitWorld,
-    signed_in_student: Any,
-    mock_ai: Any,
-    mock_ai_endpoint: Any,
-    open_now: tuple[Any, Any],
-    submit_contract: Any,
-) -> None:
-    """A foreign section is refused, and the refusal says nothing about its existing.
-
-    SPEC §4.1 item 1 is asserted from E2 because this is the first epic with a
-    student-visible path "and the scoping that gives 'another section' its
-    meaning". A 403 here, or a 404 whose body differs from an unknown id's, tells
-    a student which section codes are real — a membership oracle over the whole
-    institution, one request at a time.
-
-    **The refusal is asserted, not the absence of a name.** The two responses are
-    compared to each other, byte for byte in status and body: a test that only
-    checked the foreign section's code was missing from the body would pass
-    against a route that answered 403 "not enrolled".
-
-    **The foreign section has an open window of its own**, seeded with the same
-    instants, so the only difference between it and the student's own section is
-    the enrollment. Without that the refusal would be equally well explained by
-    the section having no survey open.
-
-    **The mutation it kills:** the enrollment check written as a 403, and the
-    enrollment check dropped entirely — which would let any signed-in student
-    write into any section in the deployment.
-    """
-    student = a_student_in_an_open_window(
-        open_submit_tool, submit_world, signed_in_student, mock_ai_endpoint, open_now
-    )
-    world = student.world
-    foreign = world.foreign_section()
-    submission = a_valid_submission(comment=marked(mock_ai, "substantive"))
-
-    not_enrolled = student.submit(submission, section=foreign)
-    unknown = student.submit(submission, section={world.key_of(SECTION_TABLE): uuid4()})
-
-    assert not_enrolled.status_code == submit_contract.not_found, (
-        f"A section the student is not enrolled in was answered {not_enrolled.status_code}. "
-        f"E2-08's work order settles {submit_contract.not_found}, 'with the same body a truly "
-        f"unknown section id gets'. Body begins {not_enrolled.text[:400]!r}."
-    )
-    assert unknown.status_code == submit_contract.not_found, (
-        f"An unknown section id was answered {unknown.status_code}, so the comparison below "
-        f"would be against the wrong baseline. Body begins {unknown.text[:400]!r}."
-    )
-    assert not_enrolled.text == unknown.text, (
-        "A section the student is not enrolled in is distinguishable from one that does not "
-        f"exist: {not_enrolled.text[:300]!r} against {unknown.text[:300]!r}. That difference is "
-        "an oracle for which sections exist, answerable by any signed-in student against every "
-        "section id in the institution."
-    )
-    assert (
-        world.responses() == []
-    ), f"A submission into a section the student is not enrolled in stored {world.responses()}."
 
 
 # ---------------------------------------------------------------------------
@@ -884,7 +836,9 @@ def test_a_session_that_is_not_a_students_gets_the_same_answer_as_no_session_at_
     role — tells the holder of any session which routes exist for which role.
 
     **Both halves are compared to each other**, status and body, for the reason
-    the foreign-section test gives: asserting only that the instructor was
+    the foreign-section test gives (it is in
+    `test_the_submit_paths_refusal_names_nothing_about_another_section.py` from
+    E2-14): asserting only that the instructor was
     refused passes against a route that says "students only", which is the leak.
 
     **The mutation it kills:** `require_student` written as "any verified

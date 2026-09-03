@@ -67,6 +67,21 @@ from typing import Any
 import pytest
 from fixtures.routing import registered_paths
 
+# E2-14 item 4. This module is the only thing asserting that the clock-writing
+# routes answer 404 outside development, and it carried no `invariant` marker
+# while both sibling exposure modules did — measured by the E2 boundary review
+# (`docs/tickets/e2/boundary-review.md`). The control it writes is unauthenticated
+# and moves the clock every survey window, term lookup and live-enrollment check
+# reads, so a deployment that ships it open widens what a student and a stranger
+# alike can reach; CI's isolated §4.1 pass is where a gate like that belongs.
+#
+# **At module level rather than per test**, which is where it differs from those
+# siblings. `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_
+# invariant_pass.py` pins that currency and gives the reason: a module holding its
+# marker per test reads, to every later reader, exactly like a module inside the
+# pass, and the module's *next* test inherits nothing.
+pytestmark = pytest.mark.invariant
+
 ENVIRONMENT_VARIABLE = "ENVIRONMENT"
 
 # The value the whole `/dev` surface is gated on, exact — not a prefix, not
