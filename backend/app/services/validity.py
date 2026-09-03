@@ -63,7 +63,7 @@ from collections.abc import Iterable, Sequence
 from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.ai.contracts import CommentValidityOutput, ValidityVerdict
 from app.ai.gateway import (
@@ -351,6 +351,13 @@ def enqueue_reclassification() -> bool:
     return True
 
 
+# The same table, read a second time as the verdict that would resolve a floored
+# one. An alias rather than a second import, because both legs below are
+# `classification` and the correlated condition has to be able to say which row it
+# means.
+_JudgedVerdict = aliased(Classification, name="judged_verdict")
+
+
 def unresolved_floored_answers(session: Session) -> Sequence[UUID]:
     """Every comment whose only verdicts came from the floor (ADR 0054, ADR 0055).
 
@@ -361,11 +368,38 @@ def unresolved_floored_answers(session: Session) -> Sequence[UUID]:
     a real prompt stem, and it drops out of this set — that is what "resolved"
     means, and it is read off the rows rather than written onto them, because
     `classification` takes no `UPDATE` (ADR 0055).
+
+    **The anti-join is `NOT EXISTS` and may never go back to `NOT IN`** (E2-16
+    item 4, and `tests/integration/test_the_floored_comment_sweep_survives_a_terms_volume.py`
+    reads the statements off the wire to hold it). Postgres runs `NOT IN
+    (SELECT …)` as a hashed subplan and abandons the hash once it outgrows
+    `work_mem` — 4MB by default — after which it rescans `classification` once per
+    outer row. The epic-boundary review measured this query at **72 seconds** over
+    ~300k rows, 46 with the supporting index alone, and **166ms** in this shape
+    with the index. The job is enqueued on every floored submission and again on a
+    beat, so it runs hardest during the provider outage that produced the rows.
+
+    The near miss that is not a repair: fetching the judged set into Python and
+    sending it back as `NOT IN (:p1, :p2, …)`. That is the same unbounded set moved
+    from the planner into the request.
+
+    **The supporting index is `ix_classification_task_prompt_version`**, on the two
+    columns both legs filter (`b1e7d4a90c26`). The rewrite and the index are not
+    substitutes for each other and the measurements above are why.
     """
-    judged = select(Classification.answer_id).where(
-        Classification.task == ClassificationTask.COMMENT_VALIDITY,
-        Classification.prompt_version != FLOOR_PROMPT_VERSION,
-        Classification.answer_id.is_not(None),
+    # `answer_id IS NOT NULL` on the inner leg is implied by the correlation — a
+    # null there can never equal the outer row's non-null answer — and it is kept
+    # because it is the old shape's own filter and its absence would read as a
+    # dropped condition rather than as an implication.
+    judged = (
+        select(_JudgedVerdict.id)
+        .where(
+            _JudgedVerdict.answer_id == Classification.answer_id,
+            _JudgedVerdict.task == ClassificationTask.COMMENT_VALIDITY,
+            _JudgedVerdict.prompt_version != FLOOR_PROMPT_VERSION,
+            _JudgedVerdict.answer_id.is_not(None),
+        )
+        .correlate(Classification)
     )
     floored = (
         select(Classification.answer_id)
@@ -373,7 +407,7 @@ def unresolved_floored_answers(session: Session) -> Sequence[UUID]:
             Classification.task == ClassificationTask.COMMENT_VALIDITY,
             Classification.prompt_version == FLOOR_PROMPT_VERSION,
             Classification.answer_id.is_not(None),
-            Classification.answer_id.not_in(judged),
+            ~judged.exists(),
         )
         .distinct()
     )
