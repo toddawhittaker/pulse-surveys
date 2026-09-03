@@ -48,14 +48,25 @@ filled from `section.term_id` — which is `NOT NULL` and covers every window,
 because a window's section is what its term has to agree with anyway — and only
 then made `NOT NULL`.
 
-**The downgrade preserves, and the upgrade restores** (E2-16, the same house
-pattern `b8c41f7d2e05` is the worked example of). What this revision's downgrade
-removes is not derivable from what it leaves: `survey_window.term_id` disappears,
-and `question_set`, `question`, `response` and `answer` are dropped whole, taking
-every stored submission with them. Each is copied into a scratch table first and
-put back by the upgrade, keyed by the row's own primary key, so a down-and-up
-trip is an identity rather than a data loss followed by a plausible-looking
-migration.
+**The downgrade preserves what is not derivable, and the upgrade restores it**
+(E2-16, the same house pattern `b8c41f7d2e05` is the worked example of).
+`question_set`, `question`, `response` and `answer` are dropped whole, taking
+every stored submission with them, and nothing left behind can reconstruct one —
+so each is copied into a scratch table first and put back by the upgrade, keyed by
+the row's own primary key. A down-and-up trip is then an identity rather than a
+data loss followed by a plausible-looking migration.
+
+**`survey_window.term_id` is the column that is *not* preserved, and the
+distinction is the rule rather than an exception to it.** The composite foreign
+key this revision adds makes a window's term its section's term, so the backfill
+above computes exactly what a preserve would have carried — the two are the same
+value for every row that can exist at head. Both were written at first, and the
+E2-16 mutation battery measured what that cost: deleting either one alone left
+every round-trip test green, because the other silently covered for it. One
+guarantee held in two places is a guarantee neither place holds. The backfill
+stays and the preserve is gone, which is the test `b1e7d4a90c26` states for the
+same column on `response` — a preserve is owed for what cannot be recomputed, and
+for nothing else.
 
 **Both halves are edits to this revision rather than a new one, deliberately.**
 A later revision can add a column, and it cannot repair a `downgrade()` — the
@@ -134,14 +145,6 @@ WEEK_TERM_FK = "fk_survey_window_week_id_term_id_week"
 # and the upgrade that restores from it, and the upgrade drops it — so a database
 # standing at head never has one and `alembic check` never sees it.
 # ---------------------------------------------------------------------------
-
-# Every window's term, keyed by the window's own primary key. Keyed rather than
-# merely kept: restoring two windows' terms onto each other would leave the set of
-# stored terms exactly right and put each window in the other's term, which the
-# composite foreign keys below would then happily accept if both sections and
-# weeks moved together — a corruption arriving through a migration instead of
-# through a write.
-WINDOW_TERM_PRESERVED = "survey_window_term_preserved"
 
 # The four tables the downgrade drops whole, in the order rows have to be put
 # back: a parent before the child that references it. Each entry is the table, the
@@ -228,45 +231,35 @@ def _restore_the_dropped_tables() -> str:
     return "DO $$\nBEGIN\n" + "\n".join(body) + "\nEND\n$$;"
 
 
-# Keep every window's term before the column goes, and put it back afterwards.
+# Every window takes its section's term, and this is the **only** mechanism that
+# fills the column — there is no preserve beside it and there must not be.
 #
-# The restore runs **before** the backfill below, so a window whose term was
-# preserved gets its own term back and the backfill sees nothing left to fill.
-# The two answer the same question for different databases: the restore is for one
-# that has been here before, and the backfill is for one that has not.
-PRESERVE_THE_WINDOW_TERMS = f"""
-DROP TABLE IF EXISTS public.{WINDOW_TERM_PRESERVED};
-CREATE TABLE public.{WINDOW_TERM_PRESERVED} (
-    survey_window_id uuid PRIMARY KEY,
-    term_id uuid NOT NULL
-);
-INSERT INTO public.{WINDOW_TERM_PRESERVED} (survey_window_id, term_id)
-SELECT id, term_id FROM public.survey_window;
-"""
-
-RESTORE_THE_WINDOW_TERMS = f"""
-DO $$
-BEGIN
-    IF to_regclass('public.{WINDOW_TERM_PRESERVED}') IS NULL THEN
-        RETURN;
-    END IF;
-
-    UPDATE public.survey_window AS w
-       SET term_id = kept.term_id
-      FROM public.{WINDOW_TERM_PRESERVED} AS kept
-     WHERE kept.survey_window_id = w.id;
-
-    DROP TABLE public.{WINDOW_TERM_PRESERVED};
-END
-$$;
-"""
-
-# Every window still without a term takes its section's, which is the only answer
-# there is: the composite foreign key created two statements later says the two
-# have to agree, so a window whose section is in a term is a window in that term.
+# **Why a preserve would be dead code here.** The composite foreign key created
+# three statements later says a window's term is its section's term, so for every
+# row that can exist at head the two values are the same value. A scratch table
+# holding what the downgrade dropped would therefore always be restoring exactly
+# what this statement computes — which the E2-16 mutation battery measured: with
+# both in place, deleting either one alone kept every round-trip test green, and
+# only deleting both together reddened them. That is one guarantee held in two
+# places, so neither is held by anything.
+#
+# It is the backfill that stays, rather than the preserve, because a preserve is
+# owed only for what is **not** derivable — the test `b1e7d4a90c26` states and
+# applies to `response.term_id`, and this revision now applies to the same column
+# on `survey_window`. `response`, `answer`, `question_set` and `question` are
+# preserved below precisely because nothing left behind can reconstruct them.
+#
+# **And where the two would disagree, the backfill is the right one.** If a
+# section's term is edited while the database sits at the older revision, a
+# preserved value would put the window in a term its section is no longer in, and
+# the composite key three statements later would refuse the upgrade; the section's
+# own term is correct for the state the database is actually in.
+#
 # `section.term_id` is `NOT NULL` (E0-06) and every window references a section, so
 # this covers every row — verified against the development database's 188 windows,
-# which is where the abort this replaces was measured.
+# which is where the abort this replaces was measured. The strand test in
+# `tests/integration/test_the_survey_schema_survives_a_downgrade.py` is what holds
+# it: remove this statement and the re-upgrade aborts on the `NOT NULL` below.
 BACKFILL_THE_WINDOW_TERMS = """
 UPDATE public.survey_window AS w
    SET term_id = s.term_id
@@ -279,11 +272,15 @@ UPDATE public.survey_window AS w
 def upgrade() -> None:
     """Apply this revision: the four survey tables, then the window's term rule.
 
-    **The restores come after the tables and before anything reads them**, and the
-    window's term is restored before it is backfilled. Both are no-ops on a
-    database that has never been downgraded — the scratch tables are simply not
-    there — which is every database this revision has actually run against, CI's
-    included.
+    **The restore comes after the four tables and before anything reads them**,
+    and it is a no-op on a database that has never been downgraded — the scratch
+    tables are simply not there, which is every database this revision has
+    actually run against, CI's included.
+
+    **The window's term is backfilled and not restored**, and that is a
+    distinction rather than an omission: it is derivable from the section, so
+    there is nothing for a preserve to carry that the backfill does not compute.
+    See `BACKFILL_THE_WINDOW_TERMS`.
     """
     op.create_table(
         "question_set",
@@ -412,7 +409,6 @@ def upgrade() -> None:
     # statement is what stranded a database holding windows; see this revision's
     # docstring.
     op.add_column("survey_window", sa.Column("term_id", sa.Uuid(), nullable=True))
-    op.execute(RESTORE_THE_WINDOW_TERMS)
     op.execute(BACKFILL_THE_WINDOW_TERMS)
     op.alter_column("survey_window", "term_id", nullable=False)
     op.create_foreign_key(
@@ -447,16 +443,21 @@ def downgrade() -> None:
     The tables are dropped children first: every foreign key here is `RESTRICT`,
     so dropping `question_set` before `question` would be refused.
 
-    **Nothing is discarded.** Every window's term, and every row of the four
-    tables, is copied into a scratch table first and put back by `upgrade`. A
-    downgrade here used to lose every stored submission and every window's term
-    outright, and the re-upgrade then re-added `term_id` `NOT NULL` over the
-    windows it had emptied — so the database was stranded below every revision E2
-    added, with the responses already gone. The scratch tables stay while the
-    database sits at the older revision, which is where the values live in the
-    meantime; the upgrade is the only thing that removes them.
+    **Nothing that cannot be recomputed is discarded.** Every row of the four
+    tables is copied into a scratch table first and put back by `upgrade`. A
+    downgrade here used to lose every stored submission outright, and the
+    re-upgrade then re-added `term_id` `NOT NULL` over windows it could not fill —
+    so the database was stranded below every revision E2 added, with the responses
+    already gone. The scratch tables stay while the database sits at the older
+    revision, which is where those rows live in the meantime; the upgrade is the
+    only thing that removes them.
+
+    **`survey_window.term_id` is deliberately not among them.** It is dropped and
+    not kept, because the composite foreign key this revision adds makes it the
+    section's term — so `upgrade`'s backfill computes exactly what a preserve
+    would have carried, and a second copy of one guarantee is a guarantee neither
+    copy holds. `BACKFILL_THE_WINDOW_TERMS` carries the measurement that showed it.
     """
-    op.execute(PRESERVE_THE_WINDOW_TERMS)
     op.create_foreign_key(
         SECTION_FK, "survey_window", "section", ["section_id"], ["id"], ondelete="RESTRICT"
     )
