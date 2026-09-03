@@ -280,6 +280,22 @@ interface Bounce {
  * string all the way to the wire: the two numeric columns are decimals on the
  * server, and a float round-tripped through JavaScript is how an answer lands
  * between two of the steps its question moves in.
+ *
+ * **An incomplete week is refused here rather than sent and refused there, and
+ * the control that refuses it stays operable** (E2-17 item 1). The submit button
+ * used to carry `disabled` until every non-comment question was answered, which
+ * took it out of the tab order: the screen offered a keyboard user nothing to
+ * activate and nothing that explained why. Pressing it now names the first
+ * question still owed, moves focus to that question's control, and sends
+ * nothing.
+ *
+ * **Three live regions, one fact each.** SPEC §3.3's coaching, §3.2's
+ * conditional rule turning a comment required, and what stops this week being
+ * sent. They were not always three: sharing one made "the region is not empty"
+ * ambiguous about which fact had arrived, which is measured in this ticket's
+ * attempts log. Each is in the document from the first render and each is empty
+ * until its own fact is true, so a change to one of them is that fact and
+ * nothing else.
  */
 function OpenSurveyForm({
   sectionId,
@@ -319,7 +335,7 @@ function OpenSurveyForm({
 
   // Whether this section is offering a submit action at all, told to the screen
   // so that exactly one submit area on it carries the confidentiality sentence
-  // (SPEC §4.1 item 5; see `SectionSurveys`). The three states below that return
+  // (SPEC §4.1 item 5; see `SectionSurveys`). The two states below that return
   // early — a window that shut, and a week already answered — have no submit
   // area in them, so this is the one place the answer is known.
   const showsSubmitArea = closed === null && showForm;
