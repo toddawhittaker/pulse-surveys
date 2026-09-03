@@ -312,6 +312,26 @@ and cheap to take sooner.
 **Done when:** the deferred entry's, with a planted symlinked-directory control
 seen red.
 
+## The rendered student surface's strings rest on a convention nothing sweeps
+
+From the E2 boundary review's invariant-coverage audit (the record is
+`../e2/boundary-review.md`; recorded as plausible — the reviewer walked the
+convention and found it holding, and no second pass re-ran the walk). §4.1
+items 4 and 5 are asserted over strings the copy inventory can collect; a
+string literal or aria label written directly into a component is invisible
+to it, and the inventory's own docstring says so. Today every user-visible
+string in the survey components resolves through the copy registry, so
+nothing is wrong — the convention is simply unguarded, and one ungoverned
+sentence in a component would ship past items 4 and 5 with the inventory
+green. This is deliberately carried rather than put in E2's final batch:
+there is no live violation, and the sweep it asks for belongs with the copy
+inventory E4 grows anyway.
+**Owner:** E4, with the copy-inventory growth over report surfaces.
+**Done when:** a parse of the component and route trees refuses a
+user-visible string literal outside the copy modules, reusing the
+inventory's parser, with a planted offender and a near miss (a test id, a
+class name, a key literal) both proven.
+
 ## The Care landing still says there are five landing views
 
 Found at the E2 boundary and recorded nowhere else, so this entry carries the

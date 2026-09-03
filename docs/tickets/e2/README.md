@@ -66,6 +66,8 @@ re-litigates them:
 | 11 | [The copy-inventory test](E2-11-copy-inventory.md) | `e2/copy-inventory` | 08, 09, 10 | §4.1 items 4 and 5 become assertions over the shipped strings, with planted violations red and a canary against a blind collector. | #150 as 04599db, 2026-09-03 |
 | 12 | [The validity eval set, and the floors turn enforcing](E2-12-eval-floors.md) | `e2/eval-floors` | none | `tests/evals/` becomes real, §11 question 4 gets its operational answer, and the last E0 tolerance flips — live calls only on AI-touching changes and manual dispatch. | #148 as 705111f, 2026-09-02 |
 | 13 | [E2 exit](E2-13-e2-exit.md) | `e2/e2-exit` | all | The four exit clauses in a browser on the dev clock against the mock; boundary reviews; the denial-sweep re-affirmation; `../e3/carried-from-e2.md`. | |
+| 14 | [The §4.1 pass covers what E2 actually enforces](E2-14-invariant-pass-coverage.md) | `e2/invariant-pass-coverage` | 13 | The boundary review's final batch, coverage half: the submit lookup, the leadership union, marker currency, the dev clock module, the session-read sweep. | |
+| 15 | [Student-surface headers and copy, and the local gate that spends money](E2-15-student-surface-and-local-gate-repairs.md) | `e2/student-surface-and-local-gate-repairs` | 13 | The boundary review's final batch, code half: `no-store` on the student read with both headers pinned, the bounce sentence repaired and pinned, `make ci` conditioned like CI. | |
 
 One merged unit of work sits outside the table because it was a follow-up
 rather than a breakdown ticket: **PR #149** (`e2/luna-and-prompt-trim`, merged
