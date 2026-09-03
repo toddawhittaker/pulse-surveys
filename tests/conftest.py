@@ -74,6 +74,21 @@ boundary: `metadata_tables` is asked for by both.
     enrolled in one section and not in its sibling, and the door their read path
     is asked through with a session a real launch issued.
 
+Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
+in the tuple below: they are imported directly, the way `fixtures.supervision`'s
+`seed_row` already is. They are listed here because this docstring is the index
+of that directory and a module missing from it is a record that has stopped being
+complete.
+
+  - `fixtures/indexes.py` — E2-02's catalog reader for the key columns of every
+    index on a table, moved out of its test module in E2-16 when a second ticket
+    asked the same question.
+  - `fixtures/statements.py` — E2-16: every statement sent to any engine while a
+    call runs, for the two criteria that are about the SQL a service emits.
+  - `fixtures/migration_journey.py` — E2-16: resolving a revision and the one
+    below it, running a step that has to complete, and reading the catalog and
+    the stored rows at either end of a downgrade.
+
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
 `tests/__init__.py`, so this directory is the import root for everything under

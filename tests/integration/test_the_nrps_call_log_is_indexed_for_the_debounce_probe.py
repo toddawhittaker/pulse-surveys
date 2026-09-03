@@ -59,6 +59,7 @@ with it.
 from typing import Any
 
 import pytest
+from fixtures.indexes import index_key_columns
 from sqlalchemy import text
 
 pytestmark = pytest.mark.integration
@@ -67,31 +68,11 @@ pytestmark = pytest.mark.integration
 # `migrated_engine` from `tests/fixtures/database.py`. Reached as fixtures rather
 # than imported, for the reason every module in this suite gives.
 
-# Every key column of every index on one table, in order, with its sort direction.
-#
-# Read from the catalog rather than from a definition string, because what is being
-# asserted is a pair of facts about each key column — its position and whether it is
-# stored descending — and `pg_get_indexdef` answers them only as prose that has to be
-# parsed. `indoption`'s low bit is `INDOPTION_DESC` (`src/include/catalog/pg_index.h`).
-# `indkey` and `indoption` are `int2vector`s, whose subscripts start at 0, which is
-# why the positions generated from 1 are read one lower. Only key columns are
-# considered — `indnkeyatts` is where they stop and any `INCLUDE` payload begins — so
-# an index that carries extra non-key columns still answers this question the same way.
-INDEX_KEY_COLUMNS = text(
-    """
-    SELECT i.relname AS index_name,
-           s.position AS position,
-           a.attname AS column_name,
-           (ix.indoption[s.position - 1] & 1) = 1 AS descending
-    FROM pg_class AS t
-    JOIN pg_index AS ix ON ix.indrelid = t.oid
-    JOIN pg_class AS i ON i.oid = ix.indexrelid
-    JOIN LATERAL generate_series(1, ix.indnkeyatts) AS s(position) ON TRUE
-    JOIN pg_attribute AS a ON a.attrelid = t.oid AND a.attnum = ix.indkey[s.position - 1]
-    WHERE t.relname = :table
-    ORDER BY i.relname, s.position
-    """
-)
+# **The catalog query and its reader moved to `tests/fixtures/indexes.py` in
+# E2-16**, which asks the same question of three more indexes. The control below
+# is unchanged and still belongs here: it is the one place the reader is run
+# against indexes whose difference is exactly what these assertions turn on
+# (`docs/MISTAKES.md` entry 13 — one helper, reached from both places).
 
 # The two tables and two indexes the control builds. Temporary, and created inside
 # the transaction that reads them: `ON COMMIT DROP` is what keeps a pooled
@@ -107,16 +88,6 @@ PROBE_REVERSED_INDEX = "e1_boundary_probe_trailing_then_leading"
 # module cannot otherwise see is the superseded descending index left in place beside
 # the new one, and a name is what tells two indexes over the same columns apart.
 DEBOUNCE_INDEX = "ix_nrps_call_section_id_called_at"
-
-
-def index_key_columns(connection: Any, table: str) -> dict[str, list[tuple[str, bool]]]:
-    """Each index on `table`, as its key columns in order with their descending flags."""
-    found: dict[str, list[tuple[str, bool]]] = {}
-    for row in connection.execute(INDEX_KEY_COLUMNS, {"table": table}).mappings():
-        found.setdefault(row["index_name"], []).append(
-            (str(row["column_name"]), bool(row["descending"]))
-        )
-    return found
 
 
 # ---------------------------------------------------------------------------
