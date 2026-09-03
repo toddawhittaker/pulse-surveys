@@ -1,6 +1,7 @@
 # Pulse Surveys
 #
-# `make ci` runs the same gates as .github/workflows/ci.yml, in the same order,
+# `make ci` runs the same gates as .github/workflows/ci.yml, in the same order
+# — except the paid eval gate, the one deliberate exception (see below) — and
 # with the same tolerance for parts of the tree that do not exist yet — the
 # frontend and the eval sets. The migration and test gates lost theirs in E0-04,
 # and E0-18 committed the e2e specs, so all three now run unconditionally in
@@ -12,6 +13,12 @@
 # package and the manifest is committed (ADR 0083). If it passes here
 # it should pass there; when the two drift, the workflow is the source of truth
 # and this file is the bug.
+#
+# One gate is a deliberate exception rather than drift: `evals` calls a real
+# provider and costs money, so `make ci` does not run it. The workflow conditions
+# its live eval steps on AI-touching paths or a manual dispatch, and the local
+# equivalent of that condition is asking for the gate by name — `make evals`. The
+# `test-gates` recipe below says the same where somebody would look for it.
 #
 # Two gates need something running: `test` needs a Docker daemon for
 # testcontainers, and `migration-check` needs a database this machine can reach
@@ -73,8 +80,16 @@ selftest: ## Self-test the CI checker scripts
 	@bash -n scripts/ci/check_job_runtime.sh && echo "    check_job_runtime.sh parses"
 	@bash -n scripts/ci/check_image_contents.sh && echo "    check_image_contents.sh parses"
 
+# `evals` is deliberately not a prerequisite here, and it is the one gate this
+# file runs that `.github/workflows/ci.yml` does not run the same way. The eval
+# runner calls the real provider about a hundred times, so a `make ci` that
+# reached it would be red on a fresh clone with no key and would spend money on a
+# configured one — every time, on every diff. The workflow conditions its live
+# eval steps on AI-touching paths or a manual dispatch; a Makefile has no diff to
+# condition on, so the local equivalent is to ask for it by name: `make evals`.
+# README.md's "same set of gates" sentence names this exception.
 .PHONY: test-gates
-test-gates: test e2e evals ## Test gates: pytest, Playwright, AI evals
+test-gates: test e2e ## Test gates: pytest, Playwright (the paid eval gate is `make evals`)
 
 .PHONY: build-gates
 build-gates: docker-build frontend-build ## Build gates: images, Compose health, bundle budget
@@ -219,7 +234,9 @@ e2e: node-deps ## Playwright against the Compose stack (stack must be up and see
 # the real provider once per eval case — about a hundred requests — because SPEC
 # §9.3's floors are measured against a model and nothing else. Every other test
 # command in this file reaches the loopback stub or the in-repo mock and leaves
-# neither the machine nor your account.
+# neither the machine nor your account. **So `make ci` does not run it** — see
+# `test-gates` above; this gate is asked for by name, and asking is the decision
+# to spend.
 #
 # The tolerance is gone with E2-12, which lands the runner and the sets: the
 # recipe used to check whether `tests/evals/runner.py` existed and print a skip

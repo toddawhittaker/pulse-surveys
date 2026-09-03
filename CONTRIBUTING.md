@@ -142,7 +142,10 @@ something is ready.
 
 `.github/workflows/ci.yml` runs on every pull request and on pushes to epic
 branches. `make ci` runs the same gates locally, in the same order, so you can
-catch a failure before you push.
+catch a failure before you push — every gate but one. The paid eval gate is the
+exception: CI runs it only on a change that touches the AI code or on a manual
+dispatch, and `make ci` does not run it at all, because it calls the real
+provider about a hundred times. Locally it is `make evals`, asked for by name.
 
 | Stage | Gates |
 |---|---|

@@ -680,7 +680,7 @@ no password and no way to log in, and the Care connection fails to
 authenticate.
 
 ```sh
-make ci             # every gate, in the same order as CI
+make ci             # every gate but the paid evals, in the same order as CI
 make lint           # ruff check + ruff format --check, eslint (root + frontend)
 make typecheck      # mypy, strict over app/services/; tsc (root + frontend)
 make test           # pytest with coverage
@@ -694,9 +694,13 @@ port 8000, and a `.env`. It also includes the migration drift gate, so it needs 
 database to migrate — `make up`, with `DATABASE_URL` pointed at `localhost` as
 above.
 
-`make ci` is the same set of gates as `.github/workflows/ci.yml`, so a green run
-here should mean a green run there. Where the two disagree, the workflow is
-right and the `Makefile` is the bug.
+`make ci` is the same set of gates as `.github/workflows/ci.yml` with one named
+exception, so a green run here should mean a green run there. The exception is
+the paid eval gate: it calls the real provider about a hundred times, so CI runs
+it only on a change that touches the AI code or on a manual dispatch, and
+`make ci` does not run it at all. Locally it is `make evals`, asked for by name —
+asking is the decision to spend. Where the two disagree anywhere else, the
+workflow is right and the `Makefile` is the bug.
 
 ## Running the e2e suite locally
 

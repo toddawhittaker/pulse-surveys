@@ -125,10 +125,18 @@ STATUS_OF_REASON: dict[RefusalReason, int] = {
 @router.get(SURVEY_PATH, summary="This student's enrollments and the survey open for each")
 def student_survey(
     request: Request,
+    response: Response,
     claims: SessionClaims = Depends(require_student),
     session: Session = Depends(get_session),
 ) -> StudentSurveyView:
     """Answer the form's whole question for whoever this session belongs to.
+
+    **`Cache-Control: no-store`, set before the branch so both answers carry it.**
+    What comes back is this student's own prior free-text comment, and a stored copy
+    of it outlives the reason they were shown it: a browser back button after they
+    have revised the comment, or the next person on a shared machine after they have
+    signed out. The write sets the same header for the same reason, and E2-15 pinned
+    both so neither can go quiet.
 
     **The reader comes from the session and from nowhere else.**
     `require_student` verified the token and refused anybody who is not a student;
@@ -147,6 +155,7 @@ def student_survey(
     other request on the process.
     """
     settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = "no-store"
     if claims.user_id is None:
         return StudentSurveyView(sections=[])
     return survey_for_student(session, user_id=UUID(claims.user_id), settings=settings)
