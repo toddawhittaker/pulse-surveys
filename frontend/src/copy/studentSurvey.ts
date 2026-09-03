@@ -114,6 +114,15 @@ export const STUDENT_SURVEY_COPY = {
   // `aria-required` (SPEC §14.2 item 4: a state carried by colour alone is a
   // state some readers do not have).
   'student_survey.comment_required_flag': 'Needed to submit',
+  // And announced in words when it *changes*, which is the half a flag cannot
+  // carry: choosing a low rating swaps the helper, adds the flag and flips
+  // `aria-required` all at once, and a student who is not looking at the screen
+  // was told none of it (E2-17 item 4). Only the crossing into required is
+  // announced — becoming optional again is a relaxation, and a sentence saying
+  // a comment is needed is the last thing that should be left standing when it
+  // is not.
+  'student_survey.comment_now_required':
+    'A rating that low asks for a sentence: the comment beside it is now needed to submit.',
 
   // The workload slider. The range, the step and the readout's precision are all
   // the question's; these are the words around them.
@@ -133,6 +142,22 @@ export const STUDENT_SURVEY_COPY = {
   'student_survey.submit': 'Submit this week’s pulse',
   'student_survey.submit_again': 'Update this week’s answers',
   'student_survey.submitting': 'Sending…',
+  // What the submit control says when it is pressed with a question still
+  // unanswered (E2-17 item 1). The button used to carry `disabled` until every
+  // question was answered, which took it out of the tab order: a student using
+  // a screen reader tabbed to the end of the form, found nothing to activate
+  // and was told nothing about why. It stays operable now and says this
+  // instead, naming the question so nobody has to go back through five of them
+  // to find out which. Filled with the question's own wording by `fillCopy`.
+  // Nobody is at fault here and nothing has gone wrong, so neither sentence
+  // reads as an error.
+  'student_survey.missing_answer': 'Answer “{question}” to send this week’s pulse.',
+  // The same message for a question the served set gives no wording for. §3.2
+  // quotes none for the two comments or the slider, so their labels stand in —
+  // and a set that named a rating question nothing at all would leave even that
+  // empty, which is what this sentence is for.
+  'student_survey.missing_answer_unnamed':
+    'One question above still needs an answer before this week’s pulse can be sent.',
   // SPEC §4.1 item 5: the confidentiality line, in plain words, in the submit
   // bar, and nowhere else on this surface. There is exactly one entry for it
   // here, which is the form the inventory reads it in.

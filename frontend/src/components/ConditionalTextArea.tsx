@@ -24,6 +24,16 @@ export type CommentState = 'optional' | 'required' | 'bounce';
  * is also carried in words and in `aria-required`, not in the colour alone —
  * SPEC §14.2 item 4.
  *
+ * **The crossing into `required` is announced, and this component does not do
+ * the announcing** (E2-17 item 4). The flag, the helper and `aria-required` all
+ * changed silently until then, so a student who was not looking at the screen
+ * learned the form had changed under them only by going back. The sentence goes
+ * into the form's own live region, which is `StudentWeeklySurvey`'s: the region
+ * covers the whole form and this component would open a second one per comment
+ * field. Only the crossing *into* required is announced — becoming optional
+ * again is a relaxation (the ruling of 2026-09-03), and a sentence saying a
+ * comment is needed must not be left standing when it is not.
+ *
  * **`bounce`** is §3.3's synchronous gate having refused this comment. The
  * sentence is the server's, verbatim, in the same marigold register and entering
  * the same way: "the field does not shake. Nothing in this product shames." The

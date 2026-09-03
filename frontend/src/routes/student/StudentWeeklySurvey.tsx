@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useCallback, useEffect, useState, type JSX } from 'react';
 
 import {
   readStudentSurvey,
@@ -14,7 +14,7 @@ import { StateNotice } from '../../components/StateNotice';
 import { SubmitBar } from '../../components/SubmitBar';
 import { WeekEyebrow } from '../../components/WeekEyebrow';
 import { WorkloadSlider } from '../../components/WorkloadSlider';
-import { copy } from '../../copy/studentSurvey';
+import { copy, fillCopy } from '../../copy/studentSurvey';
 
 /**
  * SPEC §7.6's `StudentWeeklySurvey` — the five questions, and the states around
@@ -136,21 +136,99 @@ function ScreenBody({ load }: { readonly load: Load }): JSX.Element {
   if (load.sections.length === 0) {
     return <StateNotice variant="flat" body={copy('student_survey.no_open_window')} />;
   }
+  return <SectionSurveys sections={load.sections} />;
+}
+
+/**
+ * Every enrolled section, and the one submit area that carries the
+ * confidentiality sentence.
+ *
+ * SPEC §4.1 item 5, as the ruling of 2026-09-03 reads it: the sentence appears
+ * exactly once per *screen*, in the submit area. A student enrolled in two
+ * courses whose windows are open at the same minute is one screen and not two,
+ * so exactly one of the submit bars on it carries the sentence — the first, in
+ * the order the sections are drawn.
+ *
+ * **Which sections are offering a submit action is reported rather than
+ * re-derived.** Whether a section has one depends on what the student has done
+ * in it since the page loaded: submitted it, reopened it, or had its window shut
+ * underneath them. Those rules live in `OpenSurveyForm` and a second copy of
+ * them here would be a second answer to keep in step, so each form says which
+ * state it is in and this decides from the answers. The initial set is read off
+ * the wire instead, so the sentence is on screen from the first paint rather
+ * than one frame later.
+ *
+ * **A screen with nothing to submit carries no sentence, and that is the
+ * shipped reading rather than a gap.** The sentence belongs to the act of
+ * sending; a week already answered shows the submitted state, which has no
+ * submit area in it and nothing to be reassured about.
+ */
+function SectionSurveys({
+  sections,
+}: {
+  readonly sections: readonly EnrolledSection[];
+}): JSX.Element {
+  const [offering, setOffering] = useState<ReadonlySet<string>>(
+    () => new Set(sections.filter(offersASubmitActionOnArrival).map((it) => it.section_id)),
+  );
+
+  // Stable, so a form's report is an effect that runs when its own state
+  // changes rather than on every render of this list. Answering with the set it
+  // was given when nothing changed is what lets React stop there.
+  const report = useCallback((sectionId: string, offeringOne: boolean) => {
+    setOffering((current) => {
+      if (current.has(sectionId) === offeringOne) return current;
+      const next = new Set(current);
+      if (offeringOne) next.add(sectionId);
+      else next.delete(sectionId);
+      return next;
+    });
+  }, []);
+
+  const carriesConfidentiality =
+    sections.find((section) => offering.has(section.section_id))?.section_id ?? null;
+
   return (
     <>
-      {load.sections.map((section) => (
-        <SectionSurvey key={section.section_id} section={section} />
+      {sections.map((section) => (
+        <SectionSurvey
+          key={section.section_id}
+          section={section}
+          showConfidentiality={section.section_id === carriesConfidentiality}
+          onSubmitArea={report}
+        />
       ))}
     </>
   );
 }
 
-/** One enrolled section: its code, and whatever there is to do about it. */
-function SectionSurvey({ section }: { readonly section: EnrolledSection }): JSX.Element {
+/** Whether this section's block will draw a submit area on the first render. */
+function offersASubmitActionOnArrival(section: EnrolledSection): boolean {
+  const survey = section.survey_is_open ? section.open_survey : null;
+  return survey !== null && survey.submission === null;
+}
+
+/** One enrolled section: its code, its course, and whatever there is to do about it. */
+function SectionSurvey({
+  section,
+  showConfidentiality,
+  onSubmitArea,
+}: {
+  readonly section: EnrolledSection;
+  readonly showConfidentiality: boolean;
+  readonly onSubmitArea: (sectionId: string, offering: boolean) => void;
+}): JSX.Element {
   const survey = section.survey_is_open ? section.open_survey : null;
   return (
     <section className="pulse-survey-section" data-testid={sectionTestid(section.section_code)}>
-      <h2 className="pulse-section-code">{section.section_code}</h2>
+      {/* The §2.2 code and the course it belongs to, in one heading. The code
+          alone is what shipped, and `E1FF` is how a timetable names a section
+          rather than how a student does — E2-17 item 5. The label is the
+          server's, composed from the reader's own enrollment metadata. */}
+      <h2 className="pulse-section-heading">
+        <span className="pulse-section-code">{section.section_code}</span>
+        <span className="pulse-course-label">{section.course_label}</span>
+      </h2>
       {survey === null ? (
         <StateNotice
           variant="flat"
@@ -158,7 +236,12 @@ function SectionSurvey({ section }: { readonly section: EnrolledSection }): JSX.
           body={copy('student_survey.section_closed_body')}
         />
       ) : (
-        <OpenSurveyForm sectionId={section.section_id} survey={survey} />
+        <OpenSurveyForm
+          sectionId={section.section_id}
+          survey={survey}
+          showConfidentiality={showConfidentiality}
+          onSubmitArea={onSubmitArea}
+        />
       )}
     </section>
   );
@@ -201,9 +284,13 @@ interface Bounce {
 function OpenSurveyForm({
   sectionId,
   survey,
+  showConfidentiality,
+  onSubmitArea,
 }: {
   readonly sectionId: string;
   readonly survey: OpenSurvey;
+  readonly showConfidentiality: boolean;
+  readonly onSubmitArea: (sectionId: string, offering: boolean) => void;
 }): JSX.Element {
   const [values, setValues] = useState<Record<number, string>>(() => initialValues(survey));
   const [stored, setStored] = useState(survey.submission !== null);
@@ -212,23 +299,84 @@ function OpenSurveyForm({
   const [refusal, setRefusal] = useState<string | null>(null);
   const [closed, setClosed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Why this week cannot be sent yet, written beside the button when it is
+  // pressed with a question still unanswered (E2-17 item 1). Empty otherwise,
+  // and empty again as soon as any answer changes: it is the result of one
+  // activation, and an edit is what makes it possibly untrue.
+  const [missing, setMissing] = useState('');
+  // What the form's live region is saying right now. One region for the whole
+  // form, so §3.3's coaching is announced once when it arrives rather than once
+  // per field carrying it, and E2-17 item 4's conditional-required sentence goes
+  // through the same channel rather than opening a second one.
+  const [announcement, setAnnouncement] = useState('');
+
+  // Whether this section is offering a submit action at all, told to the screen
+  // so that exactly one submit area on it carries the confidentiality sentence
+  // (SPEC §4.1 item 5; see `SectionSurveys`). The three states below that return
+  // early — a window that shut, and a week already answered — have no submit
+  // area in them, so this is the one place the answer is known.
+  const showsSubmitArea = closed === null && showForm;
+  useEffect(() => {
+    onSubmitArea(sectionId, showsSubmitArea);
+  }, [onSubmitArea, sectionId, showsSubmitArea]);
 
   function setValue(position: number, value: string): void {
-    setValues((current) => ({ ...current, [position]: value }));
+    const before = values;
+    const after = { ...before, [position]: value };
+    setValues(after);
+    setRefusal(null);
+    setMissing('');
+
     // Editing a coached field takes the coaching off that field and leaves it on
     // the others. The message itself is unchanged while any field still carries
     // it, so the live region does not announce the same sentence twice.
-    setBounce((current) => {
-      if (current === null) return null;
-      const remaining = current.positions.filter((carried) => carried !== position);
-      return remaining.length === 0 ? null : { ...current, positions: remaining };
+    const stillCoached =
+      bounce === null ? [] : bounce.positions.filter((carried) => carried !== position);
+    const nextBounce =
+      bounce === null || stillCoached.length === 0 ? null : { ...bounce, positions: stillCoached };
+    setBounce(nextBounce);
+
+    setAnnouncement((spoken) => {
+      // The coaching stops being announced when the last field carrying it has
+      // been edited; until then it stands, whatever else changed.
+      if (bounce !== null && nextBounce === null && spoken === bounce.message) return '';
+
+      // SPEC §3.2's conditional rule crossing *into* required is announced
+      // (E2-17 item 4) — the flag, the helper and `aria-required` all change at
+      // once and a student who is not looking at the screen was told none of it.
+      // Crossing back out of it is a relaxation and is not announced; the
+      // sentence goes rather than standing while it is untrue, and clearing a
+      // live region says nothing to anybody.
+      const wasRequired = requiredComments(survey.questions, before);
+      const nowRequired = requiredComments(survey.questions, after);
+      if (nowRequired.some((at) => !wasRequired.includes(at))) {
+        return copy('student_survey.comment_now_required');
+      }
+      const relaxed = wasRequired.some((at) => !nowRequired.includes(at));
+      if (relaxed && spoken === copy('student_survey.comment_now_required')) return '';
+      return spoken;
     });
-    setRefusal(null);
   }
 
   async function submit(): Promise<void> {
+    // The button is never disabled (E2-17 item 1), so a second press while the
+    // first is in flight is reachable and is refused here rather than by taking
+    // the control away.
+    if (busy) return;
+
+    // An incomplete week is not sent. The server would refuse it and the student
+    // would meet the refusal as a failure; this says which question is still
+    // owed, announces it, and puts the keyboard on it.
+    const unanswered = firstUnanswered(survey.questions, values);
+    if (unanswered !== null) {
+      setMissing(missingAnswerSentence(unanswered));
+      document.getElementById(fieldId(sectionId, unanswered.position))?.focus();
+      return;
+    }
+
     setBusy(true);
     setRefusal(null);
+    setMissing('');
     const outcome = await submitWeeklySurvey(
       { section_id: sectionId, answers: buildAnswers(survey.questions, values) },
       copy('student_survey.unavailable'),
@@ -239,6 +387,7 @@ function OpenSurveyForm({
       setStored(true);
       setShowForm(false);
       setBounce(null);
+      setAnnouncement('');
       return;
     }
     if (outcome.kind === 'bounced') {
@@ -249,6 +398,7 @@ function OpenSurveyForm({
       // `docs/tickets/e2/deferred.md` carries what closes that.
       const positions = submittedCommentPositions(survey.questions, values);
       setBounce({ message: outcome.message, positions });
+      setAnnouncement(outcome.message);
       const first = positions[0];
       if (first !== undefined) {
         document.getElementById(fieldId(sectionId, first))?.focus();
@@ -311,11 +461,6 @@ function OpenSurveyForm({
     );
   }
 
-  const incomplete = survey.questions.some((question) => {
-    if (isAnswered(values, question)) return false;
-    return question.kind !== 'comment' || isCommentRequired(question, values);
-  });
-
   return (
     <div className="pulse-survey-form">
       {eyebrow}
@@ -324,14 +469,18 @@ function OpenSurveyForm({
           once when it arrives rather than once per field carrying it. The region
           is in the document from the first render: a region added at the moment
           it has something to say is a region assistive technology has not been
-          watching. */}
+          watching — and, since E2-17 item 8, it is *rendered* from the first
+          render too. It used to be `display: none` while empty, which is the
+          same defect wearing a stylesheet: Chromium marked the node
+          `notRendered` and kept it out of the accessibility tree until it
+          already had something to say. `styles.css` hides it by clipping now. */}
       <p
         className="pulse-bounce-announcement"
         data-testid={BOUNCE_ANNOUNCEMENT_TESTID}
         role="status"
         aria-live="polite"
       >
-        {bounce?.message ?? ''}
+        {announcement}
       </p>
       {refusal === null ? null : (
         <p className="pulse-refusal" data-testid={REFUSAL_TESTID} role="alert">
@@ -356,8 +505,10 @@ function OpenSurveyForm({
 
       <SubmitBar
         label={copy(stored ? 'student_survey.submit_again' : 'student_survey.submit')}
-        disabled={incomplete || busy}
         busy={busy}
+        missingAnswer={missing}
+        missingAnswerId={missingAnswerId(sectionId)}
+        showConfidentiality={showConfidentiality}
         showResubmitNote={!stored}
         onSubmit={() => {
           void submit();
@@ -460,6 +611,66 @@ function PulseDivider(): JSX.Element {
 /** One field's DOM id, which is also the Likert group's radio name. */
 function fieldId(sectionId: string, position: number): string {
   return `survey-${sectionId}-q${position}`;
+}
+
+/** Where one section's submit control finds its own description. */
+function missingAnswerId(sectionId: string): string {
+  return `survey-${sectionId}-missing`;
+}
+
+/**
+ * The first question this week cannot be sent without, or nothing.
+ *
+ * The same rule the submit button used to be disabled by: every question but a
+ * comment, and a comment that SPEC §3.2's conditional rule has made required.
+ * In position order, because "the first unanswered question" is the one a
+ * student reading down the form meets first.
+ */
+function firstUnanswered(
+  questions: readonly SurveyQuestion[],
+  values: Readonly<Record<number, string>>,
+): SurveyQuestion | null {
+  const owed = questions.find((question) => {
+    if (isAnswered(values, question)) return false;
+    return question.kind !== 'comment' || isCommentRequired(question, values);
+  });
+  return owed ?? null;
+}
+
+/** What the submit control says about the question it stopped at (E2-17 item 1). */
+function missingAnswerSentence(question: SurveyQuestion): string {
+  const named = questionName(question);
+  return named === null
+    ? copy('student_survey.missing_answer_unnamed')
+    : fillCopy('student_survey.missing_answer', { question: named });
+}
+
+/**
+ * What to call one question in a sentence about it, or nothing.
+ *
+ * The served wording when there is one. SPEC §3.2 quotes none for the two
+ * comments or the slider — `scripts/seed.py` stores `null` for all three — so
+ * their own labels stand in, which are this surface's copy and are what the
+ * student is looking at. A rating question with no wording at all leaves nothing
+ * honest to say, and the caller has a sentence for that rather than quoting an
+ * empty string or leaking the machine name.
+ */
+function questionName(question: SurveyQuestion): string | null {
+  const prompt = (question.prompt ?? '').trim();
+  if (prompt !== '') return prompt;
+  if (question.kind === 'comment') return copy('student_survey.comment_label');
+  if (question.kind === 'workload') return copy('student_survey.workload_label');
+  return null;
+}
+
+/** The positions of every comment SPEC §3.2's conditional rule requires right now. */
+function requiredComments(
+  questions: readonly SurveyQuestion[],
+  values: Readonly<Record<number, string>>,
+): number[] {
+  return questions
+    .filter((question) => question.kind === 'comment' && isCommentRequired(question, values))
+    .map((question) => question.position);
 }
 
 /**
