@@ -131,17 +131,17 @@ batch (`E2-14-invariant-pass-coverage.md`,
 - **MEDIUM, confirmed with a new sub-finding** — `GET /student/survey` sets
   no `Cache-Control: no-store` while returning the student's own prior
   free text; the POST sets it, and verification found the POST's header is
-  itself pinned by no test. → **E2-15 item 1.**
+  itself pinned by no test. → **E2-15 item 1, built in PR #153.**
 
 **From the exit review:**
 
 - **MEDIUM, confirmed** — the shipped bounce sentence ends in a truncated
   infinitive ("are too brief to.") and nothing pins the string. → **E2-15
-  item 2.**
+  item 2, built in PR #153.**
 - **MEDIUM, confirmed** — `make ci` runs the paid eval runner
   unconditionally: red on a fresh clone, roughly a hundred paid calls on a
   configured one, against two README sentences claiming otherwise.
-  → **E2-15 item 3.**
+  → **E2-15 item 3, built in PR #153.**
 - **LOW, confirmed** — ADR 0002 claimed no tolerance survives while the
   `node` probe still gates the Node-side audit and licence steps, and
   ci.yml's header comment was three removals out of date. → **Fixed here.**

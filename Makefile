@@ -1,6 +1,7 @@
 # Pulse Surveys
 #
-# `make ci` runs the same gates as .github/workflows/ci.yml, in the same order,
+# `make ci` runs the same gates as .github/workflows/ci.yml, in the same order
+# — except the paid eval gate, the one deliberate exception (see below) — and
 # with the same tolerance for parts of the tree that do not exist yet — the
 # frontend and the eval sets. The migration and test gates lost theirs in E0-04,
 # and E0-18 committed the e2e specs, so all three now run unconditionally in
