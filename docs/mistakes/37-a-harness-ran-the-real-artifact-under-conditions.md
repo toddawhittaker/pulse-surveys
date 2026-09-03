@@ -1,10 +1,10 @@
 # Entry 37. A harness ran the real artifact under conditions the runtime does not use
 
-**Caught: 0**
+**Caught: 1**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*2 instances recorded, oldest first.*
+*3 instances recorded, oldest first; the newest is a catch.*
 
 *(E0-38, and it was found by an audit written after the build was green. The
 `changed` job's classification step was extracted from the parsed workflow and
@@ -73,3 +73,14 @@ through it the divergence reads as a fact about the artifact. When a result
 surprises you, reproduce it once against the real runtime before believing
 either the green or the red. A measured result is only as good as the
 conditions it was measured under, and those conditions are part of the artifact.
+
+*(**A catch**, building E2-07's comment extraction, 2026-09-01. The obvious
+marker to extract on was the prompt file's own `[[STUDENT_COMMENT]]` line — but
+`render_prompt` replaces that placeholder before anything reaches a provider,
+so a mock extracting on it would have passed every unit test (the fixtures
+build their own prompts) and returned 500 for every real rendered prompt.
+Acting on this entry's rule — reproduce the runtime's conditions, not the
+harness's — the marker was taken from the rendered prompt the gateway actually
+sends, and the choice was proved against the real render path in the
+gateway-taxonomy tests before green was reported. The rejected placeholder is
+recorded in ADR 0113.)*

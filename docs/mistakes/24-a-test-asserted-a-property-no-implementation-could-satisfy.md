@@ -1,8 +1,45 @@
 # Entry 24. A test asserted a property no implementation could satisfy
 
-**Caught: 0**
+**Caught: 1**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
+
+*(A fourth instance, E2-05, ruled in [E2-05-01](../disputes/E2-05-01.md) on
+2026-09-01, and the first counted catch: the implementer recognised the shape
+from this entry, measured it in both directions, and wrote the objection
+instead of shipping the one schema change that would have satisfied both tests.
+The sub-shape is the E2-02 one wearing a fixture: a control that names one
+column of a pair and lets the shared seeding walker complete the row from a
+constant chosen for a different table — two days before the named value — so
+the control attempts the exact backwards row the sibling ordering test requires
+the database to refuse. The naive-datetime test was red with the ordering CHECK
+present and its sibling red with it absent; no implementation satisfies both.
+What the entry prevented: a nullable `last_submitted_at`, which turns both
+tests green and pushes a `None` into every later reader of the pair. The
+repair is the control naming both timestamps, equal — the killed mutation is
+unchanged because the naive guard sits on the column type and is reached by
+whichever column carries the naive value.)*
+
+*(A third instance, E2-02, ruled the same way in
+[E2-02-01](../disputes/E2-02-01.md) on 2026-08-31. Third sub-shape, and the one
+that hides best: **an assertion about one member of a collection, where a second
+and entirely legitimate mechanism puts that same member there.**
+`test_a_deployments_stored_roster_host_is_not_exempted_from_the_pin` required the
+section's stored roster host to be absent from `roster_sync`'s `unpinned_hosts`
+outside development. Two independent entries fill that set — the token endpoint's,
+which ADR 0101 settles and which is unconditional in every environment, and the
+roster host's, which the ticket narrowed — and the fixture's platform builds both
+URLs off one issuer, so both entries are the string `roster-platform.invalid`. The
+test therefore failed with the finding fixed exactly as it failed with the finding
+unfixed, and the only code change that could satisfy it was one the ticket and the
+ADR both forbid. **A test that is red in both states measures nothing**, and that
+sentence — not the argument around it — is what settled the dispute. What made it a
+measurement rather than a claim was disabling the *other* entry and re-running: the
+test then failed earlier and differently (no token, so no page fetched), which
+attributes the surviving entry beyond argument. The mutation was reverted before
+anything else happened. The repair is the test author's and the ruling names it in
+preference order: give the deployment fixture a token endpoint on a host distinct
+from the roster host, or make the reader attribute each exemption to its reason.)*
 
 *(A second instance, E0-26 item 1, ruled the same way in
 [E0-26-01](../disputes/E0-26-01.md). Same entry, different sub-shape: not a needle
@@ -91,6 +128,16 @@ message, where the extra material helps; compare against the narrowest value tha
 carries the property, and say in a comment which neighbouring spelling you rejected
 and what it renders instead. A column named for the property while holding the
 rendering is how the next person makes the same comparison.
+
+**And from the third instance, for anything that asserts about a set, a list or a
+log: before asserting that a member is absent, ask what else legitimately puts it
+there.** If a second mechanism can, the assertion is not about the mechanism under
+test — it is about the union, and it will report the same red whether or not the
+work was done. Either separate the mechanisms in the fixture so the member can only
+have come from one of them, or make the reader carry *why* each member is present
+rather than only which. The diagnostic, for whoever meets the red: disable the
+other mechanism and re-run. If the failure moves, changes shape, or lands earlier,
+the assertion was never reading what its docstring said.
 
 The general form is worth stating because it is entry 3's mirror — and **the two
 do not cost the same**, which the objection first argued and the arbitrator

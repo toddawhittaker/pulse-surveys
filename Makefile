@@ -1,6 +1,7 @@
 # Pulse Surveys
 #
-# `make ci` runs the same gates as .github/workflows/ci.yml, in the same order,
+# `make ci` runs the same gates as .github/workflows/ci.yml, in the same order
+# — except the paid eval gate, the one deliberate exception (see below) — and
 # with the same tolerance for parts of the tree that do not exist yet — the
 # frontend and the eval sets. The migration and test gates lost theirs in E0-04,
 # and E0-18 committed the e2e specs, so all three now run unconditionally in
@@ -12,6 +13,12 @@
 # package and the manifest is committed (ADR 0083). If it passes here
 # it should pass there; when the two drift, the workflow is the source of truth
 # and this file is the bug.
+#
+# One gate is a deliberate exception rather than drift: `evals` calls a real
+# provider and costs money, so `make ci` does not run it. The workflow conditions
+# its live eval steps on AI-touching paths or a manual dispatch, and the local
+# equivalent of that condition is asking for the gate by name — `make evals`. The
+# `test-gates` recipe below says the same where somebody would look for it.
 #
 # Two gates need something running: `test` needs a Docker daemon for
 # testcontainers, and `migration-check` needs a database this machine can reach
@@ -73,8 +80,16 @@ selftest: ## Self-test the CI checker scripts
 	@bash -n scripts/ci/check_job_runtime.sh && echo "    check_job_runtime.sh parses"
 	@bash -n scripts/ci/check_image_contents.sh && echo "    check_image_contents.sh parses"
 
+# `evals` is deliberately not a prerequisite here, and it is the one gate this
+# file runs that `.github/workflows/ci.yml` does not run the same way. The eval
+# runner calls the real provider about a hundred times, so a `make ci` that
+# reached it would be red on a fresh clone with no key and would spend money on a
+# configured one — every time, on every diff. The workflow conditions its live
+# eval steps on AI-touching paths or a manual dispatch; a Makefile has no diff to
+# condition on, so the local equivalent is to ask for it by name: `make evals`.
+# README.md's "same set of gates" sentence names this exception.
 .PHONY: test-gates
-test-gates: test e2e evals ## Test gates: pytest, Playwright, AI evals
+test-gates: test e2e ## Test gates: pytest, Playwright (the paid eval gate is `make evals`)
 
 .PHONY: build-gates
 build-gates: docker-build frontend-build ## Build gates: images, Compose health, bundle budget
@@ -120,20 +135,22 @@ lint: node-deps ## ruff check + ruff format --check, eslint (root and frontend w
 	$(call banner,eslint (frontend workspace))
 	@npm run lint --workspace frontend
 
-# mypy runs three times, and it has to: `backend/app`, `mock-lms/app` and
-# `mock-idp/app` are all packages called `app` (SPEC §13 names all three), and
-# one run over two of them stops with "Duplicate module named app" having
-# checked neither. Measured, not assumed. `.github/workflows/ci.yml` runs the
-# same three in the same order. See
+# mypy runs four times, and it has to: `backend/app`, `mock-lms/app`,
+# `mock-idp/app` and `mock-ai/app` are all packages called `app` (SPEC §13 names
+# all four), and one run over two of them stops with "Duplicate module named app"
+# having checked neither. Measured, not assumed. `.github/workflows/ci.yml` runs
+# the same four in the same order. See
 # docs/adr/0039-the-two-app-packages-are-typechecked-in-two-runs.md.
 .PHONY: typecheck
-typecheck: node-deps ## mypy over backend/, mock-lms/ and mock-idp/ + tsc --noEmit (root and frontend workspace)
+typecheck: node-deps ## mypy over backend/, mock-lms/, mock-idp/ and mock-ai/ + tsc --noEmit (root and frontend workspace)
 	$(call banner,mypy)
 	@mypy
 	$(call banner,mypy mock-lms/app)
 	@mypy mock-lms/app
 	$(call banner,mypy mock-idp/app)
 	@mypy mock-idp/app
+	$(call banner,mypy mock-ai/app)
+	@mypy mock-ai/app
 	$(call banner,tsc --noEmit)
 	@if [ -f package.json ]; then \
 		npx tsc --noEmit; \
@@ -213,14 +230,33 @@ e2e: node-deps ## Playwright against the Compose stack (stack must be up and see
 	$(call banner,Playwright e2e)
 	@npx playwright test
 
+# **This target costs money, and it is the only one here that does.** It calls
+# the real provider once per eval case — about a hundred requests — because SPEC
+# §9.3's floors are measured against a model and nothing else. Every other test
+# command in this file reaches the loopback stub or the in-repo mock and leaves
+# neither the machine nor your account. **So `make ci` does not run it** — see
+# `test-gates` above; this gate is asked for by name, and asking is the decision
+# to spend.
+#
+# The tolerance is gone with E2-12, which lands the runner and the sets: the
+# recipe used to check whether `tests/evals/runner.py` existed and print a skip
+# if it did not, and skipping a gate whose code has landed is what ADR 0002 makes
+# an acceptance criterion to remove. A missing runner is a red now, saying which
+# module is missing.
+#
+# `.env` is loaded here, and only here among the test targets. The runner builds
+# its gateway `live=True`, which reads AI_PROVIDER_BASE_URL,
+# AI_PROVIDER_MODEL_NAME and AI_PROVIDER_API_KEY in every environment (ADR
+# 0118) — and `.env` is where a developer's real provider credential lives. The
+# variables are exported into the recipe's own shell and nowhere else; nothing
+# here echoes one, and the runner refuses plainly, naming the variable, when the
+# key is absent or blank rather than reporting a pass over a run that reached
+# nothing. README.md says what it costs and when CI fires it for you.
 .PHONY: evals
-evals: ## AI eval runner with per-task precision/recall floors
+evals: ## AI eval runner with per-task precision/recall floors (calls the real provider; costs money)
 	$(call banner,AI evals)
-	@if [ -f tests/evals/runner.py ]; then \
-		$(PYTHON) -m tests.evals.runner --enforce-floors; \
-	else \
-		$(call skip,no tests/evals runner yet); \
-	fi
+	@set -a; . ./.env; set +a; \
+		$(PYTHON) -m tests.evals.runner --enforce-floors
 
 # ---------------------------------------------------------------------------
 # Build gates

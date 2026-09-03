@@ -128,10 +128,13 @@ one alike. The second is a *report* rather than a guard: the sweeps above are al
 phrased over names and markers, so a table the walk reaches whose columns none of
 them recognises is passed over in silence, which is how `web_login_subject` would
 have shipped unmarked. `unclassified_reached_tables` names such a table, and
-`REACHED_TABLES_THAT_CARRY_NOTHING` is where the five the silence is acceptable
-over today are recorded — each with the columns that judgement was made against,
-so the entry expires the moment one of them grows a column, and with the reason a
-reviewer reads when it does.
+`REACHED_TABLES_THAT_CARRY_NOTHING` is where the tables the silence is acceptable
+over are recorded — each with the columns that judgement was made against, so the
+entry expires the moment one of them grows a column, and with the reason a
+reviewer reads when it does. No count is written here: the mapping grows with
+every ticket that adds a table the walk reaches, and a number in a docstring is a
+record with a scheduled expiry (`docs/MISTAKES.md` entry 1). E2-05 added two,
+`response` and `answer`.
 
 What remains outside the search is stated on `IDENTITY_NAME_FRAGMENTS` below
 rather than here, beside the tuple that decides it (`docs/MISTAKES.md` entry 14).
@@ -566,9 +569,19 @@ def people_tables(engine: Any) -> set[str]:
     rather than against the set it was building, so it walked exactly one hop and
     a table linking to a table that links to `user` was never swept at all. The
     tables that was written about are `answer` and `threat_case` — the second
-    being §6.2's Care queue — and neither exists yet, so the property is asserted
-    over a planted chain in
-    `test_the_marker_sweep_follows_the_foreign_key_walk_to_a_fixed_point` below.
+    being §6.2's Care queue.
+
+    **`answer` is no longer hypothetical, and this sentence used to say it was.**
+    E2-05 builds it: `response.user_id` is one hop from `user` and
+    `answer.response_id` is a second, so `answer` is reached by the fixed point
+    and by nothing else, and both tables are recorded in
+    `REACHED_TABLES_THAT_CARRY_NOTHING` at the foot of this file. That makes this
+    walk the first thing in the repository to depend on the extra hop against a
+    real table rather than against a plant. `threat_case` is still hypothetical,
+    and the property is still asserted over a planted chain as well, in
+    `test_the_marker_sweep_follows_the_foreign_key_walk_to_a_fixed_point` below:
+    a plant is what keeps the guard measurable when the schema's own two-hop
+    tables happen to be reachable by one hop too.
 
     The loop terminates because `found` only grows and is bounded by `present`.
     On today's schema it reaches exactly the tables the one-hop version reached,
@@ -2540,6 +2553,84 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
     "lead_faculty_mapping": CarriesNothing(
         ("course_id", "id", "person_id"),
         "Two foreign keys, a person and a course, and no other column.",
+    ),
+    # The two E2-05 adds, and the first entries here that were written before
+    # the tables existed. They are the reason `people_tables`' own docstring no
+    # longer says `answer` is hypothetical: `response.user_id` puts `response`
+    # one hop from `user` and `answer.response_id` puts `answer` two, so the
+    # fixed-point walk E0-10 built for exactly this case reaches both the moment
+    # E2-05's migration runs. Neither carries a name the vocabulary knows, so
+    # without these two entries the report would name them and the repair would
+    # be on the other side of the test wall from the ticket that caused it
+    # (`docs/MISTAKES.md` entry 22).
+    #
+    # **E2-08 makes it three**, and it is the walk rather than the table that
+    # moved: `classification.answer_id` is ADR 0055's promised reference, added by
+    # that ticket, so `answer_id` puts `classification` three hops from `user` and
+    # the fixed point reaches a table it had never reached before. The row itself
+    # is unchanged in what it is about — a verdict — and the reachability is a
+    # statement about foreign keys rather than about access: E2-08 grants that
+    # table no privilege at all, and it keeps the `SELECT, INSERT` ADR 0055 gave
+    # it. `docs/disputes/E2-08-04.md` is the record.
+    "response": CarriesNothing(
+        (
+            "first_submitted_at",
+            "id",
+            "is_valid",
+            "last_submitted_at",
+            "section_id",
+            "term_id",
+            "user_id",
+            "week_id",
+        ),
+        "The three keys SPEC §8's uniqueness rule is written over — a student, a section and a "
+        "week — and the two submission timestamps, and nothing about the person. What holds the "
+        "student's identity is the same thing that holds it on `enrollment`: `user_id` is a "
+        "foreign key, and the identity behind it sits on `user_identity`, which `pulse_app` is "
+        "granted no `SELECT` on. Note that this is the table SPEC §4 is written about — the "
+        "de-identification rules are about what a *view* of it may carry, which the bound-column "
+        "rule above governs, not about a column on the row. The column pin expired this entry "
+        "once already and did exactly what it is for: E2-08 added `is_valid`, §3.3's verdict "
+        "about the submission as a whole — a boolean about a week, carrying nothing about who "
+        "submitted it, and the column §3.4's participation score reads "
+        "(`docs/disputes/E2-08-04.md`). It expired a second time for `term_id`, E2-16's "
+        "addition, and this sentence is the re-reading. A term is the coarsest thing on the row: "
+        "an interval of the academic calendar that every section running in it shares, so it "
+        "narrows a response to nobody. It is here because SPEC §2.2 numbers weeks *within* a "
+        "term — 'each of them falls in a week of the term' — so which week a response is about "
+        "is only a well-formed question once the term its section and its week both sit in is "
+        "named; and §3.4 counts 'valid weeks completed ÷ weeks elapsed to date', a ratio along "
+        "that one axis, which a row pairing a section in one term with a week in another counts "
+        "across two calendars. That row was writable until this column arrived. It is carried on "
+        "the row rather than checked because a `CHECK` cannot read another table (ADR 0018), so "
+        "the agreement is expressed as a term held by two composite foreign keys into "
+        "`section (id, term_id)` and `week (id, term_id)` — the mechanism `survey_window` has "
+        "carried since E2-05, on a table this walk does not reach at all. It names a term, not a "
+        "person: no identity vocabulary knows it, and marking it would put every response in the "
+        "set the identity-separated views may not read, which is what the `answer` entry below "
+        "says about `comment_text` for the same reason (`docs/disputes/E2-16-01.md`).",
+    ),
+    "answer": CarriesNothing(
+        ("comment_text", "id", "question_id", "rating", "response_id", "workload_hours"),
+        "Two foreign keys and the three value columns, exactly one of which a row holds. "
+        "`comment_text` is a student's own words and can name anybody at all — that is why §5.2 "
+        "moderates it and §4 randomises its display order and never shows a timestamp beside it "
+        "— but it is not an identity *column* in this convention's sense: it holds no key to a "
+        "person, and marking it would put every comment in the set the identity-separated views "
+        "may not read, which is the opposite of what §5.1 requires of the instructor report.",
+    ),
+    "classification": CarriesNothing(
+        ("answer_id", "classified_at", "id", "model_id", "prompt_version", "task", "verdict"),
+        "A model's verdict about one comment, with the prompt version and model ID SPEC §7.4 "
+        "requires of it, and `answer_id` — E2-08's addition, ADR 0055's promised reference — "
+        "which names the comment rather than the person. The identity is two more hops away "
+        "through `answer.response_id` and `response.user_id`, and it is `user_identity` that "
+        "holds it, which `pulse_app` is granted no `SELECT` on. Marking anything here would put "
+        "every verdict in the set the identity-separated views may not read, which is the "
+        "opposite of what §5.1 and §6.1 need, so an entry is the right record and a marker is "
+        "not. `pulse_app` reads and appends this table and can neither update nor delete a row "
+        "(ADR 0055), which is what makes the audit trail an audit trail; what a *view* over it "
+        "may join to is the bound-column rule above, not this entry.",
     ),
     "role_assignment": CarriesNothing(
         (

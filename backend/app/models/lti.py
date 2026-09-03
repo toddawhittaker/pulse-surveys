@@ -1104,7 +1104,7 @@ class LtiLaunchState(UuidPrimaryKey, Base):
 
 
 class LaunchDefectKind(StrEnum):
-    """The five ways launch-time ingestion refuses a context (E1-10, ADR 0091).
+    """Every way launch-time ingestion refuses a context (E1-10, ADR 0091, ADR 0108).
 
     A closed set, held as a Postgres enum type rather than as free text, for the
     reason `app.models.org`'s two enums give: the set belongs in the database
@@ -1133,6 +1133,14 @@ class LaunchDefectKind(StrEnum):
     # state, which is a state and not a fault.
     CONTEXT_COLLISION = "context_collision"
     ROSTER_ADDRESS_REFUSED = "roster_address_refused"
+    # E2-02's, from the E1 boundary review's M9. §7.3's leadership limb admitted
+    # any holder of a live leadership assignment with no reference to the launch's
+    # context, so a Lead Faculty enrolled as a Learner in a sibling lead's course
+    # could bind that section and store its roster address. The limb now checks
+    # the launcher's own grant against the launched context, and this is the
+    # record of a launch that did not reach it — the launch itself still lands,
+    # and it is the *binding* that was refused (ADR 0108).
+    CONTEXT_OUTSIDE_PURVIEW = "context_outside_purview"
 
 
 class LaunchDefect(UuidPrimaryKey, Base):
@@ -1268,33 +1276,42 @@ class NrpsCall(UuidPrimaryKey, Base):
         # hour-major: 2,006 buffers per probe against the `section_id` index alone,
         # and 5 against this one.
         #
-        # Both halves of the shape are the criterion. `section_id` leads, because
-        # that is what the probe filters on and Postgres 17 has no skip scan.
-        # `called_at` is stored **descending**, so the row the probe wants is at the
-        # near end of the section's range rather than the far one.
+        # `section_id` leads, because that is what the probe filters on and
+        # Postgres 17 has no skip scan; `called_at` follows it, because the probe
+        # then wants one end of that section's range.
+        #
+        # **Ascending, and E2-02 is what reversed it** (`docs/tickets/e2/carried-
+        # from-e1.md`). It was `(section_id, called_at DESC)`, written as a text
+        # expression because that is the only way to state a direction here — and a
+        # text-expression index is not comparable, so `alembic check` read the key
+        # columns as `('section_id',)` and could not see the declaration at all. The
+        # gate that is supposed to catch this index being dropped, renamed or
+        # re-declared was blind to it for as long as it was written that way. A
+        # plain ascending composite costs the probe nothing: Postgres serves
+        # `ORDER BY called_at DESC LIMIT 1` from it by a backward scan, at the same
+        # 5 buffers. `d2f6a913c47e` drops the descending index and creates this one.
         #
         # **It is the only index on `section_id`, and that is deliberate.**
         # `e2c94b6a1f70` created `ix_nrps_call_section_id`; leading with the same
         # column, this one serves every lookup that one served, so keeping both
         # bought nothing and cost a second index write on every call row — of which
         # there is one per HTTP call, per section, every hour. `a4d61c8f9b27` drops
-        # it in the same revision that creates this. That is the reasoning E0-06
+        # it in the same revision that created this index's descending predecessor,
+        # and `d2f6a913c47e` swaps that one for this. That is the reasoning E0-06
         # applied to `ix_section_course_id`, and the reasoning `section`,
         # `college.institution_id`, `department.college_id` and `course.prefix_id`
         # are all left unindexed under today: an index that is merely contained by
         # another index's leading column is a write nobody reads.
         #
-        # An expression rather than a column list, because that is the only way to
-        # state the sort direction here — and it is why this declaration is not the
-        # guarantee. `alembic check` sees an index by name (measured: dropping the
-        # migration below makes it fail), but it reads this one's key columns as
-        # `('section_id',)` and cannot compare the expression at all, so it would
-        # equally accept a migration that created the wrong index under the right
-        # name. What says the shape reached the database is
-        # `tests/integration/test_the_nrps_call_log_is_indexed_for_the_debounce_probe.py`,
-        # which reads each key column's position and descending flag out of
-        # `pg_index` on the migrated schema.
-        Index("ix_nrps_call_section_id_called_at_desc", "section_id", text("called_at DESC")),
+        # A column list rather than an expression, which is what makes this
+        # declaration comparable: `alembic check` reads both key columns and holds
+        # the migration to them. It is still not the whole guarantee — `check` sees
+        # what is declared here against what the database has, and
+        # `tests/integration/test_the_nrps_call_log_is_indexed_for_the_debounce_probe.py`
+        # is what reads each key column's position and descending flag out of
+        # `pg_index` on the migrated schema, and requires that no descending index
+        # is left standing beside this one.
+        Index("ix_nrps_call_section_id_called_at", "section_id", "called_at"),
     )
 
     # Which section's roster was being read. Every one of the three jobs above is

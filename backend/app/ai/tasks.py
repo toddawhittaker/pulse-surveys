@@ -14,29 +14,43 @@ E0-13's sixth criterion).
 **Failing open means accepting the submission, not skipping the classification.**
 §3.3: "Classifier latency budget: p95 < 2s; on provider timeout, the heuristic
 floor applies and the submission is accepted, then classified async (fail open,
-never block a student on an outage)." So `classify_comment_validity` catches the
+never block a student on an outage)." So `verdict_for_comment` catches the
 one error that means "the endpoint was reached and did not classify", applies it,
-and returns the contract — and the row it writes says a floor decided it, under a
+and returns the contract — and the row `classify_comment_validity` then writes
+says a floor decided it, under a
 prompt version and a model ID that name no prompt and no model
 ([ADR 0054](../../../docs/adr/0054-a-floored-classification-names-the-floor-in-its-audit-pair.md)).
 Everything else the gateway raises propagates: a rejected credential is not an
 outage, and absorbing one would classify every comment by length for as long as
 the credential stayed wrong, with nothing saying so.
 
-**This fail-open is the only one in this codebase.** `CLAUDE.md` says so and says
-why it may not be generalised from: §3.3 sanctions it for the validity check
-alone, and §6.2's moderation path — the one that routes a threat or a self-harm
-disclosure to the Care queue — has none.
+**This fail-open is the only one in this codebase, and the spec is what says
+why it may not be generalised from**: SPEC §3.3 sanctions it for the validity
+check alone, and §6.2's moderation path — the one that routes a threat or a
+self-harm disclosure to the Care queue — has none. (An earlier version of this
+paragraph attributed the rule to `CLAUDE.md`, which never carried it; the E2
+boundary review corrected the citation.)
 
 **Every classification row is written here.** One function, `record_classification`,
 so that "what gets stored when a model answers" is a question with one place to
 read rather than a line at each call site. It writes and does not commit: the
 caller owns the transaction, because E2's submit path stores the response and the
 classification together or stores neither.
+
+**The comment-validity task comes in two halves, and `classify_comment_validity`
+is still the task.** `verdict_for_comment` judges and stores nothing;
+`classify_comment_validity` is that call plus `record_classification`, and it is
+what a caller uses when it already knows what the verdict will be recorded
+against. The split exists because E2-08's submit path does not: a comment §3.3
+bounces stores no `answer` row, and the verdict that bounced it still has to be
+recorded (ADR 0114). Asking the model once and choosing where the row goes
+afterwards is what the two halves buy, and the fail-open taxonomy stays in one
+place either way.
 """
 
 import threading
 from importlib.resources import files
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -46,9 +60,17 @@ from app.models.ai import Classification, ClassificationTask
 
 # The prompt this task renders, named as ADR 0031 spells a `prompt_version`: the
 # file's path stem under `app/ai/prompts/`, so the stored value names exactly one
-# immutable file (ADR 0032). Changing the prompt means adding `validity.v2.md`
+# immutable file (ADR 0032). Changing the prompt means adding the next version
 # beside it and changing this constant — never editing the file this names.
-VALIDITY_PROMPT_VERSION = "validity.v1"
+#
+# **It named `validity.v1` until the trim of 2026-09-02, and that is exactly the
+# move the paragraph above describes** (ADR 0120). `validity.v1.md` is still on
+# disk and still unedited, because classifications recorded against it have to
+# stay reproducible; `validity.v2.md` is the same instructions with the
+# documentation that was riding in every request taken out. Rows written before
+# the switch go on naming v1 and go on resolving to the text that produced them,
+# which is the whole property this constant exists to carry.
+VALIDITY_PROMPT_VERSION = "validity.v2"
 
 # Where the student's text goes, spelled exactly as `prompts/README.md` requires:
 # "The placeholder is `[[STUDENT_COMMENT]]`, replaced literally — with
@@ -199,8 +221,17 @@ def record_classification(
     session: Session,
     task: ClassificationTask,
     output: CommentValidityOutput,
+    *,
+    answer_id: UUID | None = None,
 ) -> Classification:
     """Store one verdict, with the pair that says what produced it (SPEC §8).
+
+    `answer_id` is the comment the verdict is about — ADR 0055's promised
+    reference, which E2-08 added the column for. It is optional in the signature
+    and not in the design: every caller that has an `answer` row passes it, and it
+    defaults to `None` only because the rows written before E2 exist and name
+    nothing. A verdict stored with no subject is a verdict the async
+    re-classification cannot find and a disputed grade cannot be answered from.
 
     Appended, never updated: a re-run under a new prompt version is what §6.1's
     drift panel and §9.3's eval floors compare against the earlier answer, and an
@@ -214,6 +245,7 @@ def record_classification(
     commit here would take that choice away from it.
     """
     row = Classification(
+        answer_id=answer_id,
         task=task,
         verdict=output.verdict.value,
         prompt_version=output.prompt_version,
@@ -224,17 +256,14 @@ def record_classification(
     return row
 
 
-def classify_comment_validity(
-    session: Session,
+def verdict_for_comment(
     comment: str,
     gateway: AIGateway | None = None,
 ) -> CommentValidityOutput:
-    """§7.4's comment-validity task: substantive / insufficient / nonsense.
+    """§7.4's comment-validity task, judged and not yet recorded.
 
-    One call in, one validated object out, one row stored. §3.3 gates
-    participation on the verdict, and refuses an `insufficient` comment to the
-    student's face at submit time with coaching copy — so what this returns
-    decides both what a student is told and what a section's validity rate says.
+    One call in, one validated object out, and **no row and no session** — which
+    is the whole of what separates this from `classify_comment_validity` below.
 
     On an endpoint that was reached and could not classify — it did not answer
     in time, or it answered to say it is temporarily unavailable — the character
@@ -249,17 +278,54 @@ def classify_comment_validity(
     caller that passes nothing gets `process_gateway()`, which is the one this
     process shares. Building one per comment is a connection pool per comment,
     and that shape was measured leaking sockets in E0-13's review.
+
+    **Why the judging is separable at all**, since the pair below was one function
+    until E2-08's security round: the submit path has to know the verdict *before*
+    it knows whether an `answer` row will exist to name. A comment §3.3 bounces
+    stores no answer and no response, and the verdict that bounced it still has to
+    be recorded — §7.4 rests auditability on "a specific prompt version and model
+    ID produced a specific classification". Splitting the call from the write is
+    what lets the caller record the same single call against an answer or against
+    none, without asking the model twice and without a second copy of the floor
+    rule anywhere. The taxonomy stays here, in one place, where ADR 0056 put it.
     """
     gateway = gateway or process_gateway()
     try:
-        output = gateway.run_task(
+        return gateway.run_task(
             prompt=render_prompt(VALIDITY_PROMPT_VERSION, comment),
             prompt_version=VALIDITY_PROMPT_VERSION,
             output_model=CommentValidityOutput,
             timeout=VALIDITY_TIMEOUT_SECONDS,
         )
     except AIProviderUnavailableError:
-        output = character_floor(comment)
+        return character_floor(comment)
 
-    record_classification(session, ClassificationTask.COMMENT_VALIDITY, output)
+
+def classify_comment_validity(
+    session: Session,
+    comment: str,
+    gateway: AIGateway | None = None,
+    *,
+    answer_id: UUID | None = None,
+) -> CommentValidityOutput:
+    """§7.4's comment-validity task: judge one comment and store the verdict.
+
+    The two halves above and below composed — `verdict_for_comment` decides
+    and `record_classification` writes — which is the whole of what this function
+    is. §3.3 gates participation on the verdict, and refuses an `insufficient`
+    comment to the student's face at submit time with coaching copy, so what this
+    returns decides both what a student is told and what a section's validity rate
+    says.
+
+    Callers that want both in one step use this, which is every caller that
+    already knows what the verdict will be recorded against: the async
+    re-classification sweep, and any later task. E2-08's submit path calls the two
+    halves separately, for the reason `verdict_for_comment` gives.
+
+    `answer_id` is the `answer` row this comment was submitted on, stored on the
+    verdict so that the row names what it judged (ADR 0055, E2-08). See
+    `record_classification` for why it has a default at all.
+    """
+    output = verdict_for_comment(comment, gateway)
+    record_classification(session, ClassificationTask.COMMENT_VALIDITY, output, answer_id=answer_id)
     return output

@@ -357,6 +357,7 @@ def door_contract() -> DoorContract:
 def deployed_identity_provider(
     monkeypatch: pytest.MonkeyPatch,
     configured_env: dict[str, str],
+    deployed_ai_provider: dict[str, str],
 ) -> dict[str, str]:
     """Configure an identity provider that is not the mock, and answer what it set.
 
@@ -364,6 +365,24 @@ def deployed_identity_provider(
     something else. `configured_env` has just laid down `.env.example`, whose
     provider is the mock; E0-39 refuses that combination, so without this the test
     stops in its own setup on a rule that is not its subject.
+
+    **It also requests `deployed_ai_provider`, which is E2-07 arriving with the
+    same problem one ticket later.** `.env.example` points
+    `MOCK_AI_PROVIDER_BASE_URL` at `http://mock-ai:8000/v1` — the variable was
+    spelled `AI_PROVIDER_BASE_URL` until the configuration split of 2026-09-02
+    gave the real provider and the mock a triple each — and a deployment refuses
+    that value twice over, for naming the mock and for being cleartext off this
+    machine. Whether the refusal still fires once the mock's triple is *unread*
+    outside development is the selection half of that split and is not settled
+    here; this fixture is correct either way, since all it does is name a provider
+    that is not the mock. Every test that requests this fixture is a test running
+    as a
+    deployment, which is exactly the set that has to move both providers, so the
+    two travel together rather than every such module gaining a second
+    declaration. The names stay separate because the two are separate
+    configurations and a test about one may want to say so; what is shared is the
+    occasion. `docs/MISTAKES.md` entry 22: the repair for a new rule that makes an
+    earlier ticket's tests unrunnable is on this side of the test wall.
 
     Requested rather than applied globally, because the combination is legal — and
     required — in development, and `tests/unit/test_config_settings.py` asserts that

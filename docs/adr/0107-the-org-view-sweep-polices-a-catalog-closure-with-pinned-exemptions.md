@@ -1,5 +1,25 @@
 # 0107 — The org-view sweep polices a catalog closure, with pinned exemptions
 
+> **Amended by E2-01** (`e2/sweep-guard-agreement`). The fourth exempt
+> location is now the single module `backend/app/views_sql/queries.py`, not
+> the `views_sql/` package. The sentence below that leaves the package
+> unpinned "because the one-importer sweep guards `views_sql` separately"
+> described a guard that does not exist as described: that sweep watches the
+> one module name `app.views_sql.queries`, so a second module added to the
+> package held a package-wide SQL exemption while its import was watched by
+> nothing — two individually legal steps to a raw org read, reproduced with
+> a planted module during the post-merge re-review of PR #123. The narrowing
+> is the fail-closed repair (`docs/MISTAKES.md` entry 35: a closed set must
+> not be extendable by the thing it guards): the package exemption would
+> have excused the module nobody has written yet. The import sweep's own
+> package exemption was deleted in the same change — no module in the
+> package imports `queries`, and a package member that did could launder the
+> statements to a handler under a name the one-importer sweep never watched.
+> Both guards now name the same object. The unpinned reasoning below still
+> holds for `queries.py` itself: holding statements that name these
+> relations is that module's whole job, and one importer is what keeps it
+> honest.
+
 **Status:** Accepted
 **Date:** 2026-08-28 (E1 boundary fix batch C; the safety.py ruling and the
 scope ruling were made during this batch's review round)

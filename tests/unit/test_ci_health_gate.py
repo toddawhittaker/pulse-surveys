@@ -1,4 +1,4 @@
-"""The CI health gate: which services it names, and where it names them — E0-03, E0-14, E0-16.
+"""The CI health gate: which services it names, and where — E0-03, E0-14, E0-16, E2-07.
 
 E0-03's acceptance criterion 5: "The CI `docker` job waits on all three services
 and passes." The passing half is the job's own business and cannot be asserted
@@ -16,8 +16,18 @@ criterion is then asserted nowhere at all.
 to healthy alongside the existing services" — is checked by exactly the same
 mechanism and by nothing else. E0-16 adds `mock-idp` and its first criterion is
 the same sentence about the other entry door, so it joins the list for the same
-reason. A ticket that adds a service with a health check and does not add it here
-has shipped a service the gate never looks at.
+reason. E2-07 adds `mock-ai`, the third external dependency's stand-in, and its
+fourth criterion is that CI's e2e job runs against it — which is exactly this
+argument list, in a second job. A ticket that adds a service with a health check
+and does not add it here has shipped a service the gate never looks at.
+
+**Two jobs ask this question now, and they ask it about different things.** The
+`docker` job is about the images and the stack; the `e2e` job is about a browser
+driving that stack, and `mock-ai` is the service whose absence it would feel
+first — a Playwright submit against a stack with no provider waits four seconds
+and takes the fail-open path, which is a passing spec measuring nothing. So the
+same list is required of both, and the second test below says so about the job
+E2-07's criterion 4 names.
 
 E0-02 reached `db` and `redis` through `api`'s `depends_on` conditions rather
 than by naming them, and `test_compose_stack.py` holds those conditions for that
@@ -70,13 +80,17 @@ from typing import Any
 # so rather than quietly find nothing to check.
 DOCKER_JOB = "docker"
 
+# The job E2-07's fourth criterion names: "CI's e2e job runs against it".
+E2E_JOB = "e2e"
+
 # Every service a first acceptance criterion requires to reach healthy: `api`,
-# `worker` and `beat` from E0-03, `mock-lms` from E0-14, and `mock-idp` from
-# E0-16. Listed rather than derived from the Compose file, and the difference
-# matters — a rule of "wait on whatever the file declares" would silently accept
-# a service that lost its health check, because `wait_for_health.sh` would stop
-# being given it at the same moment it stopped being able to answer.
-REQUIRED_SERVICES = ("api", "worker", "beat", "mock-lms", "mock-idp")
+# `worker` and `beat` from E0-03, `mock-lms` from E0-14, `mock-idp` from E0-16,
+# and `mock-ai` from E2-07. Listed rather than derived from the Compose file, and
+# the difference matters — a rule of "wait on whatever the file declares" would
+# silently accept a service that lost its health check, because
+# `wait_for_health.sh` would stop being given it at the same moment it stopped
+# being able to answer.
+REQUIRED_SERVICES = ("api", "worker", "beat", "mock-lms", "mock-idp", "mock-ai")
 
 WAIT_SCRIPT = "scripts/ci/wait_for_health.sh"
 
@@ -325,6 +339,77 @@ def test_the_docker_job_waits_on_every_service_a_criterion_names(
             "goes green with it crash-looping. Restore the full list — "
             f"`{WAIT_SCRIPT} {' '.join(REQUIRED_SERVICES)}` — at every wait in the job, the "
             "one after the restart loop included.",
+        ]
+    )
+
+
+def test_the_e2e_job_waits_on_every_service_a_criterion_names(
+    ci_workflow_path: Path,
+    ci_workflow: dict[str, Any],
+) -> None:
+    """E2-07's fourth criterion, for the half of it that is not about secrets.
+
+    "CI's e2e job runs against it" — and the only thing that makes that true is
+    the stack this job brings up and waits on. `wait_for_health.sh` says nothing
+    whatever about a service nobody named, so a `mock-ai` left off this list is a
+    Playwright run against a stack whose provider may be crash-looping, and every
+    submit in it takes the four-second fail-open path and passes.
+
+    That is the failure worth naming: the specs stay green. A stack with no
+    classifier does not break a browser test, it makes one meaningless — the
+    "bounced with immediate feedback" exit clause E2-07's context paragraph
+    describes is never actually exercised against a verdict.
+
+    **The same list as the `docker` job**, because a service that has to be
+    healthy for one is healthy for the other, and two lists that could disagree
+    are two things to keep in step (`docs/MISTAKES.md` entry 13). This is a
+    separate *test* rather than a parametrisation because the two jobs fail for
+    different reasons and a red should say which.
+
+    **The mutation this kills:** `mock-ai` added to the `docker` job's waits and
+    not to this one, which is the natural half-edit — the `docker` job is where
+    three of the five names went in.
+
+    The "found any at all" assertion is not ceremony: this test compares a
+    required set against what it collected, and an empty collection satisfies a
+    subset check trivially.
+    """
+    assert ci_workflow, (
+        f"{ci_workflow_path} does not exist or parsed to nothing. The CI pipeline is what makes "
+        "the §14.2 definition of done enforceable."
+    )
+
+    jobs = ci_workflow.get("jobs") or {}
+    job = jobs.get(E2E_JOB)
+    assert job, (
+        f"{ci_workflow_path} declares no `{E2E_JOB}` job (it declares {sorted(jobs)}). E2-07's "
+        "fourth criterion names that job; if it has been renamed, rename it here too rather than "
+        "leaving this test looking for something that is gone."
+    )
+
+    invocations = health_wait_invocations(job)
+    assert invocations, (
+        f"The `{E2E_JOB}` job calls `{WAIT_SCRIPT}` nowhere, so it starts a stack and drives a "
+        "browser at it without ever asking whether the stack came up."
+    )
+
+    required = set(REQUIRED_SERVICES)
+    incomplete = [
+        (arguments, sorted(required - set(arguments)))
+        for arguments in invocations
+        if required - set(arguments)
+    ]
+    reported = [f"  waits on {waited}, missing {missing}" for waited, missing in incomplete]
+
+    assert not incomplete, "\n".join(
+        [
+            f"A `{WAIT_SCRIPT}` call in the `{E2E_JOB}` job does not wait on every service the "
+            "stack brings up:",
+            *reported,
+            "",
+            "E2-07's fourth criterion is that this job runs against the mock provider. A service "
+            "nobody names is a service the gate never looks at — and a Playwright submit against "
+            "a stack with no classifier waits four seconds, takes the fail-open path, and passes.",
         ]
     )
 

@@ -85,6 +85,15 @@ Every E1 pull request that defers something adds it here in the same PR.
    five measured entries are `user`, `audit_log`, `enrollment`,
    `lead_faculty_mapping` and `role_assignment`, each with its pinned
    columns and its reason beside it.
+   **E2-05 grew that inventory to seven**, adding `response` and `answer`:
+   `response.user_id` puts one of them a hop from `user` and
+   `answer.response_id` puts the other two, so the fixed-point walk reaches
+   both the moment that ticket's migration runs. The count above is left as
+   it was measured, with this line beside it: a number written into a record
+   expires every time the thing it counts grows (`docs/MISTAKES.md` entry 1),
+   and the inventory itself is the mapping in
+   `tests/integration/test_identity_column_marker.py`, which is where a
+   reader should look for today's list.
    **The structural-source half was attempted by Batch A and failed
    honestly; it stays carried to E13.** Measured 2026-08-28: the
    grant-derived candidate (tables `pulse_app` holds no SELECT on) returns
@@ -242,6 +251,31 @@ Every E1 pull request that defers something adds it here in the same PR.
    families are named.
 
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E2.
+
+   **Closed by E2-10, and the strategy is self-hosting.**
+   [ADR 0116](../../adr/0116-the-three-webfonts-are-self-hosted-in-the-bundle.md)
+   is the record. `@fontsource/literata`, `@fontsource/schibsted-grotesk` and
+   `@fontsource/spline-sans-mono` are pinned exactly at 5.3.0 in
+   `frontend/package.json`, and `frontend/src/main.tsx` imports the six faces the
+   brief gives a job — Literata 600/700, Schibsted Grotesk 400/500, Spline Sans
+   Mono 400/500 — in the latin subset and the normal style, so the bundler emits
+   them beside the bundle and the browser fetches them from the tool's own
+   origin. The three-faces-from-a-font-host option is refused for this entry's
+   own reason, which was E0-18's before it. `design/tokens.css` is untouched, as
+   the "done when" required. Measured on the branch: the payload
+   `scripts/ci/check_bundle_size.py` counts grows by **219 bytes gzipped** (the
+   six `@font-face` rules), and the faces themselves are **119,100 bytes of
+   woff2** the gate does not count; the budget is green at 93,678 of 163,840.
+   Two residues are recorded in `../e2/deferred.md` rather than fixed here,
+   because both sit on a heavy-lane path: the licence gate has no rule for
+   OFL-1.1, and a second copy of every face ships as woff that no supported
+   browser fetches.
+
+   (Note: the "done when" says "the four faces". There are three —
+   `design/tokens.css` names Literata, Schibsted Grotesk and Spline Sans Mono,
+   and `docs/DESIGN_BRIEF.md` calls them "three faces, three jobs". The count in
+   the sentence above was wrong when it was written and is left standing with
+   this correction beside it rather than edited away.)
 
 2. **The application sends no security response headers.** No route sets
    `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, or

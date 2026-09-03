@@ -50,13 +50,14 @@
 }
 
 /* The landing shell. One reading column at the width `docs/DESIGN_BRIEF.md`
- * gives report and survey surfaces, and nothing else — these views are
- * intentionally empty.
+ * gives report and survey surfaces, and nothing else — the four remaining
+ * landing views are intentionally empty.
  *
- * There is no motion here at all, on any of the five. The brief gives the Care
- * queue none by name ("stillness is the design"), and an empty view has nothing
- * to animate; `design/tokens.css` carries the reduced-motion kill switch for
- * when a later screen does.
+ * There is no motion on any of them. The brief gives the Care queue none by name
+ * ("stillness is the design"), and an empty view has nothing to animate; the
+ * weekly survey below is the first surface with any, and every piece of it is a
+ * CSS animation or transition so that `design/tokens.css`'s reduced-motion kill
+ * switch removes all of it. Nothing in this application animates in JavaScript.
  */
 @layer components {
   .pulse-landing {
@@ -84,5 +85,570 @@
   .pulse-line {
     display: block;
     margin: var(--space-4) 0;
+  }
+}
+
+/* ==========================================================================
+   StudentWeeklySurvey — SPEC §7.6, E2-10.
+   ==========================================================================
+
+   The five questions and the states around them. Every value here is a token
+   from `design/tokens.css`: no raw hex, no invented spacing, no radius outside
+   the two the brief allows (4px inputs, 8px cards).
+
+   Colour, in one paragraph, because the reservations are load-bearing
+   (`design/Usage Rules.md` §2). Marigold is the hero accent and carries the
+   conditional-required reveal and the validity coaching — *not* madder, which
+   means "attend to this" and is reserved for flags, Care labels and breached
+   thresholds. Nothing on this screen is madder. Marigold-deep is what any of it
+   is written in, because the accent measures under 3:1 on both grounds and
+   `tokens.css` gives the focus ring the deep variant for the same reason.
+
+   Motion, in one paragraph. The Likert dot beats once, 180ms; the helper line
+   under a comment field slides down four pixels and fades in, 180ms; the beat
+   pulse line draws on once, 600ms, with its terminal dot fading in behind it.
+   That is the whole budget and it is the brief's. There is no shake anywhere,
+   on any state, including the bounce — "nothing in this product shames". All of
+   it is CSS, so the `prefers-reduced-motion` block in `design/tokens.css`
+   removes every piece of it, and there is no JavaScript animation that could
+   escape that switch.
+ */
+@keyframes pulse-beat {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes pulse-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes pulse-terminal-dot {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@layer components {
+  /* The reading column. Narrower than the report column: the survey is a phone
+   * screen first ("students on phones are a primary case for the survey
+   * itself") and a form reads worse the wider its fields get. */
+  .pulse-survey {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: var(--space-6) var(--space-4);
+  }
+
+  .pulse-survey h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: var(--text-4);
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .pulse-line-divider {
+    margin: var(--space-3) 0 0;
+  }
+
+  .pulse-survey-status {
+    margin: var(--space-6) 0 0;
+    color: var(--spruce-60);
+  }
+
+  .pulse-survey-section {
+    margin-top: var(--space-6);
+  }
+
+  /* The section heading: the §2.2 code in mono, the course beside it in the
+   * body face. Two voices in one line, which is the brief's own split — mono is
+   * for codes and numerals, and the course is prose. */
+  .pulse-section-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2);
+    margin: 0;
+    font-size: var(--text-2);
+    font-weight: 500;
+    line-height: 1.4;
+  }
+
+  .pulse-section-code {
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+    color: var(--spruce);
+  }
+
+  .pulse-course-label {
+    font-family: var(--font-body);
+    font-weight: 400;
+    color: var(--spruce-60);
+  }
+
+  /* The mono eyebrow: uppercase, letterspaced, spruce-60. The course week leads
+   * and the term week and the closing instant follow it quietly. */
+  .pulse-eyebrow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin: var(--space-3) 0 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-1);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--spruce-60);
+  }
+
+  .pulse-eyebrow-week {
+    color: var(--spruce);
+  }
+
+  .pulse-eyebrow-quiet::before {
+    content: '· ';
+  }
+
+  .pulse-survey-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+    margin-top: var(--space-4);
+  }
+
+  .pulse-question-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+    padding: var(--space-5);
+    background: var(--paper);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  /* ---- LikertInput ---- */
+
+  .pulse-likert {
+    margin: 0;
+    padding: 0;
+    border: none;
+  }
+
+  .pulse-likert legend {
+    padding: 0;
+    margin-bottom: var(--space-3);
+    font-size: var(--text-2);
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--spruce);
+  }
+
+  .pulse-likert-scale {
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .pulse-likert-point {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 44px;
+    padding: var(--space-2) 0;
+    cursor: pointer;
+  }
+
+  /* The dot is the radio. `appearance: none` keeps the control — its focus ring,
+   * its arrow keys, its position announced in the group — and takes only its
+   * paint.
+   *
+   * **The ring is `--spruce-60` at 2px, and both halves are E2-17 item 3.** It
+   * was `--mist` at 1.5px, which measures 2.58:1 against the white card by the
+   * token's own value and 1.92:1 as it actually rendered — an antialiased hairline
+   * is lighter than its own colour — against SC 1.4.11's 3:1 floor for the
+   * boundary of a control a person has to find. `--spruce-60` measures 5.18:1 and
+   * is the token the numerals and the end labels beside it are already drawn in,
+   * so the unchecked dot now reads as the same de-emphasised ink rather than as a
+   * fourth grey. The width is part of the fix and not a detail of it: a darker
+   * token at 1px renders lighter than the ratio it promises. The component
+   * publishes this token's name in `data-pulse-ring-token`. */
+  .pulse-likert-point input {
+    appearance: none;
+    width: 26px;
+    height: 26px;
+    margin: 0;
+    border: 2px solid var(--spruce-60);
+    border-radius: 50%;
+    background: transparent;
+    cursor: pointer;
+    transition: border-color 150ms ease;
+  }
+
+  .pulse-likert-point input:checked {
+    border-color: var(--spruce);
+    background: var(--spruce);
+    animation: pulse-beat 180ms ease-out;
+  }
+
+  .pulse-likert-value {
+    font-family: var(--font-mono);
+    font-size: var(--text-1);
+    color: var(--spruce-60);
+  }
+
+  .pulse-likert-ends {
+    display: flex;
+    justify-content: space-between;
+    margin-top: var(--space-1);
+    font-size: var(--text-1);
+    color: var(--spruce-60);
+  }
+
+  /* ---- ConditionalTextArea ---- */
+
+  .pulse-comment label {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+    font-size: var(--text-2);
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--spruce);
+  }
+
+  /* The required state in words as well as in colour (SPEC §14.2 item 4). */
+  .pulse-comment-flag {
+    font-family: var(--font-mono);
+    font-size: var(--text-1);
+    font-weight: 400;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--marigold-deep);
+  }
+
+  .pulse-comment[data-required='false'] .pulse-comment-flag {
+    display: none;
+  }
+
+  .pulse-comment textarea {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 88px;
+    padding: var(--space-3) var(--space-4);
+    font-family: var(--font-body);
+    font-size: var(--text-2);
+    line-height: 1.55;
+    color: var(--spruce);
+    background: var(--paper);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-input);
+    resize: vertical;
+    transition: border-color 180ms ease;
+  }
+
+  /* Marigold for both the invitation and the coaching — never madder, and never
+   * a red. The bounce is the same warm border as the required state, because it
+   * is the same request made twice. */
+  .pulse-comment[data-state='required'] textarea,
+  .pulse-comment[data-state='bounce'] textarea {
+    border-color: var(--marigold);
+  }
+
+  .pulse-comment-help {
+    margin: var(--space-2) 0 0;
+    font-size: var(--text-1);
+    line-height: 1.5;
+    color: var(--spruce-60);
+  }
+
+  .pulse-comment[data-state='required'] .pulse-comment-help,
+  .pulse-comment[data-state='bounce'] .pulse-comment-help {
+    color: var(--marigold-deep);
+    animation: pulse-reveal 180ms ease-out both;
+  }
+
+  /* ---- WorkloadSlider ---- */
+
+  .pulse-workload-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+  }
+
+  .pulse-workload-head label {
+    font-size: var(--text-2);
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--spruce);
+  }
+
+  /* Tabular figures, so the readout does not shift while the thumb moves. */
+  .pulse-workload-readout {
+    font-family: var(--font-mono);
+    font-size: var(--text-3);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: var(--spruce);
+  }
+
+  .pulse-workload-range {
+    appearance: none;
+    width: 100%;
+    height: 44px;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  /* The track is `--mist`, up from `--hairline` (E2-17 item 3). `--hairline` is
+   * the rule and gridline token and measures 1.30:1 against the card, at which
+   * the track is invisible and the slider reads as a floating thumb; `--mist` is
+   * the de-emphasis token and measures 2.58:1. Not 3:1, and deliberately: a
+   * track is not the control's boundary — the thumb is, at 12.45:1 — so this is
+   * the design-fidelity half of item 3 rather than SC 1.4.11. The component
+   * publishes this token's name in `data-pulse-track-token`. */
+  .pulse-workload-range::-webkit-slider-runnable-track {
+    height: 4px;
+    background: var(--mist);
+    border-radius: 2px;
+  }
+
+  .pulse-workload-range::-webkit-slider-thumb {
+    appearance: none;
+    width: 24px;
+    height: 24px;
+    margin-top: -10px;
+    border: none;
+    border-radius: 50%;
+    background: var(--spruce);
+  }
+
+  .pulse-workload-range::-moz-range-track {
+    height: 4px;
+    background: var(--mist);
+    border-radius: 2px;
+  }
+
+  .pulse-workload-range::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 50%;
+    background: var(--spruce);
+  }
+
+  .pulse-workload-ends {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-top: var(--space-1);
+    font-family: var(--font-mono);
+    font-size: var(--text-1);
+    color: var(--spruce-60);
+  }
+
+  /* The spoken range, drawn small: it is the slider's `aria-describedby`, so it
+   * has to be in the document, and it reads as the scale's own caption. */
+  .pulse-workload-hint {
+    font-family: var(--font-body);
+    text-align: center;
+  }
+
+  /* ---- SubmitBar ---- */
+
+  .pulse-submit-bar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .pulse-submit,
+  .pulse-secondary {
+    display: block;
+    width: 100%;
+    min-height: 48px;
+    box-sizing: border-box;
+    padding: var(--space-3) var(--space-4);
+    font-family: var(--font-body);
+    font-size: var(--text-2);
+    font-weight: 500;
+    border-radius: var(--radius-input);
+    cursor: pointer;
+    transition: opacity 150ms ease;
+  }
+
+  .pulse-submit {
+    color: var(--paper);
+    background: var(--spruce);
+    border: 1px solid var(--spruce);
+  }
+
+  /* There is deliberately no `:disabled` rule here. E2-17 item 1 makes the
+   * submit control operable always — a disabled button is not in the tab order,
+   * so the screen offered a keyboard user nothing to activate and nothing that
+   * explained why — and it refuses to send rather than refusing to exist. A
+   * dimmed style for a state that cannot happen is a second answer to a question
+   * this stylesheet no longer has. */
+
+  .pulse-secondary {
+    margin-top: var(--space-5);
+    color: var(--spruce);
+    background: var(--paper);
+    border: 1px solid var(--hairline);
+  }
+
+  .pulse-confidentiality,
+  .pulse-submit-note {
+    margin: 0;
+    font-size: var(--text-1);
+    line-height: 1.5;
+    text-align: center;
+    text-wrap: pretty;
+    color: var(--spruce-60);
+  }
+
+  /* ---- The announcements ---- */
+
+  .pulse-bounce-announcement,
+  .pulse-refusal {
+    margin: 0;
+    padding: var(--space-3) var(--space-4);
+    font-size: var(--text-1);
+    line-height: 1.5;
+    color: var(--marigold-deep);
+    background: var(--chalk);
+    border: 1px solid var(--marigold);
+    border-radius: var(--radius-input);
+    animation: pulse-reveal 180ms ease-out both;
+  }
+
+  /* An idle live region is **hidden and still rendered** — E2-17 item 8. It was
+   * `display: none` while empty, and Chromium's accessibility tree marked the
+   * node `notRendered`: the region a screen reader is supposed to be watching
+   * was not in the tree at all until it already had something to say, which is
+   * the one moment it is too late to start watching. The comment that stood
+   * here claimed the opposite intent.
+   *
+   * The clipped 1px box is what replaces it. It keeps `display: block` and
+   * `visibility: visible`, which is what keeps the node in the tree, and takes
+   * no space on the screen. `animation: none` is part of it and not tidiness:
+   * an idle region carries no animation, so the property changes when the
+   * sentence arrives, and that is what restarts the reveal the `display` switch
+   * used to restart for free.
+   *
+   * The submit control's own region (E2-17 item 1) is the same node twice over —
+   * the sentence it announces is also the visible text the button is described
+   * by — so it is hidden the same way and shown the same way. The
+   * conditional-required region (item 4) is hidden this way *always*: the flag
+   * beside the label and the helper under the box already say on screen what it
+   * announces, and a third statement of it would be the same sentence twice. */
+  .pulse-required-announcement,
+  .pulse-bounce-announcement:empty,
+  .pulse-submit-missing:empty {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+    background: none;
+    animation: none;
+  }
+
+  /* The refusal is rendered only when there is one, so it is never in the
+   * document empty; this is the belt to that brace. */
+  .pulse-refusal:empty {
+    display: none;
+  }
+
+  /* What the submit control says when it is pressed with a question still
+   * unanswered. Beside the button, in the same marigold register as every other
+   * piece of coaching on this screen — never madder, and never a red: a student
+   * who has not finished a form has done nothing wrong. */
+  .pulse-submit-missing {
+    margin: 0;
+    font-size: var(--text-1);
+    line-height: 1.5;
+    text-align: center;
+    text-wrap: pretty;
+    color: var(--marigold-deep);
+    animation: pulse-reveal 180ms ease-out both;
+  }
+
+  /* ---- StateNotice ---- */
+
+  .pulse-state-notice {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: var(--space-7) var(--space-4);
+  }
+
+  .pulse-state-notice .pulse-line {
+    margin: 0 0 var(--space-5);
+  }
+
+  .pulse-state-title {
+    margin: 0 0 var(--space-2);
+    font-family: var(--font-display);
+    font-size: var(--text-3);
+    font-weight: 600;
+    color: var(--spruce);
+  }
+
+  .pulse-state-body {
+    margin: 0;
+    max-width: 42ch;
+    font-size: var(--text-2);
+    line-height: 1.55;
+    text-wrap: pretty;
+    color: var(--spruce-60);
+  }
+
+  /* The signature moment, once per visit: the line draws left to right and the
+   * terminal dot arrives behind it. `pathLength` is 1 on the path, so the dash
+   * arithmetic is in units of the whole stroke rather than of its pixel length. */
+  .pulse-line-beat path {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 0;
+    animation: pulse-draw 600ms ease-out;
+  }
+
+  .pulse-line-beat circle {
+    animation: pulse-terminal-dot 150ms ease-out 560ms both;
   }
 }

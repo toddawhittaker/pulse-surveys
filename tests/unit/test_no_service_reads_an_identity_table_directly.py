@@ -105,9 +105,11 @@ UNPOLICED_RELATION = "widget_ledger"
 # not sanctioned. `pulse_app` holds an unfiltered read on both relations, and
 # `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` now polices
 # them — along with base `enrollment`, which they are defined over — outside four
-# locations: `services/authz.py`, ADR 0100's development console, the `views_sql/`
-# package where the statements live, and `services/safety.py`, which revalidates
-# the holds-Care rule on the Care credential.
+# locations: `services/authz.py`, ADR 0100's development console,
+# `views_sql/queries.py` where the statements live, and `services/safety.py`,
+# which revalidates the holds-Care rule on the Care credential. That fourth one
+# was the whole `views_sql/` package until E2-01 narrowed it to the module the
+# one-importer sweep watches.
 #
 # Then the round's own review found the same defect in what remained: the two
 # surviving samples were written over `role_assignment` and

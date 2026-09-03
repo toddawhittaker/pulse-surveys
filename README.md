@@ -22,8 +22,10 @@ Early, but no longer empty. The backend package exists — a FastAPI application
 factory, the environment-driven settings object, a health endpoint, and a
 database engine with a session per request — and it runs in a container
 alongside a Celery worker, a Celery beat scheduler, Postgres, Redis, Mailpit,
-and the two mocks described below — a fake LMS to launch from and a fake identity
-provider to log in through, one for each of the two entry doors in SPEC §2. CI enforces lint, typing, the test suite,
+and the three mocks described below — a fake LMS to launch from and a fake
+identity provider to log in through, one for each of the two entry doors in SPEC
+§2, and a fake model provider so that classifying a comment costs nothing and
+calls nobody. CI enforces lint, typing, the test suite,
 migration drift, dependency audit, license compatibility, and that the stack
 comes up healthy.
 
@@ -53,7 +55,8 @@ make down           # docker compose down -v — discards the database too
 `GET http://localhost:8000/healthz` answers with the service name, the version,
 and the environment it was configured with. The interactive API documentation is
 at `/docs`, the captured mail is at <http://localhost:8025>, the mock LMS is at
-<http://localhost:8080>, the mock IdP is at <http://localhost:8081>, and Postgres
+<http://localhost:8080>, the mock IdP is at <http://localhost:8081>, the mock AI
+provider's published rules are at <http://localhost:8082/mock/rules>, and Postgres
 and Redis are on their usual ports. All of them bind to `127.0.0.1` only.
 
 The developer test console is at <http://localhost:8000/dev>. It lists the mock
@@ -126,33 +129,64 @@ job that has already fired is not fired again when one of those entries lands.
 
 ## The AI provider
 
-Three variables configure it, and `.env.example` documents all three:
-`AI_PROVIDER_BASE_URL` is any OpenAI-compatible endpoint, `AI_MODEL_NAME` is the
-model to ask for, and `AI_PROVIDER_API_KEY` is the credential — a secret, so a
-real one belongs in your `.env` or in the deployment's secret store and nowhere
-else.
+**Two providers are configured at once**, and `.env.example` documents both
+triples. `AI_PROVIDER_BASE_URL`, `AI_PROVIDER_MODEL_NAME` and
+`AI_PROVIDER_API_KEY` describe the real provider — any OpenAI-compatible
+endpoint, and a key that is a secret, so a real one belongs in your `.env` or in
+the deployment's secret store and nowhere else. `MOCK_AI_PROVIDER_BASE_URL`,
+`MOCK_AI_PROVIDER_MODEL_NAME` and `MOCK_AI_PROVIDER_API_KEY` describe the mock,
+the third service described below.
 
-**You can run without a key.** Leave `AI_PROVIDER_API_KEY` empty and the request
-carries an inert placeholder bearer token instead of a real one, which a local
-server such as vLLM or Ollama ignores:
+`AIGateway` takes a `live` flag that picks between them
+([ADR 0118](docs/adr/0118-the-provider-configuration-splits-in-two.md)):
+`live=True` reads the real triple in every environment, and `live=False` — every
+caller except the eval runner — reads the mock's in development and the real one
+in a deployment. Two triples rather than three variables that switch, because the
+§9.3 eval floors have to be measured against the real provider on a developer's
+machine, which is the same machine and the same environment where everything else
+has to reach the mock.
+
+**Out of the box an ordinary run reaches the mock**: `http://mock-ai:8000/v1`, a
+model name it answers to, and a blank key. So `docker compose up` from a clean
+checkout classifies a comment, and so does CI's e2e job, which copies
+`.env.example` to `.env` unedited. Nothing in an ordinary run of this stack calls
+a model anybody pays for; `make evals` is the one local command that does.
+
+**You can run without a key.** Leave a key empty and the request carries an inert
+placeholder bearer token instead of a real one, which the mock and a local server
+such as vLLM or Ollama both ignore. To classify a development stack's comments
+through your own local model rather than through the mock, point the mock triple
+at it:
 
 ```sh
 # in your own .env
-AI_PROVIDER_BASE_URL=http://localhost:11434/v1
-AI_MODEL_NAME=llama3.1
-AI_PROVIDER_API_KEY=
+MOCK_AI_PROVIDER_BASE_URL=http://localhost:11434/v1
+MOCK_AI_PROVIDER_MODEL_NAME=llama3.1
+MOCK_AI_PROVIDER_API_KEY=
 ```
 
-**Off this machine means `https`, key or no key.** The base URL may be plain
-`http` only when it names this machine, as the example above does; anywhere else
-startup refuses it rather than put a student's comment — and any key sent with
-it — on the wire in the clear. A model reached over plain `http` inside a private
-network or a cluster is not an exception: terminate TLS at the model, or run the
-model alongside this application, where the local case above already covers it.
+**Off this machine means `https`, key or no key — outside development.**
+`AI_PROVIDER_BASE_URL` may be plain `http` to this machine in any environment; a
+deployment refuses it anywhere else rather than put a student's comment — and any
+key sent with it — on the wire in the clear. A model reached over plain `http`
+inside a private network or a cluster is not an exception: terminate TLS at the
+model, or run the model alongside this application, where the local case already
+covers it. Development is exempt because a developer with a model server on the
+next machine is a real situation
+([ADR 0113](docs/adr/0113-the-mock-model-provider-is-development-only-and-selects-in-band.md)).
+
+**The real triple may never point at the mock, in any environment.** An
+`AI_PROVIDER_BASE_URL` whose host is `mock-ai` is refused at startup, exactly as
+one naming `mock-idp` is: the mock ships in the base Compose file, so a
+deployment that copied the development value forward would store a character
+count as a classification under a real prompt version and a real model id — and a
+local eval run pointed there would record that count as SPEC §9.3's precision and
+recall floor. The mock's own triple carries no such rule, because it is meant to
+name the mock and nothing outside development and test reads it.
 
 The test suite never reaches a real endpoint whatever those hold: it points the
-base URL at a stub on `127.0.0.1` and asserts, with a guard under the call, that
-nothing connects off this machine.
+base URL at a stub or at the mock on `127.0.0.1` and asserts, with a guard under
+the call, that nothing connects off this machine.
 
 Everything a model produces enters through `backend/app/ai/`: `gateway.py` is the
 only module that talks to a provider, `tasks.py` holds one function per SPEC §7.4
@@ -421,6 +455,34 @@ arrive in one namespaced claim and everything about what she can see is worked
 out on this side of the door
 ([ADR 0061](docs/adr/0061-a-session-states-roles-in-a-namespaced-claim.md)).
 
+## The mock AI provider
+
+The third external dependency Pulse does not run is a model. Development and CI
+would otherwise either spend real tokens on every submitted comment or reach
+nothing at all and take SPEC §3.3's four-second fail-open path on each one — a
+stack that looks like it is classifying and is not. So the stack brings its own
+endpoint: `mock-ai`, a small FastAPI application in [`mock-ai/`](mock-ai/)
+speaking the OpenAI-compatible chat-completions surface the gateway drives.
+
+**It classifies by published rule.** `GET /mock/rules` serves the whole
+vocabulary — the marker phrases, the character threshold, the stall, and the
+prompt line it reads the student's comment from — and that route, not this page,
+is what the tests aim at. [`mock-ai/README.md`](mock-ai/README.md) restates it in
+prose for a person, including the four markers a comment can carry to make the
+provider fail on purpose: `mock-ai:503` and `mock-ai:500` (one status code apart,
+and one floors while the other does not), `mock-ai:malformed`, and
+`mock-ai:stall`.
+
+**It is not a model**, which is why the eval suite measures the real one and
+never this: a mock that passed evals would be measuring itself. And it will
+answer whatever a comment tells it to, which is why nothing outside development
+may address it — see the section above and
+[ADR 0113](docs/adr/0113-the-mock-model-provider-is-development-only-and-selects-in-band.md).
+
+**It has no reload**, for the reason the other two mocks give: the development
+override mounts your checkout into the three application containers and not into
+this one, so editing `mock-ai/` means `docker compose up -d --build mock-ai`.
+
 ## The demo institution
 
 An empty Pulse is hard to develop against, so
@@ -525,18 +587,24 @@ cp .env.example .env
 uvicorn app.main:create_app --factory --reload
 ```
 
-One catch. `DATABASE_URL`, `CARE_DATABASE_URL` and `REDIS_URL` in `.env.example`
-name the Compose services `db` and `redis`, because CI copies that file and
-starts the stack from it, so it has to be a file the stack can actually start
-from. Outside a container those names do not resolve. Either start the backing
-services with `make up` and point the three URLs at `localhost`:
+One catch. `DATABASE_URL`, `CARE_DATABASE_URL`, `REDIS_URL` and
+`MOCK_AI_PROVIDER_BASE_URL` in `.env.example` name the Compose services `db`,
+`redis` and `mock-ai`, because CI copies that file and starts the stack from it,
+so it has to be a file the stack can actually start from. Outside a container
+those names do not resolve. Either start the backing services with `make up` and
+point the four URLs at `localhost`:
 
 ```sh
-# in your own .env, replacing the three lines copied from .env.example
+# in your own .env, replacing the four lines copied from .env.example
 DATABASE_URL=postgresql+psycopg://${DB_APP_USER}:${DB_APP_PASSWORD}@localhost:5432/${DB_NAME}
 CARE_DATABASE_URL=postgresql+psycopg://${DB_CARE_USER}:${DB_CARE_PASSWORD}@localhost:5432/${DB_NAME}
 REDIS_URL=redis://localhost:6379/0
+MOCK_AI_PROVIDER_BASE_URL=http://localhost:8082/v1
 ```
+
+The mock provider's line is the port the development override publishes it on,
+and plain `http` to `localhost` is accepted in every environment — see the
+transport rule above.
 
 — or just use `make up`, which needs no such edit for the application. It is not
 optional for migrations: `make migrate` and `make migration-check` run `alembic`
@@ -612,7 +680,7 @@ no password and no way to log in, and the Care connection fails to
 authenticate.
 
 ```sh
-make ci             # every gate, in the same order as CI
+make ci             # every gate but the paid evals, in the same order as CI
 make lint           # ruff check + ruff format --check, eslint (root + frontend)
 make typecheck      # mypy, strict over app/services/; tsc (root + frontend)
 make test           # pytest with coverage
@@ -626,9 +694,13 @@ port 8000, and a `.env`. It also includes the migration drift gate, so it needs 
 database to migrate — `make up`, with `DATABASE_URL` pointed at `localhost` as
 above.
 
-`make ci` is the same set of gates as `.github/workflows/ci.yml`, so a green run
-here should mean a green run there. Where the two disagree, the workflow is
-right and the `Makefile` is the bug.
+`make ci` is the same set of gates as `.github/workflows/ci.yml` with one named
+exception, so a green run here should mean a green run there. The exception is
+the paid eval gate: it calls the real provider about a hundred times, so CI runs
+it only on a change that touches the AI code or on a manual dispatch, and
+`make ci` does not run it at all. Locally it is `make evals`, asked for by name —
+asking is the decision to spend. Where the two disagree anywhere else, the
+workflow is right and the `Makefile` is the bug.
 
 ## Running the e2e suite locally
 
@@ -641,7 +713,7 @@ database migrated and seeded, and the Playwright browser installed.
 # 1. Bring the stack up (Postgres is published on localhost:5432 by the override).
 cp .env.example .env
 make up
-./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
+./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp mock-ai
 
 # 2. Migrate and seed host-side, with DATABASE_URL pointed at localhost. The seed
 #    registers the mock platform the launch door resolves against.

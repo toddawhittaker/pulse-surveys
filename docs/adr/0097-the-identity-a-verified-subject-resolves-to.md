@@ -87,6 +87,15 @@ launching subject to a person and asks whether that person holds a role in
 `LEADERSHIP_ROLES`. The claim test runs first and short-circuits, so an ordinary
 instructor launch costs no query.
 
+**Amended by [0108](0108-the-leadership-limb-is-scoped-by-the-launchers-own-grant.md)
+(E2-02).** What is written above is the limb's *applicability* test and it is
+unchanged. What this record did not say, and what the E1 boundary review found as
+M9, is that holding a leadership role anywhere admitted a launch from anywhere: the
+limb referred to the launched context nowhere at all. From E2-02 it binds a context
+only where the launching person's own grants reach it, and a launch outside that
+records `context_outside_purview` rather than binding. The claim limb stays exempt,
+for the reason 0108 gives.
+
 **The role question is asked through the authorization chokepoint**, as
 `holds_leadership` in `app/services/authz.py` beside `holds_care`, and not with a
 query in the launch path. That was got wrong first and a §4.1 invariant caught

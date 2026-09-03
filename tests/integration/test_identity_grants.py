@@ -3311,6 +3311,179 @@ MEMBER_OF_ROLES = """
 #     E1-01 item 2) is answered no on exactly this ground: `nrps_call` references
 #     `section` and nothing else.
 #     Decided and spent in E1-11.
+#   - `pulse_app` **reads, inserts and deletes** `clock_override`, the single-row
+#     development clock E2-04 adds, and holds no `UPDATE` on it. This is the
+#     widening this test's docstring says will happen and has happened before, and
+#     `docs/disputes/E2-04-02.md` is its record: the branch was run without the
+#     grant, and five of the six cases in
+#     `tests/integration/test_the_dev_console_sets_and_clears_the_clock.py` failed
+#     with `permission denied for table clock_override` on the `GET /dev` render
+#     and on both `POST`s alike. It is issued by
+#     `backend/app/views_sql/clock_override_grants_v001.sql`, executed by revision
+#     `a789f1920de3`, so a fresh database reproduces it.
+#     **A verb per caller.** `SELECT` is `app.services.clock.now`, which every
+#     scheduling and visibility read in the product goes through — the service
+#     reads the row on the tool's connection and on the Celery worker's, and
+#     `DATABASE_URL` names `pulse_app` for both. `INSERT` is `POST /dev/clock`,
+#     which writes the pretended instant and the real instant it was anchored at.
+#     `DELETE` is `POST /dev/clock/clear`, and it is also the first half of a set:
+#     the table holds at most one row by a unique index over `(true)`, so replacing
+#     an override is a delete and an insert rather than an update.
+#     **`UPDATE` and `TRUNCATE` are withheld, and that is the assertion**, as it is
+#     on `classification` and on E1-10's group. The two instants are one fact
+#     written together: an anchor rewritten on its own leaves a clock running at
+#     the right rate from the wrong origin, which no single reading of `now` can
+#     detect and which
+#     `test_now_adds_the_real_time_elapsed_since_the_override_was_anchored` is the
+#     only thing in the suite that would catch. Withholding the verb makes
+#     write-together a property of the database rather than a rule the next writer
+#     has to remember.
+#     **This grant does not weaken the ticket's "unreachable outside development".**
+#     No grant can express "in development only", so the gate is behavioural and in
+#     two places: `app.services.clock` refuses to read the table unless
+#     `is_development(settings)`, and both `/dev` routes answer `404` outside
+#     development. A deployment holding a stray `clock_override` row goes on
+#     reading the real clock, which
+#     `test_the_override_moves_neither_now_nor_today_outside_development` asserts in
+#     both deployment environments.
+#     **What this table carries, for §4.1.** `id`, `pretend_now` and `anchored_at`
+#     — two timestamps and no person. No foreign key to anything, no view over it,
+#     so it is outside `test_identity_column_marker.py`'s marker and outside the
+#     policed inventory of
+#     `tests/unit/test_the_org_views_are_read_only_through_the_grant.py`.
+#     Decided and spent in E2-04, ruled in `docs/disputes/E2-04-02.md`.
+#   - `pulse_app` **reads and inserts** `survey_window`, the table E2-06 fills, and
+#     holds no `UPDATE` and no `DELETE` on it. The entry above predicted this one —
+#     "E2 will do it again when the first student write path needs a grant on
+#     `response`" — and it arrives one table early, because the development console
+#     reads windows and the Celery worker writes them.
+#     `docs/disputes/E2-06-03.md` is its record: the branch was run without the
+#     grant and eight tests across the three development-console modules failed with
+#     `permission denied for table survey_window` behind a 500, one of them
+#     `invariant`-marked, so `pytest -m invariant` and
+#     `scripts/ci/check_invariants.py` were red too. The grant is issued by revision
+#     `c9b4e0a71d38`, so a fresh database reproduces it.
+#     **A verb per caller, and both were measured.** `SELECT` has two readers: the
+#     `/dev` console's open-window column, and the derivation's own "which windows
+#     does this section already have", which is what makes the hourly reconciler
+#     idempotent instead of a repeated `INSERT` refused by
+#     `uq_survey_window_section_id_week_id`. `INSERT` is the derivation writing one.
+#     Applying exactly these two and changing nothing else turned those three
+#     modules green; neither verb is spare.
+#     **`UPDATE`, `DELETE` and `TRUNCATE` are withheld, and that is the assertion**,
+#     as on `classification`, on `clock_override` and on E1-10's group. SPEC §3.1:
+#     "Missed weeks cannot be back-filled (this keeps the signal weekly and the
+#     grading unambiguous)." Without `UPDATE` this connection structurally cannot
+#     move a `closes_at` and reopen a week that has closed; without `DELETE` it
+#     cannot remove a window that a response (E2-08) or a participation denominator
+#     (§3.4) has already been counted against. It is also what makes E2-06's "an
+#     existing `(section_id, week_id)` row is skipped, never rewritten" a property of
+#     the database rather than a rule the next writer has to remember — re-deriving
+#     after a calendar edit is E11's, ruled at the E2 breakdown on 2026-08-31, and
+#     this connection could not do it if it tried.
+#     **What this table carries, for §4.1.** `id`, `section_id`, `week_id`,
+#     `term_id`, `opens_at` and `closes_at` — three references to structure and two
+#     timestamps. No person, no subject, no name, no address. It carries no
+#     identity-marked column and no view reads it, so there is no join from a window
+#     to a person on this connection.
+#     Decided and spent in E2-06, ruled in `docs/disputes/E2-06-03.md`; ADR 0111
+#     records the ticket's decisions, this grant and its withheld verbs among them.
+#   - `pulse_app` **reads** `week`, `question_set`, `question`, `response` and
+#     `answer`, and holds no other verb on any of the five. These are E2-09's
+#     student read path — the one `GET` that answers "for me, right now, what is
+#     there?" — and the entry above predicted them by name: "E2 will do it again
+#     when the first student write path needs a grant on `response`". It is the
+#     read path that arrives first, so the verbs are `SELECT` and only `SELECT`;
+#     E2-08's submit needs `INSERT` and `UPDATE` on `response` and `answer` and
+#     they land in that ticket's own revision, with the code that issues them.
+#     `docs/disputes/E2-09-02.md` is the record, and each of the five was measured
+#     load-bearing one relation at a time: held out, the branch fails with
+#     `permission denied for table week` behind a 500 on twelve of E2-09's
+#     fourteen items; granted one at a time, Postgres refuses the next relation in
+#     turn — `week`, then `question_set`, then `question`, then `response`, then
+#     `answer`, then nothing. No verb here is spare.
+#     **A statement per grant.** `week` is the term-week number a window is over,
+#     which SPEC §2.2 makes a *row's own* `number` rather than something to
+#     re-derive from the window's instants — a second reading of §3.1's rhythm
+#     agrees with the first only while both are right, and §2.2's two week axes
+#     are what E2-09 answers under `course_week` and `term_week`.
+#     `question_set` and `question` are SPEC §3.2's five questions, which E2-10
+#     renders from this one read. `response` and `answer` are the reader's **own**
+#     submission, for the resubmit case.
+#     **`INSERT`, `UPDATE`, `DELETE` and `TRUNCATE` are withheld on all five, and
+#     that is the assertion**, as on `classification`, `clock_override` and
+#     `survey_window`. A read path that structurally cannot write is a read path
+#     that cannot alter a submission it was only meant to display, and it cannot
+#     back-fill a missed week (§3.1) or move a question's wording out from under
+#     the `answer` rows keyed to it (§3.2's versioned set). The write verbs the
+#     entry below adds are E2-08's submit path's, and they are granted by that
+#     ticket's own revision rather than widened here.
+#     **What `SELECT` on `response` and `answer` is not.** It is not a widening of
+#     what a student can see: §4.1 item 1's scoping is the read's `WHERE` clause —
+#     E2-05's `(user_id, section_id, week_id)` key with the author left in — and
+#     `test_the_student_read_path_names_nothing_outside_the_enrollment.py` is the
+#     assertion that a classmate's stored submission does not come back. Neither
+#     table carries an identity-marked column: a `response` names a section, a
+#     week and the `user_id` §4 keys it to, and that key is what makes it the
+#     reader's own rather than somebody's name.
+#     **One of the five closes a gap that predates the ticket**, recorded rather
+#     than quietly fixed: `app.services.survey_windows.derive_windows_for_section`
+#     has selected `week` on this connection since E2-06's hourly beat, and no
+#     revision had ever granted it. It lands here because this is the ticket whose
+#     read needed it.
+#     Decided and spent in E2-09, ruled in `docs/disputes/E2-09-02.md`; precedent
+#     `docs/disputes/E2-04-02.md` and `docs/disputes/E2-06-03.md`.
+#   - `pulse_app` also **writes and revises** `response` and `answer`, on top of
+#     the reads the entry above grants — the four tables E2-08's submit path
+#     touches are `question_set`, `question`, `response` and `answer`, and this is
+#     the arrival the `survey_window` entry predicted ("E2 will do it again when
+#     the first student write path needs a grant on `response`").
+#     This is the first student write path in the product, and
+#     [ADR 0110](../../docs/adr/0110-answer-values-are-validated-by-the-write-path.md)
+#     names the shape in advance: "`pulse_app` is granted nothing on `answer` by
+#     E2-05's migration at all, and E2-08 grants the privilege its own path needs
+#     beside the code that justifies it — the same shape ADR 0055 gives
+#     `classification`."
+#     **A verb per caller, and each was measured** by asking what fails without
+#     it; the branch was run with the grants file removed from the revision and
+#     the route answers 500 on its first `SELECT` against `question_set`.
+#     `question_set` `SELECT` finds the set in force and `question` `SELECT` reads
+#     ADR 0110's `minimum_value`, `maximum_value`, `step` and the conditional-rule
+#     columns — that record makes those three "the only statement of the ranges in
+#     the system", and validating against them means reading them. `response`
+#     `SELECT` finds a resubmission's existing row, `INSERT` writes the first
+#     submission of a week, and `UPDATE` writes `last_submitted_at` on a
+#     resubmission and `is_valid` when the async sweep revises a floored verdict.
+#     `answer` `SELECT` reads the rows a resubmission revises and the comment text
+#     the sweep re-classifies, `INSERT` writes a question answered for the first
+#     time, `UPDATE` is
+#     [ADR 0115](../../docs/adr/0115-a-resubmission-revises-its-answers-in-place.md)'s
+#     in-place revision, and `DELETE` removes a question answered before and left
+#     blank now.
+#     **What is withheld is the assertion**, as on `classification`, on
+#     `clock_override` and on `survey_window`. `response` `DELETE` is **not**
+#     granted: SPEC §3.1 makes a missed week unfillable and §3.4 counts these rows,
+#     so this connection structurally cannot remove a week a participation score
+#     has already been computed from. Nothing beyond `SELECT` is granted on
+#     `question` or `question_set` — the instrument is written by a migration and
+#     by the seed, under the bootstrap identity — so a route cannot edit the
+#     question it is validating against. `classification` gains a column in this
+#     ticket and no privilege: it keeps `SELECT, INSERT` and stays append-only,
+#     which is what makes ADR 0115's refusal-rather-than-delete the only way a
+#     judged comment can go, since a referential action on that table is an
+#     `UPDATE` this role does not hold.
+#     **What these tables carry, for §4.1.** `question_set` and `question` hold the
+#     instrument — a version, an ordinal, question text, bounds — and nothing about
+#     anybody. `response` holds the three keys SPEC §8's uniqueness rule is written
+#     over, two submission timestamps and `is_valid`; `answer` holds a response, a
+#     question and exactly one of a rating, a comment or a workload figure. The
+#     student's identity is a foreign key on `response` and the identity behind it
+#     sits on `user_identity`, which `pulse_app` is granted no `SELECT` on — the
+#     same argument `enrollment`'s entry makes, and the one
+#     `tests/integration/test_identity_column_marker.py` records for both tables.
+#     Decided and spent in E2-08, ruled in `docs/disputes/E2-08-03.md`; the whole
+#     argument for each verb, and for the ones withheld beside them, is in
+#     `backend/app/views_sql/survey_submission_grants_v001.sql`.
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -3337,6 +3510,21 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "enrollment", "INSERT"),
         (APPLICATION_ROLE, "nrps_call", "SELECT"),
         (APPLICATION_ROLE, "nrps_call", "INSERT"),
+        (APPLICATION_ROLE, "clock_override", "SELECT"),
+        (APPLICATION_ROLE, "clock_override", "INSERT"),
+        (APPLICATION_ROLE, "clock_override", "DELETE"),
+        (APPLICATION_ROLE, "survey_window", "SELECT"),
+        (APPLICATION_ROLE, "survey_window", "INSERT"),
+        (APPLICATION_ROLE, "week", "SELECT"),
+        (APPLICATION_ROLE, "question_set", "SELECT"),
+        (APPLICATION_ROLE, "question", "SELECT"),
+        (APPLICATION_ROLE, "response", "SELECT"),
+        (APPLICATION_ROLE, "response", "INSERT"),
+        (APPLICATION_ROLE, "response", "UPDATE"),
+        (APPLICATION_ROLE, "answer", "SELECT"),
+        (APPLICATION_ROLE, "answer", "INSERT"),
+        (APPLICATION_ROLE, "answer", "UPDATE"),
+        (APPLICATION_ROLE, "answer", "DELETE"),
     }
 )
 

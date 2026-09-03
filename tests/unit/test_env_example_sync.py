@@ -39,9 +39,109 @@ The mapping from a field to its environment variable is `pydantic-settings`
 behaviour, not an implementation choice: the explicit alias if the field has
 one, otherwise the configured `env_prefix` plus the field name. Comparison is
 case-insensitive, so `case_sensitive` either way is fine.
+
+**One rule here has a named exemption, and it is the only rule in this module that
+has one.**
+`test_every_documented_variable_has_a_placeholder_value` required a non-empty
+value for every entry, and dispute E2-07-01 measured that against
+`AI_PROVIDER_API_KEY`, whose *correct* documented value is the empty string: a
+blank is how this codebase says "this endpoint authenticates nobody", stated in
+`app/config.py`'s own validator, in `.env.example`'s prose above the entry, and in
+`README.md`. E2-07 puts the development stack on exactly such an endpoint — the
+in-repo mock provider — so the two assertions became the negation of each other
+over one line, in all three states that line can take.
+
+The ruling was that the sweep is the test at fault: its universal form generalises
+from a file in which every entry happened to need a value, and E2-07 introduced
+the first one whose blankness is a decision. The rule keeps its teeth — a *new*
+valueless entry still fails, which is what it is really guarding — and the
+exemption is a literal tuple rather than a condition, because the next such entry
+(an SMTP password against a mail catcher, which authenticates nobody either) is
+already foreseeable and belongs in a reviewed diff on that line.
+
+**The tuple holds two entries as of 2026-09-02, and the second is that foreseen
+diff arriving early.** The configuration split gives the real provider and the
+in-repo mock a triple each, so the one provider-key entry becomes two:
+`MOCK_AI_PROVIDER_API_KEY` is blank for dispute E2-07-01's own reason — the mock
+authenticates nobody — and `AI_PROVIDER_API_KEY`, which now names a real hosted
+provider, is blank for a different one: a real credential may never be committed
+(CLAUDE.md, SPEC §10). Two reasons, one answer, and both held by the same two
+controls below.
+
+An exemption of that shape is the thing `docs/MISTAKES.md` entry 35 is about: it
+can go stale, and a stale exemption reports exactly what a live one reports. So
+it carries two controls of its own, below the sweep — the exempted entry has to
+*be* blank, and the exempted name has to still be *present*, so that the tuple
+cannot go on excusing a value that has come back or hide a variable somebody
+deleted.
 """
 
 from pathlib import Path
+
+# The entries whose documented value is deliberately the empty string, and the
+# only exemption in this module. **Dispute E2-07-01**, ruled 2026-09-01: a blank
+# `AI_PROVIDER_API_KEY` is not a missing placeholder, it is the documented way to
+# say that the configured endpoint authenticates nobody — `app/config.py`'s
+# validator, `.env.example`'s own prose and `README.md` all state it, and E2-07
+# points the development stack at the in-repo mock provider, which is such an
+# endpoint. A placeholder there would send a made-up bearer token to a service in
+# the developer's own Compose network and would read as configuration somebody
+# still has to fill in.
+#
+# A tuple rather than an `if name != ...`, because the next entry of this kind is
+# foreseeable and because a set is a thing a reviewer can see growing. Every
+# member is held against the file by the two controls below: an exemption is a
+# rule that can go stale, and a stale one reports exactly what a live one reports
+# (`docs/MISTAKES.md` entry 35).
+#
+# **The second entry arrived with the configuration split ruled on 2026-09-02, and
+# it is the foreseen case rather than a new argument.** That ruling gives the real
+# provider and the in-repo mock a triple each —
+# `AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}` and
+# `MOCK_AI_PROVIDER_{API_KEY,BASE_URL,MODEL_NAME}` — so the one key entry becomes
+# two, and both are correctly blank for reasons that are not the same one:
+#
+#   MOCK_AI_PROVIDER_API_KEY  dispute E2-07-01's reason exactly. The endpoint is
+#                             the in-repo mock and it authenticates nobody, so a
+#                             blank is the documented way to say so.
+#   AI_PROVIDER_API_KEY       a different reason with the same answer. This one
+#                             names a real hosted provider now, and a real
+#                             credential may never be committed (CLAUDE.md,
+#                             SPEC §10) — so the documented value is blank and an
+#                             operator fills it in `.env` or a secret store.
+#                             `tests/evals/runner.py` refuses plainly when it is,
+#                             which is what stops a blank here reading as "no key
+#                             needed" on the one path that needs one.
+#
+# Both are held by the same two controls below, which is why two reasons can share
+# one tuple: each name has to still be present in the file and each entry has to
+# still be blank.
+#
+# **The third entry is E2-12's security review, and its blank means something
+# different again: it refuses rather than being read as absent.**
+# `AI_PROVIDER_BASE_URL` shipped carrying a working public endpoint. Beside a
+# blank `AI_PROVIDER_API_KEY`, that let a deployment which filled in the database,
+# the broker, the session secret and the identity provider — and left the AI block
+# alone, because it looked configured already — start cleanly and post §3.3's
+# prompts, student comment text included, to a third party under a placeholder
+# bearer token. Nothing failed, nothing warned, and SPEC §10's "no student PII in
+# logs" says nothing about a request body.
+#
+# The field is required with no default, so a blank refuses at startup and names
+# itself. That is the fix: the endpoint moves into the comment beside the entry,
+# where an operator copies it deliberately, and a deployment that forgets the AI
+# block stops rather than guessing. The mock's base URL is untouched — it has a
+# working default because the service it names is in this repository's own Compose
+# file, and a development stack has to come up (SPEC §14.3).
+#
+# Three reasons in one tuple now, and the controls below still hold every one of
+# them the same way: the name has to be present in the file, and the entry has to
+# be blank.
+DELIBERATELY_BLANK_VARIABLES = (
+    "AI_PROVIDER_API_KEY",
+    "MOCK_AI_PROVIDER_API_KEY",
+    "AI_PROVIDER_BASE_URL",
+)
 
 
 def load_settings_class() -> type:
@@ -204,15 +304,125 @@ def test_every_variable_the_compose_files_interpolate_is_documented(
 def test_every_documented_variable_has_a_placeholder_value(
     documented_env: dict[str, str],
 ) -> None:
-    """Placeholders are present for every entry.
+    """Placeholders are present for every entry that is not deliberately blank.
 
     `.env.example` is the configuration documentation, and the e2e job in
     `.github/workflows/ci.yml` runs the stack from `cp .env.example .env`. An
     entry with no value documents neither the shape of the setting nor a value
     the stack can start with.
+
+    **Except where the empty string is the value.** Dispute E2-07-01: this rule
+    was written over a file in which every entry needed a value, and E2-07 added
+    the first one whose correct documented value is blank — a blank
+    `MOCK_AI_PROVIDER_API_KEY` is how this codebase says the endpoint
+    authenticates nobody. (It was spelled `AI_PROVIDER_API_KEY` when that dispute
+    was ruled; the configuration split of 2026-09-02 gave the mock its own triple
+    and left the real provider's key blank for a different reason — no credential
+    is committed.) `DELIBERATELY_BLANK_VARIABLES` above is that list, both reasons
+    are written there, and so is why the rule reads a tuple rather than a
+    condition.
+
+    **What the rule still catches, which is what it is for:** a new entry added
+    with nothing after the `=`. That is the accident this test was written
+    against, and it is unaffected — a name has to be put in the tuple above, in a
+    diff somebody reviews, before its blankness is accepted.
+
+    The two tests below are what stop that tuple from becoming a way to hide
+    things.
     """
     assert documented_env, "`.env.example` documents no variables at all."
 
-    valueless = sorted(name for name, value in documented_env.items() if not value.strip())
+    exempt = {name.upper() for name in DELIBERATELY_BLANK_VARIABLES}
+    valueless = sorted(
+        name
+        for name, value in documented_env.items()
+        if not value.strip() and name.upper() not in exempt
+    )
 
-    assert not valueless, f".env.example entries with no placeholder value: {valueless}."
+    assert not valueless, (
+        f".env.example entries with no placeholder value: {valueless}. Every entry documents a "
+        "value the stack can start from, and CI's e2e job copies this file to `.env` unedited. If "
+        "one of these is blank *on purpose* — the empty string being the documented configuration, "
+        "the way it is for a provider that authenticates nobody — add it to "
+        "`DELIBERATELY_BLANK_VARIABLES` in this file and say in the pull request what the blank "
+        "means. Do not put a placeholder there instead: a value nobody meant to send is worse than "
+        "no value."
+    )
+
+
+def test_every_deliberately_blank_variable_is_actually_blank(
+    documented_env: dict[str, str],
+) -> None:
+    """The first control on the exemption: it may not excuse a value that has come back.
+
+    **A red here means the exemption is stale, not that the file is wrong.** An
+    exemption list is a rule that stops being true without anything failing:
+    either provider key acquiring a placeholder again would leave this tuple
+    excusing an entry that no longer needs excusing, and the sweep above would go
+    on reporting the whole file clean — the same silence a correct file produces.
+    `docs/MISTAKES.md` entry 35's rule is that a guard which only ever reports
+    absence has to be seen finding the thing on a subject that certainly has it,
+    and this is that: each exempted name is required to be blank in the file the
+    sweep reads.
+
+    **The mutation this kills:** a value written back into an exempted entry, and
+    a name added to the tuple that was never blank in the first place — which is
+    how an exemption list becomes a way of switching the rule off one name at a
+    time.
+    """
+    assert documented_env, ".env.example is missing or parsed to nothing."
+    assert DELIBERATELY_BLANK_VARIABLES, (
+        "`DELIBERATELY_BLANK_VARIABLES` is empty, so the sweep above has no exemption and this "
+        "control has nothing to check. If the last exempted entry has genuinely gone, delete this "
+        "test and the one below with it rather than leaving two that pass over an empty tuple."
+    )
+
+    carrying = {
+        name: documented_env[name]
+        for name in DELIBERATELY_BLANK_VARIABLES
+        if name in documented_env and documented_env[name].strip()
+    }
+
+    assert not carrying, (
+        f"These entries are exempted from the placeholder rule and are not blank: {carrying}. The "
+        "exemption exists because the empty string is their documented value — a blank "
+        "`MOCK_AI_PROVIDER_API_KEY` means the endpoint authenticates nobody (dispute E2-07-01), "
+        "and a blank `AI_PROVIDER_API_KEY` means no real credential is committed. An "
+        "exempted entry that carries a value is an exemption doing nothing except making the "
+        "sweep above blind to that name."
+    )
+
+
+def test_every_deliberately_blank_variable_is_still_documented(
+    documented_env: dict[str, str],
+) -> None:
+    """The second control: the exemption may not hide a deleted variable.
+
+    **A red here means a documented variable has gone, not that the exemption is
+    wrong.** The control above compares values and says nothing about a name that
+    is absent altogether — `name in documented_env` is what makes it silent for
+    one — so deleting the `AI_PROVIDER_API_KEY` line would satisfy both the sweep
+    and that control while removing the only place a deployment learns the
+    variable exists.
+
+    `test_every_settings_field_is_documented_in_env_example` would catch that
+    today, because `Settings` has a field for it. This does not rely on that: the
+    two rules answer different questions, and a field made optional and dropped —
+    or renamed — would take that cover away without anything saying so. An
+    exemption naming a variable that is not in the file is the shape worth
+    refusing outright.
+
+    **The mutation this kills:** the entry deleted rather than blanked, with the
+    exemption left behind to make the deletion invisible.
+    """
+    assert documented_env, ".env.example is missing or parsed to nothing."
+
+    missing = sorted(name for name in DELIBERATELY_BLANK_VARIABLES if name not in documented_env)
+
+    assert not missing, (
+        f".env.example no longer documents these exempted entries: {missing}. Blank is not the "
+        "same as gone: a blank entry documents a setting and says its value is deliberately empty, "
+        "and a deleted one leaves a deployment with no way to learn the variable exists. If it is "
+        "genuinely gone, remove it from `DELIBERATELY_BLANK_VARIABLES` in the same change — an "
+        "exemption for a name nothing documents excuses nothing and hides the deletion."
+    )

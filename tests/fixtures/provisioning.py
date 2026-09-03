@@ -45,8 +45,9 @@ a registered platform, with the one member under test rewritten. The second stat
 its own `ENVIRONMENT`, because building no door means nothing else in that chain
 sets one; the fixture says what running under the process's leftovers cost.
 
-**`provisioning_contract` is the vocabulary both modules read a launch through**:
-claim names, column names, the seven defect kinds, the mint selectors, and the
+**`provisioning_contract` is the vocabulary those modules read a launch through**:
+claim names, column names, the defect kinds `DEFECT_KINDS` enumerates, the mint
+selectors, and the
 helpers that split a context label into the three parts E1-10 parses. Test modules
 reach it as a fixture rather than importing this file, because an import of a
 fixtures module by name depends on where pytest put `tests/` on `sys.path` and an
@@ -557,6 +558,33 @@ class LaunchGround:
         return self.key_of("prefix", self.prefix_row)
 
     @property
+    def college_id(self) -> Any:
+        """The `college` this launch's prefix hangs under, out of the chain that seeded it.
+
+        Added by E2-02, whose condition is about which containment node a launcher's
+        assignment is scoped to: a dean's grant is their college (SPEC §2.1), so a test
+        that means to place a dean *over the launched context* needs the college above
+        the launched prefix and no other. Two modules ask that question — the purview
+        pair and the leadership-limb module next door — so it is answered once here
+        rather than twice there (`docs/MISTAKES.md` entry 13).
+
+        Read off the ancestors `seed_prefix` built, which is this fixture's own
+        bookkeeping; that the answer really is the college above the seeded prefix is
+        asserted independently, by walking `prefix` → `department` → `college` in the
+        database, in the control at the head of
+        `tests/integration/test_a_staff_launch_binds_only_inside_the_launchers_purview.py`.
+        """
+        if "college" not in self.chain:
+            pytest.fail(
+                "The chain this ground seeded holds no college (it holds "
+                f"{sorted(self.chain)}), so there is no node to scope a dean's assignment to. "
+                "SPEC §2.1 puts a prefix inside a department inside a college, and `seed_prefix` "
+                "builds every ancestor the prefix row requires — a chain without one means the "
+                "link is nullable and was left null, which would scope an assignment to nothing."
+            )
+        return self.key_of("college", self.chain["college"])
+
+    @property
     def term_id(self) -> Any:
         return self.key_of("term", self.term_row)
 
@@ -748,6 +776,13 @@ SECTION_CODE_UNDERIVABLE = "section_code_underivable"
 CONTEXT_COLLISION = "context_collision"
 ROSTER_ADDRESS_REFUSED = "roster_address_refused"
 
+# E2-02's, and the E1 boundary review's M9 reaching the record: a launch admitted by
+# §7.3's leadership limb whose context sits outside the launching person's own grant.
+# The section is not bound and the discovered roster address is not stored — the launch
+# lands the person all the same, exactly as every other kind here does. Asserted in
+# `tests/integration/test_a_staff_launch_binds_only_inside_the_launchers_purview.py`.
+CONTEXT_OUTSIDE_PURVIEW = "context_outside_purview"
+
 DEFECT_KINDS = (
     UNPARSEABLE_CONTEXT_LABEL,
     UNKNOWN_PREFIX,
@@ -756,6 +791,7 @@ DEFECT_KINDS = (
     SECTION_CODE_UNDERIVABLE,
     CONTEXT_COLLISION,
     ROSTER_ADDRESS_REFUSED,
+    CONTEXT_OUTSIDE_PURVIEW,
 )
 
 
@@ -862,10 +898,11 @@ class ProvisioningContract:
     Handed over as a fixture rather than imported, for the reason
     `tests/integration/test_mock_lms_launch.py` gives about every fixtures import:
     an import of a fixtures module by name depends on where pytest put `tests/` on
-    `sys.path`, and an import error is not a red. Two modules need all of it —
-    `test_launch_time_provisioning.py` and `test_launch_provisioning_defects.py` —
-    so a copy in each would be two copies of one rule (`docs/MISTAKES.md` entry 13)
-    about what a context label is made of.
+    `sys.path`, and an import error is not a red. Several modules need all of it —
+    `test_launch_time_provisioning.py`, `test_launch_provisioning_defects.py` and,
+    from E2-02, `test_a_staff_launch_binds_only_inside_the_launchers_purview.py` —
+    so a copy in each would be as many copies of one rule (`docs/MISTAKES.md` entry
+    13) about what a context label is made of.
     """
 
     context_claim = CONTEXT_CLAIM
@@ -892,6 +929,7 @@ class ProvisioningContract:
     section_code_underivable = SECTION_CODE_UNDERIVABLE
     context_collision = CONTEXT_COLLISION
     roster_address_refused = ROSTER_ADDRESS_REFUSED
+    context_outside_purview = CONTEXT_OUTSIDE_PURVIEW
 
     instructor_role_urn = INSTRUCTOR_ROLE_URN
     learner_role_urn = LEARNER_ROLE_URN

@@ -1673,6 +1673,18 @@ SEED_FILE = "seed.txt"
 INERT_CHANGE = "docs/MISTAKES.md"
 CODE_CHANGE = "backend/app/services/authz.py"
 
+# The `changed` job's second classification, and a path that is one. E2-12 added
+# `ai_surface`, which decides whether SPEC §9.3's eval floors run — and unlike
+# `inert`, a wrong answer there is money: the eval job holds the provider secret
+# in its step environment and spends about ninety-eight paid calls per run.
+#
+# This module owns the harness that executes the step, so it owns the cases about
+# what the step emits. Which gates *read* the answer is
+# `tests/unit/test_the_eval_gate_fires_on_an_ai_touching_change.py`'s, and which
+# paths count is `tests/unit/test_the_changed_job_classifies_an_ai_surface.py`'s.
+AI_SURFACE_OUTPUT = "ai_surface"
+AI_SURFACE_CHANGE = "backend/app/ai/prompts/validity.v1.md"
+
 # A stand-in for the classifier that answers neither of its two answers, for the
 # one case the real one cannot produce on demand. Everything else below runs the
 # real script.
@@ -1841,7 +1853,27 @@ def runner_shaped_path(root: Path) -> str:
 def classification_step(
     workflow: dict[str, Any], workflow_path: Path
 ) -> tuple[str, dict[str, Any]]:
-    """The output name the `changed` job publishes, and the step that produces it."""
+    """E0-38's verdict output, and the step that produces it.
+
+    **This required the job to publish exactly one step output until dispute
+    E2-12-02, and it was the assumption rather than the requirement that went
+    stale.** One job, one question, one output was true when E0-38 wrote it. E2-12
+    gives the same job a second classification — `ai_surface`, which decides
+    whether SPEC §9.3's eval floors run at all — and `docs/MISTAKES.md` entry 36
+    makes that a published job output rather than a value smuggled through some
+    other context. The old form then stopped four executed guards in this module
+    before they had read a line of the step, with a message about how many outputs
+    a job has.
+
+    So the verdict is selected by name. `INERT` is E0-38's own constant, already
+    held in this module, and every case downstream is about that classification:
+    the documentation-only short-circuit, the routes that must fail toward running
+    everything, and the `--` before the path list. A job that grows a third
+    classification changes nothing here.
+
+    A missing `inert` is still a refusal rather than a guess, and it is the same
+    finding it always was — nothing publishes the answer six expensive gates read.
+    """
     jobs = jobs_of(workflow, workflow_path)
     job = jobs.get(CHANGED_JOB)
     if not job:
@@ -1851,22 +1883,26 @@ def classification_step(
             "rather than leaving this module looking for something that is gone."
         )
 
-    published = [
-        (name, match)
-        for name, value in (job.get("outputs") or {}).items()
-        if (match := STEP_OUTPUT_REFERENCE.search(str(value)))
-    ]
-    if len(published) != 1:
+    outputs = dict(job.get("outputs") or {})
+    match = STEP_OUTPUT_REFERENCE.search(str(outputs.get(INERT, "")))
+    if match is None:
         pytest.fail(
-            f"The `{CHANGED_JOB}` job publishes {len(published)} step outputs and this module "
-            "expects exactly one — the classification every expensive gate reads.\n"
-            f"  outputs: {dict(job.get('outputs') or {})}\n"
+            f"The `{CHANGED_JOB}` job publishes no `{INERT}` output filled from one of its own "
+            "steps.\n"
+            f"  outputs: {outputs}\n"
             "\n"
-            "If the job now publishes several, this module has to be told which one is the "
-            "verdict rather than guessing at it."
+            f"`{INERT}` is E0-38's verdict — the classification pytest, the §4.1 invariant suite, "
+            "both image builds, Playwright, the evals and the supply-chain audit all switch their "
+            "own work off on. It is selected by name rather than by being the only output, "
+            "because E2-12 gave this job a second classification (`ai_surface`) and "
+            "`docs/MISTAKES.md` entry 36 requires that one to be published too.\n"
+            "\n"
+            f"If the verdict has been renamed, `INERT` at the top of this file is the one line "
+            "that changes. If it is gone, every gate below reads an empty string — which is not "
+            "`'true'`, so all of them run and the filter has silently never fired."
         )
 
-    output_name, match = published[0]
+    output_name = INERT
     step_id = match.group("step")
     for step in steps_of(job):
         if step.get("id") == step_id:
@@ -2108,6 +2144,126 @@ def test_the_changed_job_classifies_the_diff_on_a_runner_that_has_only_python3(
     )
 
 
+def test_a_push_decides_its_ai_surface_from_its_own_diff(
+    ci_workflow_path: Path, ci_workflow: dict[str, Any], tmp_path: Path
+) -> None:
+    """A push that touched no AI path must not spend ninety-eight paid calls.
+
+    E2-12's security review, as a LOW with a cost attached. The classifier's
+    unknown route answered `ai_surface=true` for every push event, so each push to
+    an epic branch — every ticket merge in this repository's ordinary flow — ran
+    the full eval suite: about ninety-eight provider calls, with the provider
+    secret bound into that job's environment. The workflow's own scoping paragraph
+    says the opposite, that live calls happen "only when the change touches what
+    §9.3's gate names", so the file contradicted itself and the contradiction cost
+    money on every merge.
+
+    **The safe direction stays exactly where it is, and that is the point of the
+    repair rather than an exception to it.** The reason a push answered `true` was
+    that its *verdict* could not be trusted — a push's base is
+    `github.event.before`, the previous head, so the diff is incremental while the
+    inert verdict has to be about the whole tree. That argument is sound for
+    `inert` and does not transfer: "did this push touch an AI path" is a question
+    the incremental diff answers correctly, because a push that touched one at any
+    point in its own range shows it. So the ordinary decidable push stops
+    defaulting to a paid run, and every genuine unknown — no base, an unfetchable
+    base, an all-zero `before` — still falls to `true`. Those routes are asserted
+    in the test immediately below this one, for both classifications.
+
+    **The pull-request rows are here as the control.** Without them a repair that
+    answered `false` to everything would satisfy the push rows perfectly and
+    switch the eval gate off entirely, which is the same defect as the one being
+    fixed, reached from the expensive side rather than the cheap one.
+
+    **The documentation push is the row that separates the two classifications.**
+    A push is never `inert` — E0-38's security review settled that and this module
+    asserts it above — and it is also not an AI surface. A repair that made
+    `ai_surface` follow `inert` would answer `true` there and pay for a docs merge.
+
+    **The mutation this survives:** send a push down the unknown route again, or
+    make `ai_surface` copy whatever `inert` decided. **The near miss that must stay
+    green:** a push that really did touch the AI surface, which still runs.
+    """
+    output_name, step = classification_step(ci_workflow, ci_workflow_path)
+
+    cases: tuple[tuple[str, str, tuple[str, ...], str], ...] = (
+        (
+            "a push touching code that is not the AI surface",
+            "push",
+            (CODE_CHANGE,),
+            "false",
+        ),
+        (
+            "a push touching only documentation",
+            "push",
+            (INERT_CHANGE,),
+            "false",
+        ),
+        (
+            "a push that edits the prompt SPEC §9.3's gate is about",
+            "push",
+            (AI_SURFACE_CHANGE,),
+            "true",
+        ),
+        (
+            "a pull request touching code that is not the AI surface",
+            "pull_request",
+            (CODE_CHANGE,),
+            "false",
+        ),
+        (
+            "a pull request that edits the prompt",
+            "pull_request",
+            (AI_SURFACE_CHANGE,),
+            "true",
+        ),
+    )
+
+    wrong: list[str] = []
+    for index, (case, event_name, touched, expected) in enumerate(cases):
+        workspace = tmp_path / f"case-{index}"
+        workspace.mkdir()
+        repository = workspace / "repo"
+        base = planted_repository(repository, touched)
+        install_real_classifier(repository)
+
+        event = {
+            "EVENT_NAME": event_name,
+            "PR_BASE_SHA": base if event_name == "pull_request" else "",
+            "PUSH_BEFORE": base if event_name != "pull_request" else "",
+        }
+        status, emitted, log = run_classification_step(step, repository, workspace, event)
+
+        if emitted.get(AI_SURFACE_OUTPUT) != expected:
+            wrong.append(
+                f"  {case}\n"
+                f"    changed:          {list(touched)}\n"
+                f"    expected:         {AI_SURFACE_OUTPUT} = {expected}\n"
+                + described(status, emitted, log)
+            )
+
+    assert not wrong, "\n".join(
+        [
+            "The classification step gave the wrong AI-surface answer for these diffs:",
+            *wrong,
+            "",
+            f"`{AI_SURFACE_OUTPUT}` decides whether SPEC §9.3's eval floors run, and that job "
+            "holds the provider secret and spends about ninety-eight paid calls. A `true` it "
+            "did not need is a bill; a `false` it did need is the gate not running on the one "
+            "change it exists for.",
+            "",
+            "A push answered `true` unconditionally until E2-12's security review, because it "
+            "went down the same unknown route the `inert` question uses. That route is right "
+            f"for `{output_name}` — a push's incremental diff cannot settle a verdict about "
+            "the whole tree — and it does not transfer: whether a push touched an AI path is "
+            "a question its own diff answers.",
+            "",
+            "The genuine unknowns are not this test's subject and have not moved. They are "
+            "asserted in the next test, and they still fall to `true`.",
+        ]
+    )
+
+
 def test_every_way_the_diff_can_fail_still_emits_a_classification_that_runs_everything(
     ci_workflow_path: Path, ci_workflow: dict[str, Any], tmp_path: Path
 ) -> None:
@@ -2132,12 +2288,29 @@ def test_every_way_the_diff_can_fail_still_emits_a_classification_that_runs_ever
     looks exactly like a working filter over a busy repository. That is why these
     assert the *value* rather than merely that nothing was `true`.
 
+    **Both classifications, since E2-12.** The job emits `ai_surface` as well now,
+    and every route out of here has to emit the running answer for it too — which
+    is `true`, the opposite literal, because the two questions run their gates on
+    opposite answers. That asymmetry is the reason this is asserted per output
+    rather than "nothing was the skipping value": a repair that made `ai_surface`
+    follow `inert`'s literal would emit `false` on every unknown and switch SPEC
+    §9.3's floors off on exactly the runs where nobody could tell what changed.
+    E2-12's security review narrowed the push route for `ai_surface`; these four
+    are the routes it deliberately did **not** narrow, and this is what holds them.
+
     **The mutation this survives:** drop the `emit` from any one of the early exits
-    in the `changed` job, or turn one of them into a non-zero exit. **The near miss
-    that must stay green:** changing the notice text, or reordering the checks, or
-    replacing the `case` with an `if` — nothing here reads how the step decides.
+    in the `changed` job, or turn one of them into a non-zero exit, or narrow the
+    unknown routes along with the push one. **The near miss that must stay green:**
+    changing the notice text, or reordering the checks, or replacing the `case`
+    with an `if` — nothing here reads how the step decides.
     """
     output_name, step = classification_step(ci_workflow, ci_workflow_path)
+
+    # What each classification's "we do not know, so run it" answer is. They are
+    # opposite literals because the gates read them in opposite senses: an
+    # expensive gate runs when `inert` is not `true`, and the eval steps run when
+    # `ai_surface` is `true`.
+    running_answer = {output_name: "false", AI_SURFACE_OUTPUT: "true"}
 
     # `(case, event, touched, base, classifier source or None for the real one)`.
     cases: tuple[tuple[str, str, tuple[str, ...], str, str | None], ...] = (
@@ -2193,10 +2366,18 @@ def test_every_way_the_diff_can_fail_still_emits_a_classification_that_runs_ever
         }
         status, emitted, log = run_classification_step(step, repository, workspace, event)
 
-        if status != 0 or emitted.get(output_name) != "false":
+        misread = {
+            name: emitted.get(name)
+            for name, answer in running_answer.items()
+            if emitted.get(name) != answer
+        }
+        if status != 0 or misread:
             wrong.append(
                 f"  {case}\n"
-                f"    expected:         exit 0, {output_name} = false\n"
+                f"    expected:         exit 0, "
+                + ", ".join(f"{name} = {answer}" for name, answer in running_answer.items())
+                + (f"\n    misread:          {misread}" if misread else "")
+                + "\n"
                 + described(status, emitted, log)
             )
 
@@ -2205,6 +2386,11 @@ def test_every_way_the_diff_can_fail_still_emits_a_classification_that_runs_ever
             "These routes out of the classification step do not end in a classification that "
             "runs every gate:",
             *wrong,
+            "",
+            f"The two answers are opposite literals — `{output_name} = false` and "
+            f"`{AI_SURFACE_OUTPUT} = true` — because the gates read them in opposite senses. "
+            "A route that emits one and forgets the other, or that gives both the same "
+            "literal, switches off whichever gate reads the one it got wrong.",
             "",
             "Each of them means 'we do not know what changed', and the only safe reading of that "
             "is the full pipeline. A route that emits nothing is not equivalent: an unset output "
@@ -2596,6 +2782,61 @@ SWEEPS_THAT_NEED_NO_PROTECTION = {
     # belongs in the unconditional job instead.
     "tests/unit/test_the_frontend_source_uses_tokens_only.py": (
         "sweeps tracked files under frontend/ only, and nothing under frontend/ is inert"
+    ),
+    # E2-11's copy inventory, in two files: the collector, and the module that
+    # asserts SPEC §4.1 items 4 and 5 over what it collects. Both match the
+    # detector on prose alone — each says, in as many words, that the enumeration
+    # is a directory glob and **not** `git ls-files`, because a violation planted
+    # to prove the suite goes red is untracked and a tracked-files enumeration
+    # would not see it. That is a false match of exactly the kind the comment
+    # above this set describes, and it is triaged here rather than reworded: the
+    # detector is deliberately textual, and editing prose to slip past it is how
+    # it went blind once already.
+    #
+    # The substance. This sweep reads two kinds of source and no others:
+    # `frontend/src/copy/*.ts` by glob, and the modules of `app.copy` by import.
+    # Nothing under `frontend/` is inert — the entry above establishes it — and a
+    # backend `.py` change is never inert, which the two E0-35 entries at the top
+    # establish. So every file either of these can read already runs the whole
+    # pipeline when it changes, and there is nothing an inert diff can put in
+    # front of them.
+    #
+    # What would break both entries is the collector being taught to read copy
+    # from somewhere inert: a string catalogue under `docs/`, sample text under
+    # `design/`. At that point they belong in the unconditional job instead, and
+    # the two entries move together because one imports the other.
+    "tests/fixtures/copy_inventory.py": (
+        "collects frontend/src/copy/*.ts by glob and app.copy by import, and neither "
+        "frontend/ nor a backend .py is inert"
+    ),
+    "tests/unit/test_the_shipped_copy_inventory_holds_to_items_four_and_five.py": (
+        "asserts over that same inventory — frontend/src/copy/*.ts and app.copy — and "
+        "neither frontend/ nor a backend .py is inert"
+    ),
+    # E2-14's session-reader sweep. It matches because its walk root is written
+    # `APP_ROOT = REPO_ROOT / "backend" / "app"`, and `REPO_ROOT` is on
+    # `ROOT_FIXTURE_NAMES` — so what the detector saw is the constant's ancestry
+    # rather than a walk of the repository root. That is the over-detection the
+    # comment above `ROOT_FIXTURE_NAMES` describes and accepts, and it is triaged
+    # here rather than reworded: editing a sweep to slip past a deliberately
+    # textual detector is how this guard went blind once already.
+    #
+    # The substance is the two E0-35 entries at the top of this set, exactly. The
+    # walk is `backend/app`, recursively, over `*.py` and nothing else, so every
+    # file it can read is a backend Python file — never inert. A diff that could
+    # add a module reading `session_from_request` therefore already runs the whole
+    # pipeline, and there is nothing a documentation-only diff can put in front of
+    # it.
+    #
+    # What would break this entry is the walk moving outside `backend/app` or
+    # being taught to read something that is not a `.py` file. The module's own
+    # docstring already argues against the first — it was widened once, from
+    # `backend/app/api` to the package, after a security review defeated it one
+    # directory out, and it names "anything outside `backend/app/` entirely" as a
+    # disclosed limit rather than a gap to close by widening again. If it ever
+    # does move, it belongs in the unconditional job instead of here.
+    "tests/unit/test_only_the_dependency_module_reads_a_session_from_a_request.py": (
+        "sweeps *.py under backend/app, and a .py change is never inert"
     ),
 }
 

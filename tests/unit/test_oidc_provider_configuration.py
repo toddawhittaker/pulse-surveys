@@ -122,6 +122,19 @@ MOCK_CLIENT_ID = "mock-idp-client"
 # deployment could hold. `.example.edu` resolves nowhere, which is the point: these
 # values are never fetched by anything here.
 DEPLOYED_HOST = "idp.example.edu"
+
+# The AI provider a real deployment holds, applied by `deployment()` beside the
+# five settings below. **Added by E2-07**, which points `.env.example`'s
+# `AI_PROVIDER_BASE_URL` at `http://mock-ai:8000/v1` and refuses that value
+# outside development — for naming the mock, and for being cleartext off this
+# machine. Without it, every deployment row in this module would be refused by
+# *that* rule while the module reported its own firing: `docs/MISTAKES.md` entry
+# 3 in the direction that produces a red nobody can attribute, since the
+# acceptance rows would fail against a correct implementation and the refusal
+# rows would pass whatever they set.
+AI_PROVIDER_BASE_URL_VARIABLE = "AI_PROVIDER_BASE_URL"
+DEPLOYED_AI_PROVIDER_URL = "https://ai.example.edu/v1"
+
 DEPLOYED_OIDC = {
     OIDC_ISSUER_VARIABLE: f"https://{DEPLOYED_HOST}",
     OIDC_AUTHORIZATION_ENDPOINT_VARIABLE: f"https://{DEPLOYED_HOST}/oidc/authorize",
@@ -301,8 +314,14 @@ def deployment(**overrides: str | None) -> dict[str, str | None]:
     placeholders, which are the mock's — otherwise a refusal that fired on a
     neighbouring value would read as the rule under test firing
     (`docs/MISTAKES.md` entry 3).
+
+    **The AI provider is part of "what a real deployment holds" since E2-07**, for
+    the same reason and by the same argument: `.env.example` points it at
+    `mock-ai` and a deployment refuses that. It is set here rather than in each
+    test because no test in this module is about it.
     """
     values: dict[str, str | None] = dict(DEPLOYED_OIDC)
+    values[AI_PROVIDER_BASE_URL_VARIABLE] = DEPLOYED_AI_PROVIDER_URL
     values.update(overrides)
     return values
 
@@ -909,6 +928,16 @@ def test_the_deployed_sample_configuration_names_no_mock_anywhere() -> None:
     assert DEPLOYED_OIDC[OIDC_CLIENT_ID_VARIABLE] != MOCK_CLIENT_ID, (
         "The deployed sample client id is the mock's, so every test that leaves the client id "
         "alone is configured as the mock's client."
+    )
+    assert DEPLOYED_AI_PROVIDER_URL.startswith("https://"), (
+        f"The deployed sample AI provider is {DEPLOYED_AI_PROVIDER_URL!r}, which is not TLS to "
+        "another host. Every deployment row in this module then carries a second refusable value, "
+        "and E0-37 item 12's transport rule is what would fire."
+    )
+    assert "mock" not in DEPLOYED_AI_PROVIDER_URL, (
+        f"The deployed sample AI provider is {DEPLOYED_AI_PROVIDER_URL!r}, which names a mock. "
+        "E2-07 refuses that outside development, so every deployment row here would be refused "
+        "for a reason this module is not about."
     )
 
 

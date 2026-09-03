@@ -89,8 +89,19 @@ guard: exit 2, the real rows untouched, and no partial demo institution left
 behind, because the whole load is one transaction.
 
 **The rule for anyone adding a table to this loader:** the key must be scoped to
-a row the seed created, or be a value the seed invented. If it is neither,
-refuse rather than match.
+a row the seed created, or be a value the seed invented, or a value whose content
+the spec itself fixes, which is adopted and corrected rather than refused. If it
+is none of the three, refuse rather than match.
+
+**The third case arrived with E2-05, and `question_set` version 1 is the
+instance.** The danger the refuse rule guards against is a key matching a row
+somebody else owns whose legal content differs from this file's — which is what
+`prefix.code` did. SPEC §3.2 fixes version 1's content to exactly one legal
+answer in every deployment, so a v1 question set that disagrees with this file is
+not somebody else's data, it is a v1 set that is wrong. Putting it back the way
+this file describes it enforces the spec rather than overwriting anything. The
+questions under it are matched on `(question_set_id, position)`, which is scoped
+to the set matched above them and so is an ordinary first-case key.
 
 Two consequences of that choice are deliberate:
 

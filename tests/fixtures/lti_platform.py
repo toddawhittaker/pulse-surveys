@@ -21,6 +21,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import pytest
 
 from fixtures.repo import REPO_ROOT
+from fixtures.routing import every_route
 
 # ---------------------------------------------------------------------------
 # E0-14 — the mock LTI 1.3 platform, driven the way a tool drives one.
@@ -426,9 +427,22 @@ def declared_paths(application: Any, method: str = "GET") -> list[str]:
     No path parameter, so a caller can fetch every one of them without inventing
     a value — which is what makes "walk what this service serves" safe to do at
     all. Shared by both mocks for the reason `local_target` above is.
+
+    **The routes come from `fixtures.routing.every_route` since E2-04-01**, and
+    that is the whole of the difference between this and the walk it replaced.
+    This used to iterate `application.routes` directly, which is correct only for
+    an application whose routes were registered with decorators on the application
+    object — which is what both mocks do today, and the only reason it was not
+    already blind. On the pinned `fastapi` 0.141.1, `include_router` appends an
+    `_IncludedRouter` carrying no `.path`, so the day either mock grows a router
+    this would have reported an empty walk as a clean one.
+    `docs/disputes/E2-04-01.md` measured exactly that on the tool's own
+    application, and its ruling requires the two walks to be one rather than
+    leaving this as a warning (`docs/MISTAKES.md` entry 13). The recursion lives
+    in one place now and this function is the filter over it.
     """
     found: list[str] = []
-    for route in application.routes:
+    for route in every_route(application):
         path = getattr(route, "path", None)
         methods = getattr(route, "methods", None) or set()
         if isinstance(path, str) and "{" not in path and method in methods:

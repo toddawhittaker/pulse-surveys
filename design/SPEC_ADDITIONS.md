@@ -1,6 +1,6 @@
 # Pulse Surveys — SPEC_ADDITIONS
 
-> Frozen design-session input, written before `docs/SPEC.md` existed; where they disagree, the spec governs (known case: §2.1 — students hold no role assignment; their access resolves from enrollment).
+> Frozen design-session input, written before `docs/SPEC.md` existed; where they disagree, the spec governs (known cases: §2.1 — students hold no role assignment; their access resolves from enrollment. C1 item 5 below — the survey's confidentiality line reads "once per screen, in the submit area" as of the ruling of 2026-09-03, not "in the submit bar"; §4.1 item 5 carries the wording in force).
 
 Consolidated spec input covering the data model plus all behavioral, policy, and design decisions made in sessions 1–4. Feed this to the spec AI alongside the design brief. Entity/field names are suggestions.
 

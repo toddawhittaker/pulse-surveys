@@ -1,12 +1,16 @@
-// E1-04 — the five empty landing views, served by the application at their own
-// routes.
+// E1-04 — the five role routes, served by the application at their own
+// addresses. Four are still empty landing views; the fifth is E2-10's survey.
 //
 // What it proves: each of the five role routes under /app is served by the tool,
-// renders the landing view that route names, and renders it with the governed
-// copy — the heading and the empty-state sentence — from the served route rather
-// than from a string this file handed the page. E1-04 acceptance criterion 4:
-// "a spec asserts each landing view renders its role label from a served route
-// (not a fixture string)."
+// renders the view that route names, and renders it with the governed copy — the
+// heading and the one sentence under it — from the served route rather than from
+// a string this file handed the page. E1-04 acceptance criterion 4: "a spec
+// asserts each landing view renders its role label from a served route (not a
+// fixture string)."
+//
+// **The student row's sentence changed with E2-10 and its security review**, and
+// the reason is written where that row is. Everything else about these five
+// cases is E1-04's and is untouched.
 //
 // Why this is the instrument for that criterion and a unit test is not: the copy
 // has to come out of the built application, through the app factory's static
@@ -52,10 +56,27 @@ const ALL_LANDINGS = [
 // asked the page what its own heading was would pass against any heading at all.
 const VIEWS = [
   {
+    // **The student route is no longer an empty landing view** — E2-10 replaced
+    // it with SPEC §7.6's StudentWeeklySurvey — so what this case reads changed
+    // with it, and the sentence below is not the one E1-04 wrote.
+    //
+    // These cases navigate to the route directly, carrying **no session**. The
+    // survey asks `GET /student/survey`, which answers 401, and E2-10's security
+    // review is why that no longer renders "there is no survey open for you
+    // yet": a refused read and an empty week are different facts, and only one
+    // of them entitles the page to say what is due. A launch session lives an
+    // hour while a window stands open for days, so a student meeting that
+    // sentence is most often one whose session ran out — told authoritatively
+    // that nothing is due, on the week they still have time to answer.
+    //
+    // The heading is unchanged and is still E1-04's governed wording. The
+    // testid is unchanged, because four other specs address it to say a student
+    // landed.
     role: 'student',
     testid: 'pulse-landing-student',
     heading: 'Your weekly check-in',
-    empty: 'There is no survey open for you yet. When one opens, it appears here.',
+    empty:
+      'This page is not signed in, so it cannot say what is due. Open Pulse Surveys from inside your course in the LMS, and this week’s questions will be here.',
   },
   {
     role: 'instructor',

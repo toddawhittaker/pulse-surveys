@@ -43,6 +43,14 @@ E1-01 item 2.
 (standing); the structural source is E13's at the latest (ruled
 2026-08-28), with the reached-table report as its compensating control.
 **Done when:** the deferred entry's, for the half still open.
+**E2-05 asked the standing question of the four tables it adds.**
+`question_set` and `question` hold no key to a person and the walk reaches
+neither. `response` and `answer` are reached — `response.user_id` is one
+hop from `user`, `answer.response_id` is a second — and both are recorded
+in the carries-nothing inventory with the columns each judgement was made
+against, which took it from five entries to seven. `PERSON_TABLES` is
+unchanged: `response.user_id` is a foreign key, and the identity behind it
+stays on `user_identity`, which `pulse_app` is granted no `SELECT` on.
 
 ## A non-development deployment has no way to supply the tool's signing key
 
@@ -95,12 +103,15 @@ forced. Source: `docs/tickets/e1/deferred.md`, E1-03 item 1, and
 peerDependencies` admits 7.x.
 **Done when:** triage entry 3's.
 
-## The three webfonts are declared and not loaded
+## The three webfonts are declared and not loaded — CLOSED by E2-10
 
-The five landing views render in fallback faces; self-hosting versus
-shipping fallbacks is decided against E2's first real screen. Source:
-`docs/tickets/e1/deferred.md`, E1-04 item 1.
-**Owner:** E2. **Done when:** the deferred entry's.
+Closed 2026-09-02: E2-10 self-hosts the three faces via pinned
+`@fontsource` packages, per ADR 0116; the deferred entry's done-when is
+met and written up in place in `docs/tickets/e1/deferred.md`, E1-04
+item 1. (This entry originally read "the five landing views render in
+fallback faces"; they no longer do, and the student landing is now the
+survey screen.)
+**Owner:** E2. **Done when:** the deferred entry's — met.
 
 ## The security response headers — closed inside E1; only the E11 residue below is carried
 
@@ -333,9 +344,11 @@ none reachable today.
   no generative purview coverage — §4.1 item 2 is proven on hand-built
   fixtures only, which stands while the union computation is E9's (E9
   already owns the Hypothesis purview properties, listed below).
-  **Owner:** E2 for the comment correction, done when the comment counts
-  what the sweep polices; the purview note is E9's already and carries no
-  work here.
+  **Owner:** E2 for the comment correction, done when the comment stops
+  asserting a count and points at the catalog the sweep reads (amended at
+  the E2 breakdown: this entry first said "counts what the sweep polices",
+  and a written count re-creates the drift the fix exists to end); the
+  purview note is E9's already and carries no work here.
 - The denial-module closure sweep's inventory is a naming convention
   (`DENIAL_NAME_SHAPES` in
   `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`),
@@ -359,5 +372,5 @@ resolve-only-your-own-subject rule, and the Hypothesis purview properties
 (E9, per `carried-from-e0.md`'s three entries); §4.1 item 1's assertion and
 the copy-inventory test (E2); `PlatformProfile` adapters (E3);
 supervision-graph and Lead-Faculty-mapping editing (E9); notifications
-(E12); term-map edits re-deriving section calendars (E2 or E11, ADR 0018
-and ADR 0021); real-LMS certification (post-v1, §14.4).
+(E12); term-map edits re-deriving section calendars (ruled E11, 2026-08-31,
+at the E2 breakdown; ADR 0018 and ADR 0021); real-LMS certification (post-v1, §14.4).

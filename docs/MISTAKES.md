@@ -195,7 +195,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
+**Caught: 6** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
 
 **Rule.** When a guard enumerates mechanisms, require it to *find* each one on a
 subject that certainly has it, as a control. A guard that only ever reports
@@ -204,7 +204,7 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 11** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 17. An unqualified table name let the caller choose which table a guard read
 
@@ -212,7 +212,7 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 ## 34. A pipeline discarded a non-zero exit and printed a line that read as success
 
-**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
+**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
 
 **Rule.** Never read a gate's result through a pipe. `cmd | tail` reports the
 exit status of `tail`, so a failing gate prints a passing line. Redirect to a
@@ -228,7 +228,7 @@ file and check the status, or run the gate bare.
 
 ## 18. A deliverable existed in the source tree and not in the built artifact
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/18-a-deliverable-existed-in-the-source-tree-and-not.md)
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/18-a-deliverable-existed-in-the-source-tree-and-not.md)
 
 ## 23. A validation created the appearance of a behaviour
 
@@ -284,7 +284,7 @@ file and check the status, or run the gate bare.
 
 ## 24. A test asserted a property no implementation could satisfy
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/24-a-test-asserted-a-property-no-implementation-could-satisfy.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/24-a-test-asserted-a-property-no-implementation-could-satisfy.md)
 
 ## 25. Two lockfiles resolved the same package to two versions
 
@@ -305,7 +305,7 @@ glob is a single `*` unless `globstar` is set.
 
 ## 37. A harness ran the real artifact under conditions the runtime does not use
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/37-a-harness-ran-the-real-artifact-under-conditions.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/37-a-harness-ran-the-real-artifact-under-conditions.md)
 
 **Rule.** When you extract something to run it, copy the invocation and not just
 the body — the shell and its flags, the interpreter, the environment. Prefer a
@@ -316,7 +316,7 @@ the real runtime before believing either the green or the red.
 
 ## 38. An option parser answered before the guard did, and its answer was the permissive one
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/38-an-option-parser-answered-before-the-guard-did.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/38-an-option-parser-answered-before-the-guard-did.md)
 
 **Rule.** When a guard takes untrusted names as arguments, the argument parser is
 part of the guard: pass `--` before any list that came from a diff or a glob, and
@@ -335,7 +335,7 @@ printed.
 
 ## 40. The suite ran under an environment nobody chose, and it was a different one in CI
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/40-the-suite-ran-under-an-environment-nobody-chose.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/40-the-suite-ran-under-an-environment-nobody-chose.md)
 
 **Rule.** A test whose subject reads the process environment states the value it
 runs under, in its own fixture chain. Anything a fixture runs in process brings
@@ -348,15 +348,32 @@ the fixtures that should have set it.
 
 ## 41. A request path inherited a background job's dependency, at that dependency's default retry policy
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/41-a-request-path-inherited-a-background-dependency.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/41-a-request-path-inherited-a-background-dependency.md)
 
 **Rule.** A request path may not be able to fail because a background dependency
 was unavailable, and it may not wait to find out. When a handler enqueues work,
 publish with retries off, keep the result backend out of it for a task whose
-answer nobody reads, and catch broadly — the request has already done its own job
-by then, and the scheduled run covers the gap. A client library's defaults are
+answer nobody reads, **publish on a connection made for the call, with its own
+retries off and its socket timeouts bounded**, and catch broadly — the request has
+already done its own job by then, and the scheduled run covers the gap. The third
+of those four was added after the other three were measured and found
+insufficient: a publish flag governs the publish, while the client library opens
+the connection under a retry policy of its own *before* the publish is attempted,
+so a broker refusing instantly still costs seconds. Time the enqueue against a
+closed port rather than trusting the flags. A client library's defaults are
 written for the context that library is usually called from, and a worker's
 defaults on a request path turn a dependency that is *down* into a request that is
 *hanging*. And the corollary: a change that adds a call to a shared entry point is
 not verified by the suites of the ticket that made it — run the whole suite, and
 read its timing as well as its result.
+
+## 42. A CI verdict was read off a stale check summary between two pushes
+
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/42-a-ci-verdict-was-read-off-a-stale-summary.md)
+
+**Rule.** The only CI verdict that exists is a **completed** run whose head SHA
+equals the final commit. A pull request's check rollup queried between two
+pushes can answer for the superseded run — an empty failure list is not a green.
+Before reporting green or marking anything ready, resolve the run by id, assert
+`status == completed`, and assert its `headSha` equals the commit being vouched
+for; a watch command's clean exit proves only that some run finished.

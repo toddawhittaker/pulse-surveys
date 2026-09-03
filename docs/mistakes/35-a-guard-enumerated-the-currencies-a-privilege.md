@@ -1,10 +1,56 @@
 # Entry 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 4**
+**Caught: 6**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*9 occurrences recorded; four of them are catches.*
+*12 occurrences recorded; six of them are catches. This file keeps the three
+most recent instances; the rest live in git history — it is carrying five today,
+because the oldest of them and the addendum under it are one lesson and trimming
+one without the other would leave a paragraph referring to nothing.*
+
+*(**A catch**, writing E2-16's tests, 2026-09-03. Three of the ticket's criteria
+are assertions that something is **absent**: no `NOT IN` in any statement the
+floored-comment sweep sends, no growth in the reads window derivation issues as
+sections are added, and — the mirror image — an index over
+`classification (task, prompt_version)` that is present. Each is read through an
+instrument this ticket wrote: a `before_cursor_execute` recorder, and a catalog
+matcher over an index's leading key columns. Every one of those absences passes
+for free against an instrument that sees nothing, and the matcher's assertions
+pass equally against a matcher that says yes to everything. This entry's rule put
+both directions in the suite before anything rested on either: the recorder is
+shown a real `NOT IN` over the real tables and has to flag exactly one, and is
+shown a lone `SELECT` and has to count exactly one read; the matcher has to find
+the two week-axis indexes that certainly exist and to refuse a column
+(`response.first_submitted_at`) that nothing indexes. Without them, the day the
+listener was registered on the wrong event, three criteria would have gone green
+over a sweep nobody had watched.)*
+
+*(Building E2-08, 2026-09-02. Three discovery walks in one ticket's test
+machinery each reported a deliverable missing while it was present, and each
+repair widened the walk by exactly the one level the last failure exposed: a
+Celery task filtered by `__module__`, which a task proxy reports as
+`celery.local` (`docs/disputes/E2-08-02.md`); a request model required to be
+*defined* in the route module, while SPEC §13 homes it in `app/schemas/`
+(`docs/disputes/E2-08-06.md`); then the same walk again, blind to the model
+being nested behind `list[...]` in the model it did find. None of the three
+applied this entry's rule when the walk was written — a discovery that
+enumerates candidates must *find* a subject certainly present, as a control —
+so every failure was a red naming the code instead of a red naming the walk,
+and each was caught by a run rather than by reading. The repair that ended it
+closed the class: both discovery helpers now carry a control asserting they
+find something the tree certainly holds.)*
+
+*(**A catch**, writing E2-03's refusal tests, 2026-09-01. The refusal test
+asserts that the raw foreign-key-violation shape is absent from the migration's
+failure, read through a new reader that walks the server's `message_primary`,
+`message_detail` and SQLSTATE chain. Entry 35's rule turned that absence
+assertion into a second control: the same reader and the same SQLSTATE walk are
+run against a real foreign key violation and required to find it, by phrase and
+by code. Without it, a reader that returned nothing — a driver whose `diag`
+moved, a chain walk that stopped early — would have made the absence assertion
+pass against the exact defect the ticket exists to remove, and the test would
+have gone green the moment its machinery broke.)*
 
 *(**A catch**, writing the E1 re-review fix's closure sweep, 2026-08-31. The
 re-review had found M6's own defect recurring — three new confidentiality-denial
@@ -20,74 +66,6 @@ refuse the rest, so a module holding its marker any other way is red until it
 adopts the form, never silently approved. The control corollary is applied too:
 the sweep's planted tree carries a module for each currency, including the
 per-test-only one, and asserts exactly which are demanded and which are found.)*
-
-*(**A catch**, writing E0-19's tests — the Compose credential surface, two readers
-at once. The first enumerates the currencies a host bind mount can be declared
-in, and the rule turned it into a table of six with a sample for each, written so
-that **only its own mechanism** can resolve it: the `driver_opts` sample with
-`type: none` carries an `o:` with no `bind` in it, and the `o: bind` sample
-declares no `type:` at all, so deleting either half of the classifier turns
-exactly one control red while every refusal rule stays green. The inventory is a
-separate constant the sample table cannot shrink, which is the corollary the
-E0-34 instance below bought. The second reader is the one the entry's sharper
-half actually changed. Route 3 asks which variables a Compose file delivers to a
-container, and the natural shape — documented `.env.example` names checked
-against documented values — is blind to `db`, the one service that legitimately
-receives the superuser credential: it takes the pair by explicit interpolation
-into `POSTGRES_USER` and `POSTGRES_PASSWORD`, which are Postgres's names and are
-documented nowhere. So the design changed before it was written: the reader
-resolves the *value* a service is handed rather than matching documented names,
-and the control asserts it **finds** the credential arriving at `db`. Without the
-entry, that control could not have been written at all — the rule would have
-reported every application service clean while being unable to see a delivery
-anywhere, which is exactly "no role can do this *the one way I looked*".)*
-
-*(**An occurrence, not a catch**, in E0-36 item 3, by the orchestrating session,
-and the currency was a pytest marker. The question "which tests are marked
-`invariant`" was measured with an AST walk over `decorator_list`, which answered
-20. `pytest -m invariant --collect-only` answers 24: four tests are marked by a
-module-level `pytestmark = pytest.mark.invariant` — three in
-`tests/unit/test_no_service_reads_an_identity_table_directly.py`, one in
-`tests/unit/test_care_is_not_reachable_from_a_claim.py` — and a decorator walk
-cannot see any of them. The number went into the ticket and into a test docstring
-as the justification for the rule being green on the suite. **The implementer read
-both forms and got 24; the mutation that disables the `pytestmark` path makes the
-checker report exactly 20**, which is a clean scan printed over four real §4.1
-invariants it never looked at — item 3's own subject, inside the round that was
-fixing item 3. The entry's sharper half held too: those two modules use
-`pytestmark` **because every test in them is an invariant**, so the files that are
-wholly confidential are precisely the ones the walk was blind to. "Name the
-catalog, not the concept" is the corollary that applies — `decorator_list` is not
-the marked set, pytest's collector is — and the repair is to quote the count from
-the collector rather than from a walk. **The entry's own rule then closed the
-second half of it**, one round later: the eight planted samples in
-`tests/unit/test_the_invariant_gate_refuses_a_test_that_asserts_nothing.py` all
-used the decorator form, so nothing under `tests/**` would have noticed the
-checker's `pytestmark` path regressing — the currency had been named in the record
-and not yet planted in the battery. Two samples now carry it, refused and allowed,
-and it takes both: the refusal alone is passed by a checker that refuses every
-`pytestmark` module whatever its body, and the allowance alone is passed by a
-checker blind to the form, which scans nothing and objects to nothing. The refusal
-is checked as a non-zero exit **and** the offending test named, because a checker
-that cannot see the marking reports an empty scan, which may exit non-zero for its
-own reasons and would otherwise read as the rule having been applied.)*
-
-*(**A catch**, writing E0-35's tests — three static sweeps over writes to
-LMS-owned data. All three have an empty subject set today, because E0 ships no
-application write path, so the shape about to be written was a sweep plus a set
-of samples it must *refuse*: over a tree containing nothing, that is a file that
-reports green having demonstrated nothing about what it can see. This entry is
-why each sweep is now required to **find** every mechanism it claims, on a sample
-carried in the module — an ORM `add`, a Core `insert().values()`, textual
-`INSERT`, `UPDATE` and `DELETE`, and an `INSTRUCTOR` role assignment written both
-as the string `"INSTRUCTOR"` and as `AssignmentRole.INSTRUCTOR`, since a detector
-that saw one spelling would miss whichever E1's roster sync happens to use. The
-corollary about the design's own currency is what put the second spelling there:
-the enum member is how the codebase actually holds a role, and the string is the
-one a guard's author reaches for. The inventory follows the same rule — the ORM
-half resolves every guarded table to a mapped class off `Base.registry` and fails
-if any of them resolves to none, rather than trusting a class name typed into a
-test file.)*
 
 *(**The catch**, writing E0-34's tests — the guard that reads
 `backend/app/views_sql/*.sql` looking for an identity column. It enumerates two

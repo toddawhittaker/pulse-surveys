@@ -8,6 +8,14 @@ on:
   push:
     branches:
       - 'epic/**'
+  # E2-12 scope (b): the eval floors run "on demand via `workflow_dispatch`".
+  # Firing them on AI-touching diffs is the right default and is not enough on
+  # its own — a provider changes a model behind a stable identifier, a floor
+  # needs re-measuring before it is moved, a key is rotated and somebody has to
+  # know the wiring still works. None of those is a diff, and without a manual
+  # trigger the only way to run the gate would be to push a change to a file
+  # that does not need changing.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -33,13 +41,13 @@ env:
 
 jobs:
   # --------------------------------------------------------------------------
-  # What exists yet? The jobs still listed here are tolerant of a tree that has
-  # not been built. As each E0 ticket lands, flip the matching `allow-missing`
-  # step in that job from tolerant to enforcing — the job body is already
-  # written — and drop the probe with it, so this list shrinks to nothing.
-  #
-  # Gone already: `migrations` and `pytests`. E0-04 turned the `migration-drift`
-  # and `test` jobs on, and they now run unconditionally.
+  # What exists yet? One probe remains: `node`, which asks whether the root
+  # `package.json` exists and gates the Node-side audit and licence steps. Every
+  # other tolerance this header once listed is gone — `migrations` and `pytests`
+  # with E0-04, the e2e gate with E0-18, the four frontend gates with E1-04, the
+  # AI eval floors with E2-12, and the readerless `evals` probe with E2-13. ADR
+  # 0002's closing section names the surviving probe and the rule that a new
+  # tolerant gate needs its own argued ticket.
   # --------------------------------------------------------------------------
   # E0-38: what *changed*, as against what `detect` below answers, which is what
   # exists. A documentation-only pull request ran pytest against testcontainers,
@@ -62,6 +70,16 @@ jobs:
       # off rather than being skipped — the `ci` job's comment says why a
       # job-level `if:` would fail the required check instead.
       inert: ${{ steps.diff.outputs.inert }}
+      # `true` when the diff touched anything SPEC §9.3's eval floors measure:
+      # the AI package, the eval tree, or either of the two files that carry the
+      # model identifier. Read by the `evals` job alone, which is the one gate
+      # here that calls a paid provider (E2-12).
+      #
+      # **Declaring it and never filling it is the quiet failure.** Every reader
+      # would hold the empty string, `'' == 'true'` is false, the live eval steps
+      # would never run again, and the job would report success — so every route
+      # out of the step below emits both classifications rather than one.
+      ai_surface: ${{ steps.diff.outputs.ai_surface }}
     steps:
       # Full history, because the step below diffs against the base commit and a
       # shallow clone does not have it. A few seconds here against the fifteen
@@ -86,9 +104,24 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # A push's own range. Not usable for the inert verdict, for the reason
+          # the script says below, and exactly right for the AI-surface one.
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -uo pipefail
           emit() { echo "$1=$2" >> "$GITHUB_OUTPUT"; echo "  $1 = $2"; }
+
+          # "We do not know what changed", said in both classifications at once.
+          # Every early exit below is that answer, and each one has to give it
+          # twice: the two outputs have opposite polarities — `inert=false` runs
+          # the six expensive gates, `ai_surface=true` runs the eval steps — so a
+          # route that emitted one and forgot the other would leave the forgotten
+          # reader holding the empty string. `'' == 'true'` is false and
+          # `'' != 'true'` is true, so forgetting `inert` runs everything and
+          # forgetting `ai_surface` silently stops SPEC §9.3's floors ever
+          # running again, with the job green. One function rather than two lines
+          # repeated at five sites (`docs/MISTAKES.md` entry 13).
+          unknown() { emit inert false; emit ai_surface true; }
 
           # **Only a pull request may be inert.** A push event's base is
           # `github.event.before`, which is the previous head of the branch, so
@@ -101,25 +134,46 @@ jobs:
           # `base.sha` gives the whole delta rather than the last push, which is
           # why the saving this ticket is for is untouched: documentation-only
           # pull requests are the case it was measured on.
-          if [ "${EVENT_NAME:-}" != "pull_request" ]; then
-            echo "::notice::${EVENT_NAME:-unknown} is not a pull request, so the diff would be"
-            echo "::notice::incremental while the verdict is not. Every gate runs."
-            emit inert false
-            exit 0
-          fi
+          #
+          # **That argument is about `inert` and does not carry to `ai_surface`,
+          # which is E2-12's security review as a LOW with a bill attached.** Both
+          # questions used to leave here together, so every push to an epic branch
+          # — every ticket merge in this repository's ordinary flow — ran the full
+          # eval suite: about ninety-eight paid provider calls, in the one job
+          # holding the provider secret, while this file's own scoping paragraph
+          # said live calls happen only when the change touches what §9.3's gate
+          # names. The file contradicted itself and the contradiction cost money
+          # on every merge.
+          #
+          # The two questions differ in what an incremental diff can settle. "Is
+          # the whole tree inert" is not answerable from the last push; "did this
+          # push touch an AI path" is, because a push that touched one anywhere in
+          # its own range shows it. So `inert` still leaves here and `ai_surface`
+          # goes on to be decided from `before..HEAD`. Every genuine unknown below
+          # — no base, a base this clone does not hold, an all-zero `before`, a
+          # diff that failed — still answers `true` for it, and those routes were
+          # deliberately not narrowed.
+          decide_inert=true
           base="${PR_BASE_SHA:-}"
+          if [ "${EVENT_NAME:-}" != "pull_request" ]; then
+            echo "::notice::${EVENT_NAME:-unknown} is not a pull request, so the diff is"
+            echo "::notice::incremental while the inert verdict is not. Every expensive gate runs."
+            echo "::notice::The AI-surface question is decided from this push's own range."
+            decide_inert=false
+            base="${PUSH_BEFORE:-}"
+          fi
 
           # A new branch pushes an all-zero "before", and a missing base is an
           # empty string. Both mean there is nothing to diff against.
           if [ -z "${base}" ] || [ "${base}" = "0000000000000000000000000000000000000000" ]; then
             echo "::notice::no base commit to diff against; every gate runs."
-            emit inert false
+            unknown
             exit 0
           fi
 
           if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
             echo "::notice::base commit ${base} is not in this clone; every gate runs."
-            emit inert false
+            unknown
             exit 0
           fi
 
@@ -142,7 +196,7 @@ jobs:
           # stays inert, which is what trimming that directory looks like.
           if ! git diff --no-renames --name-only -z "${base}" HEAD > /tmp/changed-paths.z; then
             echo "::notice::could not diff against ${base}; every gate runs."
-            emit inert false
+            unknown
             exit 0
           fi
           # Also in an `if`, for the reason the classifier invocation below is:
@@ -151,7 +205,7 @@ jobs:
           # required check going red. No bare command is left in it.
           if ! mapfile -t -d '' changed < /tmp/changed-paths.z; then
             echo "::notice::could not read the changed-path list; every gate runs."
-            emit inert false
+            unknown
             exit 0
           fi
 
@@ -193,25 +247,75 @@ jobs:
           # land in the `*)` branch below, which is why nothing caught this.
           # The script rejects leading-dash arguments as well; both halves are
           # deliberate, because the script advertises a general command line.
-          if python3 scripts/ci/classify_changed_paths.py -- "${changed[@]}"; then
-            status=0
+          # **Asked only when the event can answer it.** A push reached this step
+          # with `decide_inert=false` and its verdict settled above, for the
+          # reason written there; running the classification anyway and throwing
+          # the answer away would leave a log line saying "inert" beside an
+          # emitted `false`, which is the kind of disagreement somebody later
+          # resolves in the wrong direction.
+          if [ "${decide_inert}" = "true" ]; then
+            if python3 scripts/ci/classify_changed_paths.py -- "${changed[@]}"; then
+              status=0
+            else
+              status=$?
+            fi
+
+            # Its contract is exit 0 for inert and exit 1 for not. Anything else
+            # is the classifier failing rather than answering, and that is worth a
+            # line in the log: every route out of here still runs every gate, so a
+            # broken classifier is invisible in the result and would otherwise
+            # look exactly like a repository whose every pull request touches
+            # code.
+            case "${status}" in
+              0) emit inert true ;;
+              1) emit inert false ;;
+              *)
+                echo "::warning::classify_changed_paths.py exited ${status}, which is neither of"
+                echo "::warning::its two answers. Every gate runs. This is a broken checker, not a"
+                echo "::warning::busy repository."
+                emit inert false
+                ;;
+            esac
           else
-            status=$?
+            emit inert false
           fi
 
-          # Its contract is exit 0 for inert and exit 1 for not. Anything else is
-          # the classifier failing rather than answering, and that is worth a line
-          # in the log: every route out of here still runs every gate, so a broken
-          # classifier is invisible in the result and would otherwise look exactly
-          # like a repository whose every pull request touches code.
-          case "${status}" in
-            0) emit inert true ;;
-            1) emit inert false ;;
+          # The second question, over the same path list (E2-12). Same script,
+          # same `if`, same `--`, same `case`, and every note above applies to it
+          # unchanged — including the two that were paid for: `python3` rather
+          # than `python`, because this job runs no `actions/setup-python`; and
+          # `--` before the paths, because argparse answers before the script's
+          # own logic does and a repository file named `-h` would exit 0.
+          #
+          # **Only the meaning of the exits differs, and it does not.** Exit 0 is
+          # "the gates this question decides may short-circuit" for both
+          # classifications, which is what lets the two `case` statements be read
+          # the same way; here that means "no changed path is an AI surface, so
+          # the live eval steps may stay off". A neither-answer exit emits `true`,
+          # which runs SPEC §9.3's floors — the direction every failure route in
+          # this step takes, because under-firing this gate is the threat and
+          # self-harm recall floor not running on the change that most needs it.
+          #
+          # **This one is asked on a push as well**, unlike the question above,
+          # and `${changed[@]}` then holds the push's own range rather than a
+          # whole-tree delta. That is the difference the paragraph at the top of
+          # this step argues: an incremental diff cannot settle "is everything
+          # here documentation" and does settle "did this touch an AI path".
+          if python3 scripts/ci/classify_changed_paths.py --classification ai-surface -- "${changed[@]}"; then
+            ai_status=0
+          else
+            ai_status=$?
+          fi
+
+          case "${ai_status}" in
+            0) emit ai_surface false ;;
+            1) emit ai_surface true ;;
             *)
-              echo "::warning::classify_changed_paths.py exited ${status}, which is neither of"
-              echo "::warning::its two answers. Every gate runs. This is a broken checker, not a"
-              echo "::warning::busy repository."
-              emit inert false
+              echo "::warning::classify_changed_paths.py --classification ai-surface exited"
+              echo "::warning::${ai_status}, which is neither of its two answers. The eval floors"
+              echo "::warning::run. This is a broken checker, not a repository nobody has"
+              echo "::warning::touched."
+              emit ai_surface true
               ;;
           esac
 
@@ -220,7 +324,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       node: ${{ steps.d.outputs.node }}
-      evals: ${{ steps.d.outputs.evals }}
     steps:
       - uses: actions/checkout@v7
 
@@ -276,19 +379,18 @@ jobs:
           # change as its last reader rather than being left emitting.
           echo "Probing repository layout (SPEC §13):"
           if [ -f package.json ]; then emit node true; else emit node false; fi
-          # The exact module the job imports, in the shape the manifest probes
-          # already use. Stricter than "some Python exists under tests/evals",
-          # and deliberately: a tree with `__init__.py` and no runner would make
-          # that glob answer true and the job then fails on the import.
-          if [ -f tests/evals/runner.py ]; then emit evals true; else emit evals false; fi
           #
-          # There is deliberately no `e2e` probe and no `frontend` one. PR #61
-          # made the Playwright gate unconditional on the specs being present and
-          # E1-04 made the four frontend gates enforcing, so in each case nothing
-          # consumed the output any more; a boolean nobody reads is a probe whose
-          # wrongness has no symptom, which is the failure this comment's first
-          # paragraph is about. E0-40 decision 5 removed the first, E1-04 the
-          # second.
+          # There is deliberately no `e2e` probe, no `frontend` one and no
+          # `evals` one. PR #61 made the Playwright gate unconditional on the
+          # specs being present, E1-04 made the four frontend gates enforcing,
+          # and E2-12 committed `tests/evals/runner.py` and made the eval job
+          # enforcing on the changed-paths classification — so in each case
+          # nothing consumed the output any more; a boolean nobody reads is a
+          # probe whose wrongness has no symptom, which is the failure this
+          # comment's first paragraph is about. E0-40 decision 5 removed the
+          # first, E1-04 the second, and E2-13 the third, each in the change
+          # that took away its last reader or as soon after as the test wall
+          # allowed.
 
   # ==========================================================================
   # FAST GATES — everything else waits on these.
@@ -350,16 +452,17 @@ jobs:
       # confidentiality and eval guarantees, so they get no untyped escape.
       #
       # Then one invocation per mock, each of which is a further package also
-      # called `app` (SPEC §13 names all three). One run over two of them stops
+      # called `app` (SPEC §13 names all four). One run over two of them stops
       # with "Duplicate module named app" having checked neither, so this is
-      # three runs rather than a longer `files` list. `make typecheck` runs the
-      # same three in the same order. See
+      # four runs rather than a longer `files` list. `make typecheck` runs the
+      # same four in the same order. See
       # docs/adr/0039-the-two-app-packages-are-typechecked-in-two-runs.md.
       - name: mypy
         run: |
           mypy
           mypy mock-lms/app
           mypy mock-idp/app
+          mypy mock-ai/app
 
       # **Repository-wide sweeps run here because this job is unconditional.**
       # E0-38's inert set says `docs/` is documentation nothing depends on, and
@@ -410,6 +513,19 @@ jobs:
       # `classify_changed_paths.py` calls `docs/package.json` inert, measured
       # rather than assumed. So a documentation-only pull request can commit a
       # manifest this guard reads, on the one run where it would not have run.
+      #
+      # The sixth entry is E2-06's one-writer sweep over `survey_window`, and it
+      # is a whole module for the same reason the fourth is: every test in
+      # `test_survey_windows_have_one_assignment_site.py` is the sweep itself, the
+      # control that proves the detector finds each shape it claims to, the
+      # positive control that proves it finds the sanctioned writer, or the check
+      # that the columns it names are the ones the schema has — and a sweep run
+      # without its controls is a silence nobody can read. What puts it in this
+      # job is the detector in
+      # `test_every_repository_wide_sweep_runs_in_a_job_the_filter_cannot_switch_off`,
+      # which reads its `REPO_ROOT`-rooted `rglob` as a repository-wide sweep; the
+      # repair that guard asks for is to name the ids here, never to reshape the
+      # sweep until the detector stops seeing it.
       - name: Repository-wide sweeps that a docs-only diff must not switch off
         run: |
           pytest -q \
@@ -418,7 +534,8 @@ jobs:
             "tests/unit/test_mock_lms_service.py::test_the_private_key_matcher_finds_a_private_key_and_ignores_a_public_one" \
             "tests/unit/test_mock_lms_service.py::test_the_sweep_itself_finds_a_planted_key_and_not_a_tree_without_one" \
             "tests/unit/test_the_process_wide_authorization_endpoint_is_gone.py" \
-            "tests/unit/test_types_node_tracks_runtime.py"
+            "tests/unit/test_types_node_tracks_runtime.py" \
+            "tests/unit/test_survey_windows_have_one_assignment_site.py"
 
   # The job keeps its id and its display name. Branch protection's required-check
   # list keys on the display name, and renaming it is a change to that list
@@ -766,12 +883,12 @@ jobs:
           pip install --require-hashes -r requirements-dev.txt
           pip install -e . --no-deps --no-build-isolation
 
-      - name: Bring up the stack (api, worker, beat, mock-lms, mock-idp)
+      - name: Bring up the stack (api, worker, beat, mock-lms, mock-idp, mock-ai)
         if: needs.changed.outputs.inert != 'true'
         run: |
           cp .env.example .env
           docker compose up -d --build
-          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
+          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp mock-ai
 
       # Host-side, against the published port. `.env` supplies the superuser
       # credentials `migrations/env.py` connects as and the ENVIRONMENT the seed
@@ -803,6 +920,40 @@ jobs:
           path: playwright-report/
           if-no-files-found: ignore
 
+  # E2-12 turns this job enforcing, and it is ADR 0002's last tolerance. Until
+  # now it printed a `::notice::` saying the first eval set and the floors that
+  # gate on it "are E2's, and this job stays tolerant until then", and reported
+  # success. That sentence is false in the change that lands the set, and ADR
+  # 0002 makes removing a tolerance an acceptance criterion of the ticket that
+  # lands the code rather than a tidy-up for later.
+  #
+  # **This job is the one gate in this pipeline that calls a paid provider**, at
+  # about a hundred requests a run, so it is the one gate whose steps are
+  # conditioned on more than "was the diff inert". Three clauses, and each is
+  # doing separate work:
+  #
+  #   * `needs.changed.outputs.inert != 'true'` — E0-38's short-circuit, kept and
+  #     not replaced. Two committed modules require every expensive gate to keep
+  #     it, and one of them reads its operator.
+  #   * `needs.changed.outputs.ai_surface == 'true'` — E2-12's clause. SPEC §9.3
+  #     scopes the floors to "prompt or model changes"; this is that question
+  #     asked of the diff.
+  #   * `github.event_name == 'workflow_dispatch'` — the manual run, which fires
+  #     the steps whatever the diff says, because a dispatch has no meaningful
+  #     diff at all.
+  #
+  # **The inert clause leads every condition, and that is a real constraint.**
+  # `test_a_documentation_only_diff_does_not_run_the_expensive_gates.py` reads
+  # the sense of an expensive gate's guard by taking the *first* comparison of a
+  # `needs.changed.outputs.*` reference against `'true'`. Leading with
+  # `ai_surface == 'true'` hands that reader an `==`, it concludes this gate runs
+  # only on documentation, and a correct guard reds a committed module. The
+  # boolean is identical either way.
+  #
+  # **The condition is at step level and must stay there.** E0-36 made the
+  # aggregate `ci` check treat `skipped` as a failure, so a job-level `if:` fails
+  # the one check branch protection points at on every pull request that does not
+  # touch the AI surface.
   evals:
     name: Test · AI eval floors
     needs: [changed, detect, fast-gate]
@@ -814,19 +965,30 @@ jobs:
         if: needs.changed.outputs.inert == 'true'
         run: echo "::notice::Every changed path is inert documentation (E0-38), so no eval floor was checked."
 
-      - name: No eval sets yet
-        if: needs.detect.outputs.evals != 'true' && needs.changed.outputs.inert != 'true'
+      # The not-fired case, which is an ordinary and expected outcome rather than
+      # a tolerance: most pull requests here change no prompt and no model, and
+      # SPEC §9.3's gate is scoped to the ones that do.
+      #
+      # **This script deliberately does not use the word the sibling guard reads.**
+      # `test_a_documentation_only_diff_does_not_run_the_expensive_gates.py` flags
+      # any step that is switched off by an inert diff, prints a `::notice::`,
+      # explains the *inert* classification and does not run the gate's command —
+      # it reads that shape as a skip-notice guarded backwards. A notice about the
+      # AI-surface classification is a different notice, and saying so plainly is
+      # what keeps the two apart.
+      - name: This diff touches no AI surface, so the eval floors did not run
+        if: needs.changed.outputs.inert != 'true' && needs.changed.outputs.ai_surface != 'true' && github.event_name != 'workflow_dispatch'
         run: |
-          echo "::notice::No tests/evals runner yet. E0-13 builds the gateway; the first eval set and the floors that gate on it are E2's, and this job stays tolerant until then."
-          echo "::notice::Running the eval suite needs a provider API key as a repository secret and a secrets.* reference in this workflow. Under the secrets policy in CLAUDE.md that is Todd's call, so it is proposed, not wired."
+          echo "::notice::No changed path is under backend/app/ai/ or the eval tree, and neither backend/app/config.py nor .env.example changed, so SPEC §9.3's floors measured nothing. This is the scoped behaviour, not a tolerance: the floors call a paid provider about a hundred times a run and §9.3 scopes them to prompt or model changes."
+          echo "::notice::To measure them anyway, run this workflow by hand (Actions, Run workflow)."
 
       - uses: actions/setup-python@v7
-        if: needs.detect.outputs.evals == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.changed.outputs.inert != 'true' && (needs.changed.outputs.ai_surface == 'true' || github.event_name == 'workflow_dispatch')
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install backend (locked)
-        if: needs.detect.outputs.evals == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.changed.outputs.inert != 'true' && (needs.changed.outputs.ai_surface == 'true' || github.event_name == 'workflow_dispatch')
         run: |
           pip install --require-hashes -r requirements-dev.txt
           pip install -e . --no-deps --no-build-isolation
@@ -836,8 +998,87 @@ jobs:
       # threat/self-harm recall floor is the strictest in the suite (§9.3): a
       # false negative there is a student in danger whose comment reached
       # nobody, which is why it is a hard gate and never a warning.
+      #
+      # **The three environment values, and why one of them is a secret and two
+      # are not.** `AI_PROVIDER_API_KEY` is a credential and lives in the
+      # repository's secrets; the repository owner created it and gave the
+      # written go on 2026-09-02, which is what CLAUDE.md's secrets policy
+      # requires before a `secrets.*` expression may appear here — asked, then
+      # waited for, never provisional. The base URL and the model name are not
+      # credentials: `.env.example` documents both in the open, and putting them
+      # here rather than in a secret keeps the log able to say which endpoint and
+      # which model a floor was measured against, which is half of what makes one
+      # run comparable to the next (ADR 0031).
+      #
+      # The runner refuses plainly when the key is absent or blank, naming the
+      # variable, rather than reporting a pass over a run that reached nothing.
+      #
+      # **The two open values are kept in step with `.env.example` by hand**, and
+      # they name the provider ruled on 2026-09-02. The endpoint has to serve the
+      # `json_schema` structured-output mode `app.ai.gateway` asks for; the
+      # provider named here before that ruling answered HTTP 400 to it, which is
+      # why the switch happened rather than a second output mode being added.
+      # ADR 0118's consequences carry the measurement.
+      #
+      # **The model wants to be pinned to a snapshot, and this one has none.** A
+      # floor is a claim about a particular model: ADR 0031 records the provider's
+      # own identifier on every classification precisely so that two runs can be
+      # told apart, and the same property applies to the thing being measured.
+      # The previous model was pinned that way, as `gpt-5-mini-2025-08-07`.
+      #
+      # `gpt-5.6-luna` publishes no dated build. Checked on 2026-09-02 by listing
+      # the provider's models, by retrieving that model, and by reading a
+      # completion's envelope — one bare identifier every time, where the previous
+      # model's envelope resolved to its snapshot, and no `system_fingerprint`.
+      # So the value below is what the provider serves, and the property the pin
+      # bought is unavailable rather than traded away: the weights behind this
+      # name can move, and a floor breach would then be indistinguishable from a
+      # model change with nothing here able to tell. ADR 0120 carries it as a cost
+      # of the switch, and `.env.example` says the same beside its own entry.
+      #
+      # If a dated Luna build appears, pinning it here is the repair — and it is a
+      # re-measurement, so it belongs in a pull request whose subject is moving
+      # the floors.
+      #
+      # **Everything below the provider triple is here because `Settings()` is
+      # constructed before any of it is read, and the runner reads none of it.**
+      # SPEC §6.3's configuration surface is one class validated as a whole at
+      # startup, so a process that only wants a model call still has to satisfy
+      # the database, Redis, session and identity-provider fields; the alternative
+      # is a second configuration path, which dispute E2-12-01's reasoning refuses
+      # and which would be a way for a deployment to start without the checks. The
+      # nine values are obviously fake, address nothing that exists on a runner,
+      # and hold no credential — the eval job starts no services and opens no
+      # connection, and none of these is consulted between process start and the
+      # provider call. They were not guessed: `Settings()` was constructed under
+      # exactly this environment and each one removed in turn, keeping only those
+      # whose absence still refuses.
+      #
+      # **`ENVIRONMENT: development` is load-bearing and does not send the run to
+      # the mock.** It is the environment where the identity-provider validators
+      # do not fire, which is what lets a loopback authorization endpoint stand in
+      # at all — measured, a deployment name refuses `OIDC_AUTHORIZATION_ENDPOINT`
+      # outright, because that value is resolved by a browser and loopback there
+      # is the reader's own machine (ADR 0077). Which provider the run reaches is
+      # a separate question with a separate answer: `AIGateway(live=True)` reads
+      # the `AI_PROVIDER_*` triple in *every* environment (ADR 0118), so this says
+      # nothing about `mock-ai` and the eval run still measures the real model.
       - name: Eval runner (per-task floors; threat recall is a hard gate)
-        if: needs.detect.outputs.evals == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.changed.outputs.inert != 'true' && (needs.changed.outputs.ai_surface == 'true' || github.event_name == 'workflow_dispatch')
+        env:
+          AI_PROVIDER_API_KEY: ${{ secrets.AI_PROVIDER_API_KEY }}
+          AI_PROVIDER_BASE_URL: 'https://api.openai.com/v1'
+          AI_PROVIDER_MODEL_NAME: 'gpt-5.6-luna'
+          ENVIRONMENT: 'development'
+          DATABASE_URL: 'postgresql+psycopg://unused:unused@localhost:5432/unused'
+          REDIS_URL: 'redis://localhost:6379/0'
+          SESSION_SECRET: 'eval-run-issues-no-sessions'
+          INSTITUTION_TIMEZONE: 'America/New_York'
+          OIDC_ISSUER: 'http://localhost:8081'
+          OIDC_AUTHORIZATION_ENDPOINT: 'http://localhost:8081/oidc/authorize'
+          OIDC_TOKEN_ENDPOINT: 'http://localhost:8081/oidc/token'
+          OIDC_JWKS_URL: 'http://localhost:8081/oidc/jwks'
+          OIDC_CLIENT_ID: 'eval-run-logs-nobody-in'
         run: python -m tests.evals.runner --enforce-floors
 
   # ==========================================================================
@@ -887,17 +1128,18 @@ jobs:
         if: needs.changed.outputs.inert != 'true'
         run: ./scripts/ci/check_image_contents.sh
 
-      # Five services named, seven covered. `api` declares `depends_on` on a
+      # Six services named, eight covered. `api` declares `depends_on` on a
       # healthy `db` and a healthy `redis`, so reaching healthy here means those
-      # two did too. `worker`, `beat`, `mock-lms` and `mock-idp` have to be
-      # named: nothing depends on any of them — the API must come up whether or
-      # not the job runtime does, and nothing in the tool depends on either mock
-      # — and a service nobody names is one this gate never looks at.
-      - name: Stack comes up healthy (api, worker, beat, mock-lms, mock-idp, and through api db and redis)
+      # two did too. `worker`, `beat`, `mock-lms`, `mock-idp` and `mock-ai` have
+      # to be named: nothing depends on any of them — the API must come up
+      # whether or not the job runtime does, and nothing in the tool depends on
+      # any of the three mocks — and a service nobody names is one this gate
+      # never looks at.
+      - name: Stack comes up healthy (api, worker, beat, mock-lms, mock-idp, mock-ai, and through api db and redis)
         if: needs.changed.outputs.inert != 'true'
         run: |
           docker compose up -d
-          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
+          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp mock-ai
 
       # The container's own HEALTHCHECK proves the app answers itself. It says
       # nothing about whether the development override publishes the port, which
@@ -957,15 +1199,15 @@ jobs:
       #
       # Every service is named on purpose. `api` reaches `db` and `redis`
       # through its depends_on conditions; nothing depends on `worker`, `beat`,
-      # `mock-lms` or `mock-idp`, so dropping any of them from this list would
-      # leave the pass green against a container that never started.
+      # `mock-lms`, `mock-idp` or `mock-ai`, so dropping any of them from this
+      # list would leave the pass green against a container that never started.
       - name: Base file alone runs the installed application, not the mounted checkout
         if: needs.changed.outputs.inert != 'true'
         run: |
           set -euo pipefail
           docker compose -f docker-compose.yml down -v
           docker compose -f docker-compose.yml up -d
-          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
+          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp mock-ai
 
       # `down -v` discards the Postgres volume and beat's schedule volume, so
       # the second and third starts each initialise from nothing. This catches
@@ -979,7 +1221,7 @@ jobs:
             echo "::group::down -v && up -d (attempt ${attempt})"
             docker compose down -v
             docker compose up -d
-            ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
+            ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp mock-ai
             echo "::endgroup::"
           done
 

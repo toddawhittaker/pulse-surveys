@@ -5,12 +5,15 @@ than code — an admin sets a term's length and the letters that start inside it
 (§6.3) — so it is data with constraints, and everything derived from it (a
 section's length, start and end dates) is E0-07's arithmetic over these rows.
 
-**Two rules here compare a row against its term, and neither is a plain CHECK.**
-A week number has to fit inside its own term's length, and a start letter's
-length may not exceed it. A `CHECK` constraint cannot read another table, so both
-are enforced by a composite foreign key that carries the term's length alongside
-its id — `(term_id, term_length_weeks)` referencing `term (id, length_weeks)` —
-which turns each rule into a local comparison the server checks like any other.
+**Three rules here compare a row against its term, and none is a plain CHECK.**
+A week number has to fit inside its own term's length, a start letter's length
+may not exceed it, and a survey window's section and its week have to belong to
+the same term. A `CHECK` constraint cannot read another table, so all three are
+enforced by a composite foreign key that carries the term's own value alongside
+an id — `(term_id, term_length_weeks)` referencing `term (id, length_weeks)` for
+the first two, and `(section_id, term_id)` and `(week_id, term_id)` referencing
+`section (id, term_id)` and `week (id, term_id)` for the third — which turns
+each rule into a local comparison the server checks like any other.
 [ADR 0018](../../../docs/adr/0018-cross-table-length-rules-are-enforced-by-a-composite-foreign-key.md)
 records why that and not a trigger; the short version is that a trigger commits a
 violating row when a term is shortened concurrently, and this does not.
@@ -45,11 +48,12 @@ docstring. So a term's "institution timezone reference" is `institution_id`: the
 term names the institution, and the institution's timezone is configuration. A
 per-term timezone column would be a second place for one value to live.
 
-**Not here, on purpose.** Windows are not scheduled — `survey_window` carries the
-columns and the constraints, and the logic that fills them is E2. A week carries
-no dates: nothing needs them yet, and the section-date arithmetic that might is
-E0-07's, over `start_letter_map`. The Fall 2026 seed map (§2.2) is fixture and
-seed data (E0-17), never rows in a migration.
+**Not here, on purpose.** Windows are not scheduled here — `survey_window` carries
+the columns and the constraints, and the logic that fills them is
+`app.services.survey_windows` (E2-06). A week carries no dates: nothing needs them
+yet, and the section-date arithmetic that might is E0-07's, over
+`start_letter_map`. The Fall 2026 seed map (§2.2) is fixture and seed data
+(E0-17), never rows in a migration.
 """
 
 from collections.abc import Mapping
@@ -135,6 +139,12 @@ class Week(UuidPrimaryKey, Base):
             ondelete="RESTRICT",
         ),
         UniqueConstraint("term_id", "number"),
+        # Looks redundant beside the primary key and is not, for exactly the
+        # reason `term`'s `UNIQUE (id, length_weeks)` above is not: a foreign key
+        # must reference a unique constraint, and this is what lets
+        # `survey_window` carry `(week_id, term_id)` as one reference and so
+        # agree with its section about the term. Dropping it drops that rule.
+        UniqueConstraint("id", "term_id"),
         CheckConstraint(
             "number >= 1 AND number <= term_length_weeks", name="number_is_inside_the_term"
         ),
@@ -214,31 +224,77 @@ class SurveyWindow(UuidPrimaryKey, Base):
     One window per section per week, which is what `UNIQUE (section_id, week_id)`
     says and the whole of what it says. §3.1's stronger rule — a student sees
     exactly one open survey at a time per section — also needs the windows not to
-    overlap in time, which no constraint here expresses; that falls to the
-    scheduling in E2, which is the only thing that sets these two columns.
+    overlap in time, which no constraint here expresses; that falls to
+    `app.services.survey_windows` (E2-06), the only thing that sets these two
+    columns, where consecutive Friday-to-Sunday spans cannot overlap by
+    construction and
+    `tests/integration/test_at_most_one_survey_window_is_open_at_a_time.py`
+    asserts it rather than assuming it.
 
-    **Nothing here schedules anything.** E2 computes these instants; this table
-    is where they land, with the constraints that make a nonsensical row
+    **The section and the week belong to the same term, and the server refuses a
+    window where they do not.** ADR 0018 named this as the rule this table had
+    available and did not take, and E2-05 takes it: the window states its own
+    `term_id`, and each of the two references is a composite foreign key carrying
+    that term — `(section_id, term_id)` into `section (id, term_id)` and
+    `(week_id, term_id)` into `week (id, term_id)`. A window pairing a section in
+    one term with a week in another finds no matching row on one limb or the
+    other. Without it a window opens a section's survey against a week its own
+    calendar does not contain, and §3.4's participation denominator ("valid weeks
+    completed ÷ weeks elapsed") is counted over two different calendars.
+
+    **`term_id` is NOT NULL, and that is what makes both limbs bite.** Postgres
+    evaluates a composite foreign key under `MATCH SIMPLE`, which skips the check
+    entirely when any column of the key is null — so a nullable term column would
+    be a documented way to store the very row this refuses. The table was empty in
+    every environment when E2-05 added the column, so it arrived with no backfill
+    and no server default — E2-06 is what began writing these rows, and a seeded
+    development stack has carried them since.
+
+    **No `ON UPDATE` action on either limb.** A section or a week whose term is
+    edited under an open window is a change to be refused rather than followed:
+    the window's instants were computed from the term's calendar, and cascading
+    the new term into the window would keep the row valid while making it wrong.
+    That is the opposite of the `ON UPDATE CASCADE` on `week` and
+    `start_letter_map` above, where the carried value is a copy of the term's
+    length that nobody sets on purpose.
+
+    **Nothing here schedules anything.** `app.services.survey_windows` computes
+    these instants from the section's calendar and §3.1's rhythm (E2-06); this
+    table is where they land, with the constraints that make a nonsensical row
     unwritable.
     """
 
     __tablename__ = "survey_window"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["section_id", "term_id"],
+            ["section.id", "section.term_id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["week_id", "term_id"],
+            ["week.id", "week.term_id"],
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint("section_id", "week_id"),
         CheckConstraint("closes_at > opens_at", name="closes_after_it_opens"),
     )
 
     # Leads `uq_survey_window_section_id_week_id`, which serves the read the
     # student and instructor surfaces make: this section's windows.
-    section_id: Mapped[UUID] = mapped_column(
-        ForeignKey("section.id", ondelete="RESTRICT"), nullable=False
-    )
-    # Indexed, because the other read is by week — closing every window for the
-    # week that has just ended (§3.4 recomputes participation after each one) —
-    # and this column leads no constraint.
-    week_id: Mapped[UUID] = mapped_column(
-        ForeignKey("week.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
+    section_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    # Indexed for the read this anticipates: every window of the week that has
+    # just ended, which is what SPEC §3.4's "recomputed after each week closes"
+    # will ask for. **E3 is where that read is built; nothing in the tree makes it
+    # today** (E2-16 item 6, which keeps the index and corrects the tense this
+    # comment used to claim). The column leads no constraint, so nothing else
+    # would serve it.
+    week_id: Mapped[UUID] = mapped_column(Uuid, nullable=False, index=True)
+    # The term both of the above have to agree on. Carried rather than derived,
+    # because a `CHECK` cannot read another table — which is the whole of ADR
+    # 0018. Not indexed on its own: no read starts from a term here, and the two
+    # composite foreign keys each index nothing by themselves.
+    term_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     opens_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)
     closes_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)
 

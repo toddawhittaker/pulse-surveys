@@ -6,8 +6,8 @@ directions.
 
 The fields split into two groups, and the split is the point:
 
-* **Deployment wiring** has no default. A database URL, a Redis URL, an AI
-  provider base URL and model name, the institution timezone, the environment
+* **Deployment wiring** has no default. A database URL, a Redis URL, the *real*
+  AI provider's base URL and model name, the institution timezone, the environment
   name, and the five settings that name the identity provider a web login is
   verified against all differ per deployment, and a working literal default for
   any of them is a misconfiguration that starts successfully and is wrong in
@@ -19,7 +19,11 @@ The fields split into two groups, and the split is the point:
   none of the five trusted a provider that signs an `id_token` for any identity
   it is asked for, CARE and ADMIN included. ADR 0077 reverses that half of
   ADR 0075.
-* **Everything else carries a default** and is therefore optional.
+* **Everything else carries a default** and is therefore optional. The mock model
+  provider's three settings are here, and they are the one place where a working
+  literal default is right rather than a hazard: they describe a service this
+  repository itself ships, they are read in development and test alone, and a
+  deployment that never sets them is not misconfigured. ADR 0118 argues it.
 
 Why a particular setting has a default is written at the field and nowhere
 else. Three different reasons are in play — the spec settles the value, the
@@ -177,6 +181,69 @@ def is_development(settings: "Settings") -> bool:
 # which is a supported deployment, and would protect nothing. ADR 0077 argues it.
 MOCK_IDENTITY_PROVIDER_HOST = "mock-idp"
 MOCK_IDENTITY_PROVIDER_CLIENT_ID = "mock-idp-client"
+
+# The one spelling by which a configuration can reach the mock model provider
+# `docker-compose.yml` starts, refused on `ai_provider_base_url` in **every**
+# environment by the validator below (E2-07 and ADR 0113 as amended by E2-12 and
+# ADR 0118).
+#
+# The Compose service name, which is how a container on this stack reaches it.
+# One entry rather than the identity provider's two, because there is nothing
+# corresponding to a client id: this endpoint authenticates nobody, so a
+# configuration cannot name it except by addressing it.
+#
+# **What a deployment reaching it would produce**, since a mock model provider
+# sounds less alarming than a mock identity provider and is not: it answers a
+# verdict to any completion, so a stack pointed here stores a character count as
+# a classification — under a real `prompt_version` and a real `model_id`
+# (ADR 0031), which is what makes it indistinguishable from a model's answer
+# rather than from ADR 0054's floor. Every student comment reaches it, and any
+# student can decide what it answers by typing `mock-ai:substantive`.
+#
+# Written out here rather than derived, on the same terms as the two above, and
+# held against the running service by
+# `tests/unit/test_ai_provider_configuration.py::test_the_refused_provider_host_
+# is_the_compose_service_name_the_mock_runs_as`, because a catalog that has gone
+# stale refuses nothing and reports every configuration clean exactly as a
+# correct one does (`docs/MISTAKES.md` entry 35).
+#
+# **The rule is unconditional since E2-12, and the environment condition did not
+# lapse — it was moved out from under.** ADR 0113 exempted development because
+# `.env.example` had one provider base URL and pointed it at the mock, so an
+# unconditional rule refused the configuration a clean checkout ships. ADR 0118
+# gives the mock a triple of its own, that address now lives on
+# `MOCK_AI_PROVIDER_BASE_URL`, and the exemption has nothing left to protect. It
+# costs something instead: the eval runner builds its gateway `live=True`, which
+# reads this triple on a developer's machine too, so a `mock-ai` address here
+# makes a local eval run measure §3.3's character count and record the score as
+# §9.3's precision and recall floor.
+#
+# `localhost` and the loopback addresses are deliberately *not* here, for the
+# reason ADR 0077 gives above: inside a deployed container `localhost` is that
+# container, and a model server running alongside the application is a supported
+# deployment that §7.4 names outright.
+MOCK_AI_PROVIDER_HOST = "mock-ai"
+
+# What a development or test process reaches when no `MOCK_AI_PROVIDER_*` value
+# is given, and the one place in this class where a working literal default is
+# correct rather than a misconfiguration (ADR 0118).
+#
+# The module docstring's rule is that a deployment-specific value gets no
+# default, because a working one starts successfully and is wrong in production.
+# These two are not deployment-specific: they describe a service this repository
+# itself ships and `docker-compose.yml` starts, they are read in development and
+# test and nowhere else, and the address is fixed by the Compose network rather
+# than chosen per site. A deployment that never sets them is not misconfigured —
+# it is a deployment, and nothing there looks at them.
+#
+# The model name is a third written copy of one string — `mock-ai/app/config.py`
+# holds it and `.env.example` documents it — and it is the harmless kind. The
+# mock echoes back whatever model a request asks for and names its own only when
+# a request names none, so the three do not have to agree for anything to work;
+# they agree so that a reader meeting the name in a `classification` row can find
+# where it came from.
+DEFAULT_MOCK_AI_PROVIDER_BASE_URL = f"http://{MOCK_AI_PROVIDER_HOST}:8000/v1"
+DEFAULT_MOCK_AI_PROVIDER_MODEL_NAME = "mock-validity-v1"
 
 
 class ConfigurationError(Exception):
@@ -550,21 +617,27 @@ class Settings(BaseSettings):
         default=None,
         description="Credential for the AI provider, when the endpoint wants one (SPEC §6.3).",
     )
+    # The mock provider's credential, and it exists so that the two triples are
+    # symmetrical rather than because `mock-ai` wants one: that service
+    # authenticates nobody. A development stack that puts something else on
+    # `MOCK_AI_PROVIDER_BASE_URL` — a colleague's model server, a proxy — is the
+    # case it is here for, and the moment such a value is real it is a credential
+    # like any other. `SecretStr` for that reason: a masked real key beside an
+    # unmasked mock key is still a credential in the log aggregator, and which of
+    # the two is real is not something this class can know. ADR 0118.
+    #
+    # An empty string is read as absent, by the same rule and for the same reason
+    # as the field above.
+    mock_ai_provider_api_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Credential for the mock model provider's endpoint, when whatever is listening "
+            "there wants one. Read in development and test only (ADR 0118)."
+        ),
+    )
 
     # --- deployment wiring, no credential: required, no default ---------------
-    ai_provider_base_url: str = Field(
-        description=(
-            "OpenAI-compatible API base URL (§7.4). It carries no credential of its own — no "
-            "user:password@ prefix; the key belongs in AI_PROVIDER_API_KEY. And it must be "
-            "https unless it names this machine, with or without a key: plain http off this "
-            "machine would put the comment being classified, and any credential sent with it, "
-            "on the wire in the clear (§10)."
-        )
-    )
-    ai_model_name: str = Field(description="Model identifier passed to that provider.")
-    institution_timezone: str = Field(
-        description="IANA timezone the survey window follows (§3.1), such as America/New_York."
-    )
+    #
     # Free-form by this project's choice, not by the spec: `ENVIRONMENT` and
     # `healthz` each appear zero times in `docs/SPEC.md`, and §6.3 — the
     # configuration surface — names no environment variable. `.env.example` is
@@ -575,7 +648,33 @@ class Settings(BaseSettings):
     # E0-18 adds a third reader, `app/main.py`, which compares against
     # `DEVELOPMENT_ENVIRONMENT` below before it serves `/docs` and
     # `/openapi.json` (ADR 0074).
+    #
+    # **It is declared first in this block deliberately, and E2-07 moved it
+    # here.** pydantic validates in declaration order and a validator reads
+    # `ENVIRONMENT` out of the fields already validated, so a rule conditioned on
+    # the environment sees nothing at all on a field declared above this line —
+    # `info.data` simply has no `environment` key, `is_a_deployment(None)` is
+    # `False`, and the rule silently permits everything. The identity provider's
+    # five settings below carry the same note for the same reason; before E2-07
+    # the two AI settings sat above this one and neither had a rule that read the
+    # environment, which is why the order held anyway.
     environment: str = Field(description="Deployment name, reported by /healthz. Free-form.")
+    ai_provider_base_url: str = Field(
+        description=(
+            "OpenAI-compatible API base URL of the real provider (§7.4). It carries no "
+            "credential of its own — no user:password@ prefix; the key belongs in "
+            "AI_PROVIDER_API_KEY. In every environment it may not address the mock model "
+            "provider this repository ships, the Compose service mock-ai — the eval runner "
+            "reads this triple on a developer's machine too. Outside "
+            "ENVIRONMENT=development it must be https unless it names this "
+            "machine, with or without a key: plain http off this machine would put the comment "
+            "being classified, and any credential sent with it, on the wire in the clear (§10)."
+        )
+    )
+    ai_provider_model_name: str = Field(description="Model identifier passed to the real provider.")
+    institution_timezone: str = Field(
+        description="IANA timezone the survey window follows (§3.1), such as America/New_York."
+    )
 
     # --- the web door's identity provider (E0-18, ADR 0077) -------------------
     #
@@ -703,6 +802,47 @@ class Settings(BaseSettings):
             "the result exactly against what they were registered with."
         ),
     )
+    # --- the mock model provider's endpoint (E2-12, ADR 0118) -----------------
+    #
+    # The other half of the configuration split. These two describe the mock
+    # `docker-compose.yml` starts, and `AIGateway(live=False)` reads them in
+    # development and test — nowhere else. The reason for the split is that three
+    # variables cannot describe two providers: before it, the only way to reach a
+    # real provider was to overwrite the values the development stack needs, and
+    # the only way to keep the development stack working was to have no real
+    # provider configured at all. The eval runner needs both at once, because it
+    # runs on a developer's machine against the real one.
+    #
+    # **Defaulted, and this is the third of the three reasons this module keeps
+    # apart: the spec never spoke to it.** §6.3's configuration surface names no
+    # mock. The default is not the "working literal default" the module docstring
+    # refuses, on exactly the argument `public_base_url` below makes: the address
+    # names a service on this stack's own Compose network, so it resolves in
+    # development and resolves nowhere else, and nothing outside development and
+    # test reads it in any case. What a required field would buy is a startup
+    # refusal on a variable a deployment is never going to consult; what it would
+    # cost is that every deployment whose `.env` predates this split stops
+    # starting.
+    #
+    # **No rule attaches to these.** The catalog rule and the transport rule are
+    # rules about the real triple: this one is *meant* to name `mock-ai`, and
+    # refusing that would refuse the configuration a clean checkout ships and take
+    # SPEC §14.3's exit criterion with it. That the mock triple is unread in a
+    # deployment is a property of `AIGateway` rather than of this class, and
+    # `tests/unit/test_the_gateway_reads_the_provider_triple_the_flag_selects.py`
+    # is where it is asserted.
+    mock_ai_provider_base_url: str = Field(
+        default=DEFAULT_MOCK_AI_PROVIDER_BASE_URL,
+        description=(
+            "OpenAI-compatible API base URL of the mock model provider this repository ships. "
+            "Read in development and test only (ADR 0118); in a deployment nothing consults it."
+        ),
+    )
+    mock_ai_provider_model_name: str = Field(
+        default=DEFAULT_MOCK_AI_PROVIDER_MODEL_NAME,
+        description="Model identifier passed to the mock model provider.",
+    )
+
     # The spec never spoke to this one. §6.3 enumerates the configuration
     # surface and no log level is in it; no other section mentions one. INFO is
     # this project's choice, defaulted because a log level is not
@@ -733,10 +873,10 @@ class Settings(BaseSettings):
         description="Respondents a comparison set needs before it is shown (§5.1).",
     )
 
-    @field_validator("ai_provider_api_key", mode="before")
+    @field_validator("ai_provider_api_key", "mock_ai_provider_api_key", mode="before")
     @classmethod
     def blank_provider_key_is_absent(cls, value: object) -> object:
-        """A blank `AI_PROVIDER_API_KEY` means this endpoint wants no credential.
+        """A blank provider key means that endpoint wants no credential.
 
         A local OpenAI-compatible server — vLLM, Ollama, a proxy on the same
         host — authenticates nobody, and the way a developer says so is to leave
@@ -752,6 +892,13 @@ class Settings(BaseSettings):
         blank value avoids is an *empty* bearer token, which some servers refuse
         and none is helped by; an endpoint that authenticates nobody ignores the
         placeholder.
+
+        **Both keys, since the configuration split (ADR 0118)**, and one validator
+        rather than two: the rule is the same sentence about both, and a second
+        copy of it is the one that would not be updated (`docs/MISTAKES.md`
+        entry 13). `.env.example` ships both blank, for the same reason — the mock
+        authenticates nobody, and a hosted provider's key belongs in a `.env`
+        nobody commits.
 
         `_blank_is_absent` above is the rule itself.
         """
@@ -792,7 +939,75 @@ class Settings(BaseSettings):
 
     @field_validator("ai_provider_base_url")
     @classmethod
-    def an_off_machine_endpoint_is_encrypted(cls, value: str) -> str:
+    def no_real_provider_url_addresses_the_mock_model(cls, value: str) -> str:
+        """Refuse a real model endpoint that addresses the mock, in every environment.
+
+        The same rule the identity provider's four URLs carry, on the setting that
+        names the model. `docker-compose.yml` starts `mock-ai` in every deployment
+        that runs the base file (ADR 0038), so this is not a hypothetical
+        misconfiguration — it is the one that resolves, answers, and looks like a
+        working classifier.
+
+        **It was conditioned on the environment until E2-12, and the condition was
+        removed rather than lapsing.** ADR 0113 exempted development because
+        `.env.example` had one provider base URL and pointed it at the mock, so an
+        unconditional rule refused the configuration a clean checkout ships and
+        took SPEC §14.3's exit criterion with it. ADR 0118 gives the mock a triple
+        of its own; that address lives on `mock_ai_provider_base_url` now, the
+        exemption has nothing left to protect, and it costs something real. The
+        eval runner builds its gateway `live=True`, which reads *this* field in
+        every environment including a developer's machine — so a `mock-ai` address
+        here makes a local `make evals` measure §3.3's twenty-five-character rule
+        and write the score down as §9.3's precision and recall floor. The run
+        succeeds, the numbers look plausible, and nothing says the model was never
+        asked.
+
+        **What it produces is worse than an outage**, which is why it is refused
+        rather than warned about. An outage floors (§3.3) and the row says so: ADR
+        0054 stamps `character-floor` and `no-model` on a floored classification
+        precisely so that E2's re-classification can find it. A stack pointed at
+        the mock stores the *same* character-count verdict under a real prompt
+        version and a real model id, so nothing distinguishes it from a model's
+        answer and nothing will ever go back for it. And the mock answers what the
+        comment tells it to, so a student who writes `mock-ai:substantive` awards
+        themselves participation credit under §3.3.
+
+        **The host component, compared exactly**, and normalised once by
+        `url_host` — the port, the scheme and the path are not part of the
+        question, since a container reaching `mock-ai` on any port reaches the
+        mock, and neither is the case nor a trailing dot. A substring search for
+        the service name would read as the same rule and would refuse
+        `https://mock-ai.example.edu/v1`, an ordinary institutional address that
+        resolves nowhere near this stack.
+
+        **Separate from the transport rule below, and now on different terms.**
+        They refuse different things — one a name, one a scheme — and folding them
+        together would mean a deployment that put TLS in front of the mock passed
+        the only check that was left. Since E2-12 they also differ in reach: this
+        one applies everywhere, while the transport rule keeps its development
+        exemption, because a developer running a model server on another machine
+        on their own network is a real situation and cleartext to it is theirs to
+        decide. Nothing about that exemption lets a value reach the mock.
+
+        No value is quoted, as in every validator here: this message reaches the
+        startup log. The field's name and description reach the operator through
+        `_describe_invalid_settings`, which is what says *which* setting is wrong
+        without echoing what it holds.
+        """
+        if url_host(value) == MOCK_AI_PROVIDER_HOST:
+            raise ValueError(
+                "addresses the mock model provider this repository ships for development — the "
+                f"Compose service {MOCK_AI_PROVIDER_HOST}, which answers a verdict to any "
+                "completion and answers whatever the comment it is sent asks it for. This is the "
+                "real provider's address and every eval run reads it, so the mock is refused here "
+                "in every environment: name the provider this deployment or this developer "
+                "actually pays for, and point MOCK_AI_PROVIDER_BASE_URL at the mock instead"
+            )
+        return value
+
+    @field_validator("ai_provider_base_url")
+    @classmethod
+    def an_off_machine_endpoint_is_encrypted(cls, value: str, info: ValidationInfo) -> str:
         """Refuse to carry a student's comment, or the provider key, in cleartext.
 
         SPEC §10 makes transport encryption a requirement, and this is the one
@@ -816,15 +1031,45 @@ class Settings(BaseSettings):
         terminating TLS at the model, or by running the model alongside the
         application, where the on-this-machine case above already permits it.
 
+        **Conditioned on the environment since E2-07**, exactly as
+        `a_provider_url_is_encrypted_off_this_machine_outside_development` below
+        already was, and for the identical reason: the development stack's model
+        provider is `http://mock-ai:8000/v1` — cleartext, to another container —
+        so an unconditional version refuses the configuration `.env.example` ships
+        and CI copies to `.env`, and takes SPEC §14.3's exit criterion with it.
+        The exemption is the environment and not the host: a developer running a
+        model server on another machine on their own network is the same
+        situation, and a rule that carved out `mock-ai` alone would still refuse
+        them while being one line longer. ADR 0113 records it.
+
+        **The condition stayed when the catalog rule above lost its own, and that
+        is a decision rather than an omission** (ADR 0118). The catalog rule's
+        exemption existed only to let this field name the mock, and the split moved
+        that address to `mock_ai_provider_base_url`, so it had nothing left to
+        protect. This one's exemption never was about the mock: it is about the
+        developer with a model server on the next machine, which the split does
+        not touch. Removing both together would have refused that developer for a
+        reason belonging to a different rule.
+
+        **The exemption for this machine is not what moved.** A model server in
+        the same pod is reached at `localhost` by a production container as
+        readily as by a laptop, and there is no wire either way — so the loopback
+        case is permitted in every environment, and the condition above is what
+        stops this being read as "in a deployment, require https", which would
+        refuse the sidecar deployment §7.4 names as supported.
+
         No value is quoted, as in every validator here.
         """
+        if not is_a_deployment(info.data.get("environment")):
+            return value
         parsed = urlsplit(value)
         if parsed.scheme == "https" or is_on_this_machine(parsed.hostname):
             return value
         raise ValueError(
             "would send the comment being classified, and any provider credential configured "
             "with it, in cleartext to an address off this machine — use https, or plain http "
-            "only for an endpoint on this machine"
+            f"only for an endpoint on this machine, or run with ENVIRONMENT="
+            f"{DEVELOPMENT_ENVIRONMENT}"
         )
 
     @field_validator("care_database_url", mode="before")
@@ -996,12 +1241,19 @@ class Settings(BaseSettings):
         Issuer Identifier to use `https`, so an `http` issuer is not an identity
         any conformant provider has.
 
-        **Conditioned on the environment, unlike the model provider's copy of
-        this rule**, and that is not an oversight to tidy up later: every address
-        on the development stack is cleartext to *another container*
+        **Conditioned on the environment**, because every address on the
+        development stack is cleartext to *another container*
         (`http://mock-idp:8000`), so an unconditional version refuses the
         configuration `.env.example` ships and CI copies to `.env`, and takes
         SPEC §14.3's exit criterion with it.
+
+        This paragraph used to say the model provider's copy of the rule was
+        unconditional and that the difference "is not an oversight to tidy up
+        later". That was true when it was written and E2-07 made it false, not by
+        tidying but for this paragraph's own reason: the development stack's model
+        provider became `http://mock-ai:8000/v1`, cleartext to another container,
+        so `an_off_machine_endpoint_is_encrypted` above now carries the same
+        condition on the same argument (ADR 0113).
 
         **The exemption is `is_on_this_machine`, not the wider loopback class.**
         A provider beside the application is reached over the loopback interface

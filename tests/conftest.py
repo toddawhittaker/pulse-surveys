@@ -55,6 +55,39 @@ boundary: `metadata_tables` is asked for by both.
   - `fixtures/landing.py` — E1-13: the names the assignment-derived landing is
     settled under, one `enrollment` row with the window the caller chose, and the
     rows a launch-driving suite needs before its subject can land at all.
+  - `fixtures/celery_broker.py` — E0-03's real Redis on the image the stack
+    deploys, moved here in E2-04 when a second module needed a broker.
+  - `fixtures/clock.py` — E2-04: the `clock_override` row a test chose the values
+    of, committed or not, and `Settings` built under an environment the test named.
+  - `fixtures/survey_windows.py` — E2-06: SPEC §3.1's Fall 2026 window calendar
+    written out by hand as UTC instants, and the term, weeks and cohort sections
+    a derivation is run over.
+  - `fixtures/mock_ai.py` — E2-07's mock AI provider, in process and on a loopback
+    socket, plus the non-mock provider a deployment-environment test needs.
+  - `fixtures/ai_tasks.py` — E2-07: the comment-validity task, found rather than
+    named, and ADR 0056's failure classes looked up by name.
+  - `fixtures/submit.py` — E2-08: the section, window, question set and enrolled
+    student a submission needs, committed; the tool built with the AI provider
+    and broker a test chose; a minted student session; and the submit route
+    found through the module the work order settles rather than through a path.
+  - `fixtures/student_read.py` — E2-09: the names that ticket settles, a student
+    enrolled in one section and not in its sibling, and the door their read path
+    is asked through with a session a real launch issued.
+
+Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
+in the tuple below: they are imported directly, the way `fixtures.supervision`'s
+`seed_row` already is. They are listed here because this docstring is the index
+of that directory and a module missing from it is a record that has stopped being
+complete.
+
+  - `fixtures/indexes.py` — E2-02's catalog reader for the key columns of every
+    index on a table, moved out of its test module in E2-16 when a second ticket
+    asked the same question.
+  - `fixtures/statements.py` — E2-16: every statement sent to any engine while a
+    call runs, for the two criteria that are about the SQL a service emits.
+  - `fixtures/migration_journey.py` — E2-16: resolving a revision and the one
+    below it, running a step that has to complete, and reading the catalog and
+    the stored rows at either end of a downgrade.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -80,4 +113,11 @@ pytest_plugins = (
     "fixtures.roster_sync",
     "fixtures.web_identity",
     "fixtures.landing",
+    "fixtures.celery_broker",
+    "fixtures.clock",
+    "fixtures.survey_windows",
+    "fixtures.mock_ai",
+    "fixtures.ai_tasks",
+    "fixtures.submit",
+    "fixtures.student_read",
 )

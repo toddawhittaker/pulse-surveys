@@ -48,7 +48,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
 from app import __version__
-from app.api import auth, dev, health, lti
+from app.api import auth, dev, health, lti, student
 from app.config import Settings, is_development
 from app.db import SessionLocal
 from app.lti.registration import launcher_origins
@@ -166,9 +166,10 @@ class SinglePageApp(StaticFiles):
 
     A single-page application's routes exist in the browser: `/app/student` is
     not a file in the build output, so a plain static mount answers 404 and the
-    five landing views are reachable only by navigating from `/app/` — which is
-    not how a person arrives, and not how the doors hand over once E1-08 and
-    E1-09 land the redirects.
+    five role routes — four landing views and E2-10's survey screen — are
+    reachable only by navigating from `/app/` — which is not how a person
+    arrives, and not how the doors hand over once E1-08 and E1-09 land the
+    redirects.
 
     **The fallback is a fallback and not a catch-all.** A request that matches a
     file gets that file; only a 404 becomes the entry document. Answering
@@ -295,6 +296,13 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(lti.router)
     app.include_router(auth.router)
+    # The student's own surface: E2-09's weekly read and E2-08's weekly
+    # submission. Registered unconditionally like the doors above, and behind
+    # `app.api.deps.require_student` rather than behind a check of its own — what
+    # gates these routes is the session rather than the build, and carrying that
+    # one dependency is what puts every route this router serves inside SPEC §4.1
+    # item 1's sweep the day the route is written.
+    app.include_router(student.router)
     # The developer test console. Always registered; the handler gates itself on
     # `ENVIRONMENT == development` and answers 404 elsewhere, so production is
     # indistinguishable from a route that does not exist (ADR 0074).

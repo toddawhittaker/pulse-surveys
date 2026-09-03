@@ -23,7 +23,10 @@ wrong in the same way: a process whose `ENVIRONMENT` lives only in a `.env` file
 judged a development stack by a deployment's rules, and a launch in the hours
 either side of a term boundary landed in the neighbouring term. `Settings` is the
 one place either question is answered now, and `app.api.lti.launch` passes the
-instance it already has on `request.app.state.settings`.
+instance it already has on `request.app.state.settings`. E2-04 moved the second of
+the two one step further on: the day now comes from `app.services.clock`, which
+reads the institution timezone out of that same `Settings` and, on a developer's
+machine alone, adds the offset a `clock_override` row carries (ADR 0109).
 
 **A refusal here never fails the launch.** Every way a context can be unreadable
 ends in a `launch_defect` row and a return, and the person lands exactly as they
@@ -79,10 +82,8 @@ import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Final
 from uuid import UUID, uuid4
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
@@ -102,11 +103,13 @@ from app.models.lti import (
 )
 from app.models.org import Course, Prefix, Section
 from app.models.term import Term
+from app.services import clock
 from app.services.authz import (
     LmsOwnedWriteRefused,
     WriteSanction,
     guard_write,
     holds_leadership,
+    leadership_grant_covers,
     sanction_for,
 )
 from app.services.identity import identity_behind_a_launch_subject
@@ -222,6 +225,17 @@ def provision_from_launch(
     launch §7.3 authorizes: an instructor's, by the claim, or a leadership
     person's, by their own assignment.
 
+    **The two limbs are asked separately, and only one of them is scoped**
+    (E2-02, ADR 0108). The LTI roles claim is context-scoped — an Instructor URN
+    states what this person is *in the course they launched from* — so the claim
+    limb carries its own answer to "staff of which context" and ingests with
+    `purview_of=None`. The leadership limb reads a `role_assignment` row that
+    says nothing about this launch's context, so it hands `_ingest_the_context`
+    the person it resolved and that function refuses to bind a context their
+    assignments do not reach. The E1 boundary review's M9 is what that closes:
+    before it, "a leadership assignment anywhere" was an unscoped
+    roster-ingestion trigger.
+
     **The ordering carries the leadership limb** (E1-12). That limb resolves the
     launching subject to a `user` row, and the row it resolves is the one the line
     above has just written — a leadership person's very first launch works
@@ -234,9 +248,10 @@ def provision_from_launch(
     resolve a context claim to a row for itself, which would put domain logic in a
     router §13 keeps thin. It is `None` for every launch that did not both discover
     a section and store an address for it: a student's launch, a staff launch whose
-    context could not be read, and a staff launch whose platform advertised no
-    roster address or an address this container may not fetch. Each of those is a
-    section with no roster to pull rather than a sync to skip.
+    context could not be read, a staff launch by a leadership person whose own
+    assignments do not reach that context, and a staff launch whose platform
+    advertised no roster address or an address this container may not fetch. Each
+    of those is a section with no roster to pull rather than a sync to skip.
 
     Nothing here commits: the caller owns the transaction, exactly as
     `app.lti.replay_guard.claim_nonce` leaves its claim to ride inside the
@@ -244,8 +259,11 @@ def provision_from_launch(
     """
     platform = _registered_platform(session, claims)
     _record_the_launching_subject(session, platform, claims)
-    if _is_a_staff_launch(claims) or _launching_subject_holds_leadership(session, platform, claims):
-        return _ingest_the_context(session, claims, settings)
+    if _is_a_staff_launch(claims):
+        return _ingest_the_context(session, claims, settings, purview_of=None)
+    leader = _leadership_person_behind(session, platform, claims)
+    if leader is not None:
+        return _ingest_the_context(session, claims, settings, purview_of=leader)
     return None
 
 
@@ -379,20 +397,34 @@ def _is_a_staff_launch(claims: Mapping[str, Any]) -> bool:
 
     **This is one of §7.3's two limbs and it is the claim-based one.** The other —
     "any leadership role" — is a live `role_assignment` in Pulse's own graph rather
-    than anything the launch says, and it is `_launching_subject_holds_leadership`
-    below. E1-10 shipped this limb alone and left that one dormant, because
-    reaching an assignment needs the `sub` → `user` → `person` link E1-12 built;
-    E1-12 activated it (ADR 0090, ADR 0091, ADR 0097). The two are deliberately
+    than anything the launch says, and it is `_leadership_person_behind` below.
+    E1-10 shipped this limb alone and left that one dormant, because reaching an
+    assignment needs the `sub` → `user` → `person` link E1-12 built; E1-12
+    activated it (ADR 0090, ADR 0091, ADR 0097). The two are deliberately
     separate functions because they are checked against different sources and one
     of them can be wrong without the other.
+
+    **This limb alone is exempt from E2-02's purview gate**, and the exemption is
+    what makes it usable: the roles claim is scoped to the context it arrived
+    with, so an Instructor URN is this person's staffness *of this very context*
+    and there is no further question to ask. ADR 0108 records the choice; the
+    other limb's grant is checked against the launch's own context.
     """
     return INSTRUCTOR_ROLE_URI in stated_roles(claims.get(LTI_ROLES_CLAIM))
 
 
-def _launching_subject_holds_leadership(
+def _leadership_person_behind(
     session: Session, platform: LtiPlatform, claims: Mapping[str, Any]
-) -> bool:
-    """Whether Pulse's own records say the launching person holds a leadership role.
+) -> UUID | None:
+    """The person behind this launch if Pulse's own records give them a leadership role.
+
+    Answers the `person` this limb authorized, or `None` when the limb does not
+    apply. **The identifier is the answer rather than a yes** (E2-02): the
+    leadership limb's grant has to be checked against the launch's own context
+    before anything is bound, and the caller cannot check a boolean. Before that
+    ticket this was `_launching_subject_holds_leadership` and answered `bool`,
+    which is the shape the E1 boundary review's M9 describes — a limb that admits
+    a leadership holder "with no reference to the launch's context".
 
     §7.3's second limb, and the one that reads the database rather than the token:
     "A launch by an instructor **or any leadership role** triggers a roster sync."
@@ -424,27 +456,35 @@ def _launching_subject_holds_leadership(
     outside the supervision graph altogether, which is why that set is enumerated
     positively rather than written as "any assignment at all".
 
-    **Asked only when the claim limb has already said no**, because `or`
-    short-circuits: an ordinary instructor launch costs no query, and the two hops
-    plus the chokepoint's read are paid on the launches the cheap test does not
-    answer.
+    **Asked only when the claim limb has already said no**, because the caller
+    returns on that limb first: an ordinary instructor launch costs no query, and
+    the two hops plus the chokepoint's read are paid on the launches the cheap
+    test does not answer.
     """
     subject = claims.get("sub")
     if not isinstance(subject, str) or not subject:
-        return False
+        return None
     identity = identity_behind_a_launch_subject(session, platform_id=platform.id, subject=subject)
     if identity.person_id is None:
-        return False
-    return holds_leadership(session, person_id=identity.person_id)
+        return None
+    if not holds_leadership(session, person_id=identity.person_id):
+        return None
+    return identity.person_id
 
 
 # ---------------------------------------------------------------------------
-# What the context says, and the five ways it cannot be read.
+# What the context says, and the ways it cannot be ingested. `LaunchDefectKind`
+# in `app.models.lti` is the closed set, and the order they are checked in here
+# is the precedence: a launch that is two of them is recorded as the first.
 # ---------------------------------------------------------------------------
 
 
 def _ingest_the_context(
-    session: Session, claims: Mapping[str, Any], settings: Settings
+    session: Session,
+    claims: Mapping[str, Any],
+    settings: Settings,
+    *,
+    purview_of: UUID | None,
 ) -> UUID | None:
     """Upsert the course and section this launch's context names, or record a defect.
 
@@ -452,8 +492,16 @@ def _ingest_the_context(
     there is none to fetch — see `provision_from_launch` for what the answer is
     spent on and for every way it comes back `None`.
 
-    Every look-up happens before any write, so that four of the five defects are
-    decided while nothing has been written at all. The fifth —
+    **`purview_of` is which limb authorized this launch** (E2-02, ADR 0108).
+    `None` is the claim limb, whose Instructor URN is already an assertion about
+    *this* context, so nothing further is asked. A person id is the leadership
+    limb, and it is the person whose own assignments have to reach the context
+    below before anything is bound — the E1 boundary review's M9. It is a
+    keyword-only parameter with no default on purpose: a caller that forgot it
+    would silently get the unscoped behaviour this ticket exists to remove.
+
+    Every look-up happens before any write, so that every defect but one is
+    decided while nothing has been written at all. The exception —
     `section_code_underivable` — is ADR 0021's refusal and can only be known by
     asking `apply_section_code`, which is why the two writes sit inside one
     savepoint: a defect anywhere leaves course *and* section unwritten, and a
@@ -509,6 +557,29 @@ def _ingest_the_context(
     )
     if not _the_same_section(bound, named):
         _record_defect(session, claims, LaunchDefectKind.CONTEXT_COLLISION)
+        return None
+
+    # The purview gate, and it sits exactly here (E2-02, ADR 0108). After the
+    # collision check, because a context bound to somebody else's section is an
+    # identity-integrity defect whatever the launcher is; before the address is
+    # judged, because a launch that may not bind this context should not have its
+    # roster address considered at all. It needs `prefix`, `discovered` and
+    # `bound`, which is the earliest point all three are resolved.
+    #
+    # **It refuses the binding and not the launch.** Returning `None` is what
+    # every defect above already does, and the door lands the person exactly as
+    # it would have — E1-10's rule that a provisioning refusal never fails the
+    # launch is unchanged. Nothing about the person reaches the record: SPEC §10
+    # keeps personal information out, and the four-field row `_record_defect`
+    # writes is the same one every other kind gets.
+    if purview_of is not None and not leadership_grant_covers(
+        session,
+        person_id=purview_of,
+        prefix_id=prefix.id,
+        course_id=None if discovered is None else discovered.id,
+        section_id=None if bound is None else bound.id,
+    ):
+        _record_defect(session, claims, LaunchDefectKind.CONTEXT_OUTSIDE_PURVIEW)
         return None
 
     address = _an_address_this_tool_may_call(session, claims, settings)
@@ -592,11 +663,18 @@ def _term_containing_the_launch_day(session: Session, settings: Settings) -> Ter
     §8 makes that a deployment-level setting, so a section's term is a fact about the
     institution's calendar rather than about the server's clock.
 
+    **And the day comes from `app.services.clock`** (E2-04, ADR 0109), which is the
+    one place this codebase asks what day it is for scheduling purposes. It reads
+    the institution's zone, so the paragraph above is unchanged; what it adds is
+    that a developer who has moved the clock provisions into the term they moved to.
+    `app.services.authz._enrolled_today` asks the same question through the same
+    service, so the two are one reading now rather than two copies to keep in step.
+
     The most recently started containing term wins if an administrator has
     configured two that overlap, which is a tie this schema permits and nothing else
     decides.
     """
-    today = datetime.now(ZoneInfo(settings.institution_timezone)).date()
+    today = clock.today(session, settings=settings)
     return session.scalars(
         select(Term)
         .where(Term.start_date <= today, Term.end_date >= today)
@@ -861,7 +939,7 @@ def _section_row(session: Session, course_id: UUID, term_id: UUID, code: str) ->
 def _log_a_refused_write(table: str, refusal: LmsOwnedWriteRefused) -> None:
     """Report that the chokepoint refused this module a write it is sanctioned for.
 
-    **Error level, and no `launch_defect` row.** The five defect kinds are facts
+    **Error level, and no `launch_defect` row.** Every defect kind is a fact
     about a launch's *context* — a label nobody can parse, a prefix the org does
     not hold — and this is a fact about this project's own code: the catalog in
     `app.services.authz` and the write sites in this module disagree about what

@@ -10,6 +10,9 @@ stores for them (E1-12); `session.py` signs and verifies what a door hands the
 browser. `landing.py` mapped a verified token's roles claim to a landing view
 until E1-13 deleted it: the landing comes from the assignment model now, out of
 `authz.py`, and the four pages a door renders live in `app/api/deps.py`.
+`clock.py` is the one place the scheduling and visibility code asks what time it
+is — the effective instant, and the effective day in the institution's timezone —
+and the one place a development-only override moves them from (E2-04, ADR 0109).
 
 The package was created before any of them, because the strict mypy profile
 in `pyproject.toml` was pinned to `app.services.*` from the start: the modules

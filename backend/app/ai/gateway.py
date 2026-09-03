@@ -66,6 +66,28 @@ block that diagnosed it, because Python prints a chained cause's message too:
 `raise ... from None` suppresses the display and leaves `__context__` set for
 anything that inspects the chain.
 
+**Two providers are configured, and one construction flag picks between them.**
+E2-07 put an OpenAI-compatible mock in the base Compose file and ADR 0113 makes it
+a service every deployment starts, so `.env.example` could point the application
+at it and a clean checkout could classify a comment without calling a model
+anybody pays for. Three variables cannot describe two endpoints, and the eval
+runner needs both at once — it must reach the real provider on a developer's
+machine, where everything else must reach the mock. So the configuration splits
+into `AI_PROVIDER_*` and `MOCK_AI_PROVIDER_*`, and `AIGateway(live=...)` selects.
+`_provider_for` below is the rule and the whole of the argument; ADR 0118 records
+it and supersedes ADR 0113's transport clause in part.
+
+**What a call cost is available and is not forced on anyone.** `run_task` returns
+the validated object and nothing else, which is what every caller in the
+application wants; `run_task_with_usage` returns that object paired with a
+`TaskUsage`, and is the same method with the second half kept. The provider
+reports what it billed and this module used to discard it, so no caller could say
+what a run cost — which became a real gap rather than a tidy one when SPEC §9.3's
+eval floors started spending about a hundred live calls a run. Cached input reads
+are their own field there rather than folded into the input total, because on a
+prompt that is ~99% identical prefix they are most of the difference between the
+cheap case and the expensive one.
+
 **One client per thread, and the loop it was built for.** The asynchronous client
 underneath pools its connections, and a pooled connection belongs to the event
 loop it was opened on: reuse it from another loop and it raises, which the layers
@@ -77,21 +99,23 @@ holds the loop, the client and the agents together for exactly that reason.
 import asyncio
 import json
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 from functools import cache
 from typing import Any, TypeVar
 
 import httpx
 import httpx2
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel, SecretStr, create_model
 from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
+from pydantic_ai.usage import RunUsage
 
 from app.ai.contracts import AiTaskOutput, ContractModel
-from app.config import Settings
+from app.config import ConfigurationError, Settings, is_development
 
 OutputT = TypeVar("OutputT", bound=AiTaskOutput)
 
@@ -242,6 +266,89 @@ class AIProviderRefusedError(AIGatewayError):
     """
 
 
+@dataclass(frozen=True)
+class TaskUsage:
+    """What one call to this gateway cost, in the units the provider counted it in.
+
+    **Why this exists at all.** The provider reports what it billed and the
+    gateway used to drop it: `_ask` returned the answer and the model id and threw
+    the rest away, so no caller could say what a run cost. E2-12's eval runner is
+    the caller that made that a problem rather than an omission — SPEC §9.3's
+    floors are measured by about a hundred live calls, and the README's cost
+    expectations were an estimate nobody could check.
+
+    **Why it is this project's own type and not `pydantic_ai`'s `RunUsage`.**
+    Returning the library's class would put its name in the signature of a public
+    method, and then in every caller that annotates the result — while
+    `tests/unit/test_provider_library_is_confined_to_the_gateway.py` asserts that
+    exactly one module under `backend/app/` names the provider library at all.
+    That sweep is E0-13's sixth criterion and the enforcing half of §7.4's "keep
+    the gateway interface thin enough that replacing it is a day's work". A task
+    module that recorded usage on a row would trip it directly; the eval runner
+    sits outside `backend/app/` and would not, and would still be coupled to a
+    library it has no business knowing about. So the fields are copied across the
+    boundary once, here, in the one module allowed to see both sides.
+
+    **Cached reads are their own field and are not folded into `input_tokens`.**
+    They are the same tokens counted at a different price, and on this prompt they
+    are most of the bill: every validity request is one ~4,200-character prompt
+    with a short comment substituted, so nearly all of it is an identical prefix.
+    A total that hid the split would make the cheap case and the expensive case
+    report the same number. `input_tokens` is the provider's own input total and
+    `cache_read_tokens` is the part of it that was served from cache — that is how
+    the library normalises OpenAI's `prompt_tokens_details.cached_tokens`, and the
+    arithmetic between them is the caller's business, not this module's.
+
+    **`details` is safe to hand out**, which is worth saying in a module where
+    most things are not. The provider library builds it by keeping only integer
+    members of the usage payload, so it holds counts and never text — no prompt,
+    no answer, nothing a student wrote. It carries whatever else the provider
+    counted, `reasoning_tokens` among them for models that bill them and never
+    show them in the answer body.
+
+    Every field is zero when a provider reports no usage, which is what an
+    OpenAI-compatible endpoint that omits the block produces. Zero therefore means
+    "not reported" as well as "nothing spent", and the two are not distinguished:
+    a caller that needs to tell them apart has `requests`.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    total_tokens: int
+    requests: int
+    details: Mapping[str, int]
+
+
+def _task_usage(reported: RunUsage) -> TaskUsage:
+    """Copy the provider library's usage across the boundary `TaskUsage` draws.
+
+    A function rather than a constructor on the class, so that no signature on the
+    public type names `RunUsage` — see that class's docstring for why the name
+    stays inside this module.
+
+    `total_tokens` is carried rather than re-derived. It is the library's own
+    property today (`input_tokens + output_tokens`), and computing it again here
+    would be this project holding its expectation in a copy of the thing it is
+    copying (`docs/MISTAKES.md` entry 19) — a definition that widened to include
+    audio or cache-write tokens would then disagree with itself across two
+    modules, silently and in the direction of under-reporting.
+
+    `details` is copied into a plain dict rather than shared, so a caller cannot
+    reach back into the library's object through it.
+    """
+    return TaskUsage(
+        input_tokens=reported.input_tokens,
+        output_tokens=reported.output_tokens,
+        cache_read_tokens=reported.cache_read_tokens,
+        cache_write_tokens=reported.cache_write_tokens,
+        total_tokens=reported.total_tokens,
+        requests=reported.requests,
+        details=dict(reported.details),
+    )
+
+
 @cache
 def _payload_model(contract: type[AiTaskOutput]) -> type[BaseModel]:
     """`contract` without the two values the gateway supplies (ADR 0031).
@@ -304,6 +411,116 @@ def _declared_names(payload: type[BaseModel]) -> frozenset[str]:
     return frozenset(names)
 
 
+@dataclass(frozen=True)
+class _Provider:
+    """The three values that name one endpoint: where, which model, and with what.
+
+    A value object rather than three arguments, because the whole point of ADR
+    0118's split is that these three travel together. The failure it exists to
+    make hard to write is a base URL from one triple beside a model name or a
+    credential from the other — a request that lands at the paid provider asking
+    for a model it does not serve, or at the mock carrying a paid credential.
+    Both look like a working gateway and neither goes red.
+    """
+
+    base_url: str
+    model_name: str
+    api_key: SecretStr | None
+
+
+def _provider_for(settings: Settings, *, live: bool) -> _Provider:
+    """Which of the two configured providers a gateway built this way reads.
+
+    ADR 0118's selection rule, in one place because it is one sentence and a
+    second copy is the one that would not be updated (`docs/MISTAKES.md` entry
+    13):
+
+      - `live=True` reads the real triple **in every environment**. That is the
+        eval runner's, and it has to hold on a developer's machine as much as in
+        CI, or `make evals` measures E2-07's twenty-five-character rule and writes
+        the score down as SPEC §9.3's precision and recall floor.
+      - `live=False` reads the mock triple in development and test, and the real
+        triple in a deployment. That is every other caller's: the submit path on a
+        development stack classifies through `mock-ai`, which is what lets
+        `docker compose up` on a clean checkout work with no paid credential (SPEC
+        §14.3) — and the same call in production reaches the provider the
+        institution pays for.
+
+    **Both halves of the second rule matter and neither is redundant.** Written on
+    the flag alone — `live=False` means the mock, everywhere — it points production
+    at a character counter. Written on the environment alone — development means
+    the mock, whatever the flag says — it points the eval runner at one. The rule
+    is the disjunction, and `tests/unit/test_the_gateway_reads_the_provider_triple_
+    the_flag_selects.py` holds all four combinations rather than the three that
+    disagree.
+
+    `is_development` rather than a comparison written here, because E0-37 item 2
+    made that predicate the one reader of the one definition of the name.
+    """
+    if live or not is_development(settings):
+        _refuse_a_blank_real_endpoint(settings)
+        return _Provider(
+            base_url=settings.ai_provider_base_url,
+            model_name=settings.ai_provider_model_name,
+            api_key=settings.ai_provider_api_key,
+        )
+    return _Provider(
+        base_url=settings.mock_ai_provider_base_url,
+        model_name=settings.mock_ai_provider_model_name,
+        api_key=settings.mock_ai_provider_api_key,
+    )
+
+
+def _refuse_a_blank_real_endpoint(settings: Settings) -> None:
+    """Refuse a real triple with no endpoint, at the moment it is actually selected.
+
+    **This exists because `.env.example` now ships `AI_PROVIDER_BASE_URL` blank**
+    (E2-12's security review). The entry used to carry a working public endpoint,
+    and beside a blank key that let a deployment which configured everything else
+    and left the AI block alone start cleanly and post §3.3's prompts — the
+    student's comment text included — to a third party under this module's
+    placeholder bearer. Blanking the line makes a forgotten setting refuse instead,
+    and `Settings` already does that everywhere it can: outside development the
+    transport rule rejects a blank base URL at startup and the report names the
+    variable.
+
+    **It cannot do it in development, and that is deliberate rather than a gap
+    left open.** A development stack reads the mock triple, so a blank real
+    endpoint is the ordinary state of a clean checkout, and refusing it at
+    `Settings` construction would stop `docker compose up` from coming up at all —
+    SPEC §14.3's exit criterion. So the same guarantee is picked up here, at the
+    one place in development that genuinely needs a real endpoint: the gateway
+    that has just decided to read the real triple.
+
+    That is why it hangs off the selection rather than off the field. `live=False`
+    in development reads the mock and never reaches this; `live=True` — the eval
+    runner, and nothing else — does. Same blank, same environment, opposite
+    answers, and the flag is the whole difference.
+
+    **`ConfigurationError` rather than a gateway error**, because that is what this
+    is: a variable nobody filled in, not a provider that misbehaved. A caller
+    catching `AIGatewayError` on the submit path must not swallow it, and §3.3's
+    fail-open must not turn it into a character count — an unconfigured endpoint is
+    not an outage, and flooring it would hand out participation credit on a
+    misconfiguration.
+
+    No value is quoted, as in every refusal this project raises about
+    configuration: the message names the variable and says what to do, and the
+    thing it is refusing is empty in any case.
+    """
+    if settings.ai_provider_base_url.strip():
+        return
+    raise ConfigurationError(
+        "AI_PROVIDER_BASE_URL is blank, and this gateway was built to read the real "
+        "provider's triple — so there is no endpoint to send anything to.\n"
+        ".env.example ships it blank on purpose: an endpoint sitting there beside a blank "
+        "key is a deployment that forgot this block posting student comment text to a third "
+        "party without anybody choosing it. The address of the provider is in the comment "
+        "above the entry; copy it into your own .env, or set MOCK_AI_PROVIDER_BASE_URL and "
+        "build this gateway with live=False to classify through the in-repo mock instead."
+    )
+
+
 class _ThreadBound:
     """The event loop, the client and the agents one thread uses.
 
@@ -323,10 +540,10 @@ class _ThreadBound:
     rather than by comments.
     """
 
-    def __init__(self, settings: Settings) -> None:
-        key = settings.ai_provider_api_key
+    def __init__(self, chosen: _Provider) -> None:
+        key = chosen.api_key
         provider = OpenAIProvider(
-            base_url=settings.ai_provider_base_url,
+            base_url=chosen.base_url,
             api_key=key.get_secret_value() if key is not None else UNAUTHENTICATED,
         )
         # **The underlying client's own retry is turned off**, so that the number
@@ -344,7 +561,7 @@ class _ThreadBound:
         # second provider-library importer E0-13's sixth criterion is about.
         provider.client.max_retries = 0
         self.loop = asyncio.new_event_loop()
-        self.model = OpenAIChatModel(settings.ai_model_name, provider=provider)
+        self.model = OpenAIChatModel(chosen.model_name, provider=provider)
         self.agents: dict[type[AiTaskOutput], Agent[None, Any]] = {}
 
     def agent_for(self, output_model: type[AiTaskOutput]) -> Agent[None, Any]:
@@ -376,7 +593,9 @@ class AIGateway:
     """One client per thread against one OpenAI-compatible endpoint (SPEC §6.3, §7.4).
 
     Built from `Settings`, so the base URL, the model and the credential all come
-    from the environment and none of them is written down here. Nothing is
+    from the environment and none of them is written down here — and *which* of
+    the two configured endpoints they come from is the `live` flag's answer, which
+    `_provider_for` above holds. Nothing is
     constructed at import time: a module that built a client on import would need
     `AI_PROVIDER_BASE_URL` set to be importable at all, and CI's
     `migration-drift` job supplies the database variables alone.
@@ -389,15 +608,32 @@ class AIGateway:
     only when the garbage collector got to it.
     """
 
-    def __init__(self, settings: Settings | None = None) -> None:
-        """Read the configuration; build nothing until a thread asks."""
+    def __init__(self, settings: Settings | None = None, live: bool = False) -> None:
+        """Read the configuration, choose a provider, and build nothing until a thread asks.
+
+        **`live` decides which of the two configured providers this gateway
+        reaches** (ADR 0118), and `_provider_for` above holds the rule and the
+        argument for it. It is resolved here, once, rather than per call: the
+        selection is a property of the gateway, and a gateway that re-decided per
+        request could answer two comments from two endpoints.
+
+        **It defaults to `False` because every caller except the eval runner wants
+        that**, and the wrong default is expensive in a way nothing reports. A
+        default of `True` would send a clean `docker compose up` — and every test
+        that does not pass the flag — to a paid endpoint with a student's comment
+        in the body. Nothing goes red; it costs money and leaves the machine.
+        `tests/evals/live.py` is the one caller that passes `True`, and it passes
+        it explicitly rather than relying on the environment it happens to start
+        in.
+        """
         self._settings = settings or Settings()
+        self._provider = _provider_for(self._settings, live=live)
         self._local = threading.local()
 
     @property
     def model_name(self) -> str:
-        """The model this gateway asks for, as `AI_MODEL_NAME` spells it."""
-        return self._settings.ai_model_name
+        """The model this gateway asks for, from whichever triple it selected."""
+        return self._provider.model_name
 
     def run_task(
         self,
@@ -437,22 +673,84 @@ class AIGateway:
         `AIProviderRefusedError` if the answer was a status about this request;
         and `AIResponseInvalidError` if it kept answering with something that is
         not the contract. ADR 0056 has the table.
+
+        **What this call cost is not returned here**, and that is what
+        `run_task_with_usage` below is for. This signature is what every caller in
+        the application uses and none of them has anything to do with a token
+        count, so the pair stays out of their way; this method is that one's
+        result with the second half dropped, rather than a second implementation
+        of it.
+        """
+        answer, _ = self.run_task_with_usage(
+            prompt=prompt,
+            prompt_version=prompt_version,
+            output_model=output_model,
+            timeout=timeout,
+        )
+        return answer
+
+    def run_task_with_usage(
+        self,
+        *,
+        prompt: str,
+        prompt_version: str,
+        output_model: type[OutputT],
+        timeout: float,
+    ) -> tuple[OutputT, TaskUsage]:
+        """`run_task`, and what the provider says it billed for it.
+
+        Same call, same arguments, same failures — see `run_task` above for all of
+        it, because this is where that method's body lives and that one is this
+        one with the usage dropped. Written that way round so the retry loop and
+        the audit-pair merge exist once: a second copy is the one that would not
+        be updated when ADR 0031 grows a third audit field.
+
+        **What is reported is the successful request, and a retried call
+        under-reports by exactly the attempts that failed.** That is a limit of the
+        provider library rather than a choice made here, and it was measured
+        before being written down: usage reaches this module on the run result,
+        and a request that raises produces no run result — `UnexpectedModelBehavior`,
+        `ModelHTTPError` and `ModelAPIError` carry `args` and, on one of them,
+        `retry_after`, and none of them carries a usage figure. So the tokens a
+        shape-violating attempt burned are not available to anybody in this
+        process, and a ledger built on this has to read `requests` as "requests
+        this figure covers" rather than "requests made".
+
+        It matters least where it is used most: a shape violation is rare, and the
+        eval runner's set is one field of one enum, which is about as hard to
+        violate as a contract gets. It would matter more for a task with a wide
+        output, and the note is here so that whoever wires the second one knows
+        what the number does and does not include.
+
+        **Nothing is reported for a call that failed outright**, for the same
+        reason one level up: every failure path raises, and the figure would have
+        to ride on the exception. Those exceptions are built from static text
+        deliberately — nothing raised in this module carries the credential, the
+        prompt or the answer — and widening what they hold is not something to do
+        in passing for a number nobody has asked for yet.
+
+        The caller that needs this today is SPEC §9.3's eval runner, which makes
+        about a hundred live calls per run and until now could not say what any of
+        them cost.
         """
         problem = ""
         for _ in range(SHAPE_VIOLATION_ATTEMPTS):
             try:
-                payload, model_id = self._ask(
+                payload, model_id, reported = self._ask(
                     prompt=prompt, output_model=output_model, timeout=timeout
                 )
             except AIResponseInvalidError as invalid:
                 problem = str(invalid)
                 continue
-            return output_model.model_validate(
-                {
-                    **payload.model_dump(),
-                    "prompt_version": prompt_version,
-                    "model_id": model_id,
-                }
+            return (
+                output_model.model_validate(
+                    {
+                        **payload.model_dump(),
+                        "prompt_version": prompt_version,
+                        "model_id": model_id,
+                    }
+                ),
+                _task_usage(reported),
             )
 
         raise AIResponseInvalidError(
@@ -473,14 +771,14 @@ class AIGateway:
         """
         bound: _ThreadBound | None = getattr(self._local, "bound", None)
         if bound is None:
-            bound = _ThreadBound(self._settings)
+            bound = _ThreadBound(self._provider)
             self._local.bound = bound
         return bound
 
     def _ask(
         self, *, prompt: str, output_model: type[OutputT], timeout: float
-    ) -> tuple[BaseModel, str]:
-        """Send one request; return the task's own output and which model produced it.
+    ) -> tuple[BaseModel, str, RunUsage]:
+        """Send one request; return the task's output, which model produced it, and what it cost.
 
         Every branch names the failure and its class, and the raise happens
         *after* the `except` block rather than inside it. Inside, Python would
@@ -542,7 +840,11 @@ class AIGateway:
             # not resolve". Only some of that is §3.3's fail-open case.
             failure, message = _unanswered_outcome(unanswered)
         else:
-            return result.output, self._reported_model(result)
+            # `usage` is a property on the result rather than a method, and it is
+            # the usage of the whole agent run — which is one request here, since
+            # the agent is built `retries=0` and this gateway spends its own
+            # attempts in the loop above.
+            return result.output, self._reported_model(result), result.usage
 
         raise failure(message)
 

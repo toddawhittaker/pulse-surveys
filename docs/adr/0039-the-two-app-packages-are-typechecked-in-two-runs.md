@@ -76,3 +76,9 @@ is that package, and `mypy mock-idp/app` follows the other two in
 `.github/workflows/ci.yml` and in `make typecheck`. The rule generalises as
 written: an `n`th package called `app` is an `n`th invocation, in both files, in
 the same order.
+
+**A fourth arrived with E2-07**, and the rule held without amendment:
+`mypy mock-ai/app` follows the other three in the same two files. The count in
+this record's title is therefore two behind and is left alone, because renumbering
+and retitling records is what this directory's index forbids — the decision is the
+invocation-per-package rule, not the number two.

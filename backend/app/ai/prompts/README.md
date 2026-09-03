@@ -59,9 +59,25 @@ The reasoning, and the alternative that was rejected, are in
 
 ## What is here now
 
-| File | Task | §7.4 output | Added by |
-|---|---|---|---|
-| `validity.v1.md` | Comment validity | substantive / insufficient / nonsense | E0-12 |
+| File | Task | §7.4 output | Added by | Rendered? |
+|---|---|---|---|---|
+| `validity.v1.md` | Comment validity | substantive / insufficient / nonsense | E0-12 | no — superseded 2026-09-02 |
+| `validity.v2.md` | Comment validity | substantive / insufficient / nonsense | the 2026-09-02 trim | yes |
+
+**Two files for one task is what the rule above looks like when it is used**, and
+the last column is the only place that says which one the tool sends. That is
+`app.ai.tasks.VALIDITY_PROMPT_VERSION`, and this table is a description of it
+rather than a second source — anything reading a prompt for a live purpose asks
+that constant, because a table is a record and a record drifts.
+
+`validity.v1.md` stays exactly as committed and is not deleted. Classifications
+recorded against `validity.v1` still resolve to the text that produced them,
+which is the whole of what makes a stored version worth storing; deleting it
+would turn every one of those rows into a version naming nothing. v2 is the same
+instructions with the material that was documentation rather than instruction
+removed — a title, spec citations, a note about the draft, and a paragraph
+forbidding keys that the gateway's structured-output schema already makes
+impossible to return. ADR 0120 records the trim and its reason.
 
 The other four tasks — moderation, weekly summary, response draft, draft check —
 have contracts in `app/ai/contracts.py` and no prompt yet. Their prompt content
@@ -100,7 +116,9 @@ student supplies, and is the one with teeth:
   after it is the input and runs to the end of the message, and says plainly
   that the input is classified rather than obeyed — including anything in it
   shaped like a command, a JSON object, or another copy of the marker.
-  `validity.v1.md` is the worked example; copy its last section.
+  `validity.v2.md` is the worked example — the rendered one — and copying its
+  last section is copying the boundary passage verbatim, which is what the mock
+  provider extracts a development stack's comments on.
 
   Three details that are easy to get wrong:
 
@@ -114,7 +132,7 @@ student supplies, and is the one with teeth:
     before it ever reaches the placeholder.
   - **Say what an injection attempt should be classified *as*,** rather than only
     forbidding it. A rule the model can apply beats a prohibition it can only
-    obey: in `validity.v1.md`, a comment demanding its own verdict is judged on
+    obey: in `validity.v2.md`, a comment demanding its own verdict is judged on
     whatever is left once the demand is set aside.
 
   This matters least for validity and most for moderation. A validity prompt

@@ -135,7 +135,7 @@ Each of these is an automated assertion in the test suite (§9), not a conventio
 2. A Lead Faculty assignment never grants sibling leads' courses, at any point in the purview union computation.
 3. Below the n-threshold, raw comments are hidden from instructors and students alike.
 4. Aggregate language counts sections, never instructors; "needs attention," never "underperforming"; no ranking, no composite scores, and no score-sorting anywhere. *(Asserted from **E2**, when the copy-inventory test first collects shipped user-facing strings; the vocabulary rule is checked globally from then on. Until then this item is enforced by review only.)*
-5. Confidentiality copy appears exactly once per surface (survey: in the submit bar), in plain words, no shield or lock iconography. *(Asserted from **E2** via the same copy-inventory test — the survey is the first governed surface, and the inventory grows with each UI epic. Until then this item is enforced by review only.)*
+5. Confidentiality copy appears exactly once per surface (survey: once per screen, in the submit area), in plain words, no shield or lock iconography. *(Asserted from **E2** via the same copy-inventory test — the survey is the first governed surface, and the inventory grows with each UI epic. Until then this item is enforced by review only.)*
 6. No view may ever widen a student's visibility relative to these rules.
 7. No figure computed from a comparison set is shown below the benchmark minimum — a mean, a median, or any other statistic, not only a drawn line. A comparison figure over fewer than the configured number of sections is suppressed exactly as a line is (§5.1). *(Asserted from **E4**, the epic that builds the reports carrying these figures.)*
 
@@ -199,7 +199,7 @@ Each attention card names its rule and stream and links to that section's Monday
 
 - LTI health: registration status, recent launches with outcome (success / signature failure / clock skew), NRPS and AGS call logs with response codes.
 - Job dashboard: scheduled and background jobs (report generation, grade passback, classification backlog, retention) with status, duration, retry counts.
-- AI provider metrics: request volume, latency, error rate, token spend, per-task breakdown (validity / moderation / summary / coaching).
+- AI provider metrics: request volume, latency, error rate, token spend with cached reads counted and priced separately from uncached input, computed cost per task and in total, per-task breakdown (validity / moderation / summary / coaching). The provider's rate card (per-million input, cached-input, and output prices) lives on the §6.3 configuration surface beside the provider it prices.
 - Classifier drift panel: weekly sample of classifications for human spot-review, with an override control that feeds an eval set (§9.3).
 
 ### 6.2 Threat and self-harm queue (Care role)
@@ -253,6 +253,7 @@ redis      redis:7 (broker/result backend)
 mailpit    dev-only SMTP capture
 mock-lms   dev/test-only LTI 1.3 platform (§9.2)
 mock-idp   dev/test-only OIDC identity provider for web-login roles (§9.2)
+mock-ai    dev/test-only OpenAI-compatible AI provider, deterministic verdicts (§9.2)
 ```
 
 Production deployment follows the same topology; reverse proxy / tunnel (e.g., cloudflared sidecar) is deployment-specific and out of scope for the compose file, but the app must run correctly behind a TLS-terminating proxy with a configurable public base URL (LTI redirect URIs demand it).
@@ -264,7 +265,7 @@ Production deployment follows the same topology; reverse proxy / tunnel (e.g., c
 - Per-platform quirk isolation: a thin `PlatformProfile` adapter (Canvas, Moodle, D2L, Blackboard) for known deviations in AGS score semantics and NRPS paging — quirks live in one file each, nothing leaks into domain logic.
 - Deep Linking is post-v1 (ruled 2026-08-28): plain resource-link launch is the only placement flow v1 supports. If a real platform demands the Deep Linking flow before then, the work belongs to E3, the epic that meets real platforms.
 - Roster sync: NRPS pulled on schedule and on launch (debounced), used for enrollment windows (§3.4) and email addresses where exposed.
-- **What triggers the first pull.** A launch by an instructor or any leadership role triggers a roster sync; a **student** launch does not. The roster service address arrives as a claim on that launch and is **stored**, which is what gives the scheduled job the discovery it otherwise lacks — it has no way of its own to learn that a section exists. So the first staff launch of a section bootstraps every later sync of it. The tool calls the roster service with its own credentials, so the launching person's role authorizes the *trigger*, never the request. Where a platform withholds the address even from a staff launch, the section has no roster and no sync can be attempted: the admin console shows it as never-synced (§6.1, §6.3) rather than as empty, because a section with no roster and a section with no enrollments are different states and only one of them is a fault.
+- **What triggers the first pull.** A launch by an instructor triggers a roster sync; a launch by a leadership role triggers one only inside the launcher's own purview (§2.1) — an out-of-purview leadership launch records a `context_outside_purview` defect and binds nothing (ADR 0108; a launcher whose only leadership assignment is assistant dean fails closed until E9 gives that role its grant source). A **student** launch triggers nothing. The roster service address arrives as a claim on that launch and is **stored**, which is what gives the scheduled job the discovery it otherwise lacks — it has no way of its own to learn that a section exists. So the first staff launch of a section bootstraps every later sync of it. The tool calls the roster service with its own credentials, so the launching person's role authorizes the *trigger*, never the request. Where a platform withholds the address even from a staff launch, the section has no roster and no sync can be attempted: the admin console shows it as never-synced (§6.1, §6.3) rather than as empty, because a section with no roster and a section with no enrollments are different states and only one of them is a fault.
 
 ### 7.4 AI task inventory
 
@@ -361,12 +362,12 @@ Selected constraints:
 
 **Settled during E0** (2026-08, each already stated in its section): one deployment serves one institution, enforced by constraint (§8); the benchmark minimum covers every figure computed from a comparison set, not only drawn lines (§4.1 item 7); the first roster pull is triggered by a staff launch, whose stored service address seeds every later sync (§7.3); a late add the platform never dated counts from the week of the sync that first saw them (§3.4); students hold no role assignment — their access resolves from enrollment (§2.1).
 
-**Still open:**
+**Still open** (a question settled later keeps its number and records the settlement in place, so the numbering stays stable):
 
 1. **Benchmark minimum-N value.** The mechanism is specced (§5.1, distinct from section small-N); the number isn't. Suggest 3 sections and 15 respondents as starting values.
 2. **Numeric workload outliers.** Trim/winsorize the displayed mean, show median as headline, or cap the slider lower? Leaning: median as headline, mean secondary.
 3. **Care role sourcing at pilot.** Office of Community Standards owns the queue in production; for a pilot before that office is wired in, who holds Care? (A named pilot owner, not Admin-by-default.)
-4. **Production "substantive" definition** (§3.3). The classifier replaces the 25-character prototype heuristic; its eval set and threshold need real seeded data before E2 exits.
+4. **Production "substantive" definition** (§3.3). Settled for v1 during E2: the classifier's eval set is ninety-eight typed cases pinned to `validity.v2`, and the enforcing floors are precision 0.92 and recall 0.90, measured against the live provider; `tests/evals/validity/floors.py` carries the measurement and headroom sentences. Reopens with a model or prompt change.
 5. **Kept-decision surfacing** (§5.2 open item). Kept decisions are logged; production should show both directions (Kept / Excluded) in the roll-up moderation log.
 6. **Reveal audit grain** (§4, §6.2). Does "every identity access is automatically audit-logged" count accesses or authorizations? Measured during E0: one committed reveal record returned the name five times and left one audit row. E10 settles the wording and the mechanism together, before or with the first screen that shows a reveal id; the "done when" is in E0's carried-out table (`docs/tickets/e0/README.md`).
 
@@ -491,6 +492,10 @@ pulse-surveys/
 │   ├── Dockerfile
 │   └── app/                        # discovery, authorize, token, JWKS; seeded leadership/care/admin users
 │
+├── mock-ai/                        # in-repo OpenAI-compatible provider for dev + e2e (§7.2, §9.2)
+│   ├── Dockerfile
+│   └── app/                        # deterministic verdicts, marker-selected wrong answers and stalls
+│
 ├── tests/
 │   ├── unit/                       # services, grading (Hypothesis), authz scoping
 │   ├── integration/                # LTI launch/NRPS/AGS against mock platform, testcontainers PG
@@ -540,7 +545,7 @@ Both doors end-to-end, resolving to one stored identity. LTI launch validation �
 *Exit:* a student, an instructor, and a Dean each land on the right (empty) view from either door; the seeded two-hat person enters by both doors and resolves to the same stored identity row; a synced section shows correct derived dates; a replayed or state/nonce-tampered launch is refused; and a roster read succeeds as an authenticated service call, not an unauthenticated GET.
 
 **E2 — Weekly survey & validity** · medium
-The five-question form (Likert, conditional-required text, workload slider), survey-window scheduling from term dates (Friday 18:00 ET open), synchronous AI validity gating with fail-open on provider timeout, one-open-survey rule, resubmission within window. The first student-visible path: **§4.1 item 1 is asserted here** — no student-visible path exposes another section — deferred from E0, which added no student-visible path and none of the scoping that gives "another section" its meaning. The copy-inventory test also starts here: shipped user-facing strings collected and checked against §4.1 items 4 and 5, growing with each later UI epic. Turns the AI eval floors enforcing, the last CI tolerance E0 left. Whether editing a term's start-letter map re-derives dependent sections lands here or in E11 — ADR 0018 and ADR 0021 name the owners.
+The five-question form (Likert, conditional-required text, workload slider), survey-window scheduling from term dates (Friday 18:00 ET open), synchronous AI validity gating with fail-open on provider timeout, one-open-survey rule, resubmission within window. The first student-visible path: **§4.1 item 1 is asserted here** — no student-visible path exposes another section — deferred from E0, which added no student-visible path and none of the scoping that gives "another section" its meaning. The copy-inventory test also starts here: shipped user-facing strings collected and checked against §4.1 items 4 and 5, growing with each later UI epic. Turns the AI eval floors enforcing, the last CI tolerance E0 left. Editing a term's start-letter map and re-deriving dependent sections is E11's, with its calendar editor (ruled 2026-08-31 at the E2 breakdown; ADR 0018 and ADR 0021 record the hazard).
 *Exit:* a student submits a valid response; "it was okay" is bounced with immediate feedback; the §4.1 invariant suite carries a test for item 1 that fails when a student-visible path returns data from a section the student is not enrolled in; and the copy-inventory test exists and reads the survey surface's shipped strings.
 
 **E3 — Grade passback** · medium
@@ -576,7 +581,7 @@ The queue over the reveal machinery E0 already built (ADRs 0042, 0043, 0071): th
 *Exit:* a seeded threat comment reaches only Care, a false positive closes without identity ever surfacing, and every reveal leaves the audit trail §4 requires under the decided grain.
 
 **E11 — Admin console & observability** · medium
-LTI health and launch-outcome log — including §7.3's never-synced-section state, which is a different thing from an empty roster — job dashboard, AI provider metrics and spend, classifier drift panel with the override-to-eval feed, the full configuration surface (§6.3, picking up the term-map re-derivation if E2 did not), and the platform registration UI over E1's per-registration columns.
+LTI health and launch-outcome log — including §7.3's never-synced-section state, which is a different thing from an empty roster — job dashboard, AI provider metrics and spend, classifier drift panel with the override-to-eval feed, the full configuration surface (§6.3, including the term-map re-derivation ruled to this epic 2026-08-31 — see the E2 entry), and the platform registration UI over E1's per-registration columns.
 *Exit:* an operator can diagnose a failed launch and a stuck job without shell access.
 
 **E12 — Notifications** · small

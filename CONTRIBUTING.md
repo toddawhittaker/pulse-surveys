@@ -142,13 +142,16 @@ something is ready.
 
 `.github/workflows/ci.yml` runs on every pull request and on pushes to epic
 branches. `make ci` runs the same gates locally, in the same order, so you can
-catch a failure before you push.
+catch a failure before you push — every gate but one. The paid eval gate is the
+exception: CI runs it only on a change that touches the AI code or on a manual
+dispatch, and `make ci` does not run it at all, because it calls the real
+provider about a hundred times. Locally it is `make evals`, asked for by name.
 
 | Stage | Gates |
 |---|---|
 | Fast | CI checker self-test, ruff check and format, mypy, tsc, eslint, migration drift |
 | Test | pytest unit and integration with coverage, the §4.1 invariant suite, Playwright e2e, AI eval floors |
-| Build | all Docker images, Compose health on api/worker/beat/mock-lms/mock-idp, frontend production build, bundle budget |
+| Build | all Docker images, Compose health on api/worker/beat/mock-lms/mock-idp/mock-ai, frontend production build, bundle budget |
 | Supply chain | pip-audit, npm audit, MIT license compatibility |
 
 Fast gates run first and everything else waits on them.
@@ -159,10 +162,13 @@ removing its tolerance — a ticket that adds tests but leaves the test gate
 tolerant has not finished. Most of them have now tightened. **The Playwright e2e
 job became enforcing with E0-18 (PR #61, 2026-08-21)** — it runs the suite on
 every diff that is not wholly inert documentation, and an empty `tests/e2e` now
-fails loudly instead of passing with a note. What remains tolerant is the AI eval
-floors, which wait for E2's first eval set, and the four frontend gates (`tsc`,
-`eslint`, production build, bundle budget), which wait for the frontend scaffold
-in E1. The E0 build order has the full table.
+fails loudly instead of passing with a note. **The four frontend gates became
+enforcing with E1-04**, and **the AI eval floors became enforcing with E2-12
+(PR #148, 2026-09-02)** — the eval job runs `--enforce-floors`, with its live
+steps conditioned on AI-touching paths or manual dispatch. The one probe still
+standing is `node` (whether the root `package.json` exists), which gates the
+Node-side audit and licence steps; ADR 0002's closing section records it. The
+E0 build order has the full table.
 
 Two rules worth stating outright. A failing test is never fixed by skipping,
 xfailing, or deleting it; if the test is wrong, fix it in its own commit and say
