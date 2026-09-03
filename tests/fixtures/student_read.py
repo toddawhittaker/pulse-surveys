@@ -1474,6 +1474,54 @@ def objects_carrying(node: Any, *names: str) -> list[dict[str, Any]]:
     return found
 
 
+def sole_entry(body: Any, answered: Any) -> dict[str, Any]:
+    """The one object in the answer that carries FIX-01's next-window member.
+
+    One, because the reader this world builds has exactly one live enrollment.
+    Nought means the member is not on the wire at all, which is the state FIX-01's
+    tests are first written red against; more than one means an enrollment is
+    being reported twice, which is a different defect and worth telling apart from
+    a wrong instant.
+
+    Here rather than in either test module because two of them ask the same
+    question of the same answer — the ordinary read-path module and the §4.1
+    denial module beside it (`docs/MISTAKES.md` entry 13).
+    """
+    entries = objects_carrying(body, NEXT_WINDOW_FIELD)
+    assert len(entries) == 1, (
+        f"{len(entries)} objects in the answer carry `{NEXT_WINDOW_FIELD}`, and this student has "
+        f"one live enrollment. Body begins {answered.text[:400]!r}.\n\n"
+        "FIX-01 item 4 puts the next materialized window's opening instant on the enrolled-section "
+        f"entry under exactly that name, as `datetime | None` — so the member is *present* on "
+        "every entry and is null when there is nothing ahead. Nought here is the member missing "
+        "from the schema, which is what this ticket owes; two is one enrollment answered twice."
+    )
+    return entries[0]
+
+
+def instant_carried(entry: dict[str, Any], answered: Any) -> datetime:
+    """One entry's next-window member as a moment, or a failure saying what it was.
+
+    Parsed rather than string-compared, for the reason `instants_in` gives above:
+    FIX-01 settles the member and settles no serialization for it, so
+    `2026-11-27T23:00:00Z` and `2026-11-27T23:00:00+00:00` are one moment written
+    two ways and a test comparing text would be pinning a choice the ticket leaves
+    open.
+    """
+    value = entry[NEXT_WINDOW_FIELD]
+    assert isinstance(value, str), (
+        f"`{NEXT_WINDOW_FIELD}` came back as {value!r} ({type(value).__name__}). It carries an "
+        f"instant, and the answer is JSON. Body begins {answered.text[:400]!r}."
+    )
+    parsed = datetime.fromisoformat(value)
+    assert parsed.tzinfo is not None, (
+        f"`{NEXT_WINDOW_FIELD}` came back as {value!r}, which carries no offset. ADR 0019 stores "
+        "every instant aware, and a naive one on the wire is a moment the browser will read in "
+        "whatever zone it happens to be in — which is the whole defect this member exists to fix."
+    )
+    return parsed
+
+
 def booleans_in(node: Any, path: str = "") -> dict[str, bool]:
     """Every boolean in a decoded answer, by the path it sits at.
 
