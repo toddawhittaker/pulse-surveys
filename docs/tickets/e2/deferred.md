@@ -405,6 +405,12 @@ ticket whose lane covers each file — a heavy ticket touching `backend/app/main
 for the first, any test-author phase touching that test module for the second.
 The assertions in both files are correct today; only the prose is stale.
 
+**Corrected by E2-11**, the next ticket whose lane covered both files: the
+`SinglePageApp` docstring now counts four landing views plus the survey screen,
+and the stale sentence in the test module — which sat in
+`test_the_mount_root_serves_the_built_entry_document`'s docstring rather than
+the module's — says the same. Prose only in both files.
+
 ## The model identifier lives in three places and nothing ties them — E2-12
 
 The model identifier is named in `.env.example`, in the eval step of
@@ -456,3 +462,25 @@ sized short.
 **Done when** E10's floor-setting records a variance allowance with at
 least two independent measured runs behind it, on the model and prompt
 that floor governs.
+
+## The copy collector's walks do not descend a symlinked directory — whoever next grows the inventory
+
+Deferred by E2-11's security re-pass as a LOW, accepted as residue under the
+round's declared stopping rule.
+
+Both of the collector's enumerations — the copy-file walk and the independent
+any-suffix coverage walk in `tests/fixtures/copy_inventory.py` — use
+`Path.rglob("*")`, which on the pinned Python does not follow a directory
+symlink. The two walks therefore agree on missing the same files: a directory
+symlink committed under `frontend/src/copy/` pointing at real copy files would
+ship those strings with §4.1 items 4 and 5 asserted over nothing, and nothing
+goes red. This is the closed-set-defeated-one-level-out shape a third time,
+one level further out than the subdirectory-and-`.tsx` finding the same review
+fixed. It is a LOW because a committed directory symlink inside `src/` is a
+deliberate, unusual act rather than an ordinary step; a symlinked *file* is
+followed and parsed today.
+
+**Done when** both walks pass `recurse_symlinks=True` (or a symlinked
+directory in the copy tree is refused outright), with a planted
+symlinked-directory control seen red — natural to take when E4 grows the
+inventory over report surfaces, and cheap to take sooner.

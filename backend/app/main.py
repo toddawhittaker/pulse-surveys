@@ -166,9 +166,10 @@ class SinglePageApp(StaticFiles):
 
     A single-page application's routes exist in the browser: `/app/student` is
     not a file in the build output, so a plain static mount answers 404 and the
-    five landing views are reachable only by navigating from `/app/` — which is
-    not how a person arrives, and not how the doors hand over once E1-08 and
-    E1-09 land the redirects.
+    five role routes — four landing views and E2-10's survey screen — are
+    reachable only by navigating from `/app/` — which is not how a person
+    arrives, and not how the doors hand over once E1-08 and E1-09 land the
+    redirects.
 
     **The fallback is a fallback and not a catch-all.** A request that matches a
     file gets that file; only a 404 becomes the entry document. Answering

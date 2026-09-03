@@ -2783,6 +2783,36 @@ SWEEPS_THAT_NEED_NO_PROTECTION = {
     "tests/unit/test_the_frontend_source_uses_tokens_only.py": (
         "sweeps tracked files under frontend/ only, and nothing under frontend/ is inert"
     ),
+    # E2-11's copy inventory, in two files: the collector, and the module that
+    # asserts SPEC §4.1 items 4 and 5 over what it collects. Both match the
+    # detector on prose alone — each says, in as many words, that the enumeration
+    # is a directory glob and **not** `git ls-files`, because a violation planted
+    # to prove the suite goes red is untracked and a tracked-files enumeration
+    # would not see it. That is a false match of exactly the kind the comment
+    # above this set describes, and it is triaged here rather than reworded: the
+    # detector is deliberately textual, and editing prose to slip past it is how
+    # it went blind once already.
+    #
+    # The substance. This sweep reads two kinds of source and no others:
+    # `frontend/src/copy/*.ts` by glob, and the modules of `app.copy` by import.
+    # Nothing under `frontend/` is inert — the entry above establishes it — and a
+    # backend `.py` change is never inert, which the two E0-35 entries at the top
+    # establish. So every file either of these can read already runs the whole
+    # pipeline when it changes, and there is nothing an inert diff can put in
+    # front of them.
+    #
+    # What would break both entries is the collector being taught to read copy
+    # from somewhere inert: a string catalogue under `docs/`, sample text under
+    # `design/`. At that point they belong in the unconditional job instead, and
+    # the two entries move together because one imports the other.
+    "tests/fixtures/copy_inventory.py": (
+        "collects frontend/src/copy/*.ts by glob and app.copy by import, and neither "
+        "frontend/ nor a backend .py is inert"
+    ),
+    "tests/unit/test_the_shipped_copy_inventory_holds_to_items_four_and_five.py": (
+        "asserts over that same inventory — frontend/src/copy/*.ts and app.copy — and "
+        "neither frontend/ nor a backend .py is inert"
+    ),
 }
 
 UNCONDITIONAL_SWEEP_JOB = "lint-python"
