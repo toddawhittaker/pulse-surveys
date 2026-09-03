@@ -492,6 +492,10 @@ pulse-surveys/
 │   ├── Dockerfile
 │   └── app/                        # discovery, authorize, token, JWKS; seeded leadership/care/admin users
 │
+├── mock-ai/                        # in-repo OpenAI-compatible provider for dev + e2e (§7.2, §9.2)
+│   ├── Dockerfile
+│   └── app/                        # deterministic verdicts, marker-selected wrong answers and stalls
+│
 ├── tests/
 │   ├── unit/                       # services, grading (Hypothesis), authz scoping
 │   ├── integration/                # LTI launch/NRPS/AGS against mock platform, testcontainers PG
