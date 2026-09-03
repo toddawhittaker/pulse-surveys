@@ -41,13 +41,33 @@ accepted rather than worked around: an exempt edit moves its hash row in a pull
 request that says which exemption it is claiming, which is a sentence somebody
 should have to write anyway.
 
-**What this cannot see, said rather than implied.** The inventory is
-`backend/app/ai/prompts/*.md`, because ADR 0032 fixes the extension as part of
-the scheme — "a stem identifies exactly one file only while the extension is
-fixed". A prompt shipped under another extension is outside this pin, and it is
-also outside ADR 0032's scheme and outside the version stems `app.ai.tasks`
-renders; `tests/unit/test_prompt_directory_layout.py` is the guard on the naming
-rule itself. This module holds the bytes of the files the scheme admits.
+**The inventory descends, and E2-18's security review is why.** A first draft
+globbed `*.md` flat, matching ADR 0032's naming scheme exactly — and matching the
+scheme is the mistake that record already documents making once, in the packaging
+glob. A nested `prompts/threat/threat.v1.md` was measured: it ships, it loads, it
+satisfies the layout guard (which walks the whole tree and blesses nesting), and
+it was invisible to this pin and to both directions of its totality. So the walk
+is recursive and a key is the path *relative to the prompts directory*, which
+makes a nested file representable instead of flattening it onto a name that
+another directory could also hold.
+
+**What this cannot see, said rather than implied.** The inventory is every `.md`
+file under the directory, and ADR 0032 records that the packaging glob is
+deliberately wider than that — `prompts/**/*` ships "everything under the
+directory, at any depth and any extension", and `draft.v1.jinja` is named there as
+a layout it was widened to carry. A prompt committed under another extension would
+therefore reach production and would not be pinned here. What keeps that narrow
+rather than open is ADR 0032's own scheme: the stored `prompt_version` is a stem
+and "a stem identifies exactly one file only while the extension is fixed", so no
+classification can cite a file this pin does not cover. If that ever stops being
+true, this pattern is the line to widen, and it should be widened by the change
+that makes it untrue.
+
+This module pins bytes and says nothing about whether a file's *name* obeys the
+scheme; `tests/unit/test_prompt_directory_layout.py` is the guard on the naming
+rule, and ADR 0032 asks a scheme-breaking prompt to produce "a red test and an
+argument about this record" while still shipping. Two guards, two mechanisms, one
+directory — which is that record's principle, not an accident.
 """
 
 from __future__ import annotations
@@ -58,29 +78,34 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # SPEC §13: "`ai/prompts/` — versioned prompt templates, one file per
-# task+version", and ADR 0032 makes the layout flat.
+# task+version". ADR 0032's scheme is flat; the tree under it is walked anyway,
+# because what ships is decided by the packaging glob and not by the scheme.
 PROMPTS_DIRECTORY = REPO_ROOT / "backend" / "app" / "ai" / "prompts"
 
-# ADR 0032's extension, which is part of the scheme rather than decoration.
+# Matched with `rglob`, so it holds at any depth. ADR 0032 fixes the extension as
+# part of the scheme — "a stem identifies exactly one file only while the
+# extension is fixed" — and the module docstring says what that leaves outside.
 PROMPT_GLOB = "*.md"
 
 # ADR 0032 puts "the scheme, the immutability rule and the list of prompts on
 # disk" in a README beside the prompts. It is documentation about the prompts
 # rather than a prompt, no `prompt_version` ever names it, and it is expected to
 # change whenever a version is added — so it is not pinned. The exclusion is by
-# exact file name, so a prompt is not exempted by mentioning a readme in its own.
+# exact file name at any depth, so a prompt is not exempted by mentioning a readme
+# in its own text, and a nested directory's readme is excluded like this one.
 NOT_A_PROMPT = frozenset({"README.md"})
 
-# The bytes of every committed prompt file, by name.
+# The bytes of every committed prompt file, by path relative to the prompts
+# directory — `validity.v2.md`, or `threat/threat.v1.md` if a task ever nests.
 #
 # **Filling a row is a two-step move and both steps belong in the pull request
 # that adds the file.** Add the new version file, then take its digest and paste
 # the row here:
 #
-#     python -c "import hashlib, pathlib; \
-#     [print(f'    {p.name!r}: {hashlib.sha256(p.read_bytes()).hexdigest()!r},') \
-#     for p in sorted(pathlib.Path('backend/app/ai/prompts').glob('*.md')) \
-#     if p.name != 'README.md']"
+#     python -c "import hashlib, pathlib; d = pathlib.Path('backend/app/ai/prompts'); \
+#     [print(f'    {p.relative_to(d).as_posix()!r}: \
+#     {hashlib.sha256(p.read_bytes()).hexdigest()!r},') \
+#     for p in sorted(d.rglob('*.md')) if p.name != 'README.md']"
 #
 # `test_every_committed_prompt_file_has_a_recorded_hash` prints the same rows in
 # its failure message, so the command is a convenience rather than the mechanism.
@@ -97,17 +122,24 @@ RECORDED_SHA256: dict[str, str] = {
 
 
 def committed_prompt_files() -> dict[str, Path]:
-    """Every file the prompt scheme admits, by name.
+    """Every committed prompt, by path relative to the prompts directory.
 
     Reads the directory rather than the mapping, which is the half that makes the
     pin total: a pin whose inventory came from its own recorded names could never
     notice a file nobody recorded.
+
+    **The walk descends.** A flat glob is the inventory ADR 0032's *scheme*
+    describes, and the scheme is not what decides which files exist — a nested
+    `threat/threat.v1.md` ships, loads and passes the layout guard, and E2-18's
+    review measured it going straight past a flat pin. The key keeps the relative
+    path for the same reason: two files with one name in two directories are two
+    files, and a mapping keyed on the bare name would pin one of them twice.
     """
     if not PROMPTS_DIRECTORY.is_dir():
         return {}
     return {
-        path.name: path
-        for path in sorted(PROMPTS_DIRECTORY.glob(PROMPT_GLOB))
+        path.relative_to(PROMPTS_DIRECTORY).as_posix(): path
+        for path in sorted(PROMPTS_DIRECTORY.rglob(PROMPT_GLOB))
         if path.is_file() and path.name not in NOT_A_PROMPT
     }
 
@@ -131,8 +163,9 @@ def test_the_prompt_directory_holds_files_for_this_module_to_pin() -> None:
     """
     found = committed_prompt_files()
     assert found, (
-        f"no prompt files were found under {PROMPTS_DIRECTORY}, matching {PROMPT_GLOB!r} and "
-        f"excluding {sorted(NOT_A_PROMPT)}. SPEC §13 puts versioned prompt templates there, "
+        f"no prompt files were found under {PROMPTS_DIRECTORY}, matching {PROMPT_GLOB!r} at "
+        f"any depth and excluding {sorted(NOT_A_PROMPT)}. SPEC §13 puts versioned prompt "
+        "templates there, "
         "and every other assertion in this module is a loop that passes over an empty "
         "inventory."
     )
@@ -254,6 +287,13 @@ def test_the_prompt_version_the_application_loads_is_one_of_the_pinned_files(
     `app.ai.tasks.VALIDITY_PROMPT_VERSION` plus `.md` is the file every §3.3
     classification and every SPEC §9.3 measurement is currently made under, and
     that file is the one whose immutability has consequences today.
+
+    The key expected is the flat one, which is a claim as well as a lookup: ADR
+    0032's scheme resolves a stored stem to a file "with no lookup table between
+    them", so the prompt a version string names sits directly in the directory. A
+    live prompt that had moved into a subdirectory would be red here, and rightly —
+    the walk descends so that nested files are *pinned*, not so that the version
+    scheme quietly acquires a search path.
 
     `configured_env` is `docs/MISTAKES.md` entry 40: importing `app.ai.tasks`
     reaches the settings, and a red that depended on the developer's shell would be

@@ -58,30 +58,50 @@ MOST_CASES = 140
 # ordinary text.
 MOCK_MARKER_PREFIX = "mock-ai:"
 
-# The number of cases each hard family shipped with — ticket E2-18.
+# The set's composition as it shipped, family by family — ticket E2-18.
 #
-# The other set-shape guards in this module hold the total (80-140), ten cases per
-# class, and each hard family non-empty. A ninety-eight-case set keeping *one*
-# short-substantive case and *one* long-vacuous case clears every one of them, and
-# it is a different measurement: the two families that carry the whole point of
-# the set become rounding error, and SPEC §9.3's precision and recall are taken
-# almost entirely over cases the character rule already gets right. That is a
-# lowered floor wearing a costume, the same move
-# `.claude/review-fixtures/eval-floor-lowered.diff` plants, and until E2-18 the
-# only thing standing against it was a non-empty check.
+# **The whole composition rather than a floor under the hard families, because a
+# floor under two families leaves the other four free.** E2-18's security review
+# proved both directions by execution:
 #
-# The numbers are the committed set's own sizes, so adding cases is green and
-# removing them is red. **A deliberate narrowing is allowed and moves these
-# numbers in the pull request that narrows the set**, beside the re-measured
-# floors — a set and the floors measured over it move together or neither moves.
+#   - thin `NONSENSE_FAMILY` from eighteen cases to one and every other guard in
+#     this module stays green — the total is 81, both classes still hold ten, and
+#     both hard families are untouched — while the only carrier of one of SPEC
+#     §7.4's three verdicts becomes a single case;
+#   - pad `LONG_SUBSTANTIVE` from forty to eighty-two and everything stays green
+#     while the measurement changes underneath: with the hard positives fixed, the
+#     positive-class denominator goes from fifty-four to ninety-six, so at a recall
+#     floor of 0.90 a run may miss nine cases where it could miss five.
 #
-# The keys are the family tokens rather than the constants because
-# `cases.py` is imported through a fixture; the test below requires them to be
-# exactly the two families the set's own module names as hard, so a family rename
-# cannot quietly drop a floor.
-HARD_FAMILY_FLOORS = {
-    "short_substantive": 12,
-    "long_vacuous": 12,
+# Neither is a narrower set and both are *easier* sets, and neither shows up in a
+# number anybody reviews. `.claude/review-fixtures/eval-floor-lowered.diff` plants
+# the same move in its crudest form.
+#
+# So the counts are exact, per family, both directions. Adding cases is a change
+# and removing them is a change, because both change what SPEC §9.3's precision
+# and recall are rates over.
+#
+# **Any composition change is a deliberate move in its own pull request, and that
+# pull request re-derives the arithmetic these numbers feed.** What a floor
+# tolerates is a function of the denominators: how many misses a recall floor
+# allows is set by the number of positive-class cases, and how many wrong claims a
+# precision floor allows is set by how many negatives there are to claim. Moving a
+# family without re-deriving that is moving the gate without moving the number
+# printed on it — the thing `CLAUDE.md` forbids doing to an eval floor directly,
+# arriving by the back door.
+#
+# **The keys are the identifiers `cases.py` declares, resolved with `getattr`,
+# never the token strings.** A mapping written in literals goes on agreeing with
+# itself after a family has been renamed out from under it. Which renames this
+# catches and which it does not is written out in
+# `test_the_pinned_composition_names_every_family_the_set_declares`.
+EXPECTED_FAMILY_COUNTS = {
+    "LONG_SUBSTANTIVE": 40,
+    "SHORT_SUBSTANTIVE": 12,
+    "LONG_VACUOUS": 12,
+    "SHORT_INSUFFICIENT": 12,
+    "NONSENSE_FAMILY": 18,
+    "BOUNDARY": 4,
 }
 
 
@@ -483,9 +503,10 @@ def test_the_character_heuristic_cannot_score_perfectly_on_this_set(
     directions, so it passes here and should — the property this test asserts is
     about the heuristic's score rather than about the set's size, and widening it
     to cover both would make one red mean two things.
-    `test_each_hard_family_still_holds_the_cases_it_shipped_with` (ticket E2-18) is
-    what refuses that set, and it is the reason this paragraph is a statement of
-    scope rather than a concession.
+    `test_each_family_holds_exactly_the_cases_it_shipped_with` (ticket E2-18) is
+    what refuses that set, along with every other reshaping that leaves the
+    heuristic wrong in both directions while changing what the floors are rates
+    over. This paragraph is a statement of scope rather than a concession.
     """
     measure_module = eval_module("tests.evals.measure")
     cases = cases_module.CASES
@@ -544,62 +565,131 @@ def test_the_set_holds_enough_of_both_classes_for_a_rate_to_mean_anything(
     )
 
 
-def test_each_hard_family_still_holds_the_cases_it_shipped_with(
+def pinned_families(cases_module: ModuleType) -> dict[str, str]:
+    """`EXPECTED_FAMILY_COUNTS`'s identifiers, resolved to the tokens `cases.py` declares.
+
+    Resolution rather than literals is what makes the mapping keys *references*:
+    an identifier that has gone from `cases.py` cannot be quietly satisfied by a
+    string that still spells the old name.
+    """
+    resolved: dict[str, str] = {}
+    unknown: list[str] = []
+    for identifier in EXPECTED_FAMILY_COUNTS:
+        token = getattr(cases_module, identifier, None)
+        if token is None:
+            unknown.append(identifier)
+        else:
+            resolved[identifier] = token
+    if unknown:
+        pytest.fail(
+            f"`cases.py` declares no {sorted(unknown)}, and this module's pinned composition "
+            "names them. A family constant that has been renamed or removed takes its case "
+            "count out of the pin with it, so the rename lands here in the same change."
+        )
+    return resolved
+
+
+def test_the_pinned_composition_names_every_family_the_set_declares(
     cases_module: ModuleType,
 ) -> None:
-    """The two families the set exists for keep their size, not merely a member — ticket E2-18.
+    """Totality both ways between the pinned composition and the set's own families — E2-18.
 
-    Every other structural guard in this module is satisfied by a set that has been
-    hollowed out where it matters. The total stays in range if the easy families
-    grow to fill the space; ten per class stays true because the easy families
-    carry both classes; and each hard family's own test asserts only that it is
-    non-empty. So a ninety-eight-case set with one short-substantive case and one
-    long-vacuous case is green everywhere and is a different measurement — the
-    cases the character rule gets wrong stop being two-fifths of the negatives and
-    become noise, and SPEC §9.3's precision and recall are then mostly a report on
-    the cases it gets right.
+    The counts in the test below are worth exactly as much as this: a mapping that
+    covers five of six families pins five of six, and the sixth is then the one to
+    empty. So the resolved tokens and the families the cases actually carry have to
+    be the same set, in both directions.
 
-    **This is a narrowed set, which is a lowered floor with better manners.** It is
-    the move `.claude/review-fixtures/eval-floor-lowered.diff` plants, and
-    `CLAUDE.md` puts moving an eval floor in its own pull request for the same
-    reason: whether the gate got easier must be visible in the diff of the thing
-    that decides it.
+    **What this catches.** A family added to `cases.py` with cases in it and no row
+    here — the shape that arrives when somebody grows the set and does not think of
+    this file. A family whose declaring identifier was renamed or deleted, through
+    `pinned_families`. A family emptied to nothing, since its token then stops
+    appearing among the cases.
 
-    **The boundary family has no row here on purpose.** Its size is already pinned
-    by `test_the_boundary_family_straddles_the_character_floor_in_both_directions`,
-    which requires four distinct length-and-verdict combinations and so cannot be
-    satisfied by fewer than four cases. A floor here would restate that guard and
-    give two reds for one defect.
+    **What it does not catch, said rather than implied.** Renaming a family's
+    *token value* — `"long_vacuous"` to something else — while leaving the
+    identifier alone moves `cases.py` and this mapping together and stays green.
+    That is a rename with no composition change behind it: every case stays in the
+    family it was in, and the counts below are unmoved. The renames that carry
+    cases with them are the ones above.
 
-    **The mutation this kills:** delete cases from `_SHORT_SUBSTANTIVE` or
-    `_LONG_VACUOUS` and pad the total out of the easy families, which passes every
-    other test in this module and in the eval suite. **The near miss that must stay
-    green:** adding cases to either family, or rewording the ones that are there,
-    since this asserts a minimum rather than a count.
+    **The set of families present in the cases cannot be this pin's inventory on
+    its own**, which is why the mapping is written down here: an inventory taken
+    from the thing being guarded shrinks when the thing is thinned. It is the
+    mapping that holds the shape, and this test that holds the mapping honest.
+
+    **The mutation this kills:** add a seventh family to `cases.py` and leave
+    `EXPECTED_FAMILY_COUNTS` alone, which leaves the new family free to be any size
+    forever.
     """
-    named_hard_families = {cases_module.SHORT_SUBSTANTIVE, cases_module.LONG_VACUOUS}
-    assert set(HARD_FAMILY_FLOORS) == named_hard_families, (
-        f"this module holds floors for {sorted(HARD_FAMILY_FLOORS)} and `cases.py` names "
-        f"{sorted(named_hard_families)} as the families the character rule gets wrong. A "
-        "floor keyed to a family the set no longer has is a floor over zero cases that never "
-        "fires, and a family with no floor is the one that can be emptied."
+    resolved = pinned_families(cases_module)
+    pinned = set(resolved.values())
+    carried = {case.family for case in cases_module.CASES}
+
+    assert pinned == carried, (
+        f"the pinned composition names {sorted(pinned)} and the set's cases carry "
+        f"{sorted(carried)}.\n"
+        "\n"
+        f"  families with cases and no pinned count: {sorted(carried - pinned)}\n"
+        f"  families pinned and holding no case:     {sorted(pinned - carried)}\n"
+        "\n"
+        "A family with no pinned count is a family that can be any size, which is how a set "
+        "gets easier without any number changing. A pinned family holding nothing has already "
+        "been emptied — the count assertion says by how much."
     )
 
-    below = [
-        (family, floor, sum(1 for case in cases_module.CASES if case.family == family))
-        for family, floor in sorted(HARD_FAMILY_FLOORS.items())
-        if sum(1 for case in cases_module.CASES if case.family == family) < floor
-    ]
-    assert not below, (
-        f"these hard families hold fewer cases than they shipped with, as "
-        f"(family, floor, cases now): {below}.\n"
+
+def test_each_family_holds_exactly_the_cases_it_shipped_with(
+    cases_module: ModuleType,
+) -> None:
+    """The set's composition is the one SPEC §9.3's floors were measured over — ticket E2-18.
+
+    Every other structural guard here is satisfied by a set reshaped where it
+    matters. The total stays in range if one family grows as another shrinks; ten
+    per class stays true because two families carry both classes; and each hard
+    family's own test asserts only that it is non-empty. E2-18's review proved two
+    reshapings that are green everywhere else and are both easier sets: the
+    nonsense family thinned to a single case, leaving one of SPEC §7.4's three
+    verdicts measured over one comment; and the long-substantive family padded to
+    eighty-two, which nearly doubles the positive-class denominator and, at a
+    recall floor of 0.90, turns five tolerated misses into nine.
+
+    **Exact, not a minimum, and that is the point of the fix.** A minimum stops the
+    thinning and permits the padding, and the padding is the one that moves a floor
+    without touching a family anybody is watching.
+
+    **The rule, so a red here reads as an instruction.** A composition change is
+    allowed and it is a pull request whose subject is the change: it moves these
+    numbers, says which cases arrived or went and why, and re-derives what the
+    floors then tolerate — how many misses a recall floor allows is a function of
+    how many positive-class cases there are.
+
+    **The mutation this kills:** thin any family, or pad any family, in either
+    direction and in any combination — including the two that pass every other test
+    in this repository. **The near miss that must stay green:** rewording a case, or
+    moving one comment for another inside the same family, since this counts cases
+    per family rather than fixing their text.
+    """
+    resolved = pinned_families(cases_module)
+    wrong = {
+        identifier: {
+            "family": token,
+            "shipped with": EXPECTED_FAMILY_COUNTS[identifier],
+            "holds now": sum(1 for case in cases_module.CASES if case.family == token),
+        }
+        for identifier, token in sorted(resolved.items())
+        if sum(1 for case in cases_module.CASES if case.family == token)
+        != EXPECTED_FAMILY_COUNTS[identifier]
+    }
+    assert not wrong, (
+        f"the set's composition has moved: {wrong}.\n"
         "\n"
-        "E2-12's scope names them as 'the two the 25-character rule misclassifies by "
-        "construction'. Thinning one does not fail any other test here — the total stays in "
-        "range and both classes keep their ten — and it makes SPEC §9.3's floors easier to "
-        "clear without changing a number anybody reviews.\n"
+        "SPEC §9.3's precision and recall are rates over these cases, so which families they "
+        "are drawn from decides what the floors mean. Thinning a family and padding another "
+        "keeps the total in range, keeps ten cases in each class, and leaves both hard "
+        "families intact, while changing how many mistakes the gate tolerates — E2-18's "
+        "review measured both moves.\n"
         "\n"
-        "If the set is being narrowed on purpose, move the floor in `HARD_FAMILY_FLOORS` in "
-        "the pull request that narrows it, saying which cases went and why, and re-measure "
-        "the floors the smaller set is supposed to hold."
+        "If the set is being reshaped on purpose, move `EXPECTED_FAMILY_COUNTS` in the pull "
+        "request that reshapes it, say which cases arrived or went and why, and re-derive "
+        "what the floors tolerate over the new denominators."
     )
