@@ -14,7 +14,13 @@
 //     this week, and a `classification` for each comment that was submitted,
 //     carrying a real audit pair. A screen that says "Your pulse is in" over a
 //     database that stored nothing satisfies every browser-side assertion there
-//     is, and clause 1 is about the response existing.
+//     is, and clause 1 is about the response existing. It then revises the week
+//     and submits a second time. That leg is not a duplicate of anything: no spec
+//     in this suite performs a second *successful* submission into one week —
+//     `student-survey.spec.ts` clicks REVISE to read the prefill and stops, and
+//     its bounce test's resubmit follows a bounce, which stored nothing — so ADR
+//     0115's revise-in-place rule had no browser guard, and a mutation that
+//     inserted a second `response` was measured surviving the whole suite.
 //   - **Test B, the fail-open submit.** SPEC §3.3: "on provider timeout, the
 //     heuristic floor applies and the submission is accepted, then classified
 //     async (fail open, never block a student on an outage)." The epic's
@@ -165,6 +171,17 @@ const INSTRUCTOR_COMMENT =
 const COURSE_COMMENT =
   'The week four reading list was long, and the ordering made it manageable.';
 
+// What the instructor comment becomes when Test A revises the week. Distinct
+// enough from the original that the two cannot be confused in a failure message,
+// and over the character floor with no marker in it, like the two above.
+//
+// **The whole of the resubmission leg turns on this string being different.**
+// ADR 0115 has a resubmission revise its answers in place, so after the second
+// submit the `answer` row carries this sentence and no row anywhere carries the
+// original. A path that inserted a second response would leave both.
+const REVISED_INSTRUCTOR_COMMENT =
+  'On reflection it was the Thursday lab rather than the seminar that made the protocol stick.';
+
 // Test B's one comment: the marker, and enough words after it to clear the
 // character floor. **The padding is load-bearing.** On the timeout the floor is
 // what decides the verdict, and under twenty-five characters the floor answers
@@ -290,13 +307,30 @@ test('a valid submission leaves one response and a real classification for every
   //      `character-floor`/`no-model` when the provider answered is ADR 0054's
   //      distinction erased in the direction nobody notices — every downstream
   //      reader that excludes floored rows then excludes rows a model produced.
-  //   3. *More than one `response` for the week.* A resubmission that inserts
-  //      instead of revising (ADR 0115) double-counts the week.
+  //   3. *A resubmission inserts instead of revising in place (ADR 0115).* The
+  //      week is then answered twice, and E3's participation formula divides by a
+  //      denominator that counted it once. **Killed by the resubmission leg at the
+  //      foot of this test and by nothing else** — a fact measured rather than
+  //      assumed: the mutation was applied live (the unique constraint dropped in
+  //      the migration and the submit path made to insert) and this test stayed
+  //      green in 1.8 seconds, because a test that submits once cannot see a
+  //      defect that only appears on the second submission. Nothing else in the
+  //      e2e suite performs a second *successful* submission into one week either:
+  //      `student-survey.spec.ts`'s first test clicks REVISE to read the prefill
+  //      and stops there, and its bounce test's resubmit follows a bounce, which
+  //      stored nothing and so is still a first submission. So ADR 0115's
+  //      revise-in-place rule had no browser guard at all until this leg.
   //
   // **The near misses that must stay green:** any verdict the provider likes for
-  // these two comments, since nothing here reads `verdict`; any prompt version
-  // and model ID at all as long as they are not the floor's; and a second
-  // classification row per comment, which the async sweep is entitled to add.
+  // these comments, since nothing here reads `verdict`; any prompt version and
+  // model ID at all as long as they are not the floor's; a second classification
+  // row per comment, which the async sweep is entitled to add; and — after the
+  // revision — the original comment's classification rows surviving beside the
+  // revised comment's. They must survive: `classification.answer_id` is ON DELETE
+  // RESTRICT and ADR 0115 refuses to let a comment a classification names be
+  // withdrawn, so the revised answer legitimately carries the verdict on the
+  // sentence it used to hold as well as the verdict on the one it holds now. Every
+  // assertion here is over the whole set for that reason.
   test.setTimeout(CASE_TIMEOUT_MS);
 
   const block = await landOnTheSurvey(page);
@@ -378,6 +412,75 @@ test('a valid submission leaves one response and a real classification for every
       'are written on every row — and both make every reader that excludes floored rows exclude ' +
       'rows a model produced.',
   ).toEqual([]);
+
+  // ---- the resubmission leg -----------------------------------------------
+  //
+  // **Mutation 3, and the only thing in the suite that can see it.** SPEC §3.3
+  // allows resubmission within the window and ADR 0115 settles how: the answers
+  // are revised in place, so the week keeps one `response`. A path that inserted
+  // instead would leave two, E3 would count the week twice, and every assertion
+  // above would still be green — measured, not supposed.
+  //
+  // The reload is the shape `student-survey.spec.ts` proves: the submitted state
+  // is re-read from the server before the revise action is taken, so the form
+  // filled in below is the one the server prefilled rather than one the browser
+  // still had in hand.
+  //
+  // **The clock does not move for this** and that is what makes the leg safe. ADR
+  // 0109 makes the development override an *offset*, so the effective now goes on
+  // advancing from where `beforeAll` set it; the second submission's
+  // `last_submitted_at` is therefore later than the stored `first_submitted_at`
+  // and `response`'s own check constraint is satisfied. The hazard that rule
+  // exists for is a clock re-set to the same pretended minute in a later run,
+  // which is what `beforeEach`'s week clear keeps out of this file.
+  await page.reload();
+  const revised = page.getByTestId(SECTION_BLOCK);
+  await expect(revised.getByText(SUBMITTED_TITLE, { exact: true })).toBeVisible();
+  await revised.getByTestId(REVISE).click();
+  await expect(revised.getByTestId(SUBMIT)).toBeVisible();
+
+  // One answer of each kind changed: a comment, which the read-back below
+  // follows, and the slider, which is the half that has no text to trace and is
+  // changed so the revision is not a single-column update.
+  await typeComment(revised, 0, REVISED_INSTRUCTOR_COMMENT);
+  await setSlider(revised, '9');
+
+  await revised.getByTestId(SUBMIT).click();
+  await expect(
+    revised.getByText(SUBMITTED_TITLE, { exact: true }),
+    'The second submission into an open window was not accepted. SPEC §3.3 allows resubmission ' +
+      'within the window, and everything below is about what that resubmission did to the row.',
+  ).toBeVisible();
+
+  // Still one row. This is the count the mutation moves, and it can only move on a
+  // second submission.
+  expect(
+    responseCountForThisWeek(),
+    `Revising this week left more than one \`response\` row for ${LEARNER_SUBJECT} in ` +
+      `${SECTION_CODE} on term week ${TERM_WEEK}. ADR 0115 revises a submission's answers in ` +
+      'place; a path that inserts instead answers the week twice, and E3 divides participation ' +
+      'by a denominator that counted it once. SPEC §3.1 also says a student sees exactly one ' +
+      'open survey at a time per section, and two rows is what that rule reads like from below.',
+  ).toBe(1);
+
+  // And the row that survived is the revised one. **This is the half the count
+  // cannot give.** A count of 1 is also what a second write that silently failed
+  // looks like — the student would be told their revision went in while the
+  // database still held the sentence they replaced. So the comment is read back
+  // through the same joins as before: the revised sentence is present and the
+  // original is gone, which together mean the answer was updated rather than
+  // duplicated or left alone.
+  const afterRevising = classifiedCommentsOfThisWeek();
+  expect(
+    commentsAmong(afterRevising),
+    'The revised week does not read back as the sentences that were submitted last. Three ' +
+      'different defects land here and the list says which: the original instructor comment ' +
+      'still present alongside the revised one is a second `response` (with the count assertion ' +
+      'above having been satisfied some other way, so read that first); the original present ' +
+      'and the revision absent is a resubmission the server accepted and did not store; and an ' +
+      'empty list is a query that reached nothing, which nothing below or above would then mean. ' +
+      `The query answered ${JSON.stringify(afterRevising)}.`,
+  ).toEqual([REVISED_INSTRUCTOR_COMMENT, COURSE_COMMENT].sort());
 });
 
 test('a comment the provider stalls past the budget is accepted on the floor and says so in the record', async ({
