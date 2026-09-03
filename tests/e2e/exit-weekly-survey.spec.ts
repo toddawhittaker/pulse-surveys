@@ -658,9 +658,18 @@ async function expectTheFormIsShowing(block: Locator): Promise<void> {
   await expect(block.getByTestId(REVISE)).toHaveCount(0);
 }
 
-/** Choose a point on the nth Likert scale in this block. */
+/**
+ * Choose a point on the nth Likert scale in this block.
+ *
+ * **The name is anchored on the digit rather than matched exactly**, and that is
+ * E2-17 item 2 reaching back into this helper: the 1 and 5 radios grow their end
+ * words into their accessible names ("5 — Strongly agree"), so `{ name: '5',
+ * exact: true }` stops matching the radio it used to — and this file chooses a 5
+ * twice. The anchored pattern matches the old spelling and the new one alike
+ * (`docs/MISTAKES.md` entry 22).
+ */
 async function chooseRating(block: Locator, scale: number, point: string): Promise<void> {
-  await block.getByRole('radio', { name: point, exact: true }).nth(scale).check();
+  await block.getByRole('radio', { name: new RegExp(`^${point}\\b`) }).nth(scale).check();
 }
 
 /** Type into the nth comment field in this block, or empty it. */

@@ -9,8 +9,15 @@ The two items, in the spec's own words:
 > 4. Aggregate language counts sections, never instructors; "needs attention,"
 >    never "underperforming"; no ranking, no composite scores, and no
 >    score-sorting anywhere.
-> 5. Confidentiality copy appears exactly once per surface (survey: in the submit
->    bar), in plain words, no shield or lock iconography.
+> 5. Confidentiality copy appears exactly once per surface (survey: once per
+>    screen, in the submit area), in plain words, no shield or lock iconography.
+
+That parenthetical was "(survey: in the submit bar)" until E2-17. The ruling of
+2026-09-03 read "once per surface" as once per *screen*, and the submit bar is
+per section — so a student in two courses whose windows are open at the same
+minute met the sentence twice. Nothing collected here changed with it: this
+module counts one string in an inventory, and where that string is rendered is
+`tests/e2e/student-survey-confidentiality.spec.ts`'s.
 
 `tests/fixtures/copy_inventory.py` collects the strings from their sources of
 record — the `app.copy` registry through E2-08's own reader, and the frontend copy
@@ -55,11 +62,14 @@ render a screen.
     nothing in this repository sweeps for a violation of it.
   - An aria label built in a component is invisible for the same reason, and §4.1
     item 1 names aria labels explicitly.
-  - **Where the confidentiality line sits on the screen is not asserted here.**
-    Item 5 puts the survey's line in the submit bar; what this can check is that
-    exactly one collected string on the surface is confidentiality copy and that
-    it is the key the submit bar renders. The DOM placement is E2-10's
-    end-to-end spec (`tests/e2e/student-survey.spec.ts`).
+  - **Where the confidentiality line sits on the screen is not asserted here,
+    and neither is how often it is rendered.** What this can check is that
+    exactly one collected *string* on the surface is confidentiality copy. One
+    string rendered once per section is two sentences on a screen and one entry
+    in this inventory, which is why item 5's count is asserted in a browser as
+    well: `tests/e2e/student-survey-confidentiality.spec.ts` counts it on a
+    screen carrying two open surveys, and `tests/e2e/student-survey.spec.ts`
+    holds the one-section reading.
   - **Iconography is checked as far as text carries it**, which is emoji and
     symbol code points inside the strings. A drawn lock in an SVG or an icon
     component is E2-10's review, not this.
@@ -131,10 +141,11 @@ GOVERNED_SURFACES = {
     "student": SURVEY,
 }
 
-# Item 5: "Confidentiality copy appears exactly once per surface (survey: in the
-# submit bar)". The submit bar is `SubmitBar`, and the string it renders is this
-# entry (E2-10's scope: "SubmitBar (carrying the confidentiality copy, exactly
-# once, plain words, no shield or lock iconography)").
+# Item 5: "Confidentiality copy appears exactly once per surface (survey: once
+# per screen, in the submit area)". The string is this entry, whichever component
+# renders it — E2-10 put it in `SubmitBar` and E2-17 lifted it to one placement
+# per screen, and the *key* is what this module counts, so that move is invisible
+# here by design.
 CONFIDENTIALITY_KEY_OF_SURFACE = {SURVEY: "student_survey.confidentiality"}
 
 # The frontend canary keys. Two, because one of them is item 5's own subject and
@@ -1255,8 +1266,9 @@ def test_each_governed_surface_carries_exactly_one_confidentiality_line() -> Non
         keys = [string.key for string in counted.get(surface, [])]
         assert keys == [expected], (
             f"The {surface} surface's confidentiality copy is {keys} rather than {[expected]}. "
-            "Item 5 puts the survey's line in the submit bar, and that is the entry the submit bar "
-            "renders."
+            "That entry is the survey's confidentiality line wherever the screen renders it — "
+            "`SubmitBar` from E2-10, one placement per screen since E2-17 — and this module "
+            "counts the string rather than the rendering."
         )
 
 

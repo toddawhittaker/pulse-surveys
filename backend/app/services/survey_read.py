@@ -30,6 +30,22 @@ course, a term or another person. The two filters that carry the whole rule are:
   the mutation `test_a_classmates_submission_is_never_in_this_students_answer`
   is written against.
 
+**Widening this join is how another person's sections reach a student's page, and
+E2-17 widened it once — upward, out of the section, and no further.** The
+enrollment read now also carries the course a section belongs to and the prefix
+that course belongs to, so the heading can say "BIOL 215 — Cell Biology" instead
+of the bare §2.2 code `R3WW`. The rule that makes that safe is a property of the
+direction: both new joins hang off a row the enrollment predicate has already
+chosen (`section.course_id`, then `course.prefix_id`), each on a single-valued
+foreign key, so they add columns to rows the scoping selected and cannot add
+rows. A join written the other way — from `prefix` down, or to `course` without
+the section's own key — reaches every course under the prefix and every section
+under those courses, which is exactly SPEC §4.1 item 1's failure. The two
+enrollment filters below are untouched by that widening and must stay so:
+`test_the_course_label_names_nothing_outside_the_students_enrollment.py` seeds a
+course this reader is not in, with somebody else enrolled in it, and reads the
+answer for any string of it.
+
 **This is a person reading themself, which is why no view stands between it and
 the tables.** ADR 0001's identity separation constrains instructor and leadership
 reads: a view selects the columns a staff caller may see and structurally cannot
@@ -62,7 +78,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.models.identity import Enrollment
-from app.models.org import Section
+from app.models.org import Course, Prefix, Section
 from app.models.survey import Answer, Question, QuestionSet, Response
 from app.models.term import SurveyWindow, Term, Week
 from app.schemas.student import (
@@ -94,15 +110,25 @@ def survey_for_student(session: Session, *, user_id: UUID, settings: Settings) -
     """
     today = clock.today(session, settings=settings)
     sections = [
-        _section_view(session, section=section, term=term, user_id=user_id, settings=settings)
-        for section, term in _live_enrollments(session, user_id=user_id, today=today)
+        _section_view(
+            session,
+            section=section,
+            term=term,
+            course=course,
+            prefix=prefix,
+            user_id=user_id,
+            settings=settings,
+        )
+        for section, term, course, prefix in _live_enrollments(
+            session, user_id=user_id, today=today
+        )
     ]
     return StudentSurveyView(sections=sections)
 
 
 def _live_enrollments(
     session: Session, *, user_id: UUID, today: date
-) -> list[tuple[Section, Term]]:
+) -> list[tuple[Section, Term, Course, Prefix]]:
     """The sections this reader is enrolled in on `today`, each with its term.
 
     **`user_id` is the whole of the scoping**, and it is written here once and
@@ -123,15 +149,25 @@ def _live_enrollments(
     what makes "a section with no term" unrepresentable, so there is no row this
     quietly drops.
 
+    **The course and its prefix are joined the same way, and only upward** (E2-17
+    item 5). `section.course_id` and `course.prefix_id` are both `NOT NULL`
+    single-valued foreign keys, so each join follows one row to the one row above
+    it: they widen what is *known* about a section this reader is enrolled in and
+    cannot widen *which* sections come back. The direction is the whole of the
+    argument — see this module's docstring — and a reviewer's question about a
+    new join here is answered by asking which end it starts from.
+
     Ordered by section code so two reads of an unchanged database answer
     byte-identically; the code is unique within a term and the row's own key
     breaks any tie across terms.
     """
     return list(
         session.execute(
-            select(Section, Term)
+            select(Section, Term, Course, Prefix)
             .join(Enrollment, Enrollment.section_id == Section.id)
             .join(Term, Term.id == Section.term_id)
+            .join(Course, Course.id == Section.course_id)
+            .join(Prefix, Prefix.id == Course.prefix_id)
             .where(
                 Enrollment.user_id == user_id,
                 Enrollment.started_on <= today,
@@ -145,7 +181,14 @@ def _live_enrollments(
 
 
 def _section_view(
-    session: Session, *, section: Section, term: Term, user_id: UUID, settings: Settings
+    session: Session,
+    *,
+    section: Section,
+    term: Term,
+    course: Course,
+    prefix: Prefix,
+    user_id: UUID,
+    settings: Settings,
 ) -> EnrolledSection:
     """One enrolled section, with its open survey if there is one.
 
@@ -153,11 +196,19 @@ def _section_view(
     enrollment does not come and go with the window, and a student whose survey is
     shut is owed "there is nothing to answer this minute" rather than an answer
     that leaves out the course they are in.
+
+    The course and the prefix are the ones `_live_enrollments` read above *this
+    section*, handed down rather than looked up again: a second lookup here would
+    be a second place the pairing between a section and its course could go wrong,
+    and pairing a label with the wrong section is the mutation
+    `test_each_section_is_labelled_with_its_own_course_and_not_with_another`
+    exists for.
     """
     window = open_window_for_section(session, section, settings=settings)
     return EnrolledSection(
         section_id=section.id,
         section_code=section.lms_section_code,
+        course_label=_course_label(course=course, prefix=prefix),
         survey_is_open=window is not None,
         open_survey=(
             None
@@ -165,6 +216,24 @@ def _section_view(
             else _open_survey(session, window=window, section=section, term=term, user_id=user_id)
         ),
     )
+
+
+def _course_label(*, course: Course, prefix: Prefix) -> str:
+    """How a student's own course names itself on their page — E2-17 item 5.
+
+    "BIOL 215 — Cell Biology": the prefix code, the LMS number, an em dash, the
+    LMS title. The heading rendered a bare section code until this ticket, and a
+    §2.2 code names a section to the timetable rather than to the person answering
+    the survey.
+
+    All three parts are `NOT NULL` on their rows, so there is no absent-part case
+    to fall back from. `lms_title` is `NOT NULL` too and a platform may send a
+    context with no title, which E1-10 handles at ingestion by writing "PREFIX
+    NUMBER" and marking `title_is_fallback` — so the worst this composes is
+    "BIOL 215 — BIOL 215", which is the ingestion's stated fallback showing
+    through and not a hole here.
+    """
+    return f"{prefix.code} {course.lms_number} — {course.lms_title}"
 
 
 def _open_survey(

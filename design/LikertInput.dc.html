@@ -13,7 +13,7 @@
   <div role="radiogroup" aria-label="{{ question }}" style="display:flex;justify-content:space-between">
     <sc-for list="{{ dots }}" as="d" hint-placeholder-count="5">
       <button role="radio" aria-checked="{{ d.checked }}" aria-label="{{ d.aria }}" onClick="{{ d.pick }}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;padding:0;cursor:pointer;border-radius:50%">
-        <span style="width:26px;height:26px;border-radius:50%;box-sizing:border-box;border:1.5px solid {{ d.ring }};background:{{ d.fill }};transition:border-color 150ms ease;animation:{{ d.anim }}"></span>
+        <span style="width:26px;height:26px;border-radius:50%;box-sizing:border-box;border:2px solid {{ d.ring }};background:{{ d.fill }};transition:border-color 150ms ease;animation:{{ d.anim }}"></span>
       </button>
     </sc-for>
   </div>
@@ -36,7 +36,7 @@ class Component extends DCLogic {
         checked: n === value,
         aria: n + ' of 5',
         pick: () => onSelect(n),
-        ring: n === value ? 'var(--spruce)' : 'var(--mist)',
+        ring: n === value ? 'var(--spruce)' : 'var(--spruce-60)',
         fill: n === value ? 'var(--spruce)' : 'transparent',
         anim: n === value ? 'li-beat 180ms ease-out' : 'none'
       }))

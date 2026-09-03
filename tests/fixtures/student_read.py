@@ -75,7 +75,7 @@ development one, and every open/closed case in E2-09 moves that clock.
 import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from importlib import import_module
 from types import ModuleType
@@ -85,10 +85,19 @@ from uuid import UUID
 import pytest
 
 from fixtures.provisioning import INSTRUCTOR_ROLE_URN, LEARNER_ROLE_URN
-from fixtures.supervision import require_table, single_primary_key
+from fixtures.supervision import (
+    foreign_key_columns,
+    require_column,
+    require_table,
+    single_primary_key,
+)
 from fixtures.survey_windows import (
     COHORT_SECTION_MODALITY,
     COHORT_SECTION_ORDINAL,
+    SECTION_CODE_COLUMN,
+    SECTION_END_COLUMN,
+    SECTION_LENGTH_COLUMN,
+    SECTION_START_COLUMN,
     SECTION_TABLE,
     SEEDED_COHORTS,
     SURVEY_WINDOW_TABLE,
@@ -331,6 +340,67 @@ OTHER_SECTION_WORKLOAD = Decimal("21.5")
 # floor; anything shorter is found inside half the strings a correct JSON body
 # contains and would make a scan red against every implementation.
 SHORTEST_TELLING_VALUE = 4
+
+# ---------------------------------------------------------------------------
+# E2-17 item 5 — the course label the read answer gains.
+# ---------------------------------------------------------------------------
+
+# The two tables above `section` that the label is built out of, and the columns
+# they hold it in. `lms_number` and `lms_title` are E0-05's names, spelled the
+# same way `tests/fixtures/provisioning.py` and `test_demo_seed_script.py` spell
+# them; the prefix's own code is looked for among candidates rather than named,
+# the way `tests/fixtures/provisioning.py::PREFIX_CODE_COLUMNS` does, because no
+# ticket in E2 settles that column and a guess here would fail inside a fixture.
+COURSE_TABLE = "course"
+PREFIX_TABLE = "prefix"
+COURSE_NUMBER_COLUMN = "lms_number"
+COURSE_TITLE_COLUMN = "lms_title"
+PREFIX_CODE_COLUMNS = ("code", "prefix_code", "name")
+
+# The field E2-17 item 5 adds to the read answer, and the shape of what it
+# carries. **Both are the ticket's, transcribed once**: the work order settles
+# the member as `course_label` and the value as "<prefix code> <lms_number> —
+# <lms_title>", em dash and single spaces. Nothing here re-derives either from
+# the code that will produce it (`docs/MISTAKES.md` entry 19); a test module
+# builds its expectation out of the rows it seeded and this spelling.
+COURSE_LABEL_FIELD = "course_label"
+COURSE_LABEL_SEPARATOR = "—"
+
+
+def course_label(code: str, number: str, title: str) -> str:
+    """The label E2-17 item 5 settles, composed from one course's own three values."""
+    return f"{code} {number} {COURSE_LABEL_SEPARATOR} {title}"
+
+
+# A prefix, a course and a section of them that this student is **not** enrolled
+# in — the rows a widened join reaches and a correctly scoped read cannot.
+#
+# **The world's two sibling sections cannot serve for this.** `Fall2026` seeds
+# both of them under one containment chain on purpose, so they share a course and
+# therefore share a course label: an answer that named the *other* section's
+# course would carry exactly the string a correct answer carries, and a scan over
+# it would be silent (`docs/MISTAKES.md` entry 3). The course below is the one
+# whose label is nobody's but its own.
+#
+# **Every needle here is chosen so it cannot be found by accident.** `ZQXK` is
+# four upper-case letters, none of them a hexadecimal digit, so it cannot occur
+# inside a uuid the answer legitimately carries; the title is a sentence nothing
+# else in this project says. The number is three digits and is deliberately
+# *never* searched for on its own — `742` occurs inside uuids constantly — only
+# as part of the composed label.
+FOREIGN_PREFIX_CODE = "ZQXK"
+FOREIGN_COURSE_NUMBER = "742"
+FOREIGN_COURSE_TITLE = "E2-17 unenrolled course: no student read path may name this one"
+FOREIGN_SECTION_CODE = "K1WW"
+
+
+class ForeignCourse(NamedTuple):
+    """The prefix, course, section and window of a course the reader is not in."""
+
+    prefix: Any
+    course: Any
+    section: Any
+    window: Any
 
 
 class StudentReadContract(NamedTuple):
@@ -609,6 +679,85 @@ class StudentReadWorld:
         """The values this student's own stored submission would put on a page."""
         return {OWN_COMMENT, str(OWN_WORKLOAD)}
 
+    # -- the course above a section (E2-17 item 5) ---------------------------
+
+    def prefix_code_column(self) -> str:
+        """The column a prefix's code is stored in, discovered rather than guessed.
+
+        The same shape as `question_text_column` below and for the same reason: no
+        ticket in E2 spells this column, so a fixture that named one would fail
+        inside its own seeding on a schema it had guessed wrong. The candidates are
+        a constant in this module, so a deliberate rename is one line.
+        """
+        return require_column(require_table(self.tables, PREFIX_TABLE), PREFIX_CODE_COLUMNS)
+
+    def parent_row(self, child_table: str, parent_table: str, row: Any) -> Any:
+        """The `parent_table` row that `row` points at, followed through its foreign key.
+
+        Followed rather than assumed: `section.course_id` and `course.prefix_id`
+        are almost certainly spelled that way, and "almost certainly" is how a
+        fixture ends up reading `None` and answering that a course has no prefix
+        (`tests/fixtures/provisioning.py::ProvisionedRows.link` says the same).
+        """
+        columns = foreign_key_columns(require_table(self.tables, child_table), parent_table)
+        if len(columns) != 1:
+            pytest.fail(
+                f"`{child_table}` has {len(columns)} foreign keys into `{parent_table}` "
+                f"({columns}); this fixture needs exactly one to walk from a section up to the "
+                "course whose label E2-17 item 5 puts on the page."
+            )
+        table = require_table(self.tables, parent_table)
+        key = single_primary_key(table)
+        # The same rollback `stored_answer_values` takes, and for the same reason:
+        # this session has been idle across HTTP calls made on another connection,
+        # and a read taken inside a stale snapshot answers about a database that
+        # has moved.
+        self.rows.session.rollback()
+        found = (
+            self.rows.session.execute(table.select().where(table.c[key] == row[columns[0]]))
+            .mappings()
+            .one_or_none()
+        )
+        if found is None:
+            pytest.fail(
+                f"The `{child_table}` row names a `{parent_table}` "
+                f"({row[columns[0]]}) that is not in the table. The containment chain this world "
+                "seeds runs institution → college → department → prefix → course → section, so a "
+                "miss here means the row was seeded against a chain that no longer exists."
+            )
+        return found
+
+    def course_label_of(self, section: Any) -> str:
+        """E2-17 item 5's label for one section's own course, built from the seeded rows.
+
+        **The values come from the database and the spelling from the ticket.** An
+        expectation read out of the code that produces it agrees with an
+        implementation that got it wrong (`docs/MISTAKES.md` entry 19), and one
+        invented here would be this fixture choosing what the label says.
+        """
+        course = self.parent_row(SECTION_TABLE, COURSE_TABLE, section)
+        prefix = self.parent_row(COURSE_TABLE, PREFIX_TABLE, course)
+        return course_label(
+            prefix[self.prefix_code_column()],
+            course[COURSE_NUMBER_COLUMN],
+            course[COURSE_TITLE_COLUMN],
+        )
+
+    def anything_shaped_like_the_foreign_courses_label(self, foreign: ForeignCourse) -> set[str]:
+        """Every string that names a course this student is not enrolled in.
+
+        The composed label, the prefix code and the title — and **not** the course
+        number, which is three digits and occurs inside uuids the answer carries
+        legitimately. A needle that can be found inside a value it is meant to be
+        unlike is a red nobody can act on (this module's own note beside
+        `OWN_WORKLOAD`).
+        """
+        return {
+            self.course_label_of(foreign.section),
+            FOREIGN_PREFIX_CODE,
+            FOREIGN_COURSE_TITLE,
+        }
+
     # -- seeding -------------------------------------------------------------
 
     def build(self, *, subject: str) -> "StudentReadWorld":
@@ -654,6 +803,54 @@ class StudentReadWorld:
                 WINDOW_CLOSES_COLUMN: WINDOW_CLOSES_AT,
             },
         )
+
+    def seed_a_course_this_student_is_not_in(self) -> ForeignCourse:
+        """A prefix, a course, a section of them and a window over this world's week.
+
+        **Under this world's own term and under nothing else of it.** The term is
+        handed to the chain so the window's composite key holds; the prefix, the
+        course and everything above them are this call's own, so the section that
+        comes out shares no course with either of the two the world already has.
+        That is the whole point of it: `Fall2026` puts both sibling sections under
+        one course, so their *labels* are identical and neither can serve as a
+        needle for the other (E2-17 item 5).
+
+        The section's calendar is the enrolled cohort's, written out rather than
+        invented by the seeding walker. Not decoration: a test may enrol somebody
+        in this section, and a section whose `start_date` and `length_weeks` are a
+        fixture's arbitrary pair makes SPEC §2.2's course-week arithmetic answer
+        something nobody can read.
+
+        Committed, because the tool reads on its own connection.
+        """
+        chain: dict[str, Any] = {TERM_TABLE: self.term}
+        prefix = self.rows.seed(
+            PREFIX_TABLE, chain, **{self.prefix_code_column(): FOREIGN_PREFIX_CODE}
+        )
+        chain[PREFIX_TABLE] = prefix
+        course = self.rows.seed(
+            COURSE_TABLE,
+            chain,
+            **{
+                COURSE_NUMBER_COLUMN: FOREIGN_COURSE_NUMBER,
+                COURSE_TITLE_COLUMN: FOREIGN_COURSE_TITLE,
+            },
+        )
+        chain[COURSE_TABLE] = course
+        length_weeks, _first_term_week, start = SEEDED_COHORTS[ENROLLED_COHORT]
+        section = self.rows.seed(
+            SECTION_TABLE,
+            chain,
+            **{
+                SECTION_CODE_COLUMN: FOREIGN_SECTION_CODE,
+                SECTION_LENGTH_COLUMN: length_weeks,
+                SECTION_START_COLUMN: start,
+                SECTION_END_COLUMN: start + timedelta(days=length_weeks * 7 - 1),
+            },
+        )
+        window = self.seed_window(section)
+        self.rows.commit()
+        return ForeignCourse(prefix=prefix, course=course, section=section, window=window)
 
     def question_text_column(self) -> str:
         """The column a question's own wording is stored in, discovered not guessed."""

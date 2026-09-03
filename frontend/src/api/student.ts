@@ -22,6 +22,13 @@
  * carries one is exempt from the write path's double-submit check by
  * construction, because no cross-site page can make a browser attach it.
  *
+ * **A session that rides the cookie instead is not exempt, and until E2-17 this
+ * file had no answer for it**: `csrf_verified_student` requires `X-Pulse-CSRF`
+ * from a cookie carrier, nothing under `frontend/src` read `pulse_csrf`, and a
+ * cookie-borne student could therefore read the survey and never submit it. Every
+ * POST below carries the cookie's value when the cookie is readable — see
+ * `requestHeaders`.
+ *
  * **Every field below is the wire's spelling**, snake case included, because
  * these types describe `backend/app/schemas/student.py` and
  * `backend/app/schemas/survey.py` rather than a shape of this screen's choosing.
@@ -88,6 +95,15 @@ export interface OpenSurvey {
 export interface EnrolledSection {
   readonly section_id: string;
   readonly section_code: string;
+  /**
+   * The reader's own course, as a person names it: "BIOL 215 — Cell Biology".
+   *
+   * Composed on the server out of the prefix, number and title of the course
+   * above *this* section (`app.services.survey_read`), because §4.1 item 1 makes
+   * which course may be named a scoping question rather than a formatting one.
+   * The heading renders it beside the §2.2 section code.
+   */
+  readonly course_label: string;
   readonly survey_is_open: boolean;
   readonly open_survey: OpenSurvey | null;
 }
@@ -172,11 +188,52 @@ const CONFLICT_STATUS = 409;
 /** No student session on the request (`require_student`). */
 const UNAUTHORIZED_STATUS = 401;
 
-/** The headers every call here carries. */
-function requestHeaders(withBody: boolean): Record<string, string> {
+/**
+ * The cookie the double-submit token rides in, and the header it is echoed in.
+ *
+ * `csrf_verified_student` (`app.api.deps`) requires the header from any request
+ * whose session rides the cookie, and exempts the Bearer carrier — a Bearer
+ * header is not something a cross-site form can be tricked into sending, so
+ * there is nothing there for a double submit to protect. The cookie is
+ * deliberately not `HttpOnly` (ADR 0089) for exactly this reason: this page has
+ * to read it.
+ */
+const CSRF_COOKIE = 'pulse_csrf';
+const CSRF_HEADER = 'X-Pulse-CSRF';
+
+/** The headers one call here carries. */
+function requestHeaders(method: 'GET' | 'POST'): Record<string, string> {
   const headers: Record<string, string> = { Accept: 'application/json', ...authorizationHeader() };
-  if (withBody) headers['Content-Type'] = 'application/json';
+  if (method === 'GET') return headers;
+  headers['Content-Type'] = 'application/json';
+  // **Every POST, whenever the cookie is readable, and no POST when it is not.**
+  // A cookie-borne session could read this survey and never submit it before
+  // E2-17: the SPA never read `pulse_csrf` at all, so the one action the screen
+  // exists for arrived as a 403. Sending a value the cookie did not supply would
+  // be worse than sending nothing — a double submit the server cannot compare is
+  // a check that verifies nothing — and withholding the request itself would
+  // lock every student in the LMS iframe out, where the session rides Bearer and
+  // the browser refuses the tool's cookies anyway.
+  const token = readCookie(CSRF_COOKIE);
+  if (token !== null) headers[CSRF_HEADER] = token;
   return headers;
+}
+
+/**
+ * One cookie's value as this document can read it, or `null`.
+ *
+ * Written out rather than pattern-matched: a name is compared whole, so
+ * `pulse_csrf` is not answered by a cookie called `not_pulse_csrf`, and a value
+ * carrying `=` keeps everything after the first one.
+ */
+function readCookie(name: string): string | null {
+  for (const pair of document.cookie.split(';')) {
+    const at = pair.indexOf('=');
+    if (at < 0) continue;
+    if (pair.slice(0, at).trim() !== name) continue;
+    return decodeURIComponent(pair.slice(at + 1).trim());
+  }
+  return null;
 }
 
 /**
@@ -227,7 +284,7 @@ async function jsonBody(response: Response): Promise<unknown> {
 export async function readStudentSurvey(): Promise<SurveyRead> {
   let response: Response;
   try {
-    response = await fetch(SURVEY_PATH, { headers: requestHeaders(false) });
+    response = await fetch(SURVEY_PATH, { headers: requestHeaders('GET') });
   } catch {
     return { kind: 'unavailable' };
   }
@@ -258,7 +315,7 @@ export async function submitWeeklySurvey(
   try {
     response = await fetch(SUBMIT_PATH, {
       method: 'POST',
-      headers: requestHeaders(true),
+      headers: requestHeaders('POST'),
       body: JSON.stringify(submission),
     });
   } catch {

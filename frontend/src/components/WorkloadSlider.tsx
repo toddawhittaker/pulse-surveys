@@ -38,7 +38,18 @@ const ADJUSTMENT_KEYS = new Set([
  * and moving it includes pressing an adjustment key at an end where the value
  * does not change — otherwise a student who means zero hours could never say it
  * from the keyboard.
+ *
+ * **The track names the token it is drawn from** (`data-pulse-track-token`,
+ * E2-17 item 3). The track lives in a pseudo-element, which cannot carry an
+ * attribute, so it rides the input — the only node here that can hold one. It
+ * measured 1.30:1 against the card before this ticket, which is a design-fidelity
+ * fix rather than a WCAG failure: a track is not the control's boundary and the
+ * thumb, which is, reads at 12.45:1. The colour is `styles.css`'s; nothing here
+ * holds one.
  */
+
+/** The custom property the track is drawn from, published for the spec. */
+const TRACK_TOKEN = '--mist';
 export function WorkloadSlider({
   question,
   id,
@@ -90,6 +101,7 @@ export function WorkloadSlider({
         value={value ?? String(minimum)}
         aria-describedby={`${id}-hint`}
         aria-valuetext={readout}
+        data-pulse-track-token={TRACK_TOKEN}
         onChange={(event) => {
           onChange(format(Number(event.target.value), places));
         }}

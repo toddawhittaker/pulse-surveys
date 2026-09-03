@@ -11,8 +11,10 @@ of these strings is asserted where the refusal is served, in
 there.
 
 **§4.1 item 5 is not asserted here and that is deliberate.** "Confidentiality
-copy appears exactly once per surface (survey: in the submit bar)" is a statement
-about a rendered surface, and the survey form is E2-10's. What this ticket owes
+copy appears exactly once per surface (survey: once per screen, in the submit
+area)" is a statement about a rendered surface, and the survey form is E2-10's —
+the count on a screen carrying two open surveys is E2-17's
+`tests/e2e/student-survey-confidentiality.spec.ts`. What this ticket owes
 item 5 is that the shape exists for E2-11's inventory to count against, which is
 what `test_copy_modules_enumerates_the_packages_own_modules` is about.
 

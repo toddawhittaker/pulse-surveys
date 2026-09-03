@@ -252,10 +252,19 @@ test('a student answers all five questions, the slider by keyboard, and the week
   // submit bar to put it in.
   await expect(block.getByText(CONFIDENTIALITY, { exact: true })).toHaveCount(1);
 
-  // Nothing has been answered, so nothing can be sent. Asserted first, because
-  // an assertion that the button *enables* means nothing unless it was seen
-  // disabled (`docs/MISTAKES.md` entry 3).
-  await expect(block.getByTestId(SUBMIT)).toBeDisabled();
+  // Nothing has been answered, and the submit control is still there and still
+  // operable.
+  //
+  // **This assertion read `toBeDisabled()` until E2-17.** The button carried
+  // `disabled` until every non-comment question was answered, which took it out
+  // of the tab order entirely: a student using a screen reader tabbed to the end
+  // of the form, found nothing to activate, and was told nothing about why.
+  // E2-17 item 1 settles that it stays enabled and focusable always and refuses
+  // to *send* rather than refusing to exist. The half this line used to carry —
+  // that an incomplete week is not submitted — moved with the construction and is
+  // `student-survey-accessibility.spec.ts`'s, where the refused activation is
+  // driven and the request recorder shows nothing was sent.
+  await expect(block.getByTestId(SUBMIT)).toBeEnabled();
 
   // A rating of 2 on the first question makes the comment beside it required
   // (SPEC §3.2, "Required if Q1 ≤ 2"); a 4 on the second leaves its comment
@@ -300,10 +309,17 @@ test('a student answers all five questions, the slider by keyboard, and the week
   await expect(block.getByText('6.5 h', { exact: true })).toBeVisible();
   await expect(slider).toHaveAttribute('aria-valuetext', '6.5 h');
 
-  // Four of the five are answered now and the fifth is the required comment, so
-  // the conditional rule is the only thing holding the week back — which is what
-  // makes the pair of assertions around the next line say what they claim to.
-  await expect(block.getByTestId(SUBMIT)).toBeDisabled();
+  // Four of the five are answered now and the fifth is the required comment.
+  //
+  // **This pair read `toBeDisabled()` then `toBeEnabled()` until E2-17**, and it
+  // was the file's reading of the conditional-required rule: the button was the
+  // thing that told a student the low-rated comment was still owed. Under E2-17
+  // item 1 the button never disables, so the pair says nothing about the rule
+  // and the rule is asserted where it is now stated — `aria-required` and the
+  // "Needed to submit" flag above, both already in this test, and the refused
+  // activation in `student-survey-accessibility.spec.ts`. What is kept here is
+  // that the control does not change state around the answer at all.
+  await expect(block.getByTestId(SUBMIT)).toBeEnabled();
   await typeComment(block, 0, 'The Thursday lab walkthrough made the staining protocol click.');
   await expect(block.getByTestId(SUBMIT)).toBeEnabled();
 
@@ -399,7 +415,9 @@ test('a thin comment is coached where it was typed, the rest of the form survive
   // mean a student retyping all five questions because one sentence was thin.
   await expect(block.getByRole('textbox').nth(0)).toHaveValue(THIN_COMMENT);
   await expect(block.getByRole('radio', { name: '2', exact: true }).first()).toBeChecked();
-  await expect(block.getByRole('radio', { name: '5', exact: true }).nth(1)).toBeChecked();
+  // Anchored rather than exact, for `chooseRating`'s reason: E2-17 item 2 puts
+  // "Strongly agree" into the accessible name of every scale's 5.
+  await expect(block.getByRole('radio', { name: /^5\b/ }).nth(1)).toBeChecked();
   await expect(block.getByRole('slider')).toHaveValue('9');
 
   // The fix, and the week goes in. The field goes back to the state its rating
@@ -644,10 +662,21 @@ function clearTheWeek(): void {
   );
 }
 
-/** Choose a point on the nth Likert scale in this block. */
+/**
+ * Choose a point on the nth Likert scale in this block.
+ *
+ * **The name is anchored on the digit rather than matched exactly**, and that is
+ * E2-17 item 2 reaching back into this helper: the 1 and 5 radios grow their end
+ * words into their accessible names ("1 — Strongly disagree"), so `{ name: '5',
+ * exact: true }` stops matching the radio it used to. The anchored pattern
+ * matches the old spelling and the new one alike, which is what lets this file
+ * stay green either side of that change (`docs/MISTAKES.md` entry 22: a later
+ * ticket's rule makes an earlier ticket's tests unrunnable, and the repair is on
+ * the test side).
+ */
 async function chooseRating(block: Locator, scale: number, point: string): Promise<void> {
   await block
-    .getByRole('radio', { name: point, exact: true })
+    .getByRole('radio', { name: new RegExp(`^${point}\\b`) })
     .nth(scale)
     .check();
 }
