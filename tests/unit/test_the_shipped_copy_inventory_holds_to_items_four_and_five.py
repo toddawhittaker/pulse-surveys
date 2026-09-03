@@ -73,10 +73,15 @@ render a screen.
     refactor did not change them. They are not in this inventory and are not
     drift.
 
-That module's `FORBIDDEN_COMPARISONS` sweep overlaps this one and stays where it
-is: it is E2-08's criterion 4 over the registry, this is E2-11's items 4 and 5
-over everything that ships, and two tickets' criteria holding each other up is
-redundancy rather than duplication.
+That module's `FORBIDDEN_COMPARISONS` sweep overlaps this one and stays: it is
+E2-08's criterion 4 over the registry, this is E2-11's items 4 and 5 over
+everything that ships, and two tickets' criteria holding each other up is
+redundancy rather than duplication. Since E2-14 it stays *in two files* — the
+vocabulary, the reader and the sweep's control are still in
+`test_the_submit_paths_copy_is_externalised.py`, and the marked §4.1 assertion
+that reads them is `test_the_shipped_copy_names_nothing_a_student_may_not_see.py`,
+which was extracted so that its `invariant` marker sits at module level where the
+denial-module sweep demands it. Nothing about what is swept changed.
 """
 
 from __future__ import annotations

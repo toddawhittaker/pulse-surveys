@@ -26,6 +26,18 @@ before it is run against what ships.
 **Nothing here reads a database or builds an application.** The registry is a
 package of constants; a module that needed `Settings` to state a sentence would
 be a defect worth its own failure.
+
+**One of the two vocabulary sweeps now lives next door.** The §4.1 item 1 one —
+`test_no_shipped_copy_string_shows_a_student_a_comparison` — is a confidentiality
+denial and held its `invariant` marker per test, which is the currency
+`test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`
+refuses. E2-14 moved it unchanged to
+`test_the_shipped_copy_names_nothing_a_student_may_not_see.py`, whose stem
+carries a denial shape so that sweep governs it. Its control stayed here, because
+that control is deliberately unmarked and a module-level marker would have
+enrolled it in the pass; `FORBIDDEN_COMPARISONS`, `forbidden_in` and
+`every_entry` also stay here and are imported from there, so there is one
+vocabulary rather than two. The shame-state sweep is untouched.
 """
 
 import importlib
@@ -435,11 +447,19 @@ def test_the_bounce_copy_is_not_a_shame_state(verdict: str) -> None:
 
 
 def test_the_comparison_sweep_sees_a_comparing_sentence_and_leaves_a_permitted_one() -> None:
-    """The control on the invariant below (`docs/MISTAKES.md` entry 3).
+    """The control on the invariant next door (`docs/MISTAKES.md` entry 3).
+
+    The invariant this controls is
+    `test_the_shipped_copy_names_nothing_a_student_may_not_see.py::test_no_shipped_copy_string_shows_a_student_a_comparison`,
+    which stood below this test until E2-14 moved it into a module whose name
+    carries a denial shape; that module's docstring records the direction and
+    why. It reads `FORBIDDEN_COMPARISONS` and `forbidden_in` from here, so this
+    control is still the control on exactly the instrument that sweep uses.
 
     **A red here means this module is broken, not that the copy is.** It is not
-    marked `invariant`: it asserts nothing about what ships, and CI's isolated
-    §4.1 pass should fail on the rule rather than on its instrument.
+    marked `invariant`, and that is why it stayed: it asserts nothing about what
+    ships, and CI's isolated §4.1 pass should fail on the rule rather than on its
+    instrument.
     """
     assert forbidden_in(A_COMPARING_SENTENCE, FORBIDDEN_COMPARISONS), (
         f"The sweep found nothing in {A_COMPARING_SENTENCE!r}, which names a university average "
@@ -453,33 +473,11 @@ def test_the_comparison_sweep_sees_a_comparing_sentence_and_leaves_a_permitted_o
     )
 
 
-@pytest.mark.invariant
-def test_no_shipped_copy_string_shows_a_student_a_comparison() -> None:
-    """SPEC §4.1 item 1, asserted from E2 as that item says it is.
-
-    > Students never see comparables, benchmarks, university averages, or other
-    > sections — in charts, text, tooltips, exports, or aria labels. *(Asserted
-    > from **E2**, the first epic with a student-visible path ...)*
-
-    Every string in the registry is swept, not only this ticket's, because the
-    package is the shape E2-09 and E2-10 add to and the rule is about what a
-    student reads rather than about which ticket wrote it. Item 4's ranking
-    vocabulary is swept with it, for the same reason: it forbids the same family
-    of sentence.
-
-    **The mutation it kills:** a helpful sentence added to a bounce — "most
-    students in your section wrote more" — which is a comparison reaching a
-    student through copy rather than through a chart, and which no chart test
-    would ever see. **What makes it non-vacuous:** the sweep's own control above,
-    and the assertion that the registry is not empty in `every_entry`.
-    """
-    offending = {
-        key: (text, forbidden_in(text, FORBIDDEN_COMPARISONS))
-        for key, text in ((key, str(entry.text)) for key, entry in every_entry().items())
-        if forbidden_in(text, FORBIDDEN_COMPARISONS)
-    }
-    assert not offending, (
-        f"These shipped strings show a student a comparison: {offending}. SPEC §4.1 item 1 is a "
-        "hard visibility invariant, and copy is a surface exactly as a chart is — the item names "
-        "'charts, text, tooltips, exports, or aria labels'."
-    )
+# The §4.1 item 1 sweep this control exists for is
+# `test_the_shipped_copy_names_nothing_a_student_may_not_see.py`, from E2-14. It
+# stood here, holding `@pytest.mark.invariant` on the test rather than on the
+# module, which is the currency
+# `test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`
+# refuses; it moved unchanged into a module whose name carries a denial shape, so
+# that the sweep governs it and its next denial test inherits the marker. The
+# vocabulary and the reader stay here and are imported from there.

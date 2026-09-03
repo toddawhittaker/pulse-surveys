@@ -88,27 +88,27 @@ batch (`E2-14-invariant-pass-coverage.md`,
   was refuted — one integration test about the outage floor kills it,
   incidentally, because it happens to submit as a second student first. The
   real finding stands: the clobber is invisible to the §4.1 pass and caught
-  only by accident. → **E2-14 item 1.**
+  only by accident. → **E2-14 item 1, built in PR #154.**
 - **HIGH, confirmed** — `leadership_grant_covers` (`authz.py:800`, ADR
   0108, the M9 fix and §4.1 item 2's live enforcement point) answering
   `True` unconditionally survives the entire isolated pass; its only
   behavioural cover is one integration module with no `invariant` mark.
-  → **E2-14 item 2.**
+  → **E2-14 item 2, built in PR #154.**
 - **MEDIUM, confirmed and sharpened** — the item 1 route inventory is a
   filter over the `require_student` dependency; a handler calling
   `session_from_request` directly is invisible to it, and the route walk
   does not descend a `Mount` — which is live today (`main.py:324` mounts
   the single-page application). Today the direct call exists only in
-  `api/deps.py`. → **E2-14 item 5.**
+  `api/deps.py`. → **E2-14 item 5, built in PR #154 — and its security review widened the sweep to the whole app package.**
 - **MEDIUM, confirmed with character clarified** — two live §4.1 denial
   tests hold their `invariant` marker per test, the currency the
   denial-module sweep refuses, escaping only by filename. Both ARE
   collected into the pass today; this is currency inconsistency, not lost
-  coverage. → **E2-14 item 3.**
+  coverage. → **E2-14 item 3, built in PR #154.**
 - **MEDIUM, confirmed** — `test_dev_clock_control_exposure.py`, the sole
   gate on the environment exposure of the clock-writing routes, carries no
   `invariant` marker while both sibling exposure modules do. → **E2-14
-  item 4.**
+  item 4, built in PR #154.**
 - **MEDIUM, recorded as plausible** — the rendered student surface's
   aria/label strings rest on a convention (everything resolves through the
   copy registry) that holds today — the reviewer walked every component and

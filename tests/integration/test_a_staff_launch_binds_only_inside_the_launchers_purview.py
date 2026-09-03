@@ -50,13 +50,27 @@ test that only read the tables could not tell a launch that refused to bind from
 launch that was refused outright, and those are opposite outcomes for the person
 holding the browser.
 
-**Deliberately not marked `invariant`.** The §4.1 pass is CI's isolated run of the
-confidentiality *denials*, and the E1 boundary review recorded this finding's character
-in as many words: "write/ingest integrity, not a read leak — the roster is never
-disclosed to the trigger, and the INSTRUCTOR row goes to the section's real teacher".
-What these tests assert is that a row is not written and an address is not stored, which
-is neither a read path nor a disclosure. Marking them would widen what that pass means
-on the strength of a resemblance.
+**Marked `invariant` from E2-14, and this paragraph used to say the opposite.** As
+written for E2-02 it read that marking these tests would widen what the §4.1 pass means
+"on the strength of a resemblance": the pass is CI's isolated run of the confidentiality
+*denials*, and the E1 boundary review had recorded this finding's character as
+"write/ingest integrity, not a read leak — the roster is never disclosed to the trigger,
+and the INSTRUCTOR row goes to the section's real teacher". That argument was about the
+*finding*. It is not the argument for the rule these tests turned out to be the only
+behavioural cover of.
+
+What changed is a measurement. The E2 boundary review mutated
+`app.services.authz.leadership_grant_covers` to answer `True` unconditionally and found
+it **surviving the entire isolated pass** (`docs/tickets/e2/boundary-review.md`, HIGH,
+confirmed), with this module — unmarked — the only thing that killed it. That predicate
+is the live enforcement point of SPEC §4.1 invariant 2, "A Lead Faculty assignment never
+grants sibling leads' courses, at any point in the purview union", and the lead-faculty
+test below is that invariant driven end to end through a real launch. So the marker
+rests on the item these tests enforce rather than on a resemblance to a denial, which is
+the distinction the old paragraph was drawing and the reason it is restated rather than
+deleted. The predicate is now asserted directly as well, in
+`test_the_leadership_grant_covers_no_sibling_leads_course.py`; both are in the pass,
+because a launch-driving test and a unit-grain one fail for different reasons.
 
 **Nothing about the mock's seed is transcribed.** The context label, the course number,
 the section code and the roster address are read off the launch the platform signed, and
@@ -79,7 +93,7 @@ from typing import Any
 
 import pytest
 
-pytestmark = [pytest.mark.integration, pytest.mark.lti]
+pytestmark = [pytest.mark.integration, pytest.mark.lti, pytest.mark.invariant]
 
 # `launch_driver`, `launch_ground`, `provisioning_contract` and `provisioned_rows` come
 # from `tests/fixtures/provisioning.py`; `web_identity` from
@@ -530,6 +544,18 @@ def test_a_leads_launch_into_a_sibling_leads_course_binds_nothing_and_is_recorde
     is that the door did not *refuse* the launch, which is the half E1-10's "a
     provisioning refusal never fails the launch" is about. The dean pair above asserts
     the stronger `landed` for the same reason it can: §2.1's table opens that door.
+
+    **The assignment is read back out of the database before the launch**, and E2-14 is
+    the occasion rather than the reason. The reason is the test's own premise: the actor
+    is "a Lead Faculty enrolled as a Learner in a sibling lead's course", so a launcher
+    who ended up holding *no* assignment is a stranger, and every refusal below would be
+    the refusal of a launch by a person with no leadership row at all — a different test,
+    passing for a different reason (`docs/MISTAKES.md` entry 3). The occasion is that
+    this module now carries the `invariant` marker, and
+    `scripts/ci/check_invariant_assertions.py` refuses a marked test whose own body
+    asserts nothing: it does not chase a helper, by design, "the refusal is loud and the
+    fix is one line". Written as an equality rather than a membership, because "their
+    only leadership assignment" is what the grain argument above rests on.
     """
     offer = launch_driver.offer_for_role(provisioning_contract.learner_role_urn)
     claims = launch_driver.claims_of(offer)
@@ -537,8 +563,18 @@ def test_a_leads_launch_into_a_sibling_leads_course_binds_nothing_and_is_recorde
     ground = launch_ground(label)
 
     person_id = a_linked_person(web_identity, launch_driver, claims[SUBJECT_CLAIM])
-    committed_rows.graph.assign(LEAD_FACULTY, person=person_id, reports_to=None)
+    graph = committed_rows.graph
+    lead = graph.assign(LEAD_FACULTY, person=person_id, reports_to=None)
     committed_rows.commit()
+
+    assert graph.assignments_of(person_id) == [lead[graph.assignment_key]], (
+        f"This launcher holds the assignments {graph.assignments_of(person_id)} and this test "
+        f"wrote one {LEAD_FACULTY} assignment, {lead[graph.assignment_key]!r}. None means the "
+        "launcher is a stranger and every refusal below is about a person with no leadership row "
+        "— which §7.3's leadership limb never admitted in the first place. More than one means "
+        "the launcher holds a hat this test did not write, so a refusal is not attributable to "
+        "the lead-faculty grain."
+    )
 
     response, signed = launch_driver.launch(offer)
 
@@ -591,6 +627,16 @@ def test_a_launch_by_an_assistant_dean_alone_binds_nothing_and_is_recorded(
     until somebody whose records reach it launches — the real instructor's next launch
     does exactly that through the claim limb, which the pair below keeps open. It is
     fail-closed, and E9 is where the graph makes it pass.
+
+    **"Whose only leadership assignment is `ASSISTANT_DEAN`" is read back out of the
+    database rather than asserted by the fixture that wrote it.** That sentence is this
+    test's whole subject: one assignment, of that role, and nothing beside it. A launcher
+    holding none is a stranger and a launcher holding two is a different case — §2.1 says
+    two hats compose — and either would make the refusal below evidence about something
+    else (`docs/MISTAKES.md` entry 3). The occasion for putting it in the body is E2-14
+    marking this module `invariant`:
+    `scripts/ci/check_invariant_assertions.py` refuses a marked test whose own body
+    asserts nothing and does not chase a helper, by design.
     """
     offer = launch_driver.offer_for_role(provisioning_contract.learner_role_urn)
     claims = launch_driver.claims_of(offer)
@@ -598,10 +644,21 @@ def test_a_launch_by_an_assistant_dean_alone_binds_nothing_and_is_recorded(
     ground = launch_ground(label)
 
     person_id = a_linked_person(web_identity, launch_driver, claims[SUBJECT_CLAIM])
-    committed_rows.graph.assign(
+    graph = committed_rows.graph
+    assistant_dean = graph.assign(
         ASSISTANT_DEAN, scope=ground.college_id, person=person_id, reports_to=None
     )
     committed_rows.commit()
+
+    assert graph.assignments_of(person_id) == [assistant_dean[graph.assignment_key]], (
+        f"This launcher holds the assignments {graph.assignments_of(person_id)} and this test "
+        f"wrote one {ASSISTANT_DEAN} assignment, {assistant_dean[graph.assignment_key]!r}, scoped "
+        f"over the college that contains the launched prefix ({ground.college_id!r}). None means "
+        "the launcher holds no leadership row at all, and the refusal below would be about a "
+        "person §7.3's leadership limb never admitted. More than one means a second hat this test "
+        "did not write, and §2.1 composes hats — so the refusal would no longer be the assistant "
+        "deanship's consequence."
+    )
 
     response, signed = launch_driver.launch(offer)
 
