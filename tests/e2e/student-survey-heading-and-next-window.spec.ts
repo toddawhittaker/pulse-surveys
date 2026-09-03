@@ -498,7 +498,6 @@ test('a closed section with no window ahead of it keeps the plain sentence', asy
   const filter =
     `section_id in (select id from section where lms_section_code = ${quoted(BIOLOGY.code)}) ` +
     `and opens_at > timestamptz ${quoted(AFTER_A_WINDOW_AS_SQL)}`;
-  let removed = 0;
   try {
     await setTheClockTo(page, AFTER_A_WINDOW);
     const block = await landOnTheSurvey(page, placement, BIOLOGY.code);
@@ -509,7 +508,7 @@ test('a closed section with no window ahead of it keeps the plain sentence', asy
         'in the first place would satisfy all of them.',
     ).toHaveCount(1);
 
-    removed = Number(databaseStatement(`select count(*) from survey_window where ${filter};`));
+    const removed = Number(databaseStatement(`select count(*) from survey_window where ${filter};`));
     expect(
       removed,
       `No \`survey_window\` row for ${BIOLOGY.code} opens after ${AFTER_A_WINDOW_AS_SQL}, so the ` +
