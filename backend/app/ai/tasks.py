@@ -24,10 +24,12 @@ Everything else the gateway raises propagates: a rejected credential is not an
 outage, and absorbing one would classify every comment by length for as long as
 the credential stayed wrong, with nothing saying so.
 
-**This fail-open is the only one in this codebase.** `CLAUDE.md` says so and says
-why it may not be generalised from: §3.3 sanctions it for the validity check
-alone, and §6.2's moderation path — the one that routes a threat or a self-harm
-disclosure to the Care queue — has none.
+**This fail-open is the only one in this codebase, and the spec is what says
+why it may not be generalised from**: SPEC §3.3 sanctions it for the validity
+check alone, and §6.2's moderation path — the one that routes a threat or a
+self-harm disclosure to the Care queue — has none. (An earlier version of this
+paragraph attributed the rule to `CLAUDE.md`, which never carried it; the E2
+boundary review corrected the citation.)
 
 **Every classification row is written here.** One function, `record_classification`,
 so that "what gets stored when a model answers" is a question with one place to
