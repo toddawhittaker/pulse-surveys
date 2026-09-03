@@ -57,6 +57,7 @@ both are E11's, ruled at the E2 breakdown on 2026-08-31.
 """
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from uuid import UUID
@@ -109,6 +110,58 @@ class DerivedWindow:
     closes_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class _Calendars:
+    """Everything a derivation reads, for a whole set of sections, read once.
+
+    Three mappings and three statements, whatever the number of sections. Before
+    E2-16 each section read its own term, that term's weeks and its own windows —
+    5N+1 round trips over the walk, 2,501 an hour at 500 sections, most of them
+    fetching the same term's eighteen week rows again. The reads do not depend on
+    each other and none of them depends on what an earlier section wrote, so they
+    are made up front and the writes stay where they were.
+
+    **Plain values rather than ORM rows, deliberately.** A `Term` or a `Week`
+    instance held across the loop is one the session may expire — a savepoint's
+    rollback does exactly that — and the next attribute read would then be a lazy
+    refresh, which is a per-section read the walk cannot see and this class exists
+    to remove. A `date` and a `UUID` cannot go stale.
+    """
+
+    # A term's start date, which is the anchor every window is measured from.
+    term_starts: dict[UUID, date]
+    # A term's week rows by their number within the term (SPEC §2.2's term axis).
+    week_ids: dict[UUID, dict[int, UUID]]
+    # The weeks each section already has a window for, so a second pass skips them.
+    written_week_ids: dict[UUID, set[UUID]]
+
+
+def _read_calendars(session: Session, sections: Sequence[Section]) -> _Calendars:
+    """The three reads the whole walk needs, made once for every section in it."""
+    term_ids = {section.term_id for section in sections}
+    section_ids = {section.id for section in sections}
+
+    term_starts: dict[UUID, date] = dict(
+        session.execute(select(Term.id, Term.start_date).where(Term.id.in_(term_ids)))
+        .tuples()
+        .all()
+    )
+    week_ids: dict[UUID, dict[int, UUID]] = {term_id: {} for term_id in term_ids}
+    for term_id, number, week_id in session.execute(
+        select(Week.term_id, Week.number, Week.id).where(Week.term_id.in_(term_ids))
+    ):
+        week_ids[term_id][number] = week_id
+    written_week_ids: dict[UUID, set[UUID]] = {section_id: set() for section_id in section_ids}
+    for section_id, week_id in session.execute(
+        select(SurveyWindow.section_id, SurveyWindow.week_id).where(
+            SurveyWindow.section_id.in_(section_ids)
+        )
+    ):
+        written_week_ids[section_id].add(week_id)
+
+    return _Calendars(term_starts=term_starts, week_ids=week_ids, written_week_ids=written_week_ids)
+
+
 def windows_for_section(
     session: Session, section: Section, *, settings: Settings
 ) -> list[DerivedWindow]:
@@ -133,9 +186,19 @@ def windows_for_section(
     the same section.
     """
     term = _term_of(session, section)
+    return _windows_from(section, term.start_date, settings=settings)
+
+
+def _windows_from(section: Section, term_start: date, *, settings: Settings) -> list[DerivedWindow]:
+    """The arithmetic alone: a section's course weeks against its term's anchor.
+
+    Split out of `windows_for_section` so that the batched walk can derive from a
+    start date it has already read, and so that there is still exactly one copy of
+    the arithmetic for both entry points to share.
+    """
     zone = ZoneInfo(settings.institution_timezone)
     return [
-        _window_for_course_week(section, term, course_week, zone=zone)
+        _window_for_course_week(section, term_start, course_week, zone=zone)
         for course_week in range(1, section.length_weeks + 1)
     ]
 
@@ -148,6 +211,25 @@ def derive_windows_for_section(
     **The one writer of `survey_window`** (ADR 0021, criterion 4). Nothing else in
     `backend/app/` sets these columns, and `tests/unit/
     test_survey_windows_have_one_assignment_site.py` is the sweep that says so.
+
+    One section's reads, then one section's writes. The walk below makes the same
+    reads once for every section it visits and then calls the same writer, so the
+    two paths cannot derive different calendars —
+    `tests/integration/test_window_derivation_batches_its_reads.py` compares them
+    over nine cohorts to say so.
+
+    The caller owns the transaction. This flushes what it added so that a second
+    call in the same transaction sees the rows the first one wrote.
+    """
+    return _write_windows_for_section(
+        session, section, _read_calendars(session, [section]), settings=settings
+    )
+
+
+def _write_windows_for_section(
+    session: Session, section: Section, calendars: _Calendars, *, settings: Settings
+) -> list[SurveyWindow]:
+    """Write one section's missing windows out of calendars already read.
 
     **Idempotent by skipping, never by rewriting.** A `(section_id, week_id)` that
     already has a row is left exactly as it is — instants included — because this
@@ -166,22 +248,25 @@ def derive_windows_for_section(
     course week and the term week, because it is read in a log aggregator long
     after the fact and a line naming none of them cannot be acted on.
 
-    The caller owns the transaction. This flushes what it added so that a second
-    call in the same transaction sees the rows the first one wrote.
+    **A section whose term is not in the calendars is refused rather than
+    skipped**, with the same `UnknownTermError` the per-section read raised before:
+    the batch reads the terms the sections name, so a term missing from it is a
+    section naming one that is not in the database.
     """
-    derived = windows_for_section(session, section, settings=settings)
-    weeks = {
-        week.number: week
-        for week in session.scalars(select(Week).where(Week.term_id == section.term_id))
-    }
-    already_written = set(
-        session.scalars(select(SurveyWindow.week_id).where(SurveyWindow.section_id == section.id))
-    )
+    term_start = calendars.term_starts.get(section.term_id)
+    if term_start is None:
+        raise UnknownTermError(
+            f"Section {section.lms_section_code!r} names the term {section.term_id!r}, which this "
+            "session cannot load. A section's survey windows are derived from its term's calendar "
+            "(SPEC §2.2, §3.1), so there is nothing to derive them from."
+        )
+    weeks = calendars.week_ids.get(section.term_id, {})
+    already_written = calendars.written_week_ids.get(section.id, set())
 
     written: list[SurveyWindow] = []
-    for window in derived:
-        week = weeks.get(window.term_week)
-        if week is None:
+    for window in _windows_from(section, term_start, settings=settings):
+        week_id = weeks.get(window.term_week)
+        if week_id is None:
             logger.warning(
                 "section %s (%s) has no survey window for course week %d: its term has no week "
                 "row numbered %d, so the term is short of the weeks its length claims "
@@ -192,11 +277,11 @@ def derive_windows_for_section(
                 window.term_week,
             )
             continue
-        if week.id in already_written:
+        if week_id in already_written:
             continue
         row = SurveyWindow(
             section_id=section.id,
-            week_id=week.id,
+            week_id=week_id,
             term_id=section.term_id,
             opens_at=window.opens_at,
             closes_at=window.closes_at,
@@ -219,6 +304,14 @@ def derive_windows_for_all_sections(session: Session, *, settings: Settings) -> 
     those flows; ADR 0111 records that choice and the staleness of up to an hour it
     accepts.
 
+    **The reads are made once for the whole walk and the writes stay per section**
+    (E2-16 item 5). The reads were measured at three per section — the term, that
+    term's weeks and that section's existing windows — which is 1,500 statements an
+    hour at 500 sections, nearly all of them fetching one term's rows again;
+    `_read_calendars` makes the same three for every section at once. The writes
+    are deliberately left alone, because the containment below is what the walk is
+    for.
+
     **One section's failure does not end the hour**, the shape
     `app.services.roster_sync.sync_all_rosters` already takes: each section runs
     inside a savepoint, a failure rolls back that section's own partial work and is
@@ -231,10 +324,11 @@ def derive_windows_for_all_sections(session: Session, *, settings: Settings) -> 
     """
     sections = list(session.scalars(select(Section)))
     logger.info("the survey-window reconciler found %d section(s)", len(sections))
+    calendars = _read_calendars(session, sections)
     for section in sections:
         savepoint = session.begin_nested()
         try:
-            derive_windows_for_section(session, section, settings=settings)
+            _write_windows_for_section(session, section, calendars, settings=settings)
             savepoint.commit()
         except Exception:
             savepoint.rollback()
@@ -346,11 +440,11 @@ def _reading_instant(session: Session, at: datetime | None, *, settings: Setting
 
 
 def _window_for_course_week(
-    section: Section, term: Term, course_week: int, *, zone: ZoneInfo
+    section: Section, term_start: date, course_week: int, *, zone: ZoneInfo
 ) -> DerivedWindow:
     """One course week's window: the term week it falls in, and its two instants.
 
-    The term week's Monday is `term.start_date + (term_week - 1) * 7` — the term's
+    The term week's Monday is `term_start + (term_week - 1) * 7` — the term's
     start date is the calendar's anchor, and §2.2 puts every start letter on a
     term-week Monday, so a course week's Friday is that Monday's Friday and not a
     count of seven-day periods from the section's own start date. The two agree
@@ -358,9 +452,9 @@ def _window_for_course_week(
     derivation is written from the term's Monday rather than from the section's.
     """
     term_week = week_of_the_term(
-        course_week, section_start=section.start_date, term_start=term.start_date
+        course_week, section_start=section.start_date, term_start=term_start
     )
-    monday = term.start_date + timedelta(days=(term_week - 1) * DAYS_PER_WEEK)
+    monday = term_start + timedelta(days=(term_week - 1) * DAYS_PER_WEEK)
     return DerivedWindow(
         course_week=course_week,
         term_week=term_week,
