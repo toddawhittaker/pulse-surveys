@@ -195,7 +195,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 5** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
+**Caught: 6** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
 
 **Rule.** When a guard enumerates mechanisms, require it to *find* each one on a
 subject that certainly has it, as a control. A guard that only ever reports
@@ -366,3 +366,14 @@ defaults on a request path turn a dependency that is *down* into a request that 
 *hanging*. And the corollary: a change that adds a call to a shared entry point is
 not verified by the suites of the ticket that made it — run the whole suite, and
 read its timing as well as its result.
+
+## 42. A CI verdict was read off a stale check summary between two pushes
+
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/42-a-ci-verdict-was-read-off-a-stale-summary.md)
+
+**Rule.** The only CI verdict that exists is a **completed** run whose head SHA
+equals the final commit. A pull request's check rollup queried between two
+pushes can answer for the superseded run — an empty failure list is not a green.
+Before reporting green or marking anything ready, resolve the run by id, assert
+`status == completed`, and assert its `headSha` equals the commit being vouched
+for; a watch command's clean exit proves only that some run finished.

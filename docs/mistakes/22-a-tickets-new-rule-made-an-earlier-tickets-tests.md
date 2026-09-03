@@ -4,9 +4,45 @@
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*10 instances recorded; the 5 most recent are below, newest first — except the
+*11 instances recorded; the 6 most recent are below, newest first — except the
 E0-18 PR 2 one, which sits further down beside the consequence it illustrates.
-The 5 earliest are in this file's git history and in the pull requests they cite.*
+The 5 earliest are in this file's git history and in the pull requests they cite.
+It carries six rather than five because the newest and the E2-05 one are the same
+inventory in the same module a ticket apart, and reading either without the other
+loses what the pair shows; a trim is due and it should take a pair, not a
+paragraph.*
+
+*(**2026-09-03, E2-16 (`e2/data-model-repairs`), disputes E2-16-01 and
+E2-16-02.** The ticket gives `response` the term-agreement rule `survey_window`
+has had since E2-05: a `term_id` on the row, held by composite foreign keys into
+`section (id, term_id)` and `week (id, term_id)`. It reddened two classes of
+test the implementer may not touch. The first is the closed inventory in
+`test_identity_column_marker.py` expiring on the new column — this entry's
+E2-05 instance replayed, and the pin working exactly as built: the repair is a
+human re-reading the reason and re-pinning the columns. The second is eighteen
+tests across three seeding sites, red **inside their own setup**: each writes a
+`response` naming a section and a week explicitly while handing `seed_row` an
+empty chain, so the walker — which fills an unnamed NOT NULL foreign key from
+the chain and builds the target when the chain has none — invented a section in
+a fresh term and took that term, and the composite key refused a row whose
+section and week were somebody else's. Fourteen of the eighteen were one
+fixture. **Not counted as a catch**: nothing swept for them before the schema
+changed, and both classes arrived as a red runner and a dispute round. The sweep
+that would have found them is this entry's own and is one line — the callers that
+write the table the new rule constrains, read for which of them name only part of
+the key.
+
+**What this instance adds is the half the sweep would still have missed.** Of the
+four seeding calls in `test_survey_schema.py`, three went red and the fourth went
+**green** — the duplicate insert, whose test asks only "was this refused?" through
+a helper that accepts any `DatabaseError`. With the term left to the walker it was
+refused by the composite foreign key rather than by
+`uq_response_user_id_section_id_week_id`, so the test would have gone on passing
+while measuring a different constraint entirely (`docs/MISTAKES.md` entry 3, and
+it was found by reading the file rather than by the run). So: **when a new write
+rule reddens setup, look at the tests around it that stayed green.** A test that
+asserts a refusal cannot tell one refusal from another, and a new constraint is a
+new way for it to pass.)*
 
 *(**2026-09-02, E2-12 (`e2/eval-floors`).** The ticket's configuration split
 strikes the spelling `AI_MODEL_NAME` and gives the mock endpoint a triple of its

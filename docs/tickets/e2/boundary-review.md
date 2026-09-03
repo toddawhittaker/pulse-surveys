@@ -176,3 +176,98 @@ gateway read for comment text (none carried any); all seventeen
 `carried-from-e2.md`; all twenty-three `carried-from-e1.md` headings traced
 to a closure or a re-listing; CLAUDE.md checked against its own
 process-only rule.
+
+## Second round — the four always-run agents, after the final batch merged
+
+Run 2026-09-03 against the epic branch at c2a83f1 (E2-14 and E2-15 merged),
+per the roster's always-run rule: a11y-copy, data-model, lti-oidc and
+prompt-eval, each in a fresh context that had watched none of the epic's
+builds. Every finding went through an adversarial verification pass — a
+second, independent context tasked with refuting it, by execution where the
+claim was about behaviour. Nothing was refuted outright; two findings came
+back worse than reported, two came back smaller.
+
+**From data-model** (all verified on a throwaway database; the dev database
+untouched):
+
+- **HIGH ×2, confirmed and sharpened** — both survey migrations destroyed or
+  silently corrupted data on a downgrade/upgrade round trip: `3f6907349751`
+  stranded the database re-adding `term_id` NOT NULL over 188 windows (and
+  its downgrade dropped `response` and `answer` whole, unpreserved);
+  `f1a3c7d02b64` backfilled every `is_valid` to true and left restored
+  classifications' `answer_id` NULL — permanently invisible to the floored
+  sweep. → **E2-16 items 1–2, built in PR #156.**
+- **MEDIUM, confirmed** — a cross-term (section, week) response was
+  representable while `survey_window` refused the same pairing. → **E2-16
+  item 3, PR #156.**
+- **MEDIUM, confirmed and raised** — the floored-comment sweep's `NOT IN`
+  unhashes past `work_mem` at term volume: 72 seconds measured, index alone
+  recovering ~35%; the remedy is the query's shape. → **E2-16 item 4,
+  PR #156.**
+- **MEDIUM, downgraded to LOW on verification** — the two week-axis indexes
+  are unused today but spec-anchored for E3's week-close read; their comments
+  claimed the present tense. → retensed, **E2-16 item 6, PR #156.**
+- **LOW, confirmed and sharpened** — window derivation measured at 5N+1 round
+  trips (the review counted 2N+1). → **E2-16 item 5, PR #156.**
+
+**From a11y-copy** (all independently re-measured against the live stack):
+
+- **HIGH, confirmed** — the disabled submit button left the tab order with
+  nothing saying why; no form element, no required attributes.
+  → **E2-17 item 1, built in PR #157.**
+- **MEDIUM ×5, confirmed** — Likert polarity spatial only; the unchecked dot
+  at 1.92:1 rendered (2.58:1 by token — worse than reported); the
+  required-comment flip silent; headings bare section codes with no course on
+  the wire; the confidentiality sentence rendered per section. The last was
+  sharpened to an unadjudicated reading of §4.1 item 5's "once per surface",
+  ruled 2026-09-03: once per screen. → **E2-17 items 2–6, PR #157.**
+- **LOW ×2** — the idle live region removed from the accessibility tree by
+  `:empty { display: none }` (confirmed via the accessibility protocol:
+  ignored/notRendered); the slider track's 1.30:1 (downgraded — the thumb
+  identifies the control at 12.45:1, so a design-fidelity fix, not a WCAG
+  failure). → **E2-17 items 8 and 3, PR #157.**
+
+**From lti-oidc:**
+
+- **MEDIUM, confirmed** — the CSRF double-submit's client half was never
+  built: the SPA never read `pulse_csrf`, so a cookie-borne student could
+  read and never submit. → **E2-17 item 7, PR #157.**
+- **MEDIUM, confirmed** — SPEC §7.3's roster-sync sentence still read
+  unconditionally against E2-02's merged purview gate. Ruled 2026-09-03: the
+  sentence is conditioned. → **the spec edit rides PR #156.**
+- **LOW, confirmed (one characterization softened)** — a rewound dev clock
+  can wedge one section's roster sync against the enrollment window
+  constraints, contained by the per-section savepoint; development only.
+  → **carried** (`../e3/carried-from-e2.md`).
+- Clean, verified by execution: no protocol validation reads the mocked
+  clock; the staff-launch gate changes no claim-limb outcome; the launch
+  validation order, NRPS paging and both mocks hold as merged.
+
+**From prompt-eval:**
+
+- **MEDIUM, confirmed** — prompt-file immutability was convention only (the
+  runner compares version stems; the mock guards one marker line).
+  → **E2-18 item 1, built in PR #155.**
+- **MEDIUM, verified as already tracked** — the workflow's model literal and
+  `.env.example` untied by any test: the second of the three sites the
+  existing carried entry "the model identifier lives in three places" already
+  names. → **no new record; the carried entry stands.**
+- **MEDIUM, confirmed, record-only** — the floors moved twice inside PR #149;
+  verified: no floor existed on main, the moves rescued no red run, the
+  ruling and the standing objection are recorded, and E10 holds the revisit.
+  → **no change; this line is the second-round re-affirmation.**
+- **LOW ×2, confirmed** — the E2-12-06 routing fix unpinned; the hard
+  families' sizes unguarded. → **E2-18 items 2–3, PR #155**, where the
+  security round then widened both fixes (the composition pinned whole, the
+  hash pin recursive) — that round's record is PR #155's body.
+
+**Explained rather than found:** classifications carrying `answer_id` NULL,
+observed live during verification, are bounce verdicts — a bounced comment
+stores no answer row by the 2026-09-03 ruling recorded in ADR 0114, so the
+reclassify sweep correctly never sees them.
+
+**Dispositions of this batch:** every code finding above landed in PR #155,
+#156 or #157; the two spec sentences were ruled by the owner on 2026-09-03
+and edited in PRs #156 (§7.3) and #157 (§4.1 item 5); the dev-clock/roster
+interaction and the session-read sweep's disclosed limits are re-listed in
+`../e3/carried-from-e2.md`.

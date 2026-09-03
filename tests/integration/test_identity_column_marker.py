@@ -2579,6 +2579,7 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
             "is_valid",
             "last_submitted_at",
             "section_id",
+            "term_id",
             "user_id",
             "week_id",
         ),
@@ -2592,7 +2593,22 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
         "once already and did exactly what it is for: E2-08 added `is_valid`, §3.3's verdict "
         "about the submission as a whole — a boolean about a week, carrying nothing about who "
         "submitted it, and the column §3.4's participation score reads "
-        "(`docs/disputes/E2-08-04.md`).",
+        "(`docs/disputes/E2-08-04.md`). It expired a second time for `term_id`, E2-16's "
+        "addition, and this sentence is the re-reading. A term is the coarsest thing on the row: "
+        "an interval of the academic calendar that every section running in it shares, so it "
+        "narrows a response to nobody. It is here because SPEC §2.2 numbers weeks *within* a "
+        "term — 'each of them falls in a week of the term' — so which week a response is about "
+        "is only a well-formed question once the term its section and its week both sit in is "
+        "named; and §3.4 counts 'valid weeks completed ÷ weeks elapsed to date', a ratio along "
+        "that one axis, which a row pairing a section in one term with a week in another counts "
+        "across two calendars. That row was writable until this column arrived. It is carried on "
+        "the row rather than checked because a `CHECK` cannot read another table (ADR 0018), so "
+        "the agreement is expressed as a term held by two composite foreign keys into "
+        "`section (id, term_id)` and `week (id, term_id)` — the mechanism `survey_window` has "
+        "carried since E2-05, on a table this walk does not reach at all. It names a term, not a "
+        "person: no identity vocabulary knows it, and marking it would put every response in the "
+        "set the identity-separated views may not read, which is what the `answer` entry below "
+        "says about `comment_text` for the same reason (`docs/disputes/E2-16-01.md`).",
     ),
     "answer": CarriesNothing(
         ("comment_text", "id", "question_id", "rating", "response_id", "workload_hours"),

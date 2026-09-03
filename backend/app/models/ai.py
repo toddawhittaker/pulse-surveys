@@ -41,7 +41,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Enum, ForeignKey, Text, text
+from sqlalchemy import CheckConstraint, Enum, ForeignKey, Index, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.ai.contracts import ValidityVerdict
@@ -110,6 +110,18 @@ class Classification(UuidPrimaryKey, Base):
             f" OR verdict IN ({', '.join(repr(token) for token in VALIDITY_VERDICT_TOKENS)})",
             name="verdict_is_in_its_tasks_vocabulary",
         ),
+        # The pair `app.services.validity`'s re-classification sweep filters on:
+        # one task's rows, written under the floor's prompt version (ADR 0054's
+        # audit pair, which is how a floored verdict is told from a model's).
+        # Without it the sweep reads the whole table on every run — on a beat and
+        # on every floored submission, at a table that grows with every comment
+        # ever classified. Added by E2-16, whose boundary review measured the
+        # sweep at 72 seconds over ~300k rows and 46 with this index alone; the
+        # anti-join rewrite in that service is the other half and neither is the
+        # other's substitute.
+        #
+        # `task` leads because it is the equality both legs always carry.
+        Index("ix_classification_task_prompt_version", "task", "prompt_version"),
     )
 
     # Server-side, so that two rows for the same comment can be ordered by when

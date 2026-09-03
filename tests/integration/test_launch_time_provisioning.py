@@ -501,10 +501,11 @@ def assert_nothing_was_provisioned(
     )
     assert not sections_coded(rows, names, label), f"{who} created a section coded {label.code!r}."
     assert not rows.addresses(), (
-        f"{who} stored the roster service addresses {rows.addresses()}. §7.3: 'a launch by an "
-        "instructor or any leadership role triggers a roster sync' and 'a **student** launch does "
-        "not'. The address is what makes a later sync possible at all, so storing it here hands "
-        "this section's whole roster — names and email addresses — to a sync nobody authorized."
+        f"{who} stored the roster service addresses {rows.addresses()}. §7.3: 'A launch by an "
+        "instructor triggers a roster sync; a launch by a leadership role triggers one only "
+        "inside the launcher's own purview' and 'A **student** launch triggers nothing'. The "
+        "address is what makes a later sync possible at all, so storing it here hands this "
+        "section's whole roster — names and email addresses — to a sync nobody authorized."
     )
 
 

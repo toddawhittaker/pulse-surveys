@@ -187,6 +187,14 @@ POSITION_COLUMN = "position"
 RESPONSE_USER_COLUMN = "user_id"
 RESPONSE_SECTION_COLUMN = "section_id"
 RESPONSE_WEEK_COLUMN = "week_id"
+
+# E2-16's addition, spelled as `survey_window` spells the column that carries the
+# same rule — `WINDOW_TERM_COLUMN`, imported above from
+# `fixtures/survey_windows.py`. Named separately rather than reusing that
+# constant because it is a column on a different table: they agree today and a
+# rename of one is not a rename of the other.
+RESPONSE_TERM_COLUMN = "term_id"
+
 FIRST_SUBMITTED_COLUMN = "first_submitted_at"
 LAST_SUBMITTED_COLUMN = "last_submitted_at"
 ANSWER_RESPONSE_COLUMN = "response_id"
@@ -904,6 +912,20 @@ class StudentReadWorld:
         `section_id` defaults to the reader's own section, which is where the
         classmate's submission goes; the third person's goes in the other one, and
         the caller says so rather than this method inferring it from the user.
+
+        **The response names its term as well as its section and its week**, and
+        E2-16 is why (`docs/disputes/E2-16-02.md`). That ticket gave `response`
+        the term-agreement rule `survey_window` has carried since E2-05 — a
+        `term_id` held by composite foreign keys into `section (id, term_id)` and
+        `week (id, term_id)` — and this call names two of the three explicitly
+        while handing the seeding walker an empty chain. Left to fill `term_id`
+        itself the walker builds a fresh section in a fresh term and takes that
+        term, and the composite key refuses the row: this method raised inside the
+        `student_read_door` fixture and took fourteen tests in three modules with
+        it, none of them about a term. It is `self.term` for the same reason
+        `seed_window` above uses it — both sections this world seeds are of the
+        one Fall 2026 term it builds, so a section from another term passed in
+        here would be refused, correctly and by name.
         """
         response = self.rows.seed(
             RESPONSE_TABLE,
@@ -914,6 +936,7 @@ class StudentReadWorld:
                     self.enrolled_section_id if section_id is None else section_id
                 ),
                 RESPONSE_WEEK_COLUMN: key_of(self.tables, WEEK_TABLE, self.week),
+                RESPONSE_TERM_COLUMN: key_of(self.tables, TERM_TABLE, self.term),
                 FIRST_SUBMITTED_COLUMN: SUBMITTED_AT,
                 LAST_SUBMITTED_COLUMN: SUBMITTED_AT,
             },

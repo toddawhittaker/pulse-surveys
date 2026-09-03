@@ -283,9 +283,12 @@ class SurveyWindow(UuidPrimaryKey, Base):
     # Leads `uq_survey_window_section_id_week_id`, which serves the read the
     # student and instructor surfaces make: this section's windows.
     section_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
-    # Indexed, because the other read is by week — closing every window for the
-    # week that has just ended (§3.4 recomputes participation after each one) —
-    # and this column leads no constraint.
+    # Indexed for the read this anticipates: every window of the week that has
+    # just ended, which is what SPEC §3.4's "recomputed after each week closes"
+    # will ask for. **E3 is where that read is built; nothing in the tree makes it
+    # today** (E2-16 item 6, which keeps the index and corrects the tense this
+    # comment used to claim). The column leads no constraint, so nothing else
+    # would serve it.
     week_id: Mapped[UUID] = mapped_column(Uuid, nullable=False, index=True)
     # The term both of the above have to agree on. Carried rather than derived,
     # because a `CHECK` cannot read another table — which is the whole of ADR

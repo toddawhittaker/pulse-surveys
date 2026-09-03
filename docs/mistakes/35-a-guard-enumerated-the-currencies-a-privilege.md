@@ -1,11 +1,30 @@
 # Entry 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 5**
+**Caught: 6**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*11 occurrences recorded; five of them are catches. This file keeps the three
-most recent instances; the rest live in git history.*
+*12 occurrences recorded; six of them are catches. This file keeps the three
+most recent instances; the rest live in git history — it is carrying five today,
+because the oldest of them and the addendum under it are one lesson and trimming
+one without the other would leave a paragraph referring to nothing.*
+
+*(**A catch**, writing E2-16's tests, 2026-09-03. Three of the ticket's criteria
+are assertions that something is **absent**: no `NOT IN` in any statement the
+floored-comment sweep sends, no growth in the reads window derivation issues as
+sections are added, and — the mirror image — an index over
+`classification (task, prompt_version)` that is present. Each is read through an
+instrument this ticket wrote: a `before_cursor_execute` recorder, and a catalog
+matcher over an index's leading key columns. Every one of those absences passes
+for free against an instrument that sees nothing, and the matcher's assertions
+pass equally against a matcher that says yes to everything. This entry's rule put
+both directions in the suite before anything rested on either: the recorder is
+shown a real `NOT IN` over the real tables and has to flag exactly one, and is
+shown a lone `SELECT` and has to count exactly one read; the matcher has to find
+the two week-axis indexes that certainly exist and to refuse a column
+(`response.first_submitted_at`) that nothing indexes. Without them, the day the
+listener was registered on the wrong event, three criteria would have gone green
+over a sweep nobody had watched.)*
 
 *(Building E2-08, 2026-09-02. Three discovery walks in one ticket's test
 machinery each reported a deliverable missing while it was present, and each
