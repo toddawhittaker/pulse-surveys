@@ -375,6 +375,14 @@ against the seeded calendar rather than against the service that computed it. Th
 member is one field on a schema and one read in `app.services.survey_read`, which
 puts it on a heavy-lane path.
 
+**Note, 2026-09-03 (FIX-01):** the owner's ruling of this date fixes the
+eyebrow's wording as `COURSE WK NN, TERM WK NN`, superseding the brief's
+"WK 07 / 12" as this entry's rendering target. The gap this entry records — the
+read answer still carries no week count — is unchanged and stays open, but
+closing it now needs an owner call on where the total sits in the ruled string
+(for example `COURSE WK 03 / 12, TERM WK 03`) before the done-when's rendering
+half can be built. The wire half of the done-when stands as written.
+
 ## The self-hosted faces: an unrecognized licence and a second copy nobody fetches — E2-10
 
 Deferred by E2-10, whose
