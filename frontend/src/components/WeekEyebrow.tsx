@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 
-import { copy } from '../copy/studentSurvey';
+import { copy, fillCopy } from '../copy/studentSurvey';
 
 /**
  * The mono week eyebrow — SPEC §7.6's `WeekEyebrow`, one component with variants.
@@ -37,10 +37,10 @@ export function WeekEyebrow({
   return (
     <p className="pulse-eyebrow">
       <span className="pulse-eyebrow-week">
-        {copy('student_survey.week_label')} {padWeek(courseWeek)}
+        {fillCopy('student_survey.course_week_eyebrow', { week: padWeek(courseWeek) })}
       </span>
       <span className="pulse-eyebrow-quiet">
-        {copy('student_survey.term_week_label')} {padWeek(termWeek)}
+        {fillCopy('student_survey.term_week_eyebrow', { week: padWeek(termWeek) })}
       </span>
       <span className="pulse-eyebrow-quiet">
         {copy('student_survey.closes_label')} {formatClosingInstant(closesAt)}

@@ -73,7 +73,11 @@ const HEADING_ID = 'pulse-student-survey-heading';
 /** What the read answered, as this screen holds it. */
 type Load =
   | { readonly kind: 'loading' }
-  | { readonly kind: 'sections'; readonly sections: readonly EnrolledSection[] }
+  | {
+      readonly kind: 'sections';
+      readonly sections: readonly EnrolledSection[];
+      readonly institutionTimezone: string;
+    }
   | { readonly kind: 'session-ended' }
   | { readonly kind: 'unavailable' };
 
@@ -85,7 +89,11 @@ export function StudentWeeklySurvey(): JSX.Element {
     void readStudentSurvey().then((answer) => {
       if (!live) return;
       if (answer.kind === 'view') {
-        setLoad({ kind: 'sections', sections: answer.view.sections });
+        setLoad({
+          kind: 'sections',
+          sections: answer.view.sections,
+          institutionTimezone: answer.view.institution_timezone,
+        });
       } else if (answer.kind === 'session-ended') {
         // **Never the empty-week state.** A refused read and an empty week are
         // different facts, and only one of them entitles this page to say what
@@ -136,7 +144,9 @@ function ScreenBody({ load }: { readonly load: Load }): JSX.Element {
   if (load.sections.length === 0) {
     return <StateNotice variant="flat" body={copy('student_survey.no_open_window')} />;
   }
-  return <SectionSurveys sections={load.sections} />;
+  return (
+    <SectionSurveys sections={load.sections} institutionTimezone={load.institutionTimezone} />
+  );
 }
 
 /**
@@ -165,8 +175,10 @@ function ScreenBody({ load }: { readonly load: Load }): JSX.Element {
  */
 function SectionSurveys({
   sections,
+  institutionTimezone,
 }: {
   readonly sections: readonly EnrolledSection[];
+  readonly institutionTimezone: string;
 }): JSX.Element {
   const [offering, setOffering] = useState<ReadonlySet<string>>(
     () => new Set(sections.filter(offersASubmitActionOnArrival).map((it) => it.section_id)),
@@ -194,6 +206,7 @@ function SectionSurveys({
         <SectionSurvey
           key={section.section_id}
           section={section}
+          institutionTimezone={institutionTimezone}
           showConfidentiality={section.section_id === carriesConfidentiality}
           onSubmitArea={report}
         />
@@ -208,32 +221,34 @@ function offersASubmitActionOnArrival(section: EnrolledSection): boolean {
   return survey !== null && survey.submission === null;
 }
 
-/** One enrolled section: its code, its course, and whatever there is to do about it. */
+/** One enrolled section: its course, and whatever there is to do about it. */
 function SectionSurvey({
   section,
+  institutionTimezone,
   showConfidentiality,
   onSubmitArea,
 }: {
   readonly section: EnrolledSection;
+  readonly institutionTimezone: string;
   readonly showConfidentiality: boolean;
   readonly onSubmitArea: (sectionId: string, offering: boolean) => void;
 }): JSX.Element {
   const survey = section.survey_is_open ? section.open_survey : null;
   return (
     <section className="pulse-survey-section" data-testid={sectionTestid(section.section_code)}>
-      {/* The §2.2 code and the course it belongs to, in one heading. The code
-          alone is what shipped, and `E1FF` is how a timetable names a section
-          rather than how a student does — E2-17 item 5. The label is the
-          server's, composed from the reader's own enrollment metadata. */}
-      <h2 className="pulse-section-heading">
-        <span className="pulse-section-code">{section.section_code}</span>
-        <span className="pulse-course-label">{section.course_label}</span>
-      </h2>
+      {/* One string, and the server composed all of it — FIX-01 item 2. The
+          heading used to be the §2.2 code in one span beside the course in
+          another, and it never said which term; the ruling of 2026-09-03 folds
+          the code in and adds the term name, which makes this the page's visual
+          headline and tells several courses on one screen apart. The section
+          code still travels on the wire, because `sectionTestid` addresses
+          blocks by it. */}
+      <h2 className="pulse-section-heading">{section.course_label}</h2>
       {survey === null ? (
         <StateNotice
           variant="flat"
           title={copy('student_survey.section_closed_title')}
-          body={copy('student_survey.section_closed_body')}
+          body={closedSentence(section.next_window_opens_at, institutionTimezone)}
         />
       ) : (
         <OpenSurveyForm
@@ -250,6 +265,76 @@ function SectionSurvey({
 /** Where a spec finds one section's block. */
 export function sectionTestid(sectionCode: string): string {
   return `survey-section-${sectionCode}`;
+}
+
+/**
+ * What a closed section says: when its next survey opens, or the plain sentence.
+ *
+ * FIX-01 item 4. The dated sentence needs two things to be true — the answer
+ * carries an instant, and that instant can be formatted in the deployment's zone
+ * — and the undated sentence is what stands when either is not. Both are
+ * governed copy; nothing here writes a word a reader sees.
+ */
+function closedSentence(opensAt: string | null, timeZone: string): string {
+  const when = opensAt === null ? null : institutionInstant(opensAt, timeZone);
+  return when === null
+    ? copy('student_survey.section_closed_body')
+    : fillCopy('student_survey.section_closed_body_dated', when);
+}
+
+/**
+ * One instant in the institution's zone, as the two halves of the ruled sentence.
+ *
+ * "6:00PM EDT" and "Friday, September 4". **The zone abbreviation is derived and
+ * never written down**, which is the whole point of the ruling: the same six
+ * o'clock is EDT in October and EST in November, and a page carrying either
+ * letter as a literal tells half the term's students the wrong hour.
+ * `formatToParts` is what lets the abbreviation be taken from the format without
+ * accepting the punctuation the locale would put around it — "6:00 PM" has a
+ * space the ruled shape does not.
+ *
+ * **`en-US` deliberately, rather than the reader's locale.** The eyebrow's
+ * closing instant follows the reader, because it is a bare time inside their own
+ * day; this one is filled into an English sentence the owner ruled word for word,
+ * and a date formatted to another locale's conventions inside it would read as
+ * neither.
+ *
+ * **The zone is the institution's, not the browser's** (SPEC §8, §3.1). A survey
+ * opens at six o'clock where the institution is; a student reading in another
+ * zone is owed the institution's hour, which is the one the door will actually
+ * open at.
+ *
+ * `null` when the instant will not parse or the zone is not one `Intl` knows —
+ * `Intl.DateTimeFormat` throws a `RangeError` on an unknown zone — so the caller
+ * falls back to the undated sentence rather than rendering "Invalid Date".
+ */
+function institutionInstant(
+  instant: string,
+  timeZone: string,
+): { readonly time: string; readonly day: string } | null {
+  const when = new Date(instant);
+  if (Number.isNaN(when.getTime())) return null;
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    }).formatToParts(when);
+  } catch {
+    return null;
+  }
+  const held = new Map(parts.map((part) => [part.type, part.value]));
+  const named = ['hour', 'minute', 'dayPeriod', 'timeZoneName', 'weekday', 'month', 'day'] as const;
+  if (named.some((type) => held.get(type) === undefined)) return null;
+  return {
+    time: `${held.get('hour')}:${held.get('minute')}${held.get('dayPeriod')} ${held.get('timeZoneName')}`,
+    day: `${held.get('weekday')}, ${held.get('month')} ${held.get('day')}`,
+  };
 }
 
 /**

@@ -185,30 +185,16 @@
     margin-top: var(--space-6);
   }
 
-  /* The section heading: the §2.2 code in mono, the course beside it in the
-   * body face. Two voices in one line, which is the brief's own split — mono is
-   * for codes and numerals, and the course is prose. */
+  /* The section heading: the page's visual headline, one string in the display
+   * face at the scale's section-heading step. FIX-01 criterion 3 — a student in
+   * three courses scans one column, and the courses have to be told apart at a
+   * glance, so the heading takes the step above body copy and the full ink. */
   .pulse-section-heading {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: var(--space-2);
     margin: 0;
-    font-size: var(--text-2);
-    font-weight: 500;
-    line-height: 1.4;
-  }
-
-  .pulse-section-code {
-    font-family: var(--font-mono);
-    letter-spacing: 0.04em;
-    color: var(--spruce);
-  }
-
-  .pulse-course-label {
-    font-family: var(--font-body);
-    font-weight: 400;
-    color: var(--spruce-60);
+    font-family: var(--font-display);
+    font-size: var(--text-3);
+    font-weight: 600;
+    line-height: 1.2;
   }
 
   /* The mono eyebrow: uppercase, letterspaced, spruce-60. The course week leads

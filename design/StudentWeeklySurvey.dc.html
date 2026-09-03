@@ -11,7 +11,7 @@
 <div style="background:var(--chalk);min-height:100vh;padding:var(--space-6) var(--space-4);box-sizing:border-box" data-screen-label="Student Weekly Survey">
 <div style="max-width:480px;margin:0 auto">
   <dc-import name="WeekEyebrow" week="{{ week }}" total="{{ totalWeeks }}" note="{{ eyebrowNote }}" hint-size="100%,20px"></dc-import>
-  <div style="font-size:var(--text-2);font-weight:500;color:var(--spruce);margin-top:var(--space-2)">{{ courseLine }}</div>
+  <div style="font-family:var(--font-display);font-size:var(--text-3);font-weight:600;line-height:1.2;color:var(--spruce);margin-top:var(--space-2)">{{ courseLine }}</div>
   <svg width="120" height="14" aria-hidden="true" style="display:block;margin:var(--space-3) 0 0"><path d="M1 10 H52 L60 3 L68 10 H106" style="fill:none;stroke:var(--marigold);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round"></path><circle cx="112" cy="10" r="3.5" style="fill:var(--marigold)"></circle></svg>
 
   <sc-if value="{{ showForm }}" hint-placeholder-val="{{ true }}">
@@ -62,7 +62,7 @@ class Component extends DCLogic {
     return {
       week: 7, totalWeeks: 12,
       eyebrowNote: view === 'closed' ? 'opens Fri 6:00 PM' : 'closes Sun 11:59 PM',
-      courseLine: 'BIOL 2150 — Principles of Ecology · R3WW',
+      courseLine: 'BIOL 2150 R3WW — Principles of Ecology, Fall 2026',
       showForm: view === 'form', showSubmitted: view === 'submitted', showClosed: view === 'closed',
       q1, q2, q3, q4, hours,
       q2State: q2Req ? (bounce2 ? 'bounce' : 'required') : 'optional',

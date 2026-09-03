@@ -96,21 +96,40 @@ export interface EnrolledSection {
   readonly section_id: string;
   readonly section_code: string;
   /**
-   * The reader's own course, as a person names it: "BIOL 215 — Cell Biology".
+   * The reader's own course, as a person names it:
+   * "MATH 140 E1FF — College Algebra, Fall 2026".
    *
-   * Composed on the server out of the prefix, number and title of the course
-   * above *this* section (`app.services.survey_read`), because §4.1 item 1 makes
-   * which course may be named a scoping question rather than a formatting one.
-   * The heading renders it beside the §2.2 section code.
+   * Composed on the server out of the prefix, number, section code, title and
+   * term name of the course above *this* section (`app.services.survey_read`),
+   * because §4.1 item 1 makes which course may be named a scoping question
+   * rather than a formatting one. The heading renders the whole string, and the
+   * order is the owner's ruling of 2026-09-03.
    */
   readonly course_label: string;
   readonly survey_is_open: boolean;
+  /**
+   * When this section's next survey opens, or null.
+   *
+   * Null both while a survey is open and when this section has no materialized
+   * window ahead of it — the closed-state placeholder is dated on an instant and
+   * plain on a null.
+   */
+  readonly next_window_opens_at: string | null;
   readonly open_survey: OpenSurvey | null;
 }
 
 /** Everything the form needs, in one answer. An empty list is between terms. */
 export interface StudentSurveyView {
   readonly sections: readonly EnrolledSection[];
+  /**
+   * The IANA zone this deployment's survey windows are written in (SPEC §8).
+   *
+   * Deployment configuration rather than anything about the reader, and the zone
+   * `next_window_opens_at` is rendered in: a browser handed an instant and no
+   * zone renders it in its own, which would tell a student an hour their
+   * institution does not keep.
+   */
+  readonly institution_timezone: string;
 }
 
 /**
