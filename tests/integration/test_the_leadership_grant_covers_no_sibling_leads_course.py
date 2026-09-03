@@ -255,6 +255,13 @@ def test_a_leads_own_course_is_covered_at_every_grain_the_predicate_takes(
     bootstraps every later sync of it", and a launch that binds nothing leaves the
     section never-synced with nothing saying why.
 
+    **It kills `True` unconditionally as well, which was measured rather than
+    predicted.** The prefix assertion at the end is a negative one, so the accepted
+    half is not only the accepted half: a predicate that says yes to everything
+    says yes to the prefix above a lead's own course, and that prefix is every
+    sibling lead's course under it. Both of this ticket's mutations on this
+    predicate die here, and it is recorded rather than left to be rediscovered.
+
     **The prefix grain is asked separately and is expected to answer no**, and
     that is not a contradiction of ADR 0108. Prefix-or-below means the *launch's*
     prefix is one of the three things looked for in the union; a lead's union

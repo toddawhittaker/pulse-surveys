@@ -376,6 +376,14 @@ def test_a_students_own_resubmission_still_revises_the_one_row_they_already_own(
     **A classmate submits first**, so the row this student's resubmission has to
     find is not the only row in the table — a lookup that ignores `user_id` and
     happens to be handed a one-row table would pass a test written without them.
+
+    **It also dies under the deleted `user_id` predicate, and that was measured
+    rather than predicted.** Because the classmate submits first, a lookup keyed
+    on `(section_id, week_id)` alone hands this student the classmate's row to
+    revise, and there is then no row of this student's own for `response_of` to
+    find. So this test is stricter than the near-miss duty it was written for; it
+    is written down here rather than left as a surprise in the next battery's
+    output.
     """
     student = a_student_in_an_open_window(
         open_submit_tool, submit_world, signed_in_student, mock_ai_endpoint, open_now

@@ -544,6 +544,18 @@ def test_a_leads_launch_into_a_sibling_leads_course_binds_nothing_and_is_recorde
     is that the door did not *refuse* the launch, which is the half E1-10's "a
     provisioning refusal never fails the launch" is about. The dean pair above asserts
     the stronger `landed` for the same reason it can: §2.1's table opens that door.
+
+    **The assignment is read back out of the database before the launch**, and E2-14 is
+    the occasion rather than the reason. The reason is the test's own premise: the actor
+    is "a Lead Faculty enrolled as a Learner in a sibling lead's course", so a launcher
+    who ended up holding *no* assignment is a stranger, and every refusal below would be
+    the refusal of a launch by a person with no leadership row at all — a different test,
+    passing for a different reason (`docs/MISTAKES.md` entry 3). The occasion is that
+    this module now carries the `invariant` marker, and
+    `scripts/ci/check_invariant_assertions.py` refuses a marked test whose own body
+    asserts nothing: it does not chase a helper, by design, "the refusal is loud and the
+    fix is one line". Written as an equality rather than a membership, because "their
+    only leadership assignment" is what the grain argument above rests on.
     """
     offer = launch_driver.offer_for_role(provisioning_contract.learner_role_urn)
     claims = launch_driver.claims_of(offer)
@@ -551,8 +563,18 @@ def test_a_leads_launch_into_a_sibling_leads_course_binds_nothing_and_is_recorde
     ground = launch_ground(label)
 
     person_id = a_linked_person(web_identity, launch_driver, claims[SUBJECT_CLAIM])
-    committed_rows.graph.assign(LEAD_FACULTY, person=person_id, reports_to=None)
+    graph = committed_rows.graph
+    lead = graph.assign(LEAD_FACULTY, person=person_id, reports_to=None)
     committed_rows.commit()
+
+    assert graph.assignments_of(person_id) == [lead[graph.assignment_key]], (
+        f"This launcher holds the assignments {graph.assignments_of(person_id)} and this test "
+        f"wrote one {LEAD_FACULTY} assignment, {lead[graph.assignment_key]!r}. None means the "
+        "launcher is a stranger and every refusal below is about a person with no leadership row "
+        "— which §7.3's leadership limb never admitted in the first place. More than one means "
+        "the launcher holds a hat this test did not write, so a refusal is not attributable to "
+        "the lead-faculty grain."
+    )
 
     response, signed = launch_driver.launch(offer)
 
@@ -605,6 +627,16 @@ def test_a_launch_by_an_assistant_dean_alone_binds_nothing_and_is_recorded(
     until somebody whose records reach it launches — the real instructor's next launch
     does exactly that through the claim limb, which the pair below keeps open. It is
     fail-closed, and E9 is where the graph makes it pass.
+
+    **"Whose only leadership assignment is `ASSISTANT_DEAN`" is read back out of the
+    database rather than asserted by the fixture that wrote it.** That sentence is this
+    test's whole subject: one assignment, of that role, and nothing beside it. A launcher
+    holding none is a stranger and a launcher holding two is a different case — §2.1 says
+    two hats compose — and either would make the refusal below evidence about something
+    else (`docs/MISTAKES.md` entry 3). The occasion for putting it in the body is E2-14
+    marking this module `invariant`:
+    `scripts/ci/check_invariant_assertions.py` refuses a marked test whose own body
+    asserts nothing and does not chase a helper, by design.
     """
     offer = launch_driver.offer_for_role(provisioning_contract.learner_role_urn)
     claims = launch_driver.claims_of(offer)
@@ -612,10 +644,21 @@ def test_a_launch_by_an_assistant_dean_alone_binds_nothing_and_is_recorded(
     ground = launch_ground(label)
 
     person_id = a_linked_person(web_identity, launch_driver, claims[SUBJECT_CLAIM])
-    committed_rows.graph.assign(
+    graph = committed_rows.graph
+    assistant_dean = graph.assign(
         ASSISTANT_DEAN, scope=ground.college_id, person=person_id, reports_to=None
     )
     committed_rows.commit()
+
+    assert graph.assignments_of(person_id) == [assistant_dean[graph.assignment_key]], (
+        f"This launcher holds the assignments {graph.assignments_of(person_id)} and this test "
+        f"wrote one {ASSISTANT_DEAN} assignment, {assistant_dean[graph.assignment_key]!r}, scoped "
+        f"over the college that contains the launched prefix ({ground.college_id!r}). None means "
+        "the launcher holds no leadership row at all, and the refusal below would be about a "
+        "person §7.3's leadership limb never admitted. More than one means a second hat this test "
+        "did not write, and §2.1 composes hats — so the refusal would no longer be the assistant "
+        "deanship's consequence."
+    )
 
     response, signed = launch_driver.launch(offer)
 
