@@ -1284,10 +1284,19 @@ def launch_driver_in(
     **The registration is written once however many tools are built.** Two rows
     registering one issuer would leave the door choosing between them, and which
     one it chose would decide the result of every test using it.
+
+    **`extra` is any other environment variable the caller needs named**, passed
+    to `tool_doors` alongside the two above so it is set before the application is
+    imported. FIX-01 is the first caller: it puts `institution_timezone` on the
+    student read answer, and the only way to tell a member that follows the
+    setting from one hard-coded to the documented default is to build a door under
+    a different setting (`docs/MISTAKES.md` entry 40). `environment` keeps its own
+    parameter rather than joining `extra`, because every existing caller passes it
+    positionally by name.
     """
     written: list[Any] = []
 
-    def build(environment: str | None = None) -> LaunchDriver:
+    def build(environment: str | None = None, **extra: str) -> LaunchDriver:
         if not written:
             written.append(
                 register_platform(
@@ -1299,6 +1308,7 @@ def launch_driver_in(
         values = {door_contract.settings["public_base_url"]: door_contract.public_base_url}
         if environment is not None:
             values[ENVIRONMENT_VARIABLE] = environment
+        values.update(extra)
         tool = tool_doors(values, {urlsplit(provisioning_jwks_url).hostname: provisioning_platform})
         return LaunchDriver(tool, door_contract, provisioning_platform, written[0])
 

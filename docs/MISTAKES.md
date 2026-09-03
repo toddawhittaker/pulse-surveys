@@ -169,6 +169,10 @@ And never write a prediction that explains away the evidence of its own failure:
 if you find yourself saying "there will be no confirmation, and that is expected",
 you have removed the only signal that would have told you it did not work.
 
+## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
+
+**Caught: 12** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+
 ## 16. A mutation harness reported kills it had not made
 
 **Caught: 6** · [the incidents, the root cause, and the whole rule](mistakes/16-a-mutation-harness-reported-kills-it-had-not-made.md)
@@ -201,10 +205,6 @@ you have removed the only signal that would have told you it did not work.
 subject that certainly has it, as a control. A guard that only ever reports
 absence cannot tell you which mechanisms it can see — and the role a scheme is
 built around is the one least likely to hold its privileges the ordinary way.
-
-## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
-
-**Caught: 11** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 17. An unqualified table name let the caller choose which table a guard read
 

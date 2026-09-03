@@ -5,21 +5,24 @@ integration test; the headings render it". The heading is `tests/e2e`'s; this
 module is the wire.
 
 **What the ticket settles, and what it leaves open.** The member is
-`course_label` and its value is `"<prefix code> <lms_number> — <lms_title>"` —
-both settled in E2-17's work order, and both transcribed once in
-`tests/fixtures/student_read.py` rather than spelled here. Everything else is the
+`course_label`; its value was `"<prefix code> <lms_number> — <lms_title>"` when
+E2-17 shipped it and is `"<prefix code> <lms_number> <section code> — <lms_title>,
+<term name>"` since FIX-01 item 2, the owner's ruling of 2026-09-03 — "prefix,
+number, then section code, then the em-dash title, then the term's name". Both
+the member and the spelling are transcribed once in
+`tests/fixtures/student_read.py` rather than here. Everything else is the
 implementer's: where in the answer the member sits, whether the answer is one
 object or a list of them, and how the label is assembled. So the field is found
 by walking the answer the way E2-09's own week-number test walks it, and never by
 indexing a shape.
 
 **The expectation is built out of the rows, not out of the code.** Each label is
-composed from the `prefix`, `course` and `section` rows this world seeded, read
-back through their own foreign keys, and joined with the spelling the ticket
-settles. An expectation derived from the service under test agrees with an
-implementation that made the same mistake (`docs/MISTAKES.md` entry 19), and one
-written as a literal here would go stale the first time the seeding walker
-changed what it invents for a course title.
+composed from the `prefix`, `course`, `section` and `term` rows this world
+seeded, read back through their own foreign keys, and joined with the spelling
+the ticket settles. An expectation derived from the service under test agrees
+with an implementation that made the same mistake (`docs/MISTAKES.md` entry 19),
+and one written as a literal here would go stale the first time the seeding
+walker changed what it invents for a course title.
 
 **The second test is the one a single-section world cannot ask.** A label read
 from *a* course rather than from *this section's* course satisfies the first test
@@ -47,13 +50,14 @@ from fixtures.student_read import (
     PREFIX_TABLE,
     SECTION_TABLE,
     STUDENT_READ_PATH,
+    TERM_NAME_COLUMN,
     ForeignCourse,
     StudentReadDoor,
     decoded,
     key_of,
     objects_carrying,
 )
-from fixtures.survey_windows import SECTION_CODE_COLUMN
+from fixtures.survey_windows import SECTION_CODE_COLUMN, TERM_TABLE
 
 pytestmark = [pytest.mark.integration, pytest.mark.lti]
 
@@ -112,44 +116,47 @@ def a_second_course(student_read_door: StudentReadDoor, enrol: Any) -> ForeignCo
 def test_the_answer_names_the_course_of_the_section_the_student_is_enrolled_in(
     student_read_door: StudentReadDoor,
 ) -> None:
-    """Criterion 5: the read answer carries the course label.
+    """Criterion 5, respelled by FIX-01 item 2: the read answer carries the course label.
 
-    The label is `"<prefix code> <lms_number> — <lms_title>"` for the course above
-    this student's own section, composed from the three rows this world seeded.
-    Today's answer carries four members per section entry and none of them is a
-    course name at all, which is the defect E2-17 item 5 exists for: the heading
-    renders `E1FF` and a student has to work out which course that is.
+    The label is `"<prefix code> <lms_number> <section code> — <lms_title>, <term
+    name>"` for this student's own section, composed from the five values in the
+    rows this world seeded. E2-17 shipped the first three of those parts; the
+    owner's drive of 2026-09-03 found the heading still never says which term
+    this is, and the section code sitting beside the label rather than inside it.
 
-    **The mutations this kills.** The field absent altogether, which is the state
-    this test is written red against. A label built from two of the three parts —
-    the number and the title with no prefix code, or the prefix code and the
-    number with no title — each of which reads perfectly well and is not the
-    label the ticket settles. And the parts assembled in some other order, or
-    joined with some other separator, which a test asserting containment of each
-    part separately would pass.
+    **The mutations this kills.** The field absent altogether. The E2-17 spelling
+    left in place, which is the state this test is written red against and which
+    reads perfectly well while answering neither of the ruling's two additions. A
+    label built from some of the five parts — the term name dropped, the section
+    code dropped — each of which is a sentence a reader would accept. And the
+    parts assembled in some other order, or joined with some other punctuation,
+    which a test asserting containment of each part separately would pass.
 
     **The near miss it must survive**: the answer may carry more than this. Only
     the member the criterion names is asserted, and it is asserted wherever in the
     answer it sits.
 
-    **The guard, first.** The three values are read back out of the seeded rows,
+    **The guard, first.** The five values are read back out of the seeded rows,
     so a green says the answer carried what those rows hold — not that the answer
     and an empty expectation agreed (`docs/MISTAKES.md` entry 3). A label composed
-    of blanks would be a string of two spaces and a dash, and the guard is what
+    of blanks would be a run of spaces, a dash and a comma, and the guard is what
     stops that being the thing this test demands.
     """
     world = student_read_door.world
     course = world.parent_row(SECTION_TABLE, COURSE_TABLE, world.enrolled_section)
     prefix = world.parent_row(COURSE_TABLE, PREFIX_TABLE, course)
+    term = world.parent_row(SECTION_TABLE, TERM_TABLE, world.enrolled_section)
     parts = {
         "prefix code": prefix[world.prefix_code_column()],
         "course number": course[COURSE_NUMBER_COLUMN],
+        "section code": world.enrolled_section[SECTION_CODE_COLUMN],
         "course title": course[COURSE_TITLE_COLUMN],
+        "term name": term[TERM_NAME_COLUMN],
     }
     blank = sorted(name for name, value in parts.items() if not str(value or "").strip())
     assert not blank, (
         f"The seeded course carries no {blank}; it carries {parts}. The label below is composed "
-        "from these three, so a blank among them makes this test demand a label with a hole in it "
+        "from these five, so a blank among them makes this test demand a label with a hole in it "
         "and a green would mean the read path agreed with the hole (`docs/MISTAKES.md` entry 3)."
     )
     expected = world.course_label_of(world.enrolled_section)
@@ -173,10 +180,12 @@ def test_the_answer_names_the_course_of_the_section_the_student_is_enrolled_in(
     carried = [entry[COURSE_LABEL_FIELD] for entry in entries]
     assert carried == [expected], (
         f"The answer carries {carried} as `{COURSE_LABEL_FIELD}`; this student's one live "
-        f"enrollment is in a section whose course is {expected!r}.\n\n"
-        "The label E2-17 settles is `<prefix code> <lms_number> — <lms_title>`, one space either "
-        "side of an em dash. A value missing the prefix code, or the title, or joined with some "
-        "other punctuation is a different string and is caught here rather than by three "
+        f"enrollment is in a section labelled {expected!r}.\n\n"
+        "The label FIX-01 item 2 settles is `<prefix code> <lms_number> <section code> — "
+        "<lms_title>, <term name>`, one space either side of an em dash and a comma before the "
+        "term. A value in E2-17's older spelling — no section code, no term — is the state this "
+        "test is red against; one missing the prefix code, or the title, or joined with some "
+        "other punctuation is a different string and is caught here rather than by five "
         "containment checks that would all pass on a label assembled in any order at all."
     )
 
