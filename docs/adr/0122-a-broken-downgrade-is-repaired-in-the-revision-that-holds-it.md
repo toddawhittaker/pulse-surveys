@@ -110,10 +110,16 @@ the edit leaves two databases at that revision holding the same objects. An edit
 that fails the second test is what ADR 0041 forbids, whatever it fixes.
 
 **A downgrade that removes something now owes a preserve, and the test for
-whether one is owed is derivability.** `survey_window.term_id` and the four
-dropped tables are preserved because nothing left behind can reconstruct them;
-`response.term_id` (`b1e7d4a90c26`) preserves nothing, because it is the row's own
-section's term and the upgrade computes it again from the same statement. The
+whether one is owed is derivability.** The four dropped tables are preserved
+because nothing left behind can reconstruct them. `survey_window.term_id` and
+`response.term_id` (`b1e7d4a90c26`) preserve nothing, because each is the row's
+own section's term and the upgrade computes it again from `section.term_id`.
+The first draft of this record preserved the window's term as well; the
+mutation battery proved that preserve indistinguishable from dead machinery —
+the composite key forces the preserved and recomputed values equal, so either
+mechanism alone restored the column and neither was held by any test. The
+redundant preserve was deleted (`17958da`) and the backfill is the single
+mechanism, held by the round-trip test's strand. The
 scratch tables are named `<subject>_preserved`, are outside `Base.metadata`, and
 are dropped by the upgrade that restores from them — so a database at head never
 holds one and `alembic check` never sees one.

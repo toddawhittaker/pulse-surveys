@@ -401,3 +401,31 @@ standing ADR's, or an earlier boundary's, not re-owned here.
   raises by design (ADR 0003), so an assistant dean's roll-up is fail-closed
   rather than partial; ADR 0108 records why that is the honest state and names
   E9 as where the graph makes it pass.
+
+## The session-read sweep's two disclosed limits
+
+`tests/unit/test_only_the_dependency_module_reads_a_session_from_a_request.py`
+(E2-14, widened by its security round to walk all of `backend/app/` with two
+exact exemptions) discloses what remains outside it: computed-name
+indirection via `getattr`, and anything outside `backend/app/` entirely. Both
+are closed by review of what a route depends on, not by another path
+widening. Carried so the next epic that adds a service package knows the
+sweep's edge is a fact, not an oversight.
+
+**Done when** a reviewer of any new route-serving package outside
+`backend/app/` (or any `getattr`-style dispatch over session readers) has
+re-affirmed the sweep still reaches what it claims, or the sweep has been
+rehomed to cover the new shape.
+
+## A rewound development clock can wedge a section's roster sync
+
+Found at the second E2 boundary round (lti-oidc, LOW, confirmed).
+`roster_sync` reads its day through the dev clock; the enrollment window
+constraints assume the day never moves backwards; `pretend_instant` accepts
+any past instant. Rewind, then let a sync run: one section's roster silently
+stops updating (per-section savepoint contains it) while the override
+stands. Development only — no protocol clock reads the override.
+
+**Done when** the dev clock console warns on rewinds while enrollments
+exist, or `pretend_instant` clamps to the newest enrollment write, or the
+interaction is accepted in an ADR after E3 meets real platforms' rosters.
