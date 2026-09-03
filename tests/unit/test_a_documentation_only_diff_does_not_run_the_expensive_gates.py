@@ -2813,6 +2813,31 @@ SWEEPS_THAT_NEED_NO_PROTECTION = {
         "asserts over that same inventory — frontend/src/copy/*.ts and app.copy — and "
         "neither frontend/ nor a backend .py is inert"
     ),
+    # E2-14's session-reader sweep. It matches because its walk root is written
+    # `APP_ROOT = REPO_ROOT / "backend" / "app"`, and `REPO_ROOT` is on
+    # `ROOT_FIXTURE_NAMES` — so what the detector saw is the constant's ancestry
+    # rather than a walk of the repository root. That is the over-detection the
+    # comment above `ROOT_FIXTURE_NAMES` describes and accepts, and it is triaged
+    # here rather than reworded: editing a sweep to slip past a deliberately
+    # textual detector is how this guard went blind once already.
+    #
+    # The substance is the two E0-35 entries at the top of this set, exactly. The
+    # walk is `backend/app`, recursively, over `*.py` and nothing else, so every
+    # file it can read is a backend Python file — never inert. A diff that could
+    # add a module reading `session_from_request` therefore already runs the whole
+    # pipeline, and there is nothing a documentation-only diff can put in front of
+    # it.
+    #
+    # What would break this entry is the walk moving outside `backend/app` or
+    # being taught to read something that is not a `.py` file. The module's own
+    # docstring already argues against the first — it was widened once, from
+    # `backend/app/api` to the package, after a security review defeated it one
+    # directory out, and it names "anything outside `backend/app/` entirely" as a
+    # disclosed limit rather than a gap to close by widening again. If it ever
+    # does move, it belongs in the unconditional job instead of here.
+    "tests/unit/test_only_the_dependency_module_reads_a_session_from_a_request.py": (
+        "sweeps *.py under backend/app, and a .py change is never inert"
+    ),
 }
 
 UNCONDITIONAL_SWEEP_JOB = "lint-python"
