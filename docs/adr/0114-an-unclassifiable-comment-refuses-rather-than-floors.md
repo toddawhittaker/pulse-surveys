@@ -182,19 +182,32 @@ because both directions are safety decisions the spec does not make: §6.2 says 
 Care disclosure must reach the queue, while §4 and ADR 0055 say a student's words
 are stored in one place under one set of rules, and storing refused text creates a
 second — with a retention question, a grant question and a reveal question of its
-own. Three grounds were accepted with the ruling. **Text the classifier judges
-harmful is stored and routed to Care before any bounce can happen**: §3.3's gate
-bounces `insufficient` and `nonsense` only, so the comment that discloses harm and
-is also long enough to be judged substantive is submitted, stored and moderated on
-the ordinary path — the exposed case is a disclosure short enough or garbled enough
-to be refused, not a disclosure as such. **E10's recall floor is the guard on
-mislabeling** that narrow case: a threat or self-harm disclosure classified as
-`nonsense` is a recall miss, and SPEC §9.3 makes that rate a hard gate rather than
-an observation. And **a student's words stay in one store under one set of rules**,
-which is the property §4 and ADR 0055 are built on and the one a second store would
-end. The alternative — a store for refused text, with its own retention, grant and
-reveal rules — is refused for a case those three grounds already narrow to a
-measured rate on a gated surface. It reopens if that rate is missed or if §3.3's
+own. Three grounds were accepted with the ruling, and two of them are guards
+that MATURE in later epics rather than facts about today — the E2 boundary
+review's security pass caught an earlier version of this paragraph stating
+them in the present tense, and this paragraph is the corrected record. **Today
+no comment is screened for harm at all**: the submit path runs the validity
+classifier only, the moderation pass that will route a threat or a self-harm
+disclosure to Care (§5.2, §6.2) is E6's and E10's and is called from nothing,
+so a bounced comment is unscreened exactly as every stored comment is
+unscreened. The grounds, honestly tensed: **when the moderation pass exists,
+text the classifier judges harmful will be screened from the stored path** —
+§3.3's gate bounces `insufficient` and `nonsense` only, so a disclosure long
+enough to be judged substantive is submitted and stored, and the exposed case
+is a disclosure short enough or garbled enough to be refused. **E10's recall
+floor, when it is set, is the guard on mislabeling** that narrow case: a
+disclosure classified as `nonsense` is a recall miss, and SPEC §9.3 makes that
+rate a hard gate once E10 gives it a set and a value — today
+`tests/evals/threat/floors.py` is a deferred declaration with no cases, which
+is the refuse-to-silently-pass structure E2-12 built, not a measurement. And
+**a student's words stay in one store under one set of rules**, which is the
+property §4 and ADR 0055 are built on and the one a second store would end.
+The alternative — a store for refused text, with its own retention, grant and
+reveal rules — is refused for a case the maturing grounds narrow to a measured
+rate on a gated surface. **What schedules the revisit, since a rate nobody
+measures can never be missed**: `docs/tickets/e3/carried-from-e2.md` hands E10
+a named check — its threat-floor work takes the bounce-before-screening path
+into the floor's scope or reopens this ruling. It also reopens if §3.3's
 bounce set widens beyond `insufficient` and `nonsense`.
 
 **E2-10's form has a contract it can build against.** A 403 means "reload and try

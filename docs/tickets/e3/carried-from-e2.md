@@ -312,6 +312,25 @@ and cheap to take sooner.
 **Done when:** the deferred entry's, with a planted symlinked-directory control
 seen red.
 
+## A bounced comment is refused before any harm screening exists — E10's floor takes the path into scope
+
+The 2026-09-03 ruling (ADR 0114) is that bounced comment text is not stored,
+accepted on grounds that mature later: the moderation pass that screens stored
+text for harm is E6's and E10's and runs today from nothing, and the threat
+recall floor is a deferred empty declaration until E10 sets it. So today a
+disclosure short enough or garbled enough to be bounced is unscreened — as is
+every stored comment — and once E6's pass exists, the bounced path is the one
+that stays outside it, by decision. The E2 boundary review's security pass
+established that the ruling's original reopen trigger ("a missed recall
+floor") cannot fire while no rate is measured; this entry is the scheduled
+revisit that replaces it.
+**Owner:** E10, with the threat/self-harm eval set and floor.
+**Done when:** E10's floor-setting either takes the bounce-before-screening
+path into the floor's scope — its eval set contains bounced-shaped disclosures
+(short, garbled) and the measured recall governs them — or reopens ADR 0114's
+ruling with what it found. The ruling also reopens if §3.3's bounce set widens
+past `insufficient` and `nonsense`.
+
 ## The rendered student surface's strings rest on a convention nothing sweeps
 
 From the E2 boundary review's invariant-coverage audit (the record is

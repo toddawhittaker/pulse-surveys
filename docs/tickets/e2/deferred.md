@@ -264,17 +264,20 @@ that it must not, ADR 0114's paragraph becomes a decision rather than a limitati
 and this entry closes with it.
 
 **CLOSED by the ruling of 2026-09-03: bounced comment text is not stored**, so it
-is the second branch above and no ticket is owed. ADR 0114 carries the decision and
-the three grounds it was accepted on — text the classifier judges harmful is stored
-and routed to Care before any bounce can happen, since §3.3's gate refuses
-`insufficient` and `nonsense` only; E10's recall floor is the guard on mislabeling
-that narrow case, and SPEC §9.3 makes that rate a hard gate rather than an
-observation; and a student's words stay in one store under one set of rules, which
-is the property §4 and ADR 0055 rest on and the one a second store would end. The
-record says what reopens it: a missed recall floor, or a §3.3 bounce set that
-widens past those two verdicts. The two module docstrings that repeated the open
-question — `app.services.validity` and `app.services.submissions` — say the same as
-the record now.
+is the second branch above. ADR 0114 carries the decision and the three grounds it
+was accepted on, stated in their honest tense after the E2 boundary review's
+security pass caught two of them written as present facts: the moderation pass
+that will screen stored text for harm is E6's and E10's and runs today from
+nothing, and the threat recall floor is a deferred empty declaration until E10
+sets it — so today a bounced comment is unscreened exactly as every stored
+comment is. The third ground stands in the present: a student's words stay in one
+store under one set of rules. Because a rate nobody measures can never be missed,
+the revisit is scheduled rather than assumed: `../e3/carried-from-e2.md` hands
+E10 a named check — its threat-floor work takes the bounce-before-screening path
+into the floor's scope or reopens the ruling — and the ruling also reopens if
+§3.3's bounce set widens past `insufficient` and `nonsense`. The two module
+docstrings that repeated the open question — `app.services.validity` and
+`app.services.submissions` — say the same as the record now.
 
 ## The launch-path roster enqueue still waits six seconds on a broker that is down — unowned
 

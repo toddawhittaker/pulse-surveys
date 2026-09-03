@@ -147,6 +147,21 @@ batch (`E2-14-invariant-pass-coverage.md`,
 - **LOW, confirmed** — the epic index's Merged column was empty for all
   thirteen rows and PR #149 appeared nowhere in it. → **Fixed here.**
 
+**From the exit PR's own security review, after the round above:**
+
+- **HIGH ×2, confirmed, resolved on the owner's word (2026-09-03)** — the
+  ADR 0114 ruling paragraph this PR wrote recorded two of its accepted
+  grounds as present facts when both mature later (no moderation pass
+  screens any comment for harm until E6/E10, and the threat recall floor is
+  a deferred empty declaration until E10), and the closure removed the
+  revisit mechanism while its reopen trigger — a missed rate — cannot fire
+  on a rate nobody measures. The ruling stands; the record was corrected:
+  the grounds are restated in their honest tense with today's state plain,
+  and the revisit is scheduled rather than assumed — `carried-from-e2.md`
+  hands E10 a named check (its floor-setting takes the
+  bounce-before-screening path into the floor's scope or reopens the
+  ruling). → **Fixed here**, with a security re-pass over the fix.
+
 ## What was executed and came back clean
 
 The full e2e suite against the live stack (36 passed); an independent drive
