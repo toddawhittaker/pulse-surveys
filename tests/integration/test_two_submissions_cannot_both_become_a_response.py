@@ -90,6 +90,12 @@ UNGRANTED_LOCKS = "SELECT count(*) FROM pg_locks WHERE NOT granted"
 # assertion here is about. Aware, because ADR 0019 refuses anything else.
 COMPETING_SUBMITTED_AT = datetime(2026, 8, 23, 22, 30, tzinfo=UTC)
 
+# The column both `section` and `response` carry their term on, spelled as E0-06
+# spelled it on `section` and E2-16 spells it on `response`. One name, because the
+# seeded row below reads it off a section and writes it onto a response, and the
+# whole point of the column is that those two are the same value.
+TERM_COLUMN = "term_id"
+
 
 class Submission:
     """One HTTP submission made on a thread, with whatever it answered."""
@@ -211,6 +217,17 @@ def test_a_submission_that_meets_an_uncommitted_response_is_refused_as_a_duplica
             "had blocked on it — and the submission would then be an ordinary resubmission."
         )
 
+        # The term is named beside the section and the week, and E2-16 is why
+        # (`docs/disputes/E2-16-02.md`). That ticket gave `response` the
+        # term-agreement rule `survey_window` has had since E2-05 — a `term_id`
+        # held by composite foreign keys into `section (id, term_id)` and
+        # `week (id, term_id)` — and this call names its section and its week
+        # explicitly while handing the seeding walker an empty chain. Left to
+        # fill `term_id` itself the walker builds a fresh section in a fresh term
+        # and takes that term, and the composite key then refuses this row: the
+        # competing response would never exist, the submission would meet nothing,
+        # and the 409 this test is about would never be provoked. It comes off
+        # `world.section`, which is the section `world.week` shares a term with.
         seed_row(
             holding,
             metadata_tables,
@@ -219,6 +236,7 @@ def test_a_submission_that_meets_an_uncommitted_response_is_refused_as_a_duplica
             user_id=student_id,
             section_id=section_id,
             week_id=week_id,
+            term_id=world.section[TERM_COLUMN],
             first_submitted_at=COMPETING_SUBMITTED_AT,
             last_submitted_at=COMPETING_SUBMITTED_AT,
         )

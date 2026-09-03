@@ -263,6 +263,25 @@ def test_upgrade_head_creates_the_four_survey_tables(migrated_engine: Any) -> No
 # Criterion 1 — one response per (student, section, week). SPEC §8: "`response`
 # is unique per (student, section, week)". Three tests, because the constraint
 # has three columns and leaving any one of them out is a different defect.
+#
+# **Each of the three names a term as well, and E2-16 is why** (the record is
+# `docs/disputes/E2-16-02.md`). That ticket gave `response` the term-agreement
+# rule `survey_window` has had since E2-05: a `term_id` on the row, held by
+# composite foreign keys into `section (id, term_id)` and `week (id, term_id)`.
+# The second insert in each test names a section and a week explicitly and passes
+# the seeding walker an **empty** chain, so the walker — which fills an unnamed
+# NOT NULL foreign key from the chain and builds the target when the chain has
+# none — invented a brand-new section in a brand-new term and took that term,
+# while the section and week on the row belonged to the first response's. The
+# composite key refused the row, correctly, and each test reported it as a
+# failure of the uniqueness rule it is actually about.
+#
+# So the term comes off the first response, which is the term all three cases
+# share: the later week and the other section are both seeded into
+# `chain["term"]`. Nothing about what these three assert has changed — they are
+# `docs/MISTAKES.md` entry 22's shape, a later ticket's legitimate change making
+# an earlier ticket's *seeding* false — and naming all three keys is now the
+# discipline every caller writing a response follows.
 # ---------------------------------------------------------------------------
 
 
@@ -295,6 +314,7 @@ def test_a_second_response_for_the_same_student_section_and_week_is_refused(
                 user_id=other_student["id"],
                 section_id=first["section_id"],
                 week_id=first["week_id"],
+                term_id=first["term_id"],
             )
     except DatabaseError as rejected:
         pytest.fail(
@@ -311,6 +331,7 @@ def test_a_second_response_for_the_same_student_section_and_week_is_refused(
             user_id=first["user_id"],
             section_id=first["section_id"],
             week_id=first["week_id"],
+            term_id=first["term_id"],
         ),
     )
     assert duplicated, (
@@ -353,6 +374,7 @@ def test_the_same_student_may_respond_to_the_same_section_in_a_later_week(
                 user_id=first["user_id"],
                 section_id=first["section_id"],
                 week_id=later["id"],
+                term_id=first["term_id"],
             )
     except DatabaseError as rejected:
         pytest.fail(
@@ -394,6 +416,7 @@ def test_the_same_student_may_respond_to_another_section_in_the_same_week(
                 user_id=first["user_id"],
                 section_id=other_section["id"],
                 week_id=first["week_id"],
+                term_id=first["term_id"],
             )
     except DatabaseError as rejected:
         pytest.fail(
