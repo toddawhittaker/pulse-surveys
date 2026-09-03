@@ -34,10 +34,18 @@
 // dot carries `data-pulse-ring-token` and the workload slider carries
 // `data-pulse-track-token`, each holding the custom property the colour is drawn
 // from (`--something`). That is the whole contract: the spec asserts that the
-// rendered colour really is that token's value, that the ratio it computes
-// clears the floor, and that `design/`'s prototype names the same token — none
-// of which chooses the token. An assertion written the other way, against a
-// colour named in this file, would be this spec picking the palette.
+// token is one `design/tokens.css` declares, that the ratio it computes against
+// `--paper` clears the floor, and that `design/`'s prototype names the same
+// token — none of which chooses the token. An assertion written the other way,
+// against a colour named in this file, would be this spec picking the palette.
+//
+// **"The rendered colour really is that token's value" is asserted on the dot
+// and not on the slider track**, and dispute E2-17-01 is why: Chromium's
+// `getComputedStyle` ignores the `::-webkit-slider-runnable-track` argument and
+// answers with the input's own style, so a track colour cannot be read that way
+// at all. The dot's element is styled directly and is read directly; the track's
+// test keeps the token and the ratio, and the prototype test ties both tokens to
+// `design/`.
 //
 // This spec cannot be run without a seeded, running Compose stack; its green is
 // the stack-up run and CI.
@@ -92,6 +100,27 @@ const TRACK_TOKEN = 'data-pulse-track-token';
 // the token promises. Both are the ticket's numbers.
 const NON_TEXT_FLOOR = 3;
 const MINIMUM_RING_WIDTH = 2;
+
+// The card these ratios are computed against. SPEC §7.6 makes `design/tokens.css`
+// the single source for the palette and the design brief names `--paper` as
+// "cards and input surfaces"; it is resolved from the page rather than written
+// out, so this file says which surface it means without holding a copy of its
+// colour.
+const CARD_TOKEN = '--paper';
+
+// The slider track's colour before this ticket (`--hairline`), and the ratio a
+// replacement has to clear.
+//
+// **The floor is this spec's line rather than the ticket's, and it is drawn here
+// rather than left implicit.** Criterion 3 scopes SC 1.4.11's 3:1 to the dot and
+// says only that the track gets "the same treatment" over a measured 1.30:1, so
+// demanding 3:1 of the track would invent a requirement and demanding "greater
+// than 1.30" would accept a rounding step as a fix. Two sits between them: a
+// whole ratio point clear of the defect, and comfortably under the 3:1 the
+// criterion deliberately does not ask for here. Named, so a disagreement about it
+// is a disagreement about one constant.
+const TRACK_COLOUR_TODAY = '#DCE4DD';
+const TRACK_FLOOR = 2;
 
 // Three ratios measured outside this file, used as the control on the arithmetic
 // below (`docs/MISTAKES.md` entry 3: run the instrument against what you claim it
@@ -642,7 +671,7 @@ test('the unchecked Likert dot is drawn from a token that clears the non-text co
   ).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
 });
 
-test('the workload slider track is drawn from a token, and a darker one than before', async ({
+test('the workload slider names a track token that clears the ratio the ticket recorded', async ({
   page,
 }) => {
   // Criterion 3, the track. Measured for this ticket at 1.30:1 against the card
@@ -650,15 +679,41 @@ test('the workload slider track is drawn from a token, and a darker one than bef
   // is not the control's boundary; the thumb is, and it reads at 12.45:1.
   //
   // **What is asserted, and the ambiguity that is deliberately not papered
-  // over.** The ticket says the track gets "the same treatment" and its
-  // criterion scopes the ≥ 3:1 floor to the dot. So this test does not demand
-  // 3:1 of the track. It demands the two things the ticket does say: the colour
-  // comes from a token the element names, and it is better than the 1.30:1 that
-  // is recorded as the defect. A track left exactly as it is, is not a fix.
+  // over.** The ticket says the track gets "the same treatment" and its criterion
+  // scopes the ≥ 3:1 floor to the dot. So this test does not demand 3:1 of the
+  // track. It demands the two things the ticket does say: the colour comes from a
+  // token the element names and that token is declared, and it clears the 1.30:1
+  // the ticket records as the defect by a stated margin. A track left as it is,
+  // is not a fix.
   //
-  // **Read through the pseudo-element**, because that is where a range input's
-  // track lives; the attribute rides the input, which is the only node that can
-  // carry one.
+  // **This test read the painted colour until dispute E2-17-01, and could not.**
+  // It compared `getComputedStyle(input, '::-webkit-slider-runnable-track')
+  // .backgroundColor` against the token's value, on the belief that this is where
+  // a range input's track lives. Chromium ignores that pseudo-element argument
+  // and hands back the *input's own* style — proven twice independently, by the
+  // implementer's probe in the dispute file (the returned `height` is the input's
+  // 44px, not the track's declared 4px) and by the boundary verification's own
+  // a11y pass, which hit the identical limitation and had to sample rendered
+  // pixels instead. Worse, the two assertions were jointly unsatisfiable: the only
+  // way to make that read carry the token's channels is to paint the *input*
+  // with it, and then the ratio against its own background is 1.00. A test
+  // asserting through an instrument that cannot see its subject is a broken
+  // instrument, not a red, and the ruling is recorded in
+  // `docs/disputes/E2-17-01.md`.
+  //
+  // **So the claim is narrowed to what can be measured here, and the rest is
+  // measured where it can be.** "The rendered colour really is this token's
+  // value" is asserted on the Likert dot, one test up, whose element
+  // `getComputedStyle` reads directly. What this test keeps is the token: that
+  // the slider publishes one, that `design/tokens.css` declares it, and that its
+  // ratio against the card clears the floor. The prototype test below is what
+  // ties the same token to `design/WorkloadSlider.dc.html`.
+  //
+  // **The card is resolved from `--paper` and not walked up from the slider.**
+  // The dispute's closing paragraph is the reason: a background read from the
+  // slider's own ancestry is the same colour the paint comparison would have
+  // forced onto the input, and computing the ratio from it is how the
+  // contradiction survives a repair.
   const block = await landOnTheSurvey(page, placement, BIOLOGY.code);
   await expectTheFormIsShowing(block);
 
@@ -669,28 +724,35 @@ test('the workload slider track is drawn from a token, and a darker one than bef
     `The workload slider publishes no \`${TRACK_TOKEN}\`. As with the Likert ring, the token is ` +
       'the implementer’s choice and the attribute is how this spec learns it.',
   ).toMatch(/^--[a-z0-9-]+$/);
+
   const value = await resolveToken(page, token);
-  expect(value, `\`${token}\` resolves to nothing on this page.`).not.toBe('');
-
-  const painted = await slider.evaluate(
-    (element) => getComputedStyle(element, '::-webkit-slider-runnable-track').backgroundColor,
-  );
   expect(
-    channels(painted),
-    `The track renders ${painted} and \`${token}\` is ${value}.`,
-  ).toEqual(channels(value));
+    value,
+    `\`${token}\` resolves to nothing on this page. The attribute names a custom property that ` +
+      '`design/tokens.css` does not define — SPEC §7.6 makes that file the single source for the ' +
+      'palette, and no new token is in this ticket. This is the assertion that keeps the ' +
+      'attribute honest now that the painted colour is not read: a name nothing declares would ' +
+      'otherwise satisfy every other reading here.',
+  ).not.toBe('');
 
-  const behind = await effectiveBackground(slider);
-  const ratio = contrastRatio(value, behind);
-  const before = contrastRatio('#DCE4DD', '#FFFFFF');
+  const card = await resolveToken(page, CARD_TOKEN);
+  expect(
+    card,
+    `\`${CARD_TOKEN}\` resolves to nothing on this page, so there is no card surface to compute a ` +
+      'ratio against. The design brief names it as the colour of "cards and input surfaces".',
+  ).not.toBe('');
+
+  const ratio = contrastRatio(value, card);
+  const measuredBefore = contrastRatio(TRACK_COLOUR_TODAY, card);
   expect(
     ratio,
-    `The track is ${token} (${value}) against ${behind} at ${ratio.toFixed(2)}:1. It was ` +
-      `measured at ${before.toFixed(2)}:1 for this ticket, which the ticket records as the ` +
-      'defect: at that ratio the track is invisible against the card and the slider reads as a ' +
-      'floating thumb. This assertion is the ticket’s "same treatment" and not SC 1.4.11, which ' +
-      'the criterion scopes to the dot.',
-  ).toBeGreaterThan(before);
+    `The track is ${token} (${value}) against ${CARD_TOKEN} (${card}) at ${ratio.toFixed(2)}:1. ` +
+      `The colour it replaces reads ${measuredBefore.toFixed(2)}:1 there, which is what the ` +
+      'ticket records as the defect: at that ratio the track is invisible against the card and ' +
+      `the slider reads as a floating thumb. The ${TRACK_FLOOR}:1 line is this spec's, drawn so ` +
+      'that a rounding step does not pass as a fix; SC 1.4.11 is not being applied here, because ' +
+      'criterion 3 scopes its 3:1 to the dot.',
+  ).toBeGreaterThanOrEqual(TRACK_FLOOR);
 });
 
 test('the design prototype names the same tokens the screen draws with', async ({ page }) => {
