@@ -19,10 +19,16 @@ exactly the copy-drift this rule exists to catch.
 Item 4: aggregate language counts sections, never instructors; "needs
 attention," never "underperforming"; no ranking, no composite scores, and no
 score-sorting anywhere. Item 5: confidentiality copy exactly once per
-surface — for the survey, in the submit bar — plain words, no shield or lock
-iconography. **The assertions are written from the spec's own wording of
-both items, not from this paraphrase** — a dropped clause here must not
-become a dropped assertion there.
+surface — for the survey, once per screen, in the submit area — plain words,
+no shield or lock iconography. **The assertions are written from the spec's
+own wording of both items, not from this paraphrase** — a dropped clause here
+must not become a dropped assertion there. (Item 5's parenthetical read "in
+the submit bar" when this ticket was written and was sharpened by E2-17, whose
+ruling of 2026-09-03 reads "once per surface" as once per screen; the
+paraphrase above follows the wording in force so that a reader of this ticket
+is not sent to a rule that has moved. Nothing this ticket built changed with
+it — the inventory counts one string, and where that string is rendered is
+`tests/e2e/student-survey-confidentiality.spec.ts`'s.)
 
 Read first: SPEC §4.1 items 4–5 and §5.6's non-goals vocabulary; the E2-08 /
 E2-09 / E2-10 string modules (built to be read by this test); §10's i18n line

@@ -135,7 +135,7 @@ Each of these is an automated assertion in the test suite (§9), not a conventio
 2. A Lead Faculty assignment never grants sibling leads' courses, at any point in the purview union computation.
 3. Below the n-threshold, raw comments are hidden from instructors and students alike.
 4. Aggregate language counts sections, never instructors; "needs attention," never "underperforming"; no ranking, no composite scores, and no score-sorting anywhere. *(Asserted from **E2**, when the copy-inventory test first collects shipped user-facing strings; the vocabulary rule is checked globally from then on. Until then this item is enforced by review only.)*
-5. Confidentiality copy appears exactly once per surface (survey: in the submit bar), in plain words, no shield or lock iconography. *(Asserted from **E2** via the same copy-inventory test — the survey is the first governed surface, and the inventory grows with each UI epic. Until then this item is enforced by review only.)*
+5. Confidentiality copy appears exactly once per surface (survey: once per screen, in the submit area), in plain words, no shield or lock iconography. *(Asserted from **E2** via the same copy-inventory test — the survey is the first governed surface, and the inventory grows with each UI epic. Until then this item is enforced by review only.)*
 6. No view may ever widen a student's visibility relative to these rules.
 7. No figure computed from a comparison set is shown below the benchmark minimum — a mean, a median, or any other statistic, not only a drawn line. A comparison figure over fewer than the configured number of sections is suppressed exactly as a line is (§5.1). *(Asserted from **E4**, the epic that builds the reports carrying these figures.)*
 
