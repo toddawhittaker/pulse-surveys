@@ -89,8 +89,8 @@ COPY: Mapping[str, CopyEntry] = {
             key="submit.bounce.insufficient",
             text=(
                 "A sentence about your week is what counts here, and a few words on their own "
-                'are too brief to. Something like "the pacing in week 3 was too fast" gives '
-                "your instructor a specific thing to act on."
+                'are too brief to be useful. Something like "the pacing in week 3 was too fast" '
+                "gives your instructor a specific thing to act on."
             ),
         ),
         CopyEntry(
