@@ -253,6 +253,7 @@ redis      redis:7 (broker/result backend)
 mailpit    dev-only SMTP capture
 mock-lms   dev/test-only LTI 1.3 platform (§9.2)
 mock-idp   dev/test-only OIDC identity provider for web-login roles (§9.2)
+mock-ai    dev/test-only OpenAI-compatible AI provider, deterministic verdicts (§9.2)
 ```
 
 Production deployment follows the same topology; reverse proxy / tunnel (e.g., cloudflared sidecar) is deployment-specific and out of scope for the compose file, but the app must run correctly behind a TLS-terminating proxy with a configurable public base URL (LTI redirect URIs demand it).
@@ -361,12 +362,12 @@ Selected constraints:
 
 **Settled during E0** (2026-08, each already stated in its section): one deployment serves one institution, enforced by constraint (§8); the benchmark minimum covers every figure computed from a comparison set, not only drawn lines (§4.1 item 7); the first roster pull is triggered by a staff launch, whose stored service address seeds every later sync (§7.3); a late add the platform never dated counts from the week of the sync that first saw them (§3.4); students hold no role assignment — their access resolves from enrollment (§2.1).
 
-**Still open:**
+**Still open** (a question settled later keeps its number and records the settlement in place, so the numbering stays stable):
 
 1. **Benchmark minimum-N value.** The mechanism is specced (§5.1, distinct from section small-N); the number isn't. Suggest 3 sections and 15 respondents as starting values.
 2. **Numeric workload outliers.** Trim/winsorize the displayed mean, show median as headline, or cap the slider lower? Leaning: median as headline, mean secondary.
 3. **Care role sourcing at pilot.** Office of Community Standards owns the queue in production; for a pilot before that office is wired in, who holds Care? (A named pilot owner, not Admin-by-default.)
-4. **Production "substantive" definition** (§3.3). The classifier replaces the 25-character prototype heuristic; its eval set and threshold need real seeded data before E2 exits.
+4. **Production "substantive" definition** (§3.3). Settled for v1 during E2: the classifier's eval set is ninety-eight typed cases pinned to `validity.v2`, and the enforcing floors are precision 0.92 and recall 0.90, measured against the live provider; `tests/evals/validity/floors.py` carries the measurement and headroom sentences. Reopens with a model or prompt change.
 5. **Kept-decision surfacing** (§5.2 open item). Kept decisions are logged; production should show both directions (Kept / Excluded) in the roll-up moderation log.
 6. **Reveal audit grain** (§4, §6.2). Does "every identity access is automatically audit-logged" count accesses or authorizations? Measured during E0: one committed reveal record returned the name five times and left one audit row. E10 settles the wording and the mechanism together, before or with the first screen that shows a reveal id; the "done when" is in E0's carried-out table (`docs/tickets/e0/README.md`).
 
