@@ -304,11 +304,18 @@ function OpenSurveyForm({
   // and empty again as soon as any answer changes: it is the result of one
   // activation, and an edit is what makes it possibly untrue.
   const [missing, setMissing] = useState('');
-  // What the form's live region is saying right now. One region for the whole
-  // form, so §3.3's coaching is announced once when it arrives rather than once
-  // per field carrying it, and E2-17 item 4's conditional-required sentence goes
-  // through the same channel rather than opening a second one.
-  const [announcement, setAnnouncement] = useState('');
+  // That §3.2's conditional rule has just made a comment required (E2-17 item
+  // 4), announced and never drawn: the flag beside the label and the helper
+  // under the box are the visible statement of the same fact, and a third one on
+  // screen would say it twice.
+  //
+  // **Its own region rather than the bounce's**, and that is a measured
+  // correction rather than a preference. Sharing one meant that a form where a
+  // low rating had already been chosen was announcing this sentence when the
+  // bounce arrived, so "the region is not empty" no longer identified the
+  // server's coaching and `student-survey.spec.ts` read the wrong sentence out
+  // of it. Two facts, two regions, each empty until its own is true.
+  const [requiredNotice, setRequiredNotice] = useState('');
 
   // Whether this section is offering a submit action at all, told to the screen
   // so that exactly one submit area on it carries the confidentiality sentence
@@ -336,26 +343,19 @@ function OpenSurveyForm({
       bounce === null || stillCoached.length === 0 ? null : { ...bounce, positions: stillCoached };
     setBounce(nextBounce);
 
-    setAnnouncement((spoken) => {
-      // The coaching stops being announced when the last field carrying it has
-      // been edited; until then it stands, whatever else changed.
-      if (bounce !== null && nextBounce === null && spoken === bounce.message) return '';
-
-      // SPEC §3.2's conditional rule crossing *into* required is announced
-      // (E2-17 item 4) — the flag, the helper and `aria-required` all change at
-      // once and a student who is not looking at the screen was told none of it.
-      // Crossing back out of it is a relaxation and is not announced; the
-      // sentence goes rather than standing while it is untrue, and clearing a
-      // live region says nothing to anybody.
-      const wasRequired = requiredComments(survey.questions, before);
-      const nowRequired = requiredComments(survey.questions, after);
-      if (nowRequired.some((at) => !wasRequired.includes(at))) {
-        return copy('student_survey.comment_now_required');
-      }
-      const relaxed = wasRequired.some((at) => !nowRequired.includes(at));
-      if (relaxed && spoken === copy('student_survey.comment_now_required')) return '';
-      return spoken;
-    });
+    // SPEC §3.2's conditional rule crossing *into* required is announced (E2-17
+    // item 4) — the flag, the helper and `aria-required` all change at once and
+    // a student who is not looking at the screen was told none of it. Crossing
+    // back out of it is a relaxation and is not announced: the sentence is
+    // cleared rather than left standing while it is untrue, and clearing a live
+    // region says nothing to anybody.
+    const wasRequired = requiredComments(survey.questions, before);
+    const nowRequired = requiredComments(survey.questions, after);
+    if (nowRequired.some((at) => !wasRequired.includes(at))) {
+      setRequiredNotice(copy('student_survey.comment_now_required'));
+    } else if (wasRequired.some((at) => !nowRequired.includes(at))) {
+      setRequiredNotice('');
+    }
   }
 
   async function submit(): Promise<void> {
@@ -387,7 +387,7 @@ function OpenSurveyForm({
       setStored(true);
       setShowForm(false);
       setBounce(null);
-      setAnnouncement('');
+      setRequiredNotice('');
       return;
     }
     if (outcome.kind === 'bounced') {
@@ -398,7 +398,6 @@ function OpenSurveyForm({
       // `docs/tickets/e2/deferred.md` carries what closes that.
       const positions = submittedCommentPositions(survey.questions, values);
       setBounce({ message: outcome.message, positions });
-      setAnnouncement(outcome.message);
       const first = positions[0];
       if (first !== undefined) {
         document.getElementById(fieldId(sectionId, first))?.focus();
@@ -465,22 +464,31 @@ function OpenSurveyForm({
     <div className="pulse-survey-form">
       {eyebrow}
 
-      {/* One live region for the whole form, so §3.3's coaching is announced
-          once when it arrives rather than once per field carrying it. The region
-          is in the document from the first render: a region added at the moment
-          it has something to say is a region assistive technology has not been
-          watching — and, since E2-17 item 8, it is *rendered* from the first
-          render too. It used to be `display: none` while empty, which is the
-          same defect wearing a stylesheet: Chromium marked the node
-          `notRendered` and kept it out of the accessibility tree until it
-          already had something to say. `styles.css` hides it by clipping now. */}
+      {/* SPEC §3.3's coaching, announced once for the whole form rather than
+          once per field carrying it. The region is in the document from the
+          first render: a region added at the moment it has something to say is a
+          region assistive technology has not been watching — and, since E2-17
+          item 8, it is *rendered* from the first render too. It used to be
+          `display: none` while empty, which is the same defect wearing a
+          stylesheet: Chromium marked the node `notRendered` and kept it out of
+          the accessibility tree until it already had something to say.
+          `styles.css` hides it by clipping now. */}
       <p
         className="pulse-bounce-announcement"
         data-testid={BOUNCE_ANNOUNCEMENT_TESTID}
         role="status"
         aria-live="polite"
       >
-        {announcement}
+        {bounce?.message ?? ''}
+      </p>
+      {/* And §3.2's conditional rule turning a comment required (E2-17 item 4).
+          Its own region, because the two facts are independent and a shared one
+          made "the coaching has arrived" unreadable — a form where a low rating
+          had already been chosen was announcing the conditional sentence when the
+          bounce landed. Never drawn: the flag beside the label and the helper
+          under the box are the same fact on screen already. */}
+      <p className="pulse-required-announcement" role="status" aria-live="polite">
+        {requiredNotice}
       </p>
       {refusal === null ? null : (
         <p className="pulse-refusal" data-testid={REFUSAL_TESTID} role="alert">

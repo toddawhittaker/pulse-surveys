@@ -568,12 +568,17 @@
    *
    * The submit control's own region (E2-17 item 1) is the same node twice over —
    * the sentence it announces is also the visible text the button is described
-   * by — so it is hidden the same way and shown the same way. */
+   * by — so it is hidden the same way and shown the same way. The
+   * conditional-required region (item 4) is hidden this way *always*: the flag
+   * beside the label and the helper under the box already say on screen what it
+   * announces, and a third statement of it would be the same sentence twice. */
+  .pulse-required-announcement,
   .pulse-bounce-announcement:empty,
   .pulse-submit-missing:empty {
     position: absolute;
     width: 1px;
     height: 1px;
+    margin: 0;
     padding: 0;
     overflow: hidden;
     clip-path: inset(50%);
