@@ -324,12 +324,18 @@ that stays outside it, by decision. The E2 boundary review's security pass
 established that the ruling's original reopen trigger ("a missed recall
 floor") cannot fire while no rate is measured; this entry is the scheduled
 revisit that replaces it.
-**Owner:** E10, with the threat/self-harm eval set and floor.
+**Owner:** E10, with the threat/self-harm eval set and floor. **And one hook
+for E6, at the moment the cost appears:** when E6's moderation work decides
+what its pass covers, it names this entry — the bounced path is the one that
+stays outside that pass by decision, and the decision deserves a look at the
+point it starts costing rather than an epic later.
 **Done when:** E10's floor-setting either takes the bounce-before-screening
-path into the floor's scope — its eval set contains bounced-shaped disclosures
-(short, garbled) and the measured recall governs them — or reopens ADR 0114's
-ruling with what it found. The ruling also reopens if §3.3's bounce set widens
-past `insufficient` and `nonsense`.
+path into the floor's scope — its eval set contains disclosures shaped to be
+bounced under §3.3's actual gate (under the 25-character floor, or judged
+`nonsense`; the refused set is `REFUSED_VERDICTS` in
+`backend/app/services/validity.py`) and the measured recall governs them — or
+reopens ADR 0114's ruling with what it found. The ruling also reopens if
+§3.3's bounce set widens past `insufficient` and `nonsense`.
 
 ## The rendered student surface's strings rest on a convention nothing sweeps
 

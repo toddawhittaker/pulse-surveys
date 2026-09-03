@@ -267,8 +267,8 @@ and this entry closes with it.
 is the second branch above. ADR 0114 carries the decision and the three grounds it
 was accepted on, stated in their honest tense after the E2 boundary review's
 security pass caught two of them written as present facts: the moderation pass
-that will screen stored text for harm is E6's and E10's and runs today from
-nothing, and the threat recall floor is a deferred empty declaration until E10
+that will screen stored text for harm is E6's and E10's and is called from
+nothing today, and the threat recall floor is a deferred empty declaration until E10
 sets it — so today a bounced comment is unscreened exactly as every stored
 comment is. The third ground stands in the present: a student's words stay in one
 store under one set of rules. Because a rate nobody measures can never be missed,

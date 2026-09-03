@@ -1,7 +1,8 @@
 # E2 epic-boundary review — the record
 
 Run at the epic exit (ticket E2-13, branch `e2/e2-exit`, commit a3c810d, with
-record corrections landing as 9e302c4 on the same branch), per SPEC §14.2
+record corrections landing as 9e302c4 and the security round's fix as 70d87f2
+on the same branch), per SPEC §14.2
 item 6: an exit review against the running system, an invariant-coverage
 audit, and a docs/ADR completeness check, each in a fresh context that had
 watched none of the build. Every code finding below went through an
