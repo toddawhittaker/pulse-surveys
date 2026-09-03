@@ -199,7 +199,7 @@ that ADR 0055's grant cannot prevent. The comment's **text** is still not stored
 ADR 0055 refused even a fingerprint of one on `classification`, "recoverable by
 dictionary in seconds" over strings this short, and
 [ADR 0114](../../adr/0114-an-unclassifiable-comment-refuses-rather-than-floors.md)
-records the consequence as an open limitation rather than a decision.
+recorded the consequence as an open limitation rather than a decision.
 
 The consequence is this. §5.2's moderation pass and §6.2's route to the Care queue
 both run over stored comments, so a student whose comment discloses harm and is
@@ -215,6 +215,19 @@ breakdown. If the ruling is that bounced text must reach §6.2's path, that tick
 owns where it is stored, who may read it and what removes it; if the ruling is
 that it must not, ADR 0114's paragraph becomes a decision rather than a limitation
 and this entry closes with it.
+
+**CLOSED by the ruling of 2026-09-03: bounced comment text is not stored**, so it
+is the second branch above and no ticket is owed. ADR 0114 carries the decision and
+the three grounds it was accepted on — text the classifier judges harmful is stored
+and routed to Care before any bounce can happen, since §3.3's gate refuses
+`insufficient` and `nonsense` only; E10's recall floor is the guard on mislabeling
+that narrow case, and SPEC §9.3 makes that rate a hard gate rather than an
+observation; and a student's words stay in one store under one set of rules, which
+is the property §4 and ADR 0055 rest on and the one a second store would end. The
+record says what reopens it: a missed recall floor, or a §3.3 bounce set that
+widens past those two verdicts. The two module docstrings that repeated the open
+question — `app.services.validity` and `app.services.submissions` — say the same as
+the record now.
 
 ## The launch-path roster enqueue still waits six seconds on a broker that is down — unowned
 
