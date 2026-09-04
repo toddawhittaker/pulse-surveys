@@ -146,7 +146,7 @@ it. The entries' own done-whens govern; the tickets point at them.
 |---|---|
 | A non-development deployment has no way to supply the tool's signing key | E3-01 |
 | AGS still answers without a token (deadline: paired with the first AGS client) | E3-04 |
-| The mock's scope check is only provably a membership check while no advertised scope is a superstring | E3-04 — the AGS scopes are the widening that discharges it |
+| The mock's scope check is only provably a membership check while no advertised scope is a superstring | E3-04. The pair already exists — `mock-lms/app/ags.py:92` advertises both the line-item scope and the line-item read-only scope, and the read-only string contains the line-item string as a prefix — and it becomes *provable* only once the AGS routes require a credential, which is E3-04's other half. |
 | Nothing structurally forces the next mutating route onto the CSRF dependency | E3-07 |
 | The launch-path roster enqueue still waits six seconds on a broker that is down | E3-05 — **taken at breakdown**, because the entry's owner is whichever epic next touches the launch door's suites and E3-05 is that ticket |
 | `PERSON_TABLES` standing review question, asked of the tables E3 adds | E3-02 (answered in its PR body), re-asked of the whole epic in E3-08 |
