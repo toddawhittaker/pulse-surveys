@@ -54,21 +54,29 @@ about "the defect" would be about the wrong one (`docs/MISTAKES.md` entry 3). Th
 roster address is also *asserted stored* in the refusal test, which is what says
 the writer ran at all and that only the gradebook half was refused.
 
-**The defect kind is discovered, not named.** The ticket asks for "a new
-`LaunchDefectKind` member, mirror `roster_address_refused`" and spells no name, so
-naming one here would settle an interface the ticket leaves open on the
-implementer's behalf. `the_kind_this_ticket_adds` reads the enum and subtracts the
-kinds that already existed; one new member is the answer, two is an interface
-question for the pull request, and none is the ticket not built yet. The control
-at the foot of this module is what makes that subtraction well-founded.
+**The defect kind is `ags_address_refused`, and it was discovered rather than
+named until the ticket settled it.** The ticket asks for "a new `LaunchDefectKind`
+member, mirror `roster_address_refused`" and spells no name, so this module
+originally read the enum and subtracted the kinds that already existed — naming one
+would have settled an interface the ticket left open. That could not survive
+contact with `test_launch_provisioning_defects.py`, which pins the whole set as an
+equality against the same inventory the subtraction read from: a member added to
+one is added to both, and the difference collapses to nothing.
+`docs/disputes/E3-02-01.md` is the record and the ruling. The name is now settled
+where every other kind's is — `DEFECT_KINDS` in `tests/fixtures/provisioning.py` —
+and read from there, so the two inventories cannot disagree. The control at the
+foot of this module is what keeps that name honest: it requires the enum to *hold*
+the kind rather than merely not to contradict it.
 
 **Which failure a red here is.** Before E3-02 lands, every test in the two
 criterion-1 sections is expected red on a failed assertion naming
 `section.lms_ags_line_items_url` as a column the row does not carry, or naming the
-absent defect kind — not on a collection error. The two controls at the end must be
-green today: they are statements about the launch the in-repo platform signs and
-about the defect vocabulary that already exists, and a red one means these tests
-are broken rather than that the code is.
+absent defect kind — not on a collection error. Of the two controls at the end, the
+first must be green today — it is a statement about the launch the in-repo platform
+signs, and a red one means these tests are broken rather than that the code is. The
+second goes green with the ticket, because the kind it looks for is the member the
+ticket adds; it is a control rather than a criterion because what it guards is this
+module's own vocabulary, not the behaviour.
 """
 
 from typing import Any
@@ -158,15 +166,11 @@ def stored_on(section: Any, column: str, ticket_says: str) -> Any:
     return section[column]
 
 
-def the_kind_this_ticket_adds(contract: Any) -> str:
-    """The one `LaunchDefectKind` member E3-02 adds, found by subtraction.
+def declared_defect_kinds() -> set[str]:
+    """Every kind `app.models.lti.LaunchDefectKind` declares, as strings.
 
-    The ticket asks for a new kind mirroring `roster_address_refused` and spells no
-    name for it, so this reads the enum and takes away the kinds that already
-    existed rather than pinning a spelling. Ambiguity stops rather than picks —
-    two new members mean this cannot tell which one the ticket is about, and
-    choosing would be the test deciding — which is the contract
-    `ProvisioningService.provision` keeps for the same reason.
+    Imported inside the call rather than at module scope so a missing enum is a
+    failed assertion naming it rather than a collection error.
     """
     try:
         from app.models.lti import LaunchDefectKind
@@ -176,20 +180,7 @@ def the_kind_this_ticket_adds(contract: Any) -> str:
             "of launch defect kinds there and E3-02 adds one member to it, so without the enum "
             "there is nothing for this module to read."
         )
-    declared = {str(getattr(member, "value", member)) for member in LaunchDefectKind}
-    known = set(contract.defect_kinds)
-    added = sorted(declared - known)
-    if len(added) != 1:
-        pytest.fail(
-            f"`LaunchDefectKind` declares {sorted(declared)}; the kinds that existed before E3-02 "
-            f"are {sorted(known)}; the difference is {added}. E3-02 adds exactly one member — a "
-            "refused AGS container address, the mirror of `roster_address_refused` — and this "
-            "module reads it by subtraction rather than by name so that the spelling stays the "
-            "ticket's choice. None means the kind is not there yet. More than one means this "
-            "cannot tell which is which: say in the pull request which member is the gradebook "
-            "address's, and `the_kind_this_ticket_adds` in this file is the one place that changes."
-        )
-    return added[0]
+    return {str(getattr(member, "value", member)) for member in LaunchDefectKind}
 
 
 def kind_of(defect: Any) -> str:
@@ -475,13 +466,13 @@ def test_a_gradebook_address_the_registration_rules_refuse_is_not_stored(
         "would then be green because nothing was written at all."
     )
     recorded = the_one(rows.defects(), "recorded defect")
-    assert kind_of(recorded) == the_kind_this_ticket_adds(provisioning_contract), (
+    assert kind_of(recorded) == provisioning_contract.ags_address_refused, (
         f"The recorded defect's kind is {kind_of(recorded)!r} and the kind E3-02 adds is "
-        f"{the_kind_this_ticket_adds(provisioning_contract)!r}. E11's surface reads this to tell "
-        "an administrator that a section has no gradebook address *because its platform "
-        "advertised one we will not call*, which is a different conversation from a section whose "
-        "platform advertised none — and from a refused roster address, which is a different "
-        "service entirely."
+        f"{provisioning_contract.ags_address_refused!r}. E11's surface reads this to tell an "
+        "administrator that a section has no gradebook address *because its platform advertised "
+        "one we will not call*, which is a different conversation from a section whose platform "
+        "advertised none — and from a refused roster address, which is a different service "
+        "entirely."
     )
     assert escaped is None, (
         "The address was not stored, which is this test's subject and holds — but the refusal "
@@ -590,37 +581,46 @@ def test_the_launch_this_module_drives_advertises_both_service_addresses(
     )
 
 
-def test_every_defect_kind_this_module_subtracts_is_one_the_model_declares(
+def test_the_kind_this_module_demands_is_one_the_model_declares(
     provisioning_contract: Any,
 ) -> None:
-    """A control: the subtraction that finds E3-02's new kind starts from the right set.
+    """A control: the gradebook kind is *found* in the enum, not merely not contradicted.
 
-    `the_kind_this_ticket_adds` reads `LaunchDefectKind` and takes away the kinds
-    that existed before this ticket, which are the ones
-    `tests/fixtures/provisioning.py` enumerates. If that enumeration named a kind
-    the model does not declare — a rename, a typo, a kind removed — the subtraction
-    would leave a member that is not new at all, and the refusal test would then
-    demand the wrong kind or accept an old one. This is `docs/MISTAKES.md` entry
-    35's rule applied to a subtraction: require each name to be *found*, on a
-    subject that certainly has it, rather than merely not found.
+    The refusal test above requires a recorded defect to carry
+    `provisioning_contract.ags_address_refused`, which is a string in
+    `tests/fixtures/provisioning.py`. A string that named no member of
+    `LaunchDefectKind` — a rename, a typo, a kind spelled one way in the fixture and
+    another in the model — would make that assertion demand a kind nothing can
+    write, and the failure would read as a writer that did not record a defect
+    rather than as two records disagreeing.
 
-    Green today, and it stays green after E3-02: the ticket adds a member and
-    removes none.
+    So the kind is required to be *found* on a subject that certainly has it, which
+    is `docs/MISTAKES.md` entry 35's rule: an inventory that only ever reports
+    absence cannot tell you what it can see. The whole vocabulary is checked the
+    same way, because the same disagreement in either direction has the same shape.
+
+    **This control replaces the one that guarded a subtraction.** Until
+    `docs/disputes/E3-02-01.md` was ruled on, this module found its kind by taking
+    `DEFECT_KINDS` away from the enum, and this test existed to make that
+    subtraction well-founded. The subtraction is gone — the kind is named in one
+    place and read from it — and what is left to guard is that the name is real.
+
+    Green once E3-02 has landed, and its red before that is the enum lacking the
+    member the ticket adds.
     """
-    try:
-        from app.models.lti import LaunchDefectKind
-    except ImportError as absent:
-        pytest.fail(
-            f"`app.models.lti` exposes no `LaunchDefectKind` ({absent}), so the vocabulary "
-            "`tests/fixtures/provisioning.py` enumerates has nothing to be checked against."
-        )
-    declared = {str(getattr(member, "value", member)) for member in LaunchDefectKind}
+    declared = declared_defect_kinds()
 
     assert declared, "`LaunchDefectKind` declares no members at all."
+    assert provisioning_contract.ags_address_refused in declared, (
+        f"`tests/fixtures/provisioning.py` names {provisioning_contract.ags_address_refused!r} as "
+        f"the kind a refused gradebook address is recorded under, and `LaunchDefectKind` declares "
+        f"{sorted(declared)}. The refusal test above would then be demanding a kind no writer can "
+        "record, and its failure would read as a writer that recorded nothing."
+    )
     unknown = sorted(set(provisioning_contract.defect_kinds) - declared)
     assert not unknown, (
         f"`tests/fixtures/provisioning.py` lists {unknown} as launch defect kinds and "
-        f"`LaunchDefectKind` declares {sorted(declared)}. The subtraction this module uses to find "
-        "E3-02's new member would then report a kind that already existed as the new one, and the "
-        "refusal test would be asserting the wrong vocabulary."
+        f"`LaunchDefectKind` declares {sorted(declared)}. Two inventories of one closed set have "
+        "drifted apart, and `test_launch_provisioning_defects.py`'s equality pin is where that is "
+        "diagnosed for the set as a whole."
     )

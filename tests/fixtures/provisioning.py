@@ -863,6 +863,17 @@ ROSTER_ADDRESS_REFUSED = "roster_address_refused"
 # `tests/integration/test_a_staff_launch_binds_only_inside_the_launchers_purview.py`.
 CONTEXT_OUTSIDE_PURVIEW = "context_outside_purview"
 
+# E3-02's, and the exact mirror of `roster_address_refused` one entry up: a launch
+# advertising an AGS line-item container address the registration-address rules
+# will not let this container fetch. It leaves `section.lms_ags_line_items_url`
+# unset and the section provisioned, which is the gradebook's version of §7.3's
+# never-synced state. It is a separate kind rather than a second use of the roster
+# one because the two are different services and different conversations with
+# whoever configured the platform, and E11's surface exists to tell an
+# administrator which. A launch carrying no AGS claim at all records nothing —
+# that is a state, not a fault, and the ticket rules on the distinction.
+AGS_ADDRESS_REFUSED = "ags_address_refused"
+
 DEFECT_KINDS = (
     UNPARSEABLE_CONTEXT_LABEL,
     UNKNOWN_PREFIX,
@@ -872,6 +883,7 @@ DEFECT_KINDS = (
     CONTEXT_COLLISION,
     ROSTER_ADDRESS_REFUSED,
     CONTEXT_OUTSIDE_PURVIEW,
+    AGS_ADDRESS_REFUSED,
 )
 
 
@@ -1014,6 +1026,7 @@ class ProvisioningContract:
     context_collision = CONTEXT_COLLISION
     roster_address_refused = ROSTER_ADDRESS_REFUSED
     context_outside_purview = CONTEXT_OUTSIDE_PURVIEW
+    ags_address_refused = AGS_ADDRESS_REFUSED
 
     instructor_role_urn = INSTRUCTOR_ROLE_URN
     learner_role_urn = LEARNER_ROLE_URN
