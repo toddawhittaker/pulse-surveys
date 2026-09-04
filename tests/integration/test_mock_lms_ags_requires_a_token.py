@@ -78,9 +78,11 @@ import json
 import re
 import time
 from typing import Any, NamedTuple
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import pytest
+from fixtures.routing import every_route
 
 pytestmark = pytest.mark.lti
 
@@ -158,6 +160,27 @@ POSTED_TIMESTAMP = "2026-03-02T14:05:09+00:00"
 # A credential shape that is not a bearer token this platform issued. Deliberately
 # not JWT-shaped: the JWT-shaped near miss is the forged-token test below.
 A_TOKEN_NOBODY_ISSUED = "not-a-token-this-platform-ever-issued"  # noqa: S105 - a fake, by design
+
+# The prefixes this platform serves without a credential, **by decision**. ADR 0047
+# puts the posted-score readback outside the AGS namespace as an inspection surface no
+# real platform serves, and ADR 0134 says out loud that the `/mock/` prefix is outside
+# the enforcement so a reviewer can tell the decision from an oversight. This is that
+# sentence as an allowlist, and the inventory guard at the foot of this module holds
+# it to two properties: every entry is under `/mock/`, and nothing inside the AGS
+# namespace is covered by it — so a new AGS route cannot be parked here.
+TOKENLESS_BY_DECISION = ("/mock/",)
+
+# One `{name}` or `{name:converter}` in a Starlette path template. `:path` is the
+# converter that spans slashes, which `RESULT_PATH` uses so an LTI `sub` containing
+# one still routes; every other parameter is a single segment. Both are needed, and a
+# pattern that treated them alike would match a result URL against the container's
+# own template and report a route as covered by the wrong row.
+TEMPLATE_PARAMETER = re.compile(r"\{[^}]*\}")
+
+# The HTTP methods a route's declaration carries that are not a route: Starlette adds
+# `HEAD` to every `GET` and `OPTIONS` to everything, and neither is a surface this
+# platform implements.
+DERIVED_METHODS = ("HEAD", "OPTIONS")
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +375,76 @@ def send(platform: Any, route: Route, credential: str | None, url: str | None = 
         headers["content-type"] = str(route.content_type)
         return platform.client.post(target, content=json.dumps(route.body or {}), headers=headers)
     return platform.client.get(target, headers=headers)
+
+
+def template_pattern(template: str) -> re.Pattern[str]:
+    """One Starlette path template as a pattern matching the URLs it routes.
+
+    Everything outside a `{…}` is matched literally; a plain parameter matches one
+    segment and a `:path` parameter matches across slashes, which is the distinction
+    `RESULT_PATH` rests on. Anchored at both ends, because an unanchored pattern
+    reports the container's template as matching every URL beneath it and the
+    inventory below would then find every route covered by one row.
+    """
+    parts: list[str] = []
+    last = 0
+    for found in TEMPLATE_PARAMETER.finditer(template):
+        parts.append(re.escape(template[last : found.start()]))
+        parts.append(".+" if ":path" in found.group() else "[^/]+")
+        last = found.end()
+    parts.append(re.escape(template[last:]))
+    return re.compile(f"^{''.join(parts)}$")
+
+
+def declared_routes(platform: Any) -> list[tuple[str, str]]:
+    """Every `(method, path template)` the running mock platform declares.
+
+    Read off the application rather than from a list in this file, which is the whole
+    point of the guard that uses it: an inventory written by hand cannot see a route
+    that was added after it was written. `every_route` is
+    `tests/fixtures/routing.py`'s walk and it recurses into included routers — the
+    mock registers with decorators today, and a walk that read `application.routes`
+    directly would go blind the day it grows a router and report an empty namespace
+    as a covered one.
+
+    `HEAD` and `OPTIONS` are dropped: Starlette derives them, and neither is a
+    surface this platform implements or a token could be required on.
+    """
+    found: set[tuple[str, str]] = set()
+    for route in every_route(platform.application):
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", None)
+        if not isinstance(path, str) or not methods:
+            continue
+        for method in methods:
+            if str(method).upper() not in DERIVED_METHODS:
+                found.add((str(method).upper(), path))
+    return sorted(found)
+
+
+def ags_namespace(declared: list[tuple[str, str]], container_path: str) -> str:
+    """The path template the line-item container is served at, found by what it routes.
+
+    Derived rather than transcribed: the container's address comes from the launch's
+    own AGS endpoint claim, and the template is whichever declaration routes it. Every
+    other AGS route on this platform is addressed beneath that template — a line item
+    is inside the container, and the Score and Result services are inside the line
+    item — so it is also the prefix that names the namespace.
+
+    Ambiguity stops rather than picks, the contract every discovery in this suite
+    keeps: two templates routing one URL means this cannot say which one is the
+    container, and choosing would be the test deciding.
+    """
+    matching = sorted(
+        {path for _method, path in declared if template_pattern(path).match(container_path)}
+    )
+    assert len(matching) == 1, (
+        f"{len(matching)} declared templates route the line-item container {container_path!r} "
+        f"({matching}); this platform declares {sorted({path for _m, path in declared})}. The "
+        "namespace below is derived from the one that does, so with none there is nothing to "
+        "enumerate and with two there is no saying which."
+    )
+    return matching[0]
 
 
 def challenge_parameters(challenge: str) -> dict[str, str]:
@@ -1473,4 +1566,104 @@ def test_the_mock_only_posted_score_readback_still_answers_without_a_credential(
         f"`{MOCK_POSTED_SCORES_PATH}` answered {document!r} after a score was accepted through the "
         "Score service. A 200 with nothing in it satisfies the status assertion above while "
         "carrying none of what this surface exists to carry, so both halves are asserted."
+    )
+
+
+def test_every_ags_route_the_platform_declares_is_one_this_module_drives(
+    mock_platform: Any,
+) -> None:
+    """The inventory, read off the running application rather than out of this file.
+
+    The security round's LOW, and it is `docs/MISTAKES.md` entry 35's shape one level
+    up from the triples: `EVERY_ROUTE` is a hand-written tuple over a hand-written
+    route table, so **a seventh AGS route registered without a credential is covered
+    by nothing here and this module stays entirely green**. Criterion 6 says "every
+    AGS route", and a list that cannot grow with the platform cannot say "every".
+
+    So the namespace is derived. The container's address comes from the launch's own
+    AGS endpoint claim, `ags_namespace` finds the template that routes it, and every
+    declaration beneath that template is required to be one of the six this module
+    addresses — matched by `(method, template)` against the concrete URLs the triples
+    actually drive, so a route this file *names* but never calls does not count as
+    covered.
+
+    **The mutation this kills: a new AGS route registered without `authorised_token`.**
+    Add `GET …/line_items/{id}/history` to the mock and every other test in this file
+    passes; this one names the method and the path that nothing drives.
+
+    **The near miss it is written around: the new route added to the allowlist
+    instead.** `TOKENLESS_BY_DECISION` is the `/mock/` prefix decision written down
+    (ADR 0047, ADR 0134), and it is held to two properties so it cannot become a place
+    to put an inconvenient route — every entry is under `/mock/`, and nothing inside
+    the AGS namespace matches any entry. A route parked there fails both.
+
+    **The allowlist is required to cover something**, which is the same entry-35 rule
+    the triples keep: an allowlist that matched no route this platform serves would be
+    a decision about nothing, and its two properties would hold vacuously.
+
+    **A red here is not necessarily a defect in the mock.** It is either a route that
+    has to be driven — the six triples take a seventh row and `Route` takes a seventh
+    entry — or a deliberate exception, which is an ADR 0134 amendment and a line in
+    `TOKENLESS_BY_DECISION`, never a widening of this walk.
+
+    **Predicted green today**, over the six routes ADR 0134 maps. Its worth is the
+    mutation it names rather than the colour it starts at.
+    """
+    book = gradebook(mock_platform)
+    declared = declared_routes(mock_platform)
+    assert declared, (
+        "The walk found no declared route on the mock platform at all, so this guard would report "
+        "an empty namespace as a covered one. `tests/fixtures/routing.py` explains the shape a "
+        "blind walk takes; a red here is that walk rather than the platform."
+    )
+
+    container_path = urlsplit(mock_platform.local(book.routes["list_line_items"].url)).path
+    prefix = ags_namespace(declared, container_path)
+    namespace = [(method, path) for method, path in declared if path.startswith(prefix)]
+    assert len(namespace) >= len(EVERY_ROUTE), (
+        f"The AGS namespace {prefix!r} declares {namespace}, which is fewer routes than the "
+        f"{len(EVERY_ROUTE)} this module drives. Either the walk is not seeing what the platform "
+        "serves or a route this module addresses has been removed, and both are findings rather "
+        "than a shrinking inventory."
+    )
+
+    addressed = [
+        (route.method.upper(), urlsplit(mock_platform.local(route.url)).path)
+        for route in book.routes.values()
+    ]
+    uncovered = [
+        (method, path)
+        for method, path in namespace
+        if not any(
+            driven_method == method and template_pattern(path).match(driven_path)
+            for driven_method, driven_path in addressed
+        )
+    ]
+    assert not uncovered, (
+        f"The mock declares {uncovered} under the AGS namespace {prefix!r}, and no test in this "
+        f"module calls them — this module drives {sorted(EVERY_ROUTE)}, addressed at {addressed}. "
+        "Criterion 6 is 'all three, per route': an AGS route nothing here drives has no absent-token "
+        "test, no wrong-scope test and no accepted control, so it can be serving a gradebook to "
+        "anyone who can reach the URL with this whole file green. Add it to `Route`/`EVERY_ROUTE` "
+        f"with its accepted scopes, or — if it is deliberately open — amend ADR 0134 and name it in "
+        "`TOKENLESS_BY_DECISION`."
+    )
+
+    for allowed in TOKENLESS_BY_DECISION:
+        assert allowed.startswith("/mock/"), (
+            f"`TOKENLESS_BY_DECISION` carries {allowed!r}. ADR 0134's decision is about the "
+            "`/mock/` prefix — an inspection surface no real platform serves — and an entry outside "
+            "it is a protocol route excused from the enforcement by an edit to a test file."
+        )
+        assert not [path for _method, path in namespace if path.startswith(allowed)], (
+            f"A route inside the AGS namespace {prefix!r} is covered by the tokenless entry "
+            f"{allowed!r}. That is the near miss this guard exists for: a new AGS route parked on "
+            "the allowlist rather than given its triple."
+        )
+    covered = [path for _method, path in declared if path.startswith(TOKENLESS_BY_DECISION)]
+    assert covered, (
+        f"`TOKENLESS_BY_DECISION` ({list(TOKENLESS_BY_DECISION)}) matches no route this platform "
+        f"declares; it declares {sorted({path for _m, path in declared})}. An allowlist that covers "
+        "nothing is a decision about nothing, and both properties asserted above would hold "
+        "vacuously (`docs/MISTAKES.md` entry 35)."
     )

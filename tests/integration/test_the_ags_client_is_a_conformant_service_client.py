@@ -1280,6 +1280,111 @@ def test_a_conflict_stops_the_post_and_triggers_a_re_read_carrying_what_the_plat
     )
 
 
+def test_the_conflict_error_carries_the_held_result_on_an_attribute_and_not_in_its_message(
+    ags_client: Any,
+    ags_sections: Any,
+    service_wire: Any,
+    committed_rows: Any,
+    ags_contract: Any,
+) -> None:
+    """The security round's LOW on the conflict path: where the held Result is allowed to live.
+
+    Settled decision 6 has the client "raise a typed error carrying what the platform
+    holds", and the test above requires exactly that. What it does not say is *where*
+    — and the difference is the whole finding. An error's `str()` is the thing every
+    logger prints: a caller that writes `logger.exception(...)`, or a task runner that
+    renders an unhandled exception, puts the message into a log stream without ever
+    deciding to. An **attribute** is read only by a caller that asked for it.
+
+    The held Result is one student's grade: it carries the platform's `userId`, the
+    score the platform holds, and — where the earlier post set one — the comment. So
+    the message may name none of them, and the attribute must carry them.
+
+    **The mutation this kills:** the held document interpolated into the error's
+    message — `f"the platform holds {result!r}"`, which is the obvious way to satisfy
+    "carrying what the platform holds" and which the test above accepts, because that
+    one looks for the value across the message *and* the attributes. This is the half
+    that says which of the two it may be.
+
+    **Both directions, and the second is what stops the fix being deletion.** The
+    forbidden state is asserted over `str(raised)`; the control is that the held
+    document is still reachable on the error, which is what the caller needs and what
+    a client that simply stopped carrying it would fail. Read off the attributes
+    (`vars`) rather than off the message, so a build that satisfies the control by
+    putting it back in the message fails the forbidden half in the same run.
+
+    **Four values, and the subject is the sharpest.** The posted score and the ledger
+    are the caller's own and the client is holding them while it raises; the
+    platform's held score and the student's subject come back from the re-read. A
+    message that named any of them is a per-student statement in a log stream.
+    """
+    section = ags_sections()
+    created = stored_line_item(section.platform, section.context)
+    identifier = section.platform.line_item_id(created)
+    section = ags_sections.store_line_item(section, identifier)
+
+    subject = section.subjects[0]
+    planted = section.platform.post_score(
+        created,
+        {
+            ags_contract.user_member: subject,
+            ags_contract.timestamp_member: ags_contract.a_later_timestamp,
+            ags_contract.activity_member: ags_contract.conformant_activity,
+            ags_contract.grading_member: ags_contract.conformant_grading,
+            ags_contract.given_member: ags_contract.a_newer_score,
+            ags_contract.maximum_sent_member: ags_contract.score_maximum,
+        },
+    )
+    assert planted.status_code == 200, (
+        f"Planting the newer score answered {planted.status_code}, so there is no 409 and no error "
+        f"for this test to read. Body begins {planted.text[:300]!r}."
+    )
+
+    grade = ags_contract.grade(subject, timestamp=ags_contract.a_timestamp)
+    _answered, raised = drive(
+        ags_client,
+        ags_client.post_score,
+        section,
+        committed_rows,
+        service_wire,
+        line_item=created,
+        grade=grade,
+    )
+    assert raised is not None, (
+        "The platform answered 409 and the client returned normally, so there is no error to read. "
+        "`test_a_conflict_stops_the_post_and_triggers_a_re_read_carrying_what_the_platform_holds` "
+        "is where that is the subject."
+    )
+
+    # The control, read off the attributes only: the held Result is still reachable by
+    # a caller that asks. A build that satisfied this from the message would fail the
+    # forbidden half below in the same run, which is what makes the pair a pair.
+    attributes = repr(vars(raised) if hasattr(raised, "__dict__") else {})
+    assert str(ags_contract.a_newer_score) in attributes, (
+        f"The error the client raised carries {attributes!r} on its attributes, which does not "
+        f"mention the {ags_contract.a_newer_score!r} the platform holds for that student. The "
+        "re-read is spent so a caller can find out what is on the platform; moving that out of the "
+        "message is only correct if it lands on an attribute, and an error that dropped it has "
+        "spent a request for nothing."
+    )
+
+    message = str(raised)
+    for what, value in (
+        ("the student's LMS subject", subject),
+        ("the score the platform holds", str(ags_contract.a_newer_score)),
+        ("the score the caller handed over", grade.score),
+        ("a ledger line", grade.ledger.splitlines()[0]),
+    ):
+        assert value not in message, (
+            f"The conflict error's message carries {what} ({value!r}): {message!r}. An error's "
+            "`str()` is what every logger prints — a caller writing `logger.exception(...)`, or a "
+            "task runner rendering an unhandled exception — so a message naming a student and the "
+            "grade held for them is a per-student disclosure nobody decided to make. The held "
+            "Result belongs on an attribute a caller inspects deliberately, and the message "
+            "belongs to the section and the line item."
+        )
+
+
 def test_the_re_read_after_a_conflict_is_recorded_against_an_address_carrying_no_student(
     ags_client: Any,
     ags_sections: Any,
@@ -2142,4 +2247,141 @@ def test_nothing_the_client_logs_carries_a_score_a_ledger_line_or_an_lms_user_id
             "kept longer than any table in this system; a participation figure against an LMS user "
             "id there is a statement about a named person's standing, outside every read path §4.1 "
             "governs."
+        )
+
+
+def test_a_transport_failure_on_the_conflict_re_read_logs_no_student_subject(
+    ags_client: Any,
+    ags_sections: Any,
+    service_wire: Any,
+    committed_rows: Any,
+    ags_contract: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Criterion 10 on the one branch where the client holds a URL with a student in it.
+
+    The security round's MEDIUM, and it is a coverage finding rather than a new rule:
+    the test above drives a success and a refused *token*, and neither reaches the
+    branch where the leak lives. Every other address this client handles is a
+    container, a line item or a scores endpoint — none of them names a person. The
+    conflict re-read is the exception: settled decision 6 sends it to the Result
+    container **for that user**, so the URL it dials carries `user_id=<sub>` in a
+    query string, and that URL is what a transport failure hands back in the text of
+    the exception it raises.
+
+    **The mutation this kills: the transport-failure warning is handed the
+    exception's text.** `logger.warning("re-reading the result failed: %s", failure)`
+    is the natural sentence and the natural argument, and `requests` builds a
+    `ConnectionError` whose message quotes the URL it could not reach — so the
+    student's LMS subject reaches a log stream through a string nobody wrote it into.
+    It is invisible to every other test in this module: the sanitised `ags_call` row
+    is asserted next door and is a different surface, and the log test above never
+    produces a transport failure at all.
+
+    **The near miss: no warning emitted at all.** An absence of the subject is
+    satisfied completely by a client that says nothing when a re-read fails, and that
+    is a worse outcome than the leak for the operator SPEC §6.1 writes the call log
+    for — a conflict whose re-read never landed, logged nowhere. So a warning is
+    required to have been emitted, from the client's own logger, and the assertion
+    below is over what it said rather than over whether it spoke.
+
+    **The other control: the re-read was actually attempted.** The wire records a
+    request before it refuses it, so the filtered `GET` is required to be on the wire
+    carrying the subject — without that, "no subject in the log" holds of a run in
+    which nothing was ever dialled with a subject in it (`docs/MISTAKES.md` entry 3),
+    and the 409 might not even have fired.
+
+    The whole capture is searched rather than the client's own records, for the reason
+    the test above gives: a value that reached a log stream reached it whoever emitted
+    it, and handing it to somebody else is exactly how "we do not log that" survives.
+    """
+    section = ags_sections()
+    created = stored_line_item(section.platform, section.context)
+    identifier = section.platform.line_item_id(created)
+    section = ags_sections.store_line_item(section, identifier)
+
+    subject = section.subjects[0]
+    assert len(subject) >= 8, (
+        f"The launched subject is {subject!r}, which is short enough that finding it absent from a "
+        "log says little. E0-14 seeds UUID subjects; a seed that changed that makes this assertion "
+        "weak rather than wrong, and it is said here rather than passing quietly."
+    )
+
+    planted = section.platform.post_score(
+        created,
+        {
+            ags_contract.user_member: subject,
+            ags_contract.timestamp_member: ags_contract.a_later_timestamp,
+            ags_contract.activity_member: ags_contract.conformant_activity,
+            ags_contract.grading_member: ags_contract.conformant_grading,
+            ags_contract.given_member: ags_contract.a_newer_score,
+            ags_contract.maximum_sent_member: ags_contract.score_maximum,
+        },
+    )
+    assert planted.status_code == 200, (
+        f"Planting the newer score answered {planted.status_code}, so there is no 409, no re-read "
+        f"and no branch for this test to be about. Body begins {planted.text[:300]!r}."
+    )
+
+    # The 409 sends the client to the Result container for this student; the transport
+    # then refuses that call, which is what puts the dialled URL inside an exception.
+    # Keyed by host and path, so the filtered request is matched whatever query it
+    # carries — which is also why the score post above is untouched.
+    service_wire.failing_the_transport(section.platform.results_url(created))
+
+    grade = ags_contract.grade(subject, timestamp=ags_contract.a_timestamp)
+    with caplog.at_level(logging.DEBUG):
+        drive(
+            ags_client,
+            ags_client.post_score,
+            section,
+            committed_rows,
+            service_wire,
+            line_item=created,
+            grade=grade,
+        )
+
+    results_path = urlsplit(section.platform.results_url(created)).path
+    attempted = [
+        call
+        for call in service_wire.calls
+        if call.method.upper() == "GET"
+        and call.path.startswith(results_path)
+        and subject in call.url
+    ]
+    assert attempted, (
+        f"No request under {results_path!r} carrying the subject {subject!r} reached the wire. It "
+        f"called {[f'{call.method} {call.url}' for call in service_wire.calls]}. Either the 409 did "
+        "not fire or the re-read was not attempted, and with no filtered URL dialled there is "
+        "nothing for a log line to have leaked."
+    )
+
+    from_client = [
+        record for record in caplog.records if str(record.name).startswith(ags_contract.module)
+    ]
+    warned = [record for record in from_client if record.levelno >= logging.WARNING]
+    assert warned, (
+        f"The re-read after a 409 failed at the transport and `{ags_contract.module}` logged "
+        f"nothing at or above WARNING. It logged {[(r.name, r.levelname) for r in caplog.records]}. "
+        "The absence asserted below is satisfied completely by a client that says nothing here, "
+        "and a conflict whose re-read never landed is exactly the thing SPEC §6.1 wants legible — "
+        "so the leak has to be ruled out on a line that was actually written."
+    )
+
+    text = ags_contract.logged_text(caplog.records)
+    assert subject not in text, (
+        f"A log record carries the student's LMS subject {subject!r}. What was logged was:\n"
+        f"{text[:2000]}\n\nThe re-read is the one call this client makes whose URL names a person, "
+        "and a transport failure quotes the URL it could not reach — so the subject arrives in a "
+        "log stream through the text of an exception rather than through anything the client "
+        "chose to write. Log the address without its query, or the failure's type and the section, "
+        "and never the exception's own text on this branch."
+    )
+    for what, value in (
+        ("the score the caller handed over", grade.score),
+        ("a ledger line", grade.ledger.splitlines()[0]),
+    ):
+        assert value not in text, (
+            f"A log record carries {what} ({value!r}) on the conflict path. What was logged "
+            f"was:\n{text[:2000]}"
         )
