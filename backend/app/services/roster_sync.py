@@ -773,8 +773,10 @@ def _registration_for(session: Session, platform: LtiPlatform) -> Any:
 
     Built through `OrmToolConf`, which is the one construction path this tool has
     for a registration — E1-11 taught it to fill in the tool's private key and
-    `kid` as well, so the inbound door and this outbound client read the same row
-    of `tool_signing_key` and a platform verifying either sees the same key.
+    `kid` as well, so the inbound door and this outbound client resolve the same
+    signing key and a platform verifying either sees the same key. Which key that
+    is, once a rotation can be in progress, is `app.lti.registration.signing_key`
+    for both of them (ADR 0127).
 
     The two refusals are loud because they are facts about the *deployment* rather
     than about one section: a registration with no token endpoint and a tool with
@@ -793,9 +795,10 @@ def _registration_for(session: Session, platform: LtiPlatform) -> Any:
         )
     if registration.get_tool_private_key() is None:
         raise NoSigningKeyError(
-            "This deployment holds no `tool_signing_key` row, so there is nothing to sign a "
-            "`client_assertion` with and no platform will issue this tool a token. ADR 0082 "
-            "records that a real deployment needs a supply route before it needs anything else."
+            "This deployment holds no signing key that has not been retired, so there is nothing "
+            "to sign a `client_assertion` with and no platform will issue this tool a token. "
+            "`python scripts/signing_key.py generate` supplies one (ADR 0126), and retiring the "
+            "last live key reaches this state too (ADR 0127)."
         )
     return registration
 
