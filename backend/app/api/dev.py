@@ -62,7 +62,20 @@ after a closed list of verbs let `TRACE` reach the router's `405`.
 subjects and labels come from the mock provider's roster, which is trusted, but
 they are escaped anyway — a page that escapes only the values it distrusts is one
 audit away from a hole. Nothing a caller or a roster supplies is ever written into
-the `<style>` block, which carries no interpolation at all.
+the stylesheet, which is a constant carrying no interpolation at all.
+
+**The stylesheet is linked, not inlined, because the app's own CSP forbids the
+inline form.** `app.main.BASE_CSP_DIRECTIVES` is `default-src 'self'; script-src
+'self'`, and with no `style-src` of its own a `<style>` element falls back to
+`default-src`, which carries no `'unsafe-inline'` — so a browser dropped the whole
+block and served this page with no styling at all. A same-origin stylesheet is
+what `default-src 'self'` does admit, so the CSS is served from
+`GET /dev/console.css` behind the same development gate as the page, and the
+policy is left exactly as it is. The alternatives were widening the CSP with
+`'unsafe-inline'`, which trades the app's whole inline-style defence for a
+developer scaffold, and pinning a `sha256` hash of this page's CSS into the
+policy every response carries, which breaks silently the next time the CSS is
+edited.
 """
 
 from collections.abc import Callable
@@ -94,6 +107,20 @@ from app.services.survey_windows import open_windows_now
 router = APIRouter(tags=["dev"])
 
 DEV_CONSOLE_PATH = "/dev"
+
+# Where the console's stylesheet is served from. A same-origin document, which is
+# what `default-src 'self'` admits and an inline `<style>` is not — see the module
+# docstring for the policy and why it is not the thing that moved.
+DEV_CONSOLE_STYLESHEET_PATH = "/dev/console.css"
+
+# What the stylesheet is served as. Spelled out because a browser applies a
+# stylesheet only when the response says it is one, and `nosniff` — which
+# `app.main` sets on every response — means it will not guess.
+STYLESHEET_CONTENT_TYPE = "text/css; charset=utf-8"
+
+# The stylesheet is not cached, so an edit to `STYLE` shows on the next reload
+# rather than after a developer works out that the browser kept the old one.
+NO_STORE = "no-store"
 
 # E2-04's clock control: the two routes the section below posts to.
 DEV_CLOCK_SET_PATH = "/dev/clock"
@@ -255,113 +282,241 @@ class ConsoleSection:
 
 # Static CSS, no interpolation: this is code, never a value a caller or a roster
 # supplied, so it does not go through `escape` and nothing from a request is ever
-# written into it. A cool teal accent, distinct from the mock IdP's violet and the
-# mock platform's slate, so the three test surfaces are never mistaken for one
-# another, and from Pulse's own palette (`design/tokens.css` is deliberately not
-# referenced — this is a developer scaffold, not a product screen).
+# written into it. Served from `DEV_CONSOLE_STYLESHEET_PATH` rather than inlined,
+# because the app's CSP refuses an inline `<style>` — see the module docstring.
+#
+# **The palette, the type stack, the spacing ramp and the radii below are
+# `design/tokens.css`, copied.** The custom properties carry the token names, so
+# a reader can diff the two files by eye, and every value in the rules below is
+# `var(--token)` rather than a hex. They are copied rather than imported because
+# `design/` is a design-system source the backend serves nothing from and cannot
+# reach: this file is Python, the tokens are a stylesheet in another tree, and
+# adding a static mount for one development page would be a deployment concern
+# invented for a scaffold. The cost is that a token changing there does not
+# change here until somebody copies it again, which is the honest trade for a
+# page no deployment serves.
+#
+# The register is `docs/DESIGN_BRIEF.md`'s admin one: mono is the dominant voice —
+# every number, code, date and timestamp on this page is in it — the reading
+# column is bounded, the rules are hairlines, and nothing decorates.
 STYLE = """
-    :root { color-scheme: light dark; }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      justify-content: center;
-      padding: 2.5rem 1rem;
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      background: #f0faf9;
-      color: #18181b;
-    }
-    .card {
-      width: 100%;
-      max-width: 640px;
-      background: #ffffff;
-      border-radius: 12px;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.06);
-      padding: 2rem 2.25rem 2.25rem;
-      height: fit-content;
-    }
-    h1 { font-size: 1.375rem; margin: 0 0 0.5rem; color: #0f766e; }
-    h2 {
-      font-size: 1rem;
-      margin: 2rem 0 0.75rem;
-      color: #0f766e;
-      border-top: 1px solid #e5e7eb;
-      padding-top: 1.25rem;
-    }
-    p { line-height: 1.5; color: #3f3f46; margin: 0.5rem 0 1rem; }
-    .banner {
-      display: flex;
-      gap: 0.6rem;
-      align-items: flex-start;
-      background: #fff7ed;
-      border: 1px solid #fdba74;
-      color: #9a3412;
-      padding: 0.75rem 1rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      line-height: 1.4;
-      margin-bottom: 1.5rem;
-    }
-    .banner strong { font-weight: 600; }
-    .note {
-      background: #fef2f2;
-      border: 1px solid #fca5a5;
-      color: #991b1b;
-      padding: 0.75rem 1rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      line-height: 1.4;
-    }
-    ul { list-style: none; margin: 0; padding: 0; }
-    li { margin: 0.4rem 0; }
-    a.action {
-      display: inline-block;
-      color: #0f766e;
-      font-weight: 600;
-      text-decoration: none;
-      padding: 0.15rem 0;
-    }
-    a.action:hover { text-decoration: underline; }
-    code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 0.85em;
-      background: rgba(0, 0, 0, 0.05);
-      padding: 0.1em 0.35em;
-      border-radius: 4px;
-      color: #52525b;
-    }
-    form.clock { display: inline-flex; gap: 0.5rem; margin: 0 0.75rem 0.5rem 0; }
-    form.clock input, form.clock button {
-      font: inherit;
-      padding: 0.35rem 0.6rem;
-      border-radius: 6px;
-      border: 1px solid #d4d4d8;
-      background: #ffffff;
-      color: inherit;
-    }
-    form.clock button { border-color: #0f766e; color: #0f766e; font-weight: 600; cursor: pointer; }
-    .scroller { overflow-x: auto; }
-    table { border-collapse: collapse; width: 100%; font-size: 0.8125rem; }
-    th, td { text-align: left; padding: 0.35rem 0.6rem; white-space: nowrap; }
-    thead th { color: #52525b; border-bottom: 1px solid #e5e7eb; font-weight: 600; }
-    tbody th { font-weight: 600; }
-    tbody tr + tr th, tbody tr + tr td { border-top: 1px solid #f4f4f5; }
-    @media (prefers-color-scheme: dark) {
-      body { background: #0c1a19; color: #e4e4e7; }
-      .card { background: #18181b; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
-      h1, h2 { color: #5eead4; }
-      h2 { border-top-color: #3f3f46; }
-      p { color: #a1a1aa; }
-      a.action { color: #5eead4; }
-      code { background: rgba(255, 255, 255, 0.08); color: #a1a1aa; }
-      .banner { background: #451a03; border-color: #c2410c; color: #fed7aa; }
-      .note { background: #450a0a; border-color: #b91c1c; color: #fecaca; }
-      form.clock input, form.clock button { background: #27272a; border-color: #3f3f46; }
-      form.clock button { border-color: #5eead4; color: #5eead4; }
-      thead th { color: #a1a1aa; border-bottom-color: #3f3f46; }
-      tbody tr + tr th, tbody tr + tr td { border-top-color: #27272a; }
-    }
+:root {
+  /* Palette — copied from design/tokens.css */
+  --chalk: #F6F8F4;         /* --chalk: page ground */
+  --paper: #FFFFFF;         /* --paper: the card */
+  --spruce: #1E3932;        /* --spruce: primary ink, primary button */
+  --spruce-60: #5B7269;     /* --spruce-60: labels, helpers, meta */
+  --hairline: #DCE4DD;      /* --hairline: borders, dividers, table rules */
+  --marigold: #DFA320;      /* --marigold: the accent, never text */
+  --marigold-deep: #8F6A10; /* --marigold-deep: links and the focus ring */
+  --madder: #A93F32;        /* --madder: reserved for "attend to this" */
+
+  /* Type — copied from design/tokens.css. The named faces are webfonts this
+     page deliberately does not fetch (it is served by the backend and loads
+     nothing external), so each stack falls through to what the machine has. */
+  --font-display: 'Literata', Georgia, serif;
+  --font-body: 'Schibsted Grotesk', 'Helvetica Neue', sans-serif;
+  --font-mono: 'Spline Sans Mono', ui-monospace, monospace;
+
+  /* Type scale — copied from design/tokens.css */
+  --text-1: 13px;
+  --text-2: 16px;
+  --text-4: 25px;
+
+  /* Spacing — the 4px ramp, copied from design/tokens.css */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* Radii and elevation — copied from design/tokens.css */
+  --radius-input: 4px;
+  --radius-card: 8px;
+  --shadow-card: 0 1px 2px rgba(30, 57, 50, .06);
+
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: var(--space-7) var(--space-4);
+  background: var(--chalk);
+  color: var(--spruce);
+  font-family: var(--font-body);
+  font-size: var(--text-2);
+  line-height: 1.5;
+}
+
+/* Wider than the ~720px reading column the brief gives report surfaces: the
+   sections table is eight columns and this is one of the dense instrument
+   surfaces the brief allows that for. The prose keeps its own measure below. */
+.card {
+  width: 100%;
+  max-width: 1080px;
+  height: fit-content;
+  padding: var(--space-6);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+h1 {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--text-4);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--spruce);
+}
+
+/* Section heads in the mono eyebrow register the brief gives the admin
+   surfaces, each opening its section under a hairline. */
+h2 {
+  margin: var(--space-7) 0 var(--space-3);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--hairline);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  font-weight: 500;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--spruce-60);
+}
+
+p {
+  margin: 0 0 var(--space-4);
+  max-width: 68ch;
+  color: var(--spruce-60);
+}
+
+.banner {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  margin: 0 0 var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  background: var(--chalk);
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--marigold);
+  border-radius: var(--radius-input);
+  font-size: var(--text-1);
+  color: var(--spruce);
+}
+
+.banner strong { font-weight: 500; color: var(--marigold-deep); }
+
+/* The honest empty states — no platform registered, no section discovered, the
+   provider unreachable. Madder, which the brief reserves for "attend to this". */
+.note {
+  max-width: none;
+  padding: var(--space-3) var(--space-4);
+  background: var(--chalk);
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--madder);
+  border-radius: var(--radius-input);
+  font-size: var(--text-1);
+  color: var(--spruce);
+}
+
+ul { margin: 0; padding: 0; list-style: none; }
+li { padding: var(--space-1) 0; }
+
+a.action {
+  color: var(--marigold-deep);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+a.action:hover { text-decoration: underline; }
+
+code {
+  padding: 1px var(--space-1);
+  background: var(--chalk);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  color: var(--spruce-60);
+}
+
+form.clock {
+  display: inline-flex;
+  gap: var(--space-2);
+  margin: 0 var(--space-2) var(--space-2) 0;
+}
+
+form.clock input,
+form.clock button {
+  padding: var(--space-2) var(--space-3);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  color: var(--spruce);
+}
+
+form.clock button {
+  background: var(--spruce);
+  border-color: var(--spruce);
+  color: var(--paper);
+  cursor: pointer;
+}
+
+/* The second clock form is "clear the override" — the quieter of the two, so it
+   is the secondary button. Addressed by position rather than by a test id, which
+   is a name a spec owns and this stylesheet should not depend on. */
+form.clock + form.clock button {
+  background: var(--paper);
+  border-color: var(--hairline);
+  color: var(--spruce);
+}
+
+.scroller { overflow-x: auto; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+th, td { padding: var(--space-2); text-align: left; white-space: nowrap; }
+
+thead th {
+  border-bottom: 1px solid var(--hairline);
+  font-weight: 500;
+  letter-spacing: .04em;
+  color: var(--spruce-60);
+}
+
+tbody th { font-weight: 500; color: var(--spruce); }
+tbody td { color: var(--spruce-60); }
+tbody tr + tr th, tbody tr + tr td { border-top: 1px solid var(--hairline); }
+
+/* Copied from design/tokens.css: deep marigold, because the accent measures
+   under SC 1.4.11's 3:1 floor for a focus indicator on both grounds. */
+:focus-visible {
+  outline: 2px solid var(--marigold-deep);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
 """
 
 # Static banner markup, no interpolation.
@@ -382,8 +537,9 @@ def page(body: str) -> str:
 <html lang="en">
   <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{escape(CONSOLE_TITLE)}</title>
-    <style>{STYLE}</style>
+    <link rel="stylesheet" href="{escape(DEV_CONSOLE_STYLESHEET_PATH, quote=True)}">
   </head>
   <body>
     <div class="card">
@@ -736,6 +892,37 @@ def dev_console(request: Request, session: Session = Depends(get_session)) -> HT
 {clock_section(session, settings)}
 {sections_section(console_sections(session, settings))}"""
     return HTMLResponse(page(body))
+
+
+@router.get(
+    DEV_CONSOLE_STYLESHEET_PATH,
+    summary="The developer console's stylesheet",
+    include_in_schema=False,
+)
+def dev_console_stylesheet(request: Request) -> Response:
+    """Serve the console's CSS, or `404` outside development.
+
+    **The same gate as the page**, and for the ordinary reason rather than a
+    confidentiality one: this answers nothing about the institution, but a
+    deployment that serves it announces that this build carries the console, which
+    is exactly what the page's own `404` refuses to say. A route whose gate is
+    weaker than the page it dresses is a gate with a hole beside it.
+
+    It takes no session and reads nothing: `STYLE` is a module constant, the same
+    bytes for every caller, with no interpolation anywhere in it.
+
+    Not in the OpenAPI schema, because a stylesheet is not an interface anybody
+    writes a client against — the same reasoning the two clock routes carry.
+    """
+    settings: Settings = request.app.state.settings
+    if not is_development(settings):
+        raise HTTPException(status_code=NOT_FOUND)
+
+    return Response(
+        STYLE,
+        media_type=STYLESHEET_CONTENT_TYPE,
+        headers={"Cache-Control": NO_STORE},
+    )
 
 
 class AnyMethodRoute(Route):
