@@ -90,6 +90,18 @@ IDENTITY_VARIABLES = ("DB_SUPERUSER", "DB_SUPERUSER_PASSWORD")
 KEY_BITS = 2048
 PUBLIC_EXPONENT = 65537
 
+# The three subcommands, named because both the parser and `run` spell them and
+# two spellings of one word is a subcommand that exists in one place and not the
+# other.
+GENERATE = "generate"
+LIST = "list"
+RETIRE = "retire"
+
+# What `retire` will not mistake for a `kid`. Everything else after it is one —
+# see `argv_with_the_kid_protected` below.
+HELP_FLAGS = ("-h", "--help")
+END_OF_OPTIONS = "--"
+
 # The exit statuses this script answers with. `1` is left to an unhandled
 # exception so that a crash is never mistaken for a decision; `2` is a refusal
 # this file made, and `3` is a database that would not do what it was asked.
@@ -272,12 +284,12 @@ def listing(session: Session) -> str:
             "This deployment holds no signing key at all, so it publishes no key set and can sign "
             "nothing. `generate` supplies one."
         )
-    lines = [f"{'kid':<45}{'supplied':<28}status"]
+    lines = [f"{'kid':<45}{'supplied':<34}status"]
     for row in rows:
         mark = (
             LIVE_MARK if row.retired_at is None else f"{RETIRED_MARK} {row.retired_at.isoformat()}"
         )
-        lines.append(f"{kid_of(row):<45}{row.created_at.isoformat():<28}{mark}")
+        lines.append(f"{kid_of(row):<45}{row.created_at.isoformat():<34}{mark}")
     return "\n".join(lines)
 
 
@@ -287,13 +299,13 @@ def run(session: Session, command: str, kid: str | None) -> str:
     A single place where the three subcommands meet, so that the transaction, the
     refusals and the output all behave the same way whichever one was asked for.
     """
-    if command == "generate":
+    if command == GENERATE:
         return (
             f"Supplied a new signing key. kid: {generate(session)}\n"
             "It is live from now and the tool publishes it at /lti/jwks. A platform verifying an "
             "assertion signed by it needs to have refetched that document."
         )
-    if command == "retire":
+    if command == RETIRE:
         if kid is None:
             # Unreachable through the parser, which makes the argument
             # mandatory for this subcommand. Kept because a caller reaching
@@ -319,11 +331,36 @@ def parser() -> argparse.ArgumentParser:
         ),
     )
     subcommands = built.add_subparsers(dest="command", required=True)
-    subcommands.add_parser("generate", help="supply a new signing key and print its kid")
-    subcommands.add_parser("list", help="every stored key, live or retired")
-    retirement = subcommands.add_parser("retire", help="take one key out of the published set")
+    subcommands.add_parser(GENERATE, help="supply a new signing key and print its kid")
+    subcommands.add_parser(LIST, help="every stored key, live or retired")
+    retirement = subcommands.add_parser(RETIRE, help="take one key out of the published set")
     retirement.add_argument("kid", help="the RFC 7638 thumbprint `list` prints for that key")
     return built
+
+
+def argv_with_the_kid_protected(argv: Sequence[str]) -> list[str]:
+    """`retire`'s argument, told apart from an option it is not.
+
+    **About one thumbprint in 64 begins with `-`.** A `kid` is base64url and that
+    alphabet carries `-` and `_`, so roughly one key in every sixty-four is named
+    something like `-LuQvIL…`. `argparse` reads a leading `-` as an option marker
+    and refuses the command with "the following arguments are required: kid" —
+    a message about the wrong thing entirely, since the argument was given.
+
+    The shell's answer is `--`, and an operator should not have to know that
+    about a value this tool generated and printed for them. `retire` takes one
+    argument and no options of its own, so anything after it that is not a
+    request for help is the `kid`, and inserting `--` here says so to the parser.
+
+    Found by a test rather than by reading: the listing test generates real keys,
+    and one run produced a `kid` starting with `-`. A defect that appears one run
+    in sixty-four looks exactly like a flake, which is what makes it worth this
+    paragraph.
+    """
+    tokens = list(argv)
+    if len(tokens) >= 2 and tokens[0] == RETIRE and tokens[1] not in (*HELP_FLAGS, END_OF_OPTIONS):
+        return [tokens[0], END_OF_OPTIONS, *tokens[1:]]
+    return tokens
 
 
 def main(
@@ -343,7 +380,9 @@ def main(
     can be asked about without starting a process in a directory with a
     particular `.env` in it.
     """
-    arguments = parser().parse_args(argv)
+    arguments = parser().parse_args(
+        argv_with_the_kid_protected(sys.argv[1:] if argv is None else argv)
+    )
     configuration = resolved_configuration(
         os.environ if environ is None else environ,
         DOTENV_PATH if dotenv_path is None else dotenv_path,
