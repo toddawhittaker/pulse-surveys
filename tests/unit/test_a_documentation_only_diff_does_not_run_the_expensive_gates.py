@@ -1676,7 +1676,7 @@ CODE_CHANGE = "backend/app/services/authz.py"
 # The `changed` job's second classification, and a path that is one. E2-12 added
 # `ai_surface`, which decides whether SPEC §9.3's eval floors run — and unlike
 # `inert`, a wrong answer there is money: the eval job holds the provider secret
-# in its step environment and spends about ninety-eight paid calls per run.
+# in its step environment and spends about a hundred paid calls per run.
 #
 # This module owns the harness that executes the step, so it owns the cases about
 # what the step emits. Which gates *read* the answer is
@@ -2147,12 +2147,12 @@ def test_the_changed_job_classifies_the_diff_on_a_runner_that_has_only_python3(
 def test_a_push_decides_its_ai_surface_from_its_own_diff(
     ci_workflow_path: Path, ci_workflow: dict[str, Any], tmp_path: Path
 ) -> None:
-    """A push that touched no AI path must not spend ninety-eight paid calls.
+    """A push that touched no AI path must not spend about a hundred paid calls.
 
     E2-12's security review, as a LOW with a cost attached. The classifier's
     unknown route answered `ai_surface=true` for every push event, so each push to
     an epic branch — every ticket merge in this repository's ordinary flow — ran
-    the full eval suite: about ninety-eight provider calls, with the provider
+    the full eval suite: about a hundred provider calls, with the provider
     secret bound into that job's environment. The workflow's own scoping paragraph
     says the opposite, that live calls happen "only when the change touches what
     §9.3's gate names", so the file contradicted itself and the contradiction cost
@@ -2248,7 +2248,7 @@ def test_a_push_decides_its_ai_surface_from_its_own_diff(
             *wrong,
             "",
             f"`{AI_SURFACE_OUTPUT}` decides whether SPEC §9.3's eval floors run, and that job "
-            "holds the provider secret and spends about ninety-eight paid calls. A `true` it "
+            "holds the provider secret and spends about a hundred paid calls. A `true` it "
             "did not need is a bill; a `false` it did need is the gate not running on the one "
             "change it exists for.",
             "",

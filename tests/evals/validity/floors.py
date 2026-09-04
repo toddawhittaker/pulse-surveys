@@ -1,9 +1,60 @@
 """The comment-validity precision and recall floors — measured on Luna under validity.v2.
 
-One clean run over the 98 cases in `cases.py`, valid on the first pass: every case
+One clean run over the 108 cases in `cases.py`, valid on the first pass: every case
 answered by the model under `validity.v2`, none stamped by §3.3's character floor,
 so nothing in the figures below came from the twenty-five-character rule the set
 exists to beat.
+
+    positive class `substantive` (ADR 0119)
+    precision 1.000000   tp 53  fp 0
+    recall    0.981481   fn 1   tn 54
+    exact agreement 107/108      100.6s wall, longest call 2.46s
+
+    the fill measurement, taken locally off `.env` on 2026-09-03 against a cold
+    cache. A second run over this composition exists — CI run 33830242674 on
+    commit 3be69bb — and is recorded under "The floors" below. Those two are the
+    runs over the 108 that this page cites.
+
+**The composition moved in this change, and the run above is the re-measurement.**
+FIX-02 adds ten fluent off-topic English comments to the `nonsense` family —
+grammatical English a reader instantly sees is not about the course — because
+nothing in the set measured whether the model refuses that region, and unmeasured
+is the state this set exists to remove. All ten are negatives, so the positive
+class stays at 54 while the negatives go from 44 to 54. The floor values did not
+move, and the derivation under "The floors" below is what says they still fit the
+set they now govern.
+
+**The new group cost the measurement nothing.** Every one of `ns-019` through
+`ns-028` was answered `nonsense`, first pass, ten out of ten. That is a result
+rather than an absence of one: the region is one the model already handles, and
+the floors that were being met over a set which could not have told the difference
+are now met over a set which can. The ten appear in the figures above as ten more
+true negatives — `tn` 44 to 54 — and nowhere else. Both runs over the 108 cited on
+this page answered all fifty-four negatives correctly, `fp 0` and `tn 54` in each,
+so neither of them has yet seen the model get one of the ten wrong.
+
+**The fill run's one miss is the case that was already unstable.** `ls-025` is a
+substantive comment answered `insufficient`. That is the same answer the second of
+the two 98-case runs gave it, and one of the two answers recorded for it below;
+this run did not find a new defect, it found the old one again. It is the whole of
+`fn 1`, and it moves recall rather than precision because an answer of
+`insufficient` claims nothing. `lv-008`, the other mover of the 98-case pair, was
+answered correctly here. The CI run over the 108 missed `ls-025` the same way and
+missed one more, which is the pair recorded under "The floors" below.
+
+**What a disagreement of that shape does not reach.** §3.3 treats `insufficient`
+and `nonsense` identically for participation credit, so a case landing on the
+wrong one of those two moves neither gated rate. The per-verdict figures are
+recorded anyway, so a later ticket that wants to gate on the distinction has a
+baseline; nothing enforces them today. **These three are derived from the counts
+above rather than transcribed from the run's own report** — one disagreement, and
+the run named which case it was, which fixes every cell: `substantive` p 1.000
+r 0.9815, `insufficient` p 0.963 r 1.000, `nonsense` p 1.000 r 1.000. The whole of
+the movement is `ls-025` landing in the `insufficient` column.
+
+**The fill measurement over the 98-case composition, kept as history** — it is the
+first of the two runs the variance figure comes from, and its per-verdict table is
+what the `ls-025` correction below reads:
 
     positive class `substantive` (ADR 0119)
     precision 1.000000   tp 53  fp 0
@@ -14,14 +65,11 @@ exists to beat.
                   insufficient p 1.000  r 0.9615
                   nonsense     p 0.900  r 1.0000
 
-Both disagreements are the same mistake in the same direction — the model reaching
-for `nonsense`. `ls-025` is a substantive comment called nonsense, and it is the
-one miss inside the recall figure; `lv-008` is an insufficient comment called
-nonsense, which moves neither gated rate because both are negatives for the
-positive class. That blindness is unchanged and deliberate: §3.3 treats
-`insufficient` and `nonsense` identically for participation credit, and the
-per-verdict figures above are recorded so a later ticket that wants to gate on the
-distinction has a baseline. Nothing enforces them today.
+Both of that run's disagreements were the same mistake in the same direction — the
+model reaching for `nonsense`. `ls-025` was a substantive comment called nonsense,
+the one miss inside its recall figure; `lv-008` was an insufficient comment called
+nonsense, which moved neither gated rate because both are negatives for the
+positive class.
 
 **The miss moved, and it moved the right way.** Under `validity.v1` on
 `gpt-5-mini-2025-08-07` the miss was `ss-005` — twenty-four characters,
@@ -30,30 +78,32 @@ exists to measure. That case is answered correctly now and the miss is a
 long-substantive one instead. It is recorded because it is the kind of thing that
 is invisible three months later.
 
-**`ls-025` stayed a miss across both Luna runs, and it did not stay still.** An
+**`ls-025` has been a miss in every Luna run, and it did not stay still.** An
 earlier version of this paragraph held it up as the stable one — a model defect
 rather than sampling — against `lv-008` as the variable one. A security re-check
 read both CI logs and found that wrong. The fill run answered `nonsense` to both
-cases, which the per-verdict table above corroborates on its own: `nonsense`
-precision 0.900 is two false positives, and those two are them. The second run
-answered `insufficient` to both.
+cases, which the 98-case per-verdict table above corroborates on its own:
+`nonsense` precision 0.900 is two false positives, and those two are them. The
+second run answered `insufficient` to both, and both runs over the 108 answered
+`insufficient` to `ls-025` and correctly to `lv-008`.
 
 So both cases moved, and `ls-025` moved exactly as `lv-008` did. It stayed a miss
-only because both of its answers were wrong — it is a substantive comment called
-`nonsense` in one run and `insufficient` in the other, and recall cannot tell those
-apart. A case can be unstable and still look fixed, if the instability happens
-below the level the rate measures.
+only because each of its answers was wrong — a substantive comment called
+`nonsense` in the first run cited here and `insufficient` in each of the three
+cited since, and recall cannot tell those apart. A
+case can be unstable and still look fixed, if the instability happens below the
+level the rate measures.
 
-That is the sharpest thing these two runs say, and it is the opposite of what the
+That is the sharpest thing these runs say, and it is the opposite of what the
 first version of this paragraph claimed: **variance reaches a positive-class
-case** — one of the 54 the recall figure is computed over. A third run that
-answered `substantive` there would move recall to 1.000 with nothing having
-changed.
+case** — one of the 54 the recall figure is computed over. A run that answered
+`substantive` there would move recall to 1.000 with nothing having changed, and
+none of the runs whose per-case answers are recorded on this page has.
 
 ## The floors: precision 0.92, recall 0.90
 
-Derived from this run's own counts by the three rules this file has carried since
-the deferral. The arithmetic is written out because a reader meeting a red gate
+Derived from the fill measurement's own counts by the three rules this file has
+carried since the deferral. The arithmetic is written out because a reader meeting a red gate
 has to be able to check it.
 
 **Rule 1 — two errors of a kind is the pattern threshold.** One new error is
@@ -92,6 +142,43 @@ So the variance is **two cases in ninety-eight**, measured on the model and the
 prompt these floors govern. The exact-agreement counts differ by one and that is
 not the figure: a case can move without changing whether it agrees, and one of
 these two did exactly that.
+
+**That figure keeps its provenance across FIX-02's composition change.** It was
+measured over two runs of the 98-case composition, and it carries over as the
+standing estimate rather than being restated as two cases in a hundred and eight —
+a number restated onto a denominator it was never taken over is the move a quietly
+rewritten sentence makes.
+
+**The two runs over the 108-case composition cited on this page**, both
+`validity.v2` on `gpt-5.6-luna`:
+
+    the fill measurement          p 1.0000  r 0.9815   tp 53  fp 0  fn 1  tn 54
+                                  exact agreement 107/108      miss: ls-025
+    CI run 33830242674 @ 3be69bb  p 1.0000  r 0.9630   tp 52  fp 0  fn 2  tn 54
+                                                       misses: ls-025, ss-011
+
+One case moved between them. `ls-025` did not: it was answered `insufficient` in
+both, which is the third and fourth times it has been wrong in the runs cited
+here. The mover is `ss-011` — answered correctly in the fill run and
+`insufficient` in the CI run — and it is a short-substantive case, which is to say
+one of the 54 the recall figure is computed over.
+
+**This is the event rule 3's argument predicted.** Over the 98-case
+pair, the argument for granting the variance allowance to each rate separately had
+to be made from a case that moved *without* moving a rate: "a rate that did not
+move is not a rate that cannot". Here one did. Recall was 0.9815 in the fill run
+and 0.9630 in the CI run with nothing changed between them but the run, so the
+allowance is no longer defended by an inference about what could happen — the
+thing happened, on the gated rate, at this composition. Both runs clear both
+floors with headroom: `fn 2` is two of the five total misses the recall floor
+tolerates, and neither run made a false positive at all.
+
+**The allowance does not move on this.** One observed mover sits inside the
+standing two-case estimate rather than beyond it, so there is nothing here that a
+re-derivation would change and no case for touching a floor value in this pull
+request. Sizing the allowance over the 108-case composition — including whether
+two runs are enough to size anything — is E10's revisit, and that is where a
+re-derived figure belongs.
 
 **An earlier version of this section said one case, and founded the rule on a
 mini/`validity.v1` pair** — a figure from a boundary this same file declares
@@ -138,6 +225,29 @@ threshold of two, which is the flaky-gate state rule 3 exists to prevent.
     recall    0.90   49/54     = 0.9074 passes — five total misses tolerated,
                                                  which is four new ones
                      48/54     = 0.8889 fails  — the sixth fires
+
+**Re-derived over the 108-case composition, and neither line above moves.** FIX-02
+adds ten cases and all ten are negatives, so the set goes from 54 positives and 44
+negatives to 54 positives and 54 negatives, and from 98 cases to 108. Recall is a
+rate over the positive class and the positive class did not move: 49/54 and 48/54
+are the same two lines they were, tolerating the same five total misses. Precision's
+tolerated count comes from the positive-class count as well, not from the negatives
+— the tolerance is four false positives measured against tp 53, so 53/(53+4)=0.9298
+passes and 53/(53+5)=0.9138 fails whatever the negative count is, and both remain
+reachable because 54 negatives is far more than five.
+
+So the tolerance has not moved and must not be read as having moved. What the ten
+new negatives add is ten more *opportunities* to make a false positive under the
+same allowance of four: a model that reaches for `substantive` on fluent off-topic
+English now has ten more cases on which it can do so, and the same four-error budget
+to do it in. That is the floors becoming effectively tighter without a value
+changing, which is the cheap direction — and it is why a composition change of this
+shape may keep the numbers it was measured with.
+
+The run at the top of this page bears the derivation out rather than merely
+agreeing with it: fifty-four negatives drew no false positive at all, so the whole
+four-error budget is unspent over a set that offers ten more ways to spend it than
+the set the number was chosen on.
 
 **These may tighten later, and that direction is the cheap one.** The variance
 allowance is two because two runs measured two cases; more runs refine that figure,
@@ -207,13 +317,38 @@ FLOORS: TaskFloors = enforced(
     precision=0.92,
     recall=0.90,
     note=(
-        "Measured against validity.v2 on gpt-5.6-luna over the 98 cases in cases.py, in "
+        "Measured against validity.v2 on gpt-5.6-luna over the 108 cases in cases.py, in "
         "one clean run — a single run, not an average — where every case was answered by "
         "the model and none by §3.3's character floor: precision 1.000000 (tp 53, fp 0), "
-        "recall 0.981481 (fn 1, tn 44). The measured run-to-run variance is two cases in "
+        "recall 0.981481 (fn 1, tn 54), exact agreement 107/108, taken locally on "
+        "2026-09-03. A second run over this composition — CI run 33830242674 on commit "
+        "3be69bb, and those two are the runs over the 108 cited here — scored precision "
+        "1.0000 (tp 52, fp 0) and recall 0.9630 (fn 2, tn 54): both clear both floors with "
+        "headroom, since two misses is two of the five the recall floor tolerates and "
+        "neither run made a false positive. One case moved between the two, ss-011, and it "
+        "is a positive-class case, so this pair moved the gated rate itself — recall 0.9815 "
+        "against 0.9630 with nothing changed but the run — which is the event rule 3's "
+        "argument had to predict rather than exhibit until now. The allowance does not move "
+        "on one observed mover inside a standing estimate of two; sizing it over this "
+        "composition is E10's revisit. "
+        "FIX-02 grew the set from 98 by adding ten fluent off-topic English "
+        "comments to the nonsense family, and both runs say the group cost the measurement "
+        "nothing: ns-019 through ns-028 were answered nonsense, ten out of ten, first pass, "
+        "and every one of the 54 negatives was answered correctly in each run. "
+        "All ten are negatives, so the positive class stays at 54 while the negatives go "
+        "from 44 to 54 — ten more opportunities for a false positive under the same "
+        "tolerance of four, none of them taken. The fill run's one miss is ls-025, a "
+        "substantive comment answered insufficient, which is the answer it also gave in the "
+        "second of the two runs over the 98-case composition and in the CI run above; it is "
+        "an already-recorded unstable case rather than a new defect. The measured "
+        "run-to-run variance is still two cases in "
         "ninety-eight, on this same model and this same prompt, from two independent runs "
+        "over that earlier composition "
         "— the fill measurement at 96/98 exact agreement and CI run 33679136272 on commit "
-        "5f6a927 at 97/98. Both ls-025 and lv-008 answered nonsense in the first and "
+        "5f6a927 at 97/98. The two runs over the 108 disagree on one case, which sits "
+        "inside that standing estimate rather than replacing it, so the figure carries over "
+        "with its provenance rather than being restated on the new denominator. "
+        "Across those two runs both ls-025 and lv-008 answered nonsense in the first and "
         "insufficient in the second; the agreement counts differ by one only because "
         "ls-025 was wrong either way, which is why the count is not the figure. Neither "
         "rate moved, and the allowance is still granted to each separately: ls-025 is a "

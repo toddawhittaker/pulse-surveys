@@ -62,7 +62,10 @@ MOCK_MARKER_PREFIX = "mock-ai:"
 #
 # **The whole composition rather than a floor under the hard families, because a
 # floor under two families leaves the other four free.** E2-18's security review
-# proved both directions by execution:
+# proved both directions by execution, over the ninety-eight-case composition of
+# the day — the family sizes and totals in the two bullets are that set's, and
+# FIX-02 has since moved the nonsense family and the total without touching what
+# either bullet demonstrates:
 #
 #   - thin `NONSENSE_FAMILY` from eighteen cases to one and every other guard in
 #     this module stays green — the total is 81, both classes still hold ten, and
@@ -100,7 +103,13 @@ EXPECTED_FAMILY_COUNTS = {
     "SHORT_SUBSTANTIVE": 12,
     "LONG_VACUOUS": 12,
     "SHORT_INSUFFICIENT": 12,
-    "NONSENSE_FAMILY": 18,
+    # Eighteen when E2-18 pinned this mapping; twenty-eight since FIX-02, which
+    # added ten fluent off-topic English comments to the family because nothing in
+    # the set measured whether the model refuses grammatical prose that is not
+    # about the course. All ten are negatives for the positive class, so the
+    # positive-class denominator is unmoved and `tests/evals/validity/floors.py`
+    # carries the re-derivation the paragraph above requires.
+    "NONSENSE_FAMILY": 28,
     "BOUNDARY": 4,
 }
 

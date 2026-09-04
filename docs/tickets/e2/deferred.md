@@ -123,6 +123,9 @@ written into the item. One thing the entry did not anticipate travelled with it:
 the set is pinned to `validity.v2` rather than the `validity.v1` this entry names,
 because the prompt moved after the entry was written. The floor headroom entry
 below carries the variance measurement that goes to E10 and stays open.
+(Ninety-eight was the count as closed; FIX-02 grew the set to one hundred and
+eight on 2026-09-03 — ten fluent off-topic negatives — with the floors
+unchanged, and §11 item 4's sentence moved with it.)
 
 ## Nothing ties an `answer`'s filled column to its question's kind — E2-08
 
