@@ -229,5 +229,3 @@ Named so scope creep has something to push against. Each item has an owner.
   2026-09-04 supersedes; correcting the spec beside the breakdown is what
   stops a record going on asserting something the change made false
   (`docs/MISTAKES.md` entry 1).
-</content>
-</invoke>

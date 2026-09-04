@@ -143,5 +143,3 @@ Named here so the exit cannot forget them.
 - Building anything E4 through E13 owns. The exit ticket closes E3; it does
   not start the next epic, and `docs/tickets/e4/` gets exactly one file from
   this ticket.
-</content>
-</invoke>

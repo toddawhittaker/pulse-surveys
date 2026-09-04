@@ -118,5 +118,3 @@ ADR 0109; ADR 0063 and 0064 (the development-environment guard);
 - Any production-facing trigger. §3.4 says the passback is fully automatic
   with no instructor action or override, so the only trigger outside the beat
   is a development one.
-</content>
-</invoke>

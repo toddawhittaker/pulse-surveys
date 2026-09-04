@@ -121,5 +121,3 @@ owes; E3-03's formula and E3-04's client.
 - The development trigger that runs the sweep on demand — E3-07.
 - The job dashboard and the call-log view — E11, per §6.1.
 - Any surface that shows a student their score — E8.
-</content>
-</invoke>

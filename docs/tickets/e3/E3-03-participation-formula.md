@@ -165,5 +165,3 @@ and not just the posted number is what matters); the E2-04 clock service.
 - The job that decides when to recompute — E3-06.
 - Showing the number to a student or an instructor — E8 and E4; nothing in E3
   renders it.
-</content>
-</invoke>

@@ -156,5 +156,3 @@ and the superstring-scope entry.
 - The job that decides when to post — E3-06.
 - Any adapter for a real platform — the README's deliberately-not-done list.
 - Views over `ags_call` — E11.
-</content>
-</invoke>

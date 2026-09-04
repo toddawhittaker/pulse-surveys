@@ -144,5 +144,3 @@ address enumerations named above.
 - Calling AGS with the stored address — E3-04.
 - Computing anything to put in `grade_sync` — E3-03.
 - Any view over `ags_call` — E11's, per §6.1.
-</content>
-</invoke>

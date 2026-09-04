@@ -101,5 +101,3 @@ the tool signing key model and its grant SQL; SPEC §7.3.
 - Registering a real platform. E3 meets the mock; the carried entry's
   reasoning is that E3 is the epic where a real registration *becomes*
   possible, not that one happens here.
-</content>
-</invoke>

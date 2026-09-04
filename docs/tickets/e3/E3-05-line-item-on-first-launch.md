@@ -110,5 +110,3 @@ client.
 - Posting a score — E3-06.
 - The development trigger that runs a passback on demand — E3-07.
 - Any change to what a launch is allowed to do beyond this one hook.
-</content>
-</invoke>
