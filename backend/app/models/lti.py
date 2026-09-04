@@ -22,8 +22,9 @@ and a key sitting in a table no code opens is a credential at rest with no owner
 code by one ticket — the two move together across E1-05/E1-06 because the
 registration document's keys are the column names on both sides. It still adds no
 configuration variable: custody is the database (`docs/adr/0082`), the seed
-generates it in development, and no `app.config.Settings` field resolves to it,
-which is what the epic README's rule keys the `.env.example` line on.
+generates it in development and `scripts/signing_key.py` supplies it anywhere
+else (`docs/adr/0126`), and no `app.config.Settings` field resolves to it, which
+is what the epic README's rule keys the `.env.example` line on.
 
 **The platform's service addresses arrived here in E1-05.** §7.3 leaves the OIDC
 authorization endpoint to the registration, and E0-23 put the columns for it in
@@ -917,7 +918,7 @@ class LtiDeployment(UuidPrimaryKey, Base):
 
 
 class ToolSigningKey(UuidPrimaryKey, Base):
-    """This tool's own RSA private key — one row, and the tool's one identity.
+    """This tool's own RSA private keys — the set it publishes, and the one that signs.
 
     LTI 1.3 is asymmetric in both directions. `LtiPlatform` above holds where a
     *platform's* public keys are fetched from; this holds the private half of the
@@ -938,15 +939,27 @@ class ToolSigningKey(UuidPrimaryKey, Base):
     a copy that can drift out of step with what it was derived from
     (`docs/MISTAKES.md` entry 19).
 
-    **At most one row, by the same expression-index shape `institution` uses
-    (ADR 0072).** A check constraint sees one row at a time and cannot count its
-    own table; a unique index on a constant can, because the second row collides
-    with the first and the error names this index. The index is emphatically
-    *not* on `private_key_pem`: unique key material permits any number of rows
-    holding *different* keys, which is precisely the state this refuses. Two rows
-    is not an untidy state to reconcile later — it is two identities for one
-    tool, and whichever row a process reads first decides whether its assertions
-    verify.
+    **More than one row, since E3-01, and `retired_at` is what tells them apart**
+    (`docs/adr/0127`). E1-05 held this table to a single row with a unique index
+    on the constant expression `(true)`, which made the tool's identity provably
+    one key and made rotation structurally impossible: a rotation needs a period
+    in which the retiring key and its replacement are published together, so that
+    assertions signed before the switch still verify while assertions signed after
+    it verify too, and a one-row table has nowhere to put the second key. That
+    index is gone. What replaces it is a rule the readers hold rather than the
+    schema: the **published** set is every row with `retired_at IS NULL`, and the
+    **signing** key is the newest of those, ordered `created_at DESC, id DESC`.
+    Both live in `app.lti.registration`, so the api container and the celery
+    worker resolve the same row — which is ADR 0082's deciding fact, unchanged.
+    The tie-break on `id` is not decoration: two rows can share a `created_at`,
+    because it is server-defaulted and Postgres gives every statement in one
+    transaction the same `now()`, and an ordering that stopped at the timestamp
+    would leave the choice between them to the storage layer.
+
+    **A retired row stays.** Retirement takes a key out of the published set
+    immediately and leaves the record of what this deployment used to sign with;
+    deleting it would answer that question with nothing, at the moment somebody
+    is asking it.
 
     **`pulse_app` holds `SELECT` on this table and nothing else**, granted by
     E1-06 in `tool_signing_key_grants_v001.sql` — the ticket whose code spends
@@ -954,32 +967,43 @@ class ToolSigningKey(UuidPrimaryKey, Base):
     role holding read access to a private key it never opens is a credential at
     rest with no owner. `GET /lti/jwks` (`app.lti.registration`) is that code,
     and E1-11's `client_assertion` is the second reader. The write privileges
-    stay withheld, because the seed writes this row as the superuser and an
-    application connection that could write here could rotate the tool's
-    identity. `RUNTIME_BASE_TABLE_PRIVILEGES` in the §4.1 suite carries the
-    entry, which is where that widening has its loud conversation.
+    stay withheld, and E3-01 is the ticket that most invited widening them: its
+    supply path is an operator command holding the privileged credential
+    (`docs/adr/0126`), not a grant. An application connection that could write
+    here could rotate the tool's identity, and `retired_at` is the column a
+    request path would most like to set — retiring the last live key takes the
+    deployment to 503 at `/lti/jwks`. `RUNTIME_BASE_TABLE_PRIVILEGES` in the §4.1
+    suite carries the entry, which is where that widening has its loud
+    conversation.
 
     **Not a person table.** It holds no subject, no name and no address, so
     `PERSON_TABLES` does not change — the question `docs/tickets/e1/deferred.md`
     item 2 asks of this ticket, answered.
 
-    The key is generated by `scripts/seed.py::seed_tool_signing_key`, behind ADR
-    0063's development guard. A non-development deployment has no key until the
-    epic that first registers a real platform supplies one, which is a deliberate
-    gap with an entry in `docs/tickets/e1/deferred.md` rather than an oversight.
+    A row is written by `scripts/signing_key.py` in any deployment, and by
+    `scripts/seed.py::seed_tool_signing_key` in development behind ADR 0063's
+    guard. The seed still writes one key and never rotates: rotation is the
+    operator's command, not a side effect of re-running a demo loader.
     """
 
     __tablename__ = "tool_signing_key"
-    # Named explicitly, like `uq_institution_one_row`: the `ix` template in
-    # `app.models.base` interpolates a column name, and a textual expression has
-    # none to give it. The migration spells the same name.
-    __table_args__ = (Index("uq_tool_signing_key_one_row", text("(true)"), unique=True),)
 
     # PKCS#8 PEM, unencrypted. Unencrypted because the process that reads it has
     # nowhere to get a passphrase from: a passphrase in the same database is not
     # a second factor, and one in the environment moves custody back to the place
     # ADR 0082 rejects. What protects this column is the grant on it.
     private_key_pem: Mapped[str] = mapped_column(Text, nullable=False)
+    # When this key was supplied, defaulted to the insert moment so that the
+    # writer never has to state it. It is what orders the live keys, so the
+    # newest supplied key is the one that signs; `AwareDateTime` refuses a naive
+    # value at the bind boundary (ADR 0019).
+    created_at: Mapped[datetime] = mapped_column(
+        AwareDateTime, nullable=False, server_default=text("now()")
+    )
+    # When this key stopped being published, or NULL while it still is. Nullable
+    # because "not retired" is the ordinary state and a sentinel instant would be
+    # a date somebody has to remember is not a date.
+    retired_at: Mapped[datetime | None] = mapped_column(AwareDateTime, nullable=True)
 
 
 class LtiLaunchNonce(UuidPrimaryKey, Base):
