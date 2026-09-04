@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 
-import { copy } from '../copy/studentSurvey';
+import { copy, fillCopy } from '../copy/studentSurvey';
 
 /**
  * The mono week eyebrow — SPEC §7.6's `WeekEyebrow`, one component with variants.
@@ -19,11 +19,18 @@ import { copy } from '../copy/studentSurvey';
  * instant is absolute and the person reading it is the one who has to be there
  * before it.
  *
- * **The brief's "WK 07 / 12" loses its second half here, deliberately.** The
- * read answer carries the week a section is in and not how many weeks it runs
- * for, so the total is not a number this component has; inventing one is the
- * shape of defect this whole screen is written against. `docs/tickets/e2/deferred.md`
- * carries the entry that closes it.
+ * **Each axis is named in words** — "COURSE WK 04, TERM WK 07" — which is the
+ * owner's ruling of 2026-09-03 (FIX-01 item 1), made after "TERM 03" had to be
+ * explained to them. Both labels are governed copy filled with the API's
+ * numbers, comma included, so nothing a reader sees is assembled here.
+ *
+ * **The brief writes the eyebrow as "WK 07 / 12", and the second half is still
+ * absent.** The read answer carries the week a section is in and not how many
+ * weeks it runs for, so the total is not a number this component has; inventing
+ * one is the shape of defect this whole screen is written against.
+ * `docs/tickets/e2/deferred.md` carries the entry that closes it, and that
+ * entry's own rendering half now sits under a ruled string this ticket did not
+ * reopen.
  */
 export function WeekEyebrow({
   courseWeek,
@@ -37,10 +44,10 @@ export function WeekEyebrow({
   return (
     <p className="pulse-eyebrow">
       <span className="pulse-eyebrow-week">
-        {copy('student_survey.week_label')} {padWeek(courseWeek)}
+        {fillCopy('student_survey.course_week_eyebrow', { week: padWeek(courseWeek) })}
       </span>
       <span className="pulse-eyebrow-quiet">
-        {copy('student_survey.term_week_label')} {padWeek(termWeek)}
+        {fillCopy('student_survey.term_week_eyebrow', { week: padWeek(termWeek) })}
       </span>
       <span className="pulse-eyebrow-quiet">
         {copy('student_survey.closes_label')} {formatClosingInstant(closesAt)}

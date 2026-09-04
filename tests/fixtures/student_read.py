@@ -66,10 +66,13 @@ rather than a rewrite of two modules — the convention `tests/fixtures/landing.
 sets out for E1-13's `landing_contract`.
 
 **The environment** (`docs/MISTAKES.md` entry 40): everything here rides
-`launch_driver`, which rides `tool_doors` and therefore `configured_env` — the
+`launch_driver_in`, which rides `tool_doors` and therefore `configured_env` — the
 development name, laid down before the application is imported. It has to be that
 name: ADR 0109 applies the `clock_override` row only where the environment is the
 development one, and every open/closed case in E2-09 moves that clock.
+`student_read_door_in` is how a test names a *further* value for that laying-down
+— FIX-01's institution timezone is the first — and `student_read_door` is that
+factory called with nothing.
 """
 
 import json
@@ -297,6 +300,49 @@ OTHER_SECTION_ENROLLED_SINCE: date = SEEDED_COHORTS[UNENROLLED_COHORT][2]
 SUBMITTED_AT = datetime(2026, 11, 14, 11, 0, tzinfo=UTC)
 
 # ---------------------------------------------------------------------------
+# FIX-01 item 4 — the *next* window, for a section whose survey is not open.
+# ---------------------------------------------------------------------------
+
+# Two more term weeks out of the same hand-written table, for the case a section
+# is closed and has a window still to come. Both are inside both seeded cohorts'
+# spans — `D` runs term weeks 4 to 18 and `Q` runs 7 to 18 — and both open after
+# `AFTER_THE_WINDOW`, so at that instant term week 13's window has closed and
+# each of these is still ahead.
+#
+# **They are two different weeks on purpose, and the other section's is the
+# earlier of the two.** The reader's own next window is term week 15; the section
+# they are *not* enrolled in gets term week 14. So a read that asks "which window
+# opens next" without saying whose section it is asking about answers the other
+# one's instant — the ordinary shape of that mutation, since a query ordered by
+# `opens_at` takes the earliest row it can see. Were the reader's the earlier of
+# the pair, the same mutation would return the correct answer and survive with the
+# suite green (`docs/MISTAKES.md` entry 3).
+NEXT_TERM_WEEK = 15
+OTHER_SECTIONS_NEXT_TERM_WEEK = 14
+NEXT_WINDOW_OPENS_AT, NEXT_WINDOW_CLOSES_AT = WINDOWS_BY_TERM_WEEK[NEXT_TERM_WEEK]
+OTHER_NEXT_WINDOW_OPENS_AT, OTHER_NEXT_WINDOW_CLOSES_AT = WINDOWS_BY_TERM_WEEK[
+    OTHER_SECTIONS_NEXT_TERM_WEEK
+]
+
+# The two members FIX-01 adds to the read answer, spelled exactly as the work
+# order settles them. `next_window_opens_at` rides the enrolled-section entry and
+# is non-null only when that section's survey is closed and a materialized window
+# still lies ahead of it; `institution_timezone` is deployment configuration —
+# the zone SPEC §3.1 puts every window's wall-clock time in — and the screen
+# renders the instant in it.
+NEXT_WINDOW_FIELD = "next_window_opens_at"
+INSTITUTION_TIMEZONE_FIELD = "institution_timezone"
+
+# The two zones the timezone member is measured under. **Both are stated rather
+# than one being inherited** (`docs/MISTAKES.md` entry 40): a test that asserted
+# only the documented default would pass against a member hard-coded to it, which
+# is the mutation this pair exists to kill. `Pacific/Honolulu` is a valid IANA
+# name, is nothing this repository configures anywhere, and has no daylight
+# saving — so a green under it cannot be a coincidence of offsets.
+DEFAULT_INSTITUTION_TIMEZONE = "America/New_York"
+A_NON_DEFAULT_INSTITUTION_TIMEZONE = "Pacific/Honolulu"
+
+# ---------------------------------------------------------------------------
 # What is written into the rows a test then looks for.
 # ---------------------------------------------------------------------------
 
@@ -350,34 +396,47 @@ OTHER_SECTION_WORKLOAD = Decimal("21.5")
 SHORTEST_TELLING_VALUE = 4
 
 # ---------------------------------------------------------------------------
-# E2-17 item 5 — the course label the read answer gains.
+# E2-17 item 5 — the course label the read answer gains, respelled by FIX-01.
 # ---------------------------------------------------------------------------
 
-# The two tables above `section` that the label is built out of, and the columns
-# they hold it in. `lms_number` and `lms_title` are E0-05's names, spelled the
-# same way `tests/fixtures/provisioning.py` and `test_demo_seed_script.py` spell
-# them; the prefix's own code is looked for among candidates rather than named,
-# the way `tests/fixtures/provisioning.py::PREFIX_CODE_COLUMNS` does, because no
-# ticket in E2 settles that column and a guess here would fail inside a fixture.
+# The three tables above `section` that the label is built out of, and the
+# columns they hold it in. `lms_number` and `lms_title` are E0-05's names,
+# spelled the same way `tests/fixtures/provisioning.py` and
+# `test_demo_seed_script.py` spell them; `term.name` is E0-06's, and it is
+# `String(100) NOT NULL` so a label built from it can never carry a hole. The
+# prefix's own code is looked for among candidates rather than named, the way
+# `tests/fixtures/provisioning.py::PREFIX_CODE_COLUMNS` does, because no ticket
+# in E2 settles that column and a guess here would fail inside a fixture.
 COURSE_TABLE = "course"
 PREFIX_TABLE = "prefix"
 COURSE_NUMBER_COLUMN = "lms_number"
 COURSE_TITLE_COLUMN = "lms_title"
+TERM_NAME_COLUMN = "name"
 PREFIX_CODE_COLUMNS = ("code", "prefix_code", "name")
 
-# The field E2-17 item 5 adds to the read answer, and the shape of what it
-# carries. **Both are the ticket's, transcribed once**: the work order settles
-# the member as `course_label` and the value as "<prefix code> <lms_number> —
-# <lms_title>", em dash and single spaces. Nothing here re-derives either from
-# the code that will produce it (`docs/MISTAKES.md` entry 19); a test module
-# builds its expectation out of the rows it seeded and this spelling.
+# The field E2-17 item 5 added to the read answer, and the shape FIX-01 item 2
+# respells its value into. **Both are the ticket's, transcribed once**: the
+# member stays `course_label`, and the owner's ruling of 2026-09-03 fixes the
+# value as `<prefix code> <lms_number> <section code> — <lms_title>, <term
+# name>`, e.g. `MATH 140 E1FF — College Algebra, Fall 2026`. The order is the
+# ruling's own: "prefix, number, then section code, then the em-dash title, then
+# the term's name".
+#
+# Nothing here re-derives any of it from the code that will produce it
+# (`docs/MISTAKES.md` entry 19); a test module builds its expectation out of the
+# rows it seeded and this spelling, and this function is the one place either
+# lives (`docs/MISTAKES.md` entry 13 — three modules ask for this label).
 COURSE_LABEL_FIELD = "course_label"
 COURSE_LABEL_SEPARATOR = "—"
+COURSE_LABEL_TERM_SEPARATOR = ","
 
 
-def course_label(code: str, number: str, title: str) -> str:
-    """The label E2-17 item 5 settles, composed from one course's own three values."""
-    return f"{code} {number} {COURSE_LABEL_SEPARATOR} {title}"
+def course_label(code: str, number: str, section_code: str, title: str, term_name: str) -> str:
+    """FIX-01 item 2's label, composed from one section's own five values."""
+    return (
+        f"{code} {number} {section_code} {COURSE_LABEL_SEPARATOR} "
+        f"{title}{COURSE_LABEL_TERM_SEPARATOR} {term_name}"
+    )
 
 
 # A prefix, a course and a section of them that this student is **not** enrolled
@@ -613,6 +672,7 @@ class StudentReadWorld:
         self.other_section: Any = None
         self.enrolled_window: Any = None
         self.other_window: Any = None
+        self.calendar: Any = None
         self.question_set: Any = None
         self.questions: list[Any] = []
         self.question_texts: list[str] = []
@@ -736,19 +796,30 @@ class StudentReadWorld:
         return found
 
     def course_label_of(self, section: Any) -> str:
-        """E2-17 item 5's label for one section's own course, built from the seeded rows.
+        """FIX-01 item 2's label for one section, built from the seeded rows.
 
         **The values come from the database and the spelling from the ticket.** An
         expectation read out of the code that produces it agrees with an
         implementation that got it wrong (`docs/MISTAKES.md` entry 19), and one
         invented here would be this fixture choosing what the label says.
+
+        **The term is followed out of the section's own row rather than taken
+        from `self.term`.** The two agree in this world — everything here is
+        seeded under one Fall 2026 term — and that is exactly why reading the
+        convenient one would be untestable: a label that named *a* term rather
+        than *this section's* term would compose identically. `parent_row`
+        follows `section.term_id`, so the value is the one the read path has to
+        reach for as well.
         """
         course = self.parent_row(SECTION_TABLE, COURSE_TABLE, section)
         prefix = self.parent_row(COURSE_TABLE, PREFIX_TABLE, course)
+        term = self.parent_row(SECTION_TABLE, TERM_TABLE, section)
         return course_label(
             prefix[self.prefix_code_column()],
             course[COURSE_NUMBER_COLUMN],
+            section[SECTION_CODE_COLUMN],
             course[COURSE_TITLE_COLUMN],
+            term[TERM_NAME_COLUMN],
         )
 
     def anything_shaped_like_the_foreign_courses_label(self, foreign: ForeignCourse) -> set[str]:
@@ -779,6 +850,9 @@ class StudentReadWorld:
         self.subject = subject
 
         calendar = Fall2026(self.rows.seed, self.rows.session, self.tables).build()
+        # Kept, so a test that needs a window over some *other* term week has the
+        # `week` rows to hang it on. `seed_window_over` is the only reader.
+        self.calendar = calendar
         self.term = calendar.term
         self.week = calendar.weeks[TERM_WEEK]
         self.enrolled_section = calendar.section_row(ENROLLED_COHORT)
@@ -790,7 +864,16 @@ class StudentReadWorld:
         return self
 
     def seed_window(self, section: Any) -> Any:
-        """One `survey_window` over term week 13 for one section.
+        """One `survey_window` over term week 13 for one section, uncommitted.
+
+        The world's own window, seeded during `build` and committed with the rest
+        of it. Delegates so that "how a window row is written" has one spelling
+        here rather than two (`docs/MISTAKES.md` entry 13).
+        """
+        return self.seed_window_over(section, TERM_WEEK, commit=False)
+
+    def seed_window_over(self, section: Any, term_week: int, *, commit: bool = True) -> Any:
+        """One `survey_window` over any of this term's weeks, for one section.
 
         Written directly rather than derived through
         `app.services.survey_windows.derive_windows_for_section`, and that is
@@ -799,18 +882,26 @@ class StudentReadWorld:
         make every assertion here rest on that service being right as well — a
         red would then name the wrong ticket. The instants are E2-06's own
         hand-written table, so the rows are the ones a correct derivation writes.
+
+        `commit` defaults to true because every caller outside `build` is a test
+        adding a window to a world that is already committed, and the tool reads
+        on its own connection.
         """
-        return self.rows.seed(
+        opens_at, closes_at = WINDOWS_BY_TERM_WEEK[term_week]
+        window = self.rows.seed(
             SURVEY_WINDOW_TABLE,
             {},
             **{
                 WINDOW_SECTION_COLUMN: key_of(self.tables, SECTION_TABLE, section),
-                WINDOW_WEEK_COLUMN: key_of(self.tables, WEEK_TABLE, self.week),
+                WINDOW_WEEK_COLUMN: key_of(self.tables, WEEK_TABLE, self.calendar.weeks[term_week]),
                 WINDOW_TERM_COLUMN: key_of(self.tables, TERM_TABLE, self.term),
-                WINDOW_OPENS_COLUMN: WINDOW_OPENS_AT,
-                WINDOW_CLOSES_COLUMN: WINDOW_CLOSES_AT,
+                WINDOW_OPENS_COLUMN: opens_at,
+                WINDOW_CLOSES_COLUMN: closes_at,
             },
         )
+        if commit:
+            self.rows.commit()
+        return window
 
     def seed_a_course_this_student_is_not_in(self) -> ForeignCourse:
         """A prefix, a course, a section of them and a window over this world's week.
@@ -1141,7 +1232,57 @@ class StudentReadDoor:
 
 
 @pytest.fixture
-def student_read_door(
+def student_read_door_in(
+    launch_driver_in: Any,
+    committed_rows: Any,
+    metadata_tables: dict[str, Any],
+    committed_clock_overrides: Any,
+    web_identity: Any,
+    enrol: Any,
+    landing_ground: Any,
+) -> Callable[..., StudentReadDoor]:
+    """The same door, built under environment values the caller names.
+
+    A factory beside `student_read_door` rather than instead of it, and the split
+    exists for one reason: FIX-01 puts `institution_timezone` on the read answer,
+    and a test that asserted only the documented default would pass against a
+    member hard-coded to it. So one test asks for the door under a zone that is
+    *not* the default, which means naming a setting before the application is
+    imported (`docs/MISTAKES.md` entry 40) — and `tool_doors` only sees a value
+    that came down through `launch_driver_in`.
+
+    Keyword arguments are environment variable names and values, passed straight
+    through. Called with none, this is exactly what `student_read_door` has always
+    built.
+    """
+
+    def build(**settings: str) -> StudentReadDoor:
+        return _build_student_read_door(
+            launch_driver_in(**settings),
+            committed_rows,
+            metadata_tables,
+            committed_clock_overrides,
+            web_identity,
+            enrol,
+            landing_ground,
+        )
+
+    return build
+
+
+@pytest.fixture
+def student_read_door(student_read_door_in: Callable[..., StudentReadDoor]) -> StudentReadDoor:
+    """A student who is enrolled in one section and not its sibling, at the door.
+
+    Built with no environment override, so it runs under whatever `configured_env`
+    laid down — the development name, which is what every test about the ordinary
+    path wants. The shape `tests/fixtures/provisioning.py` gives `launch_driver`
+    over `launch_driver_in`, and for the same reason.
+    """
+    return student_read_door_in()
+
+
+def _build_student_read_door(
     launch_driver: Any,
     committed_rows: Any,
     metadata_tables: dict[str, Any],
@@ -1149,8 +1290,8 @@ def student_read_door(
     web_identity: Any,
     enrol: Any,
     landing_ground: Any,
-) -> Iterator[StudentReadDoor]:
-    """A student who is enrolled in one section and not its sibling, at the door.
+) -> StudentReadDoor:
+    """Seed the world, enrol the people, move the clock, launch — in that order.
 
     Everything in order, and every step of it is somebody's existing machinery:
     the platform is registered and the launch is real (`launch_driver`), the
@@ -1162,6 +1303,9 @@ def student_read_door(
     The clock starts **inside** the window, which is the state most tests want and
     none of them depends on: `pretend` moves it, and the test that is about the
     clock moves it three times.
+
+    A module-level function rather than a fixture body, so that the two fixtures
+    above share it instead of holding a copy each (`docs/MISTAKES.md` entry 13).
     """
     offer = launch_driver.offer_for_role(LEARNER_ROLE_URN)
     claims = launch_driver.claims_of(offer)
@@ -1242,7 +1386,7 @@ def student_read_door(
         answered, _ = launch_driver.launch(instructor_offer)
         return session_token_at(answered, INSTRUCTOR_LANDING, "The seeded instructor's launch")
 
-    yield StudentReadDoor(launch_driver, world, overrides, token, instructor_token)
+    return StudentReadDoor(launch_driver, world, overrides, token, instructor_token)
 
 
 # ---------------------------------------------------------------------------
@@ -1328,6 +1472,54 @@ def objects_carrying(node: Any, *names: str) -> list[dict[str, Any]]:
         for item in node:
             found.extend(objects_carrying(item, *names))
     return found
+
+
+def sole_entry(body: Any, answered: Any) -> dict[str, Any]:
+    """The one object in the answer that carries FIX-01's next-window member.
+
+    One, because the reader this world builds has exactly one live enrollment.
+    Nought means the member is not on the wire at all, which is the state FIX-01's
+    tests are first written red against; more than one means an enrollment is
+    being reported twice, which is a different defect and worth telling apart from
+    a wrong instant.
+
+    Here rather than in either test module because two of them ask the same
+    question of the same answer — the ordinary read-path module and the §4.1
+    denial module beside it (`docs/MISTAKES.md` entry 13).
+    """
+    entries = objects_carrying(body, NEXT_WINDOW_FIELD)
+    assert len(entries) == 1, (
+        f"{len(entries)} objects in the answer carry `{NEXT_WINDOW_FIELD}`, and this student has "
+        f"one live enrollment. Body begins {answered.text[:400]!r}.\n\n"
+        "FIX-01 item 4 puts the next materialized window's opening instant on the enrolled-section "
+        f"entry under exactly that name, as `datetime | None` — so the member is *present* on "
+        "every entry and is null when there is nothing ahead. Nought here is the member missing "
+        "from the schema, which is what this ticket owes; two is one enrollment answered twice."
+    )
+    return entries[0]
+
+
+def instant_carried(entry: dict[str, Any], answered: Any) -> datetime:
+    """One entry's next-window member as a moment, or a failure saying what it was.
+
+    Parsed rather than string-compared, for the reason `instants_in` gives above:
+    FIX-01 settles the member and settles no serialization for it, so
+    `2026-11-27T23:00:00Z` and `2026-11-27T23:00:00+00:00` are one moment written
+    two ways and a test comparing text would be pinning a choice the ticket leaves
+    open.
+    """
+    value = entry[NEXT_WINDOW_FIELD]
+    assert isinstance(value, str), (
+        f"`{NEXT_WINDOW_FIELD}` came back as {value!r} ({type(value).__name__}). It carries an "
+        f"instant, and the answer is JSON. Body begins {answered.text[:400]!r}."
+    )
+    parsed = datetime.fromisoformat(value)
+    assert parsed.tzinfo is not None, (
+        f"`{NEXT_WINDOW_FIELD}` came back as {value!r}, which carries no offset. ADR 0019 stores "
+        "every instant aware, and a naive one on the wire is a moment the browser will read in "
+        "whatever zone it happens to be in — which is the whole defect this member exists to fix."
+    )
+    return parsed
 
 
 def booleans_in(node: Any, path: str = "") -> dict[str, bool]:

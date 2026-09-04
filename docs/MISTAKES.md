@@ -169,6 +169,10 @@ And never write a prediction that explains away the evidence of its own failure:
 if you find yourself saying "there will be no confirmation, and that is expected",
 you have removed the only signal that would have told you it did not work.
 
+## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
+
+**Caught: 12** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+
 ## 16. A mutation harness reported kills it had not made
 
 **Caught: 6** · [the incidents, the root cause, and the whole rule](mistakes/16-a-mutation-harness-reported-kills-it-had-not-made.md)
@@ -201,10 +205,6 @@ you have removed the only signal that would have told you it did not work.
 subject that certainly has it, as a control. A guard that only ever reports
 absence cannot tell you which mechanisms it can see — and the role a scheme is
 built around is the one least likely to hold its privileges the ordinary way.
-
-## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
-
-**Caught: 11** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 17. An unqualified table name let the caller choose which table a guard read
 
@@ -326,7 +326,7 @@ doing nothing.
 
 ## 39. A gate run was invalidated by edits that landed while it ran
 
-**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/39-a-gate-run-was-invalidated-by-edits-that.md)
+**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/39-a-gate-run-was-invalidated-by-edits-that.md)
 
 **Rule.** While a gate runs, the tree it runs in is read-only — no edits, no
 checkouts, no restores. A verdict is valid only for the tree it started on; if
@@ -377,3 +377,17 @@ pushes can answer for the superseded run — an empty failure list is not a gree
 Before reporting green or marking anything ready, resolve the run by id, assert
 `status == completed`, and assert its `headSha` equals the commit being vouched
 for; a watch command's clean exit proves only that some run finished.
+
+## 43. A broad guard's pattern matched ordinary prose, and named a file that runs no SQL
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/43-a-broad-guards-pattern-matched-ordinary-prose.md)
+
+**Rule.** Prose in a **non-docstring** string under `backend/app/` is read by the
+org-views SQL sweep, which excuses docstrings and nothing else. Before spending a
+full-suite run, re-read any `Field(description=...)`, log message or error
+sentence you added there for a policed relation name — `course`, `enrollment`,
+`prefix`, `section` and the rest of `views_sql/`'s inventory — sitting after a
+comma or after `from`, `join`, `into`, `update`, `table` or `using`; running that
+one module answers it in under a second. **Reword the prose; never widen the
+guard**, and leave a comment beside the reworded string saying why, or the next
+edit puts the comma back.
