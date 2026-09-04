@@ -73,6 +73,10 @@ boundary: `metadata_tables` is asked for by both.
   - `fixtures/student_read.py` — E2-09: the names that ticket settles, a student
     enrolled in one section and not in its sibling, and the door their read path
     is asked through with a session a real launch issued.
+  - `fixtures/grading.py` — E3-03: the module contract the participation formula
+    is asked through, a section whose course weeks are not its term weeks, and
+    students enrolled on the dates a test chose with the answers and verdicts it
+    chose.
 
 Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
@@ -120,4 +124,5 @@ pytest_plugins = (
     "fixtures.ai_tasks",
     "fixtures.submit",
     "fixtures.student_read",
+    "fixtures.grading",
 )
