@@ -93,11 +93,15 @@ from app.ags import (
     LINE_ITEM_CONTAINER_MEDIA_TYPE,
     LINE_ITEM_MEDIA_TYPE,
     LINE_ITEM_PAGE_SIZE,
+    LINE_ITEM_READONLY_SCOPE,
+    LINE_ITEM_SCOPE,
     MAX_LINE_ITEM_LIMIT,
     MAX_RESULT_LIMIT,
     RESULT_CONTAINER_MEDIA_TYPE,
     RESULT_MEDIA_TYPE,
     RESULT_PAGE_SIZE,
+    RESULT_READONLY_SCOPE,
+    SCORE_SCOPE,
     GradeBook,
     GradeServiceError,
     LineItem,
@@ -167,6 +171,12 @@ FORM_MEDIA_TYPE = "application/x-www-form-urlencoded"
 # hangs rather than one that fails — and a token endpoint that hangs is a tool
 # that hangs. The backend sets the same bound on its own client.
 OUTBOUND_TIMEOUT_SECONDS = 5.0
+
+# The page-size parameter both AGS containers implement, named here because a
+# refusal has to say which parameter it objects to. `page` is `app.paging`'s own
+# `PAGE_PARAMETER`; this is the other half of the pair that came out of the two
+# route signatures when AGS started requiring a credential (ADR 0099, ADR 0134).
+LIMIT_PARAMETER = "limit"
 
 # How many path segments come before the user identifier in `RESULT_PATH`.
 # Counted off `RESULTS_PATH` rather than written as a number, so that moving
@@ -273,34 +283,67 @@ async def json_object(request: Request, subject: str) -> dict[str, Any]:
 # gradebook is built per application exactly as the issuer key is, so two
 # platforms started in one process hold two gradebooks (ADR 0049).
 #
-# **NRPS is authenticated and AGS is not, and the split is deliberate.** A real
-# platform puts both behind an OAuth 2.0 client-credentials grant. E0-14 built no
-# token endpoint and E0-15 specified none, so an endpoint that answered 401 then
-# would have answered it to a tool with nothing to present; E1-06 built the grant
-# (`app.tokens`) and ruled that enforcement pairs with the first conformant
-# client, because a service refusing before one exists would be refusing this
-# repository's own tests.
+# **Both services are authenticated, and each waited for the client it would be
+# refusing.** A real platform puts both behind an OAuth 2.0 client-credentials
+# grant. E0-14 built no token endpoint and E0-15 specified none, so an endpoint
+# that answered 401 then would have answered it to a tool with nothing to present;
+# E1-06 built the grant (`app.tokens`) and ruled that enforcement pairs with the
+# first conformant client, because a service refusing before one exists would be
+# refusing this repository's own tests.
 #
-#   - **The roster requires a token now.** E1-11 built the conformant client, so
-#     that argument has expired for NRPS: `memberships` below refuses a call that
-#     presents no token this platform issued for the membership scope, and
-#     `tests/integration/test_mock_lms_nrps_requires_a_token.py` holds the
+#   - **The roster required a token first.** E1-11 built the conformant NRPS
+#     client, so that argument expired for NRPS: `memberships` below refuses a
+#     call that presents no token this platform issued for the membership scope,
+#     and `tests/integration/test_mock_lms_nrps_requires_a_token.py` holds the
 #     contract. Landed in E1-11's fix round, which E1-15's exit clause 5 needs.
-#   - **AGS still answers without one, and that is the same argument still
-#     standing.** No grade-passback client exists: §3.4 is the passback rule and
-#     SPEC §14.3 gives the work to **E3 — Grade passback**, which is where the
-#     first AGS client is built and therefore where this ends. E3 owns the
-#     enforcement; it is recorded with that owner and its "done when" in
-#     `docs/tickets/e1/deferred.md`. Until then a token is presentable at every
-#     AGS route below and required at none.
+#   - **AGS requires one since E3-04**, in the same change as the first AGS
+#     client (`backend/app/lti/ags.py`), which is what makes the pairing
+#     structural rather than promised. Each route takes the scope AGS 2.0 defines
+#     for it, the two line-item reads take the writing scope or its read-only
+#     sibling, and the credential is judged before the query parameters and the
+#     context lookup on every one of them.
+#     `tests/integration/test_mock_lms_ags_requires_a_token.py` holds the
+#     contract; the per-route map is ADR 0134's.
 #
-# See `docs/adr/0099-the-mock-enforces-a-token-on-nrps-and-not-on-ags.md`.
+# **The `/mock/` prefix is outside this, by decision.** `GET /mock/posted-scores`
+# and `GET /mock/defects` are inspection surfaces no real platform serves (ADR
+# 0047), so there is no protocol credential to ask for and nothing a tool could
+# present. ADR 0134 says so out loud so a reviewer can tell the decision from an
+# oversight.
+#
+# See `docs/adr/0099-the-mock-enforces-a-token-on-nrps-and-not-on-ags.md` and
+# `docs/adr/0134-the-mocks-ags-routes-map-to-scopes-one-per-route.md`.
+
+
+def _not_a_page(parameter: str, value: str | None) -> str:
+    """Why a paging parameter this container will not serve on was refused.
+
+    **400 rather than 422**, which is E0-28 item 2's code for a parameter a
+    container will not serve on and the one ADR 0099 already applied to the
+    roster's cursor when its bound moved behind the credential: 400 says this
+    platform read the request and will not serve it, which is a sentence a tool's
+    author acts on, while a 422 reports that a value could not be parsed — a
+    different fact, and one a handler judging the value itself is no longer in a
+    position to state. It is deliberately not the 404 that a page *past* the end
+    answers with: page nine of a three-page container is a client following a
+    header into nowhere, and page zero is a cursor no collection could have.
+
+    The parameter is named, so that a tool's author reads one sentence and acts on
+    it and so that a test can attribute the refusal to the cursor rather than to
+    something else about the request.
+    """
+    return (
+        f"`{parameter}={value}` is not a {parameter} of this container. Both `{PAGE_PARAMETER}` "
+        f"and `{LIMIT_PARAMETER}` are whole numbers from {FIRST_PAGE} upwards — the cursor a walk "
+        "moves by and the size of the page it asks for. A page past the end of the collection is a "
+        "different answer, and this is not that."
+    )
 
 
 def require_a_token(
-    request: Request, settings: PlatformSettings, key: IssuerKey, scope: str
+    request: Request, settings: PlatformSettings, key: IssuerKey, *accepted: str
 ) -> None:
-    """Refuse this request unless it presents a token this platform issued for `scope`.
+    """Refuse this request unless it presents a token this platform issued for a scope it takes.
 
     Every rule about the token is in `app.tokens`; what lives here is the
     translation of a refusal into the status and the RFC 6750 §3 challenge it
@@ -311,9 +354,13 @@ def require_a_token(
     One translation rather than one per service, because every service that
     enforces answers a refusal the same way and two copies of that mapping are two
     places for one of them to drift (`docs/MISTAKES.md` entry 13).
+
+    `accepted` is one scope or several, and several is the AGS line-item case: a
+    read is opened by the writing scope or by its read-only sibling (ADR 0134).
+    `authorised_token` is what decides membership.
     """
     try:
-        authorised_token(request.headers.get("authorization"), scope, settings, key)
+        authorised_token(request.headers.get("authorization"), accepted, settings, key)
     except ServiceTokenError as refusal:
         raise HTTPException(
             status_code=refusal.status_code,
@@ -692,13 +739,34 @@ def _register_nrps(
 
 
 def _register_ags(
-    app: FastAPI, settings: PlatformSettings, platform: SeededPlatform, grades: GradeBook
+    app: FastAPI,
+    settings: PlatformSettings,
+    platform: SeededPlatform,
+    key: IssuerKey,
+    grades: GradeBook,
 ) -> None:
-    """Assignment and Grade Services 2.0: line items, scores and results."""
+    """Assignment and Grade Services 2.0: line items, scores and results, authenticated.
+
+    **Every route here requires a token, and which scope opens which is ADR
+    0134's** — the map is in this module's Advantage comment above and nowhere
+    else in `mock-lms/`. The check runs before the query parameters and before the
+    context lookup on every one of them, exactly as the roster's does: an
+    unauthenticated caller learns that it needs a credential and learns nothing
+    about which sections this platform seeds, which filters a container
+    implements, or where its cursor starts.
+    """
 
     @app.post(LINE_ITEMS_PATH, summary="AGS 2.0: create a line item in a section")
     async def create_line_item(context_id: str, request: Request) -> JSONResponse:
-        """Store one line item and answer with the identifier scores are posted to."""
+        """Store one line item and answer with the identifier scores are posted to.
+
+        The writing scope alone, never the read-only sibling: a credential granted
+        only to read a gradebook must not be able to add a column to it, and
+        `…/scope/lineitem.readonly` contains `…/scope/lineitem` as a prefix, so
+        this is the route on which the difference between membership and substring
+        is a product difference.
+        """
+        require_a_token(request, settings, key, LINE_ITEM_SCOPE)
         require_context(platform, context_id)
         payload = await json_object(request, "line item")
         try:
@@ -714,8 +782,8 @@ def _register_ags(
         resource_link_id: str | None = None,
         resource_id: str | None = None,
         tag: str | None = None,
-        limit: Annotated[int | None, Query(ge=1)] = None,
-        page: Annotated[int, Query(alias=PAGE_PARAMETER, ge=1)] = 1,
+        limit: Annotated[str | None, Query()] = None,
+        page: Annotated[str | None, Query(alias=PAGE_PARAMETER)] = None,
     ) -> JSONResponse:
         """One page of this section's line items, in creation order.
 
@@ -729,19 +797,39 @@ def _register_ags(
         appears only where a next page exists. The next URL is built from the
         query this request carried, so a filtered container's second page is the
         second page *of that filter* rather than of everything.
+
+        Either line-item scope opens it. AGS gives the container a read-only scope
+        precisely so a tool that only reads need not hold a writing credential.
+
+        **`page` and `limit` are typed here as unbounded strings, and that is ADR
+        0099's own recorded consequence arriving.** Both carried `ge=1`, which
+        FastAPI enforces before the handler is entered at all, so `?page=0`
+        answered 422 — naming the parameter, its bound and the fact that this
+        container pages — to a caller who had presented nothing. The bound and the
+        default live in `app.paging::page_number` now, read below and behind the
+        credential, which is where the roster's went when its own enforcement
+        landed. `?page=abc` and `?limit=abc` move with them, for the same reason.
         """
+        require_a_token(request, settings, key, LINE_ITEM_SCOPE, LINE_ITEM_READONLY_SCOPE)
+        requested = page_number(page)
+        if requested is None:
+            raise HTTPException(status_code=400, detail=_not_a_page(PAGE_PARAMETER, page))
+        asked = None if limit is None else page_number(limit)
+        if limit is not None and asked is None:
+            raise HTTPException(status_code=400, detail=_not_a_page(LIMIT_PARAMETER, limit))
+
         require_context(platform, context_id)
         found = grades.line_items(
             context_id,
             LineItemFilters(resource_link_id=resource_link_id, resource_id=resource_id, tag=tag),
         )
-        size = page_size(limit, LINE_ITEM_PAGE_SIZE, MAX_LINE_ITEM_LIMIT)
+        size = page_size(asked, LINE_ITEM_PAGE_SIZE, MAX_LINE_ITEM_LIMIT)
         try:
-            shown = window(found, page, size)
+            shown = window(found, requested, size)
         except PageOutOfRangeError as refusal:
             raise HTTPException(status_code=404, detail=str(refusal)) from refusal
         base = advertised(settings.line_items_url(context_id), request.url.query)
-        header = link_header(base, page, page_count(len(found), size))
+        header = link_header(base, requested, page_count(len(found), size))
         return JSONResponse(
             [line_item.document for line_item in shown],
             media_type=LINE_ITEM_CONTAINER_MEDIA_TYPE,
@@ -749,7 +837,7 @@ def _register_ags(
         )
 
     @app.get(LINE_ITEM_PATH, summary="AGS 2.0: one line item")
-    def read_line_item(context_id: str, line_item_id: str) -> JSONResponse:
+    def read_line_item(request: Request, context_id: str, line_item_id: str) -> JSONResponse:
         """The line item at its own `id`, which is what makes that `id` a URL.
 
         **What this route is for**, because it arrived in E0-15 without a
@@ -765,7 +853,11 @@ def _register_ags(
         minted" is asked; a platform that minted one and routed only `…/3` would
         have handed a tool an id it cannot use, and E3 would meet that as a 404
         on a URL the platform itself composed.
+
+        Either line-item scope opens it, as for the container: reading one line
+        item and listing them are one permission.
         """
+        require_a_token(request, settings, key, LINE_ITEM_SCOPE, LINE_ITEM_READONLY_SCOPE)
         return JSONResponse(
             require_line_item(platform, grades, context_id, line_item_id).document,
             media_type=LINE_ITEM_MEDIA_TYPE,
@@ -777,7 +869,12 @@ def _register_ags(
 
         The body is not modelled, defaulted or normalised anywhere between the
         socket and the store — see `json_object` above and ADR 0047.
+
+        The score scope alone. A gradebook any roster token can write to is the
+        thing the scope check exists to prevent, and neither line-item scope
+        carries permission to put a grade in front of a student.
         """
+        require_a_token(request, settings, key, SCORE_SCOPE)
         line_item = require_line_item(platform, grades, context_id, line_item_id)
         payload = await json_object(request, "score")
         try:
@@ -796,8 +893,8 @@ def _register_ags(
         context_id: str,
         line_item_id: str,
         user_id: str | None = None,
-        limit: Annotated[int | None, Query(ge=1)] = None,
-        page: Annotated[int, Query(alias=PAGE_PARAMETER, ge=1)] = 1,
+        limit: Annotated[str | None, Query()] = None,
+        page: Annotated[str | None, Query(alias=PAGE_PARAMETER)] = None,
     ) -> JSONResponse:
         """The conformant `Result` container: the current grade, and nothing else.
 
@@ -822,16 +919,30 @@ def _register_ags(
         and advertised an unfiltered `first`, `last` or `current` hands a tool
         the whole class the moment it follows one — and it fails open, which is
         the paging defect that looks most like working.
+
+        The result read-only scope, which is the only one AGS 2.0 defines for
+        this container. Its `page` and `limit` moved out of the signature for the
+        reason `list_line_items` above gives at length: two containers with the
+        same pair of declarations is `docs/MISTAKES.md` entry 13's shape exactly,
+        and a repair reaching one of them is a repair reaching half of it.
         """
+        require_a_token(request, settings, key, RESULT_READONLY_SCOPE)
+        requested = page_number(page)
+        if requested is None:
+            raise HTTPException(status_code=400, detail=_not_a_page(PAGE_PARAMETER, page))
+        asked = None if limit is None else page_number(limit)
+        if limit is not None and asked is None:
+            raise HTTPException(status_code=400, detail=_not_a_page(LIMIT_PARAMETER, limit))
+
         line_item = require_line_item(platform, grades, context_id, line_item_id)
         found = grades.results(line_item, user_id=user_id)
-        size = page_size(limit, RESULT_PAGE_SIZE, MAX_RESULT_LIMIT)
+        size = page_size(asked, RESULT_PAGE_SIZE, MAX_RESULT_LIMIT)
         try:
-            shown = window(found, page, size)
+            shown = window(found, requested, size)
         except PageOutOfRangeError as refusal:
             raise HTTPException(status_code=404, detail=str(refusal)) from refusal
         base = advertised(settings.results_url(context_id, line_item_id), request.url.query)
-        header = link_header(base, page, page_count(len(found), size))
+        header = link_header(base, requested, page_count(len(found), size))
         return JSONResponse(
             list(shown),
             media_type=RESULT_CONTAINER_MEDIA_TYPE,
@@ -855,7 +966,11 @@ def _register_ags(
         The identifier comes from `addressed_user_id` rather than from the route
         parameter, for the reason that function gives at length: one decode of
         what the wire carried, whatever the server did to the path on the way in.
+
+        The result read-only scope, the same one the container takes: this is one
+        entry of that container addressed directly, not a second permission.
         """
+        require_a_token(request, settings, key, RESULT_READONLY_SCOPE)
         line_item = require_line_item(platform, grades, context_id, line_item_id)
         user_id = addressed_user_id(request)
         found = grades.result(line_item, user_id)
@@ -971,6 +1086,6 @@ def create_app() -> FastAPI:
     _register_authorization(app, settings, platform, key, wrong_launches)
     _register_token(app, settings, key)
     _register_nrps(app, settings, platform, key)
-    _register_ags(app, settings, platform, grades)
+    _register_ags(app, settings, platform, key, grades)
     _register_mock_inspection(app, grades)
     return app
