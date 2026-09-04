@@ -212,7 +212,7 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 ## 34. A pipeline discarded a non-zero exit and printed a line that read as success
 
-**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
+**Caught: 5** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
 
 **Rule.** Never read a gate's result through a pipe. `cmd | tail` reports the
 exit status of `tail`, so a failing gate prints a passing line. Redirect to a
@@ -236,7 +236,7 @@ file and check the status, or run the gate bare.
 
 ## 29. A value was repaired before the check that should have refused it
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/29-a-value-was-repaired-before-the-check-that-should.md)
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/29-a-value-was-repaired-before-the-check-that-should.md)
 
 ## 33. A class-tree split put a case on the wrong side, and the docstring said otherwise
 

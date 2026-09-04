@@ -1492,10 +1492,17 @@ class AgsCall(UuidPrimaryKey, Base):
     section_id: Mapped[UUID] = mapped_column(
         ForeignKey("section.id", ondelete="RESTRICT"), nullable=False
     )
-    # The address actually called — the container, a line item, or the token
-    # endpoint when that is what refused. Not the section's stored address: a line
-    # item's own id is a different URL from the container it lives in, and
-    # recording the stored one would lose which of the two failed.
+    # The AGS address the call was for — the container, or a line item, or the
+    # scores or results service derived from one. Not the section's stored
+    # address in the ordinary case: a line item's own id is a different URL from
+    # the container it lives in, and recording the stored one would lose which of
+    # the two failed. Never the token endpoint, even when the token endpoint is
+    # what refused; see the class docstring, which this comment used to
+    # contradict. The two exceptions are the section's stored container address,
+    # which is what a refused platform-chosen URL is recorded under so that a
+    # hostile string never reaches an operator's console, and a Result read
+    # filtered to one student, recorded without its query so that no LMS user id
+    # reaches this table.
     url: Mapped[str] = mapped_column(Text, nullable=False)
     # The HTTP status the platform answered with. NULL means no answer at all: see
     # the class docstring.

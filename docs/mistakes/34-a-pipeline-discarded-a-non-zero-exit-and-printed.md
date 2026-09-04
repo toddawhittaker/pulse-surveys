@@ -1,8 +1,16 @@
 # Entry 34. A pipeline discarded a non-zero exit and printed a line that read as success
 
-**Caught: 4**
+**Caught: 5**
 
-*5 instances recorded: one occurrence, and four catches.*
+*6 instances recorded: one occurrence, and five catches.*
+
+*(**A catch**, building E3-04, 2026-09-04. Every gate run for this ticket — the
+red confirmation, four scoped pytest runs, `ruff format --check`, `ruff check`,
+mypy over all four scopes and the full suite — either ran bare or was piped with
+`echo "EXIT=${PIPESTATUS[0]}"` immediately after, because this entry names the
+pipe as the thing that turns a red gate into a passing line. The habit that
+protects context is the one that destroys the verdict, and reading a suite's
+tail without its status is exactly how a ticket gets reported green.)*
 
 *(**A catch**, building E2-07, 2026-09-01. Six gates were run for the green
 report — the suite, the invariant pass, two linters, four mypy scopes, a Docker
