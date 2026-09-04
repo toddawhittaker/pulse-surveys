@@ -6,8 +6,10 @@
 **Lane:** heavy
 **Security-relevant:** the diff is arithmetic and reads no identity beyond
 the enrollment it is scoring, but it sits in `backend/app/services/`, which
-is a heavy-lane row, and it is the first reader of `response.is_valid` —
-a field E2 wrote and nothing has read since.
+is a heavy-lane row. It does **not** read `response.is_valid`: the
+item-based formula ruled on 2026-09-04 works from the answer rows and each
+comment's most recent classification, which is a finer grain than a
+per-response verdict can carry.
 
 ## Context
 
@@ -93,14 +95,36 @@ and not just the posted number is what matters); the E2-04 clock service.
    generator provably includes the boundary cases its docstring names
    (`docs/MISTAKES.md` entry 15).
 8. No network call, no AGS type, and no job import appears in the module.
-9. Nothing in the tree still states the superseded formula as the current
-   rule. Twelve files outside `docs/SPEC.md` and `docs/tickets/e3/` carried
-   the phrase "valid weeks completed ÷ weeks elapsed" or a variant of it when
-   this breakdown was written, across sixteen lines: `backend/app/models/`,
-   `backend/app/views_sql/`, `backend/migrations/versions/`, `mock-lms/app/`
-   and eight test modules. Each is re-read and either corrected or dated as
-   history in this ticket's pull request, and the grep is re-run and reported
-   rather than assumed clean.
+9. **No record in the tree still asserts the superseded formula or the data
+   path it implied.** This is a sweep for the *fact*, not for a phrase: the
+   thing to find is every place that says the participation score counts
+   weeks, or that a week is a pass or a fail, or that the score is read from
+   `response.is_valid` — however it happens to be worded.
+
+   A phrase grep for "valid weeks completed ÷ weeks elapsed" and its variants
+   found sixteen lines in twelve files at breakdown time, across
+   `backend/app/models/`, `backend/app/views_sql/`,
+   `backend/migrations/versions/`, `mock-lms/app/` and eight test modules.
+   **That list is the starting point and not the bound.** Two records the
+   phrase grep cannot see are already known and are corrected by this ticket:
+
+   - `backend/app/models/survey.py:311-318` justifies storing `is_valid`
+     rather than querying `classification` on the grounds that "§3.4's
+     participation score is computed over these rows". The item formula does
+     not compute over `response` rows, so the justification is now false —
+     and the column's other reasons (E2-08 owns the verdict, one module
+     writes it, the student read path returns it) still stand, which is why
+     this is a correction to the reasoning rather than a case against the
+     column.
+   - `backend/app/services/validity.py:42-44` says a blank comment "has no
+     verdict and no effect (§3.3 in as many words)". True about validity and
+     now false about credit, since §3.3 was amended in this breakdown to say
+     that a blank optional comment costs its item in §3.4's score.
+
+   Each hit is re-read and either corrected or dated as history, and both
+   greps — the phrase and the fact — are re-run and their results reported
+   rather than assumed clean (`docs/MISTAKES.md` entry 1: grep the fact, not
+   the identifier).
 
 ## Decisions this ticket settles
 
@@ -144,15 +168,23 @@ and not just the posted number is what matters); the E2-04 clock service.
   gradebook. Prefer asserting the forbidden state over the permitted one
   (`docs/MISTAKES.md` entry 2), and mutate the arithmetic to prove the tests
   can fail (entry 3).
-- **The superseded formula is written into the tree in sixteen places, and
-  none of them is code.** They are docstrings, SQL comments, a migration's
-  prose and test module headers, all explaining *why* a rule exists by citing
-  a formula this breakdown replaced. A grep for the identifier finds none of
-  them; a grep for the fact finds all of them (`docs/MISTAKES.md` entry 1).
-  Two more sit in `docs/disputes/`, which are dated records of an argument
-  and are correct as history — the judgement of which class a hit belongs to
-  is part of the work, and a merged migration's prose is the borderline case
-  worth deciding out loud.
+- **The superseded formula is written into the tree in at least sixteen
+  places, and none of them is code.** They are docstrings, SQL comments, a
+  migration's prose and test module headers, all explaining *why* a rule
+  exists by citing a formula this breakdown replaced. A grep for the
+  identifier finds none of them; a grep for the fact finds more of them than
+  a grep for the phrase does, which is exactly `docs/MISTAKES.md` entry 1's
+  point — and the two records named in criterion 9 are the proof, since
+  neither contains the phrase. Three further lines sit in `docs/disputes/`
+  (`E2-16-01.md:64` and `:143`, `E2-16-02.md:142`), which are dated records
+  of an argument and are correct as history. The judgement of which class a
+  hit belongs to is part of the work, and a merged migration's prose is the
+  borderline case worth deciding out loud.
+- **A record can be false about the formula without mentioning it.**
+  `survey.py`'s `is_valid` justification is the shape to look for: it names a
+  data path rather than a formula, and it is the data path the ruling
+  changed. Ask of every hit what it would have to say to still be true, not
+  whether it contains a phrase.
 - **A property test whose generator excludes its own named case** is
   `docs/MISTAKES.md` entry 15, and the four cases §9.1 names — adds, drops,
   missed weeks, partially answered weeks — are exactly the ones a bounded

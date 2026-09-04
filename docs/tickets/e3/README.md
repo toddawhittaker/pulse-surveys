@@ -17,9 +17,13 @@ epic branch.
 **Read before building anything here:** `docs/tickets/e3/carried-from-e2.md`
 (every entry — this breakdown schedules the E3-owned ones, and the mapping is
 below), SPEC §3.1, §3.3, §3.4, §7.3, §9.1, §14.3, and `docs/MISTAKES.md`
-whole. E3 is the first epic to read `response.is_valid`, which E2 wrote and
-nothing has read since; the formula ticket is where that field stops being a
-claim and starts being a behaviour.
+whole. One inherited expectation does not survive the formula ruling and is
+worth knowing before E3-03 is built: E3 was to be the first reader of
+`response.is_valid`, and it is not. The field already has a reader —
+`backend/app/api/student.py:231` returns it to the student — and the
+item-based formula does not use it, because a per-response verdict cannot
+express a week answered four items of five. The formula reads the answer rows
+and each comment's most recent classification instead.
 
 Items an E3 ticket defers rather than fixes live in `deferred.md` (created by
 the first PR that needs it); a PR that defers something adds it there in the
@@ -150,7 +154,7 @@ it. The entries' own done-whens govern; the tickets point at them.
 | Nothing structurally forces the next mutating route onto the CSRF dependency | E3-07 |
 | The launch-path roster enqueue still waits six seconds on a broker that is down | E3-05 — **taken at breakdown**, because the entry's owner is whichever epic next touches the launch door's suites and E3-05 is that ticket |
 | `PERSON_TABLES` standing review question, asked of the tables E3 adds | E3-02 (answered in its PR body), re-asked of the whole epic in E3-08 |
-| Grade passback reading validity state (spec-owned to E3) | E3-03, the first reader of `response.is_valid` |
+| Grade passback reading validity state (spec-owned to E3) | **Superseded by the formula ruling of 2026-09-04.** The entry rests on E2-08 writing `response.is_valid` for E3 to read, and the item-based score does not read it — it reads the answer rows and each comment's most recent classification, a finer grain than a per-response verdict carries. E3-03 consumes the validity *machinery* (§3.3's refused set, the append-only classification rows) without consuming that column. The column is not orphaned: `backend/app/api/student.py:231` returns it to the student. E3-03 corrects the records that justified the column by naming E3 as its reader. |
 | The session-read sweep's two disclosed limits | E3-08 re-affirms the sweep still reaches `services/grading.py` |
 | The TypeScript 7 pair's floating owner | E3-08 checks at exit whether `typescript-eslint` admitted 7.x on E3's watch |
 | A rewound development clock can wedge a section's roster sync | **To-know for E3-06 and E3-07**, whose timestamp and dev-trigger decisions touch the same interaction; not closed here, and re-carried by E3-08 |
