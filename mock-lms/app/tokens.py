@@ -46,7 +46,9 @@ does not apply.
 
 **The second half of this module is the other end of the same token** — a
 service being presented one, added in E1-11's fix round for the roster and used
-by NRPS alone. It is here rather than in `app.nrps` because a token is only ever
+by both Advantage services since E3-04 turned the AGS enforcement on beside the
+first AGS client (ADR 0134). It is here rather than in `app.nrps` because a token
+is only ever
 good if this endpoint issued it, and the rules for reading one back are the
 mirror image of `issued_token`'s for minting one: same issuer, same audience,
 same key, same clock. Two copies of that arithmetic in two modules would be two
@@ -487,8 +489,10 @@ def granted_token(
 
 
 # ---------------------------------------------------------------------------
-# The other end of the same token: a service being presented one (E1-11 fix
-# round). NRPS only — AGS stays unauthenticated until its first client exists.
+# The other end of the same token: a service being presented one. NRPS since
+# E1-11's fix round, AGS since E3-04, which built the first AGS client and turned
+# the enforcement on in the same change (ADR 0134). Both go through
+# `authorised_token` below; which scopes open which route stays with the service.
 # ---------------------------------------------------------------------------
 
 # RFC 6750 §3.1's two error codes, and the status each answers with. Two codes
