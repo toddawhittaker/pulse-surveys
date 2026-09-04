@@ -35,9 +35,12 @@
 --     student revises inside the window, and `is_valid` when the async
 --     re-classification finally gets a model's verdict for a comment the floor
 --     stood in for (§3.3).
---   - **DELETE stays withheld.** §3.1 makes a missed week unfillable and §3.4
---     counts "valid weeks completed ÷ weeks elapsed" over exactly these rows, so a
---     week that has been answered may not stop having been answered. What a
+--   - **DELETE stays withheld.** §3.1 makes a missed week unfillable and §3.4's
+--     score counts the items a student completed, read from these rows and the
+--     answers hanging off them, so a week that has been answered may not stop
+--     having been answered. (The formula ruled on 2026-09-04 replaced the weeks
+--     ratio this sentence used to quote; the verb stays withheld for the same
+--     reason under either.) What a
 --     retention policy eventually removes is the retention epic's decision, made on
 --     a surface an administrator drives; withholding the verb is what keeps it from
 --     being made by accident on the connection every screen runs on.
@@ -78,8 +81,8 @@
 -- view over the row.
 --
 -- **pulse_care is granted nothing.** The Care queue reaches a threat comment and
--- the audited reveal (ADR 0001, SPEC §6.2). Whether a student's week counts for
--- participation is no part of that surface, and the one role in the cluster that
+-- the audited reveal (ADR 0001, SPEC §6.2). A student's participation score is no
+-- part of that surface, and the one role in the cluster that
 -- can resolve a student's name gets no privilege it has no use for.
 --
 -- **USAGE ON SCHEMA public is not granted again here.** identity_grants_v001.sql

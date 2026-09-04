@@ -1157,10 +1157,10 @@ def test_an_enrollment_ending_before_it_starts_is_refused(
 
     assert refused_backwards, (
         "An enrollment was stored whose end date falls before its start date. E0-08: "
-        "'`enrollment` rejects an end date before its start date.' E3's participation formula "
-        "counts the weeks between the two, and a backwards window makes that count negative — a "
-        "row that is wrong in a way no later code can detect, because both dates are perfectly "
-        "valid on their own."
+        "'`enrollment` rejects an end date before its start date.' §3.4's tiers resolve a "
+        "student's first enrolled week from this pair, and a backwards window describes a "
+        "membership that ended before it began — a row that is wrong in a way no later code can "
+        "detect, because both dates are perfectly valid on their own."
     )
 
 
@@ -1281,8 +1281,11 @@ def test_overlapping_enrollments_for_one_user_and_section_are_refused(
     documented reason — decide and test it." Rejection is chosen because E3's
     participation formula asks "was this student enrolled in week N", and two
     overlapping rows make that question have two answers with no rule for
-    choosing between them; a student who is counted twice in one week moves the
-    denominator of a number that goes on an instructor's report. Permitting them
+    choosing between them; a student counted twice in one week moves the
+    denominator of a number posted straight into the LMS gradebook, whose only
+    explanation to anybody is the per-week ledger in its AGS comment (§3.4, ADR
+    0125) — v1 ships no instructor-facing or student-facing view of it at all.
+    Permitting them
     would need that rule written down first, and the ticket does not have one. If
     the pull request permits overlap instead, it owes the documented reason the
     criterion asks for, and this test is what it replaces.
@@ -1367,8 +1370,8 @@ def test_a_re_enrollment_after_the_first_window_closes_is_accepted(
             f"{refused}. The two windows do not touch — day {ADDED} to {DROPPED}, then day "
             f"{RE_ADDED} to {RE_DROPPED} — so this is a drop and a later re-add, which the LMS "
             "sends and E0-15 seeds. A uniqueness rule over the user and section alone rejects "
-            "it, and E3's participation formula then has no way to know the student was away for "
-            "two weeks."
+            "it, and the roster record then cannot say the student was away for two weeks — which "
+            "is what E3-06 reads to decide whether a score is still posted for them."
         )
 
 
