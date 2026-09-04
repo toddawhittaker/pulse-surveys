@@ -93,6 +93,7 @@ from app.config import Settings
 from app.lti.launch import INSTRUCTOR_ROLE_URI, LTI_ROLES_CLAIM, stated_roles
 from app.models.identity import User
 from app.models.lti import (
+    AGS_CONTAINER_ADDRESS_COLUMN,
     ROSTER_SERVICE_ADDRESS_COLUMN,
     LaunchDefect,
     LaunchDefectKind,
@@ -599,13 +600,35 @@ def _ingest_the_context(
         refused=LaunchDefectKind.ROSTER_ADDRESS_REFUSED,
         service="roster service",
     )
+    # E3-02's gradebook address, judged on exactly the same terms and here for the
+    # same reason: this is the one path SPEC §3.4's line-item container arrives on.
+    # A launch that advertises none leaves the column NULL with no record, because
+    # a platform granting no gradebook scope is a configuration and not a fault;
+    # one that advertises an address these rules refuse leaves the column NULL and
+    # records `ags_address_refused`, which is a fault somebody can act on.
+    gradebook_address = _an_address_this_tool_may_call(
+        session,
+        claims,
+        settings,
+        _gradebook_address(claims),
+        column=AGS_CONTAINER_ADDRESS_COLUMN,
+        refused=LaunchDefectKind.AGS_ADDRESS_REFUSED,
+        service="AGS line-item container",
+    )
 
     both_or_neither = session.begin_nested()
     try:
         course = _upsert_course(session, prefix.id, label, _platform_title(claims))
         if course is not None:
             _upsert_section(
-                session, course, term, label, binding=binding, address=address, section=bound
+                session,
+                course,
+                term,
+                label,
+                binding=binding,
+                address=address,
+                gradebook_address=gradebook_address,
+                section=bound,
             )
     except SectionCodeError as refusal:
         both_or_neither.rollback()
@@ -805,6 +828,27 @@ def _roster_address(claims: Mapping[str, Any]) -> str | None:
     return address if isinstance(address, str) and address else None
 
 
+def _gradebook_address(claims: Mapping[str, Any]) -> str | None:
+    """The AGS line-item container this launch advertises, if it advertises one.
+
+    SPEC §3.4 gives every section one line item called "Pulse Participation", and a
+    line item is created *in a container* — the `lineitems` member of the AGS
+    endpoint claim is the only thing that says where that container is. Read out of
+    the claim rather than built from the issuer and a guessed path, for the reason
+    `_roster_address` above gives: an address this tool assembled is one no platform
+    published, and a guessed one points a scored post at whatever the guess hit.
+
+    **`None` covers both shapes of absence.** A platform that grants this tool no
+    gradebook scope sends no endpoint claim at all; one that sends the claim for its
+    scopes alone sends no `lineitems` member. Neither is a fault and neither is
+    distinguishable from the other in anything this tool goes on to do, so both
+    answer the same way and neither records anything.
+    """
+    endpoint = claims.get(AGS_CLAIM)
+    address = endpoint.get(LINE_ITEMS_MEMBER) if isinstance(endpoint, Mapping) else None
+    return address if isinstance(address, str) and address else None
+
+
 # ---------------------------------------------------------------------------
 # The two writes.
 # ---------------------------------------------------------------------------
@@ -885,6 +929,7 @@ def _upsert_section(
     *,
     binding: ContextBinding,
     address: str | None,
+    gradebook_address: str | None,
     section: Section | None,
 ) -> None:
     """Update the section this context is bound to, or create it with the binding stamped.
@@ -909,11 +954,19 @@ def _upsert_section(
     `lms_context_id` reaches round 3's finding through the database instead of
     through this module.
 
-    **The address is stored on a staff launch and never cleared.** A staff launch
-    carrying no NRPS claim, or one whose address this container will not fetch,
-    leaves whatever is there: a platform that stops advertising a service has not
-    moved the roster, and a section with no address at all is §7.3's never-synced
-    state rather than an error.
+    **The two service addresses are stored on a staff launch and never cleared.** A
+    staff launch carrying no NRPS or AGS claim, or one whose address this container
+    will not fetch, leaves whatever is there: a platform that stops advertising a
+    service has not moved the roster or the gradebook, and a section with no address
+    at all is §7.3's never-synced state rather than an error. E3-02's gradebook
+    address is the roster address's exact mirror in every line of this — same
+    trigger, same writer, same "changed means the platform moved it" rule.
+
+    **`ags_line_item_url` is written nowhere here**, and that is E3-02's scope
+    rather than an omission: the column holds the id of a line item this tool has
+    not created yet, E3-04 is what creates it and E3-05 is what records the id. The
+    application role holds no `UPDATE` on that column until then, so a writer added
+    here would be refused by the database as well as by this sentence.
 
     A guard refusal is logged here and travels, exactly as `_upsert_course`'s does
     — and it is the case that makes the shared savepoint load-bearing, because by
@@ -934,6 +987,7 @@ def _upsert_section(
                         term_id=term.id,
                         lms_section_code=label.code,
                         lms_context_memberships_url=address,
+                        lms_ags_line_items_url=gradebook_address,
                         lti_deployment_id=binding.deployment_id,
                         lms_context_id=binding.context_id,
                     ),
@@ -942,8 +996,14 @@ def _upsert_section(
             session.flush()
         return
 
+    corrected = False
     if address is not None and section.lms_context_memberships_url != address:
         section.lms_context_memberships_url = address
+        corrected = True
+    if gradebook_address is not None and section.lms_ags_line_items_url != gradebook_address:
+        section.lms_ags_line_items_url = gradebook_address
+        corrected = True
+    if corrected:
         session.flush()
 
 
