@@ -77,10 +77,13 @@ and the superstring-scope entry.
    drives an id with a query string and requires the composed address to be
    right.
 3. **The posted score carries the AGS comment member, holding the ledger
-   string byte-exact as the grading service produced it.** The client does
-   not compose, reformat, truncate or re-wrap it — the string that arrives at
-   the platform is the string E3-03 returned, asserted by comparing the two
-   rather than by inspecting either alone. This is the same rule the
+   string it was handed, byte-exact.** The client does not compose,
+   reformat, truncate or re-wrap it — the string that arrives at the
+   platform is the string the caller supplied, asserted by comparing the
+   two rather than by inspecting either alone. The end-to-end tie to the
+   grading service's real ledger belongs to E3-06's criterion 4; this
+   ticket proves only faithful carriage, because the client and the
+   formula share nothing. This is the same rule the
    percentage string follows and for the same reason (ADR 0052): a value the
    poster re-derives is not provably the value it is retrying.
 4. A post whose `scoreMaximum` disagrees with the line item is refused rather

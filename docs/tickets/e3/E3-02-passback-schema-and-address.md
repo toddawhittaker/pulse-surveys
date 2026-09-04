@@ -36,8 +36,8 @@ somewhere the poster can find it without re-reading a container on every run.
 
 **The two log and state tables.** `grade_sync` is named in SPEC §8's table
 list and in §13's layout as `models/grades.py`, and it exists nowhere in the
-tree — no model, no migration, no column list. `ags_call` is absent from §8's
-table list, which names neither call log; §6.1 promises "NRPS and AGS call
+tree — no model, no migration, no column list. `ags_call` is named in §8's
+table list beside `nrps_call`; §6.1 promises "NRPS and AGS call
 logs" and only the NRPS half was ever built, as `NrpsCall`
 (`backend/app/models/lti.py:1215`). Read that model's docstring before
 designing this one: it is at the grain of one HTTP call, and the reasoning
@@ -126,6 +126,7 @@ address enumerations named above.
   spirit as §7.3's never-synced section: a section with no gradebook address
   and a section whose gradebook is empty are different things and only one is
   a fault.
+
 ## Known traps
 
 - **An append-only table is read wrong by asking for "the" row.** Every
