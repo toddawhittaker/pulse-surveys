@@ -134,10 +134,18 @@ LTI_CLAIM_PREFIX = "https://purl.imsglobal.org/spec/lti/claim/"
 CONTEXT_CLAIM = f"{LTI_CLAIM_PREFIX}context"
 DEPLOYMENT_ID_CLAIM = f"{LTI_CLAIM_PREFIX}deployment_id"
 NRPS_CLAIM = "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice"
+AGS_CLAIM = "https://purl.imsglobal.org/spec/lti-ags/claim/endpoint"
 
 # Where the roster service address sits inside that claim. The member name is the
 # NRPS specification's.
 MEMBERSHIPS_URL_MEMBER = "context_memberships_url"
+
+# Where the AGS line-item container sits inside the endpoint claim. The member name
+# is the Assignment and Grade Services 2.0 specification's, and the claim's other
+# members — the scopes a token may be requested for, and a line item id when the
+# platform launched into one — are not this module's business. E3-04 is what asks
+# for a token; this module only stores the address.
+LINE_ITEMS_MEMBER = "lineitems"
 
 # The three members of a context claim this module reads. `id` is the only one LTI
 # 1.3 requires; `label` and `title` are both optional, and the whole of what this
@@ -582,7 +590,15 @@ def _ingest_the_context(
         _record_defect(session, claims, LaunchDefectKind.CONTEXT_OUTSIDE_PURVIEW)
         return None
 
-    address = _an_address_this_tool_may_call(session, claims, settings)
+    address = _an_address_this_tool_may_call(
+        session,
+        claims,
+        settings,
+        _roster_address(claims),
+        column=ROSTER_SERVICE_ADDRESS_COLUMN,
+        refused=LaunchDefectKind.ROSTER_ADDRESS_REFUSED,
+        service="roster service",
+    )
 
     both_or_neither = session.begin_nested()
     try:
@@ -718,16 +734,31 @@ def _section_bound_to(session: Session, binding: ContextBinding) -> Section | No
 
 
 def _an_address_this_tool_may_call(
-    session: Session, claims: Mapping[str, Any], settings: Settings
+    session: Session,
+    claims: Mapping[str, Any],
+    settings: Settings,
+    address: str | None,
+    *,
+    column: str,
+    refused: LaunchDefectKind,
+    service: str,
 ) -> str | None:
-    """The launch's roster address if this container may fetch it, and `None` if not.
+    """One address off a launch if this container may fetch it, and `None` if not.
 
-    Round 3's MEDIUM. E1-11 calls this address with the tool's own client
+    Round 3's MEDIUM. E1-11 calls the roster address with the tool's own client
     credentials, on a schedule, with nobody present, so it is judged by the same
     rules `jwks_url` and `auth_token_url` pass — through the one function that
     holds them (`docs/MISTAKES.md` entry 13), not a second copy beside it. There
     are five of those rules since ADR 0101, and the fifth resolves the host and
     judges every address it answers with.
+
+    **It takes the address rather than reading one**, because a launch now carries
+    two of them and every word below is true of both. E3-02's AGS line-item
+    container is fetched by E3-04 on the same terms, so it reaches the same rules
+    under a column of its own and records a kind of its own; `column` is what the
+    rules key on and `refused` is what the record says. Two copies of this function
+    would be entry 13 exactly — a hazard handled in one of the two places facing
+    it — and the copy that went stale would be the one nobody was looking at.
 
     **This caller names no exempt host and passes no resolver**, which is a
     decision rather than an omission (ADR 0101). In development the blanket
@@ -745,21 +776,18 @@ def _an_address_this_tool_may_call(
     the rules were written for and the message is not this module's to reword; the
     log line beside it says which address was actually refused.
     """
-    address = _roster_address(claims)
     if address is None:
         return None
     try:
-        refuse_invalid_fetched_address(
-            settings.environment, column=ROSTER_SERVICE_ADDRESS_COLUMN, address=address
-        )
+        refuse_invalid_fetched_address(settings.environment, column=column, address=address)
     except RegistrationAddressError as refusal:
         logger.warning(
-            "%s: the roster service address this launch advertised is one this container will "
-            "not fetch. %s",
-            LaunchDefectKind.ROSTER_ADDRESS_REFUSED.value,
+            "%s: the %s address this launch advertised is one this container will not fetch. %s",
+            refused.value,
+            service,
             refusal,
         )
-        _record_defect(session, claims, LaunchDefectKind.ROSTER_ADDRESS_REFUSED)
+        _record_defect(session, claims, refused)
         return None
     return address
 
