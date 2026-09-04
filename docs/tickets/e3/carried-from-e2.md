@@ -94,6 +94,24 @@ Source: `docs/tickets/e1/deferred.md`, "From the E1-11 fix round".
 **Done when:** ADR 0099's consequences — enforcement lands with that client, the
 way NRPS's landed with E1-11's.
 
+**Closed by E3-04.** The done-when asked for enforcement to land with the client
+rather than after it, and both halves shipped in one pull request: the client is
+`backend/app/lti/ags.py` and the six AGS routes require a token in the same
+change.
+
+Each route names the scopes AGS 2.0 defines for it — the create takes the
+line-item scope, the two line-item reads take that or its read-only sibling, the
+score post takes the score scope, and both result reads take the result read-only
+scope ([ADR 0134](../../adr/0134-the-mocks-ags-routes-map-to-scopes-one-per-route.md)).
+The credential is judged before the query parameters and before the context
+lookup, which is the roster route's order copied, so both containers' `ge=1` page
+bounds came out of the route signatures and are read by `app.paging::page_number`
+behind the credential — the consequence ADR 0099 wrote down when the roster's own
+bound moved, arriving in the ticket that record named. The `/mock/` prefix stays
+tokenless by decision (ADR 0047), with a test that says so, so an enforcement
+applied to the application rather than to the routes is caught rather than
+shipped.
+
 ## The registration chokepoint stores a CSP-breaking authorization endpoint verbatim
 
 E1 shipped the security response headers in full; the residue is on the write
@@ -161,6 +179,21 @@ substring. Recorded in PR #109.
 **Owner:** whichever ticket widens the mock's `ADVERTISED_SCOPES`.
 **Done when:** if a new scope is a superstring of another, a pair proves the
 check is membership rather than substring.
+
+**Closed by E3-04.** No scope was added; the pair became expressible because a
+second service started enforcing. `…/scope/lineitem.readonly` was already
+advertised and already contains `…/scope/lineitem` as a prefix, and until AGS
+required a credential there was no route on which the two could be told apart.
+
+Both halves are asserted on the route that creates a gradebook column: a token
+granted only the read-only line-item scope is refused 403 `insufficient_scope`
+there, and a token granted the writing scope creates a line item the container
+then lists. The refused half alone would be satisfied by a route that refuses
+every credential, which is why the accepted half is asserted past the 201 and
+against the container's own contents. `app.tokens::authorised_token` compares
+membership of RFC 6749 §3.3's space-delimited list, so the substring, prefix and
+`startswith` implementations each die against the first half while passing every
+other test in the module.
 
 ## The reveal-subject guard, restated
 

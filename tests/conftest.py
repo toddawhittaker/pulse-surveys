@@ -80,6 +80,10 @@ boundary: `metadata_tables` is asked for by both.
     is asked through, a section whose course weeks are not its term weeks, and
     students enrolled on the dates a test chose with the answers and verdicts it
     chose.
+  - `fixtures/ags_client.py` — E3-04: the AGS client and the `PlatformProfile`
+    registry reached by discovery, a registered platform whose section carries the
+    gradebook address a launch advertised, the `ags_call` rows a run leaves, and
+    the score string and ledger string a caller hands over.
 
 Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
@@ -129,4 +133,5 @@ pytest_plugins = (
     "fixtures.student_read",
     "fixtures.signing_key_tool",
     "fixtures.grading",
+    "fixtures.ags_client",
 )

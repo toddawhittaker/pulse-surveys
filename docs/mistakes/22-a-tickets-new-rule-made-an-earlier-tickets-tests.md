@@ -1,16 +1,38 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 13**
+**Caught: 15**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*13 instances recorded; the 8 most recent are below, newest first — except the
+*19 instances recorded; the 14 most recent are below, newest first — except the
 E0-18 PR 2 one, which sits further down beside the consequence it illustrates.
 The 5 earliest are in this file's git history and in the pull requests they cite.
-It carries eight rather than three because the E2-16 one and the E2-05 one are
+It carries more than three because the E2-16 one and the E2-05 one are
 the same inventory in the same module a ticket apart, and reading either without
 the other loses what the pair shows; **the trim is overdue and it should take
 that pair together**, not a paragraph off the end.*
+
+*(**2026-09-04, E3-04 (`e3/ags-client-and-mock-enforcement`), caught before
+anything was written.** The ticket turns on credential enforcement across the
+mock's whole AGS surface, which is the largest instance of this shape the
+repository has met: every line-item, score and result call in two merged E0-15
+suites is made without a credential and every one of them would answer 401, with
+the repair on the read-only side of the wall. The ticket's own known-traps
+section names the entry, so the sweep was the first thing done. Nearly all of the
+calls funnel through `MockPlatform`, so the repair is one fixture: an
+`ags_token(scope)` cache and an `ags_get`/`ags_post` pair that attach the scope
+each route takes. **The half a fixture-only repair would have missed is the nine
+direct call sites** — `mock_platform.service_get(...)` written out in
+`test_mock_lms_paging_and_service_urls.py` and
+`test_mock_lms_ags_line_items_and_scores.py`, found by grepping for the method
+rather than for the helpers — and one of them is worse than a red: the naive
+`/scores` concatenation test asserts `400 <= status < 500`, so a 401 would have
+kept it **green while measuring the credential instead of the URL**, which is
+entry 3 arriving through this one. Attaching tokens is inert until the
+enforcement lands, so the whole repair rides the tests-first commit. Counted as a
+catch: without it the implementer's first run would have been two walls of red
+E0-15 tests, one of them silently passing for the wrong reason, on modules they
+may not edit.)*
 
 *(**2026-09-04, E3-02 (`e3/passback-schema-and-address`), caught while the tests
 were being written.** E3-02 puts a second launch address — the AGS line-item

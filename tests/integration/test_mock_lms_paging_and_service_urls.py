@@ -101,6 +101,16 @@ LINE_ITEM_MEDIA_TYPE = "application/vnd.ims.lis.v2.lineitem+json"
 LINE_ITEM_CONTAINER_MEDIA_TYPE = "application/vnd.ims.lis.v2.lineitemcontainer+json"
 SCORE_MEDIA_TYPE = "application/vnd.ims.lis.v1.score+json"
 
+# The AGS scopes this module's own raw calls present, since E3-04 put the mock's
+# AGS routes behind a credential. Specification constants, transcribed the way the
+# media types above are; the route each opens is `MockPlatform.ags_token`'s map, and
+# `test_mock_lms_ags_requires_a_token.py` is where the enforcement itself is the
+# subject. Nothing here is about the credential — every call below presents a
+# working one so that what is asserted is the URL, the cap or the encoding.
+AGS_LINE_ITEM_READONLY_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem.readonly"
+AGS_RESULT_READONLY_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/result.readonly"
+AGS_SCORE_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/score"
+
 # The two caps, **written here rather than imported from `mock-lms/app/ags.py`**,
 # and that is `docs/MISTAKES.md` entry 19: a test that reads its expectation out
 # of the module under test holds two copies of one fact inside the blast radius
@@ -517,8 +527,12 @@ def test_the_naive_concatenation_of_a_scores_segment_is_not_a_score_endpoint(
     )
 
     before = mock_platform.posted_scores_for(created)
-    response = mock_platform.service_post(
-        naive, score_payload("e0-28-naive-user"), SCORE_MEDIA_TYPE
+    # A working score-scope credential, so the refusal below is about the URL. Since
+    # E3-04 a tokenless AGS call is refused 401, which is also inside the 4xx band
+    # this test asserts — the token is what keeps this assertion about the naive
+    # assembly rather than about the credential (`docs/MISTAKES.md` entry 3).
+    response = mock_platform.ags_post(
+        naive, score_payload("e0-28-naive-user"), SCORE_MEDIA_TYPE, scope=AGS_SCORE_SCOPE
     )
     assert 400 <= response.status_code < 500, (
         f"Posting a score to the naively concatenated `{naive}` answered "
@@ -564,7 +578,9 @@ def test_the_read_line_item_route_answers_the_exact_identifier_the_platform_mint
     created = mock_platform.create_line_item(signed_launch)
     identifier = str(created.get("id"))
 
-    response = mock_platform.service_get(identifier, accept=LINE_ITEM_MEDIA_TYPE)
+    response = mock_platform.ags_get(
+        identifier, accept=LINE_ITEM_MEDIA_TYPE, scope=AGS_LINE_ITEM_READONLY_SCOPE
+    )
     assert response.status_code == 200, (
         f"`GET {identifier}` — the exact identifier the platform minted — answered "
         f"{response.status_code}. Body begins {response.text[:200]!r}. AGS 2.0 defines the "
@@ -908,7 +924,7 @@ def test_a_score_posted_for_a_user_id_containing_a_slash_round_trips_through_its
         f"a `userId` of {SLASHED_USER_ID!r}, and it carries no `resultUrl`. AGS returns it so a "
         "tool can read back the result it just caused."
     )
-    read = mock_platform.service_get(str(body["resultUrl"]))
+    read = mock_platform.ags_get(str(body["resultUrl"]), scope=AGS_RESULT_READONLY_SCOPE)
     assert read.status_code == 200, (
         f"The `resultUrl` the platform composed for {SLASHED_USER_ID!r} — `{body['resultUrl']}` — "
         f"answered {read.status_code}. A URL a platform hands out and does not serve is a lie "
@@ -957,7 +973,7 @@ def test_the_result_for_a_slashed_user_id_identifies_itself_with_the_url_that_an
         "a tool that stored one cannot recognise the other, and only one of them is being tested "
         "by whichever test happens to follow it."
     )
-    read = mock_platform.service_get(identifier)
+    read = mock_platform.ags_get(identifier, scope=AGS_RESULT_READONLY_SCOPE)
     assert read.status_code == 200, (
         f"The result for {SLASHED_USER_ID!r} identifies itself as `{identifier}` and that URL "
         f"answered {read.status_code}. AGS makes a result's `id` the URL it lives at."
@@ -1004,7 +1020,7 @@ def test_a_literally_encoded_user_id_is_a_different_student_from_the_slashed_one
     )
 
     for user_id, url in urls.items():
-        read = mock_platform.service_get(url)
+        read = mock_platform.ags_get(url, scope=AGS_RESULT_READONLY_SCOPE)
         assert (
             read.status_code == 200
         ), f"The `resultUrl` for {user_id!r} — `{url}` — answered {read.status_code}."
@@ -1054,7 +1070,9 @@ def test_the_line_item_container_serves_its_cap_and_advertises_the_rest(
     url = mock_platform.with_query(
         mock_platform.line_items_url(signed_launch), {"limit": OVER_LARGE_LIMIT}
     )
-    response = mock_platform.service_get(url, accept=LINE_ITEM_CONTAINER_MEDIA_TYPE)
+    response = mock_platform.ags_get(
+        url, accept=LINE_ITEM_CONTAINER_MEDIA_TYPE, scope=AGS_LINE_ITEM_READONLY_SCOPE
+    )
     assert response.status_code == 200, (
         f"Asking the line-item container for `limit={OVER_LARGE_LIMIT}` answered "
         f"{response.status_code}. Body begins {response.text[:200]!r}. The rule is to clamp and "

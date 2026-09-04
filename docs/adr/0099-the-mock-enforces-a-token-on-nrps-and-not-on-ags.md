@@ -1,5 +1,14 @@
 # 0099 — The mock platform requires a token on NRPS, and still does not on AGS
 
+**Superseded in part by
+[ADR 0134](0134-the-mocks-ags-routes-map-to-scopes-one-per-route.md).** The AGS
+half of this record ended in E3-04, which built the first AGS client and turned
+the enforcement on in the same change — the condition this record itself set.
+ADR 0134 carries the per-route scope map, what stays tokenless and why, and the
+page bounds this record predicted would move. Everything below about NRPS, about
+the RFC 6750 vocabulary and about why enforcement waits for a client stands
+unchanged.
+
 ## Context
 
 E1-06 built the mock platform's client-credentials grant and deliberately left
@@ -43,6 +52,10 @@ nothing but this repository's own E0-15 tests — `docs/MISTAKES.md` entry 22
 exactly, and with no client to prove conformance against, the refusal would
 assert nothing. **Owner: E3, which builds the first AGS client**, recorded with a
 "done when" in [`docs/tickets/e1/deferred.md`](../tickets/e1/deferred.md).
+
+> **This half is spent.** E3-04 built the client and turned the enforcement on in
+> the same pull request, which is the condition this paragraph sets. The scope
+> map is [ADR 0134](0134-the-mocks-ags-routes-map-to-scopes-one-per-route.md).
 
 **The check lives beside the mint.** `app.tokens::authorised_token` is the one
 door, and it is in the module that issues tokens rather than in `app.nrps`,
@@ -118,6 +131,9 @@ request's cursor is judged.
   answering first gives away nothing a caller could not have asked for anyway.
   The day AGS starts requiring a token — E3's, per the deferral — those two
   signatures are part of the work, and this consequence is the note saying so.
+  *(That day was E3-04. Both bounds moved behind the credential in the same
+  change as the enforcement, exactly as predicted; ADR 0134 records where they
+  went and what each container answers now.)*
 - **The AGS owner is E3 and several places in the repository say E2.** This
   ticket's own work order, the mock-platform test driver and three test module
   docstrings all read "grade passback is E2 (SPEC §3.4)". §3.4 is the section
