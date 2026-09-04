@@ -207,6 +207,32 @@ def ags_module() -> ModuleType:
     )
 
 
+def registration_address_error() -> type[BaseException]:
+    """`app.models.lti.RegistrationAddressError`, named rather than caught as `Exception`.
+
+    The discriminator E3-04's failure contract rests on. An address the client refused
+    to fetch and an address it dialled and could not reach both end as a raise out of
+    the same entry point, and the two are told apart by what the raise was **caused
+    by**: a judgment refusal carries this, a transport refusal carries
+    `requests.ConnectionError`.
+
+    Named for the reason `tests/unit/test_registration_address_constraints.py` gives
+    on the same import: a bare `Exception` is satisfied by an `AttributeError` out of
+    a renamed symbol, which is a broken test reading as a refused address — the exact
+    inversion these tests exist to prevent.
+    """
+    try:
+        from app.models.lti import RegistrationAddressError
+    except ImportError as absent:  # pragma: no cover - a red, not a branch
+        pytest.fail(
+            f"`app.models.lti` exposes no `RegistrationAddressError` ({absent}). E1-05 raises it "
+            "from the registration-address chokepoint and ADR 0096's `refuse_invalid_fetched_"
+            "address` raises it per fetched URL, which is what E3-04's client judges every "
+            "platform-chosen gradebook address with."
+        )
+    return RegistrationAddressError
+
+
 def platforms_module() -> ModuleType:
     """`app.lti.platforms`, imported the same way and for the same reason."""
     return _module_or_named_absence(
@@ -739,6 +765,16 @@ class PostedGrade(NamedTuple):
 #     a poster that re-derived the number would produce one of the other two —
 #     which ADR 0052's retry identity cannot survive, because "a value the poster
 #     re-derives is not provably the value it is retrying".
+#
+#     **This value alone is not enough for criterion 3, and a mutation battery is
+#     what said so.** `str(float("61.5"))` is `"61.5"`, so a client that parsed the
+#     caller's string into a float and re-serialised it sends these exact bytes —
+#     the one re-derivation this string cannot see. The byte-exact test therefore
+#     drives a *pair* of spellings, `61.5` beside `61.50`, and holds its own copy of
+#     them because a parametrisation needs its values at collection time; see
+#     `BYTE_EXACT_SCORES` in
+#     `tests/integration/test_the_ags_client_is_a_conformant_service_client.py`,
+#     whose control test pins this constant against the pair's stable half.
 #   - the ledger is more than one line, so a carriage that took the first line, or
 #     joined with a comma, or re-wrapped, is visible. Its lines are SPEC §3.4's
 #     format and the numbers in them are this file's, not a computation.
@@ -889,6 +925,7 @@ def ags_contract() -> Any:
         a_later_timestamp = A_LATER_TIMESTAMP
         a_newer_score = A_NEWER_SCORE
 
+        address_error = staticmethod(registration_address_error)
         grade = staticmethod(a_grade)
         line_item_document = staticmethod(a_line_item_document)
         resource_id_for = staticmethod(a_resource_id)

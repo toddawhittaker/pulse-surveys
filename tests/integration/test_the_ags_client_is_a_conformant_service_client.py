@@ -88,6 +88,23 @@ A_RENAMED_LABEL = "Weekly Pulse Check (renamed by the instructor)"
 # *in the call log*, which is a statement about this parameter in two places.
 RESULT_USER_FILTER = "user_id"
 
+# Two spellings of one percentage, and the pair is criterion 3's whole instrument.
+# **Written here rather than read off `ags_contract`** because a parametrisation needs
+# its values at collection time and a fixture cannot supply them there — the same
+# reason `tests/unit/test_registration_address_constraints.py` writes its environment
+# names out. `A_FLOAT_STABLE_SCORE` is `tests/fixtures/ags_client.py`'s own default,
+# and a control below holds the two against `json` itself.
+#
+# The second one is why the pair exists. `str(float("61.5"))` is `"61.5"`, so against
+# the first row alone a client that parsed the caller's string into a float and
+# re-serialised it sends byte-identical output and the mutation is invisible — a
+# fixture value that made the property unobservable, which is `docs/MISTAKES.md` entry
+# 30's shape. `61.50` is the same quantity, is an RFC 8259 number so nothing refuses
+# it for an unrelated reason, and does not survive the round trip.
+A_FLOAT_STABLE_SCORE = "61.5"
+A_FLOAT_UNSTABLE_SCORE = "61.50"
+BYTE_EXACT_SCORES = (A_FLOAT_STABLE_SCORE, A_FLOAT_UNSTABLE_SCORE)
+
 # The maximum a line item that is not out of 100 carries. **This suite's choice**, and
 # the one property it needs is that it differs from `PULSE_SCORE_MAXIMUM`: a client
 # that sent a constant 100 is refused by the mock (ADR 0051), which is what makes
@@ -165,6 +182,59 @@ def drive(
     except Exception:  # pragma: no cover - a broken transaction, not a branch
         rows.session.rollback()
     return answered, raised
+
+
+def refused_by_the_judgment(
+    raised: BaseException | None, address: str, ags_contract: Any, whose: str
+) -> None:
+    """Require that `raised` is the client refusing `address`, not the transport failing on it.
+
+    **The discriminator, and the two loopback tests rest on it entirely.** Both paths
+    end the same way from the outside — nothing is dialled, a failure row is written,
+    the call raises — because the client mounts a pinned-resolution transport that
+    fails closed on a host it never pinned. So an assertion that the hostile host was
+    never reached is satisfied by a build with the address judgment deleted: the
+    transport refuses instead, one layer lower, and the test reports a rule that is
+    not there as working (`docs/MISTAKES.md` entry 3).
+
+    `__cause__` is where the two differ and it is the client's settled contract: a
+    judgment refusal is raised **from** `RegistrationAddressError`, a transport
+    refusal **from** `requests.ConnectionError`. Both halves are asserted — the cause
+    is the judgment's error, and it is *not* the transport's — because a build that
+    raised from neither would satisfy a one-sided check by carrying no cause at all.
+
+    The error itself is required to come from the client's own module rather than
+    being whatever escaped, which is the same "typed error" requirement the conflict
+    path keeps: a caller has to be able to branch on it.
+    """
+    import requests
+
+    assert raised is not None, (
+        f"The client was given {whose} gradebook address {address!r} and returned normally. A "
+        "refused address means no line item was found or created, so a caller that cannot tell "
+        "that from success will go on to post a grade against nothing."
+    )
+    assert type(raised).__module__ == ags_contract.module, (
+        f"The client raised {type(raised).__module__}.{type(raised).__name__}, which is not defined "
+        f"in `{ags_contract.module}`. The refusal has to be a typed error a caller can branch on — "
+        "an exception that escaped from a library is indistinguishable from every other failure "
+        "fetching a container can have."
+    )
+    cause = raised.__cause__
+    assert not isinstance(cause, requests.ConnectionError), (
+        f"The client raised {type(raised).__name__} from a "
+        f"{type(cause).__name__} — the transport's own refusal. That is the masking this assertion "
+        "exists for: the pinned-resolution transport fails closed on a host it never pinned, so "
+        f"{address!r} is not dialled whether or not the address was ever judged, and every other "
+        "assertion in this test holds either way. A refusal that reached the transport is a "
+        "refusal the address rules did not make."
+    )
+    assert isinstance(cause, ags_contract.address_error()), (
+        f"The client raised {type(raised).__name__} from {cause!r}, and a refused address is "
+        "raised from `app.models.lti.RegistrationAddressError`. Without that cause this test "
+        "cannot say which layer refused, and the address judgment can be deleted with the whole "
+        "module still green — which is what the mutation battery measured."
+    )
 
 
 def calls_to(wire: Any, url: str, method: str | None = None) -> list[Any]:
@@ -744,12 +814,60 @@ def test_the_scores_address_is_composed_from_the_line_item_id_as_a_url(
 # ---------------------------------------------------------------------------
 
 
+def test_the_two_score_spellings_this_suite_drives_differ_after_a_float_round_trip(
+    ags_contract: Any,
+) -> None:
+    """The premise the parametrisation below rests on, checked against `json` itself.
+
+    The byte-exact test is driven over two spellings of one quantity, and the whole
+    value of the pair is that **one of them survives a float round trip and the other
+    does not**. `61.5` decodes and re-renders as `61.5`, so against it a client that
+    parsed the caller's string into a float and re-serialised it is byte-identical to
+    one that carried the string — the mutation is a no-op and the test cannot see it,
+    which is `docs/MISTAKES.md` entry 30's shape arriving through a fixture value
+    rather than through a fixture. `61.50` decodes to the same float and re-renders as
+    `61.5`, so the same client is caught.
+
+    Both are RFC 8259 numbers, so neither is a malformed body the platform would
+    refuse for an unrelated reason.
+
+    If a later change made both rows float-stable, the parametrisation would be two
+    copies of one case and the mutation battery would find the survivor again. This is
+    the assertion that says so first, by name.
+
+    **A red here means these tests are broken, not the client.**
+    """
+    assert json.dumps(json.loads(A_FLOAT_STABLE_SCORE)) == A_FLOAT_STABLE_SCORE, (
+        f"{A_FLOAT_STABLE_SCORE!r} does not survive a JSON round trip unchanged, so the row this "
+        "suite drives as the ordinary case is not the ordinary case."
+    )
+    assert json.dumps(json.loads(A_FLOAT_UNSTABLE_SCORE)) != A_FLOAT_UNSTABLE_SCORE, (
+        f"{A_FLOAT_UNSTABLE_SCORE!r} survives a JSON round trip unchanged, so a client that parsed "
+        "the caller's string and re-serialised it would send exactly these bytes and the "
+        "byte-exact test would be green against the very mutation the pair exists to catch."
+    )
+    assert json.loads(A_FLOAT_STABLE_SCORE) == json.loads(A_FLOAT_UNSTABLE_SCORE), (
+        f"{A_FLOAT_STABLE_SCORE!r} and {A_FLOAT_UNSTABLE_SCORE!r} denote different numbers, so the "
+        "pair differs in more than its spelling and a failure could not be attributed to the "
+        "spelling."
+    )
+    assert ags_contract.a_score == A_FLOAT_STABLE_SCORE, (
+        f"This module drives {A_FLOAT_STABLE_SCORE!r} as the ordinary spelling and "
+        f"`tests/fixtures/ags_client.py` hands every other test {ags_contract.a_score!r}. The two "
+        "are one value written twice — the parametrisation needs its copy at collection time — so a "
+        "divergence means the comment above them has stopped being true and one half of this "
+        "suite is measuring a number the other half never sends (`docs/MISTAKES.md` entry 1)."
+    )
+
+
+@pytest.mark.parametrize("score", BYTE_EXACT_SCORES)
 def test_the_score_string_and_the_ledger_arrive_at_the_platform_byte_for_byte(
     ags_client: Any,
     ags_sections: Any,
     service_wire: Any,
     committed_rows: Any,
     ags_contract: Any,
+    score: str,
 ) -> None:
     """Criterion 3, asserted by comparing what was handed with what arrived.
 
@@ -766,27 +884,43 @@ def test_the_score_string_and_the_ledger_arrive_at_the_platform_byte_for_byte(
         decoder is lossless and `GET /mock/posted-scores` gives back exactly what was
         sent. Equality against the string this test handed over is therefore already
         byte-exact, newlines included.
-      - The **score** is a JSON number, so the decoder turns it into a float and the
-        stored value can no longer say whether `61.5` or `61.50` was on the wire.
-        Re-rendering it (`json.dumps`) and comparing catches a client that sent
-        `0.615` or `62`; the request body **on the wire** catches the rest, and it is
-        the byte-exact half.
+      - The **score** is a JSON number, and `json.loads` is where its spelling is
+        lost: the platform stores the body it decoded, so the stored value can no
+        longer say whether `61.5` or `61.50` was on the wire. What the stored value
+        *can* say is which number arrived, so it is compared against the caller's
+        string put through the same one decode — which catches `0.615`, `62` and
+        every other re-derivation. The **bytes** are then read off the request as it
+        left the client, and that is the byte-exact half.
+
+    **Two spellings of one quantity, and that is what the mutation battery cost.**
+    Driven over `61.5` alone this test survived a client that parsed the caller's
+    string into a float and re-serialised it — `str(float("61.5"))` is `"61.5"`, so
+    the mutation was a no-op and the wire assertion could not see it. That is
+    `docs/MISTAKES.md` entry 30's shape arriving through a *fixture value*: the
+    fixture supplied a number that made the property under test unobservable. `61.50`
+    is the same quantity spelled so that the round trip changes it, so the same
+    client is red on the second row. The premise is checked by
+    `test_the_two_score_spellings_this_suite_drives_differ_after_a_float_round_trip`,
+    so a later change that made both rows float-stable is a red naming the pair
+    rather than a mutation surviving again.
 
     **The mutations these kill:** a comment composed from the score rather than
     carried; a ledger joined with commas, truncated to its first line, or re-wrapped;
-    a percentage re-derived from the completed and total counts; a score serialised
-    through a formatter that pads or rounds.
+    a percentage re-derived from the completed and total counts; a score parsed to a
+    float and re-serialised, or run through a formatter that pads or rounds.
 
     Nothing is compared against a literal in this file. The strings come from the
     caller's own value object, which is also what was handed to the client
-    (`docs/MISTAKES.md` entry 19).
+    (`docs/MISTAKES.md` entry 19); the two spellings are parametrised because a
+    parametrisation needs its values at collection time and a fixture cannot supply
+    them there.
     """
     section = ags_sections()
     created = stored_line_item(section.platform, section.context)
     identifier = section.platform.line_item_id(created)
     section = ags_sections.store_line_item(section, identifier)
 
-    grade = ags_contract.grade(section.subjects[0])
+    grade = ags_contract.grade(section.subjects[0], score=score)
     assert "\n" in grade.ledger and grade.ledger.count("\n") >= 2, (
         f"The ledger this test hands over is {grade.ledger!r}, which is one line — so a carriage "
         "that took the first line, joined with a comma or re-wrapped would be invisible and this "
@@ -818,12 +952,14 @@ def test_the_score_string_and_the_ledger_arrive_at_the_platform_byte_for_byte(
         "since v1 ships no view of the participation score, that comment is the only place the "
         "arithmetic behind a posted percentage is visible to anyone."
     )
-    assert json.dumps(arrived.get(ags_contract.given_member)) == grade.score, (
+    assert arrived.get(ags_contract.given_member) == json.loads(grade.score), (
         f"The caller handed the client the score string {grade.score!r} and the platform received "
-        f"{arrived.get(ags_contract.given_member)!r}, which renders as "
-        f"{json.dumps(arrived.get(ags_contract.given_member))!r}. ADR 0052 makes the retry identity "
-        "rest on the value being the one that was handed over rather than one re-derived from the "
-        "counts, and a value the poster re-derives is not provably the value it is retrying."
+        f"{arrived.get(ags_contract.given_member)!r}. The comparison is against the caller's own "
+        "string put through the one decode the platform cannot avoid — never against a number this "
+        "test worked out — so it catches a value re-derived from the completed and total counts "
+        "while staying true of both spellings. ADR 0052 rests the retry identity on the value "
+        "being the one that was handed over: a value the poster re-derives is not provably the "
+        "value it is retrying."
     )
     assert arrived.get(ags_contract.timestamp_member) == grade.timestamp, (
         f"The caller handed the timestamp {grade.timestamp!r} and the platform received "
@@ -841,9 +977,11 @@ def test_the_score_string_and_the_ledger_arrive_at_the_platform_byte_for_byte(
         rf'"{ags_contract.given_member}"\s*:\s*{re.escape(grade.score)}(?![0-9])', text
     ), (
         f"The request body the client sent carries no `{ags_contract.given_member}` written as "
-        f"{grade.score!r} — the body is {text[:400]!r}. This is the byte-exact half: `61.50` and "
-        "`61.5` decode to one float, so the stored value cannot tell them apart and only what went "
-        "on the wire can."
+        f"{grade.score!r} — the body is {text[:400]!r}. This is the byte-exact half, and the "
+        f"{A_FLOAT_UNSTABLE_SCORE!r} row is the one that can see it: both spellings decode to one "
+        "float, so the stored value cannot tell them apart and only what went on the wire can. The "
+        "trailing lookahead is part of the assertion — a client that padded "
+        f"{A_FLOAT_STABLE_SCORE!r} to {A_FLOAT_UNSTABLE_SCORE!r} must not match either."
     )
 
 
@@ -1596,6 +1734,29 @@ def test_a_loopback_container_address_is_refused_before_it_is_dialled(
     container address — which every other test in this module stays green under,
     because they all store an address that would pass.
 
+    **"Nothing was dialled" does not kill that mutation, and the battery proved it.**
+    A second, independent control stands behind the judgment: the client mounts a
+    pinned-resolution transport that fails closed on a host it never pinned, so with
+    the judgment call removed the request is still not made — it is refused one layer
+    lower, by the transport, and every assertion about what reached `127.0.0.1` holds
+    either way. That is `docs/MISTAKES.md` entry 3 in its most expensive form: a
+    security test that is green because *something* refused, without saying what.
+
+    **So the observable difference is pinned instead: what the raise was caused by.**
+    An address-judgment refusal raises the client's own error from
+    `RegistrationAddressError`; a transport refusal raises it from
+    `requests.ConnectionError`. `__cause__` is the one place those two paths differ,
+    and with the judgment removed this assertion is the thing that goes red. It also
+    pins the half an operator reads: a section that stops posting because its
+    platform advertised a refused address needs a different repair from one whose
+    network is down, and the two are indistinguishable from the call log alone.
+
+    **What is deliberately not pinned** is the wording of the refusal's message. It is
+    settled — it says the address "is one this container refuses to fetch" — and a
+    later rewording should not redden a security test, so the cause type carries the
+    assertion and the sentence carries the operator (`docs/MISTAKES.md` entry 14: the
+    boundary is named rather than claimed away).
+
     **Under a deployment's `ENVIRONMENT`, and it has to be.** ADR 0081 switches every
     one of these rules off where the environment is exactly the development name, so
     a refusal test in development would pass against a validator that refuses
@@ -1612,7 +1773,7 @@ def test_a_loopback_container_address_is_refused_before_it_is_dialled(
     section = ags_sections(roster_contract.https_platform_issuer, container=LOOPBACK_CONTAINER)
     resolver = resolving({section.host: (roster_contract.a_global_address,)})
 
-    _answered, _raised = drive(
+    _answered, raised = drive(
         ags_client,
         ags_client.find_or_create_line_item,
         section,
@@ -1621,6 +1782,8 @@ def test_a_loopback_container_address_is_refused_before_it_is_dialled(
         settings=deployment_settings,
         resolve=resolver,
     )
+
+    refused_by_the_judgment(raised, LOOPBACK_CONTAINER, ags_contract, "the section's stored")
 
     dialled = [call for call in service_wire.calls if call.host == "127.0.0.1"]
     assert not dialled, (
@@ -1693,6 +1856,17 @@ def test_a_loopback_line_item_id_the_platform_answered_with_is_refused_before_it
     green, because every other line-item id comes from the mock and is on the mock's
     own host.
 
+    **And "nothing was dialled" does not kill it**, which the mutation battery
+    measured. The client mounts a pinned-resolution transport that fails closed on a
+    host it never pinned, so with the judgment on the answered id removed the request
+    is still not made — the transport refuses one layer lower, and every assertion
+    about what reached `127.0.0.1` holds either way. The two layers are told apart by
+    what the raise was **caused by**: `RegistrationAddressError` for a judgment
+    refusal, `requests.ConnectionError` for a transport one. `refused_by_the_judgment`
+    asserts both directions of that, and it is what goes red when the judgment is
+    deleted; the sentence the refusal carries is deliberately left unpinned, for the
+    reason the test above gives.
+
     **The row is asserted against the section's stored address, not against the
     hostile id.** §6.1's console is read per section, and a row keyed to the value the
     platform supplied puts an attacker's string on an operator's screen and detaches
@@ -1707,7 +1881,7 @@ def test_a_loopback_line_item_id_the_platform_answered_with_is_refused_before_it
         content_type=ags_contract.container_media_type,
     )
 
-    _answered, _raised = drive(
+    _answered, raised = drive(
         ags_client,
         ags_client.find_or_create_line_item,
         section,
@@ -1716,6 +1890,8 @@ def test_a_loopback_line_item_id_the_platform_answered_with_is_refused_before_it
         settings=deployment_settings,
         resolve=resolver,
     )
+
+    refused_by_the_judgment(raised, LOOPBACK_LINE_ITEM, ags_contract, "the platform's answered")
 
     dialled = [call for call in service_wire.calls if call.host == "127.0.0.1"]
     assert not dialled, (
