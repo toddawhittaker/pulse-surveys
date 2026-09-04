@@ -93,6 +93,14 @@ and not just the posted number is what matters); the E2-04 clock service.
    generator provably includes the boundary cases its docstring names
    (`docs/MISTAKES.md` entry 15).
 8. No network call, no AGS type, and no job import appears in the module.
+9. Nothing in the tree still states the superseded formula as the current
+   rule. Twelve files outside `docs/SPEC.md` and `docs/tickets/e3/` carried
+   the phrase "valid weeks completed ÷ weeks elapsed" or a variant of it when
+   this breakdown was written, across sixteen lines: `backend/app/models/`,
+   `backend/app/views_sql/`, `backend/migrations/versions/`, `mock-lms/app/`
+   and eight test modules. Each is re-read and either corrected or dated as
+   history in this ticket's pull request, and the grep is re-run and reported
+   rather than assumed clean.
 
 ## Decisions this ticket settles
 
@@ -136,6 +144,15 @@ and not just the posted number is what matters); the E2-04 clock service.
   gradebook. Prefer asserting the forbidden state over the permitted one
   (`docs/MISTAKES.md` entry 2), and mutate the arithmetic to prove the tests
   can fail (entry 3).
+- **The superseded formula is written into the tree in sixteen places, and
+  none of them is code.** They are docstrings, SQL comments, a migration's
+  prose and test module headers, all explaining *why* a rule exists by citing
+  a formula this breakdown replaced. A grep for the identifier finds none of
+  them; a grep for the fact finds all of them (`docs/MISTAKES.md` entry 1).
+  Two more sit in `docs/disputes/`, which are dated records of an argument
+  and are correct as history — the judgement of which class a hit belongs to
+  is part of the work, and a merged migration's prose is the borderline case
+  worth deciding out loud.
 - **A property test whose generator excludes its own named case** is
   `docs/MISTAKES.md` entry 15, and the four cases §9.1 names — adds, drops,
   missed weeks, partially answered weeks — are exactly the ones a bounded
