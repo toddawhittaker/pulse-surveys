@@ -40,8 +40,16 @@ comment's *text* is not stored, so it is outside the reach of §5.2's moderation
 §6.2's Care queue.
 
 **What `response.is_valid` says.** The latest verdict of each submitted comment,
-and nothing else. A comment left blank has no verdict and no effect (§3.3 in as
-many words), and a response with no comments at all is valid.
+and nothing else. A comment left blank has no verdict and no effect *on validity*
+(§3.3 in as many words), and a response with no comments at all is valid.
+
+**A blank comment does cost its item in §3.4's score**, which is the other half of
+the same sentence and was easy to read as a general "no effect". §3.3 was amended
+on 2026-09-04 to say it outright: the participation score counts completed items,
+and an optional comment nobody answered is an item not completed. Two different
+questions about one blank box — this module answers the validity one, and
+`app.services.grading` answers the credit one from the answer rows and their
+classifications rather than from this column.
 
 **The async half is a sweep and not a per-comment job**, and the shape follows
 from §3.3's promise rather than from convenience. A floored submission is one the
@@ -243,8 +251,11 @@ def _latest_verdicts(session: Session, response_id: UUID) -> Sequence[str]:
 def recompute_response_validity(session: Session, response: Response) -> bool:
     """Set `response.is_valid` from the current verdicts of its comments, and answer it.
 
-    The one writer of that column, so "what makes a week count" is a question with
-    one place to read (§3.3). It is called twice on a response's life: by the submit
+    The one writer of that column, so "was this submission complete and reasonable"
+    is a question with one place to read (§3.3). It is **not** what makes a week
+    count toward §3.4's score: that is the item formula's, in
+    `app.services.grading`, and it reads the answer rows and their classifications
+    rather than this column. It is called twice on a response's life: by the submit
     path, over the verdicts it has just obtained, and by the sweep below when a
     model finally judges a comment the floor stood in for.
 

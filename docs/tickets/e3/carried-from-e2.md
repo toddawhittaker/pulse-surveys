@@ -384,6 +384,14 @@ standing ADR's, or an earlier boundary's, not re-owned here.
 
 - **Grade passback reading validity state — E3.** E2-08 writes
   `response.is_valid` and nothing reads it yet; E3 is the first reader.
+  **Superseded 2026-09-04, and left above as E2's own hand-off.** The item-based
+  formula does not read that column — it counts completed items from the answer
+  rows and each comment's most recent classification, a finer grain than a
+  per-response verdict carries — and the column already had a reader,
+  `backend/app/api/student.py`, which returns a student their own submission's
+  verdict. E3 does consume the validity *machinery* (§3.3's refused set decides
+  whether a comment item counts). `README.md`'s carried table holds the full
+  ruling, and E3-08 re-lists from this entry as amended rather than as written.
 - **Validity-rate surfaces, and growing the copy inventory over them — E4**
   (instructor and leadership only, §3.3).
 - **The student results view — E8.**
