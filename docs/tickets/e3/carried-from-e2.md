@@ -71,13 +71,18 @@ the set immediately and its row stays as the record of what this deployment used
 to sign with. A deployment with no *live* key still answers 503, in a sentence
 that now names the command that fixes it.
 
-Two limits stated rather than left to be discovered. Nothing expires a key or
+Three limits stated rather than left to be discovered. Nothing expires a key or
 bounds how many the published set carries: `retire` is a command somebody has to
-run, and `list` exists so the state a rotation is halfway through is visible. And
-the migration's downgrade **refuses** when it meets more than one stored key
-rather than discarding the extra rows, because below that revision the table
-permits one row and what would be discarded is the private half of a key a
-platform may already have been registered against. ADR 0127 carries both.
+run, and `list` exists so the state a rotation is halfway through is visible. The
+migration's downgrade **refuses** when it meets more than one *live* key, because
+below that revision the table permits one row and completing would have to choose
+which identity survives — the one discarded being the private half of a key a
+platform may already have been registered against; retirement is the route down,
+which is why the guard counts live rows rather than stored ones. And a downgrade
+that does complete **discards the retired-key records**, which the one-row schema
+has nowhere to hold: no identity anything still verifies against is lost, but the
+record of what this deployment used to sign with is, and only a backup has it
+afterwards. ADR 0127 carries all three.
 
 ## AGS still answers without a token
 
