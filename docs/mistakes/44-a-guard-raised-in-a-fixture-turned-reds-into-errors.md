@@ -1,5 +1,28 @@
 # 44. A guard raised in a fixture turned a module's reds into setup errors
 
+**Caught: 1**
+
+## A catch: E3-04's enforcement module builds its gradebook in the test body (2026-09-04)
+
+Every test in `tests/integration/test_mock_lms_ags_requires_a_token.py` needs the
+same six addressed AGS routes, and building them means *creating a line item and
+posting a score through the very enforcement under test*. A `@pytest.fixture`
+was the obvious home and is exactly this entry's mistake: an implementation that
+refused a call it should serve would have turned all forty-odd reds in the module
+into setup ERRORs, proving nothing about the refusals they exist to make and
+reading to a hurried eye as "the suite is red". It is a plain `gradebook(platform)`
+function called as each test body's first statement instead, so the same failure
+arrives as a FAILED naming the accepted call that did not work.
+
+The same rule shaped the client side, where the deliverable is a whole module:
+`tests/fixtures/ags_client.py` imports `app.lti.ags` inside the call rather than
+at fixture setup, so an unbuilt tree gives nineteen failed assertions naming the
+missing module rather than nineteen errors.
+
+Counted as a catch: without the entry the module would have shipped with its
+guard in a fixture, and the red-run verification would have had a wall of errors
+to sort through instead of a manifest to compare against.
+
 ## Instance: E3-01's rotation module errored at setup instead of failing (2026-09-04)
 
 The tests-first suite for the signing-key rotation put its

@@ -171,7 +171,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 14** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 15** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 16. A mutation harness reported kills it had not made
 
@@ -191,7 +191,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 19. A test held its expectation in a copy of the thing it was checking
 
-**Caught: 6** · [the incidents, the root cause, and the whole rule](mistakes/19-a-test-held-its-expectation-in-a-copy-of.md)
+**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/19-a-test-held-its-expectation-in-a-copy-of.md)
 
 ## 14. An enumeration was reported as an impossibility
 
@@ -199,7 +199,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 6** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
+**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
 
 **Rule.** When a guard enumerates mechanisms, require it to *find* each one on a
 subject that certainly has it, as a control. A guard that only ever reports
@@ -394,7 +394,7 @@ edit puts the comma back.
 
 ## 44. A guard raised in a fixture turned a module's reds into setup errors
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/44-a-guard-raised-in-a-fixture-turned-reds-into-errors.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/44-a-guard-raised-in-a-fixture-turned-reds-into-errors.md)
 
 **Rule.** A tests-first suite's red must be a FAILED, never an ERROR: an error at
 setup proves nothing about the assertion the test exists to make, survives the

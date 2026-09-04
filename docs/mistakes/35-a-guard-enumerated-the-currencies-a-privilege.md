@@ -1,6 +1,6 @@
 # Entry 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 6**
+**Caught: 7**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -8,6 +8,24 @@
 most recent instances; the rest live in git history — it is carrying five today,
 because the oldest of them and the addendum under it are one lesson and trimming
 one without the other would leave a paragraph referring to nothing.*
+
+*(**A catch**, writing E3-04's tests, 2026-09-04. The ticket's criterion 6 is a
+triple per AGS route — absent token refused, wrong scope refused, right scope
+accepted — and the third is only there because of this entry: the ticket's own
+known-traps section quotes it. A module holding the two refusals alone is green
+against a platform that refuses **everything**, which is the one implementation
+nobody wants and the cheapest way to satisfy a wall of refusal tests. Acting on
+the entry put the accepting half beside every refusal *and* pushed it one level
+further out, which is where the value was: the two read routes accept either the
+line-item scope or its read-only sibling, so the control loops over the whole
+accepted set rather than presenting the first one — an any-of rule implemented as
+a single required scope passes a one-scope control and refuses a conformant tool.
+Two more controls came from the same reading: the six routes are asserted to be
+six different `(method, url)` pairs, because a `results_url` that came back as the
+line item's own id would turn six routes into four with every refusal still green;
+and the platform is required to *grant* a token for each of the four scopes, since
+a driver handing back a string it invented would fail every acceptance and pass
+every refusal.)*
 
 *(**A catch**, writing E2-16's tests, 2026-09-03. Three of the ticket's criteria
 are assertions that something is **absent**: no `NOT IN` in any statement the
