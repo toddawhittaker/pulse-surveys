@@ -297,6 +297,31 @@ async def json_object(request: Request, subject: str) -> dict[str, Any]:
 # See `docs/adr/0099-the-mock-enforces-a-token-on-nrps-and-not-on-ags.md`.
 
 
+def require_a_token(
+    request: Request, settings: PlatformSettings, key: IssuerKey, scope: str
+) -> None:
+    """Refuse this request unless it presents a token this platform issued for `scope`.
+
+    Every rule about the token is in `app.tokens`; what lives here is the
+    translation of a refusal into the status and the RFC 6750 §3 challenge it
+    carries. The challenge is a header rather than a body member because that is
+    where a client reads it — a bare 401 is indistinguishable from a route that
+    has moved.
+
+    One translation rather than one per service, because every service that
+    enforces answers a refusal the same way and two copies of that mapping are two
+    places for one of them to drift (`docs/MISTAKES.md` entry 13).
+    """
+    try:
+        authorised_token(request.headers.get("authorization"), scope, settings, key)
+    except ServiceTokenError as refusal:
+        raise HTTPException(
+            status_code=refusal.status_code,
+            detail=refusal.description,
+            headers={"WWW-Authenticate": refusal.challenge()},
+        ) from refusal
+
+
 def require_context(platform: SeededPlatform, context_id: str) -> MockContext:
     """The seeded section, or a 404 that says which identifiers exist."""
     context = platform.context(context_id)
@@ -580,10 +605,9 @@ def _register_nrps(
         move covers `?page=abc`, which the framework would also have answered
         before the token was looked at.
 
-        Every rule about the token is in `app.tokens`; this turns a refusal into
-        the status and the RFC 6750 §3 challenge it carries. The challenge is a
-        header rather than a body member because that is where a client reads it
-        — a bare 401 is indistinguishable from a route that has moved.
+        Every rule about the token is in `app.tokens` and the translation of a
+        refusal into a status and a challenge is in `require_a_token` above, which
+        every enforcing service on this platform goes through.
 
         The verification is RSA arithmetic and this is a synchronous handler, so
         FastAPI already runs it in a threadpool; there is nothing to hand off
@@ -623,14 +647,7 @@ def _register_nrps(
         following a header into nowhere, and page zero is a cursor no collection
         could ever have.
         """
-        try:
-            authorised_token(request.headers.get("authorization"), MEMBERSHIP_SCOPE, settings, key)
-        except ServiceTokenError as refusal:
-            raise HTTPException(
-                status_code=refusal.status_code,
-                detail=refusal.description,
-                headers={"WWW-Authenticate": refusal.challenge()},
-            ) from refusal
+        require_a_token(request, settings, key, MEMBERSHIP_SCOPE)
 
         refused = [
             name
