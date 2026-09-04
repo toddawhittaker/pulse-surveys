@@ -65,12 +65,12 @@ __all__ = [
     "NoSigningKeyError",
     "OrmToolConf",
     "ToolRegistration",
+    "current_signing_key",
     "launcher_origins",
     "live_signing_keys",
     "public_jwk",
     "published_key_set",
     "rfc7638_thumbprint",
-    "signing_key",
 ]
 
 # Where this tool publishes its key set. Beside `LOGIN_PATH` and `LAUNCH_PATH` in
@@ -219,7 +219,7 @@ class OrmToolConf(ToolConfAbstract[Any]):
         # back, and it can be a retired one — a key the published set no longer
         # carries, so every assertion signed with it is refused at the platform
         # while this side looks perfect.
-        stored = signing_key(self._session)
+        stored = current_signing_key(self._session)
         if stored is not None:
             registration.set_tool_private_key(stored.private_key_pem)
             registration.set_kid(public_jwk(stored.private_key_pem)["kid"])
@@ -356,13 +356,18 @@ def live_signing_keys(session: Session) -> list[ToolSigningKey]:
     )
 
 
-def signing_key(session: Session) -> ToolSigningKey | None:
+def current_signing_key(session: Session) -> ToolSigningKey | None:
     """The key this tool signs with now, or `None` where it holds no usable one.
 
     `None` rather than a raise, because the two callers want different things
     from the same absence: an inbound launch does not need this key and must not
     be refused over it, and the outbound service client does and says so with a
     message naming the supply path.
+
+    Named for the *current* key rather than `signing_key`, which is what
+    `app.services.tokens.signing_key` is already called — that one picks a
+    **platform's** verification key out of a key set this tool fetched, and the
+    two would be one grep away from each other in a traceback.
     """
     live = live_signing_keys(session)
     return live[0] if live else None

@@ -775,8 +775,8 @@ def _registration_for(session: Session, platform: LtiPlatform) -> Any:
     for a registration — E1-11 taught it to fill in the tool's private key and
     `kid` as well, so the inbound door and this outbound client resolve the same
     signing key and a platform verifying either sees the same key. Which key that
-    is, once a rotation can be in progress, is `app.lti.registration.signing_key`
-    for both of them (ADR 0127).
+    is, once a rotation can be in progress, is
+    `app.lti.registration.current_signing_key` for both of them (ADR 0127).
 
     The two refusals are loud because they are facts about the *deployment* rather
     than about one section: a registration with no token endpoint and a tool with
