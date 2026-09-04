@@ -360,6 +360,10 @@ def main(
         with Session(bind=engine) as session:
             try:
                 answer = run(session, arguments.command, getattr(arguments, "kid", None))
+                # Inside the guard, not after it. A commit is the second place a
+                # driver error can arrive, and an uncaught one prints a traceback
+                # holding whatever SQLAlchemy quoted.
+                session.commit()
             except OperatorError as refused:
                 session.rollback()
                 print(refused, file=sys.stderr)
@@ -382,7 +386,6 @@ def main(
                     file=sys.stderr,
                 )
                 return DATABASE_REFUSED
-            session.commit()
     finally:
         engine.dispose()
 
