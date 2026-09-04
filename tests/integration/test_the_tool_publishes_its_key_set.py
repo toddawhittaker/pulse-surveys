@@ -11,10 +11,16 @@ and one mistake away from publishing the private half instead.
   - **It answers in every environment.** Criterion 4's own words. A key set served
     only in development is a tool that cannot be registered anywhere it matters,
     and the failure appears at the first service call rather than at deployment.
-  - **It carries one RSA signing key, shaped as RFC 7517 shapes one.** ADR 0082
-    stores exactly one key and forbids rotation, so a key set with two keys is a
-    tool with two identities and a key set with none is a document that verifies
-    nothing.
+  - **It carries one RSA signing key, shaped as RFC 7517 shapes one.** One,
+    because this module plants exactly one row — **not** because the schema
+    permits only one, which is what this bullet said until E3-01. ADR 0127 widened
+    the rule so a rotation can publish the retiring key beside its replacement, so
+    "the set carries one key" is now a statement about this module's own planted
+    state and nothing more; how many keys the set may carry, and which of them
+    signs, is `tests/integration/test_the_published_key_set_carries_a_rotation.py`
+    and `tests/integration/test_the_signer_selects_the_newest_live_key.py`. What
+    stands here unchanged is the shape of a key and the fact that a key set with
+    none is a document that verifies nothing.
   - **Its `kid` is the key's RFC 7638 thumbprint.** A platform selects a
     verification key by `kid`, and the tool puts the same value in the header of
     every assertion it signs. Any stable string works right up until the two are
@@ -32,9 +38,11 @@ and one mistake away from publishing the private half instead.
   - **With no key stored, it refuses rather than serving an empty set.** One of
     the two properties here written after the code rather than before it, and the
     manifest entry says so. A deployment with no `tool_signing_key` row is a real state —
-    ADR 0082's seed runs only in development — and an empty key set is a document
-    a platform accepts and stores, which turns "this tool has no key" into a
-    refused assertion hours later at somebody else's service.
+    before E3-01 because ADR 0082's seed runs only in development, and after it
+    because a deployment nobody has run the supply script against still holds
+    none — and an empty key set is a document a platform accepts and stores, which
+    turns "this tool has no key" into a refused assertion hours later at somebody
+    else's service.
 
 **Why the key is planted rather than seeded.** `tests/integration/
 test_tool_signing_key_custody.py` owns what the seed writes. What is under test
@@ -161,10 +169,12 @@ def the_one_key(document: dict[str, Any]) -> dict[str, Any]:
         "key-set reader accepts."
     )
     assert len(keys) == 1, (
-        f"The published key set carries {len(keys)} keys. ADR 0082 stores exactly one signing key "
-        "and forbids rotation — 'two rows is not an untidy state to reconcile later, it is two "
-        "identities for one tool' — so zero keys is a document that verifies nothing and two is a "
-        "tool a platform can be made to accept two signatures from."
+        f"The published key set carries {len(keys)} keys and this test planted exactly one row. "
+        "Zero is a document that verifies nothing. Two is no longer a schema violation — ADR 0127 "
+        "publishes every unretired row so a rotation can carry the retiring key beside its "
+        "replacement — so two here means the route published a key this test did not plant, which "
+        "is a tool a platform can be made to accept a second signature from. The rotation itself "
+        "is `tests/integration/test_the_published_key_set_carries_a_rotation.py`."
     )
     key = keys[0]
     assert isinstance(key, dict), f"The published key is {key!r} rather than a JWK object."
@@ -504,12 +514,15 @@ def test_the_route_refuses_rather_than_serving_an_empty_key_set_when_no_key_is_s
     is worth is that the decision cannot now be reversed silently.
 
     **Why an empty key set is the wrong answer, and it is not a close call.** A
-    deployment with no key is a real state and not a hypothetical one: ADR 0082
-    generates the key in the seed, the seed runs only in development, and that
-    record's own consequence section says "a non-development deployment has no
-    signing key" and books the supply route as deferred work. So the first real
-    platform this tool is registered at will fetch this document, and `{"keys":
-    []}` is a **valid** JWK Set — a platform accepts it, stores it, and reports the
+    deployment with no key is a real state and not a hypothetical one. It used to
+    be so because ADR 0082 generated the key in the seed and the seed runs only in
+    development, with the supply route booked as deferred work; **E3-01 closed
+    that gap and the state remains**, reached now by a deployment nobody has run
+    `scripts/signing_key.py` against yet, and by one whose every stored key has
+    been retired — that second route is
+    `tests/integration/test_the_published_key_set_carries_a_rotation.py::test_the_route_refuses_when_every_stored_key_has_been_retired`,
+    and this test still owns the no-row case. Either way `{"keys": []}` is a
+    **valid** JWK Set — a platform accepts it, stores it, and reports the
     registration as complete. Nothing is wrong until an assertion arrives hours
     later and is refused with an error that names no key, at somebody else's
     service, with no way back to this container. A 503 is the same fact delivered
