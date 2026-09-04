@@ -2,7 +2,7 @@
 
 §11 question 4: "the classifier replaces the 25-character prototype heuristic;
 its eval set and threshold need real seeded data before E2 exits". This module is
-the seeded data. Ninety-eight synthetic student comments across §7.4's three
+the seeded data. One hundred and eight synthetic student comments across §7.4's three
 verdicts, each a typed case whose `expected` is a `ValidityVerdict` out of
 `app.ai.contracts` rather than a string (SPEC §7.4, ADR 0030), and each pinned to
 `validity.v2` — the prompt file ADR 0032 makes immutable, so the set states which

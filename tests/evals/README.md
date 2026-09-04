@@ -78,13 +78,21 @@ the character rule. The one miss is `ls-025`, a substantive comment answered
 earlier runs. The set grew from 98 to 108 in that same change and the floor values
 did not move; `floors.py` carries the derivation that says they still fit.
 
+A second run over the 108 followed, CI run 33830242674 on commit 3be69bb, and
+those two are the runs over this composition the records cite: precision 1.0000,
+recall 0.9630, `fn 2`. Both clear both floors with headroom — two misses of the
+five the recall floor tolerates, and no false positive in either run. One case
+moved between them, `ss-011`, and it is a positive-class case, so this pair moved
+the gated rate itself rather than moving below it.
+
 They tolerate four new errors of a kind each — precision fires at 53/(53+5) =
 0.9138, recall at 48/54 = 0.8889 — which is the pattern threshold of two plus the
 measured run-to-run variance of **two cases in ninety-eight**, taken on this same
 model and this same prompt from two independent runs over the earlier 98-case
-composition: the fill measurement and CI run 33679136272. One run over the 108
-measures no variance, so that figure carries over as the standing estimate rather
-than being restated on the new denominator. Subtract the variance back out and two
+composition: the fill measurement and CI run 33679136272. The two runs over the
+108 disagree on one case, which sits inside that standing estimate rather than
+replacing it, so the figure carries over with its provenance rather than being
+restated on the new denominator; re-sizing it belongs to E10's revisit. Subtract the variance back out and two
 errors of real-regression headroom remain, which is the point of composing the two
 rules rather than letting the larger one win.
 
