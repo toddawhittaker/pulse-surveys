@@ -71,16 +71,22 @@ pull request whose subject is moving them, and the threat and self-harm recall
 floor is a hard gate whose lowering is the repository owner's call.
 
 The comment-validity floors are **precision 0.92 and recall 0.90**, measured
-against `validity.v2` on `gpt-5.6-luna` in one clean run over the 98 cases:
-precision 1.000000, recall 0.981481, nothing floored by the character rule.
+against `validity.v2` on `gpt-5.6-luna` in one clean run over the 108 cases:
+precision 1.000000, recall 0.981481, exact agreement 107/108, nothing floored by
+the character rule. The one miss is `ls-025`, a substantive comment answered
+`insufficient` — the same case, and the same answer, as the second of the two
+earlier runs. The set grew from 98 to 108 in that same change and the floor values
+did not move; `floors.py` carries the derivation that says they still fit.
 
 They tolerate four new errors of a kind each — precision fires at 53/(53+5) =
 0.9138, recall at 48/54 = 0.8889 — which is the pattern threshold of two plus the
 measured run-to-run variance of **two cases in ninety-eight**, taken on this same
-model and this same prompt from two independent runs: the fill measurement and CI
-run 33679136272. Subtract the variance back out and two errors of real-regression
-headroom remain, which is the point of composing the two rules rather than letting
-the larger one win.
+model and this same prompt from two independent runs over the earlier 98-case
+composition: the fill measurement and CI run 33679136272. One run over the 108
+measures no variance, so that figure carries over as the standing estimate rather
+than being restated on the new denominator. Subtract the variance back out and two
+errors of real-regression headroom remain, which is the point of composing the two
+rules rather than letting the larger one win.
 
 They may tighten in a later deliberate pull request as more runs refine the
 variance figure — that direction is the cheap one, and loosening is the one this

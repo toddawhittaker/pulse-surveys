@@ -279,6 +279,13 @@ _NONSENSE = (
     # punctuation, so whether the floors in `floors.py` hold over fluent off-topic
     # English was unmeasured. Unmeasured is the state this set exists to remove.
     #
+    # **The first run over the new composition answered all ten `nonsense`, first
+    # pass.** That is a result rather than an absence of one: the region is one the
+    # model already handles, and the ten now hold it that way — a later prompt or
+    # model that stopped handling it would show up as wrong answers on ten cases
+    # that had none, and as false positives against the same four-error tolerance
+    # wherever the wrong answer is `substantive`. `floors.py` carries the figures.
+    #
     # Lengths straddle the twenty-five character floor as the rest of the family does.
     # Three of the ten sit under it, where §3.3's rule already withholds credit and the
     # model has only to agree; seven sit at or over it, where the rule awards credit and
