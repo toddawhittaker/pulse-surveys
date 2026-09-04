@@ -1,0 +1,56 @@
+-- What the application role may do on the relations grade passback writes —
+-- ticket E3-02, SPEC §3.4, §6.1, §8, ADR 0001, ADR 0090, ADR 0124, ADR 0129.
+--
+-- `roster_sync_grants_v001.sql` is the file this follows and the rule is the same
+-- one: a sanctioned writer in `app.services.authz` passes the application-layer
+-- chokepoint, and the *database* is what says which verbs that writer's connection
+-- actually holds. Neither is the other's backstop — ADR 0045's "a caller can
+-- bypass it by not calling it" is why the grant is narrow, and ADR 0090's catalog
+-- is why the write is routed.
+--
+-- **`grade_sync`: SELECT and INSERT, and the verbs withheld are the assertion.**
+-- SPEC §8 puts this table at the grain of one row per post, append-only, with a
+-- failed attempt a row too. `INSERT` is the row E3-06 writes for every post it
+-- makes. `SELECT` is the lookup that decides whether to post at all: ADR 0124
+-- makes the latest row for a (section_id, user_id) pair what a fresh recomputation
+-- is compared against, and what identifies a retry under ADR 0052. Written as
+-- INSERT alone, the sweep could not tell a changed figure from an unchanged one
+-- and would re-post every student on every run.
+--
+-- No UPDATE and no DELETE. ADR 0124 exists because a posted score can be lowered
+-- afterwards by an asynchronous re-classification, so a row rewritten in place
+-- would destroy the number a student was previously shown — the one thing this
+-- record is kept to be able to answer for. A connection able to UPDATE here is a
+-- connection able to rewrite what Pulse told a platform about a person's standing,
+-- on the connection every screen in the product runs on, and no Python rule makes
+-- that structural. E13's retention purge is what trims the table, on its own
+-- connection and with its own rule.
+--
+-- **`ags_call`: SELECT and INSERT, and the argument is `nrps_call`'s unchanged.**
+-- §6.1 puts it at the grain of one HTTP call the tool made to a platform service.
+-- The caller appends a row per call and reads its own log back; an append-only log
+-- is only append-only if the grant says so.
+--
+-- **One more column on `section`, and it is the roster address's twin.** The AGS
+-- line-item container arrives on a staff launch exactly as the roster address
+-- does, is judged by the same rules, and is written by the same writer on the same
+-- upsert — so it needs the same column-scoped UPDATE and for the same reason. A
+-- platform may move the container, and following the platform is the rule rather
+-- than an edit (the `lms_` marker, ADR 0014). The alternative is UPDATE on the
+-- whole table, which would hand this connection the section code and ADR 0021's
+-- four derived calendar columns.
+--
+-- **`section.ags_line_item_url` is deliberately not granted here.** E3-02 creates
+-- that column and writes nothing to it; E3-05 is its writer and is the ticket that
+-- spends the privilege, with the record beside it. A grant issued now would be one
+-- nothing in the tree uses, which is the convenience grant this whole scheme
+-- exists to make visible.
+--
+-- Every grant here is recorded in `RUNTIME_BASE_TABLE_PRIVILEGES` and
+-- `RUNTIME_COLUMN_PRIVILEGES` in `tests/integration/test_identity_grants.py`, each
+-- with the sentence it rests on, and those inventories are equalities.
+
+GRANT SELECT, INSERT ON public.grade_sync TO pulse_app;
+GRANT SELECT, INSERT ON public.ags_call TO pulse_app;
+
+GRANT UPDATE (lms_ags_line_items_url) ON public.section TO pulse_app;
