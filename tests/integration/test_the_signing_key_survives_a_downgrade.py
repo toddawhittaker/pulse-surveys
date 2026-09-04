@@ -18,10 +18,14 @@ revision below, the one-row rule is back on the table, so a database holding a
 rotation cannot be represented there at all. This module's first two tests said
 nothing about that state and this paragraph used to say why: the choice between
 refusing loudly and keeping the newest was open, and a test that picked one would
-have made the decision from the test side. **It is no longer open** — ADR 0127
-makes it a refusal, and
-`test_a_downgrade_refuses_a_stored_rotation_rather_than_discarding_a_key` is what
-holds it, written after the fact and saying so in its own docstring. The first two
+have made the decision from the test side. **It is no longer open**, and ADR 0127
+records both halves: the downgrade counts the **live** keys and refuses while more
+than one is live, naming retirement as the way forward; with at most one live key
+it deletes the retired rows itself and proceeds, since the one-row schema cannot
+hold them and nothing signs with them.
+`test_a_downgrade_refuses_a_stored_rotation_rather_than_discarding_a_key` holds
+both halves — written after the fact and saying so in its own docstring — and its
+second half is what tells a live-key count from a stored-row count. The first two
 tests still seed one key, which is the state a downgrade must always be able to
 handle.
 
@@ -78,11 +82,13 @@ WHAT_IT_IS = "the migration chain's head when E3-01 was cut, below the rotation 
 # The columns compared at either end: the ones that exist at both revisions.
 CARRIED_ACROSS = ("id", PRIVATE_KEY_COLUMN)
 
-# Two instants, aware as ADR 0019 requires, so the seeded rows carry values this
-# module chose rather than ones the server default invented. The second is only
-# used by the refusal test, where two keys have to be told apart by something.
+# Three instants, aware as ADR 0019 requires, so the seeded rows carry values this
+# module chose rather than ones the server default invented. The second and third
+# belong to the refusal test, where two keys have to be told apart and one of them
+# is then retired.
 SUPPLIED_AT = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
 REPLACED_AT = datetime(2026, 9, 3, 9, 0, tzinfo=UTC)
+RETIRED_ON = datetime(2026, 9, 4, 9, 0, tzinfo=UTC)
 
 # How a refusal to downgrade a stored rotation has to tell an operator what to do.
 # **A candidate list, because the ticket fixes no wording** — the same device
@@ -140,14 +146,19 @@ def seed_one_signing_key(database: Any, tables: dict[str, Any]) -> None:
         )
 
 
-def plant_a_signing_key(database: Any, tables: dict[str, Any], created_at: datetime) -> None:
+def plant_a_signing_key(database: Any, tables: dict[str, Any], created_at: datetime) -> str:
     """One more `tool_signing_key` row at head, created at an instant the caller chose.
 
     `seed_one_signing_key` above is the one-key case two tests share; this is the
     same write with the instant as an argument, so a rotation — two live keys with
     different `created_at` — can be planted without either test guessing at the
     other's constant.
+
+    The PEM comes back so the caller can name *this* row afterwards without
+    comparing timestamps across a database round trip. The key is what tells the
+    two rows apart everywhere below.
     """
+    pem = generated_pem()
     with session_on(database) as session:
         seed_row(
             session,
@@ -155,11 +166,12 @@ def plant_a_signing_key(database: Any, tables: dict[str, Any], created_at: datet
             SIGNING_KEYS,
             {},
             **{
-                PRIVATE_KEY_COLUMN: generated_pem(),
+                PRIVATE_KEY_COLUMN: pem,
                 CREATED_AT_COLUMN: created_at,
                 RETIRED_AT_COLUMN: None,
             },
         )
+    return pem
 
 
 def the_stamped_revision(database: Any) -> str:
@@ -198,17 +210,21 @@ def stored_signing_keys(database: Any) -> list[dict[str, Any]]:
         engine.dispose()
 
 
-def remove_the_key_created_at(database: Any, created_at: datetime) -> None:
-    """Delete one planted row, leaving the other, so one key is stored.
+def retire_the_key(database: Any, pem: str, at: datetime) -> None:
+    """Mark one stored key retired, the way an operator's `retire <kid>` does.
 
-    **Deleted rather than retired**, and the difference is the near miss this
-    module cannot resolve on its own: whether the guard counts every row or only
-    the unretired ones is not something the ticket record settles, and a reduction
-    by retirement would be a test that passes under one reading and fails under
-    the other. Deleting reduces both counts to one, so the pair below is correct
-    whichever rule the migration uses. The residue — that the refusal's advice and
-    the guard's counting rule are not proven to agree — is named in the docstring
-    that relies on it.
+    **Retired rather than deleted**, and that is the whole strength of the pair
+    that uses it. An earlier version of this module deleted the row, because
+    whether the guard counted every row or only the unretired ones was unsettled
+    and a reduction by retirement would have passed under one reading and failed
+    under the other. The ruling settled it — the guard counts **live** keys, and
+    with at most one live key the downgrade clears the retired rows itself — so
+    the reduction is now the very thing the refusal's message advises, and the
+    pair proves that advice end to end instead of proving a way round it.
+
+    The row is addressed by its key rather than by its timestamp: a value this
+    test generated and holds, with no round trip through a column whose type or
+    timezone rendering could make the comparison the subject.
     """
     from sqlalchemy import create_engine, text
 
@@ -216,8 +232,11 @@ def remove_the_key_created_at(database: Any, created_at: datetime) -> None:
     try:
         with engine.begin() as connection:
             connection.execute(
-                text(f"DELETE FROM public.{SIGNING_KEYS} WHERE {CREATED_AT_COLUMN} = :when"),  # noqa: S608
-                {"when": created_at},
+                text(
+                    f"UPDATE public.{SIGNING_KEYS} SET {RETIRED_AT_COLUMN} = :at "  # noqa: S608
+                    f"WHERE {PRIVATE_KEY_COLUMN} = :pem"
+                ),
+                {"at": at, "pem": pem},
             )
     finally:
         engine.dispose()
@@ -413,11 +432,22 @@ def test_a_downgrade_refuses_a_stored_rotation_rather_than_discarding_a_key(
     something a platform may already have fetched, nothing regenerates it, and the
     failure surfaces at that platform as a refused assertion naming no key.
 
-    **The mutation this exists to kill:** the row-count guard removed from
+    **The first mutation this kills:** the row-count guard removed from
     `downgrade()`, so the migration proceeds and the index creation decides what
     happens to the second key. Every other test in this module seeds exactly one
     key and stays green against that change; this is the only place in the suite
-    that puts two there and asks.
+    that puts two there and asks. That is the survivor the E3-01 mutation battery
+    found.
+
+    **The second mutation this kills, and it is why the reduction below is a
+    retirement:** a guard that counts **stored** rows rather than live ones. The
+    ruling is that it counts live keys, and that with at most one live key the
+    downgrade clears the retired rows itself — so retiring a key is the whole of
+    what an operator has to do, which is exactly what the refusal's message tells
+    them. Under the stored-row count that same retirement changes nothing, the
+    second attempt refuses too, and the operator is left following advice that
+    does not work. The two counts are indistinguishable on the refusal alone and
+    are told apart only here, by taking the advice and requiring it to succeed.
 
     **Four assertions, because "it refused" is the weakest of them.** It raised;
     the message names a way back to one key rather than only reporting that there
@@ -427,17 +457,17 @@ def test_a_downgrade_refuses_a_stored_rotation_rather_than_discarding_a_key(
 
     **The near miss, and it is the second half of this test:** a guard that refuses
     every downgrade. That takes a deployment's ability to back out a bad release
-    away entirely, and it would pass every assertion above. So one key is removed
+    away entirely, and it would pass every assertion above. So one key is retired
     and the same walk has to succeed — and to have really run, which is why the
-    rotation columns are required to be gone at the end rather than the exit
-    status being taken as the answer.
+    rotation columns are required to be gone at the end and the one-row index to
+    be back, rather than the exit status being taken as the answer.
 
-    **The reduction is a delete rather than a retirement**, and that leaves a
-    residue worth naming: the refusal's own advice is retirement, and whether
-    retiring a key satisfies the guard depends on whether it counts every row or
-    only the unretired ones — which no record settles. Deleting reduces both
-    counts, so the pair here is correct either way, and the unproven agreement
-    between the message and the rule is recorded rather than assumed.
+    **The retired row is required to be gone, and the live one to remain.** That
+    is the other half of the ruling: the one-row schema cannot hold two rows at
+    all, so the downgrade deletes what it can no longer represent, and which row
+    it deletes is the whole question. A downgrade that kept the retired key and
+    dropped the live one would complete, restore the index, and leave the
+    deployment signing with nothing — every earlier assertion here green.
     """
     require_rotation_columns(metadata_tables[SIGNING_KEYS].c.keys(), "the declared table")
     config = alembic_config_pointed_at(empty_database)
@@ -445,13 +475,19 @@ def test_a_downgrade_refuses_a_stored_rotation_rather_than_discarding_a_key(
 
     migrate(config, "upgrade", MODEL_SCHEMA, "putting an empty database into the models' shape")
     seed_one_signing_key(empty_database, metadata_tables)
-    plant_a_signing_key(empty_database, metadata_tables, REPLACED_AT)
+    retiring = plant_a_signing_key(empty_database, metadata_tables, REPLACED_AT)
     before = {row["id"]: row[PRIVATE_KEY_COLUMN] for row in stored_signing_keys(empty_database)}
     standing_at = the_stamped_revision(empty_database)
     assert len(before) == 2, (
         f"This test needs two stored keys and the database holds {len(before)}. With one, the "
         "downgrade below is the ordinary case the first test in this module owns, and every "
         "assertion here would be about a refusal that never had a reason to happen."
+    )
+    staying = [pem for pem in before.values() if pem != retiring]
+    assert len(staying) == 1, (
+        "The two planted rows do not hold two different keys, so 'the live key is the one that "
+        "survived' cannot be told from 'the retired key is'. That is a defect in this test's "
+        "planting rather than a finding about the migration."
     )
 
     refusal = refused_downgrade(config, below)
@@ -489,19 +525,28 @@ def test_a_downgrade_refuses_a_stored_rotation_rather_than_discarding_a_key(
         "assertion above is meant to be evidence against."
     )
 
-    remove_the_key_created_at(empty_database, REPLACED_AT)
-    migrate(config, "downgrade", below, "the same walk, with one key stored")
+    retire_the_key(empty_database, retiring, RETIRED_ON)
+    migrate(config, "downgrade", below, "the same walk, with one live key and one retired")
 
     standing = columns_the_database_reports(empty_database, SIGNING_KEYS)
     assert not {CREATED_AT_COLUMN, RETIRED_AT_COLUMN} & standing, (
-        f"With one key stored the downgrade reported success and `{SIGNING_KEYS}` still carries "
+        f"After retiring one key the downgrade reported success and `{SIGNING_KEYS}` still carries "
         f"the rotation columns: {sorted(standing)}. Then the near miss is unproven — a guard that "
-        "refuses every downgrade and one that refuses only a stored rotation are indistinguishable "
+        "refuses every downgrade and one that refuses only a live rotation are indistinguishable "
         "if the permitted case never actually runs."
     )
+    assert ONE_ROW_INDEX in indexes_the_database_reports(empty_database, SIGNING_KEYS), (
+        f"The permitted downgrade completed and `{ONE_ROW_INDEX}` is not on `{SIGNING_KEYS}`. The "
+        "index is the reason two rows cannot be walked down at all, so a downgrade that clears the "
+        "retired rows and then does not restore it has paid the whole price of the refusal and "
+        "bought none of it."
+    )
     kept = stored_signing_keys(empty_database)
-    assert len(kept) == 1 and kept[0][PRIVATE_KEY_COLUMN] in before.values(), (
-        f"After the permitted downgrade the table holds {len(kept)} row(s), and the key in it is "
-        "not one of the two this test planted. The whole point of refusing the two-key case is "
-        "that the one-key case keeps its key."
+    assert [row[PRIVATE_KEY_COLUMN] for row in kept] == staying, (
+        f"After retiring one of two keys the downgrade left {len(kept)} row(s), and not the live "
+        "one alone. Two rows means it did not clear what the one-row schema cannot hold — the "
+        "ruling has the downgrade delete the retired rows itself, which is what makes retirement "
+        "sufficient advice. Zero, or the retired key in place of the live one, is worse than the "
+        "refusal this test starts with: it completes, it restores the index, and it leaves the "
+        "deployment signing with nothing."
     )
