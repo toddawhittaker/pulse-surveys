@@ -3,8 +3,9 @@
 E0-15 builds the *platform* side of Assignment and Grade Services 2.0: line-item
 creation and listing, and score posting that records what it received. SPEC §3.4
 is what will use it — one line item per section called "Pulse Participation",
-scored as valid weeks completed over weeks elapsed — so the line item created
-below carries §3.4's label and maximum rather than an invented one.
+scored as completed items over total items across the student's elapsed weeks
+(ruled 2026-09-04) — so the line item created below carries §3.4's label and
+maximum rather than an invented one.
 
 **How a test finds the service.** Out of the AGS endpoint claim in the launch,
 which carries the line-items URL and the scopes a token may be requested for.
@@ -832,7 +833,7 @@ def test_a_negative_score_is_refused(
     """A grade below nothing is not a grade, and it folds into the gradebook.
 
     Measured: `scoreGiven: -5` is accepted and produces a `Result` of `-5`.
-    Canvas answers 422. E3 computes valid weeks over weeks elapsed, which cannot
+    Canvas answers 422. E3 computes completed items over total items, which cannot
     go negative, so a negative arriving at this service is a tool defect the
     platform should refuse rather than record — and a `Result` of `-5` is a
     number a student sees.

@@ -134,7 +134,9 @@ entry expires the moment one of them grows a column, and with the reason a
 reviewer reads when it does. No count is written here: the mapping grows with
 every ticket that adds a table the walk reaches, and a number in a docstring is a
 record with a scheduled expiry (`docs/MISTAKES.md` entry 1). E2-05 added two,
-`response` and `answer`.
+`response` and `answer`; E3-02 adds `grade_sync`, whose entry is the standing
+`PERSON_TABLES` question answered about a table that holds a figure describing a
+person and no column that identifies one.
 
 What remains outside the search is stated on `IDENTITY_NAME_FRAGMENTS` below
 rather than here, beside the tuple that decides it (`docs/MISTAKES.md` entry 14).
@@ -2592,16 +2594,19 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
         "rule above governs, not about a column on the row. The column pin expired this entry "
         "once already and did exactly what it is for: E2-08 added `is_valid`, §3.3's verdict "
         "about the submission as a whole — a boolean about a week, carrying nothing about who "
-        "submitted it, and the column §3.4's participation score reads "
+        "submitted it. It is not an input to §3.4's score: the item formula ruled on 2026-09-04 "
+        "counts answer rows and each comment's latest classification, a finer grain than a "
+        "per-response verdict can carry, and E2-08 owns the column for the student read path "
         "(`docs/disputes/E2-08-04.md`). It expired a second time for `term_id`, E2-16's "
         "addition, and this sentence is the re-reading. A term is the coarsest thing on the row: "
         "an interval of the academic calendar that every section running in it shares, so it "
         "narrows a response to nobody. It is here because SPEC §2.2 numbers weeks *within* a "
         "term — 'each of them falls in a week of the term' — so which week a response is about "
         "is only a well-formed question once the term its section and its week both sit in is "
-        "named; and §3.4 counts 'valid weeks completed ÷ weeks elapsed to date', a ratio along "
-        "that one axis, which a row pairing a section in one term with a week in another counts "
-        "across two calendars. That row was writable until this column arrived. It is carried on "
+        "named; and §3.4 counts the items completed across the weeks a student was enrolled for, "
+        "a ratio assembled along that one axis, which a row pairing a section in one term with a "
+        "week in another assembles across two calendars. That row was writable until this column "
+        "arrived. It is carried on "
         "the row rather than checked because a `CHECK` cannot read another table (ADR 0018), so "
         "the agreement is expressed as a term held by two composite foreign keys into "
         "`section (id, term_id)` and `week (id, term_id)` — the mechanism `survey_window` has "
@@ -2631,6 +2636,45 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
         "not. `pulse_app` reads and appends this table and can neither update nor delete a row "
         "(ADR 0055), which is what makes the audit trail an audit trail; what a *view* over it "
         "may join to is the bound-column rule above, not this entry.",
+    ),
+    # E3-02's, and the fourth entry written before the table exists. `grade_sync`
+    # carries `user_id`, which puts it one hop from `user`, so the fixed-point walk
+    # reaches it the moment that ticket's migration runs — and none of its columns
+    # carries a name any identity vocabulary knows, so without this entry the report
+    # would name it and the repair would be on the other side of the test wall from
+    # the ticket that caused it (`docs/MISTAKES.md` entry 22).
+    #
+    # **This is the standing `PERSON_TABLES` question, asked the careful way ADR
+    # 0124 asks for.** That record ends by saying the history "is a record about
+    # students", so the question is put to this table with more care than to
+    # `ags_call`, which references `section` and nothing else and is not reached by
+    # this walk at all. The answer below is the same one `enrollment` and `response`
+    # give and it is a judgement rather than a measurement: the row states something
+    # about a person's standing, and it holds no column that identifies one. E3-02's
+    # pull request is where the judgement is recorded in prose, with the columns it
+    # was made against; this is where the column list expires it.
+    "grade_sync": CarriesNothing(
+        (
+            "created_at",
+            "id",
+            "ledger_text",
+            "outcome",
+            "response_code",
+            "score_text",
+            "score_timestamp",
+            "section_id",
+            "user_id",
+        ),
+        "One posted participation score, as it was sent: the two keys it is about — a student and "
+        "a section — the score string, the timestamp that went with it, the per-week ledger that "
+        "went in the AGS comment, the outcome, and the response code the platform answered with. "
+        "The figure is a statement about a person's standing and the person is a foreign key: the "
+        "identity behind `user_id` sits on `user_identity`, which `pulse_app` is granted no "
+        "`SELECT` on, which is the same argument `enrollment` and `response` make. `ledger_text` "
+        "is composed by this project from item counts and holds no words anybody wrote. Marking a "
+        "column here would put every posted score in the set the identity-separated views may not "
+        "read, which is the opposite of what §6.1's job dashboard needs; the row is append-only by "
+        "grant (ADR 0124), so nothing on this connection can rewrite what a student was told.",
     ),
     "role_assignment": CarriesNothing(
         (

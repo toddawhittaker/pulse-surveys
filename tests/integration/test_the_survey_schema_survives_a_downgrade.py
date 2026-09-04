@@ -20,10 +20,13 @@ and today it fails on the upgrade step rather than on a comparison.
 **`f1a3c7d02b64` corrupts silently.** Its `downgrade()` drops
 `classification.answer_id` and `response.is_valid` unpreserved; its `upgrade()`
 backfills `is_valid = true` for every row and leaves `answer_id` null. So a
-response a model judged invalid comes back reading valid — §3.4 counts it — and a
-floored verdict comes back naming no comment, which the sweep in
-`app/services/validity.py` can never find again and no `UPDATE` can ever repair
-(ADR 0055 withholds it). That is
+response a model judged invalid comes back reading valid — §3.3's validity rate
+and the student's own read path both believe it — and a floored verdict comes back
+naming no comment, which the sweep in `app/services/validity.py` can never find
+again and no `UPDATE` can ever repair (ADR 0055 withholds it). The second of those
+also reaches §3.4: the item formula credits a comment unless its latest
+classification refuses it, and a verdict that no longer names its comment can
+neither refuse nor be re-run. That is
 `test_a_downgrade_and_re_upgrade_keeps_each_verdicts_comment_and_each_submissions_validity`,
 and it fails on the values rather than on a step.
 

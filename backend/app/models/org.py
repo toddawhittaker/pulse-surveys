@@ -471,6 +471,41 @@ class Section(UuidPrimaryKey, Base):
     # connects to the address that was judged.
     lms_context_memberships_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # **SPEC §3.4's gradebook addresses**, arriving with E3-02 and deliberately an
+    # exact mirror of the roster address above rather than a scheme of their own.
+    # §3.4 gives every section one AGS line item called "Pulse Participation", and
+    # getting a score into it needs two addresses: the container the line item is
+    # created in, and the line item's own id once it exists.
+    #
+    # `lms_ags_line_items_url` is the container. It arrives as the `lineitems`
+    # member of the launch's AGS endpoint claim and is stored on a **staff** launch
+    # only, through `app.services.provisioning` — the same claim, the same writer
+    # and the same trigger the roster address has. LMS-owned and so `lms_`-prefixed
+    # (ADR 0014): the platform publishes the address and Pulse only keeps what it
+    # was handed.
+    #
+    # `ags_line_item_url` is the id of the line item **this tool creates** in that
+    # container, which is Pulse's own doing and so carries no marker — the same
+    # split `course.level` sits on. E3-02 adds the column and E3-05 is what writes
+    # it; the application role holds no `UPDATE` on it until then, which is that
+    # ticket's paperwork rather than this one's.
+    #
+    # Both nullable, and NULL is a **state** rather than a missing value, in the
+    # same spirit as the never-synced roster above: a platform that grants this
+    # tool no gradebook scope advertises no endpoint claim at all, and a section
+    # with no container address has nowhere to post to and nothing to be wrong
+    # about. A fabricated default would be an address pointing nowhere that reads
+    # as configuration.
+    #
+    # **What may be stored here is judged first**, exactly as the roster address
+    # is. Both columns are in `app.models.lti`'s `FETCHED_COLUMNS` and
+    # `LOOPBACK_REFUSED_COLUMNS`, so `refuse_invalid_fetched_address` applies the
+    # same five rules to them — this container fetches both with the tool's own
+    # client credentials and nobody present. An address those rules refuse leaves
+    # the column NULL and is recorded as a launch defect.
+    lms_ags_line_items_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ags_line_item_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # **The binding: which context, on which registration, this section is.** See
     # the unique constraint above for what it is for and what it cost to learn.
     #

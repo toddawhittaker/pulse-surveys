@@ -121,6 +121,20 @@ PULSE_OWNED_COLUMNS: dict[str, dict[str, str]] = {
             "ADR 0021 and SPEC §2.2: the modality is parsed out of the section code rather than "
             "supplied as a field, so it is derived in Pulse like the three dates."
         ),
+        "ags_line_item_url": (
+            "ADR 0128 (E3-02): SPEC §3.4 gives every section one AGS line item, 'Pulse "
+            "Participation', and this tool is what creates it in the container the platform "
+            "advertises. The platform mints the identifier, and that is not what decides "
+            "ownership here: the value records which artifact Pulse created and posts to. "
+            "Nothing in the LMS's data model instructs Pulse to hold it, no sync mirrors it, "
+            "and an LMS-side rename or deletion makes it stale rather than wrong — E3-04's "
+            "re-find rule is the reconciliation. The `lms_` prefix is refused deliberately: ADR "
+            "0014's prefix means 'the platform publishes it and Pulse only keeps what it was "
+            "handed', which describes the claim-supplied `lms_ags_line_items_url` beside it and "
+            "not this receipt. E3-02 adds the column and writes nothing to it; E3-05 is its "
+            "writer, and the application role holds no `UPDATE` on it until that ticket grants "
+            "one."
+        ),
     },
     "enrollment": {
         "started_on": (

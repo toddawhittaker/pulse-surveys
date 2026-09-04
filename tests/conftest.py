@@ -76,6 +76,10 @@ boundary: `metadata_tables` is asked for by both.
   - `fixtures/signing_key_tool.py` — E3-01: `scripts/signing_key.py` run as a
     program against a migrated database of its own, the RFC 7638 thumbprint of a
     stored key, and the sign-and-verify pair a retirement is planted with.
+  - `fixtures/grading.py` — E3-03: the module contract the participation formula
+    is asked through, a section whose course weeks are not its term weeks, and
+    students enrolled on the dates a test chose with the answers and verdicts it
+    chose.
 
 Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
@@ -124,4 +128,5 @@ pytest_plugins = (
     "fixtures.submit",
     "fixtures.student_read",
     "fixtures.signing_key_tool",
+    "fixtures.grading",
 )

@@ -171,7 +171,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 13** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 14** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 16. A mutation harness reported kills it had not made
 
@@ -326,7 +326,7 @@ doing nothing.
 
 ## 39. A gate run was invalidated by edits that landed while it ran
 
-**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/39-a-gate-run-was-invalidated-by-edits-that.md)
+**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/39-a-gate-run-was-invalidated-by-edits-that.md)
 
 **Rule.** While a gate runs, the tree it runs in is read-only — no edits, no
 checkouts, no restores. A verdict is valid only for the tree it started on; if

@@ -76,7 +76,7 @@ pytestmark = pytest.mark.integration
 # `require_revision` failure until somebody makes it. If another E3 ticket's
 # migration lands between the two, the walk undoes that one as well, which is
 # still a valid journey for the only thing asserted below: the stored key.
-THE_REVISION_BELOW = "b1e7d4a90c26"
+THE_REVISION_BELOW = "c7e2a41b90f5"
 WHAT_IT_IS = "the migration chain's head when E3-01 was cut, below the rotation revision"
 
 # The columns compared at either end: the ones that exist at both revisions.

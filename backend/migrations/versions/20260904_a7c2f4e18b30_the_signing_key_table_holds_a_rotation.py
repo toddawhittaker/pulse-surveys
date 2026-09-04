@@ -1,7 +1,7 @@
 """the signing key table holds a rotation
 
 Revision ID: a7c2f4e18b30
-Revises: b1e7d4a90c26
+Revises: c7e2a41b90f5
 Create Date: 2026-09-04 00:00:00.000000
 
 E3-01. One table changes shape so that the tool can hold more than one signing
@@ -69,7 +69,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "a7c2f4e18b30"
-down_revision: str | Sequence[str] | None = "b1e7d4a90c26"
+down_revision: str | Sequence[str] | None = "c7e2a41b90f5"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
