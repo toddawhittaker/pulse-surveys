@@ -267,4 +267,12 @@ a value they never named. Found by the implementer's full-suite run, repaired
 on the test side after a ruling: each helper now states the identity it seeds.
 Not counted as a catch; the entry describes what happened, it did not prevent
 it — the pre-write sweep that caught E1-12's instance looked for route
-consumers, not schema-constraint dependents.
+consumers, not schema-constraint dependents.**Instance, 2026-09-04 (E3-02, disputes E3-02-01 and E3-02-02).** E3-02 added a
+ninth launch-defect kind and a Pulse-owned column on `section`, and two standing
+inventories — the defect-kind equality pin and the LMS-owned-column ownership
+sweep — went red in modules the ticket's test manifest never named. Both repairs
+sat on the read-only side of the wall and went through `docs/disputes/`; the
+whole-suite run is what found them, a scoped run would have reported the ticket
+green. Not counted as a catch; the entry describes what happened, it did not
+prevent it — the test author's pre-write sweep covered the enumerations the
+ticket itself edited and not the inventories that pin them.
