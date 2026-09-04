@@ -165,6 +165,16 @@ MOCK_AI_PROVIDER_MODEL_NAME=llama3.1
 MOCK_AI_PROVIDER_API_KEY=
 ```
 
+**To drive the stack against the real provider interactively, `make up-live`.**
+It is the same move as the block above — the mock triple pointed elsewhere —
+committed as `docker-compose.live-ai.yml` and applied as a third `-f` file, so
+your `.env` stays unedited. The endpoint and model are the ruled ones from
+`.env.example`'s comment; the key is interpolated from `AI_PROVIDER_API_KEY`,
+and the target refuses to start while it is blank. Everything else stays the
+development stack: same database, same clock control, same mock LMS and IdP.
+Every comment submitted while it is up costs real money. Plain `make up` puts
+the mocks back.
+
 **Off this machine means `https`, key or no key — outside development.**
 `AI_PROVIDER_BASE_URL` may be plain `http` to this machine in any environment; a
 deployment refuses it anywhere else rather than put a student's comment — and any

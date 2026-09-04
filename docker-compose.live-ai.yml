@@ -1,0 +1,57 @@
+# The live-AI stack: the development stack, with one change — `api` and
+# `worker` classify through the real provider instead of the mock.
+#
+# `make up-live` applies this file as a third `-f` over `docker-compose.yml`
+# and `docker-compose.override.yml`; plain `make up` puts the mocks back by
+# recreating the two services without it. Nothing else moves: same database
+# and volume, same seed, same clock control, same mock LMS and IdP.
+# `ENVIRONMENT` stays `development`, so the dev console and the clock override
+# keep working. This is the development stack with a live model, not a
+# deployment, and it must never become the base for one.
+#
+# **Why this overrides the mock triple and not the real one.** In development
+# the gateway's ordinary construction, `AIGateway(live=False)`, reads
+# `MOCK_AI_PROVIDER_*` (ADR 0118), and both `.env.example` and README.md
+# sanction pointing that triple at another endpoint — a local model server, a
+# proxy. This file is that move written down, so it survives being needed
+# twice. The real triple stays untouched for `make evals`, the one
+# `live=True` caller, which reads it.
+#
+# **The endpoint and model are spelled here, not interpolated.** In a fresh
+# `.env`, `AI_PROVIDER_BASE_URL` is deliberately blank (its `.env.example`
+# comment says why), so `${AI_PROVIDER_BASE_URL}` would interpolate to
+# nothing. The two values below are the ruled provider and model, the same
+# ones that comment names.
+#
+# **The key is interpolated from `.env`'s `AI_PROVIDER_API_KEY`**, so the
+# credential is written once, stays out of this file, and the same key serves
+# the eval run and this stack. `make up-live` refuses to start while it is
+# blank: against the real endpoint the placeholder bearer token buys an
+# authentication error, not a classification.
+#
+# **Every comment submitted while this stack is up costs real money** — a
+# fraction of a cent per classification, on that key's account.
+
+x-live-ai: &live-ai
+  MOCK_AI_PROVIDER_BASE_URL: https://api.openai.com/v1
+  MOCK_AI_PROVIDER_MODEL_NAME: gpt-5.6-luna
+  MOCK_AI_PROVIDER_API_KEY: ${AI_PROVIDER_API_KEY}
+
+services:
+  # Classification runs synchronously in the `api` process at submit time
+  # (`app/api/student.py` → `app/services/validity.py` → `app/ai/tasks.py`),
+  # so `api` is the service that has to carry the triple — measured the hard
+  # way: a worker-only version of this override left submissions classified by
+  # the mock. `worker` carries it too, for the scheduled tasks that classify
+  # (`reclassify_floored_comments`). `beat` only schedules and never calls the
+  # gateway.
+  #
+  # Compose merges these `environment:` maps per key over the other two
+  # files' — verified with `docker compose config` — so `api` keeps its
+  # `CARE_DATABASE_URL` and both keep the development `PYTHONPATH`.
+  api:
+    environment:
+      <<: *live-ai
+  worker:
+    environment:
+      <<: *live-ai

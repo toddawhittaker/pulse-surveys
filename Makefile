@@ -429,6 +429,16 @@ fmt: ## Apply formatting (the only target that writes to your files)
 up: ## Bring the stack up with dev wiring
 	@$(COMPOSE) up -d
 
+# The guard accepts the key from either place Compose interpolates it from:
+# the shell environment (which wins) or `.env`. Blank in both means the stack
+# would come up sending a placeholder bearer token to the real endpoint and
+# every classification would fail, so refuse to start instead.
+.PHONY: up-live
+up-live: ## Bring the dev stack up with the real AI provider (spends real money)
+	@test -n "$$AI_PROVIDER_API_KEY" || grep -q '^AI_PROVIDER_API_KEY=..' .env 2>/dev/null || { echo 'up-live: AI_PROVIDER_API_KEY is blank — the real provider needs the real key. Set it in .env; see README.md, "The AI provider".' >&2; exit 1; }
+	@$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.live-ai.yml up -d
+	@echo 'Live AI is on: comments submitted to this stack reach the real provider and cost real money. `make up` puts the mocks back.'
+
 .PHONY: down
 down: ## Tear the stack down, including volumes
 	@$(COMPOSE) down -v
