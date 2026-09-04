@@ -53,6 +53,13 @@ reach it as a fixture rather than importing this file, because an import of a
 fixtures module by name depends on where pytest put `tests/` on `sys.path` and an
 import error is not a red.
 
+**E3-02 adds the gradebook half of the same vocabulary**, beside the roster half
+rather than in a module of its own, because it is the same launch being read: the
+AGS endpoint claim and its `lineitems` member, the two columns that ticket adds to
+`section`, and the three claim helpers a test rewrites a launch's gradebook
+address with. `tests/integration/test_a_launch_stores_the_gradebook_address_it_was_given.py`
+is what reads them.
+
 **The claims-rewriting helpers own one rule between them.** `with_course_number`
 is the only mutation the band-edge cases make, and
 `test_rewriting_a_launchs_course_number_changes_only_the_labels_middle_part` in
@@ -70,7 +77,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 import pytest
 
-from fixtures.lti_services import CONTEXT_CLAIM, NRPS_CLAIM
+from fixtures.lti_services import AGS_CLAIM, CONTEXT_CLAIM, NRPS_CLAIM
 from fixtures.supervision import require_column, require_table, single_primary_key
 
 # ---------------------------------------------------------------------------
@@ -297,6 +304,15 @@ LABEL_PARTS = 3
 # The member name is the NRPS 2.0 specification's, not this suite's.
 MEMBERSHIPS_URL_MEMBER = "context_memberships_url"
 
+# Where the AGS endpoint claim carries the address of the line-item container for
+# the launched context — SPEC §3.4's "one AGS line item per section", which has to
+# be created somewhere before it can be created at all. The member name is the AGS
+# 2.0 specification's and not this suite's, and it is what the in-repo platform
+# actually sends: `MockPlatform.line_items_url` in `tests/fixtures/lti_services.py`
+# reads the same member out of the same claim, and `AGS_CLAIM` is imported from
+# there rather than transcribed a second time (`docs/MISTAKES.md` entry 19).
+LINE_ITEMS_MEMBER = "lineitems"
+
 
 class ContextLabel:
     """One context label's three parts, with the label itself kept beside them."""
@@ -368,6 +384,59 @@ def memberships_url_in(claims: Mapping[str, Any]) -> str:
             "for these tests to assert about."
         )
     return address
+
+
+def line_items_url_in(claims: Mapping[str, Any]) -> str:
+    """The AGS line-item container address the launch advertises, or a named absence.
+
+    The twin of `memberships_url_in` above, and it exists for the same reason: a
+    test that asserted an address was *not* stored without first knowing there was
+    one to store would be asserting nothing (`docs/MISTAKES.md` entry 3). SPEC §3.4
+    puts one line item per section in the platform's gradebook, and this claim is
+    the only thing that says where that section's line items live.
+    """
+    endpoint = claims.get(AGS_CLAIM)
+    address = endpoint.get(LINE_ITEMS_MEMBER) if isinstance(endpoint, dict) else None
+    if not isinstance(address, str) or not address:
+        pytest.fail(
+            f"The launch carries no `{LINE_ITEMS_MEMBER}` under `{AGS_CLAIM}` (it carries "
+            f"{endpoint!r}). AGS 2.0 has a platform advertise its gradebook services on the launch "
+            "it signs, and E0-15 built the mock's half of that — "
+            "`test_mock_lms_ags_line_items_and_scores.py` is where the platform's side is "
+            "diagnosed. Without the claim there is nothing for a launch to store and nothing for "
+            "these tests to assert about."
+        )
+    return address
+
+
+def with_line_items_url(claims: Mapping[str, Any], address: str) -> dict[str, Any]:
+    """`claims` with the AGS endpoint claim's `lineitems` replaced and nothing else touched.
+
+    Copied rather than edited in place, exactly as `with_memberships_url` is: two
+    parametrised cases sharing one launch would otherwise see each other's URL. The
+    claim's other members — the scopes a token may be requested for — are carried
+    through unchanged, so what the writer is handed differs from a real launch's in
+    the one member the test changed.
+    """
+    changed = dict(claims)
+    endpoint = claims.get(AGS_CLAIM)
+    replaced = dict(endpoint) if isinstance(endpoint, dict) else {}
+    replaced[LINE_ITEMS_MEMBER] = address
+    changed[AGS_CLAIM] = replaced
+    return changed
+
+
+def without_ags_claim(claims: Mapping[str, Any]) -> dict[str, Any]:
+    """`claims` with the whole AGS endpoint claim removed and nothing else touched.
+
+    A platform that grants the tool no gradebook scope sends no endpoint claim at
+    all, which is a different thing from sending one this tool refuses to call. The
+    claim is removed whole rather than emptied because that is what such a launch
+    looks like on the wire: an absent key, not a key holding an empty object.
+    """
+    changed = dict(claims)
+    changed.pop(AGS_CLAIM, None)
+    return changed
 
 
 def relabelled(claims: Mapping[str, Any], label: str) -> dict[str, Any]:
@@ -756,6 +825,17 @@ SECTION_ADDRESS_COLUMN = "lms_context_memberships_url"
 # section resolvable by *who said so* rather than by what its label parses to.
 SECTION_CONTEXT_ID_COLUMN = "lms_context_id"
 
+# The two gradebook addresses E3-02 adds to `section`, spelled by that ticket's
+# work order and not chosen here: `lms_ags_line_items_url` is the container the
+# launch advertises, `lms_`-marked because the platform supplies it and Pulse
+# never edits it (ADR 0014); `ags_line_item_url` is the id of the line item this
+# tool creates in that container, which is Pulse's own doing and therefore carries
+# no `lms_` prefix. E3-02 adds both columns and writes only the first — E3-05 is
+# the writer of the second — so a test in this epic that found the second holding
+# anything would be asserting about a ticket that has not been built.
+SECTION_AGS_ADDRESS_COLUMN = "lms_ags_line_items_url"
+SECTION_LINE_ITEM_COLUMN = "ags_line_item_url"
+
 # Spelled by the work order too: the append-only record E11 reads, and its five
 # fields beside the key.
 DEFECT_TABLE = "launch_defect"
@@ -907,9 +987,11 @@ class ProvisioningContract:
 
     context_claim = CONTEXT_CLAIM
     nrps_claim = NRPS_CLAIM
+    ags_claim = AGS_CLAIM
     roles_claim = ROLES_CLAIM
     deployment_id_claim = DEPLOYMENT_ID_CLAIM
     memberships_url_member = MEMBERSHIPS_URL_MEMBER
+    line_items_member = LINE_ITEMS_MEMBER
     label_separator = LABEL_SEPARATOR
 
     course_number_column = COURSE_NUMBER_COLUMN
@@ -918,6 +1000,8 @@ class ProvisioningContract:
     section_code_column = SECTION_CODE_COLUMN
     section_address_column = SECTION_ADDRESS_COLUMN
     section_context_id_column = SECTION_CONTEXT_ID_COLUMN
+    section_ags_address_column = SECTION_AGS_ADDRESS_COLUMN
+    section_line_item_column = SECTION_LINE_ITEM_COLUMN
 
     defect_table = DEFECT_TABLE
     defect_columns = DEFECT_COLUMNS
@@ -942,6 +1026,9 @@ class ProvisioningContract:
     parse_label = staticmethod(parse_context_label)
     context_of = staticmethod(context_of)
     memberships_url_in = staticmethod(memberships_url_in)
+    line_items_url_in = staticmethod(line_items_url_in)
+    with_line_items_url = staticmethod(with_line_items_url)
+    without_ags_claim = staticmethod(without_ags_claim)
     relabelled = staticmethod(relabelled)
     with_course_number = staticmethod(with_course_number)
     with_section_code = staticmethod(with_section_code)
