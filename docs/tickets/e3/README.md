@@ -39,10 +39,12 @@ too. E3 ships no frontend, so there is no light-lane work in the epic at all.
 
 ## Decisions ruled at breakdown
 
-Nine decisions were settled before the first ticket branch, recorded here so
-no ticket re-litigates them. The first two change what the product does and
-are recorded in SPEC §3.3 and §3.4 by the same pull request as this file; the
-other seven are construction defaults that the spec does not decide.
+Eleven decisions were settled before the first ticket branch, recorded here
+so no ticket re-litigates them. The first three change what the product does
+or what it discloses, and are recorded in SPEC §3.3, §3.4 and ADR 0125 by the
+same pull request as this file. The other eight are construction decisions
+the spec does not make; one of them carries ADR 0124, and the rest are
+defaults a ticket may depart from only by saying so.
 
 1. **The participation score counts items, not weeks. Ruled 2026-09-04:** the
    fraction is completed items ÷ total items across the student's elapsed
@@ -59,36 +61,54 @@ other seven are construction defaults that the spec does not decide.
    week, of the form `Week 1: 4 of 5 items`. The comment is the only place the
    arithmetic is visible to anyone, because E3 ships no student surface and no
    instructor surface.
-3. **The week axis is the course week.** Elapsed weeks are counted on the
+3. **The ledger's instructor visibility is accepted. Ruled 2026-09-04**, and
+   recorded in ADR 0125. An AGS score comment is not private to the student:
+   it sits in the gradebook where an instructor reads it, and a per-week
+   completion pattern narrows the set of students who could have written a
+   given week's comment. This is accepted because the channel is not new — a
+   weekly-updated participation score already carries the same fact through
+   its deltas, since §3.4's denominator is a public rule and the week count
+   is the calendar. The ledger adds convenience, not a channel. The rejected
+   alternatives were a totals-only comment and no comment at all, and the
+   acceptance holds only while the ledger carries completion counts and
+   nothing else.
+4. **`grade_sync` is append-only, one row per post. Settled at breakdown,
+   2026-09-04**, and recorded in ADR 0124. The latest row for a student and
+   section serves the retry identity and the recompute's comparison; the
+   rows behind it are the account of what Pulse told a third-party gradebook
+   about a student's standing, which a row updated in place would destroy the
+   moment a re-classification lowered a score.
+5. **The week axis is the course week.** Elapsed weeks are counted on the
    section's own course-week axis (§2.2), the axis §3.4's late-add tiers
    already speak in, not the term week.
-4. **A week is elapsed when its window has closed.** A week counts toward the
+6. **A week is elapsed when its window has closed.** A week counts toward the
    denominator once its `survey_window.closes_at` is past `clock.now`, not
    when the recompute job happens to fire. The job's schedule therefore never
    changes an answer; it only changes when the answer is posted.
-5. **Zero elapsed weeks means no post at all.** A section whose first window
+7. **Zero elapsed weeks means no post at all.** A section whose first window
    has not yet closed gets no score, not a posted zero. A zero in a gradebook
    is a statement about a student; an absent score is a statement about the
    term, and only the second one is true before the first week closes.
-6. **The recompute is an idempotent sweep that re-posts on difference.** It
-   posts when the computed value differs from what `grade_sync` records as
-   last sent, and posts nothing otherwise. A weekly beat entry is the ordinary
-   trigger rather than the definition of the work, because a score is not
+8. **The recompute is an idempotent sweep that re-posts on difference.** It
+   posts when the computed value differs from the value in the latest
+   `grade_sync` row for that student and section, and posts nothing
+   otherwise. A weekly beat entry is the ordinary trigger rather than the
+   definition of the work, because a score is not
    final when its week closes: E2-08's asynchronous reclassification can
    change an already-posted week's numerator weeks later.
-7. **A student launch never causes a write to the platform's gradebook.**
+9. **A student launch never causes a write to the platform's gradebook.**
    Line-item creation follows §7.3's roster-trigger rule exactly — an
    instructor launch triggers it, a leadership launch triggers it only inside
    the launcher's own purview, and a student launch triggers nothing.
-8. **A worker log about a passback carries no score, no ledger and no user
-   identifier.** The task logs the section, the outcome and the call, and
-   nothing that would put a participation figure or an LMS user id in a log
-   stream. This answers the question E0-03 left open and dated to E3.
-9. **`PlatformProfile` ships as the mechanism plus the mock's profile only.**
-   The adapter seam §7.3 describes is built, and exactly one profile is
-   written against it. Canvas, Moodle, D2L and Blackboard are in the
-   deliberately-not-done list below, because a quirk adapter written against a
-   platform nobody has launched from is a guess with a file name.
+10. **A worker log about a passback carries no score, no ledger and no user
+    identifier.** The task logs the section, the outcome and the call, and
+    nothing that would put a participation figure or an LMS user id in a log
+    stream. This answers the question E0-03 left open and dated to E3.
+11. **`PlatformProfile` ships as the mechanism plus the mock's profile only.**
+    The adapter seam §7.3 describes is built, and exactly one profile is
+    written against it. Canvas, Moodle, D2L and Blackboard are in the
+    deliberately-not-done list below, because a quirk adapter written against
+    a platform nobody has launched from is a guess with a file name.
 
 ## Build order
 
@@ -106,13 +126,17 @@ other seven are construction defaults that the spec does not decide.
 ## Dependency graph
 
 ```
-01 ─────────────────────────────────── (free-standing, any time)
-02 ─┬─ 04 ─┬─ 05 ─┐
-03 ─┘      └──────┴─ 06 ── 07 ──── 08
+01 ─────────────────────────── (free-standing, any time)
+
+02 ── 04 ── 05 ─┬─ 06 ── 07 ── 08
+03 ─────────────┘
 ```
 
 (04 needs 02; 05 needs 02 and 04; 06 needs 03, 04 and 05; 07 needs 06; 08
-needs everything.)
+needs everything, 01 included. 04's edge into 06 runs through 05 and is not
+drawn twice. **03 is not an input to 04** — the formula and the client share
+nothing, which is what lets the epic's hardest reasoning run beside its
+plumbing rather than behind it.)
 
 Three starts run in parallel on day one. **01** is unrelated to grades
 entirely and can land at any point in the epic. **02** builds the tables and
@@ -161,15 +185,36 @@ it. The entries' own done-whens govern; the tickets point at them.
 
 Every other `carried-from-e2.md` entry passes through by being re-listed in
 `carried-from-e3.md` at E3-08 — the completeness rule is *every entry not
-closed inside E3, whoever owns it*: E4's reveal-subject guard with its
-deadline and the copy-collector symlink gap, E6 and E10's bounce-before-
-screening entry, E9's logout, purview properties and web-login linkage, E10's
-floor-variance point, E11's squat repair, CSP write-time rejection and
-verdict-row aggregation, E13's structural `PERSON_TABLES` source, local-account
-fallback and font licences, and the several entries whose owner is a candidate
-ticket rather than an epic. One of those candidates E3 cannot take: the stale
-Care-landing docstring needs a light-lane ticket touching
-`frontend/src/routes/care/`, and E3 has no light-lane work.
+closed inside E3, whoever owns it*, so the enumeration below is the coverage
+proof and is meant to be complete rather than representative:
+
+- **E4's**: the reveal-subject guard with its deadline, the copy-collector's
+  symlinked-directory gap, and the rendered student surface's string
+  convention that nothing sweeps.
+- **E6's and E10's**: the bounced comment refused before any harm screening
+  exists.
+- **E9's**: logout and back-channel logout, the generative purview coverage
+  note, and the web-login linkage.
+- **E10's**: the floor-headroom variance point.
+- **E11's**: the squatted section binding, the CSP-breaking authorization
+  endpoint stored verbatim, the verdict-row aggregation half of the bounced
+  attempts entry, and the two registration-write blind spots a console has to
+  know about.
+- **E13's**: the structural `PERSON_TABLES` source, the local-account
+  fallback, and the self-hosted font licences.
+- **Owned by nobody, carried as notes to a later reader**: the unproven
+  structural battery rows, and the denial-module closure sweep's inventory —
+  the latter settled at E2's breakdown and carried only if a boundary
+  re-affirmation reports its two disclosed limits no longer hold.
+- **Owned by a candidate ticket rather than an epic**: the bounce that names
+  no offending position, the week eyebrow that cannot say how long a course
+  runs, the resubmission answering 500 under a rewound clock, the model
+  identifier living in three untied places, and the stale Care-landing
+  docstring.
+
+That last one is the only candidate E3 cannot take even in principle: it
+needs a light-lane ticket touching `frontend/src/routes/care/`, and E3 has no
+light-lane work.
 
 ## What E3 deliberately does not do
 
