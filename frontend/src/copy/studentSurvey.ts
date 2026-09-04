@@ -86,10 +86,13 @@ export const STUDENT_SURVEY_COPY = {
   'student_survey.session_ended_body':
     'This page is not signed in, so it cannot say what is due. Open Pulse Surveys from inside your course in the LMS, and this week’s questions will be here.',
 
-  // The mono eyebrow (docs/DESIGN_BRIEF.md: "WK 07 / 12 · closes Sun 11:59 PM").
-  // Three words, because the numbers beside them are the API's.
-  'student_survey.week_label': 'WK',
-  'student_survey.term_week_label': 'TERM',
+  // The mono eyebrow. SPEC §2.2's two week axes, each named in words — the
+  // owner's ruling of 2026-09-03, after "TERM 03" had to be explained to them.
+  // The week numbers are the API's and arrive through `fillCopy`; the comma
+  // belongs to the first string rather than to the component, so the whole of
+  // what a reader sees is inside this inventory and the §4.1 sweeps read it.
+  'student_survey.course_week_eyebrow': 'COURSE WK {week},',
+  'student_survey.term_week_eyebrow': 'TERM WK {week}',
   'student_survey.closes_label': 'closes',
 
   // The Likert scale's ends. The scale's *values* are the question's bounds.
@@ -184,6 +187,15 @@ export const STUDENT_SURVEY_COPY = {
   'student_survey.section_closed_title': 'Nothing to answer here right now',
   'student_survey.section_closed_body':
     'When the next survey for this course opens, it appears here.',
+  // The same sentence for a section that has a window ahead of it, which is the
+  // ordinary case: the system holds the row and the sentence above was
+  // withholding it (the owner's ruling of 2026-09-03). `{time}` and `{day}` are
+  // filled by the screen from the next window's instant, read in the
+  // institution's zone — the zone abbreviation is derived from the date by
+  // `Intl.DateTimeFormat` and is written down nowhere, because a survey opening
+  // at six in October and six in November is two different offsets.
+  'student_survey.section_closed_body_dated':
+    'When the next survey for this course opens at {time} on {day}, it appears here.',
 
   // There is deliberately no entry for what a 409 says. The window shutting
   // under an open form, a week already recorded, and a judged comment that
@@ -209,9 +221,12 @@ export function copy(key: StudentSurveyCopyKey): string {
 /**
  * One entry with its `{placeholders}` filled in.
  *
- * The only entry that takes any is the slider's range hint, whose numbers come
- * off the question row. The substitution lives here rather than in the component
- * so that the sentence and the shape of its holes stay in one file.
+ * Four entries take them: the slider's range hint, whose numbers come off the
+ * question row; the two week eyebrows, whose numbers come off the read answer;
+ * and the dated closed-section sentence, whose two halves are formatted by the
+ * screen from the next window's instant. The substitution lives here rather than
+ * in the components so that a sentence and the shape of its holes stay in one
+ * file.
  */
 export function fillCopy(
   key: StudentSurveyCopyKey,

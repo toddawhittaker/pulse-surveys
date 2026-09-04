@@ -1,10 +1,11 @@
-"""SPEC §4.1 item 1, over the field E2-17 item 5 adds — ticket E2-17.
+"""SPEC §4.1 item 1, over the field E2-17 item 5 adds — tickets E2-17 and FIX-01.
 
 Item 1: "Students never see comparables, benchmarks, university averages, or
 **other sections** — in charts, text, tooltips, exports, or aria labels." E2-17
 adds a course label to the one student-visible read path, and a label is built by
-joining *upward* out of the section — section → course → prefix — which is the
-first widening anything has asked of that query since it was written.
+joining *upward* out of the section — section → course → prefix, and since FIX-01
+item 2 section → term as well — which is the first widening anything has asked of
+that query since it was written.
 
 **`app.services.survey_read`'s join is deliberately narrow, and its own docstring
 says so**: widening it is how another person's sections reach a student's page,

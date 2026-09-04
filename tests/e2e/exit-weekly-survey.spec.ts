@@ -98,7 +98,8 @@ const SECTION_BLOCK = `survey-section-${SECTION_CODE}`;
 // `week.number` is the *term* week — `tests/fixtures/survey_windows.py` seeds the
 // eighteen `week` rows of Fall 2026 by that number — so 7 is what a `response`
 // written in this window points at, and `TERM_WEEK` is the number the screen
-// prints beside `WK 04`.
+// prints beside the course week, as `COURSE WK 04, TERM WK 07` (FIX-01's owner
+// ruling of 2026-09-03; it read `WK 04 / TERM 07` before).
 const INSIDE_THE_WINDOW = '2026-10-02T19:00';
 const COURSE_WEEK = '04';
 const TERM_WEEK = 7;
@@ -339,8 +340,12 @@ test('a valid submission leaves one response and a real classification for every
   // is also what says the clock moved and the window is the one this spec means:
   // with the override cleared, today is not week 4 of a section that had not
   // started.
-  await expect(block).toContainText(`WK ${COURSE_WEEK}`);
-  await expect(block).toContainText(`TERM 0${TERM_WEEK}`);
+  //
+  // **Respelled by FIX-01's owner ruling of 2026-09-03**, which names both of
+  // §2.2's axes in words: `WK 04 / TERM 07` became `COURSE WK 04, TERM WK 07`.
+  // The numbers are unchanged and so is what this assertion is for.
+  await expect(block).toContainText(`COURSE WK ${COURSE_WEEK},`);
+  await expect(block).toContainText(`TERM WK 0${TERM_WEEK}`);
   await expectTheFormIsShowing(block);
 
   // Two ratings above SPEC §3.2's "Required if Q ≤ 2" threshold, so both comments

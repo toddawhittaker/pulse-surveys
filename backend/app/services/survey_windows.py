@@ -382,6 +382,51 @@ def open_window_for_section(
     ).first()
 
 
+def next_window_for_section(
+    session: Session,
+    section: Section,
+    *,
+    settings: Settings,
+    at: datetime | None = None,
+) -> SurveyWindow | None:
+    """The first of a section's windows that has not opened yet, or `None` — FIX-01.
+
+    A closed section's placeholder says when the next survey opens, and this is
+    the row that sentence is built out of. The answer is the *materialized*
+    windows and nothing else (ADR 0111): a section whose rows stop at term week
+    13 has nothing coming next, whatever the term calendar says about week 14.
+
+    **Strictly after, never at.** `open_window_for_section` reads both ends of a
+    window inclusively, so at exactly `opens_at` the survey is open — that
+    instant belongs to "open" and never to "next". A `>=` here would give a
+    student a page offering this week's form and, beside it, announcing when the
+    next survey starts. It is one character, and the only way to stand on the
+    instant is the `at` seam below, because ADR 0109's development clock is an
+    offset that keeps moving.
+
+    **The section is named in the `WHERE` clause.** SPEC §4.1 item 1: a student
+    is never shown another section, and the minute a page announces is a fact
+    about somebody's course calendar. A lookup ordered by `opens_at` with no
+    section predicate — or joined to the course, the term or the week — answers
+    the earliest window in the term, which is a sibling section's as often as
+    not.
+
+    **`at` and its naive refusal are `open_window_for_section`'s**, through the
+    shared `_reading_instant`: the same parameter, the same seam, and the same
+    `ValueError` on a datetime carrying no offset.
+
+    The order is ascending and fixed rather than left to the database, for the
+    reason its sibling gives: which row comes back must not depend on how the
+    rows happen to be stored.
+    """
+    instant = _reading_instant(session, at, settings=settings)
+    return session.scalars(
+        select(SurveyWindow)
+        .where(SurveyWindow.section_id == section.id, SurveyWindow.opens_at > instant)
+        .order_by(SurveyWindow.opens_at)
+    ).first()
+
+
 def open_windows_now(session: Session, *, settings: Settings) -> dict[UUID, SurveyWindow]:
     """Every section's open window right now, keyed by section id.
 

@@ -67,6 +67,22 @@ SURVEY_WINDOW_SERVICE_MODULE = "app.services.survey_windows"
 DERIVE_FUNCTION = "derive_windows_for_section"
 OPEN_WINDOW_FUNCTION = "open_window_for_section"
 
+# FIX-01's read-time question, settled by that ticket's work order as
+# `next_window_for_section(session, section, *, settings, at: datetime | None =
+# None) -> SurveyWindow | None` — the first materialized window for this section
+# whose `opens_at` is **strictly after** the instant. Strictly, because
+# `open_window_for_section` treats both ends of a window as inclusive: at exactly
+# `opens_at` the survey is open, so that instant belongs to "open" and never to
+# "next", and a `>=` here would give a student a page that says a survey is open
+# and also says when the next one starts.
+#
+# **Deliberately not added to the two names `survey_window_service` requires
+# below.** That fixture is asked for by every E2-06 suite, and a third required
+# name would turn each of them red on a symbol their own ticket never promised
+# (`docs/MISTAKES.md` entry 22). The module that is about this function looks it
+# up itself and fails by name.
+NEXT_WINDOW_FUNCTION = "next_window_for_section"
+
 # ---------------------------------------------------------------------------
 # The tables these fixtures seed and read. All four names are E0-06's and
 # E2-05's, not this file's.

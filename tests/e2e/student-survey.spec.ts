@@ -131,7 +131,24 @@ const REQUIRED_HELP =
 const REQUIRED_FLAG = 'Needed to submit';
 const SUBMITTED_TITLE = 'Your pulse is in';
 const SECTION_CLOSED_TITLE = 'Nothing to answer here right now';
-const SECTION_CLOSED_BODY = 'When the next survey for this course opens, it appears here.';
+
+// The closed-section placeholder, **as FIX-01's owner ruling of 2026-09-03
+// respells it**: the sentence names the instant the next survey opens, in the
+// institution's timezone, with the zone abbreviation derived from the date.
+//
+// It reads this way *at this spec's `AFTER_THE_WINDOW`* and not in general.
+// Transcribed from the seeded calendar, like every other constant in this file
+// (`docs/MISTAKES.md` entry 19): at 09:00 on Monday 5 October 2026 term week 7's
+// window has closed, term week 8 runs the 5th to the 11th, and SPEC §3.1 opens
+// its survey on Friday the 9th at 18:00 in `America/New_York` — where daylight
+// time is still in force, so the abbreviation is EDT.
+//
+// **The undated sentence this constant used to hold is not gone from the
+// product**; it is what a section with no future window still says, and it is
+// asserted in `student-survey-heading-and-next-window.spec.ts` where that state
+// can be posed. Here the section is mid-term and has one four days ahead.
+const SECTION_CLOSED_BODY =
+  'When the next survey for this course opens at 6:00PM EDT on Friday, October 9, it appears here.';
 
 // What a read the server refused says, and the sentence it must never say
 // instead. E2-10's security review: a 401 that renders the calm empty-week state
@@ -241,8 +258,14 @@ test('a student answers all five questions, the slider by keyboard, and the week
   // is also the assertion that says the clock moved and the window is the one
   // this spec means: with the override cleared, today is not week 4 of a section
   // that had not started.
-  await expect(block).toContainText(`WK ${COURSE_WEEK}`);
-  await expect(block).toContainText(`TERM ${TERM_WEEK}`);
+  //
+  // **Respelled by FIX-01's owner ruling of 2026-09-03**, which names both axes
+  // in words: `WK 04 / TERM 07` became `COURSE WK 04, TERM WK 07`. The two halves
+  // are matched separately, as they always were here, because they render as two
+  // spans; the ruled string as a whole — comma and order included — is asserted
+  // in `student-survey-heading-and-next-window.spec.ts`.
+  await expect(block).toContainText(`COURSE WK ${COURSE_WEEK},`);
+  await expect(block).toContainText(`TERM WK ${TERM_WEEK}`);
 
   await expectTheFormIsShowing(block);
 

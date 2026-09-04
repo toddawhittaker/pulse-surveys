@@ -1,16 +1,33 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 11**
+**Caught: 12**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*11 instances recorded; the 6 most recent are below, newest first — except the
+*12 instances recorded; the 7 most recent are below, newest first — except the
 E0-18 PR 2 one, which sits further down beside the consequence it illustrates.
 The 5 earliest are in this file's git history and in the pull requests they cite.
-It carries six rather than five because the newest and the E2-05 one are the same
-inventory in the same module a ticket apart, and reading either without the other
-loses what the pair shows; a trim is due and it should take a pair, not a
-paragraph.*
+It carries seven rather than three because the E2-16 one and the E2-05 one are
+the same inventory in the same module a ticket apart, and reading either without
+the other loses what the pair shows; **the trim is overdue and it should take
+that pair together**, not a paragraph off the end.*
+
+*(**2026-09-03, FIX-01 (`fix/student-surface-copy`), caught before anything was
+written.** FIX-01 adds a second read-time question to
+`app.services.survey_windows` — `next_window_for_section`, beside E2-06's
+`open_window_for_section`. The obvious place to name it is
+`tests/fixtures/survey_windows.py`, whose `survey_window_service` fixture
+already looks `derive_windows_for_section` and `open_window_for_section` up and
+`pytest.fail`s by name when either is missing. That fixture is asked for by
+every E2-06 suite and by E2-08's submit-machinery module, so a third required
+name would have failed all of them **inside their own setup**, on a symbol their
+own tickets never promised, with the repair on the read-only side of the wall —
+this entry's shape exactly. Acting on the entry, the test author read the
+fixture before editing it: the constant is added there so a rename stays one
+line, and the *lookup* lives in FIX-01's own module, which fails by name for the
+one suite that is about the new function. Counted as a catch: without it the
+implementer's first run would have been a wall of red E2-06 tests reading as a
+defect in window scheduling, and they may not have edited a line of it.)*
 
 *(**2026-09-03, E2-16 (`e2/data-model-repairs`), disputes E2-16-01 and
 E2-16-02.** The ticket gives `response` the term-agreement rule `survey_window`

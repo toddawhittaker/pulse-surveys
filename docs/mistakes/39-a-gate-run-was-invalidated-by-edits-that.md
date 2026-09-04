@@ -77,3 +77,25 @@ full run an hour earlier. Had it appeared in a run I had edited under, the
 obvious diagnosis would have been my own edit, and the real defect — a test
 whose expected boundary is computed before two RSA signatures — would have gone
 back to sleep.
+
+**FIX-01, 2026-09-03 — the record corrections that waited four and a half
+minutes, and the sweep that named a file.** The green run of
+`pytest tests/unit tests/integration -n 4` was under way and the ticket's record
+corrections were drafted and ready: a docstring paragraph in
+`backend/app/services/survey_read.py`, one in
+`frontend/src/components/WeekEyebrow.tsx`, and two stylesheet comments. Prose
+only, and the temptation was the same one E1-11 records — documentation cannot
+change a Python result.
+
+It could have, in a way specific to what that run found. The run came back with
+one failure:
+`tests/unit/test_the_org_views_are_read_only_through_the_grant.py::test_no_module_outside_the_sanctioned_locations_runs_sql_naming_a_policed_relation`,
+reporting `{'backend/app/schemas/student.py': ['section']}` — a sweep that parses
+**every** module under `backend/app/` and reports the offenders **by path**. One
+of the queued edits was to a docstring in a module in that sweep's set. Landing
+it at minute two would have meant a failure naming a file, listing a relation,
+over a tree where one of the parsed modules had moved underneath the parse —
+with no way to tell whether the offending string was the schema's `Field`
+description or the paragraph I had just written, and the fix for the wrong one
+would have looked like it worked. The edits went in after the run, and the
+single offender was then unambiguous and one word wide (entry 43).
