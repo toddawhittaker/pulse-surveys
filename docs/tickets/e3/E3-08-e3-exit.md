@@ -109,12 +109,21 @@ Named here so the exit cannot forget them.
   helper copy says written feedback counts toward full participation credit
   and no shipped string says what "counts" now costs. E3 ships no student
   surface and no instructor surface, so the AGS score comment's ledger is the
-  entire disclosure. **Owner:** E8's student results view for the student
-  half and E4's report surfaces for the instructor half, whichever ships
-  first taking the copy question with it; §4.1 items 4 and 5 and the copy
-  inventory govern whatever eventually says it. **Done when:** a student can
-  read, on a Pulse surface, what a week's participation credit is made of and
-  what leaving an optional comment blank costs.
+  entire disclosure, and ADR 0125 records that instructors read that ledger
+  too. **Owner:** E8's student results view for the student half and E4's
+  report surfaces for the instructor half, whichever ships first taking the
+  copy question with it; §4.1 items 4 and 5 and the copy inventory govern
+  whatever eventually says it. **Done when:** a student can read, on a Pulse
+  surface, what a week's participation credit is made of and what leaving an
+  optional comment blank costs.
+- **Comment de-anonymization by completion pattern**, accepted in ADR 0125 on
+  the ground that a weekly-updated score already carries the same signal.
+  **Owner:** E4 and E6, the epics that render comments beside a roster, which
+  read that record when deciding whether their own suppression rules are
+  sufficient. **Done when:** each has stated in writing that its suppression
+  holds against a reader who also has the gradebook open, or has changed what
+  it suppresses. Nothing is owed inside E3; the entry exists so the accepted
+  risk arrives with the surfaces that could realize it.
 - **The rewound-clock family**, re-carried with whatever E3-06 and E3-07
   learned about the passback's own interaction with it.
 - **Every open entry of `carried-from-e2.md`** that E3 did not close.

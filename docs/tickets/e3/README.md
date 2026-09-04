@@ -93,8 +93,8 @@ defaults a ticket may depart from only by saying so.
    posts when the computed value differs from the value in the latest
    `grade_sync` row for that student and section, and posts nothing
    otherwise. A weekly beat entry is the ordinary trigger rather than the
-   definition of the work, because a score is not
-   final when its week closes: E2-08's asynchronous reclassification can
+   definition of the work, because a score is not final when its week
+   closes: E2-08's asynchronous reclassification can
    change an already-posted week's numerator weeks later.
 9. **A student launch never causes a write to the platform's gradebook.**
    Line-item creation follows §7.3's roster-trigger rule exactly — an
@@ -119,7 +119,7 @@ defaults a ticket may depart from only by saying so.
 | 03 | [The participation formula](E3-03-participation-formula.md) | `e3/participation-formula` | none | `services/grading.py` as a pure computation: elapsed weeks under §3.4's tiers, the item numerator and denominator, the percentage, the ledger string, and the Hypothesis properties §9.1 asks for. | |
 | 04 | [The AGS client, and the mock's AGS routes start asking for a token](E3-04-ags-client-and-mock-enforcement.md) | `e3/ags-client-and-mock-enforcement` | 02 | `lti/ags.py` on the roster sync's conformance shape, line-item find-or-create against querified ids, and ADR 0099's pairing made structural rather than promised. | |
 | 05 | [The line item is created on the first staff launch](E3-05-line-item-on-first-launch.md) | `e3/line-item-on-first-launch` | 02, 04 | §3.4's "created by the tool on first launch" wired to the launch door on the bounded enqueue shape, with a student launch writing nothing. | |
-| 06 | [The weekly recompute posts a score when it has changed](E3-06-weekly-recompute-and-post.md) | `e3/weekly-recompute-and-post` | 03, 04, 05 | The beat entry and the thin task: walk the sections, compute, compare against last sent, post, record, retry. Drops stop posting. | |
+| 06 | [The weekly recompute posts a score when it has changed](E3-06-weekly-recompute-and-post.md) | `e3/weekly-recompute-and-post` | 03, 04, 05 | The beat entry and the thin task: walk the sections, compute, compare against the latest recorded send, post, append, retry. Drops stop posting. | |
 | 07 | [A development trigger for passback, and the CSRF route sweep](E3-07-dev-trigger-and-csrf-sweep.md) | `e3/dev-trigger-and-csrf-sweep` | 06 | The `/dev` control that makes the epic drivable in a browser on the dev clock, and the carried CSRF item whose red case this epic's first mutating route finally makes honest. | |
 | 08 | [E3 exit](E3-08-e3-exit.md) | `e3/e3-exit` | all | §14.3's exit clause driven end to end across every enrollment edge case; boundary reviews; `../e4/carried-from-e3.md`. | |
 
@@ -232,8 +232,10 @@ Named so scope creep has something to push against. Each item has an owner.
 - **Any student-facing or instructor-facing explanation of the credit rule** —
   E8's results view and E4's report surfaces. The item denominator makes a
   blank optional comment cost real credit and nothing E3 ships says so to
-  anybody; the score comment's ledger is the whole disclosure. This is carried
-  forward explicitly by E3-08 rather than left to be discovered.
+  anybody; the score comment's ledger is the whole disclosure, and ADR 0125
+  records that the ledger is read by instructors as well as students. What is
+  missing is an explanation to the student, and it is carried forward
+  explicitly by E3-08 rather than left to be discovered.
 - **The job dashboard, the AGS call-log view, and the LTI health surface** —
   E11's, per §6.1. E3 writes the `ags_call` rows those views will read and
   renders none of them.

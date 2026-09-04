@@ -27,9 +27,12 @@ already been posted. So "recompute after each week closes" as a literal
 schedule is wrong some of the time, silently.
 
 **Ruled at breakdown, 2026-09-04:** the recompute is an idempotent sweep that
-posts when the computed value differs from what `grade_sync` records as last
-sent, and posts nothing otherwise. The weekly beat entry is the ordinary
-trigger for that sweep, not the definition of the work.
+posts when the computed value differs from the value in the latest
+`grade_sync` row for that student and section, and posts nothing otherwise.
+The weekly beat entry is the ordinary trigger for that sweep, not the
+definition of the work. `grade_sync` is append-only (ADR 0124), so the
+comparison is a lookup of the most recent row rather than a read of a stored
+current value.
 
 Read first: SPEC §3.4, §6.1; ADR 0052 (an equal score timestamp is accepted
 as a retry — the identity this ticket must not collide with), ADR 0109 (the
