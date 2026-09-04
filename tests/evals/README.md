@@ -29,8 +29,8 @@ service, and neither costs anything or leaves the machine.
 
 ## What it costs
 
-One model call per case, per graded task. The comment-validity set is 98 cases,
-so a full run is 98 calls — cents, not dollars, at any provider this project
+One model call per case, per graded task. The comment-validity set is 108 cases,
+so a full run is 108 calls — cents, not dollars, at any provider this project
 would use. The design that keeps it that way is the firing condition above:
 hundreds of live calls on every merge is exactly what this arrangement refuses.
 

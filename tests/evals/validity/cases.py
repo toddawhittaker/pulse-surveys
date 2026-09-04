@@ -261,6 +261,39 @@ _NONSENSE = (
     "zzzzzzzz zzzzzzzz zzzzzzzz",
     "blah blah blah blah blah blah",
     "poiuytrewq lkjhgfdsa mnbvcxz",
+    # Fluent off-topic English — ten cases added 2026-09-03, ticket FIX-02.
+    #
+    # Grammatical English a reader instantly sees is not about the course: the two
+    # strings found by the owner on 2026-09-03, a famous quotation, lines shaped like
+    # song lyrics, weather and lunch small talk, and a proverb. SPEC §3.3's verdict for
+    # all ten is `nonsense` — the comment "did not come through as a comment about the
+    # course" — and not one of them is keyboard mash, lorem or emoji, which is
+    # everything this family held before.
+    #
+    # **Why the group exists.** The first two below went through the development stack
+    # unremarked on 2026-09-03. In development that is by design and stays that way:
+    # ADR 0113's mock reads its answer out of a `mock-ai:` marker, so a marker is the
+    # only route to `nonsense` there and what the mock does with fluent prose is not a
+    # question about the product. The question is what the real model does, and this
+    # set could not answer it — every nonsense case was mash, lorem, digits or
+    # punctuation, so whether the floors in `floors.py` hold over fluent off-topic
+    # English was unmeasured. Unmeasured is the state this set exists to remove.
+    #
+    # Lengths straddle the twenty-five character floor as the rest of the family does.
+    # Three of the ten sit under it, where §3.3's rule already withholds credit and the
+    # model has only to agree; seven sit at or over it, where the rule awards credit and
+    # only a classifier can take it back — and one of those seven is exactly
+    # twenty-five characters, the count at which the heuristic changes its mind.
+    "A man a plan a canal panama",
+    "Four score and seven years ago",
+    "To be or not to be, that is the question.",
+    "Rolling down that lonesome road again",
+    "Sing me a song tonight.",
+    "It is raining again.",
+    "It looks like rain again this afternoon.",
+    "I had soup for lunch.",
+    "The sandwiches at the corner shop are cheaper on Fridays.",
+    "A watched pot never boils",
 )
 
 # ---------------------------------------------------------------------------

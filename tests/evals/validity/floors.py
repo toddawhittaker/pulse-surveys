@@ -5,6 +5,21 @@ answered by the model under `validity.v2`, none stamped by §3.3's character flo
 so nothing in the figures below came from the twenty-five-character rule the set
 exists to beat.
 
+**`cases.py` holds 108 cases as of this change, and every measured figure on this
+page was taken over the 98.** FIX-02 adds ten fluent off-topic English comments to
+the `nonsense` family, because nothing in the set measured whether the model
+refuses grammatical prose that is not about the course. A re-measurement over the
+new composition is being taken in this same change; its figures land in a
+follow-up commit, here and in the `note` below, and until that commit arrives
+every pair, agreement count and variance figure written down here is one measured
+over the 98-case composition and is labelled as such rather than restated as a
+measurement of the set that ships. What does not wait for the run is the
+arithmetic: the new cases are negatives, the derivation over the new denominators
+is under "The floors" below, and it is what says the recorded values still fit the
+set they now govern. The floor values themselves do not move either way — a breach
+found by the new run is a finding about the model, reported rather than resolved by
+lowering a number (`CLAUDE.md`), and any resizing is E10's revisit.
+
     positive class `substantive` (ADR 0119)
     precision 1.000000   tp 53  fp 0
     recall    0.981481   fn 1   tn 44
@@ -93,6 +108,14 @@ prompt these floors govern. The exact-agreement counts differ by one and that is
 not the figure: a case can move without changing whether it agrees, and one of
 these two did exactly that.
 
+**That figure keeps its provenance across FIX-02's composition change.** It was
+measured over two runs of the 98-case composition, and it carries over as the
+standing estimate until runs over the 108 exist to replace it. It is not restated
+as a figure measured on 108 — nothing has measured that yet, and a variance
+allowance is exactly the kind of number that acquires a denominator it was never
+taken over if the sentence is quietly rewritten. When runs over the new
+composition exist, the figure is re-derived from them and this paragraph goes.
+
 **An earlier version of this section said one case, and founded the rule on a
 mini/`validity.v1` pair** — a figure from a boundary this same file declares
 non-portable. A security review caught the provenance; a re-check against both CI
@@ -138,6 +161,24 @@ threshold of two, which is the flaky-gate state rule 3 exists to prevent.
     recall    0.90   49/54     = 0.9074 passes — five total misses tolerated,
                                                  which is four new ones
                      48/54     = 0.8889 fails  — the sixth fires
+
+**Re-derived over the 108-case composition, and neither line above moves.** FIX-02
+adds ten cases and all ten are negatives, so the set goes from 54 positives and 44
+negatives to 54 positives and 54 negatives, and from 98 cases to 108. Recall is a
+rate over the positive class and the positive class did not move: 49/54 and 48/54
+are the same two lines they were, tolerating the same five total misses. Precision's
+tolerated count comes from the positive-class count as well, not from the negatives
+— the tolerance is four false positives measured against tp 53, so 53/(53+4)=0.9298
+passes and 53/(53+5)=0.9138 fails whatever the negative count is, and both remain
+reachable because 54 negatives is far more than five.
+
+So the tolerance has not moved and must not be read as having moved. What the ten
+new negatives add is ten more *opportunities* to make a false positive under the
+same allowance of four: a model that reaches for `substantive` on fluent off-topic
+English now has ten more cases on which it can do so, and the same four-error budget
+to do it in. That is the floors becoming effectively tighter without a value
+changing, which is the cheap direction — and it is why a composition change of this
+shape may keep the numbers it was measured with while the re-measurement is taken.
 
 **These may tighten later, and that direction is the cheap one.** The variance
 allowance is two because two runs measured two cases; more runs refine that figure,
@@ -207,13 +248,16 @@ FLOORS: TaskFloors = enforced(
     precision=0.92,
     recall=0.90,
     note=(
-        "Measured against validity.v2 on gpt-5.6-luna over the 98 cases in cases.py, in "
-        "one clean run — a single run, not an average — where every case was answered by "
-        "the model and none by §3.3's character floor: precision 1.000000 (tp 53, fp 0), "
-        "recall 0.981481 (fn 1, tn 44). The measured run-to-run variance is two cases in "
-        "ninety-eight, on this same model and this same prompt, from two independent runs "
+        "Measured against validity.v2 on gpt-5.6-luna over the 98 cases cases.py held "
+        "before FIX-02, in one clean run — a single run, not an average — where every case "
+        "was answered by the model and none by §3.3's character floor: precision 1.000000 "
+        "(tp 53, fp 0), recall 0.981481 (fn 1, tn 44). The measured run-to-run variance is "
+        "two cases in ninety-eight, on this same model and this same prompt, from two "
+        "independent runs "
         "— the fill measurement at 96/98 exact agreement and CI run 33679136272 on commit "
-        "5f6a927 at 97/98. Both ls-025 and lv-008 answered nonsense in the first and "
+        "5f6a927 at 97/98; it was taken over that same 98-case composition and carries over "
+        "as the standing estimate until runs over the 108 exist. "
+        "Both ls-025 and lv-008 answered nonsense in the first and "
         "insufficient in the second; the agreement counts differ by one only because "
         "ls-025 was wrong either way, which is why the count is not the figure. Neither "
         "rate moved, and the allowance is still granted to each separately: ls-025 is a "
@@ -232,6 +276,13 @@ FLOORS: TaskFloors = enforced(
         "negative is shown to the student and recoverable, a false positive is silent "
         "credit that reaches §3.4's passback. The model name pins no snapshot — no dated "
         "gpt-5.6-luna exists — so these figures do not fix a set of weights, and that is a "
-        "known gap rather than an oversight."
+        "known gap rather than an oversight. "
+        "cases.py holds 108 cases as of FIX-02, which added ten fluent off-topic English "
+        "comments to the nonsense family: all ten are negatives, so the positive class "
+        "stays at 54 and both lines of arithmetic above are unmoved while the negatives go "
+        "from 44 to 54 — ten more opportunities for a false positive under the same "
+        "tolerance of four. Every figure in this note was measured over the 98; the "
+        "re-measurement over the 108 is being taken in the same change and its figures land "
+        "in a follow-up commit."
     ),
 )
