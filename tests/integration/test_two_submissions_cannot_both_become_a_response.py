@@ -187,7 +187,8 @@ def test_a_submission_that_meets_an_uncommitted_response_is_refused_as_a_duplica
     handler's `IntegrityError` translation dropped, so the violation escapes as a
     500. It also kills the check-then-insert written with no constraint behind it,
     which under two writers stores two rows for one week — two votes in every §5
-    aggregate while §3.4's participation denominator stays at one.
+    aggregate, and two sets of `answer` rows for a week that has one set of items
+    to complete under §3.4.
     """
     world = submit_world.build(opens_at=open_now[0], closes_at=open_now[1])
     client = open_submit_tool(ai_base_url=mock_ai_endpoint.base_url)
@@ -304,6 +305,6 @@ def test_a_submission_that_meets_an_uncommitted_response_is_refused_as_a_duplica
     ]
     assert len(stored) == 1, (
         f"There are {len(stored)} responses for one (student, section, week): {stored}. SPEC §8 "
-        "makes that triple unique, and two rows are two votes in every §5 aggregate while §3.4's "
-        "participation denominator stays at one week."
+        "makes that triple unique, and two rows are two votes in every §5 aggregate and two sets "
+        "of `answer` rows for a week that has one set of items to complete under §3.4."
     )
