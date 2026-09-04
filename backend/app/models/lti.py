@@ -130,9 +130,35 @@ AUTH_TOKEN_URL_COLUMN = "auth_token_url"  # noqa: S105 - a column name, not a cr
 # `isinstance(str)` check, and `169.254.169.254` was a value a launch could name.
 ROSTER_SERVICE_ADDRESS_COLUMN = "lms_context_memberships_url"
 
-# The three this container fetches, as opposed to the one it hands to a browser.
+# E3-02's two gradebook addresses, which are not registration columns either and
+# which reach these rules for the same reason the roster address does.
+#
+# `section.lms_ags_line_items_url` is the AGS line-item **container** for one
+# launched context. It arrives on a staff launch as the `lineitems` member of the
+# AGS endpoint claim and is stored exactly as the roster address is; the platform
+# publishes it and Pulse never edits it, which is what the `lms_` marker means (ADR
+# 0014). `section.ags_line_item_url` is the id of the line item this tool
+# **creates** in that container — SPEC §3.4's one line item per section — which is
+# Pulse's own doing and so carries no marker. E3-02 adds both columns and writes
+# only the first; E3-05 is the writer of the second.
+#
+# Both are addresses this container fetches with the tool's own client credentials,
+# on a schedule, with nobody present: E3-04 lists and creates in the container, and
+# E3-05 and E3-06 post scores to the line item. That is the same server-side
+# request forgery surface the roster address is, arriving through a second claim,
+# so the answer is these same enumerations rather than a second scheme beside them.
+AGS_CONTAINER_ADDRESS_COLUMN = "lms_ags_line_items_url"
+AGS_LINE_ITEM_ADDRESS_COLUMN = "ags_line_item_url"
+
+# The five this container fetches, as opposed to the one it hands to a browser.
 # Rules 3 and 4 below are the whole of that distinction.
-FETCHED_COLUMNS = (JWKS_URL_COLUMN, AUTH_TOKEN_URL_COLUMN, ROSTER_SERVICE_ADDRESS_COLUMN)
+FETCHED_COLUMNS = (
+    JWKS_URL_COLUMN,
+    AUTH_TOKEN_URL_COLUMN,
+    ROSTER_SERVICE_ADDRESS_COLUMN,
+    AGS_CONTAINER_ADDRESS_COLUMN,
+    AGS_LINE_ITEM_ADDRESS_COLUMN,
+)
 
 # The columns loopback is refused on, and E1-11's security round widened it. Rule 3
 # began as `authorization_endpoint` alone — the one address a *browser* resolves, so
@@ -148,7 +174,20 @@ FETCHED_COLUMNS = (JWKS_URL_COLUMN, AUTH_TOKEN_URL_COLUMN, ROSTER_SERVICE_ADDRES
 # operator never pointed the tool at — the textbook server-side request forgery. ADR
 # 0096 records why the two fetched columns split here where rule 4 (link-local) keeps
 # them together.
-LOOPBACK_REFUSED_COLUMNS = (AUTHORIZATION_ENDPOINT_COLUMN, ROSTER_SERVICE_ADDRESS_COLUMN)
+#
+# **E3-02's two gradebook addresses join it, and the split decides them the same
+# way.** ADR 0096 admits loopback on the columns an *operator* writes by hand and
+# refuses it on the ones a *platform* chooses at run time. Both gradebook addresses
+# are the platform's: the container is advertised in a launch claim, and the line
+# item's own id is whatever the platform answers when this tool creates one. So a
+# loopback in either is a service on this container that nobody registered, which
+# is the request forgery the roster address's own round found.
+LOOPBACK_REFUSED_COLUMNS = (
+    AUTHORIZATION_ENDPOINT_COLUMN,
+    ROSTER_SERVICE_ADDRESS_COLUMN,
+    AGS_CONTAINER_ADDRESS_COLUMN,
+    AGS_LINE_ITEM_ADDRESS_COLUMN,
+)
 
 # The port rule 5's resolution is asked under. `getaddrinfo` wants a service as
 # well as a host, and every address judged here is opened over TLS in the case
@@ -1141,6 +1180,20 @@ class LaunchDefectKind(StrEnum):
     # record of a launch that did not reach it — the launch itself still lands,
     # and it is the *binding* that was refused (ADR 0108).
     CONTEXT_OUTSIDE_PURVIEW = "context_outside_purview"
+    # E3-02's, and the exact mirror of `ROSTER_ADDRESS_REFUSED` above. A launch
+    # advertises its AGS line-item container in the endpoint claim, the address is
+    # judged by the same rules the roster address passes, and one those rules will
+    # not let this container fetch leaves `section.lms_ags_line_items_url` NULL and
+    # is recorded here. The launch itself still lands.
+    #
+    # **It is a different fact from the two states beside it**, which is why it is
+    # a kind of its own rather than a second use of the roster kind. A section
+    # whose platform advertised no AGS claim at all has no gradebook address and no
+    # fault — SPEC §7.3's never-synced shape, applied to the gradebook — and E11's
+    # surface has nothing to ask anybody to do about it. This kind says the
+    # opposite: an address *was* advertised and this deployment will not call it,
+    # which is a conversation with whoever configured the platform.
+    AGS_ADDRESS_REFUSED = "ags_address_refused"
 
 
 class LaunchDefect(UuidPrimaryKey, Base):
@@ -1340,4 +1393,92 @@ class NrpsCall(UuidPrimaryKey, Base):
     # single transaction — a server default would give a paged walk one timestamp
     # for every page, which is true of the transaction and not of the calls.
     # `AwareDateTime` refuses a naive value at the bind boundary (ADR 0019).
+    called_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)
+
+
+class AgsCall(UuidPrimaryKey, Base):
+    """One HTTP call this tool made to a section's AGS service (E3-02).
+
+    SPEC §6.1 puts "NRPS and AGS call logs with response codes — `nrps_call` and
+    `ags_call` respectively, each at the grain of one HTTP call the tool made to a
+    platform service" on the admin console, and only the NRPS half was ever built.
+    This is the other half, and `NrpsCall` above is the model it is copied from
+    rather than merely resembles: read that docstring first, because every piece of
+    reasoning it gives about the grain and about `response_code` is repeated here
+    unchanged and is not re-argued.
+
+    **The grain is one HTTP call and not one post**, which matters more here than
+    it does for the roster. Posting one score is two calls in the ordinary case —
+    the token endpoint, then the score — and creating the section's line item is
+    another two before either. An operator looking at a gradebook that stopped
+    updating needs to see which of those failed, and a row per post cannot say.
+    `grade_sync` in `app.models.grades` is the per-post record beside this one; the
+    two answer different questions and neither is derivable from the other.
+
+    **`response_code` is nullable and NULL has exactly one meaning: the call never
+    reached the platform.** That is `NrpsCall`'s semantics for the same column and
+    it is deliberately identical, so E11's console reads one idea rather than two.
+    A transport failure and a refusal are different facts on that surface — one is
+    a network, one is a registration — so a 401 recorded as NULL would be a tool
+    being refused every hour that reads as an unreachable host.
+
+    **`url` is always the AGS address; `response_code` is sometimes the token
+    endpoint's**, and that pairing is `NrpsCall`'s too (ADR 0095). When the token
+    endpoint refuses, the gradebook is never asked at all, so there is one row,
+    under the address the call was for, carrying the status the token endpoint
+    answered. A row filed under an OAuth address would be a row about the
+    platform's credential surface in the middle of one section's gradebook history.
+
+    **No count column.** `NrpsCall` carries `members_seen` because a roster page
+    has a size worth recording and because "synced but empty" is a state SPEC §7.3
+    names. An AGS call has no such number — a score post carries one score, and a
+    container listing is walked for one line item — so nothing here would read it.
+    E3-04 and E3-06 are the tickets that make the calls, and a column added now for
+    them to fill is a column added before anybody knows what would go in it.
+
+    **Not LMS-owned, so no `guard_write` and no sanction.** SPEC §2.1's ownership
+    list is courses, sections, section codes, enrollments and teaching instructors;
+    this is Pulse's own record of what Pulse did, exactly as `nrps_call` and
+    `launch_defect` are.
+
+    **Not a person table.** A section reference, a URL, an HTTP status and a
+    timestamp — no subject, no name, no address, and no reference to any table that
+    holds one — so `PERSON_TABLES` does not change and no identity-separated view
+    is owed. The person walk in
+    `tests/integration/test_identity_column_marker.py` does not reach it at all.
+
+    **Append-only by grant** (`grade_passback_grants_v001.sql`): `pulse_app` holds
+    `SELECT` and `INSERT` here and neither `UPDATE` nor `DELETE`. E13's retention
+    purge is what will trim it, on its own connection and with its own rule.
+
+    **No index beyond the primary key's, and that is a decision.** `NrpsCall`
+    carries a composite because the debounce probe reads it on the request path of
+    every staff launch, measured at 2,006 buffers against 5. Nothing reads this
+    table on a request path: E11's console is the only reader SPEC §6.1 names, it
+    is not built, and an index maintained on every insert for a query nobody runs
+    is a write nobody reads. E11 adds one when it knows its own access path.
+    """
+
+    __tablename__ = "ags_call"
+
+    # Which section's gradebook the call was about. RESTRICT, matching every other
+    # reference to `section` in this schema: losing a section should refuse rather
+    # than silently take its call history with it. No `index=True` — see the class
+    # docstring for why this table carries no index of its own yet.
+    section_id: Mapped[UUID] = mapped_column(
+        ForeignKey("section.id", ondelete="RESTRICT"), nullable=False
+    )
+    # The address actually called — the container, a line item, or the token
+    # endpoint when that is what refused. Not the section's stored address: a line
+    # item's own id is a different URL from the container it lives in, and
+    # recording the stored one would lose which of the two failed.
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    # The HTTP status the platform answered with. NULL means no answer at all: see
+    # the class docstring.
+    response_code: Mapped[int | None] = mapped_column(nullable=True)
+    # When the call was made. Written by the caller rather than defaulted, for
+    # `NrpsCall`'s reason: several calls are written in one transaction and a
+    # server default would give them all one timestamp, which is true of the
+    # transaction and not of the calls. `AwareDateTime` refuses a naive value at
+    # the bind boundary (ADR 0019).
     called_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)

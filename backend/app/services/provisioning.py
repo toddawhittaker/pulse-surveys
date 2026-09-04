@@ -93,6 +93,7 @@ from app.config import Settings
 from app.lti.launch import INSTRUCTOR_ROLE_URI, LTI_ROLES_CLAIM, stated_roles
 from app.models.identity import User
 from app.models.lti import (
+    AGS_CONTAINER_ADDRESS_COLUMN,
     ROSTER_SERVICE_ADDRESS_COLUMN,
     LaunchDefect,
     LaunchDefectKind,
@@ -134,10 +135,18 @@ LTI_CLAIM_PREFIX = "https://purl.imsglobal.org/spec/lti/claim/"
 CONTEXT_CLAIM = f"{LTI_CLAIM_PREFIX}context"
 DEPLOYMENT_ID_CLAIM = f"{LTI_CLAIM_PREFIX}deployment_id"
 NRPS_CLAIM = "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice"
+AGS_CLAIM = "https://purl.imsglobal.org/spec/lti-ags/claim/endpoint"
 
 # Where the roster service address sits inside that claim. The member name is the
 # NRPS specification's.
 MEMBERSHIPS_URL_MEMBER = "context_memberships_url"
+
+# Where the AGS line-item container sits inside the endpoint claim. The member name
+# is the Assignment and Grade Services 2.0 specification's, and the claim's other
+# members — the scopes a token may be requested for, and a line item id when the
+# platform launched into one — are not this module's business. E3-04 is what asks
+# for a token; this module only stores the address.
+LINE_ITEMS_MEMBER = "lineitems"
 
 # The three members of a context claim this module reads. `id` is the only one LTI
 # 1.3 requires; `label` and `title` are both optional, and the whole of what this
@@ -582,14 +591,44 @@ def _ingest_the_context(
         _record_defect(session, claims, LaunchDefectKind.CONTEXT_OUTSIDE_PURVIEW)
         return None
 
-    address = _an_address_this_tool_may_call(session, claims, settings)
+    address = _an_address_this_tool_may_call(
+        session,
+        claims,
+        settings,
+        _roster_address(claims),
+        column=ROSTER_SERVICE_ADDRESS_COLUMN,
+        refused=LaunchDefectKind.ROSTER_ADDRESS_REFUSED,
+        service="roster service",
+    )
+    # E3-02's gradebook address, judged on exactly the same terms and here for the
+    # same reason: this is the one path SPEC §3.4's line-item container arrives on.
+    # A launch that advertises none leaves the column NULL with no record, because
+    # a platform granting no gradebook scope is a configuration and not a fault;
+    # one that advertises an address these rules refuse leaves the column NULL and
+    # records `ags_address_refused`, which is a fault somebody can act on.
+    gradebook_address = _an_address_this_tool_may_call(
+        session,
+        claims,
+        settings,
+        _gradebook_address(claims),
+        column=AGS_CONTAINER_ADDRESS_COLUMN,
+        refused=LaunchDefectKind.AGS_ADDRESS_REFUSED,
+        service="AGS line-item container",
+    )
 
     both_or_neither = session.begin_nested()
     try:
         course = _upsert_course(session, prefix.id, label, _platform_title(claims))
         if course is not None:
             _upsert_section(
-                session, course, term, label, binding=binding, address=address, section=bound
+                session,
+                course,
+                term,
+                label,
+                binding=binding,
+                address=address,
+                gradebook_address=gradebook_address,
+                section=bound,
             )
     except SectionCodeError as refusal:
         both_or_neither.rollback()
@@ -718,16 +757,31 @@ def _section_bound_to(session: Session, binding: ContextBinding) -> Section | No
 
 
 def _an_address_this_tool_may_call(
-    session: Session, claims: Mapping[str, Any], settings: Settings
+    session: Session,
+    claims: Mapping[str, Any],
+    settings: Settings,
+    address: str | None,
+    *,
+    column: str,
+    refused: LaunchDefectKind,
+    service: str,
 ) -> str | None:
-    """The launch's roster address if this container may fetch it, and `None` if not.
+    """One address off a launch if this container may fetch it, and `None` if not.
 
-    Round 3's MEDIUM. E1-11 calls this address with the tool's own client
+    Round 3's MEDIUM. E1-11 calls the roster address with the tool's own client
     credentials, on a schedule, with nobody present, so it is judged by the same
     rules `jwks_url` and `auth_token_url` pass — through the one function that
     holds them (`docs/MISTAKES.md` entry 13), not a second copy beside it. There
     are five of those rules since ADR 0101, and the fifth resolves the host and
     judges every address it answers with.
+
+    **It takes the address rather than reading one**, because a launch now carries
+    two of them and every word below is true of both. E3-02's AGS line-item
+    container is fetched by E3-04 on the same terms, so it reaches the same rules
+    under a column of its own and records a kind of its own; `column` is what the
+    rules key on and `refused` is what the record says. Two copies of this function
+    would be entry 13 exactly — a hazard handled in one of the two places facing
+    it — and the copy that went stale would be the one nobody was looking at.
 
     **This caller names no exempt host and passes no resolver**, which is a
     decision rather than an omission (ADR 0101). In development the blanket
@@ -745,21 +799,18 @@ def _an_address_this_tool_may_call(
     the rules were written for and the message is not this module's to reword; the
     log line beside it says which address was actually refused.
     """
-    address = _roster_address(claims)
     if address is None:
         return None
     try:
-        refuse_invalid_fetched_address(
-            settings.environment, column=ROSTER_SERVICE_ADDRESS_COLUMN, address=address
-        )
+        refuse_invalid_fetched_address(settings.environment, column=column, address=address)
     except RegistrationAddressError as refusal:
         logger.warning(
-            "%s: the roster service address this launch advertised is one this container will "
-            "not fetch. %s",
-            LaunchDefectKind.ROSTER_ADDRESS_REFUSED.value,
+            "%s: the %s address this launch advertised is one this container will not fetch. %s",
+            refused.value,
+            service,
             refusal,
         )
-        _record_defect(session, claims, LaunchDefectKind.ROSTER_ADDRESS_REFUSED)
+        _record_defect(session, claims, refused)
         return None
     return address
 
@@ -774,6 +825,27 @@ def _roster_address(claims: Mapping[str, Any]) -> str | None:
     """
     service = claims.get(NRPS_CLAIM)
     address = service.get(MEMBERSHIPS_URL_MEMBER) if isinstance(service, Mapping) else None
+    return address if isinstance(address, str) and address else None
+
+
+def _gradebook_address(claims: Mapping[str, Any]) -> str | None:
+    """The AGS line-item container this launch advertises, if it advertises one.
+
+    SPEC §3.4 gives every section one line item called "Pulse Participation", and a
+    line item is created *in a container* — the `lineitems` member of the AGS
+    endpoint claim is the only thing that says where that container is. Read out of
+    the claim rather than built from the issuer and a guessed path, for the reason
+    `_roster_address` above gives: an address this tool assembled is one no platform
+    published, and a guessed one points a scored post at whatever the guess hit.
+
+    **`None` covers both shapes of absence.** A platform that grants this tool no
+    gradebook scope sends no endpoint claim at all; one that sends the claim for its
+    scopes alone sends no `lineitems` member. Neither is a fault and neither is
+    distinguishable from the other in anything this tool goes on to do, so both
+    answer the same way and neither records anything.
+    """
+    endpoint = claims.get(AGS_CLAIM)
+    address = endpoint.get(LINE_ITEMS_MEMBER) if isinstance(endpoint, Mapping) else None
     return address if isinstance(address, str) and address else None
 
 
@@ -857,6 +929,7 @@ def _upsert_section(
     *,
     binding: ContextBinding,
     address: str | None,
+    gradebook_address: str | None,
     section: Section | None,
 ) -> None:
     """Update the section this context is bound to, or create it with the binding stamped.
@@ -881,11 +954,19 @@ def _upsert_section(
     `lms_context_id` reaches round 3's finding through the database instead of
     through this module.
 
-    **The address is stored on a staff launch and never cleared.** A staff launch
-    carrying no NRPS claim, or one whose address this container will not fetch,
-    leaves whatever is there: a platform that stops advertising a service has not
-    moved the roster, and a section with no address at all is §7.3's never-synced
-    state rather than an error.
+    **The two service addresses are stored on a staff launch and never cleared.** A
+    staff launch carrying no NRPS or AGS claim, or one whose address this container
+    will not fetch, leaves whatever is there: a platform that stops advertising a
+    service has not moved the roster or the gradebook, and a section with no address
+    at all is §7.3's never-synced state rather than an error. E3-02's gradebook
+    address is the roster address's exact mirror in every line of this — same
+    trigger, same writer, same "changed means the platform moved it" rule.
+
+    **`ags_line_item_url` is written nowhere here**, and that is E3-02's scope
+    rather than an omission: the column holds the id of a line item this tool has
+    not created yet, E3-04 is what creates it and E3-05 is what records the id. The
+    application role holds no `UPDATE` on that column until then, so a writer added
+    here would be refused by the database as well as by this sentence.
 
     A guard refusal is logged here and travels, exactly as `_upsert_course`'s does
     — and it is the case that makes the shared savepoint load-bearing, because by
@@ -906,6 +987,7 @@ def _upsert_section(
                         term_id=term.id,
                         lms_section_code=label.code,
                         lms_context_memberships_url=address,
+                        lms_ags_line_items_url=gradebook_address,
                         lti_deployment_id=binding.deployment_id,
                         lms_context_id=binding.context_id,
                     ),
@@ -914,8 +996,14 @@ def _upsert_section(
             session.flush()
         return
 
+    corrected = False
     if address is not None and section.lms_context_memberships_url != address:
         section.lms_context_memberships_url = address
+        corrected = True
+    if gradebook_address is not None and section.lms_ags_line_items_url != gradebook_address:
+        section.lms_ags_line_items_url = gradebook_address
+        corrected = True
+    if corrected:
         session.flush()
 
 

@@ -5,17 +5,19 @@ nothing is written" — generalised to the defect kinds this ticket's design
 enumerates, plus the record's own field set. Criteria 1, 2 and 4 are next door in
 `tests/integration/test_launch_time_provisioning.py`.
 
-**The set is eight, and five of them are here.** Round 3's security review added
-two and E2-02 added a third, and each is asserted where its own subject is:
-`context_collision` in
+**The set is nine, and five of them are here.** Round 3's security review added
+two, E2-02 added a third and E3-02 a fourth, and each is asserted where its own
+subject is: `context_collision` in
 `tests/integration/test_a_launch_may_not_repoint_another_contexts_section.py`,
 `roster_address_refused` in
 `tests/integration/test_a_roster_address_is_judged_by_the_registration_rules.py`,
-and `context_outside_purview` in
-`tests/integration/test_a_staff_launch_binds_only_inside_the_launchers_purview.py`.
+`context_outside_purview` in
+`tests/integration/test_a_staff_launch_binds_only_inside_the_launchers_purview.py`,
+and `ags_address_refused` in
+`tests/integration/test_a_launch_stores_the_gradebook_address_it_was_given.py`.
 What stays here is everything that judges *what the label said* — and the two
 tests at the foot of this file, which pin the closed set and the record's fields
-for all eight.
+for all nine.
 
 **Every one of these is a launch that still lands.** E1-10's work order: "A
 provisioning refusal NEVER fails the launch or the person's landing: the write is
@@ -555,21 +557,21 @@ def test_a_course_number_outside_spec_8s_bands_is_refused_and_recorded(
 # ---------------------------------------------------------------------------
 
 
-def test_the_defect_kinds_are_exactly_the_eight_these_tickets_enumerate(
+def test_the_defect_kinds_are_exactly_the_nine_these_tickets_enumerate(
     metadata_tables: dict[str, Any], provisioning_contract: Any
 ) -> None:
     """The closed set, pinned as an equality rather than as a floor.
 
     `test_the_kind_column_refuses_a_defect_kind_this_ticket_does_not_name` below
     asks the database to accept each kind and to refuse one invented name, and
-    that pair cannot see a **ninth** kind that a later ticket adds: a
+    that pair cannot see a **further** kind that a later ticket adds: a
     plausible-looking label sits in the type, is accepted, and nothing in this
     suite reports it. E11 builds an administrator's surface on this column and has
     to know what it may be shown, so the set is fixed here and widening it is a
     visible diff in a test — the same shape `RUNTIME_BASE_TABLE_PRIVILEGES` uses
     for the grants and `SANCTIONED_WRITERS_EXPECTED` for the writer catalog.
 
-    **Eight, since E2-02.** Five kinds came from E1-10's own design; that ticket's
+    **Nine, since E3-02.** Five kinds came from E1-10's own design; that ticket's
     round-3 security review added `context_collision` — a launch naming a section
     another context is bound to, which is the HIGH — and `roster_address_refused`,
     an address the registration rules will not let this container fetch. E2-02 adds
@@ -577,8 +579,20 @@ def test_the_defect_kinds_are_exactly_the_eight_these_tickets_enumerate(
     §7.3's leadership limb whose context sits outside the launching person's own
     grant, which binds nothing and stores no roster address.
 
+    **E3-02 adds `ags_address_refused`**, and this equality is what made that
+    widening a deliberate diff rather than a label nobody noticed — it went red on
+    the ninth label and `docs/disputes/E3-02-01.md` is the record. That ticket
+    stores the AGS line-item container address a launch advertises, judged by the
+    same chokepoint as the roster address, and a refused one leaves
+    `section.lms_ags_line_items_url` unset while the launch still succeeds. It is
+    the exact mirror of `roster_address_refused` and it is a separate kind for the
+    reason E11's surface exists: a refused roster address and a refused gradebook
+    address are different services and different conversations with whoever
+    configured the platform. A launch carrying no AGS claim at all records nothing,
+    because a section with no gradebook is a state and not a fault.
+
     **Read off the column's own type**, which is where E1-10 settles the set:
-    "`kind` (closed string enum of exactly the five kinds above)", now seven. A
+    "`kind` (closed string enum of exactly the five kinds above)", now nine. A
     column that is not an enum fails here saying so rather than being read as an
     empty set, because "no labels" and "a free-text column" are the same silence
     and only one of them is a defect this test can describe.
@@ -741,8 +755,9 @@ def test_the_kind_column_refuses_a_defect_kind_this_ticket_does_not_name(
 
     E1-10's design: `kind` is "a closed string enum of exactly the five kinds
     above" — seven since round 3's review added `context_collision` and
-    `roster_address_refused`, and eight since E2-02 added
-    `context_outside_purview`. Closed in the schema is what makes E11's surface able
+    `roster_address_refused`, eight since E2-02 added `context_outside_purview`,
+    and nine since E3-02 added `ags_address_refused`. Closed in the schema is what
+    makes E11's surface able
     to enumerate what it may be shown; a free-text column means the admin console
     has to cope with whatever string a later ticket invents, and it will not.
 
@@ -751,9 +766,9 @@ def test_the_kind_column_refuses_a_defect_kind_this_ticket_does_not_name(
     kind is required to be accepted, and one this ticket does not name is required
     to be refused, and the refusal is the database's — a check the writer makes in
     Python is undone by the next writer. Which kinds those are is
-    `test_the_defect_kinds_are_exactly_the_eight_these_tickets_enumerate` above:
-    this test would go on passing if a ninth were added, and that one is what
-    would not.
+    `test_the_defect_kinds_are_exactly_the_nine_these_tickets_enumerate` above:
+    this test would go on passing if a tenth were added, and that one is what
+    would not — as it did not when E3-02 added the ninth.
 
     The exception type is deliberately not named: a Postgres enum answers with a
     `DataError` and a `CHECK` constraint with an `IntegrityError`, and E1-10

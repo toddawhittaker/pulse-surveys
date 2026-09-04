@@ -46,6 +46,15 @@ why every vector below is an IP literal or a value rules 1 to 4 refuse before
 anything is looked up: nothing in this suite may depend on what a name server
 answered.
 
+**Every launch here also carries an acceptable gradebook address, and that is
+E3-02 arriving.** That ticket puts the AGS endpoint claim's `lineitems` member
+through this same chokepoint and records a defect of its own when it is refused —
+so the mock's own cleartext container address would put a second defect on every
+launch below, and the assertions here are written over exactly one. The fixture
+rewrites it to a globally routable literal, which changes nothing about what this
+module is for: the roster address stays the only thing under test, and it stays the
+only thing a defect here can be about.
+
 **Driven at the writer with one member rewritten.** The mock platform advertises
 one roster address and no mint changes it, so the claims are a real launch's from
 the registered platform, with the NRPS claim's `context_memberships_url` replaced
@@ -106,6 +115,19 @@ ACCEPTED_ADDRESSES = {
     "a globally routable IPv6 address": "https://[2606:4700:4700::1111]/lti/memberships",
 }
 
+# The gradebook address every launch in this module carries, and it is here so that
+# the *roster* address is the only thing a defect below can be about. E3-02 puts the
+# AGS endpoint claim's `lineitems` member through this same chokepoint and records a
+# defect of its own when it is refused, and the mock advertises that container at
+# `http://mock-lms:8000/...` — cleartext, on the mock's own host, which is refused
+# twice over under a deployment's name. Left alone, every launch here would carry a
+# second refusal and `the_one(rows.defects())` below would find two rows
+# (`docs/MISTAKES.md` entry 22: a later ticket's rule making an earlier ticket's
+# tests unrunnable). A globally routable literal, for the same reason the accepted
+# rows above are literals: nothing in this suite may depend on what a name server
+# answered.
+AN_ACCEPTED_GRADEBOOK_ADDRESS = "https://93.184.216.34/lti/lineitems"
+
 
 def the_one(rows: list[Any], what: str) -> Any:
     """Exactly one row, or a failure saying which of the two failures happened."""
@@ -153,7 +175,9 @@ def deployed_launch(
     """
     driver = launch_driver_in(PRODUCTION)
     offer = driver.offer_for_role(provisioning_contract.instructor_role_urn)
-    claims = driver.claims_of(offer)
+    claims = provisioning_contract.with_line_items_url(
+        driver.claims_of(offer), AN_ACCEPTED_GRADEBOOK_ADDRESS
+    )
     launch_ground(provisioning_contract.label_of(claims))
     return {"claims": claims, "rows": rows_on(db_session), "session": db_session}
 

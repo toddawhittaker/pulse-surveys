@@ -3484,6 +3484,40 @@ MEMBER_OF_ROLES = """
 #     Decided and spent in E2-08, ruled in `docs/disputes/E2-08-03.md`; the whole
 #     argument for each verb, and for the ones withheld beside them, is in
 #     `backend/app/views_sql/survey_submission_grants_v001.sql`.
+#   - `pulse_app` **reads and inserts** `grade_sync` and `ags_call`, and holds no
+#     other verb on either. This is E3's grade passback, and both tables are
+#     append-only by grant in exactly the shape `classification` and `nrps_call`
+#     already take.
+#     **What each verb is for.** On `grade_sync`, `INSERT` is the row E3-06 writes
+#     for every post it makes — SPEC §8: "one row per post … and a failed attempt is
+#     a row too" — and `SELECT` is the lookup that decides whether to post at all:
+#     [ADR 0124](../../docs/adr/0124-grade-sync-is-append-only-one-row-per-post.md)
+#     makes the latest row for a `(section_id, user_id)` pair what the recompute
+#     compares a fresh figure against, and what identifies a retry under
+#     [ADR 0052](../../docs/adr/0052-an-equal-score-timestamp-is-accepted-as-a-retry.md).
+#     On `ags_call`, the pair is `nrps_call`'s, unchanged: §6.1 puts it at the grain
+#     of one HTTP call the tool made to a platform service, and the writer both
+#     appends to it and reads it back.
+#     **No `UPDATE`, no `DELETE`, no `TRUNCATE`, and the verbs withheld are the
+#     assertion.** ADR 0124 exists because a posted score can be lowered afterwards
+#     by an asynchronous re-classification, so a row rewritten in place would
+#     destroy the number a student was previously shown — the one thing this record
+#     is kept to be able to answer for. A connection able to `UPDATE` here is a
+#     connection able to rewrite what Pulse told a platform about a person's
+#     standing, on the connection every screen in the product runs on, and no
+#     Python rule makes that structural.
+#     **What these tables carry, for §4.1.** `ags_call` holds a section reference, a
+#     URL, an HTTP status and a timestamp — no subject, no name, no email, the same
+#     answer `nrps_call`'s entry gives. `grade_sync` is asked more carefully,
+#     because it holds a participation figure against an LMS user id, which is a
+#     statement about a named person's standing even though it holds no name: the
+#     identity is a foreign key, the identity behind it sits on `user_identity`,
+#     which this role holds no `SELECT` on by any mechanism, and the columns the
+#     judgement was made against are recorded in
+#     `tests/integration/test_identity_column_marker.py`'s inventory rather than
+#     here. No view over either table exists yet — E11's console is where one would
+#     be — so nothing joins a score to a person on any connection.
+#     Decided and spent in E3-02.
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -3525,6 +3559,10 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "answer", "INSERT"),
         (APPLICATION_ROLE, "answer", "UPDATE"),
         (APPLICATION_ROLE, "answer", "DELETE"),
+        (APPLICATION_ROLE, "grade_sync", "SELECT"),
+        (APPLICATION_ROLE, "grade_sync", "INSERT"),
+        (APPLICATION_ROLE, "ags_call", "SELECT"),
+        (APPLICATION_ROLE, "ags_call", "INSERT"),
     }
 )
 
@@ -3591,11 +3629,30 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
 # re-date a student's whole term, and a re-add is a second row rather than an edit
 # to the first (ADR 0023, E1-11's D3). No `UPDATE` anywhere on `nrps_call` or
 # `role_assignment` either: an append-only log and a purview grant.
+#
+# **E3-02 spends one more, on `section`, and it is the roster address's twin.** The
+# AGS line-item container arrives on a staff launch exactly as the roster address
+# does and is written by the same writer on the same upsert, so it needs the same
+# column-scoped `UPDATE` and for the same reason: the alternative is `UPDATE` on
+# `section` table-wide, which would hand this connection the section code and ADR
+# 0021's four derived calendar columns.
+#
+#   - `section(lms_ags_line_items_url)` — the container the platform advertises. A
+#     platform may move it, and following the platform is the rule rather than an
+#     edit (E0-05's `lms_` marker), which is the argument
+#     `section(lms_context_memberships_url)` already carries one line up.
+#
+# **`section(ags_line_item_url)` is deliberately absent**, and that absence is this
+# entry's load-bearing half. E3-02 creates the column and writes nothing to it;
+# E3-05 is its writer and is the ticket that spends the privilege, with the record
+# beside it. A grant issued here would be one nothing in the tree uses, which is
+# the convenience grant this whole set exists to make visible.
 RUNTIME_COLUMN_PRIVILEGES = frozenset(
     {
         (APPLICATION_ROLE, "course", "lms_title", "UPDATE"),
         (APPLICATION_ROLE, "course", "title_is_fallback", "UPDATE"),
         (APPLICATION_ROLE, "section", "lms_context_memberships_url", "UPDATE"),
+        (APPLICATION_ROLE, "section", "lms_ags_line_items_url", "UPDATE"),
         (APPLICATION_ROLE, "user", "id", "SELECT"),
         (APPLICATION_ROLE, "enrollment", "ended_on", "UPDATE"),
         (APPLICATION_ROLE, "enrollment", "lms_window_start", "UPDATE"),

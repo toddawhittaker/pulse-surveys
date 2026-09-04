@@ -1,16 +1,37 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 12**
+**Caught: 13**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*12 instances recorded; the 7 most recent are below, newest first — except the
+*13 instances recorded; the 8 most recent are below, newest first — except the
 E0-18 PR 2 one, which sits further down beside the consequence it illustrates.
 The 5 earliest are in this file's git history and in the pull requests they cite.
-It carries seven rather than three because the E2-16 one and the E2-05 one are
+It carries eight rather than three because the E2-16 one and the E2-05 one are
 the same inventory in the same module a ticket apart, and reading either without
 the other loses what the pair shows; **the trim is overdue and it should take
 that pair together**, not a paragraph off the end.*
+
+*(**2026-09-04, E3-02 (`e3/passback-schema-and-address`), caught while the tests
+were being written.** E3-02 puts a second launch address — the AGS line-item
+container — through the same chokepoint the roster address passes, and records a
+defect kind of its own when it is refused. The mock platform advertises that
+container at `http://mock-lms:8000/…`: cleartext, on the mock's own host, refused
+twice over under a deployment's name. Every launch in
+`test_a_roster_address_is_judged_by_the_registration_rules.py` is driven under
+`ENVIRONMENT=production` and every assertion in it goes through
+`the_one(rows.defects())` — exactly one recorded defect. Left alone, E3-02 would
+have put a second defect on every one of those launches and reddened a merged
+ticket's module inside its own driving, on a rule that module's ticket never
+heard of, with the repair on the read-only side of the wall. Acting on the
+entry, the module's fixture now rewrites the gradebook address to an acceptable
+literal and its docstring says why; the change is inert before E3-02 lands — a
+claim member nothing reads — and correct after. Counted as a catch: without it
+the implementer's first run would have been a wall of red roster-address tests
+reading as a defect in address judgement, on a module they may not edit. The
+same sweep found nothing else: `grade_sync` and `ags_call` are new tables, and
+the two `section` columns are nullable additions with no constraint, so E0-33's
+forty-one-fixture shape did not repeat.)*
 
 *(**2026-09-03, FIX-01 (`fix/student-surface-copy`), caught before anything was
 written.** FIX-01 adds a second read-time question to
@@ -246,4 +267,12 @@ a value they never named. Found by the implementer's full-suite run, repaired
 on the test side after a ruling: each helper now states the identity it seeds.
 Not counted as a catch; the entry describes what happened, it did not prevent
 it — the pre-write sweep that caught E1-12's instance looked for route
-consumers, not schema-constraint dependents.
+consumers, not schema-constraint dependents.**Instance, 2026-09-04 (E3-02, disputes E3-02-01 and E3-02-02).** E3-02 added a
+ninth launch-defect kind and a Pulse-owned column on `section`, and two standing
+inventories — the defect-kind equality pin and the LMS-owned-column ownership
+sweep — went red in modules the ticket's test manifest never named. Both repairs
+sat on the read-only side of the wall and went through `docs/disputes/`; the
+whole-suite run is what found them, a scoped run would have reported the ticket
+green. Not counted as a catch; the entry describes what happened, it did not
+prevent it — the test author's pre-write sweep covered the enumerations the
+ticket itself edited and not the inventories that pin them.
