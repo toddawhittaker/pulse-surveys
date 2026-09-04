@@ -76,28 +76,35 @@ and the superstring-scope entry.
    precisely so that `id + "/scores"` cannot be green-and-wrong, and a test
    drives an id with a query string and requires the composed address to be
    right.
-3. A post whose `scoreMaximum` disagrees with the line item is refused rather
+3. **The posted score carries the AGS comment member, holding the ledger
+   string byte-exact as the grading service produced it.** The client does
+   not compose, reformat, truncate or re-wrap it — the string that arrives at
+   the platform is the string E3-03 returned, asserted by comparing the two
+   rather than by inspecting either alone. This is the same rule the
+   percentage string follows and for the same reason (ADR 0052): a value the
+   poster re-derives is not provably the value it is retrying.
+4. A post whose `scoreMaximum` disagrees with the line item is refused rather
    than rescaled (ADR 0051), and a repeat of an identical post at an equal
    timestamp is accepted as a retry rather than doubled (ADR 0052) — both
    asserted against the mock.
-4. A 409 stops the retry loop and triggers a re-read, and the test plants the
+5. A 409 stops the retry loop and triggers a re-read, and the test plants the
    409 rather than reasoning about it.
-5. Every AGS route on the mock refuses an absent token, refuses a token
+6. Every AGS route on the mock refuses an absent token, refuses a token
    carrying the wrong scope, and accepts a token carrying the right one —
    all three, per route.
-6. **The superstring pair**: a token granted only the line-item read-only
+7. **The superstring pair**: a token granted only the line-item read-only
    scope is refused by a route requiring the line-item scope, even though the
    granted string contains the required one as a substring. This is the
    carried entry's proof that the check is membership and not substring, and
    it becomes available for the first time in this ticket.
-7. `ags_call` rows are written for successes and for failures, and carry no
+8. `ags_call` rows are written for successes and for failures, and carry no
    score value.
-8. A `PlatformProfile` exists as a seam with one profile behind it, and a
+9. A `PlatformProfile` exists as a seam with one profile behind it, and a
    test proves the seam is actually consulted rather than being a file the
    code never reads (`docs/MISTAKES.md` entry 9).
-9. No log line emitted by this code contains a score, a ledger line, or an
-   LMS user id, asserted by a test over what the code logs rather than by
-   reading it.
+10. No log line emitted by this code contains a score, a ledger line, or an
+    LMS user id, asserted by a test over what the code logs rather than by
+    reading it.
 
 ## Decisions this ticket settles
 

@@ -36,11 +36,15 @@ somewhere the poster can find it without re-reading a container on every run.
 
 **The two log and state tables.** `grade_sync` is named in SPEC §8's table
 list and in §13's layout as `models/grades.py`, and it exists nowhere in the
-tree — no model, no migration, no column list. `ags_call` is not in §8 at
-all; §6.1 promises "NRPS and AGS call logs" and only the NRPS half was ever
-built, as `NrpsCall` (`backend/app/models/lti.py:1215`). Read that model's
-docstring before designing this one: it is at the grain of one HTTP call, and
-the reasoning for that grain transfers whole.
+tree — no model, no migration, no column list. `ags_call` is absent from §8's
+table list, which names neither call log; §6.1 promises "NRPS and AGS call
+logs" and only the NRPS half was ever built, as `NrpsCall`
+(`backend/app/models/lti.py:1215`). Read that model's docstring before
+designing this one: it is at the grain of one HTTP call, and the reasoning
+for that grain transfers whole. **The spec now names both logs as separate
+tables** — §6.1 says `nrps_call` and `ags_call`, and §8's constraints put
+`ags_call` beside `grade_sync` — so whether the two logs share one table is
+not a question this ticket reopens. A second table is what ships.
 
 Read first: SPEC §3.4, §6.1, §8, §13; ADR 0052 (an equal score timestamp is
 accepted as a retry — the retry identity this schema has to be able to
@@ -59,8 +63,12 @@ address enumerations named above.
   no AGS claim is a section with no gradebook, which is a state to record and
   not a fault to raise.
 - Storage for the created line item's id.
-- `grade_sync` in a new `backend/app/models/grades.py`, at the grain and with
-  the columns this ticket settles.
+- `grade_sync` in a new `backend/app/models/grades.py`, **append-only at the
+  grain of one row per post** (ADR 0124): the score as sent, the timestamp
+  sent with it, the outcome, and the student and section. A failed attempt is
+  a row too. Plus the index that makes "the latest row for this student in
+  this section" a cheap lookup, because that lookup is on the recompute's hot
+  path once a term's worth of rows exists.
 - `ags_call` at HTTP-call grain, modelled on `NrpsCall`.
 - The migration, reversible and asserted so (E2-16 repaired two irreversible
   ones; this one is written reversible from the start), the grants SQL for
@@ -87,38 +95,45 @@ address enumerations named above.
    to accommodate them.
 4. The migration round-trips: upgrade, downgrade, upgrade, with the schema
    compared rather than assumed, and `alembic check` clean.
-5. `grade_sync` can express the retry identity ADR 0052 depends on: what was
-   last sent, exactly as sent, and when.
-6. The `PERSON_TABLES` question is answered for both tables in the pull
-   request body.
+5. `grade_sync` can express the retry identity ADR 0052 depends on: the
+   latest row for a `(section_id, user_id)` pair gives back what was last
+   sent, exactly as sent, and when.
+6. A second post for the same student writes a **second row**, and the first
+   row is still readable afterwards with its original value. The test plants
+   two rows carrying different values and requires both to be present and the
+   newer one to be the answer — an update-in-place implementation is red on
+   this, which is the whole point of the criterion.
+7. The `PERSON_TABLES` question is answered for both tables in the pull
+   request body, with `grade_sync` asked more carefully than `ags_call`: it
+   holds a participation figure against an LMS user id, which is a statement
+   about a named person's standing even though it holds no name.
 
 ## Decisions this ticket settles
 
-- **`grade_sync`'s grain and columns.** SPEC §8 names the table and describes
-  none of it. The recommendation to argue against is `(section_id, user_id)`
-  as the grain, holding the last posted value *as sent* — the exact string,
-  not a re-derivable number — its timestamp, and the outcome. §8 gains that
-  sentence in the breakdown's spec edits, so this ticket is confirming a
-  recorded decision rather than inventing one, and an ADR is owed only if it
-  departs from it.
+- **`grade_sync`'s grain is already settled** by ADR 0124 and by §8's
+  amended sentence, both landing with this breakdown: append-only, one row
+  per post, latest row per `(section_id, user_id)` serving the retry
+  identity. This ticket builds it and does not reopen it. What is left to
+  this ticket is the column set that carries it — what "the outcome" is
+  made of, and whether a failed attempt records the platform's response.
 - **Where the line item id lives.** A column on `section` needs a
   `SANCTIONED_WRITERS` entry and puts platform-owned state on a
   platform-mirroring table; a Pulse-owned table avoids the sanction and adds
   a row nobody reads except the poster. Both are defensible, so whichever
-  wins gets an ADR (next free number is 0124).
+  wins gets an ADR (0124 and 0125 are taken by this breakdown; 0126 is the
+  next free number).
 - **What a section with no AGS claim is.** Recorded as a state, in the same
   spirit as §7.3's never-synced section: a section with no gradebook address
   and a section whose gradebook is empty are different things and only one is
   a fault.
-- **Whether `ags_call` is one table with the NRPS log or a second table
-  beside it.** `NrpsCall` is already at the right grain for both, and §6.1
-  speaks of them as a pair. Sharing two things too early is harder to undo
-  than a copy, so the default is a second table; departing from that default
-  is the decision, and it is worth an ADR either way because the observability
-  views E11 builds will read whichever shape ships.
-
 ## Known traps
 
+- **An append-only table is read wrong by asking for "the" row.** Every
+  reader must ask for the *latest* row for a student and section, and a query
+  that returns one row against a fixture holding one post returns the wrong
+  row against a term's worth of them. This is `docs/MISTAKES.md` entry 3
+  wearing a green tick, and it is why criterion 6 plants a second row rather
+  than trusting the shape.
 - **`PERSON_TABLES` is not what its name suggests.** It is defined in the
   test tree, three times with different contents
   (`tests/integration/test_identity_column_marker.py:222` and

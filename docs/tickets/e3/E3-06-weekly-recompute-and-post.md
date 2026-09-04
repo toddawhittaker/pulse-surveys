@@ -41,10 +41,13 @@ owes; E3-03's formula and E3-04's client.
 
 - A beat entry and a thin task on `derive_survey_windows`'s shape.
 - The sweep: for each section with a line item, for each enrolled student,
-  compute through E3-03, compare against `grade_sync`'s last-sent value, and
-  post through E3-04 only where they differ.
-- `grade_sync` written on every post — what was sent, exactly as sent, when,
-  and the outcome.
+  compute through E3-03, compare against the value in the **latest**
+  `grade_sync` row for that student and section, and post through E3-04 only
+  where they differ.
+- A `grade_sync` row appended on every post — what was sent, exactly as sent,
+  when, and the outcome (ADR 0124). The table is append-only, so a post never
+  overwrites the record of the one before it, and a failed attempt is
+  appended too.
 - Retry and backoff on a failed post, with a 409 handled as E3-04 defines it.
 - Drops: posting stops for a dropped student; the LMS owns the column.
 - The log policy from the README's ruling: the task logs the section, the
@@ -60,17 +63,25 @@ owes; E3-03's formula and E3-04's client.
    against the call log, not against the gradebook, because an idempotent
    post and an absent post look the same in a gradebook.
 3. A reclassification that lowers an already-posted week's numerator causes
-   the next sweep to post the lower value, and `grade_sync` records both the
-   old and the new send. This is the case the schedule ruling exists for and
-   it gets its own test.
-4. A failed post retries under the stated policy and stops; the section is
+   the next sweep to post the lower value, and `grade_sync` afterwards holds
+   **both** rows — the higher value that was sent first and the lower one
+   that superseded it, each with its own timestamp. This is the case the
+   schedule ruling and ADR 0124's grain both exist for, and it gets its own
+   test.
+4. **Every posted score carries the ledger.** No post leaves this task
+   without the per-week comment E3-03 produced, asserted by reading the
+   posted comment back rather than by reading the code that composed it. A
+   post with an empty or absent comment is a failure of this criterion, since
+   the comment is the only place §3.4's arithmetic is visible to anyone
+   (ADR 0125).
+5. A failed post retries under the stated policy and stops; the section is
    left in a state an operator could act on rather than in a loop.
-5. A dropped student's score stops updating, and the last posted value stays
-   where it is.
-6. No log line the task emits contains a score, a ledger line, or an LMS user
+6. A dropped student's score stops updating, and the value the platform holds
+   is the one the last successful post sent.
+7. No log line the task emits contains a score, a ledger line, or an LMS user
    id — asserted over captured log output, with a control line proving the
    capture actually sees what the task logs.
-7. The suite runs the sweep against a section with no line item and against a
+8. The suite runs the sweep against a section with no line item and against a
    section with no AGS address, and neither raises.
 
 ## Decisions this ticket settles
@@ -84,10 +95,13 @@ owes; E3-03's formula and E3-04's client.
   the view; this ticket decides what is recorded for it to read, which is a
   decision about `ags_call` and `grade_sync` contents rather than about a
   screen.
-- **Whether a lowered score is announced anywhere.** Nothing in E3 renders a
-  score to a student, so the honest answer is likely no and the consequence
-  is carried to E8 — but it is a decision, not an omission, and it is written
-  down as one.
+- **Whether a lowered score is announced anywhere.** Still open, and
+  deliberately so: SPEC §3.3 now states that the adjustment happens and says
+  in as many words that whether it is announced is a separate question. That
+  question is this ticket's to answer. Nothing in E3 renders a score to a
+  student, so the honest answer is likely no and the consequence is carried
+  to E8 — but it is a decision, not an omission, and it is written down as
+  one either way.
 
 ## Known traps
 
