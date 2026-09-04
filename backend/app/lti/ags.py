@@ -247,6 +247,14 @@ class AgsConflictError(AgsError):
     Typed, and defined here rather than taken from the transport, because a caller
     deciding whether to record a grade as sent cannot branch on an `HTTPError`: it
     is indistinguishable from every other failure a post can have.
+
+    **`held` is on the attribute and never in the message**, and the split is the
+    point rather than tidiness. An error's `str()` is what every logger prints —
+    a caller writing `logger.exception(...)`, a task runner rendering an
+    unhandled exception — so a message carrying the Result would put a named
+    student's grade into a log stream through a line nobody wrote. The message
+    names the section and the column; the attribute is read only by a caller that
+    asked for it. `None` where the re-read itself could not be made.
     """
 
     def __init__(self, message: str, *, held: Any = None) -> None:
@@ -386,11 +394,18 @@ def post_score(
         # something different — and the message and the attribute would then be
         # describing two states.
         held = call.held_result(identifier, user_id)
+        # The message names the section and the column and stops there; what the
+        # platform holds rides on the attribute. An error's `str()` is the thing
+        # every logger prints — a caller writing `logger.exception(...)`, a task
+        # runner rendering an unhandled exception — and the held Result is one
+        # student's grade, so a message carrying it is a per-student disclosure
+        # nobody decided to make. An attribute is read only by a caller that
+        # asked for it.
         raise AgsConflictError(
-            f"the platform answered 409 for a score posted to {address}, which AGS 2.0 uses for a "
-            "score older than the one it already holds for that student on that column. No retry "
-            f"was made — a 409 is the one refusal a retry cannot fix — and the platform holds "
-            f"{held!r}.",
+            f"the platform answered 409 for a score posted to {address} for section {section_id}, "
+            "which AGS 2.0 uses for a score older than the one it already holds for that student "
+            "on that column. No retry was made — a 409 is the one refusal a retry cannot fix — and "
+            "what the platform holds is on this error's `held` attribute.",
             held=held,
         )
     if not answered.ok:
@@ -660,6 +675,21 @@ class _Caller:
         student carries that student's `sub` in its query string, and settled
         decision 5 keeps a user id out of this table.
 
+        **So `row_url` is the only address this method writes down, logs or puts
+        in an error, and the dialled `url` is never any of those.** That is the
+        whole redaction and it is stated as an invariant rather than left to each
+        branch to remember: `row_url` is the caller's redacted address where one
+        was given and the dialled address otherwise, so a caller that adds a
+        second person-bearing query has one place to redact it.
+
+        **Nothing here interpolates a transport exception's text**, for the same
+        reason. `requests` builds a `ConnectionError` whose message quotes the URL
+        it could not reach — the dialled one, query and all — so a warning handed
+        `%s` of the failure puts a student's `sub` into a log stream through a
+        string nobody wrote it into. The failure's class name says which kind of
+        transport fault it was, which is what an operator reads, and the original
+        travels on as the `__cause__` for a debugger.
+
         A refused token is recorded **against the AGS address with the token
         endpoint's status**, which is the roster's rule (ADR 0095) and E3-02's
         model docstring: the row is this section's record of an attempted call and
@@ -690,13 +720,14 @@ class _Caller:
         except requests.RequestException as failure:
             _record_call(self.session, self.section_id, row_url, None)
             logger.warning(
-                "no access token could be obtained for section %s, so no call was made to %s: %s",
+                "no access token could be obtained for section %s (%s), so no call was made to %s",
                 self.section_id,
+                type(failure).__name__,
                 row_url,
-                failure,
             )
             raise AgsCallError(
-                f"no access token could be obtained, so no call was made to {row_url}"
+                f"no access token could be obtained ({type(failure).__name__}), so no call was "
+                f"made to {row_url}"
             ) from failure
 
         headers = {"Authorization": f"Bearer {token}", "Accept": accept}
@@ -707,12 +738,14 @@ class _Caller:
         except requests.RequestException as failure:
             _record_call(self.session, self.section_id, row_url, None)
             logger.warning(
-                "section %s could not reach %s at all: %s",
+                "section %s could not reach %s at all (%s)",
                 self.section_id,
                 row_url,
-                failure,
+                type(failure).__name__,
             )
-            raise AgsCallError(f"{row_url} could not be reached: {failure}") from failure
+            raise AgsCallError(
+                f"{row_url} could not be reached ({type(failure).__name__})"
+            ) from failure
         _record_call(self.session, self.section_id, row_url, answered_call.status_code)
         return answered_call
 
