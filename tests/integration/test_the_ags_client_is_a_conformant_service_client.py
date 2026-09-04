@@ -55,7 +55,7 @@ import json
 import logging
 import re
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -79,6 +79,14 @@ LOOPBACK_LINE_ITEM = "http://127.0.0.1:9/lineitems/1/lineitem?type_id=1"
 # A label the platform holds for a line item Pulse created and somebody renamed. The
 # whole point of settled decision 7 is that this is *not* what the client matches on.
 A_RENAMED_LABEL = "Weekly Pulse Check (renamed by the instructor)"
+
+# AGS 2.0's own query parameter on the Result container, which selects one student's
+# result. **The specification's name, not this suite's**: the mock's `read_results`
+# declares it and `MockPlatform.results(line_item, user_id=…)` sends it, and a tool
+# reading one student's grade has to send exactly this string. It is named here
+# because the re-read below is asserted to be filtered *on the wire* and unfiltered
+# *in the call log*, which is a statement about this parameter in two places.
+RESULT_USER_FILTER = "user_id"
 
 # The maximum a line item that is not out of 100 carries. **This suite's choice**, and
 # the one property it needs is that it differs from `PULSE_SCORE_MAXIMUM`: a client
@@ -1132,6 +1140,165 @@ def test_a_conflict_stops_the_post_and_triggers_a_re_read_carrying_what_the_plat
         "the planted one should be there — a refused post that was recorded anyway would mean the "
         "409 came from somewhere other than the staleness rule."
     )
+
+
+def test_the_re_read_after_a_conflict_is_recorded_against_an_address_carrying_no_student(
+    ags_client: Any,
+    ags_sections: Any,
+    service_wire: Any,
+    committed_rows: Any,
+    ags_rows: Any,
+    ags_contract: Any,
+) -> None:
+    """The one call in this client that puts a student's `sub` in a URL, and the row it leaves.
+
+    Settled decision 6 sends the client to the Result container **for that user**
+    after a 409, and AGS's own way of asking for one student's result is the
+    `user_id` query parameter — so the address the client dials carries the
+    student's LMS subject in a query string. Settled decision 5 keeps the call log
+    to `url`, `response_code`, `called_at` and `section_id`, with "no score, no
+    ledger, no user id in the row — and none in any log line either", and §6.1 puts
+    that log on an operator's console. Those two sentences meet on exactly this
+    call: the request is legitimately filtered and the record of it may not be.
+
+    **This is `docs/MISTAKES.md` entry 2's shape and it is why the test exists.** The
+    client is written to record the re-read against the *unfiltered* results address,
+    and until now nothing asserted it — a confidentiality rule holding on an untested
+    path, which is a convention rather than a guarantee. Re-introduce the defect and
+    the suite stays green.
+
+    **The mutation this kills:** the re-read's `ags_call` row handed the **dialled**
+    URL, filter and all — one line, the obvious one, and every other test in this
+    module stays green under it. What ships is one row per section per conflict with
+    a student's LMS subject in a column an operator reads by section, on a table
+    nothing purges until E13.
+
+    **The near miss it is written around:** no `ags_call` row written for the re-read
+    at all. That satisfies "no subject in any row" completely and by emptiness, and
+    it breaks criterion 8's grain — the re-read is an HTTP call the tool made to a
+    platform service, so it is a row. Both halves are asserted: the row is required
+    to be *there*, against the unfiltered results path, and the row count is required
+    to match the calls the client actually made.
+
+    **The control direction, and it is what makes the absence mean anything.** The
+    wire is required to have seen the subject *in the dialled URL* — so this test can
+    tell "the row was sanitised" from "the re-read never happened", which are the same
+    picture from the database side alone (`docs/MISTAKES.md` entry 3).
+
+    **Born green**, on a tree where the client already does this. Its worth is the
+    mutation it names, not the colour it starts at.
+    """
+    section = ags_sections()
+    created = stored_line_item(section.platform, section.context)
+    identifier = section.platform.line_item_id(created)
+    section = ags_sections.store_line_item(section, identifier)
+
+    subject = section.subjects[0]
+    assert len(subject) >= 8, (
+        f"The launched subject is {subject!r}, which is short enough that finding it absent from a "
+        "URL says little — a two-character `sub` could be absent by coincidence and present by "
+        "accident. E0-14 seeds UUID subjects; a seed that changed that makes this assertion weak "
+        "rather than wrong, and it is said here rather than passing quietly."
+    )
+
+    planted = section.platform.post_score(
+        created,
+        {
+            ags_contract.user_member: subject,
+            ags_contract.timestamp_member: ags_contract.a_later_timestamp,
+            ags_contract.activity_member: ags_contract.conformant_activity,
+            ags_contract.grading_member: ags_contract.conformant_grading,
+            ags_contract.given_member: ags_contract.a_newer_score,
+            ags_contract.maximum_sent_member: ags_contract.score_maximum,
+        },
+    )
+    assert planted.status_code == 200, (
+        f"Planting the newer score answered {planted.status_code}, so there is nothing newer on the "
+        f"platform, no 409, and no re-read for this test to be about. Body begins "
+        f"{planted.text[:300]!r}."
+    )
+
+    grade = ags_contract.grade(subject, timestamp=ags_contract.a_timestamp)
+    drive(
+        ags_client,
+        ags_client.post_score,
+        section,
+        committed_rows,
+        service_wire,
+        line_item=created,
+        grade=grade,
+    )
+
+    # The control: the re-read genuinely happened, and it happened as a filtered
+    # request. Without this the two assertions below hold of a client that never
+    # re-read at all — the same picture from the database side.
+    results_path = urlsplit(section.platform.results_url(created)).path
+    filtered = [
+        call
+        for call in service_wire.calls
+        if call.method.upper() == "GET"
+        and call.path.startswith(results_path)
+        and subject in call.url
+    ]
+    assert filtered, (
+        f"No request the client dialled under {results_path!r} carries the subject {subject!r}. It "
+        f"called {[f'{call.method} {call.url}' for call in service_wire.calls]}. Settled decision 6 "
+        "reads the line item's Result **for that user** after a 409, and AGS's way of asking for "
+        f"one student is the `{RESULT_USER_FILTER}` filter — so with no filtered call on the wire "
+        "there is no address for the log to have sanitised, and the absences below would be "
+        "absences of something that never existed."
+    )
+
+    recorded = ags_rows.calls_for(section.id)
+    assert recorded, (
+        f"The client wrote no `{ags_contract.call_table}` row for this section at all, so every "
+        "absence below is an absence in an empty table."
+    )
+
+    # The near miss: a row for the re-read must exist, against the *unfiltered*
+    # results address. "No subject in any row" is satisfied completely by a writer
+    # that skipped this call, and that breaks criterion 8's grain instead.
+    for_the_read = [
+        row
+        for row in recorded
+        if urlsplit(str(row.get(ags_contract.call_url_column))).path == results_path
+    ]
+    assert for_the_read, (
+        f"No `{ags_contract.call_table}` row is recorded against the results address "
+        f"{results_path!r}; the section's rows are "
+        f"{[row.get(ags_contract.call_url_column) for row in recorded]}. The re-read is an HTTP "
+        "call the tool made to a platform service, so SPEC §6.1's grain makes it a row — and a "
+        "writer that skipped it to keep the subject out of the log has bought the privacy rule by "
+        "losing the record of the call that failed."
+    )
+
+    made = ags_calls(service_wire, section.platform)
+    assert len(recorded) == len(made), (
+        f"The client made {len(made)} AGS call(s) — {[f'{c.method} {c.url}' for c in made]} — and "
+        f"wrote {len(recorded)} row(s). One row per HTTP call still holds on the conflict path: a "
+        "count short here is the re-read recorded nowhere, which is the near miss the assertion "
+        "above is written around."
+    )
+
+    # The forbidden state, over every row rather than the one this test expects to be
+    # the re-read's: a writer that sanitised the address it *meant* to and passed the
+    # dialled one somewhere else is the same disclosure.
+    for row in recorded:
+        url = str(row.get(ags_contract.call_url_column) or "")
+        assert subject not in url, (
+            f"An `{ags_contract.call_table}` row carries the student's LMS subject {subject!r} in "
+            f"its `{ags_contract.call_url_column}`: {row!r}. Settled decision 5 keeps this log to "
+            "the URL, the status, the instant and the section, and §6.1's console reads it per "
+            "section — a subject here is a per-student record of a failed grade post, on a table "
+            "nothing purges until E13, reached by whoever is looking at the section."
+        )
+        assert RESULT_USER_FILTER not in parse_qs(urlsplit(url).query), (
+            f"An `{ags_contract.call_table}` row carries a `{RESULT_USER_FILTER}` filter in its "
+            f"`{ags_contract.call_url_column}`: {row!r}. That parameter's value is a student, so "
+            "the row is about one person whether or not this test's own subject is the one in it — "
+            "asserted as the forbidden *shape* as well as the forbidden value, because the next "
+            "conflict is a different student."
+        )
 
 
 # ---------------------------------------------------------------------------
