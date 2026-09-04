@@ -52,8 +52,9 @@ the tool signing key model and its grant SQL; SPEC §7.3.
 - **Or a written ruling that moves the item to E13's deployment pass.** The
   carried entry names E3 as owner, so a ruling is owed either way; if the
   supply path genuinely belongs with the rest of the deployment work, this
-  ticket produces the ADR that says so and the `carried-from-e3.md` entry
-  that hands it on, and nothing else.
+  ticket produces the ADR that says so and the entry that hands it on, and
+  nothing else. *Not taken*: the supply path and the rotation rule were both
+  built here, so the carried entry is closed rather than passed on.
 
 ## Acceptance criteria
 
@@ -69,7 +70,13 @@ the tool signing key model and its grant SQL; SPEC §7.3.
    actionable sentence, and the application role still holds no write on the
    key table.
 5. ADR 0082 is amended or superseded in this pull request, and the carried
-   entry is closed in `carried-from-e3.md` with what closed it.
+   entry is closed with what closed it, on the entry where it lives —
+   `carried-from-e2.md`, which is where this epic's inherited work is recorded.
+   *Corrected at build time*: this criterion said `carried-from-e3.md`, which is
+   the hand-off note E3's exit ticket writes for E4 (E3-08) and does not exist
+   while this ticket is being built. A closure belongs beside the entry it
+   closes, and writing it into a file a later ticket creates would have hidden it
+   from anyone reading the entry.
 
 ## Decisions this ticket settles
 

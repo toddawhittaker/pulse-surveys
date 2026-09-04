@@ -1898,13 +1898,19 @@ def seed_tool_signing_key(session: Session, configuration: Mapping[str, str]) ->
     row — the api container and the celery worker are two processes and one tool,
     and they have to sign with the same key.
 
-    **An existing row is kept, never rotated.** Rotation is the dangerous shape,
-    because it fails invisibly: a fresh key signs perfectly, and nothing goes
-    wrong until a platform that already fetched the old public half rejects an
-    assertion, hours later, somewhere else. So this reads first and writes only
-    into an empty table, which also keeps `make seed` re-runnable — the ordinary
-    state of every development database after the first run is that a key is
-    already there.
+    **An existing row is kept, and this function never rotates.** E3-01 made
+    rotation buildable — the published key set carries every unretired key and
+    the tool signs with the newest (`docs/adr/0127`) — and deliberately left it
+    to `scripts/signing_key.py`, an operator command (`docs/adr/0126`). A demo
+    loader that rotated on a re-run would do the dangerous thing invisibly: a
+    fresh key signs perfectly, and nothing goes wrong until a platform that
+    already fetched the old public half rejects an assertion, hours later,
+    somewhere else. So this reads first and writes only into an empty table,
+    which also keeps `make seed` re-runnable — the ordinary state of every
+    development database after the first run is that a key is already there.
+    "Empty" is the whole table and not the live rows: a developer who has retired
+    their only key wants `signing_key.py generate`, which says so, rather than a
+    seed run quietly supplying one.
 
     **The guard is checked here rather than only in `main`**, exactly as
     `seed_mock_platform` is and for the same reason: `main` checks it before it

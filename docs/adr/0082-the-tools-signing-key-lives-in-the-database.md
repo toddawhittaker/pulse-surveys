@@ -1,5 +1,18 @@
 # 0082 — The tool's signing key lives in a one-row database table
 
+**Amended in part by
+[ADR 0127](0127-the-published-key-set-carries-every-unretired-key-and-the-newest-signs.md)
+(E3-01), and its open supply question answered by
+[ADR 0126](0126-a-signing-key-reaches-a-deployment-through-an-operator-command.md).**
+The table is no longer held to one row: the published key set is every row with
+`retired_at IS NULL` and the tool signs with the newest of those, which is the
+rotation overlap this record's consequences said a rotation ticket would have to
+revisit first. Three paragraphs below are marked where they have stopped being
+current. Everything else here stands — the database as custody, the private PEM
+as the only stored half, the derived `kid`, the unencrypted column, the withheld
+write grants, and the deciding fact that two processes must sign with one key,
+which is why ADR 0127's ordering has a tie-break.
+
 ## Context
 
 LTI 1.3 is asymmetric in both directions. A platform signs a launch and this
@@ -47,10 +60,23 @@ this exists to refuse. Two rows is not an untidy state to reconcile later, it is
 two identities for one tool, and whichever row a process reads first decides
 whether its assertions verify.
 
+> **Superseded by ADR 0127 (E3-01).** The index is dropped. What replaces it is a
+> rule the readers hold — the published set is every row with `retired_at IS
+> NULL`, and the signer is the newest of those by `created_at DESC, id DESC` — so
+> two rows are two published keys rather than two identities, and no process
+> decides for itself which one signs.
+
 **An existing key is kept, never rotated.** Rotation is the dangerous failure
 because it is invisible at the moment it happens: a fresh key signs perfectly,
 and nothing goes wrong until a platform that already fetched the old public half
 rejects an assertion hours later.
+
+> **Superseded by ADR 0127 (E3-01).** A key is rotated by supplying its
+> replacement, waiting long enough for platforms to re-fetch the key set, and
+> retiring the old key; the overlap is what makes the change visible rather than
+> invisible. The demo seed is unchanged and still keeps an existing key —
+> rotation is the operator's command (ADR 0126), not something re-running a
+> loader does.
 
 **Unencrypted, deliberately.** A passphrase would have to come from somewhere the
 signing process can reach unattended. In the same database it is not a second
@@ -116,6 +142,10 @@ oversight, and it has an entry with a "done when" in
 platform. The first deployment that needs to sign will need a supply route
 before it needs anything else in this record.
 
+> **Closed by ADR 0126 (E3-01).** The supply route is `scripts/signing_key.py`,
+> an operator command holding the same privileged credential a migration does.
+> The grant on this table is unchanged.
+
 **The key is readable by whoever can read the database as a superuser**, which
 is the same set that can read `user_identity`. That is the custody this buys and
 it is not a strong one; what it buys over the alternatives is that there is
@@ -127,6 +157,9 @@ no overlap window, so every assertion signed by the old one fails from that
 moment. A real rotation needs two keys published at once with `kid` selecting
 between them, which the one-row rule forbids by design — the rule is right for
 now and is the thing a rotation ticket must revisit first.
+
+> **Answered by ADR 0127 (E3-01)**, which is the rotation ticket this paragraph
+> anticipated and revisits the one-row rule exactly as it says.
 
 **`tool_signing_key` is not a person table.** It holds no subject, no name and
 no address, so SPEC §4.1's `PERSON_TABLES` does not change. That is the question
