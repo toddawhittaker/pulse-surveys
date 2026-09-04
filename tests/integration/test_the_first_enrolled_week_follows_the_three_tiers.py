@@ -36,7 +36,9 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 import pytest
-from fixtures.grading import A_MOMENT, GradingWorld, ledger_of
+from fixtures.grading import A_MOMENT, NRPS_CALL_TABLE, GradingWorld, ledger_of
+from fixtures.supervision import require_table
+from fixtures.survey_windows import SECTION_TABLE
 
 pytestmark = pytest.mark.integration
 
@@ -75,6 +77,23 @@ def ledger_from(first_week: int) -> str:
 def weeks_from(first_week: int) -> int:
     """How many items a student credited from `first_week` has in their denominator."""
     return (ELAPSED_WEEKS - first_week + 1) * ITEMS_PER_WEEK
+
+
+def roster_syncs_of(world: GradingWorld) -> list[dict[str, Any]]:
+    """Every `nrps_call` row this world's section carries, read back rather than assumed.
+
+    A tier-2 test whose section had picked up a sync row would be a tier-3 test
+    with a tier-2 expectation, and it would fail against correct code. Nothing here
+    seeds one unless a test asks, so this is a cheap statement that the state under
+    test is the state that was intended.
+    """
+    from sqlalchemy import select
+
+    table = require_table(world.tables, NRPS_CALL_TABLE)
+    section_column = world.link(NRPS_CALL_TABLE, SECTION_TABLE)
+    section_id = world.section_row[world.key_of(SECTION_TABLE)]
+    statement = select(table).where(table.c[section_column] == section_id)
+    return [dict(row) for row in world.session.execute(statement).mappings()]
 
 
 def test_a_platform_dated_add_before_a_window_closes_is_credited_with_that_week(
@@ -177,10 +196,17 @@ def test_an_undated_member_of_a_section_with_no_sync_history_starts_at_week_one(
     no `nrps_call` rows at all is the state seeded data is in, and the work order
     settles it as tier 2 outright.
 
-    **The mutation this kills:** a tier-3 rule that fires without a sync to compare
-    against — reading `started_on` alone as "the date they were added" — which
-    would credit this student from the section's start date resolved into a week
-    and would answer differently the moment a seeded `started_on` fell mid-term.
+    **This test does not kill the tier-3-without-a-sync mutation, and it used to
+    claim it did.** This student's `started_on` is the section's own start date, so
+    a rule that fell back to some earliest-possible date instead of refusing to
+    apply tier 3 resolves that date into course week 1 and agrees with tier 2 by
+    coincidence. The mutation battery measured exactly that: `sync_day =
+    first_sync_day or date.min` survived this test and the whole suite. The test
+    below is the one that kills it, and this docstring is corrected rather than
+    left asserting a coverage that was never there (`docs/MISTAKES.md` entry 1).
+
+    What this test does hold is the case itself: the tier-2 fallback answers every
+    elapsed week for the member the platform never dated.
     """
     world = grading_world.build()
     student = world.student("e3-03-tier-2")
@@ -195,6 +221,56 @@ def test_an_undated_member_of_a_section_with_no_sync_history_starts_at_week_one(
     assert score.ledger == ledger_from(
         1
     ), f"The ledger reads:\n{score.ledger}\n\nrather than:\n{ledger_from(1)}"
+
+
+def test_an_undated_member_first_seen_mid_term_in_a_never_synced_section_starts_at_week_one(
+    grading_world: GradingWorld, clock_overrides: Any, window_settings: Any
+) -> None:
+    """Tier 3 needs a sync to compare against, and there is none — so tier 2 answers.
+
+    The student was first seen on 19 October, three course weeks into the section,
+    and the section has never been synced. There is therefore no "the section's
+    first sync" for §3.4's exception to be later than, and the work order settles
+    the case outright: "A section with no NrpsCall rows at all (seeded data) is
+    tier 2." ADR 0131 records why — the rejected alternative is treating
+    `started_on` alone as the comparison, which cannot say what the section's first
+    sync was.
+
+    **The mutation this kills:** `sync_day = first_sync_day or date.min`, or any
+    other fallback that lets tier 3 fire with nothing to compare against. Every
+    such rule reads this student as a late add and starts their denominator at
+    course week 4, deleting three weeks they were enrolled for from the score. It
+    survived the whole suite before this test existed, because the only undated
+    member anywhere in it started on the section's own start date, where tier 2 and
+    the fallback happen to agree.
+
+    The absence of sync rows is read back first: a stray `nrps_call` row would make
+    this a tier-3 case wearing a tier-2 name, and the assertion would then hold for
+    the wrong reason (`docs/MISTAKES.md` entry 3).
+    """
+    world = grading_world.build()
+    student = world.student("e3-03-tier-2-mid-term", started_on=THE_MONDAY_AFTER)
+    world.elapsed_through(clock_overrides, ELAPSED_WEEKS)
+
+    assert roster_syncs_of(world) == [], (
+        f"The section has {len(roster_syncs_of(world))} `{NRPS_CALL_TABLE}` rows, and this test is "
+        "about a section that has never been synced. With a sync row present the student would be "
+        "a genuine tier-3 late add and the expectation below would be wrong."
+    )
+
+    score = world.score_for(student, settings=window_settings)
+
+    assert score.total == weeks_from(1), (
+        f"A member first seen on {THE_MONDAY_AFTER}, in a section with no roster-sync history at "
+        f"all, has a denominator of {score.total} rather than {weeks_from(1)}. Tier 3 compares "
+        "against the section's earliest sync; where there is none, the comparison cannot be made "
+        "and tier 2 answers — course week 1."
+    )
+    assert score.ledger == ledger_from(1), (
+        f"The ledger reads:\n{score.ledger}\n\nrather than:\n{ledger_from(1)}\n\nA ledger starting "
+        f"at course week {BOUNDARY_WEEK + 1} is tier 3 firing on a date it has nothing to compare "
+        "with."
+    )
 
 
 def test_a_member_first_seen_after_the_sections_first_sync_starts_at_the_week_of_that_sighting(

@@ -709,17 +709,39 @@ class GradingWorld:
             },
         )
 
-    def classify(self, answer: Mapping[str, Any], verdict: str, *, classified_at: datetime) -> Any:
+    def classify(
+        self,
+        answer: Mapping[str, Any],
+        verdict: str,
+        *,
+        classified_at: datetime,
+        classification_id: Any = None,
+    ) -> Any:
         """Append one `classification` row for one comment answer.
 
         Append, always: the table is append-only (ADR 0055, and `pulse_app` holds
         `SELECT, INSERT` and nothing else), so the way a later verdict changes the
         answer is a **new row**, which is what the ticket's fifth criterion
         requires a test to demonstrate.
+
+        **`classification_id` exists so one test can make its own kill
+        deterministic.** Primary keys here are server-generated random uuids (ADR
+        0016), so which of two rows has the larger id is a coin toss — and a test
+        distinguishing "the latest by `classified_at`" from "the largest id" then
+        kills its mutation only about half the time, which is a test that passes
+        for a reason unrelated to what it asserts on the other runs
+        (`docs/MISTAKES.md` entry 3). Given an id, the row is planted with it.
+        Left `None`, which is every other caller, the database chooses.
         """
+        chosen: dict[str, Any] = (
+            {}
+            if classification_id is None
+            else {self.key_of(CLASSIFICATION_TABLE): classification_id}
+        )
         return self.seed(
             CLASSIFICATION_TABLE,
             {},
+            **chosen,
             **{
                 ANSWER_ID_COLUMN: answer[self.key_of(ANSWER_TABLE)],
                 CLASSIFICATION_TASK_COLUMN: COMMENT_VALIDITY_TASK,

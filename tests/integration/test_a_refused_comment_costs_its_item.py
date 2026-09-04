@@ -25,9 +25,11 @@ it replaced.
 
 from datetime import timedelta
 from typing import Any
+from uuid import UUID
 
 import pytest
 from fixtures.grading import (
+    CLASSIFICATION_TABLE,
     CLASSIFICATION_VERDICT_COLUMN,
     INSUFFICIENT,
     NONSENSE,
@@ -50,6 +52,16 @@ COURSE_COMMENT = 4
 # deliberately does not pose it.
 FIRST_VERDICT_BEFORE_CLOSE = timedelta(hours=2)
 SECOND_VERDICT_BEFORE_CLOSE = timedelta(minutes=10)
+
+# The two primary keys the ordering test plants, at the bottom and the top of the
+# uuid range so that ordering by id can never agree with ordering by
+# `classified_at`. Everything else in this ticket takes the server-generated
+# random key ADR 0016 gives it; these two are pinned because a random pair makes
+# that test's kill a coin toss, and the test's own docstring carries the
+# measurement. The tail of each is this ticket's number, so the pair is unique to
+# the one test that plants it.
+THE_SMALLER_ID = UUID("00000000-0000-4000-8000-00000000e303")
+THE_LARGER_ID = UUID("ffffffff-ffff-4fff-bfff-ffffffffe303")
 
 
 def test_a_comment_whose_latest_verdict_is_insufficient_does_not_count_its_item(
@@ -218,36 +230,78 @@ def test_a_later_classification_row_lowers_the_score_without_editing_anything(
 def test_the_governing_verdict_is_the_latest_by_classified_at_not_the_last_inserted(
     grading_world: GradingWorld, clock_overrides: Any, window_settings: Any
 ) -> None:
-    """The refusing row is written first and dated last; the counting row is written second.
+    """The refusing row is dated last, inserted first, and given the *smaller* id.
 
     `app/services/validity.py` orders the latest verdict by `classified_at DESC,
-    id DESC`, and the work order requires this module to mirror it. Insertion
-    order and classification order disagree here, so exactly one of the two rules
-    can be right about this world.
+    id DESC`, and the work order requires this module to mirror it. Three orderings
+    disagree about this world and only one of them is right: by `classified_at` the
+    refusing row governs; by insertion order and by id the counting row does.
 
-    **The mutation this kills:** `ORDER BY id DESC` alone, or `LIMIT 1` over an
-    unordered read, both of which pick the substantive row and credit the item.
-    A re-classification that arrives out of order — a sweep re-running an old
-    floored verdict while a newer one is already stored — is exactly how that
-    happens in production.
+    **The mutations this kills:** `ORDER BY id DESC` alone, and `LIMIT 1` over an
+    unordered read — both pick the substantive row and credit the item. A
+    re-classification that arrives out of order, a sweep re-running an old floored
+    verdict while a newer one is already stored, is how that happens in production.
+
+    **The two ids are pinned, and that is what makes the kill deterministic.**
+    Primary keys are server-generated random uuids (ADR 0016), so with the database
+    choosing them an `ORDER BY id DESC` implementation returns the refusing row
+    about half the time and this test passes against the defect on those runs — the
+    mutation battery measured 3 of 10 and 7 of 10 kills on two runs, which is
+    `docs/MISTAKES.md` entry 3 in its most literal form. The refusing row therefore
+    takes an id that sorts below the counting row's, so id order and `classified_at`
+    order name different rows on **every** run. The near miss stays green: the two
+    `classified_at` values are still distinct and the correct ordering still reaches
+    the refusing row.
+
+    The planted ids are read back before the score is asserted. An override the
+    seeding helper silently ignored would leave the ids random again, and the test
+    would go back to killing the mutation half the time while looking exactly like
+    this one (`docs/MISTAKES.md` entry 20 — a mutation the fixture undid).
     """
     world = grading_world.build()
     student = world.student("e3-03-out-of-order")
-    answers = world.answer_week(student, 1, verdicts={INSTRUCTOR_COMMENT: INSUFFICIENT})
+    answers = world.answer_week(student, 1, unclassified=[INSTRUCTOR_COMMENT])
+    comment = answers[INSTRUCTOR_COMMENT]
+
+    # Inserted first, dated last, and the smaller id: the row that governs under
+    # the one correct ordering and under neither of the others.
     world.classify(
-        answers[INSTRUCTOR_COMMENT],
+        comment,
+        INSUFFICIENT,
+        classified_at=world.closes_at(1) - SECOND_VERDICT_BEFORE_CLOSE,
+        classification_id=THE_SMALLER_ID,
+    )
+    world.classify(
+        comment,
         SUBSTANTIVE,
         classified_at=world.closes_at(1) - FIRST_VERDICT_BEFORE_CLOSE,
+        classification_id=THE_LARGER_ID,
     )
     world.elapsed_through(clock_overrides, 1)
+
+    planted = {
+        row[CLASSIFICATION_VERDICT_COLUMN]: row[world.key_of(CLASSIFICATION_TABLE)]
+        for row in world.classifications_of(comment)
+    }
+    assert set(planted) == {INSUFFICIENT, SUBSTANTIVE}, (
+        f"The comment carries the verdicts {sorted(planted)} rather than one of each, so the "
+        "orderings this test needs to disagree do not disagree."
+    )
+    assert planted[INSUFFICIENT] < planted[SUBSTANTIVE], (
+        f"The refusing row's id is {planted[INSUFFICIENT]} and the counting row's is "
+        f"{planted[SUBSTANTIVE]}, so the refusing row does not sort below it. The ids are pinned "
+        "precisely so that an implementation ordering by id alone is wrong every time; unpinned, "
+        "this test kills that mutation on about half of its runs."
+    )
 
     score = world.score_for(student, settings=window_settings)
 
     assert score.completed == ITEMS_PER_WEEK - 1, (
         f"The comment's rows are {INSUFFICIENT!r} at the later `classified_at` and "
-        f"{SUBSTANTIVE!r} at the earlier one, inserted in that order, and the student is credited "
-        f"with {score.completed} of {score.total} rather than {ITEMS_PER_WEEK - 1}. The governing "
-        "verdict is the latest by `classified_at`, which is the row that refuses."
+        f"{SUBSTANTIVE!r} at the earlier one, and the student is credited with {score.completed} "
+        f"of {score.total} rather than {ITEMS_PER_WEEK - 1}. The governing verdict is the latest "
+        "by `classified_at`, which is the row that refuses — it is neither the last inserted nor "
+        "the one with the larger id, and each of those names the row that counts."
     )
 
 
