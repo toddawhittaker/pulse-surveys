@@ -73,6 +73,9 @@ boundary: `metadata_tables` is asked for by both.
   - `fixtures/student_read.py` — E2-09: the names that ticket settles, a student
     enrolled in one section and not in its sibling, and the door their read path
     is asked through with a session a real launch issued.
+  - `fixtures/signing_key_tool.py` — E3-01: `scripts/signing_key.py` run as a
+    program against a migrated database of its own, the RFC 7638 thumbprint of a
+    stored key, and the sign-and-verify pair a retirement is planted with.
   - `fixtures/grading.py` — E3-03: the module contract the participation formula
     is asked through, a section whose course weeks are not its term weeks, and
     students enrolled on the dates a test chose with the answers and verdicts it
@@ -124,5 +127,6 @@ pytest_plugins = (
     "fixtures.ai_tasks",
     "fixtures.submit",
     "fixtures.student_read",
+    "fixtures.signing_key_tool",
     "fixtures.grading",
 )

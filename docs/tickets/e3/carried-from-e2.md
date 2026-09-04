@@ -46,6 +46,44 @@ needs. Source: `docs/tickets/e1/deferred.md`, E1-05 item 1.
 **Owner:** E3, the first epic to register a real platform.
 **Done when:** the deferred entry's.
 
+**Closed by E3-01.** The done-when asked for "a documented and tested way to put
+a signing key in that table — with the rotation question answered too", and both
+halves shipped in one pull request.
+
+The supply path is `scripts/signing_key.py`, an operator command with `generate`,
+`list` and `retire <kid>`, connecting on `DATABASE_URL` for the address and
+`DB_SUPERUSER`/`DB_SUPERUSER_PASSWORD` for the identity — the same three
+variables a migration reads, so no configuration variable was added, and the
+application role still holds `SELECT` on the table and no write of any kind
+([ADR 0126](../../adr/0126-a-signing-key-reaches-a-deployment-through-an-operator-command.md)).
+It is driven as a program against migrated databases the demo seed has never run
+against, which is the half of the entry that mattered: a path proven only where
+the seed works is proven in the one place it is not needed.
+
+The rotation question is answered by
+[ADR 0127](../../adr/0127-the-published-key-set-carries-every-unretired-key-and-the-newest-signs.md).
+`uq_tool_signing_key_one_row` is dropped and two columns replace it: the
+published key set at `/lti/jwks` is every row with `retired_at IS NULL`, and the
+tool signs with the newest of those by `created_at DESC, id DESC`. A rotation is
+`generate`, a wait long enough for platforms to re-fetch the key set, then
+`retire` on the old key — and both keys verify in between. A retired key leaves
+the set immediately and its row stays as the record of what this deployment used
+to sign with. A deployment with no *live* key still answers 503, in a sentence
+that now names the command that fixes it.
+
+Three limits stated rather than left to be discovered. Nothing expires a key or
+bounds how many the published set carries: `retire` is a command somebody has to
+run, and `list` exists so the state a rotation is halfway through is visible. The
+migration's downgrade **refuses** when it meets more than one *live* key, because
+below that revision the table permits one row and completing would have to choose
+which identity survives — the one discarded being the private half of a key a
+platform may already have been registered against; retirement is the route down,
+which is why the guard counts live rows rather than stored ones. And a downgrade
+that does complete **discards the retired-key records**, which the one-row schema
+has nowhere to hold: no identity anything still verifies against is lost, but the
+record of what this deployment used to sign with is, and only a backup has it
+afterwards. ADR 0127 carries all three.
+
 ## AGS still answers without a token
 
 E1's fix round enforced the client-credentials token on NRPS only; the AGS

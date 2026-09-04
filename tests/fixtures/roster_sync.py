@@ -66,6 +66,7 @@ import inspect
 import io
 import json
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from datetime import UTC, datetime
 from types import ModuleType
 from typing import Any
 from urllib.parse import parse_qs, urlsplit, urlunsplit
@@ -86,6 +87,13 @@ from fixtures.supervision import require_column, require_table, single_primary_k
 # `backend/app/services/roster_sync.py`." The package root is `backend/`, so the
 # import path is `app.services....`.
 ROSTER_SYNC_MODULE = "app.services.roster_sync"
+
+# The instant a signing key row sorts under when it carries no `created_at`. Only
+# `stored_signing_key` below uses it, and only while `created_at` does not exist:
+# E3-01 adds that column, and before it lands every row answers the same value so
+# the ordering falls through to the tie-break on `id`. Aware, because ADR 0019
+# makes every stored instant aware and a naive one would not compare with them.
+BEFORE_ANY_KEY = datetime(1970, 1, 1, tzinfo=UTC)
 
 # The one callable the work order spells (D9): "`roster_sync.request_section_sync(
 # session, section_id)` skips the enqueue when the section has an `nrps_call` row
@@ -1248,6 +1256,19 @@ def stored_signing_key(committed_rows: Any, metadata_tables: dict[str, Any]) -> 
     `tests/integration/test_the_tool_publishes_its_key_set.py` uses, and it is
     deliberately a separate row from that module's so neither test depends on the
     other's ordering.
+
+    **Which row, once there can be more than one.** This used to hand back
+    `existing[0]` — the first row the database returned — and that was unambiguous
+    only while `uq_tool_signing_key_one_row` held the table to one. E3-01 drops
+    that index, so the first row is now whichever the planner happens to return,
+    and it can be a retired one. The key a platform driver signs with has to be
+    the key the *tool* signs with, or every ground-truth roster read in this suite
+    fails at the mock's token check for a reason that has nothing to do with the
+    sync (`docs/MISTAKES.md` entry 22). So the choice is made by ADR 0127's own
+    rule — the newest row with `retired_at IS NULL`, ordered `created_at DESC, id
+    DESC` — written out here rather than read from the implementation, which is
+    what keeps `tests/integration/test_the_signer_selects_the_newest_live_key.py`
+    from comparing the tool against a copy of itself (entry 19).
     """
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
@@ -1259,11 +1280,22 @@ def stored_signing_key(committed_rows: Any, metadata_tables: dict[str, Any]) -> 
             "E1-06 publishes the key set out of it, and D11 signs this ticket's client assertion "
             "with the same row — without it nothing here can request a token at all."
         )
-    existing = list(
-        committed_rows.session.execute(require_table(metadata_tables, table).select()).mappings()
-    )
+    existing = [
+        dict(row)
+        for row in committed_rows.session.execute(
+            require_table(metadata_tables, table).select()
+        ).mappings()
+    ]
+    usable = [row for row in existing if row.get("retired_at") is None]
+    if usable:
+        newest = max(usable, key=lambda row: (row.get("created_at") or BEFORE_ANY_KEY, row["id"]))
+        return str(newest["private_key_pem"])
     if existing:
-        return str(existing[0]["private_key_pem"])
+        pytest.fail(
+            f"`{table}` holds {len(existing)} row(s) and every one of them is retired, so the tool "
+            "publishes no key set and can sign nothing. A fixture that generated a fresh key here "
+            "would hide that state behind a working sync; a test that wants it says so itself."
+        )
     pem = (
         rsa.generate_private_key(public_exponent=65537, key_size=2048)
         .private_bytes(

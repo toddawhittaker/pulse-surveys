@@ -149,6 +149,18 @@ Every E1 pull request that defers something adds it here in the same PR.
    **Owner:** the epic that first registers a real platform and therefore first
    needs a production signer.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; that epic is E3.
+   **Fixed by E3-01**, both halves of the done-when. The supply path is
+   `scripts/signing_key.py` — `generate`, `list`, `retire <kid>` — connecting as
+   the bootstrap identity the way a migration does, so no configuration variable
+   was added and the application role still holds `SELECT` and no write
+   ([ADR 0126](../../adr/0126-a-signing-key-reaches-a-deployment-through-an-operator-command.md)).
+   The rotation question is answered by
+   [ADR 0127](../../adr/0127-the-published-key-set-carries-every-unretired-key-and-the-newest-signs.md):
+   the one-row index is dropped, the published key set is every row with
+   `retired_at IS NULL`, and the tool signs with the newest of those, so a
+   rotation carries the retiring key and its replacement at once. The closure and
+   the two limits it leaves are recorded on the entry in
+   [`../e3/carried-from-e2.md`](../e3/carried-from-e2.md).
 
 2. **The address rules judge spellings, not addresses** (security review,
    LOW). Rules 3 and 4 of ADR 0081 accept `127.1`, bare-decimal and

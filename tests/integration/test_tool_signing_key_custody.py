@@ -12,10 +12,16 @@ Four properties, and each has its own test because each fails differently:
 
   - **The seed generates one**, and what it generates is a real RSA private key
     of a real size. "A row exists" is satisfied by a row holding an empty string.
-  - **The database permits at most one**, by the expression-index pattern
-    `uq_institution_one_row` already uses. A second row is not a duplicate to be
-    tidied later; it is two identities for one tool, and whichever one a process
-    reads first decides whether its assertions verify.
+  - **The database accepts a second row.** This bullet said the opposite until
+    E3-01, and the change is deliberate: E1-05 held the one-row rule in the
+    database as `uq_tool_signing_key_one_row`, on the grounds that two rows are
+    "two identities for one tool", and E3-01's rotation rule replaces it. A
+    rotation needs the retiring key and its replacement published at once, and
+    the one-row rule leaves nowhere to put the second; the rule that replaces it
+    is that the published set is every row with `retired_at IS NULL` and the
+    signer is the newest of those (ADR 0127, amending ADR 0082). The seed still
+    writes exactly one key, which is what the first bullet is about; what changed
+    is what the *database* permits beside it.
   - **A second run keeps the key it finds.** A seed that rotated the key on every
     run would leave every previously-issued assertion unverifiable and would do
     it silently, since a fresh key signs perfectly well.
@@ -43,7 +49,6 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select, text
-from sqlalchemy.exc import DatabaseError
 
 pytestmark = pytest.mark.integration
 
@@ -53,10 +58,11 @@ pytestmark = pytest.mark.integration
 SIGNING_KEYS = "tool_signing_key"
 PRIVATE_KEY_COLUMN = "private_key_pem"
 
-# The one-row rule's object, named because the assertion is about *which* object
-# refused the second row. The model and the migration spell it the same way, and
-# the `ix` naming template cannot build it for them: it interpolates a column
-# name and this index is on an expression.
+# The object E1-05's one-row rule was held in, kept here because the test below
+# names it: an insert refused by *this* index is E3-01's schema change not having
+# landed, and a reader who is told the name can check in one query. E3-01 drops
+# it (ADR 0127) and `tests/integration/test_the_signing_key_survives_a_downgrade.py`
+# is where its return at the revision below is asserted.
 ONE_ROW = "uq_tool_signing_key_one_row"
 
 # The floor for the key itself. **Not this module's choice**: E1-05 says RSA
@@ -195,8 +201,10 @@ def test_the_seed_leaves_exactly_one_tool_signing_key(
     assert len(rows) == 1, (
         f"The seed left {len(rows)} rows in `{SIGNING_KEYS}` and E1-05 asks for exactly one. Zero "
         "means the tool has no signing key after a development bring-up, which is the criterion "
-        "failing outright; more than one means two identities for one tool, and whichever row a "
-        "process reads first decides whether its client assertions verify."
+        "failing outright. More than one is no longer refused by the database — E3-01 widened the "
+        "rule so a rotation has somewhere to put its second key — so this assertion is now the "
+        "only thing saying the *seed* writes one: a development bring-up that quietly accumulated "
+        "a key per run would be a growing published key set nobody asked for."
     )
 
     key = loaded_key(rows[0].get(PRIVATE_KEY_COLUMN), f"The seeded `{SIGNING_KEYS}` row")
@@ -249,7 +257,7 @@ def test_the_seed_prints_no_private_key_material(
 
 
 # ---------------------------------------------------------------------------
-# The one-row rule, asked of the database.
+# How many rows the database permits, asked of the database.
 # ---------------------------------------------------------------------------
 
 
@@ -258,10 +266,11 @@ def test_the_first_tool_signing_key_row_is_accepted(
 ) -> None:
     """One key is the supported state, not zero.
 
-    The near miss for the test below. A rule spelled as a check nothing can
-    satisfy — or an expression index that collides with itself on the first row —
-    refuses the second insert exactly as the right rule does, and the two would
-    be indistinguishable without this.
+    The control for the test below, and it keeps that job through E3-01's change
+    of direction. A schema that refuses *every* insert — a check nothing can
+    satisfy, a grant nobody holds, a column that is not there — would make the
+    test below red for a reason that has nothing to do with the row-count rule,
+    and the two would be indistinguishable without this.
     """
     require_signing_key_table(metadata_tables)
     assert stored_keys(db_session) == 0, (
@@ -274,39 +283,49 @@ def test_the_first_tool_signing_key_row_is_accepted(
     assert stored_keys(db_session) == 1
 
 
-def test_a_second_tool_signing_key_row_is_refused(
+def test_a_second_tool_signing_key_row_is_accepted(
     db_session: Any, metadata_tables: dict[str, Any]
 ) -> None:
-    """The tool has one identity, and the database is what says so.
+    """The database has room for a rotation's second key — E3-01, and a reversal.
 
-    Two keys is not an untidy state to reconcile later. The signing code reads
-    *a* row; the platform holds the public half of *one* of them; so a second row
-    is a coin toss on every client assertion, and the half that fails fails at
-    the platform with an error about a signature rather than about a duplicate.
+    **This test asserted the opposite until E3-01, and the change is deliberate.**
+    It was `test_a_second_tool_signing_key_row_is_refused`, and it was right: while
+    the signing code read *a* row and a platform held the public half of *one* of
+    them, a second row was a coin toss on every client assertion. E3-01 replaces
+    the read rather than relaxing the rule — the published set is every row with
+    `retired_at IS NULL` and the signer is the newest of those by `created_at
+    DESC, id DESC` (ADR 0127) — so two rows are two published keys rather than two
+    identities, which is precisely what a rotation is. The old assertion is not
+    weakened here; it is removed because the fact it rested on is gone, and this
+    sentence is the record of that (`docs/MISTAKES.md` entry 1).
 
-    The two rows carry different keys, so nothing about the values can be what
-    refuses the second one, and the message is asserted to name the rule's own
-    object rather than settling for "something failed".
+    **The mutation this kills:** `uq_tool_signing_key_one_row` left on the table,
+    which makes rotation unbuildable — there is nowhere to put the replacement key
+    while the retiring one is still published, so every rotation is a gap in which
+    assertions signed by the old key verify nowhere.
 
-    **The mutations this survive:** the index dropped, or made non-unique, or
-    written over `private_key_pem` instead of over a constant expression — the
-    last is the interesting one, because a unique index on the key material
-    permits any number of rows holding *different* keys, which is exactly the
-    state this test exists to refuse.
+    **The near misses it must also kill**, and they are why the two keys differ:
+    the index moved onto `private_key_pem`, which permits any number of rows
+    holding *different* keys and is satisfied by this test; and a partial unique
+    index over the unretired rows, which refuses exactly the overlap the rotation
+    needs. The second insert here is a second *live* key, so both fail it.
+
+    **Its control is the test above.** A schema that refuses every insert would
+    make this red for a reason that is not the row-count rule.
     """
     require_signing_key_table(metadata_tables)
     first, second = generated_pem(), generated_pem()
     assert first != second, "Two generated keys came out identical, so this poses nothing."
 
     insert_key(db_session, first)
+    insert_key(db_session, second)
 
-    with pytest.raises(DatabaseError) as refusal, db_session.begin_nested():
-        insert_key(db_session, second)
-
-    assert ONE_ROW in str(refusal.value), (
-        f"A second `{SIGNING_KEYS}` row was refused, and not by {ONE_ROW}. The rule has to be the "
-        "object that refuses it, so that the error names what is actually wrong rather than a "
-        f"constraint about something else. Postgres said: {refusal.value}"
+    assert stored_keys(db_session) == 2, (
+        f"A second `{SIGNING_KEYS}` row did not survive. If Postgres refused it and named "
+        f"{ONE_ROW}, that is E1-05's one-row index still on the table: E3-01 drops it, because a "
+        "rotation needs the retiring key and its replacement published at once and the one-row "
+        "rule leaves nowhere to put the second. An index moved onto the key material, or made "
+        "partial over the unretired rows, refuses this same pair for the same reason."
     )
 
 

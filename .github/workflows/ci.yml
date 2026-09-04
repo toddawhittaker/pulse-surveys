@@ -526,6 +526,15 @@ jobs:
       # which reads its `REPO_ROOT`-rooted `rglob` as a repository-wide sweep; the
       # repair that guard asks for is to name the ids here, never to reshape the
       # sweep until the detector stops seeing it.
+      #
+      # The seventh entry is E3-01's, and it is the case E0-37 item 10 predicted
+      # in as many words: a test whose subject is `docs/` itself. It globs
+      # `docs/adr` to check that ADR 0082 points at the record which replaced its
+      # one-row rule, and every change that could falsify it — editing 0082,
+      # deleting 0126 or 0127, renumbering any of them — is a documentation-only
+      # diff. Left in the conditional job it would run on every pull request
+      # except the ones it exists for. A whole module rather than node ids,
+      # because the module is that one sweep.
       - name: Repository-wide sweeps that a docs-only diff must not switch off
         run: |
           pytest -q \
@@ -535,7 +544,8 @@ jobs:
             "tests/unit/test_mock_lms_service.py::test_the_sweep_itself_finds_a_planted_key_and_not_a_tree_without_one" \
             "tests/unit/test_the_process_wide_authorization_endpoint_is_gone.py" \
             "tests/unit/test_types_node_tracks_runtime.py" \
-            "tests/unit/test_survey_windows_have_one_assignment_site.py"
+            "tests/unit/test_survey_windows_have_one_assignment_site.py" \
+            "tests/unit/test_the_signing_key_custody_record_is_amended.py"
 
   # The job keeps its id and its display name. Branch protection's required-check
   # list keys on the display name, and renaming it is a change to that list

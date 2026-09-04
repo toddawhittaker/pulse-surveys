@@ -58,11 +58,25 @@ from app.services.authz import Door
 from app.services.provisioning import provision_from_launch
 from app.services.roster_sync import request_section_sync
 
-# What a caller is told when this deployment holds no signing key. Short on
-# purpose: the route is public in every environment, and the operator's copy of
-# this — which table, which command — is in `app.lti.registration`, where
-# somebody reading a traceback or the code will find it.
-NO_KEY_SET_DETAIL = "This deployment publishes no LTI key set."
+# What a caller is told when this deployment holds no usable signing key.
+#
+# **It names the command that fixes it** (E3-01 criterion 4). Until E3-01 there
+# was nothing to name: the demo seed was the only writer and it refuses to run
+# outside development, so the body said only that no key set is published and
+# whoever read it could do nothing but escalate. The supply path exists now, and
+# a refusal that does not name it is a refusal that wastes the one reader who
+# could act on it.
+#
+# **What that discloses, and why it is acceptable.** This route is public in
+# every environment (ADR 0085), so the sentence goes to anybody who asks. It
+# names a script in this tool's own repository and nothing about this
+# deployment — no path on disk, no role, no address, no whether-a-key-once-
+# existed. What it tells an unauthenticated reader is that this installation
+# cannot sign yet, which the 503 already told them.
+NO_KEY_SET_DETAIL = (
+    "This deployment publishes no LTI key set: it holds no signing key that has not been retired. "
+    "An operator supplies one with `python scripts/signing_key.py generate`."
+)
 
 # RFC 9110's status for a server that is working and cannot serve this yet.
 SERVICE_UNAVAILABLE = 503

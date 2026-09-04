@@ -7,14 +7,25 @@ platform's JWKS URL, and this is the mirror — the public half of **this tool's
 key, published so a platform can verify the `client_assertion` the tool signs a
 client-credentials grant with (E1-06 part 4, E1-11's service calls).
 
-**One key, read from the database on every request** (ADR 0082). The `api`
-container and the celery worker are two processes and one tool, and a platform
-holds the public half of exactly one key — so the key lives in a one-row
-`tool_signing_key` table rather than in a process, a file or a setting. Only the
-private PEM is stored; the public JWK and its `kid` are both derived here, on
-read, because a stored copy of something derivable is a copy that can drift out
-of step with what it was derived from (`docs/MISTAKES.md` entry 19). The drift
-would be a key set advertising a key that no longer signs anything.
+**The keys are read from the database on every request** (ADR 0082). The `api`
+container and the celery worker are two processes and one tool, and they have to
+agree on which key is signing — so the keys live in `tool_signing_key` rather
+than in a process, a file or a setting. Only the private PEM is stored; the
+public JWK and its `kid` are both derived here, on read, because a stored copy of
+something derivable is a copy that can drift out of step with what it was derived
+from (`docs/MISTAKES.md` entry 19). The drift would be a key set advertising a
+key that no longer signs anything.
+
+**One rule for which keys those are, and this module is where it lives** (ADR
+0127, which widens ADR 0082's one-row rule). The **published** set is every
+stored key with `retired_at IS NULL`, so a rotation can carry the retiring key
+and its replacement at once; the **signing** key is the newest of those, ordered
+`created_at DESC, id DESC`. `live_signing_keys` below answers both, which is what
+keeps the two processes agreeing and what keeps the `kid` in an assertion header
+naming a key the published set actually carries. Two ordering columns rather than
+one, deliberately: `created_at` is server-defaulted and Postgres gives every
+statement in a transaction the same `now()`, so an ordering that stopped there
+would leave the choice between two same-instant rows to the storage layer.
 
 **The public JWK is assembled member by member, never filtered.** `cryptography`
 will serialise a *private* key to a JWK-shaped mapping one call away from the
@@ -54,7 +65,9 @@ __all__ = [
     "NoSigningKeyError",
     "OrmToolConf",
     "ToolRegistration",
+    "current_signing_key",
     "launcher_origins",
+    "live_signing_keys",
     "public_jwk",
     "published_key_set",
     "rfc7638_thumbprint",
@@ -80,15 +93,19 @@ SIGNATURE_USE = "sig"
 
 
 class NoSigningKeyError(RuntimeError):
-    """This deployment holds no `tool_signing_key` row, so the tool has no identity.
+    """This deployment holds no usable signing key, so the tool has no identity.
 
-    A deliberate state rather than an impossible one (ADR 0082): the key is
-    written by the demo seed, which runs only in development, and the supply
-    route for a real deployment is `docs/tickets/e1/deferred.md`'s with a
-    done-when. Raised loudly here rather than answered with an empty key set,
-    because an empty set is a document a platform accepts and stores — and the
-    failure then arrives hours later, at that platform, as an assertion refused
-    for a reason that names no key.
+    Two ways to reach it and they are the same state. A deployment nobody has run
+    `scripts/signing_key.py generate` against holds no row at all; a deployment
+    part-way through a rotation can hold several rows and have retired every one
+    of them, which is an ordinary mistake to make in the middle of one. The row
+    count is therefore not what says whether this tool can sign — the live rows
+    are.
+
+    Raised loudly rather than answered with an empty key set, because an empty
+    set is a document a platform accepts and stores, and the failure then arrives
+    hours later, at that platform, as an assertion refused for a reason that names
+    no key.
     """
 
 
@@ -190,12 +207,19 @@ class OrmToolConf(ToolConfAbstract[Any]):
         if row.auth_token_url is not None:
             registration.set_auth_token_url(row.auth_token_url)
         # **Absent rather than refused**, deliberately. Every inbound launch is
-        # resolved through this method, and a deployment with no `tool_signing_key`
-        # row can still verify one — so raising here would take the door down over
+        # resolved through this method, and a deployment with no usable signing
+        # key can still verify one — so raising here would take the door down over
         # a key only the outbound client needs. The outbound caller
         # (`app.services.roster_sync`) checks for it and raises `NoSigningKeyError`
-        # naming the table, which is a better message than the library's assert.
-        stored = self._session.scalars(select(ToolSigningKey)).one_or_none()
+        # naming the supply path, which is a better message than the library's
+        # assert.
+        #
+        # `signing_key` and not "some stored row": once a rotation can be in
+        # progress, the row a `.first()` returns is whichever the planner hands
+        # back, and it can be a retired one — a key the published set no longer
+        # carries, so every assertion signed with it is refused at the platform
+        # while this side looks perfect.
+        stored = current_signing_key(self._session)
         if stored is not None:
             registration.set_tool_private_key(stored.private_key_pem)
             registration.set_kid(public_jwk(stored.private_key_pem)["kid"])
@@ -306,25 +330,70 @@ def public_jwk(private_key_pem: str) -> dict[str, str]:
     }
 
 
+def live_signing_keys(session: Session) -> list[ToolSigningKey]:
+    """Every stored key that has not been retired, newest first (ADR 0127).
+
+    The one place the rotation rule is written down. Both readers spend it: the
+    key set publishes all of them, and the signer takes the first. Writing it
+    twice would be two rules that agree until somebody changes one, and the
+    disagreement would be a `kid` in an assertion header naming a key the
+    published document does not carry — refused at the platform, with nothing on
+    this side to look at.
+
+    **Ordered on two columns.** `created_at` is server-defaulted and Postgres
+    gives every statement in one transaction the same `now()`, so two keys
+    supplied together share an instant; without the tie-break on `id` the choice
+    between them belongs to the storage layer, and the api container and the
+    celery worker can then sign with different keys. That is ADR 0082's deciding
+    fact, and it is the reason this ordering is not "newest by timestamp".
+    """
+    return list(
+        session.scalars(
+            select(ToolSigningKey)
+            .where(ToolSigningKey.retired_at.is_(None))
+            .order_by(ToolSigningKey.created_at.desc(), ToolSigningKey.id.desc())
+        )
+    )
+
+
+def current_signing_key(session: Session) -> ToolSigningKey | None:
+    """The key this tool signs with now, or `None` where it holds no usable one.
+
+    `None` rather than a raise, because the two callers want different things
+    from the same absence: an inbound launch does not need this key and must not
+    be refused over it, and the outbound service client does and says so with a
+    message naming the supply path.
+
+    Named for the *current* key rather than `signing_key`, which is what
+    `app.services.tokens.signing_key` is already called — that one picks a
+    **platform's** verification key out of a key set this tool fetched, and the
+    two would be one grep away from each other in a traceback.
+    """
+    live = live_signing_keys(session)
+    return live[0] if live else None
+
+
 def published_key_set(session: Session) -> dict[str, Any]:
     """This tool's key set, as RFC 7517 §5 shapes one: `{"keys": [...]}`.
 
-    Exactly one key, because ADR 0082 stores exactly one and forbids rotation:
-    "two rows is not an untidy state to reconcile later, it is two identities for
-    one tool, and whichever row a process reads first decides whether its
-    assertions verify". `one_or_none` is what makes a second row a loud failure
-    here as well as at the unique index, rather than this quietly publishing
-    whichever came back first.
+    Every live key, oldest-signed assertions included: a rotation is a period in
+    which the retiring key and its replacement are both published, so that what
+    was signed before the switch still verifies while what is signed after it
+    verifies too (ADR 0127). A retired key leaves this document immediately and
+    stays in the database as the record of what this deployment used to sign with.
+
+    A deployment with no live key refuses rather than serving `{"keys": []}`, and
+    the row count is not what decides that — every stored key can be retired.
     """
-    stored = session.scalars(select(ToolSigningKey)).one_or_none()
-    if stored is None:
+    live = live_signing_keys(session)
+    if not live:
         raise NoSigningKeyError(
-            "This deployment holds no `tool_signing_key` row, so the tool has no key to publish "
-            "and nothing it signs can be verified. `make seed` writes one in development; ADR "
-            "0082 records that a real deployment needs a supply route before it needs anything "
-            "else."
+            "This deployment holds no signing key that has not been retired, so the tool has "
+            "nothing to publish and nothing it signs can be verified. "
+            "`python scripts/signing_key.py generate` supplies one, in any deployment; `make seed` "
+            "writes one in development."
         )
-    return {"keys": [public_jwk(stored.private_key_pem)]}
+    return {"keys": [public_jwk(key.private_key_pem) for key in live]}
 
 
 # A syntactically valid browser origin: `scheme://host[:port]` and nothing else.
