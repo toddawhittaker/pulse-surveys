@@ -8,12 +8,19 @@ E2-08 writes the first student submission, and it needs two columns and nine
 privileges that do not exist yet.
 
 **`response.is_valid`, `NOT NULL` and with no server default.** SPEC §3.3 gates
-participation on a "complete, reasonable submission", and §3.4 counts "valid weeks
-completed ÷ weeks elapsed to date" — so whether a week counted is a fact about the
-row, read later by E3's participation formula and E4's reporting. It is written by
-the submit path alone, from the verdicts of the comments the submission carried,
-and revised by the async re-classification when a model finally judges a comment
-§3.3's fail-open floor stood in for.
+participation on a "complete, reasonable submission", so whether a submission was
+one is a fact about the row. It is written by the submit path alone, from the
+verdicts of the comments the submission carried, and revised by the async
+re-classification when a model finally judges a comment §3.3's fail-open floor
+stood in for.
+
+*(Corrected 2026-09-04, prose only and no schema change. This paragraph named
+§3.4's then-current "valid weeks completed ÷ weeks elapsed to date" and said the
+column would be read by E3's participation formula. The formula ruled that day
+counts completed items over total items and reads the answer rows and their
+classifications, not this column, so the forward reference sent a reader to the
+wrong reader. E4's reporting and the student's own read path are what the column
+serves. The revision's SQL is untouched.)*
 
 No server default in the final schema, for the reason
 `app.models.survey.Response`'s two timestamps carry none: a default wins silently

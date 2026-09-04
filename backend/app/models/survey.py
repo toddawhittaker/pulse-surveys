@@ -263,10 +263,12 @@ class Response(UuidPrimaryKey, Base):
     """One student's submission for one section in one week (SPEC §8).
 
     "`response` is unique per (student, section, week)", and the database is what
-    refuses the second one. Two rows are two votes: §3.3's validity rate and
-    §3.4's participation score both count responses, and the denominator is weeks
-    rather than rows, so a duplicate doubles a student's weight in every §5
-    aggregate while participation stays at one.
+    refuses the second one. Two rows are two votes: §3.3's validity rate counts
+    responses, so a duplicate doubles a student's weight in every §5 aggregate.
+    §3.4's participation score counts the *items* answered against the week's
+    question set, so a second row for one week hangs a second set of answers off
+    the same week and can carry a student past that week's own denominator. The
+    key is what makes both impossible.
 
     All three columns are in the key and each is load-bearing. Without the week,
     a student could answer a section's survey once per term. Without the section,
@@ -310,12 +312,21 @@ class Response(UuidPrimaryKey, Base):
 
     **`is_valid` is §3.3's verdict about the whole submission**, added by E2-08
     with the path that writes it. It is a stored answer rather than a query over
-    `classification` because §3.4's participation score is computed over these
-    rows and the verdicts behind it are append-only — "the latest classification
-    of each of this response's comments" is a window function every reader would
-    otherwise have to get right. What keeps the stored answer honest is that one
-    module writes it: `app.services.validity`, at submit and again when the async
-    re-classification revises a floored verdict.
+    `classification` because the verdicts behind it are append-only — "the latest
+    classification of each of this response's comments" is a window function every
+    reader would otherwise have to get right — and because the student is entitled
+    to their own submission's verdict, which the read path returns from this column
+    (`app.schemas.survey.SubmissionAccepted`). What keeps the stored answer honest
+    is that one module writes it: `app.services.validity`, at submit and again when
+    the async re-classification revises a floored verdict.
+
+    **It is not what §3.4's participation score is counted from**, and an earlier
+    version of the paragraph above said it was. The formula ruled on 2026-09-04
+    counts completed items over total items, working from the answer rows and each
+    comment's most recent classification — a finer grain than a per-response
+    boolean can carry — so `app.services.grading` reads this column nowhere. The
+    reasons above still stand and the column stays; what the ruling changed is the
+    justification, not the decision.
     """
 
     __tablename__ = "response"
@@ -376,17 +387,26 @@ class Response(UuidPrimaryKey, Base):
     term_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     first_submitted_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)
     last_submitted_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)
-    # Whether this submission counts for participation (§3.3, §3.4), written by
-    # the submit path alone from the classification verdicts of the comments it
-    # carried. NOT NULL and no server default, for both halves of the reason the
-    # timestamps above carry none: E3's participation formula reads this column,
-    # and a default would let a row that nothing decided about look decided.
+    # §3.3's verdict about this submission — was it complete and reasonable —
+    # written by the submit path alone from the classification verdicts of the
+    # comments it carried. NOT NULL and no server default, for the reason the
+    # timestamps above carry none: a default would let a row that nothing decided
+    # about look decided. Its reader is the student's own submission answer, which
+    # `app.api.student` returns.
+    #
+    # It is **not** read by §3.4's participation score, and this comment said the
+    # opposite until 2026-09-04. The formula ruled that day counts completed items
+    # from the answer rows and each comment's most recent classification, which is
+    # a finer grain than a per-response verdict carries, and
+    # `app.services.grading` names this column nowhere.
     #
     # It moves after the fact, and that is the point rather than an oversight: a
     # submission accepted on §3.3's fail-open floor is stored valid and the async
     # re-classification revises it when a model finally judges the comment
     # (`app.services.validity`). A blank optional comment never affects it —
-    # §3.3 says so in as many words — because there is no verdict to read.
+    # §3.3 says so in as many words — because there is no verdict to read. It
+    # does cost its item in that score, which is the other question, asked of the
+    # same blank box and answered somewhere else.
     is_valid: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 

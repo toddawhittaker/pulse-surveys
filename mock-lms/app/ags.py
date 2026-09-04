@@ -1,8 +1,10 @@
 """Assignment and Grade Services 2.0: line items, scores, and two ways to read back.
 
 SPEC §3.4 is what will drive this: one line item per section called "Pulse
-Participation", scored as valid weeks completed over weeks elapsed and re-posted
-after every week closes. So a line item is created by the tool rather than seeded
+Participation", scored as completed items over total items across the student's
+elapsed weeks and re-posted whenever a recomputation changes the value —
+ordinarily after each week closes, and also when a re-classification lowers a
+score already sent. So a line item is created by the tool rather than seeded
 here, and a score is *appended* rather than stored per student — the second
 posting of one student's score is a new entry beside the first, because the
 sequence is the only evidence E3 has that a repost happened.
@@ -408,7 +410,7 @@ def score_value(payload: dict[str, Any], line_item: "LineItem") -> None:
     if given is not None and given < 0:
         raise GradeServiceError(
             f"The score carries `scoreGiven` {given!r}. A grade below nothing is not a grade, and "
-            "E3 computes valid weeks over weeks elapsed, which cannot go negative — so a negative "
+            "E3 computes completed items over total items, which cannot go negative — so a negative "
             "arriving here is a tool defect to refuse rather than a number to put in a gradebook."
         )
     if maximum is None:
