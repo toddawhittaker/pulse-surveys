@@ -58,6 +58,19 @@ after a closed list of verbs let `TRACE` reach the router's `405`.
 `app.services.clock` is what applies the row, and only where `is_development`; ADR
 0109 carries the design and the list of clocks it deliberately does not touch.
 
+**It grows a passback trigger in E3-07**, and that is the one control here that
+reaches another system. SPEC §3.4's participation sweep runs on a weekly beat
+which fires on real time, while the formula counts weeks off the pretend clock
+above, so the epic's behaviour is not drivable by hand at all without a way to run
+the sweep on demand — the same gap E2-04 hit with survey windows, and the same
+answer. `POST /dev/passback` runs it over every eligible section and redirects
+back here. It is registered as a `DevControlRoute`, which is the clock pair's
+any-method registration **plus** a same-origin check: this page holds no session
+and no CSRF token, so nothing else distinguishes a POST the developer meant from
+one a page they were reading made on their behalf, and what this control writes
+lands in somebody else's gradebook. ADR 0140 and ADR 0141 carry the sweep that
+requires the check and the trigger's own decisions.
+
 **Every interpolated value goes through `html.escape` with `quote=True`.** The
 subjects and labels come from the mock provider's roster, which is trusted, but
 they are escaped anyway — a page that escapes only the values it distrusts is one
@@ -81,7 +94,9 @@ edited.
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from functools import wraps
 from html import escape
+from inspect import iscoroutinefunction
 from typing import Any
 from urllib.parse import parse_qs, urlencode
 from uuid import UUID
@@ -102,6 +117,7 @@ from app.lti.registration import launcher_origins
 from app.models.clock import ClockOverride
 from app.models.org import Course, Prefix, Section
 from app.services import clock
+from app.services.grading import post_scores_for_all_sections
 from app.services.survey_windows import open_windows_now
 
 router = APIRouter(tags=["dev"])
@@ -126,6 +142,11 @@ NO_STORE = "no-store"
 DEV_CLOCK_SET_PATH = "/dev/clock"
 DEV_CLOCK_CLEAR_PATH = "/dev/clock/clear"
 
+# E3-07's passback trigger: the route the Passback section posts to. Named rather
+# than written into the route, because the console's own form, the CSRF sweep and
+# both trigger suites address the one value.
+DEV_PASSBACK_PATH = "/dev/passback"
+
 # Where the console reads the roster from. The mock provider publishes its
 # registration and its seed together (ADR 0058) under this path on the issuer's
 # host, and the fetch goes through `app.state.http` — the one client every
@@ -138,6 +159,26 @@ ROSTER_TIMEOUT_SECONDS = 5.0
 
 NOT_FOUND = 404
 BAD_REQUEST = 400
+
+# What a `DevControlRoute` answers a request whose `Origin` is not this
+# application's own (E3-07). It is reached only after the environment and method
+# gates have let the request through, so it is never seen by a caller outside
+# development — see `DevControlRoute` for why that order is the security property
+# rather than a preference.
+CROSS_SITE_REFUSED = 403
+
+# The refusal sentence, a constant carrying nothing the caller sent. Echoing the
+# rejected origin back would put a value an attacker chose into a response body,
+# and the developer reading it already knows which page they were on.
+CROSS_SITE_DETAIL = (
+    "This development control accepts a request only from the page it is served with. The "
+    "`Origin` header on this request names somewhere else."
+)
+
+# The header a browser puts the requesting page's origin in. Every current browser
+# sends it on a cross-site POST, which is what makes the comparison worth making;
+# a request carrying none is not a browser and is not a forgery vector.
+ORIGIN_HEADER = "Origin"
 
 # The answer both clock controls give on success: 303, so the browser follows with
 # a GET and a reload does not re-post the form.
@@ -182,6 +223,9 @@ CLOCK_OVERRIDE_STATE_TESTID = "clock-override-state"
 CLOCK_PRETEND_NOW_TESTID = "clock-pretend-now"
 CLOCK_SET_TESTID = "clock-set"
 CLOCK_CLEAR_TESTID = "clock-clear"
+
+# The passback section's one control (E3-07).
+PASSBACK_RUN_TESTID = "passback-run"
 
 # The form field `POST /dev/clock` reads: an HTML `datetime-local` value — a wall
 # time with no offset, minute precision — read in the institution's timezone.
@@ -863,6 +907,39 @@ def clock_section(session: Session, settings: Settings) -> str:
     </form>"""
 
 
+def passback_section() -> str:
+    """The passback trigger, and the two things a rewound clock does to it (E3-07).
+
+    **Why a control exists at all.** SPEC §3.4's sweep runs on the weekly beat,
+    which fires on real time, while the formula counts weeks off the clock above
+    (ADR 0109). A developer who moves the pretend now past a survey window's close
+    therefore sees nothing happen until Monday morning comes round for real. This
+    button is the whole of what closes that gap.
+
+    **The copy names two hazards because this control is what makes them
+    reachable by hand for the first time**, and neither is E3-07's to fix — both
+    are carried entries with owners of their own. Somebody who rewinds the clock
+    and then pulls this trigger will otherwise spend the afternoon debugging the
+    passback rather than the clock they moved.
+
+    Static markup, no interpolation: nothing a caller or a roster supplies reaches
+    this section, and the two paths written into it are module constants.
+    """
+    return f"""    <h2>Passback</h2>
+    <p>
+      Run SPEC §3.4's participation sweep now over every eligible section, rather than
+      waiting for the weekly beat; the clock above is what decides which weeks have
+      closed, so move the pretend now past a window's close first. A clock rewound
+      behind where a roster sync has already reached can wedge that sync. A passback
+      run under a rewound clock can be refused with a 409, because the score it sends
+      carries a timestamp older than the one the platform already holds.
+    </p>
+    <form class="clock" method="post" action="{escape(DEV_PASSBACK_PATH, quote=True)}">
+      <button data-testid="{escape(PASSBACK_RUN_TESTID, quote=True)}" type="submit"
+        >Run a passback now</button>
+    </form>"""
+
+
 @router.get(DEV_CONSOLE_PATH, summary="Development-only test console for both entry doors")
 def dev_console(request: Request, session: Session = Depends(get_session)) -> HTMLResponse:
     """Render the console, or `404` outside development.
@@ -890,6 +967,7 @@ def dev_console(request: Request, session: Session = Depends(get_session)) -> HT
 {web}
 {launcher_section(launcher_origins(session))}
 {clock_section(session, settings)}
+{passback_section()}
 {sections_section(console_sections(session, settings))}"""
     return HTMLResponse(page(body))
 
@@ -969,6 +1047,91 @@ class AnyMethodRoute(Route):
         self.methods = None
 
 
+def refuse_unless_this_page_asked(endpoint: Callable[..., Any]) -> Callable[[Request], Any]:
+    """Put E3-07's two gates in front of one `/dev` endpoint, in the order that matters.
+
+    1. **Not development, or not a `POST`** — a bare `404`, the answer the clock
+       controls give and the answer an unregistered path gives, so a method probe
+       of a deployment learns neither that this build carries the control nor that
+       `ENVIRONMENT` is not `development`.
+    2. **An `Origin` header naming somewhere else** — `403`. The literal `null` a
+       browser sends from a sandboxed iframe or an opaque origin is a value that is
+       not this application's own, so it is refused like any other mismatch. A
+       request carrying **no** `Origin` at all is allowed: every current browser
+       sends the header on a cross-site POST, so the requests that arrive without
+       one are the callers that cannot be tricked into making a request on somebody
+       else's behalf — `curl`, a script, a Makefile target.
+
+    **The order is the security property, not a style.** Answering the origin
+    check first would turn a deployment's unremarkable `404` into a `403`, which
+    tells an unauthenticated cross-site caller both that the route is there and
+    that its same-origin check is running. That is a change which reads as
+    tightening — it refuses more requests sooner — and it is a disclosure.
+
+    A synchronous endpoint goes to the threadpool and an asynchronous one is
+    awaited, which is what `starlette.routing.request_response` does with the
+    endpoint this replaces. Written out here because the whole point of this
+    wrapper is that the endpoint no longer reaches that function directly.
+    """
+
+    @wraps(endpoint)
+    async def gated(request: Request) -> Any:
+        settings: Settings = request.app.state.settings
+        if not is_development(settings) or request.method != POST_METHOD:
+            raise HTTPException(status_code=NOT_FOUND)
+        origin = request.headers.get(ORIGIN_HEADER)
+        if origin is not None and origin != f"{request.url.scheme}://{request.url.netloc}":
+            raise HTTPException(status_code=CROSS_SITE_REFUSED, detail=CROSS_SITE_DETAIL)
+        if iscoroutinefunction(endpoint):
+            return await endpoint(request)
+        return await run_in_threadpool(endpoint, request)
+
+    return gated
+
+
+class DevControlRoute(AnyMethodRoute):
+    """An `AnyMethodRoute` whose endpoint also refuses a request from another origin (E3-07).
+
+    **What it is for.** A `/dev` control has no session and no CSRF token — the
+    console is unauthenticated, which is the whole reason it exists — so nothing
+    but the `Origin` header distinguishes a POST the developer meant from one a
+    page they happened to be reading made on their behalf. The environment gate is
+    a different control answering a different question: it decides whether the
+    route exists at all, and says nothing about who asked.
+
+    **It is also the CSRF sweep's second currency.** A route appended to
+    `router.routes` carries no dependency graph, so
+    `tests/unit/test_every_mutating_route_carries_the_csrf_check.py` cannot look
+    for `app.api.deps.csrf_verified_student` on one; it reads the class instead.
+    A mutating `/dev` route registered as a plain `AnyMethodRoute` is therefore
+    red in that sweep unless the exemption ledger argues for it by name, which is
+    what the two clock controls are and this one deliberately is not.
+
+    **The gates go on the endpoint, and they cannot go anywhere else.** Measured
+    against the pinned `fastapi` 0.141.1: `include_router` does not serve the
+    route objects a router holds. For a plain `starlette.routing.Route` it builds
+    a **fresh** `Route` from that route's `endpoint`, `methods`, `name` and
+    `include_in_schema` and serves that — so the subclass, and anything a
+    subclass put on `self.app`, is discarded at dispatch while the original object
+    stays in `router.routes` for anything that walks them. A first build of this
+    class wrapped `self.app` and every gate silently did nothing: `POST
+    /dev/passback` answered `303` on a production build, and the class was still
+    found by the sweep, which reads the router rather than the dispatcher. The
+    endpoint is the only part of a route that survives the rebuild, so it is where
+    behaviour belongs. ADR 0141 records the measurement.
+
+    **The clock pair is not retrofitted onto this class**, and that is a decision
+    rather than an oversight: those two are the sweep's declared exemption, with a
+    sentence saying so, and moving them would delete the one worked example the
+    ledger's machinery is asserted against. ADR 0141 carries the argument.
+
+    The constructor takes the same two arguments its parent does.
+    """
+
+    def __init__(self, path: str, endpoint: Callable[..., Any]) -> None:
+        super().__init__(path, refuse_unless_this_page_asked(endpoint))
+
+
 async def set_the_dev_clock(request: Request) -> Response:
     """Replace the override row with the posted instant, or `404`.
 
@@ -1046,13 +1209,66 @@ def clear_the_dev_clock(request: Request) -> Response:
     return RedirectResponse(DEV_CONSOLE_PATH, status_code=SEE_OTHER)
 
 
-# The two controls, each matching its path for every method. Appended rather than
+async def run_a_passback_now(request: Request) -> Response:
+    """Run SPEC §3.4's participation sweep over every eligible section, then `303`.
+
+    **The whole sweep, and it takes no arguments.** No section to point it at and
+    no student to point it at: that is the behaviour the weekly beat has, it adds
+    no query surface a caller can steer, and the sweep is already per-section
+    transactional so there is nothing a narrower run would protect. ADR 0141
+    carries the rejection.
+
+    **Synchronous and in the request.** A developer clicks the button and reloads
+    the mock's gradebook; enqueuing the work would make the page's answer say
+    nothing about whether anything happened, and the scripted proof would depend
+    on a worker being up. A sweep over a development stack's handful of sections
+    is a second's work.
+
+    **The gates are the route's, not this function's** — see `DevControlRoute`.
+    That is the one thing here a reader should not copy into a handler of their
+    own without registering it the same way: the two clock handlers below check
+    the environment themselves because they are plain `AnyMethodRoute`s.
+
+    Answers a `303` back to the console, the shape both clock controls give, so a
+    browser reload cannot run a second passback.
+    """
+    settings: Settings = request.app.state.settings
+    await run_in_threadpool(post_every_changed_score, settings)
+    return RedirectResponse(DEV_CONSOLE_PATH, status_code=SEE_OTHER)
+
+
+def post_every_changed_score(settings: Settings) -> None:
+    """Open a session and run the sweep, committing nothing.
+
+    **It opens its own session**, for the reason `replace_the_override` gives: the
+    route is a plain `starlette.routing.Route` and has no `Depends` to be handed
+    one by.
+
+    **And it does not commit, which is deliberate.**
+    `app.services.grading.post_scores_for_all_sections` commits after each
+    section, because a score sitting in somebody else's gradebook is not undone by
+    this process dying and the rows recording it have to be as durable as the
+    thing they describe. `app.jobs.tasks.post_participation_scores` is the other
+    caller and says the same in more detail. A commit on this line would tell the
+    next reader that the caller owns durability, which is the belief both those
+    docstrings exist to correct.
+    """
+    with SessionLocal() as session:
+        post_scores_for_all_sections(session, settings=settings)
+
+
+# The three controls, each matching its path for every method. Appended rather than
 # decorated because `APIRouter.api_route` requires a method list, which is the thing
 # that has to go — see `AnyMethodRoute`. One route per path, so there is no ordering
 # between a route that serves `POST` and a route that refuses everything else, and
 # no way to reintroduce the router's `405` by moving one of them.
+#
+# The passback trigger is a `DevControlRoute` and the clock pair is not: the
+# trigger reaches another system on a request nobody authenticated, and the pair
+# is the CSRF sweep's declared exemption (ADR 0140, ADR 0141).
 router.routes.append(AnyMethodRoute(DEV_CLOCK_SET_PATH, set_the_dev_clock))
 router.routes.append(AnyMethodRoute(DEV_CLOCK_CLEAR_PATH, clear_the_dev_clock))
+router.routes.append(DevControlRoute(DEV_PASSBACK_PATH, run_a_passback_now))
 
 
 def posted_field(body: bytes, name: str) -> str | None:
