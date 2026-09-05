@@ -18,6 +18,7 @@ from uuid import UUID
 from app.config import Settings
 from app.db import SessionLocal
 from app.jobs.celery_app import celery_app
+from app.lti.ags import AgsError
 from app.lti.in_flight import purge_expired_launch_states
 from app.lti.replay_guard import purge_expired_nonces
 from app.services import clock
@@ -157,16 +158,38 @@ def create_line_item(section_id: str) -> None:
     `ValueError` naming the value, instead of reaching a query that matches no
     section at all.
 
-    **No retry, and the `AgsError` family propagates.** A platform that refused this
-    call is not more likely to accept it a second later, and the next qualifying
-    launch of the section is the retry (ADR 0135). What reaches the worker log is
-    the section, the outcome and the call — creation carries no score, no ledger
-    and no LMS user id, which is what E3's breakdown decision 10 settled the log
-    could hold.
+    **No retry, and the `AgsError` family propagates, after the calls it recorded
+    are committed.** A platform that refused this call is not more likely to accept
+    it a second later, and the next qualifying launch of the section is the retry
+    (ADR 0135). What reaches the worker log is the section, the outcome and the
+    call — creation carries no score, no ledger and no LMS user id, which is what
+    E3's breakdown decision 10 settled the log could hold.
+
+    **A failed attempt keeps the `ags_call` rows it wrote before it raised.** Every
+    failing AGS path calls `_record_call` and then raises an `AgsError`; without the
+    commit below, `SessionLocal.__exit__` would roll those rows back on the raise,
+    so a successful creation would be durable on SPEC §6.1's console and a failed
+    one would leave no trace at all. Creation has no hourly backstop the way the
+    roster sync does, so an attacker who can provoke the failure could probe a
+    platform's gradebook endpoints and stay invisible in the one log built to show
+    the attempt. So the `AgsError` family is caught, the recorded calls are
+    committed, and the error is re-raised unchanged — the worker still sees the
+    failure, and the row survives it.
+
+    **`AgsError` specifically, never a bare `Exception`.** A failure inside that
+    family has already recorded its row and left the session clean to commit; a
+    failure outside it — a bug that left the session mid-flush — must roll back
+    rather than commit half a row. A `RegistrationAddressError` refused inside
+    `ensure_line_item` never reaches here: it is logged and returned, so its own row
+    is committed by the ordinary success path below.
     """
     settings = Settings()
     with SessionLocal() as session:
-        ensure_line_item(session, UUID(section_id), settings=settings)
+        try:
+            ensure_line_item(session, UUID(section_id), settings=settings)
+        except AgsError:
+            session.commit()
+            raise
         session.commit()
 
 
