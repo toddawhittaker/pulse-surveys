@@ -492,6 +492,23 @@ PREFIXES: tuple[DemoPrefix, ...] = (
     DemoPrefix(code="STAT", department="Mathematics"),
     DemoPrefix(code="MIS", department="Mathematics"),
     DemoPrefix(code="BIOL", department="Biology"),
+    # **`NURS` is here so the mock platform's third section can be launched from**
+    # (E3-08). `mock-lms/app/seed.py` seeds `NURS-8100-Q2FF`, and a launch naming a
+    # prefix this institution does not hold is refused as an `unknown_prefix`
+    # defect — so that section reached no database, and SPEC §3.4's undated tier
+    # and later-sync tier, whose only seeded cases live in it, could not be driven
+    # against the running stack at all. E2 recorded the gap in a spec comment
+    # (`tests/e2e/student-survey-heading-and-next-window.spec.ts`) and worked
+    # around it; E3's exit proof cannot, because the exit table names that
+    # section's windowless member.
+    #
+    # Grouped under Biology rather than given a department of its own, which keeps
+    # the people graph exactly as it is: every seeded department carries a chair,
+    # and a new one would need a person invented for it whose only purpose is to
+    # chair a prefix the demo has no course in. The course itself is not seeded
+    # either — a launch upserts the course it names, which is how `NURS 8100`
+    # arrives with the title the platform sends.
+    DemoPrefix(code="NURS", department="Biology"),
     DemoPrefix(code="PSYC", department="Psychology"),
     DemoPrefix(code="CSCI", department="Computer Science"),
     DemoPrefix(code="BUSA", department="Business Administration"),
