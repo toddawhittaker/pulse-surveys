@@ -13,11 +13,19 @@ names the student in that score by the LTI `sub`. This system holds a `sub` in
 exactly one column — `user.lms_user_id` — and E1-10's round-3 review revoked it
 from `pulse_app` because "a connection able to read it can enumerate every
 subject that ever launched and join a response back to the person who gave it".
-That revocation stands, so the sweep resolves the subject the way every other
-door resolves an identity: through ADR 0094's third mechanism, a point lookup
-owned by `pulse_resolve_definer` that answers one row's value while the calling
-connection holds no read on the column. ADR 0139 records the decision, what it
-gives back and what it does not.
+The column itself stays revoked, and the sweep resolves the subject through ADR
+0094's third mechanism instead: a `SECURITY DEFINER` function owned by
+`pulse_resolve_definer`, which answers while the calling connection holds no read
+of its own.
+
+**That is not the same trade the forward resolvers make, and ADR 0139 is where it
+is argued rather than here.** Those answer a uuid; this answers the subject, and a
+scalar function is callable per row inside a `SELECT` — so for a caller composing
+queries this door is as wide as the column was, and `pulse_app` already lists
+`user.id`. The enumeration is given back. What is bought for it is auditability —
+one inventoried, greppable function with a signature, an owner and a stated
+argument — and the line at a *name*, which stays unreachable. Read ADR 0139 before
+citing this revision as a containment.
 
 **The definer role gains nothing.** It already holds `SELECT (id,
 lti_platform_id, lms_user_id)` on `user`, granted by `identity_resolution_v001`,

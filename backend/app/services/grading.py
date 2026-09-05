@@ -796,10 +796,10 @@ def post_scores_for_all_sections(
     about a single creation, at the grain a walk needs it.
 
     **The residue is named rather than hidden**: a section that fails unexpectedly
-    mid-post still loses its own rows, because its work is one savepoint and a
-    half-written section is not a record anybody can read. What D15 buys is that the
-    loss is contained to the section it happened in instead of taking the whole
-    walk's account with it (ADR 0137).
+    still loses its own rows, because its work is one transaction and a half-written
+    section is not a record anybody can read. What D15 buys is that the loss is
+    contained to the section it happened in instead of taking the whole walk's
+    account with it (ADR 0137).
 
     Answers `{"posted": p, "failed": f}` — the counts of attempted posts that the
     platform took and did not, which is what the task hands to §6.1's console.
@@ -938,8 +938,10 @@ def _post_one_sections_scores(
     except AgsError as refusal:
         # The gradebook column could not be resolved, so no delivery was composed
         # and no `grade_sync` row is owed: the record of the attempt is the
-        # `ags_call` rows the client already wrote, which the savepoint keeps. The
-        # refusal's own text is never interpolated — `app/lti/ags.py` says why.
+        # `ags_call` rows the client already wrote. They survive because this is an
+        # answered refusal rather than a raise — the section's own transaction goes
+        # on to be committed by the walk, with those rows in it. The refusal's own
+        # text is never interpolated — `app/lti/ags.py` says why.
         logger.warning(
             "%s: its participation column could not be resolved (%s), so no score was posted for "
             "it this run",
