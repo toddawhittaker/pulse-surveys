@@ -99,10 +99,24 @@ same value.
 - The launch door has two enqueues and one authorization decision. A third
   trigger added later inherits both properties by living in the same block, and
   gets neither if it does not.
-- A section whose creation task fails repeatedly retries once per staff launch
-  and is invisible between them: nothing records "this section has been asked
-  four times". §6.1's `ags_call` rows are what an operator reads instead, and the
-  console that renders them is E11's.
+- A section whose creation task fails repeatedly retries once per staff launch,
+  and every failed attempt now leaves the `ags_call` rows it recorded before it
+  raised: the worker task catches the `AgsError`, commits those rows and re-raises,
+  so a failure is as durable on §6.1's console as a success (E3-05's security
+  round; the earlier shape rolled a failed attempt's rows back with the session
+  and left an endpoint probe invisible in the one log built to show it). What is
+  still not recorded is an aggregate — nothing counts "this section has been asked
+  four times"; the rows are per call, and the console that renders them is E11's.
+- The worker's AGS calls dial under a finite timeout (`AGS_REQUEST_TIMEOUT` in
+  `app.lti.ags`, and the token grant `pylti1p3` posts inherits it through the
+  client's own bounded session). `ensure_line_item` holds `SELECT … FOR UPDATE`
+  on the section across those calls so two workers racing to create one section's
+  item serialise, and a platform that completed the handshake and then stalled
+  would otherwise hold that lock, the connection and the worker slot without bound
+  — on the single default queue, that would also stall the floored-comment
+  reclassify and turn a slow gradebook write into a §3.3 safety outage. The lock
+  stays; the timeout is what makes it safe to hold across the network (E3-05's
+  security round).
 - A section that a platform has stopped advertising a gradebook for keeps the id
   it already recorded; nothing here clears it. Reconciling a column a human
   deleted beyond E3-04's re-find rule is out of scope for E3 by the breakdown.
