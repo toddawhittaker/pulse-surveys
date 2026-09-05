@@ -75,9 +75,22 @@ pytestmark = [pytest.mark.integration, pytest.mark.lti]
 # nothing reads them back as an answer** — what a planted row's `created_at`
 # decides is only which of two rows is newer, which is the question ADR 0124
 # makes every reader answer.
-AN_EARLIER_WRITE = datetime(2026, 10, 6, 2, 20, tzinfo=UTC)
-A_LATER_WRITE = datetime(2026, 10, 13, 2, 20, tzinfo=UTC)
-A_LATEST_WRITE = datetime(2026, 10, 20, 2, 20, tzinfo=UTC)
+#
+# **They sit in the real past, and dispute E3-06-01 is why.** `grade_sync.
+# created_at` defaults to `now()`, and ADR 0109 keeps that class of instant —
+# when a row was written — on real time rather than on the development
+# override. So a row the sweep appends carries the machine's own clock, and a
+# planted row dated inside this section's Fall 2026 calendar sorts *after*
+# anything a real clock can produce: the criterion-3 test below then reads the
+# planted row as the newer of the two, and the only implementation that could
+# satisfy it is one that stamps the comparison key from a clock a demo can
+# rewind. Any instant before real time serves, and only their relative order is
+# used. Mondays at 02:20 — the beat's own slot — are kept from the original
+# constants, and now say what they were meant to say: the sweep wrote this row
+# on a Monday a few weeks ago.
+AN_EARLIER_WRITE = datetime(2026, 8, 3, 2, 20, tzinfo=UTC)
+A_LATER_WRITE = datetime(2026, 8, 10, 2, 20, tzinfo=UTC)
+A_LATEST_WRITE = datetime(2026, 8, 17, 2, 20, tzinfo=UTC)
 
 # The timestamp a planted row says it sent, kept apart from the `created_at`
 # values above so a reader that confused the two is visible.
@@ -655,6 +668,16 @@ def test_a_reclassification_that_lowers_a_posted_week_posts_again_and_leaves_bot
     distinguishable: ADR 0052 has a platform accept an equal timestamp as a
     retry of the same delivery, so two rows sharing one would be one delivery
     recorded twice rather than a supersession.
+
+    **This is the only test in the module that orders a planted row against a
+    swept one**, and dispute E3-06-01 was decided on it. The planted row is
+    dated in the real past so that the row the sweep appends — `created_at`
+    defaults to `now()`, which ADR 0109 keeps on real time — is the newer of the
+    two, which is what makes `rows[0]` the sweep's and `rows[-1]` this test's.
+    The constants were first written inside the section's Fall 2026 calendar,
+    which sorts *after* the machine's clock, and the assertions below then
+    passed only against a sweep that stamped `created_at` from the development
+    clock — a comparison key any demo's rewind could reorder.
 
     **The precondition is asserted before the sweep**: the reclassification is
     required to have actually lowered the computed value. Without that check a

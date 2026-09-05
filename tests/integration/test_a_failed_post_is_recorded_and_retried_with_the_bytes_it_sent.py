@@ -71,8 +71,26 @@ A_SERVER_FAILURE = 500
 
 # When a planted `grade_sync` row says it was written. This module's own values;
 # nothing reads them back as an answer.
-AN_EARLIER_WRITE = datetime(2026, 10, 6, 2, 20, tzinfo=UTC)
-A_LATER_WRITE = datetime(2026, 10, 13, 2, 20, tzinfo=UTC)
+#
+# **The first sits in the real past and the second deliberately does not**, and
+# dispute E3-06-01 is behind both. `created_at` defaults to `now()`, which ADR
+# 0109 keeps on real time, so every row the sweep appends carries the machine's
+# own clock — and a planted instant is only ever meaningful beside that.
+#
+# The first plant is the only row for its pair at the moment the sweep reads it,
+# so any past instant serves; a Monday at 02:20, the beat's own slot, says the
+# row was written a few weeks ago and is now true rather than a month ahead of
+# the clock.
+#
+# The second is planted *after* a run that posted, and that run appended a row
+# of its own stamped with real time. It has to be the latest row for the pair or
+# the sweep compares against that run's row instead, finds the computed pair
+# already sent, and the differing-pair half of the retry test measures nothing.
+# So it is derived from real time rather than written down: a fixed date chosen
+# to be "in the future" is exactly what E3-06-01 found wrong, because it stops
+# being in the future.
+AN_EARLIER_WRITE = datetime(2026, 8, 3, 2, 20, tzinfo=UTC)
+A_WRITE_NEWER_THAN_THIS_RUN = datetime.now(UTC) + timedelta(days=1)
 
 # How far the wire timestamp may sit outside the window this module measures
 # around the call. Generous, because a container start or a slow query inside
@@ -311,6 +329,14 @@ def test_a_retry_of_a_failed_delivery_re_sends_the_stored_bytes_rather_than_a_ne
     section's deliveries at one instant for ever and make every later
     correction invisible to the platform's ordering rule.
 
+    **"Newer" there means newer than the row the retry above appended**, not
+    merely newer than the first plant: the successful retry wrote its own
+    `grade_sync` row, stamped by `now()` on real time, and if the second plant
+    does not out-sort it the sweep compares against the retry's row, finds the
+    computed pair already sent and posts nothing. That is why the constant is
+    derived from real time (dispute E3-06-01) — a fixed future date would do the
+    same job until the date arrived and would then fail here as a puzzle.
+
     **The mutation this kills**: the timestamp re-derived on the retry path, and
     the score string re-rendered with it. Both are invisible in a gradebook —
     the number is the same — and both turn ADR 0052's retry into a second
@@ -377,7 +403,7 @@ def test_a_retry_of_a_failed_delivery_re_sends_the_stored_bytes_rather_than_a_ne
         ledger_text=sweep_contract.a_differing_ledger,
         outcome=outcomes["failed"],
         score_timestamp=sweep_contract.a_stored_timestamp,
-        created_at=A_LATER_WRITE,
+        created_at=A_WRITE_NEWER_THAN_THIS_RUN,
         response_code=A_SERVER_FAILURE,
     )
     book.wire.calls.clear()
