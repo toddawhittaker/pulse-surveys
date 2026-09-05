@@ -29,45 +29,50 @@
 // **The gradebook is not the assertion for "posted once" or "no new post."** An
 // idempotent re-post and an absent post leave the same gradebook.
 // `GET /mock/posted-scores` is a log in arrival order, so where this file means
-// "nothing was posted" it counts entries before and after, and it always pairs
-// that count with somebody who *did* post in the same sweep — an absence with no
-// positive control beside it is satisfied by a sweep that did nothing at all
-// (`docs/MISTAKES.md` entry 3).
+// "no *new* post" it counts entries before and after, and where it means "no post
+// at all" it requires the whole set to be empty. Either way it pairs the claim
+// with somebody who *did* post in the same sweep, established by that person's
+// entry carrying the ledger this moment implies rather than by its mere
+// existence — an absence with no positive control beside it is satisfied by a
+// sweep that did nothing at all (`docs/MISTAKES.md` entry 3).
 //
-// **One divergence from the work order's drive schedule is deliberate and is the
-// reason there is a sixth clock position.** The work order predicted that
+// **Exit-table row 7 is driven in two halves, because the seeded member and the
+// amended one are two different cases.**
+//
 // `BIOL-215-R3WW`'s dropped member — student 07, whom `with_the_add_and_the_drop`
-// seeds `Inactive` with `closed_at` 2026-10-19 — would receive no score at any
-// point in the drive. Two rules that are already asserted elsewhere in this
-// repository say otherwise, and they compose:
+// seeds `Inactive` with `closed_at` 2026-10-19 — **is never enrolled in Pulse at
+// all**, and therefore never receives a gradebook column. The platform reports
+// him departed the first time the tool reads the roster, and ADR 0095 settles
+// what happens then: recording a closed enrollment for a member who is already
+// dropped on the first sync was considered and rejected, because `started_on`
+// would have to be synthesized and ADR 0023's `ended_on >= started_on` refuses a
+// row whose end date precedes the sync that first saw it. "So such a member gets
+// no row, which is the honest answer to 'how many weeks was this student
+// enrolled in, as far as Pulse knows'." SPEC §3.4's drops line governs a student
+// who *was* enrolled and left; it is silent about one already gone when the tool
+// arrives, and ADR 0095 filled that silence in E1.
 //
-//   - the sync records a departed member's `ended_on` as **the platform's own end
-//     date**, not the day the sync ran
-//     (`test_a_dropped_member_is_ended_at_the_platforms_end_date_and_an_active_one_is_not`);
-//   - the sweep posts for a student while `started_on <= clock.today AND
-//     (ended_on IS NULL OR ended_on >= clock.today)` — E3-06's work order D10,
-//     asserted from both sides one day apart in
-//     `test_a_dropped_students_score_stops_updating.py`.
+// The seed puts `status="Inactive"` and a `closed_at` three weeks out on this
+// member precisely because the two can disagree — `mock-lms/app/seed.py` says "a
+// seed where `status` and `end` disagree is one E1 has to pick a side in" — and
+// E1 picked `status`. So he is asserted **absent** from the posted-score log at
+// P4, P5 and P6, each time beside classmates who post in the same sweep, which is
+// what makes the absence a statement about him rather than about a sweep that did
+// nothing. That is a real exit-table case: a student the platform already dropped
+// never gets a gradebook column at all.
 //
-// So student 07's enrollment is live on every day before 2026-10-19 and his score
-// updates like anybody's until then. That is not a defect: a student whose
-// platform record says they leave in three weeks has not left, and a tool that
-// stopped posting the moment a roster said `Inactive` would freeze three weeks of
-// a grade the LMS still expects to move. The drive therefore asserts the whole
-// boundary rather than half of it — 07 posting beside his classmates at
-// 2026-10-05 and 2026-10-12, and 07 alone silent at 2026-10-26 while they post —
-// which is exit-table row 7 driven with its own seeded member and with a positive
-// control on both sides.
+// The learner's drop from `MATH-140-E1FF`, amended at P3 and dated at the moment
+// it is made, is the other half: a member who *was* enrolled, whose score stops
+// updating and whose last posted value stands while classmates in the same
+// section move on.
 //
-// **That divergence is a prediction and the run is what settles it.** If the
-// implementation does stop posting for him the moment his roster status reads
-// `Inactive`, the P4 and P5 assertions below go red — and the finding is then
-// whether "Inactive with an end date three weeks out" should stop a grade today,
-// which is a question for the ticket rather than a number to widen here.
-//
-// The learner's drop from `MATH-140-E1FF`, dated at the moment it is made, is the
-// other half of row 7 and is the case where the *last posted value stands* while
-// classmates in the same section move on.
+// **The record of how this file got that wrong is `docs/disputes/E3-08-02.md`.**
+// An earlier version of this spec predicted that student 07 would be scored until
+// his end date, reasoning from a sync test whose subject is a member who was
+// enrolled *first* and became `Inactive` later — which is a different member
+// from the one ADR 0095's rejected alternative is about. The drive still has six clock positions: P6
+// is what puts a third sweep behind the absence and gives the learner's own
+// percentage a value that moves (28.6), and it is worth keeping for both.
 //
 // This spec cannot be run without a seeded, running Compose stack; its green is
 // the stack-up run and CI.
@@ -124,7 +129,9 @@ function student(section: { label: string }, ordinal: number): string {
 // `without_an_enrollment_window` rewrites 03 of `NURS-8100-Q2FF`.
 const BIOL_DAY_ONE = student(BIOL, 1); // dated 2026-09-07 with the rest of the class
 const BIOL_LATE_ADD = student(BIOL, 4); // `opened_at` 2026-09-28 — exit row 4
-const BIOL_DROPPED = student(BIOL, 7); // Inactive, `closed_at` 2026-10-19 — exit row 7
+// Reported `Inactive` at the first sync, so Pulse never enrolls him and never
+// posts a score for him (ADR 0095) — exit row 7's first half.
+const BIOL_DROPPED = student(BIOL, 7);
 const NURS_WINDOWLESS = student(NURS, 3); // no platform dates at all — exit row 5
 const NURS_DAY_ONE = student(NURS, 1); // dated 2026-09-28, the classmate row 5 compares against
 const MATH_CLASSMATE = student(MATH, 1); // the positive control beside the learner's drop
@@ -251,6 +258,12 @@ const P3_BIOL_SILENT_LEDGER = ledgerOf(unanswered(1, 2));
 // **P4, BIOL, the learner.** Weeks 1–4 have elapsed (week 4 closed Sun 10-04).
 //   completed 10, total 4 × 5 = 20 → 10/20 × 100 = 50.0
 const P4_BIOL_LEARNER_SCORE = 50;
+const P4_BIOL_LEARNER_LEDGER = ledgerOf([
+  [1, 5],
+  [2, 5],
+  [3, 0],
+  [4, 0],
+]);
 
 // **P4, BIOL, the platform-dated late add (student 04).** §3.4's first tier: the
 // denominator starts at the student's first enrolled week, which is the earliest
@@ -286,6 +299,7 @@ const P4_MATH_CLASSMATE_LEDGER = ledgerOf(unanswered(1, 6));
 // **P5, BIOL, the learner.** Week 5 closed Sun 10-11, so five weeks have elapsed.
 //   completed 10, total 5 × 5 = 25 → 10/25 × 100 = 40.0
 const P5_BIOL_LEARNER_SCORE = 40;
+const P5_BIOL_LEARNER_LEDGER = ledgerOf([[1, 5], [2, 5], ...unanswered(3, 5)]);
 
 // **P5, NURS, the member added part-way through.** §3.4's third tier: "a student
 // who first appears in a roster sync later than their section's first sync counts
@@ -297,13 +311,11 @@ const P5_BIOL_LEARNER_SCORE = 40;
 const P5_NURS_LATE_ADD_SCORE = 0;
 const P5_NURS_LATE_ADD_LEDGER = ledgerLine(2, 0, ITEMS_PER_WEEK);
 
-// **P5, BIOL, the dropped member (student 07).** His platform end date is
-// 2026-10-19, which is still ahead, so he is enrolled and scored like any
-// classmate who answered nothing. This is his **last** posted value; nothing
-// after it moves.
-//   completed 0, total 5 × 5 = 25 → 0.0, with a five-line ledger
-const P5_BIOL_SILENT_SCORE = 0;
-const P5_BIOL_SILENT_LEDGER = ledgerOf(unanswered(1, 5));
+// **The dropped member (student 07) has no expected value at any position**, and
+// that is exit row 7's first half rather than a gap in this list: the platform
+// reported him `Inactive` at the first sync, so Pulse never enrolled him (ADR
+// 0095) and the formula has no student to answer for. He is asserted absent at
+// P4, P5 and P6.
 
 // **P6, BIOL, the learner and the day-one classmate.** Week 7 closed Sun 10-25,
 // so seven weeks have elapsed.
@@ -311,6 +323,7 @@ const P5_BIOL_SILENT_LEDGER = ledgerOf(unanswered(1, 5));
 //              which is 28.6 to one decimal, rounded half up (E3-03's rule)
 //   classmate: completed 0, total 35 → 0.0, with a seven-line ledger
 const P6_BIOL_LEARNER_SCORE = 28.6;
+const P6_BIOL_LEARNER_LEDGER = ledgerOf([[1, 5], [2, 5], ...unanswered(3, 7)]);
 const P6_BIOL_SILENT_LEDGER = ledgerOf(unanswered(1, 7));
 
 // ---------------------------------------------------------------------------
@@ -337,6 +350,7 @@ const ROSTER_AMENDMENTS_URL = `${MOCK_LMS_ORIGIN}mock/roster-amendments`;
 // `tests/fixtures/ags_client.py` transcribes them.
 const SCORE_USER = "userId";
 const SCORE_GIVEN = "scoreGiven";
+const SCORE_MAXIMUM = "scoreMaximum";
 const SCORE_COMMENT = "comment";
 
 // The survey form's testids (E2-10) and the submitted-state heading, taken from
@@ -428,8 +442,21 @@ async function postedEntries(page: Page): Promise<PostedEntry[]> {
   ).toBe(true);
   return (scores as PostedEntry[]).map((entry) => ({
     lineItem: String(entry.lineItem ?? ""),
-    score: (entry.score ?? {}) as Record<string, unknown>,
+    score: entry.score ?? {},
   }));
+}
+
+/**
+ * One member of a score document read as text, or `''` when it is not text.
+ *
+ * The document is whatever the platform served, so its members are `unknown` and
+ * narrowing is the honest way to read one — `String(…)` on an `unknown` would
+ * turn an object into `"[object Object]"` and then compare *that* against a
+ * subject, which is a match this file could never diagnose.
+ */
+function textMember(score: Record<string, unknown>, member: string): string {
+  const value = score[member];
+  return typeof value === "string" ? value : "";
 }
 
 /**
@@ -448,8 +475,40 @@ function scoresFor(
 ): Record<string, unknown>[] {
   return entries
     .filter((entry) => entry.lineItem.includes(contextId))
-    .filter((entry) => String(entry.score[SCORE_USER] ?? "") === subject)
+    .filter((entry) => textMember(entry.score, SCORE_USER) === subject)
     .map((entry) => entry.score);
+}
+
+/**
+ * The members of a score document that SPEC §3.4 governs, and only those.
+ *
+ * Used where two students' scores are compared with each other rather than with
+ * a hand-computed value. §3.4 makes an undated member's **denominator**
+ * indistinguishable from a day-one member's, and so the score and the per-week
+ * ledger that explains it — it says nothing that could make two score documents
+ * identical, and two things in one deliberately differ:
+ *
+ *   - `userId` identifies the student, and `scoresFor` selects each document *by*
+ *     that member, so the two differ there by construction. An equality over the
+ *     whole document is unsatisfiable by any correct implementation
+ *     (`docs/MISTAKES.md` entry 24) — and the only way to satisfy it would be the
+ *     platform recording one student's identifier against another's post, which
+ *     `tests/integration/test_the_results_container_and_the_mock_log_agree.py`
+ *     exists to catch.
+ *   - `timestamp` matches only while one sweep stamps one instant for everybody.
+ *     Nothing in §3.4 requires that, so comparing it would make this case fail
+ *     for a reason with nothing to do with the rule under test.
+ *
+ * Settled in `docs/disputes/E3-08-01.md`.
+ */
+function theMembersTheRuleGoverns(
+  score: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  return {
+    [SCORE_GIVEN]: score?.[SCORE_GIVEN],
+    [SCORE_MAXIMUM]: score?.[SCORE_MAXIMUM],
+    [SCORE_COMMENT]: score?.[SCORE_COMMENT],
+  };
 }
 
 /** The last thing the platform was told about one student, or `undefined`. */
@@ -636,6 +695,58 @@ function expectTheGradebookShows(
   ).toBe(expected.ledger);
 }
 
+/**
+ * Exit row 7's first half: the seeded `Inactive` member has no gradebook column.
+ *
+ * **The positive control is inside this helper and is the whole reason it is a
+ * helper.** An absence proves nothing on its own — a sweep that posted to nobody
+ * satisfies it perfectly (`docs/MISTAKES.md` entry 3) — so the learner's own BIOL
+ * entry is required first, and required to carry *this moment's* ledger rather
+ * than merely to exist. A ledger of the right length can only have been written
+ * by the sweep that just ran at this clock position, which is what pins the
+ * control to the same sweep the absence is claimed of.
+ *
+ * The rule: the platform reports `mock-lms-user-biol-215-r3ww-student-07`
+ * `Inactive` at the first sync, and ADR 0095 settles that a member already
+ * dropped when the tool first reads the roster gets no `enrollment` row at all —
+ * there is no honest `started_on` for a student who left before Pulse arrived,
+ * and ADR 0023's `ended_on >= started_on` refuses a row that tried to invent one.
+ * So the formula has no student to answer for and the sweep has nothing to post.
+ * Settled in `docs/disputes/E3-08-02.md`.
+ */
+function expectTheDroppedMemberIsAbsent(
+  entries: PostedEntry[],
+  day: string,
+  learnerLedgerNow: string,
+): void {
+  const control = latestScoreFor(entries, BIOL.context, LEARNER);
+  expect(
+    control?.[SCORE_COMMENT],
+    `The learner's latest ${BIOL.label} ledger is ${JSON.stringify(control?.[SCORE_COMMENT])} ` +
+      `and the sweep at ${day} should have left him\n${learnerLedgerNow}\n\nThis is the positive ` +
+      "control on the absence asserted below, and it comes first: with no classmate posting in " +
+      'this sweep, "the dropped member has no score" is satisfied by a sweep that posted to ' +
+      "nobody at all, which is the one way this assertion could pass while proving nothing.",
+  ).toBe(learnerLedgerNow);
+
+  const dropped = scoresFor(entries, BIOL.context, BIOL_DROPPED);
+  expect(
+    dropped,
+    `Exit row 7, first half. The platform holds ${dropped.length} scores for ${BIOL_DROPPED} at ` +
+      `${day}: ${JSON.stringify(dropped)}. It should hold none, at this or any moment of the ` +
+      "drive. That member is reported `Inactive` by the roster the first time Pulse reads it, and " +
+      "ADR 0095 rejected recording a closed enrollment for such a member — `started_on` would " +
+      "have to be synthesized and ADR 0023's `ended_on >= started_on` refuses a row whose end " +
+      "date precedes the sync that first saw it — so he gets no `enrollment` row, the formula " +
+      "has no student to answer for, and no gradebook column is ever created. A score here means " +
+      "either that a departed member is being enrolled anyway, or that the ingestion has started " +
+      "reading the extension's `end` in preference to `status`, which is the side E1 did not " +
+      'pick (`mock-lms/app/seed.py`: "a seed where `status` and `end` disagree is one E1 has to ' +
+      'pick a side in"). The learner posted in this same sweep, asserted just above, so this is ' +
+      "not a section the sweep skipped.",
+  ).toEqual([]);
+}
+
 // ---------------------------------------------------------------------------
 // Setup and teardown.
 // ---------------------------------------------------------------------------
@@ -808,7 +919,7 @@ test("P1: the three sections are provisioned and only the section with elapsed w
   // the paragraph above names, and it is also what makes the poll below a wait
   // for the *sweep* rather than for the worker.
   let lineItems: Record<string, string> = {};
-  const ready = await waitFor(async () => {
+  const ready = await waitFor(() => {
     lineItems = Object.fromEntries(
       EVERY_SECTION.map((section) => [
         section.label,
@@ -1065,11 +1176,14 @@ test("P4: the late add starts at his own week, the undated member starts at the 
   //
   //   - row 4: student 04's first entry names week 4 and **only** week 4 — the
   //     boundary asserted in both directions, week 4 present and weeks 1–3 absent
-  //   - row 5: the windowless NURS member's ledger starts at week 1 and equals a
-  //     platform-dated classmate's, which is §3.4's accepted under-credit
-  //     asserted as the intended behaviour
-  //   - row 7: the learner, dropped from MATH on 09-21, gets no new entry while a
-  //     classmate in the same section gets one in the same sweep
+  //   - row 5: the windowless NURS member's ledger starts at week 1, and the
+  //     three members §3.4 governs — the score, its maximum and the ledger —
+  //     match a platform-dated classmate's exactly, which is that rule's accepted
+  //     under-credit asserted as the intended behaviour
+  //   - row 7, both halves: the learner, dropped from MATH on 09-21, gets no new
+  //     entry while a classmate in the same section gets one in the same sweep;
+  //     and the seeded `Inactive` member of BIOL has no entry at all, because
+  //     Pulse never enrolled him (ADR 0095)
   //
   // **The mutations these kill:**
   //   1. *A late add's denominator taken from the section's start*, which makes
@@ -1091,6 +1205,11 @@ test("P4: the late add starts at his own week, the undated member starts at the 
   //      percentage-only comparison he does not re-post, the positive control
   //      vanishes, and the learner's silence stops meaning anything — so this
   //      case is what makes mutation 3's proof sound.
+  //   5. *A member the platform reports `Inactive` at the first sync enrolled
+  //      anyway*, which gives a student the LMS says is not in the section a
+  //      gradebook column, on a denominator resting on a `started_on` nothing
+  //      supplied (ADR 0095). Caught by `expectTheDroppedMemberIsAbsent` at the
+  //      foot of this case, and again at P5 and P6.
   //
   // **Why the learner's silence is not confusable with an unchanged value.** Had
   // he stayed enrolled he would be 4 of 30 = 13.3, which is not the 16.0 the
@@ -1150,12 +1269,7 @@ test("P4: the late add starts at his own week, the undated member starts at the 
     LEARNER,
     {
       score: P4_BIOL_LEARNER_SCORE,
-      ledger: ledgerOf([
-        [1, 5],
-        [2, 5],
-        [3, 0],
-        [4, 0],
-      ]),
+      ledger: P4_BIOL_LEARNER_LEDGER,
     },
     "Four BIOL weeks have elapsed at 2026-10-05 (week 4 closed 10-04). The learner answered weeks " +
       "1 and 2 in full and missed 3 and 4: 10 completed over 4 × 5 = 20, which is " +
@@ -1208,11 +1322,18 @@ test("P4: the late add starts at his own week, the undated member starts at the 
       'platform never supplied".',
   );
   expect(
-    latestScoreFor(entries, NURS.context, NURS_WINDOWLESS),
+    theMembersTheRuleGoverns(
+      latestScoreFor(entries, NURS.context, NURS_WINDOWLESS),
+    ),
     "The windowless NURS member and her platform-dated classmate were posted different scores. " +
       "Exit row 5 is an assertion that they are indistinguishable, which is what §3.4 settles for " +
-      `a student the platform never dated. The classmate holds ${JSON.stringify(classmate)}.`,
-  ).toEqual(classmate);
+      `a student the platform never dated. The classmate holds ${JSON.stringify(classmate)}.\n\n` +
+      "The comparison is over the three members the rule governs — the score, the maximum it is " +
+      "out of, and the ledger that explains it. `userId` and `timestamp` are excluded and the " +
+      "reason is `docs/disputes/E3-08-01.md`: what §3.4 makes indistinguishable is the " +
+      "denominator, never the whole document, and the two documents differ in `userId` by " +
+      "construction because each is selected by it.",
+  ).toEqual(theMembersTheRuleGoverns(classmate));
 
   const nursLateAdd = scoresFor(entries, NURS.context, NURS_LATE_ADD);
   expect(
@@ -1268,31 +1389,13 @@ test("P4: the late add starts at his own week, the undated member starts at the 
       "the count says nothing new arrived and this says the thing that is there is the right one.",
   ).toBe(P3_MATH_LEARNER_SCORE);
 
-  // The other member of `with_the_add_and_the_drop`. His platform record ends
-  // 2026-10-19, which is still ahead of this clock, so he is enrolled and scored
-  // exactly like the classmate who answered nothing — see this file's header for
-  // why that is the settled behaviour and not the absence the work order
-  // predicted. His stop is asserted at P6.
-  const stillEnrolled = latestScoreFor(entries, BIOL.context, BIOL_DROPPED);
-  expect(
-    stillEnrolled,
-    `${BIOL_DROPPED} is reported \`Inactive\` by the platform with \`closed_at\` 2026-10-19, and ` +
-      "the roster sync records that date as his `ended_on` rather than the day it ran. The sweep " +
-      "posts while `ended_on >= clock.today`, so on 2026-10-05 he is still enrolled and still " +
-      'scored. No entry here means a roster status of `Inactive` is being read as "gone now", ' +
-      "which withholds two weeks of grade updates from a student the LMS still has on its books.",
-  ).toBeDefined();
-  expect(
-    stillEnrolled,
-    "The still-enrolled dropped member was scored differently from a day-one classmate who also " +
-      "answered nothing. Both carry `opened_at` 2026-09-07 and neither submitted anything, so " +
-      "their denominators and numerators are identical; a difference is the drop leaking into the " +
-      "formula, which ADR 0131 keeps out of it.",
-  ).toEqual(latestScoreFor(entries, BIOL.context, BIOL_DAY_ONE));
+  // Exit row 7, first half — the seeded member, at the first of the three sweeps
+  // his absence is asserted in.
+  expectTheDroppedMemberIsAbsent(entries, "2026-10-05", P4_BIOL_LEARNER_LEDGER);
 });
 
 // ---------------------------------------------------------------------------
-// P5 — exit row 6, and the last value the dropped BIOL member is given.
+// P5 — exit row 6, and the second sweep the seeded drop is absent from.
 // ---------------------------------------------------------------------------
 
 test("P5: the member first seen in a later sync is credited from that week and no earlier", async ({
@@ -1373,76 +1476,63 @@ test("P5: the member first seen in a later sync is credited from that week and n
     LEARNER,
     {
       score: P5_BIOL_LEARNER_SCORE,
-      ledger: ledgerOf([[1, 5], [2, 5], ...unanswered(3, 5)]),
+      ledger: P5_BIOL_LEARNER_LEDGER,
     },
     "Five BIOL weeks have elapsed at 2026-10-12 (week 5 closed 10-11). The learner answered weeks " +
       "1 and 2 in full: 10 completed over 5 × 5 = 25, which is 10/25 × 100 = 40.0.",
   );
 
-  expectTheGradebookShows(
-    entries,
-    BIOL,
-    BIOL_DROPPED,
-    {
-      score: P5_BIOL_SILENT_SCORE,
-      ledger: P5_BIOL_SILENT_LEDGER,
-    },
-    "The seeded BIOL drop, still enrolled: his platform `closed_at` is 2026-10-19, a week ahead " +
-      "of this clock. 0 completed over 5 × 5 = 25, which is 0.0, across five ledger lines. **This " +
-      "is the value P6 requires to still be standing**, and the five-line ledger is what " +
-      "distinguishes it from the seven-line one his classmates get there — both percentages are " +
-      "0.0, so the ledger is the only thing that can say a stale entry is stale.",
-  );
+  // Exit row 7, first half — the second of the three sweeps his absence is
+  // asserted in. His platform `closed_at` of 2026-10-19 is still a week ahead of
+  // this clock and it makes no difference: what decides his case is that Pulse
+  // never enrolled him at all, not a date it never recorded (ADR 0095).
+  expectTheDroppedMemberIsAbsent(entries, "2026-10-12", P5_BIOL_LEARNER_LEDGER);
 });
 
 // ---------------------------------------------------------------------------
-// P6 — exit row 7 with its own seeded member: the drop takes effect, and the
-// last posted value stands.
+// P6 — the last two BIOL weeks, and the third sweep the seeded drop is absent
+// from.
 // ---------------------------------------------------------------------------
 
-test("P6: the seeded dropped member stops being posted while his classmates go on", async ({
+test("P6: two more weeks are scored for the class and the seeded dropped member is still absent", async ({
   page,
 }) => {
-  // **Exit row 7, driven with the member the ticket names.** E3-08's table says
-  // "the dropped member of `with_the_add_and_the_drop` — the score stops updating
-  // and the last posted value stands", and that member's platform record ends on
-  // 2026-10-19. Every earlier moment in this drive is before that date, so this
-  // is the first one at which the rule has anything to do. The learner's drop
-  // from MATH at P4 is the same rule on a different member; this is the seeded
-  // case the ticket names, and the two together are the rule from both ends of
-  // the same `AND`.
+  // **Two things, both of which need a sweep the earlier positions cannot give.**
+  //
+  //   - The learner's percentage **moves off a whole number**: 10 of 35 is
+  //     28.5714…, which is the only value in this drive that exercises E3-03's
+  //     rounding rule on the wire. Every other percentage here is exact.
+  //   - Exit row 7's first half gets its third sweep. The seeded `Inactive`
+  //     member has been absent at P4 and P5; asserting it again after two further
+  //     weeks have closed says the absence is a permanent property of a member
+  //     Pulse never enrolled, not a section that had run out of elapsed weeks to
+  //     say anything new about.
   //
   // **The mutations this kills:**
-  //   1. *The live-enrollment predicate dropped from the sweep*, which re-posts a
-  //      departed student every Monday for the rest of the term.
-  //   2. *The predicate written `ended_on > clock.today` or against the wrong
-  //      clock*, which this case cannot fully separate — that boundary is one day
-  //      wide and belongs to
-  //      `test_a_dropped_students_score_stops_updating.py`, which poses both
-  //      sides of it a day apart. What this case adds is that the rule survives
-  //      the whole path: a platform roster, a real sync, a real `ended_on`.
-  //   3. *A final zero, or a blanked column, written on the drop.* §3.4 gives the
-  //      LMS the column outright — "the LMS owns what happens to it" — so the
-  //      value must be the one his last successful post sent and nothing else.
+  //   1. *A member the platform reports `Inactive` at the first sync enrolled
+  //      anyway*, which would give a student the LMS says is not in the section a
+  //      gradebook column — and, per ADR 0095, a column whose denominator rests
+  //      on a `started_on` nothing supplied.
+  //   2. *The ingestion reading the extension's `end` in preference to `status`*,
+  //      the side E1 did not pick. All three positions catch it, and this one
+  //      catches it in the shape most likely to be mistaken for correct
+  //      behaviour: 2026-10-19 has passed, so under that reading the member gains
+  //      nothing *now* and looks like a student who has properly stopped being
+  //      updated — while holding three entries from the earlier sweeps that he
+  //      should never have had. Holding none at all is a different claim, and it
+  //      is the one asserted.
+  //   3. *Banker's rounding or truncation reaching the wire*, which makes the
+  //      learner 28.5 rather than 28.6.
   //
-  // **The counts are taken before the sweep and compared after it**, because a
-  // gradebook cannot tell an absent post from an idempotent one: his percentage
-  // is 0.0 before and would be 0.0 after. What changes under the mutation is the
-  // *number of entries* and the ledger's length — and both are read here.
-  //
-  // **The pair is in the same sweep.** Two classmates who also answered nothing
-  // must gain a new entry with a seven-line ledger while he gains none.
+  // **The pairing.** The absence helper requires the learner's own entry to carry
+  // *this moment's* seven-line ledger before it reads the absence, so what is
+  // asserted is "this sweep posted to this section and not to him" rather than
+  // "nothing happened". The day-one classmate's fresh entry is asserted beside it
+  // as a second witness, and the poll below waits for exactly that.
   test.setTimeout(CASE_TIMEOUT_MS);
 
   const before = await postedEntries(page);
-  const droppedBefore = scoresFor(before, BIOL.context, BIOL_DROPPED).length;
   const classmateBefore = scoresFor(before, BIOL.context, BIOL_DAY_ONE).length;
-  expect(
-    droppedBefore,
-    `${BIOL_DROPPED} has no scores at all before this moment, so "his last posted value stands" ` +
-      "is a claim about nothing and the count comparison below is satisfied by a student the " +
-      "sweep has never posted for. P5 is where his last entry is written.",
-  ).toBeGreaterThan(0);
 
   await setTheClockTo(page, P6);
 
@@ -1482,7 +1572,7 @@ test("P6: the seeded dropped member stops being posted while his classmates go o
     LEARNER,
     {
       score: P6_BIOL_LEARNER_SCORE,
-      ledger: ledgerOf([[1, 5], [2, 5], ...unanswered(3, 7)]),
+      ledger: P6_BIOL_LEARNER_LEDGER,
     },
     "The second half of the control, and the one whose percentage moves. The learner answered " +
       "weeks 1 and 2 in full: 10 completed over 7 × 5 = 35, which is 10/35 × 100 = 28.5714…, " +
@@ -1490,39 +1580,27 @@ test("P6: the seeded dropped member stops being posted while his classmates go o
       "here is banker's rounding or truncation reaching the wire.",
   );
 
-  const droppedAfter = scoresFor(after, BIOL.context, BIOL_DROPPED);
-  expect(
-    droppedAfter.length,
-    `Exit row 7. ${BIOL_DROPPED} left ${BIOL.label} on 2026-10-19 and the platform holds ` +
-      `${droppedAfter.length} scores for him, against ${droppedBefore} before this sweep. SPEC ` +
-      '§3.4: "Drops: scores stop updating." Two classmates gained an entry in this same run, so ' +
-      "a new entry here is the live-enrollment predicate missing from the sweep rather than a " +
-      `sweep that skipped the section. The whole log for him is ${JSON.stringify(droppedAfter)}.`,
-  ).toBe(droppedBefore);
-
-  expectTheGradebookShows(
-    after,
-    BIOL,
-    BIOL_DROPPED,
-    {
-      score: P5_BIOL_SILENT_SCORE,
-      ledger: P5_BIOL_SILENT_LEDGER,
-    },
-    'Exit row 7, the "last posted value stands" half. The value the platform holds for him must ' +
-      "still be the one his last successful post sent at 2026-10-12: 0 of 25 across five ledger " +
-      "lines. **The percentage cannot tell this apart from a fresh post** — a student who " +
-      "answered nothing is 0.0 at every moment — so the ledger is the assertion: seven lines here " +
-      "means the sweep recomputed and re-posted a departed student, and Pulse neither blanks the " +
-      "column nor writes a final zero, because §3.4 gives the LMS what happens to it.",
-  );
+  // Exit row 7, first half — the third and last sweep his absence is asserted in,
+  // and the only one taken after his platform `closed_at` of 2026-10-19 has
+  // passed. He held nothing before that date and holds nothing after it, which is
+  // what "never enrolled" looks like from a gradebook.
+  expectTheDroppedMemberIsAbsent(after, "2026-10-26", P6_BIOL_LEARNER_LEDGER);
 });
 
 // ---------------------------------------------------------------------------
 // Small shared instruments.
 // ---------------------------------------------------------------------------
 
-/** Poll `settled` on this file's shared budget, and answer whether it ever held. */
-async function waitFor(settled: () => Promise<boolean>): Promise<boolean> {
+/**
+ * Poll `settled` on this file's shared budget, and answer whether it ever held.
+ *
+ * `settled` may be synchronous: the line-item probe below reads the database
+ * through `docker compose exec`, which is a blocking call and has nothing to
+ * await.
+ */
+async function waitFor(
+  settled: () => boolean | Promise<boolean>,
+): Promise<boolean> {
   const deadline = Date.now() + ASYNC_TIMEOUT_MS;
   for (;;) {
     if (await settled()) return true;
