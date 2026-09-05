@@ -380,7 +380,7 @@ for; a watch command's clean exit proves only that some run finished.
 
 ## 43. A broad guard's pattern matched ordinary prose, and named a file that runs no SQL
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/43-a-broad-guards-pattern-matched-ordinary-prose.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/43-a-broad-guards-pattern-matched-ordinary-prose.md)
 
 **Rule.** Prose in a **non-docstring** string under `backend/app/` is read by the
 org-views SQL sweep, which excuses docstrings and nothing else. Before spending a

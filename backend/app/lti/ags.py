@@ -58,10 +58,12 @@ longer than any table in this system; a participation figure against a student's
 `sub` there is a statement about a named person's standing, outside every read
 path SPEC §4.1 governs.
 
-**This module persists nothing to `section` and commits nothing.** The application
-role holds no `UPDATE` on `ags_line_item_url` — E3-05 is the ticket that spends
-that grant — so find-or-create answers the line item and leaves storing it to its
-caller, and the caller owns the transaction exactly as it does for the roster sync.
+**This module persists nothing to `section` and commits nothing.** Find-or-create
+answers the line item and leaves storing it to its caller, and the caller owns the
+transaction exactly as it does for the roster sync. That caller is
+`app.services.grading.ensure_line_item`, which holds the `grade_passback` sanction
+and the column-scoped grant E3-05 spends (ADR 0136) and judges the answered
+address again before writing it down.
 """
 
 import json
@@ -291,9 +293,9 @@ def find_or_create_line_item(
       3. **A create**, when the container holds none.
 
     Answers the line-item document exactly as the platform served it. **Nothing is
-    written to `section`**: the application role holds no `UPDATE` on
-    `ags_line_item_url` and E3-05 is the ticket that spends that grant, so a caller
-    that wants the id kept stores it itself.
+    written to `section`**, so a caller that wants the id kept stores it itself —
+    `app.services.grading.ensure_line_item` is the one that does, under the
+    sanction and the column grant ADR 0136 records.
 
     `http` is the transport every outbound call travels over — see the module
     docstring for why it is a parameter. `settings` supplies the environment the

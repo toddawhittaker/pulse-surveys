@@ -286,6 +286,29 @@ launch door's suites, which should move with it.
 **Done when:** the deferred entry's — the bounded connection, and a test that
 times a staff launch against a broker at a closed port under a stated budget.
 
+**Closed by E3-05.** Both halves of the done-when landed in the ticket that added
+a second enqueue to the same door.
+
+`request_section_sync` publishes through `app.jobs.celery_app.publish_once`,
+which is where the bounded shape now lives: one attempt, a connection made for
+the call with `max_retries: 0` and its socket timeouts bounded, and no result
+backend. The constants moved out of `app.services.validity` rather than being
+copied, so the three request paths that enqueue — the submit path's
+re-classification, the launch door's roster sync and the launch door's line-item
+creation — cannot come apart (`docs/MISTAKES.md` entry 13). Each caller keeps its
+own broad `except`, its own error log and its own answer, because what to do
+about a broker that is not there is a different question per caller.
+
+The measurement is
+`tests/integration/test_a_staff_launch_is_prompt_with_the_broker_at_a_closed_port.py`:
+a real instructor launch with the broker at a closed loopback port, under SPEC
+§10's 2.5-second budget, asserting *both* error-level refusals — one under
+`app.services.roster_sync` and one under `app.services.grading` — so that a door
+which published nothing cannot satisfy the budget by being fast. The section it
+drives is required to hold both service addresses, to carry no line-item id and
+to have no `nrps_call` row at all, so neither trigger can be correctly silent and
+the roster debounce cannot fire (`docs/MISTAKES.md` entry 7).
+
 ## The unproven structural battery rows
 
 Recorded so the residue is findable rather than to schedule work: E2-05's
