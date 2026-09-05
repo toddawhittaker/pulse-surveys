@@ -65,6 +65,7 @@ and changes nothing else.
 from typing import Any
 
 import pytest
+from fixtures.dev_console import NON_STANDARD_METHODS, PROBED_METHODS, STANDARD_METHODS
 from fixtures.routing import registered_paths
 
 # E2-14 item 4. This module is the only thing asserting that the clock-writing
@@ -113,33 +114,15 @@ HEALTHZ_PATH = "/healthz"
 UNREGISTERED_PATH = "/e2-04-unregistered-path-4c81ae"
 
 # The seven standard HTTP methods, and the two the security round of 2026-09-01
-# added. The split is the finding, so it is written as two tuples rather than one
-# list somebody would read as uniform.
-#
-# **The standard seven are what a closed enumeration can hold.** They are what the
-# route registration lists today, and every one of them answers 404 outside
-# development already — which is exactly why a sweep over them alone reported a
-# clean surface.
-STANDARD_METHODS = ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
-
-# **These two are outside every enumeration, and that is their whole job.**
-# `TRACE` is a real method defined by RFC 9110 that nothing in this tree registers;
-# `FOO` is an arbitrary token, syntactically a valid method and certain never to
-# appear in anybody's list. A route set that answers the seven above by naming them
-# answers these with the router's own `405`, naming the one method it does
-# register. Both are sent because they fail for the same reason and a reader
-# should not have to take the general case on the strength of the specific one:
-# `TRACE` shows the gap is reachable with a *standardised* verb, and `FOO` shows
-# no amount of widening the list closes it.
-NON_STANDARD_METHODS = ("TRACE", "FOO")
-
-# The whole walk. `httpx` — which `starlette.testclient.TestClient` is built on —
-# puts the method token on the wire verbatim and validates it against no list, so
-# every one of these is sent by the ordinary client and no ASGI-level driving is
-# needed. If a later pin changes that, the fallback is to call the ASGI
-# application directly with a scope carrying the token, and the reason to do so
-# belongs in this comment rather than in a skip.
-PROBED_METHODS = STANDARD_METHODS + NON_STANDARD_METHODS
+# added, are `STANDARD_METHODS`, `NON_STANDARD_METHODS` and `PROBED_METHODS`,
+# imported at the top of this module. The split is the finding, so it is held as
+# two tuples rather than one list somebody would read as uniform — and it is held
+# in `tests/fixtures/dev_console.py` rather than here from E3-07, because that
+# ticket's trigger is registered the same way and asks the identical question of
+# it. Two inventories of "every method" is `docs/MISTAKES.md` entry 13 on a guard
+# whose whole finding is that enumerating is what fails: the widening would be
+# applied to one and not the other. The reasoning for each tuple travelled with
+# them; nothing about what this module asserts moved.
 
 
 def application_in(environment: str, monkeypatch: pytest.MonkeyPatch) -> Any:
