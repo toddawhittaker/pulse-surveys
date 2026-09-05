@@ -64,23 +64,47 @@ full-term section beside it.
 percentage alone: a reclassification, a question set that changed a week's
 denominator, or a late add that moved which weeks count can each leave the number
 equal and the arithmetic behind it different, and SPEC §3.4 puts that arithmetic
-in the comment beside the score (ADR 0125). Three outcomes follow.
+in the comment beside the score (ADR 0125). Four outcomes follow.
 
   - No row, or a pair that differs from the computed one: a **new delivery**,
     carrying the characters the formula just produced and one instant captured per
     run.
-  - A `FAILED` row whose stored pair equals the computed one: a **retry of that
-    delivery**, re-sending the stored characters and the stored instant, so ADR
-    0052's identity holds byte for byte.
   - A `POSTED` row whose stored pair equals the computed one: **nothing**, and no
     HTTP call at all on that student's account. A section where no student needs a
     post makes no call of any kind — not a token grant, not a line-item read.
+  - A `FAILED` row whose stored pair equals the computed one **and whose
+    `response_code` is NULL**: a **retry of that delivery**, re-sending the stored
+    characters and the stored instant, so ADR 0052's identity holds byte for byte.
+  - A `FAILED` row whose stored pair equals the computed one **and whose
+    `response_code` is a number**: a **new delivery** at this run's own instant.
+
+**Byte identity is for the unknown outcome and for nothing else**, which is the
+narrowing E3-06's security round made (LOW 3) and the reason the last two outcomes
+are two. ADR 0129 gives a NULL `response_code` one meaning — the call never
+reached the platform — so nobody knows whether that score landed, and an equal
+timestamp is what keeps a repeat from being read as a second grade. A row carrying
+a status is the other thing entirely: the platform answered, and it answered no.
+Re-sending the refused instant asks the question that was already refused.
 
 **The schedule is the retry, and there is no backoff.** A refused post appends a
 `FAILED` row carrying the status the platform answered, or the literal 409 for the
 one refusal a retry cannot fix, and the run moves on to the next student. Nothing
-is attempted twice inside a run. A 409 heals itself, because the next run's fresh
-real-time timestamp is later than whatever the platform holds (ADR 0138).
+is attempted twice inside a run. A 409 heals itself **because of the rule above**:
+the conflict is recorded with its status, so the next sweep composes a fresh
+delivery whose real-time instant is later than whatever the platform holds (ADR
+0138). Under the wider retry rule this record first carried, the same 409 would
+have been answered every Monday with the instant the platform had already refused,
+for the rest of the term — the sentence was true only once the narrowing existed.
+
+**Each section is committed before the next one starts** (E3-06's security round,
+MEDIUM 2). The rows the sweep writes are the record of a side effect that has
+already happened outside this process: a score sitting in a gradebook is not undone
+by a worker dying. Under one commit at the end of the walk, a worker killed on
+section two hundred discarded the `grade_sync` and `ags_call` rows of the hundred
+and ninety-nine before it, leaving Pulse believing it had posted nothing and
+re-posting all of them the following Monday as new deliveries. So the commit is the
+service's rather than the calling task's — the one place in `app/jobs/tasks.py`
+where that convention is departed from, and argued there.
 
 **Posting stops at a drop, and this is the only place that stop exists.** A
 student posts while `started_on <= clock.today AND (ended_on IS NULL OR ended_on
@@ -132,12 +156,25 @@ covers the final week's post plus one corrective pass.
 
 ## Consequences
 
+**Two residues are named here rather than left to be found, and they are the
+price of the two decisions above.**
+
 - **A reclassification that lands more than fourteen days after a term ends never
-  re-posts.** That is the named residue of the bound: the score the platform holds
-  is the last one this sweep sent, and it is the one an appeal is answered from.
-  It is a deliberate trade against recomputing a finished term from data that is no
-  longer there, and it is stated here so a later ticket that wants the other
-  behaviour argues for it rather than discovering it.
+  re-posts.** The residue of the bound: the score the platform holds is the last
+  one this sweep sent, and it is the one an appeal is answered from. It is a
+  deliberate trade against recomputing a finished term from data that is no longer
+  there, and it is stated here so a later ticket that wants the other behaviour
+  argues for it rather than discovering it.
+- **A section that fails unexpectedly mid-post still loses its own rows.** The
+  residue of the commit grain: each section's work is one savepoint, so an
+  unexpected failure rolls that section back — a half-written section is not a
+  record anybody can read, and the alternative is committing rows about a post that
+  may never have been composed. What the per-section commit buys is that the loss
+  is *contained* to the section it happened in, instead of the walk's whole account
+  going with it. The next run recomputes that section from scratch and posts what
+  differs, so the residue is a section whose account of one run is missing rather
+  than a section that stops being posted for; what cannot be recovered is the
+  record of a post that had already reached the platform when the failure hit.
 - A difference is noticed up to a week late. A student whose score changes on
   Tuesday sees it on Monday. E3-07's development trigger runs the same sweep on
   demand for a demonstration; nothing in E3 shortens the production cadence.
@@ -155,7 +192,8 @@ covers the final week's post plus one corrective pass.
   a column.** An AGS Score is keyed by the LTI `sub`, which lives only in
   `user.lms_user_id`, and `pulse_app` was refused `SELECT` on that column by
   E1-10's round-3 security review. The sweep therefore resolves each subject
-  through `app.services.identity.subject_for_user`, one row at a time, and
+  through `app.services.identity.subject_for_user`, and
   `app/services/grading.py` reads no column of `user` by any route. ADR 0139
-  records that decision, what it gives back and what it does not; it arrived as
-  this ticket's blocker and was settled before it merged.
+  records that decision and states plainly what it gives back — the enumeration,
+  not a point lookup — and what it keeps; it arrived as this ticket's blocker and
+  was settled before it merged.

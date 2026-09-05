@@ -28,14 +28,28 @@
 -- keeps green across this ticket. A new column grant appearing there would mean
 -- the door reaches something the five columns did not.
 --
--- **What is given back, said plainly.** A caller able to enumerate `user.id` —
--- which `pulse_app` is, since it holds `SELECT (id)` — can now map those ids to
--- subjects one call at a time. That is part of what the revocation bought, and it
--- is handed back deliberately for this one need rather than by re-granting the
--- column, which would put the join back inside every query the product runs.
--- What stays out of reach is a *name*: this answers a pseudonymous identifier the
--- issuing platform assigned, and `user_identity` and `person.identity_name` are
--- refused to `pulse_app` by every mechanism this scheme has.
+-- **What is given back, said plainly, and it is more than a point lookup.** A
+-- scalar function is callable per row inside a `SELECT`, so a caller composing its
+-- own queries can join this against `user` and read a whole table's worth of
+-- subjects — and `pulse_app` holds `SELECT (id)` on `user`, so it has the ids to
+-- do it with. **This door is therefore not enumeration resistance**, and calling
+-- it one would be containment theater: for a caller that writes SQL it is as wide
+-- as the column was. E3-06's security round found the earlier wording here
+-- claiming otherwise, and the honest claim is narrower.
+--
+-- Two things are bought, and they are the reason this shape was chosen over
+-- re-granting the column. **Auditability**: the disclosure has a signature, an
+-- owner, an inventory entry, an ADR and a name a reviewer can grep for, instead of
+-- being a column any join can pick up unremarked in a module nobody is reviewing
+-- for it. And **the line at a name**: what comes back is a pseudonymous identifier
+-- the issuing platform assigned, while `user_identity` and `person.identity_name`
+-- stay refused to `pulse_app` by every mechanism this scheme has.
+--
+-- **The body is deliberately not narrowed** — no `EXISTS` against a live
+-- enrollment, no section argument. ADR 0139 records why: a guard like that still
+-- resolves nearly every student the data holds, while widening this owner's own
+-- read surface to `enrollment` and breaking the pinned privilege equality that is
+-- the one thing here anybody can check.
 --
 -- **NULL is a defined answer, not an error.** The sweep walks enrollments and a
 -- `user` row can go missing between the walk and the read, so "no such row" has

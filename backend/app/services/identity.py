@@ -30,11 +30,12 @@ token it has verified, and can never enumerate the subjects it does not.
 is a decision rather than an oversight. `subject_for_user` runs the mechanism
 backwards for SPEC §3.4's grade passback, which posts a score keyed by the LTI
 `sub` and can key it by nothing else, so it hands a value back where the others
-hand an id. What that gives back — a caller able to enumerate `user.id` can now
-map ids to subjects, one call at a time — is written out in ADR 0139 and in
-`views_sql/identity_resolution_v002.sql`. What it does not give back is a name:
-`user_identity` and `person.identity_name` stay unreachable from this connection
-by every mechanism this scheme has.
+hand an id. **That one gives the enumeration back**: a scalar function is callable
+per row inside a `SELECT` and this connection can already list `user.id`, so the
+door is as wide as the column was for anyone composing a query. What is kept is
+auditability — one inventoried, greppable function with a stated argument (ADR
+0139) — and the line at a *name*: `user_identity` and `person.identity_name` stay
+unreachable from this connection by every mechanism this scheme has.
 
 **Two doors, two lookups, and deliberately not one clever query.** A launch
 reaches a person in two hops — the platform's `sub` to a `user` row, then ADR
@@ -201,14 +202,25 @@ def subject_for_user(session: Session, user_id: UUID) -> str | None:
     nothing else, so a sweep holding a `user` row id has to be able to reach the
     subject that row was created for.
 
-    **It is a point lookup and not a read of the column.** `pulse_app` holds no
-    `SELECT` on `user.lms_user_id` — E1-10's round-3 review revoked it, because a
-    connection able to read it can enumerate every subject that ever launched and
-    join a response back to the person who gave it — so this goes through the
-    `SECURITY DEFINER` function that answers one row's value while this connection
-    holds no read at all. What is handed back is a pseudonymous identifier the
-    issuing platform assigned; a name is refused here by every mechanism this
-    scheme has, and `user_identity` is unreachable from this connection entirely.
+    **What this does and does not contain, stated honestly** (E3-06's security
+    round, MEDIUM 1). `pulse_app` holds no `SELECT` on `user.lms_user_id` — E1-10's
+    round-3 review revoked it, because a connection able to read it can enumerate
+    every subject that ever launched and join a response back to the person who
+    gave it — so this goes through a `SECURITY DEFINER` function instead. **That is
+    not enumeration resistance.** A scalar function is callable per row inside a
+    `SELECT`, so a caller composing its own queries can reach through this door for
+    a whole table's worth of subjects as readily as it could have read the column;
+    `pulse_app` holds `SELECT (id)` on `user`, which is the enumeration this leaves
+    open by construction.
+
+    What the door does buy is two things worth having and worth naming as what they
+    are. It is **auditable**: one inventoried function with a signature, an owner, a
+    stated argument (ADR 0139) and a name a reviewer can grep, rather than a column
+    any join can pick up unremarked. And it holds a hard line at the value: what
+    comes back is the pseudonymous identifier the issuing platform assigned, and a
+    *name* is refused by every mechanism this scheme has — `user_identity` is
+    unreachable from this connection entirely and `person.identity_name` is not
+    among the columns this function's owner may read.
 
     **`None` is a defined answer.** A row can go missing between the moment a
     caller reads an enrollment and the moment it asks for the subject, and the

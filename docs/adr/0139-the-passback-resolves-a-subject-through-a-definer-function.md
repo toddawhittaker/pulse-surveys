@@ -88,20 +88,42 @@ new table for §4's retention and §8's grants to reason about. ADR 0001's split
 exists so there is one place, and the answer to "which copy is right" should never
 be a question anyone has to ask.
 
+**Narrowing the body so it answers only for a student the caller has business
+with** — an `EXISTS` against a live enrollment, or a section argument the function
+checks the student against. This is the repair the containment wording above
+invites once the wording is corrected, and it is rejected on measurement rather
+than on effort. Nearly every `user` row in this schema *is* enrolled somewhere:
+the guard would refuse a handful of rows and resolve the rest, so the enumeration
+it is meant to close stays open at very nearly full width. It is not free either —
+the owner would need `SELECT` on `enrollment` to run it, which widens the blast
+radius the pinned equality in
+`test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answers`
+exists to bound, and that test would go red for a change that bought nothing. A
+guard that stops almost none of the thing it names while enlarging what its owner
+can read is containment theater: it makes the honest paragraph above harder to
+write and does not make the disclosure smaller.
+
 **Leaving the sweep unable to post, and rendering scores some other way.** SPEC
 §3.4 posts to the platform's gradebook; there is no other way for a score to reach
 a student in v1, and E3 renders none itself.
 
 ## Consequences
 
-- **A caller able to enumerate `user.id` can now map ids to subjects, one call at
-  a time, through one auditable function.** `pulse_app` holds `SELECT (id)` on
-  `user`, so that describes it. This is part of what E1-10's revocation bought,
-  given back deliberately for exactly this need — stated plainly here rather than
-  left to be discovered, because the honest reading of this decision is that the
-  property is narrowed rather than preserved. What is bought back for it is that
-  the disclosure has a name, a signature, an owner and an inventory entry, instead
-  of being a column any query can join to.
+- **This gives the enumeration back, and it is not "one call at a time".** A
+  scalar function is callable per row inside a `SELECT`, so a caller composing its
+  own queries can join `resolve_subject_for_user` against `user` and read every
+  subject in the schema in one statement — and `pulse_app` holds `SELECT (id)` on
+  `user`, so it has the ids to do it with. For a caller that writes SQL this door
+  is as wide as the column was. The first version of this record, and the SQL
+  file's own comment, described it as a point lookup that left enumeration closed;
+  E3-06's security round found that wording and it was wrong. **The property
+  E1-10's revocation bought is given back here, not narrowed.**
+- **What is bought for it is auditability, and the line at a name.** The
+  disclosure has a signature, an owner, an inventory entry, this record and a name
+  a reviewer can grep for, instead of being a column any join in any module can
+  pick up unremarked — which is a real difference in how a later widening gets
+  noticed, and is the whole of what this shape buys over re-granting the column. It
+  is not a technical containment and must not be cited as one.
 - **Names remain unreachable.** A subject is pseudonymous: it identifies a person
   only to the platform that issued it. `user_identity` is refused to `pulse_app` by
   every mechanism this scheme has, `person.identity_name` is not among the five
@@ -113,9 +135,10 @@ a student in v1, and E3 renders none itself.
   This is the sixth, argued for here; the sentence is unchanged and points one
   further along.
 - The sweep costs one statement per student it is about to post for, which is a
-  point lookup beside an HTTP call. A batch resolver would be cheaper and would be
-  a function that returns a set, which is the shape this mechanism exists not to
-  have.
+  cheap call beside the HTTP post each of those students is about to receive. A
+  set-returning resolver would be fewer statements; it is not built because nothing
+  needs it, not because a scalar one is safer — the paragraph above is why that
+  distinction does not survive contact with a caller writing SQL.
 - A downgrade of `f3b7d05c9e42` drops the function and leaves the role, its column
   grants and the four other resolvers untouched, so a database walked back to
   `e5b83c60f7a1` keeps every forward door and loses only the passback's.
