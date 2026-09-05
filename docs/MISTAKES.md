@@ -335,7 +335,18 @@ printed.
 
 ## 40. The suite ran under an environment nobody chose, and it was a different one in CI
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/40-the-suite-ran-under-an-environment-nobody-chose.md)
+**Caught: 1 — retired 2026-09-05.** The first sentence of the rule is
+mechanically enforced now. The gate is
+`tests/unit/test_the_documented_environment_is_laid_down_for_every_test.py`,
+and it was watched failing against this entry's own defect, planted, in
+FIX-03's mutation battery:
+`documented_environment_baseline` deleted and made non-autouse (both caught by
+`test_the_documented_environment_is_in_place_with_no_fixture_laying_it_down`),
+and `unconfigured_env`'s clearing loop deleted (caught by
+`test_the_opt_out_clears_every_variable_env_example_documents` and the refusal
+canary). What the baseline does not cover — the rule's last paragraph — is not
+enforced by that gate and stays a rule to remember.
+· [the incidents, the root cause, and the whole rule](mistakes/40-the-suite-ran-under-an-environment-nobody-chose.md)
 
 **Rule.** A test whose subject reads the process environment states the value it
 runs under, in its own fixture chain. Anything a fixture runs in process brings
