@@ -32,15 +32,27 @@ spelled with its name would retire with it.
 
 **Since E1-12 there is a fifth role and a second kind of definer function**, and
 the two are not the same kind of thing. `pulse_resolve_definer` (ADR 0094) owns
-three point-resolution functions that turn a subject the caller already holds into
-a row id: a uuid out, five column reads behind them, no identity column among
-those and no `user_identity` read at all. `pulse_app` may execute those three and
-may execute the Care door's halves *not at all*, which is now two assertions rather
-than one — a door (`test_the_application_role_may_not_execute_the_reveal_function`)
-and an inventory (`test_the_application_role_may_execute_only_the_point_resolvers`).
-The second definer's grants are pinned exactly, like the first's, and for a
-sharper reason: the connection that may call its functions is the one every screen
-in the product runs on.
+point-resolution functions that turn a subject the caller already holds into a row
+id: five column reads behind them, no identity column among those and no
+`user_identity` read at all. `pulse_app` may execute them and may execute the Care
+door's halves *not at all*, which is now two assertions rather than one — a door
+(`test_the_application_role_may_not_execute_the_reveal_function`) and an inventory
+(`test_the_application_role_may_execute_only_the_point_resolvers`). The second
+definer's grants are pinned exactly, like the first's, and for a sharper reason:
+the connection that may call its functions is the one every screen in the product
+runs on.
+
+**E3-06 adds a fourth function to that owner and runs it the other way.**
+`resolve_subject_for_user` takes a `user` row id and answers the platform's own
+subject for it, because the weekly participation sweep posts a score keyed by that
+subject (SPEC §3.4) and `user.lms_user_id` is the column E1-10's round-3 review
+revoked from the application role. It reads the two columns the owner already
+holds, so the owner's grant list does not move — but the *direction* is new, and
+the cost is stated rather than hidden: a caller able to enumerate `user.id` can now
+map ids to subjects, which is part of what the revocation bought and is given back
+for exactly this outbound need. A subject is pseudonymous and a name is not:
+`user_identity` and `person.identity_name` stay unreachable from this role by every
+mechanism this file measures. ADR 0139 records it.
 
 **Denial, never absence.** Every confidentiality assertion here is that the
 server *refused* a statement, with the SQLSTATE that says why. "The name was not
@@ -272,12 +284,13 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 
 # Every `SECURITY DEFINER` function `pulse_app` may call, by name, and why.
 #
-# **Four entries, from two tickets, and one inventory rather than two.** E1-12 and
-# E1-11 opened this door in the same epic and from opposite ends — the first so a
-# verified subject reaches its stored identity, the second so a roster member
+# **Six entries, from three tickets, and one inventory rather than three.** E1-12
+# and E1-11 opened this door in the same epic and from opposite ends — the first so
+# a verified subject reaches its stored identity, the second so a roster member
 # reaches its `user` row — and each ticket's branch wrote the equality over its own
 # set. Two rival closed sets over one fact is not an inventory; the merge is the
-# union, and every entry keeps the sentence that admits it.
+# union, and every entry keeps the sentence that admits it. E3-06 adds the sixth to
+# the merged list rather than beside it, for the same reason.
 #
 #   - `resolve_platform_user(lti_platform_id, lms_user_id) -> uuid` — E1-12's
 #     launch door holds a `sub` from a token it has verified and needs the `user`
@@ -314,17 +327,37 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 #     return a name — passed unconditionally. A grant cannot bound a column's value,
 #     so the write moved into a function whose body writes `'INSTRUCTOR'` and whose
 #     signature is two uuids with nowhere to put a role. The grant is gone.
+#   - `resolve_subject_for_user(user_id) -> text` — E3-06's, and the first entry
+#     that reads a subject *out* rather than matching one the caller already holds.
+#     The weekly participation sweep posts a score keyed by the platform's own
+#     subject (SPEC §3.4), and that subject is `user.lms_user_id` — the column
+#     E1-10's round-3 review revoked from this role because "a connection able to
+#     read it can enumerate every subject that ever launched and join a response
+#     back to the person who gave it". A view cannot help, for the reason it could
+#     not help E1-12: a view filters only on a column it exposes. So the read goes
+#     through the third mechanism this file recognises, one function answering a
+#     pseudonymous subject for one row id and NULL for an id that names no row, and
+#     never a name. **The cost, stated rather than hidden**: a caller able to
+#     enumerate `user.id` can now map ids to subjects, which is part of what the
+#     revocation bought and is given back for exactly this outbound need. What it
+#     does not give back is identity — `user_identity` and `person.identity_name`
+#     stay unreachable, the owner gains no column privilege for this (its five stay
+#     exactly five), and enumeration of subjects the caller holds no row id for is
+#     still refused. ADR 0139.
 #
 # What is *not* here is the point of the list: the two halves of the Care door.
 # `pulse_app` is refused those by name in an `invariant`-marked test below, and a
-# sixth entry appearing here is a new door into identity that some later ticket
-# opened without arguing for it.
+# **seventh** entry appearing here is a new door into identity that some later
+# ticket opened without arguing for it. The number moves only in a change that
+# writes the sentence admitting the entry, as each of the six above did; an entry
+# arriving without one is the thing this inventory exists to make impossible.
 SANCTIONED_APPLICATION_EXECUTE = (
     "resolve_platform_user",
     "resolve_person_for_user",
     "resolve_web_person",
     "record_roster_email",
     "record_teaching_instructor",
+    "resolve_subject_for_user",
 )
 
 # What the resolve definer may reach at table grain, and the whole of it.
@@ -346,6 +379,15 @@ RESOLVE_DEFINER_PRIVILEGES = frozenset({("web_login_subject", "SELECT")})
 # A sixth entry — `person.identity_name`, say — would be a name reachable through a
 # function `pulse_app` may call, which is ADR 0001's scheme undone in one line and
 # is invisible to every other gate in this build.
+#
+# **E3-06 adds a fourth function to this owner and nothing to this set**, which is
+# the whole of what makes that door affordable. `resolve_subject_for_user` reads
+# `user.id` and `user.lms_user_id`, both already here for `resolve_platform_user`,
+# so the blast radius of the new door is the blast radius that was already
+# measured. It does return a subject rather than a uuid — ADR 0094's quoted
+# sentence above is about the functions ADR 0094 ships — and a subject is
+# pseudonymous where a name is not. A column added here in that ticket's name would
+# be the widening to look for.
 RESOLVE_DEFINER_COLUMN_PRIVILEGES = frozenset(
     {
         ("user", "id", "SELECT"),
@@ -507,8 +549,9 @@ RESOLVE_BOTH = text("SELECT to_regclass(:bare)::oid, to_regclass(:qualified)::oi
 #
 # **One rule stopped being spellable as emptiness, and E1-12 and E1-11 are why.**
 # "`pulse_app` may execute nothing" needed no name at all while the answer was
-# zero; the answer is now five functions that return no identity (ADR 0094, E1-11's
-# D7, and the security round's F2), so the rule is an equality over
+# zero; the answer is now six functions that return no identity (ADR 0094, E1-11's
+# D7, the security round's F2, and E3-06's outbound subject), so the rule is an
+# equality over
 # `SANCTIONED_APPLICATION_EXECUTE` at
 # the head of this file. The **door** it may not open is still spelled without a
 # name — `test_the_application_role_may_not_execute_the_reveal_function` discovers
@@ -524,10 +567,13 @@ CARE_DOOR_HALVES = 2
 # three functions *that* ticket granted — and the merge folded its entries and its
 # sentences into that one rather than leaving two equalities to disagree.
 #
-# The owners those five functions run as: NOLOGIN roles that exist for nothing
+# The owners those six functions run as: NOLOGIN roles that exist for nothing
 # else, so that "the definer's privileges" is a list you can read in one file
 # against one body (ADR 0043's pattern, ADR 0094 and E1-11's D7).
-# `pulse_resolve_definer` owns the three point resolvers, `pulse_roster_definer`
+# `pulse_resolve_definer` owns the three point resolvers **and E3-06's fourth**
+# (ADR 0139 — the same owner because the function reads the two columns that owner
+# already holds, and a fifth NOLOGIN role holding a subset of an existing one's
+# grants would be a role to audit rather than a boundary), `pulse_roster_definer`
 # the email write, and `pulse_instructor_definer` the teaching-instructor write the
 # security round's F2 moved off a table grant. They are named here because the
 # grantee sweep below asks *who* is named in an ACL anywhere in `public` and would
@@ -1147,10 +1193,14 @@ def test_the_application_role_may_not_execute_the_reveal_function(db_session: An
     `pulse_app` now holds `EXECUTE` on the three point-resolution functions ADR
     0094 ships — a verified subject reaching its stored identity is E1-12's whole
     subject, and E1-11's roster sync matches a member to its `user` row through the
-    same two — and on `record_roster_email`, which writes an address into a table
-    this role holds no grant on at all (E1-11's D7, ADR 0050). Each answers a point
-    question and returns no identity, so a rule phrased as emptiness would be red
-    against the correct schema.
+    same two — on `record_roster_email`, which writes an address into a table this
+    role holds no grant on at all (E1-11's D7, ADR 0050), on
+    `record_teaching_instructor`, whose body writes the one role it may write (the
+    security round's F2), and on `resolve_subject_for_user`, which answers the
+    platform's subject for a row id the caller already has so that E3-06's sweep can
+    post a score keyed by it (ADR 0139). Each answers a point question and returns
+    no identity, so a rule phrased as emptiness would be red against the correct
+    schema.
 
     **What this test asserts is the door, and it identifies the door by discovery.**
     Whatever `pulse_care` may execute is what `pulse_app` may not — never by name,
@@ -1161,13 +1211,13 @@ def test_the_application_role_may_not_execute_the_reveal_function(db_session: An
     the audit row that makes the name accountable.
 
     **The inventory half is next door**, in
-    `test_the_application_role_may_execute_only_the_point_resolvers`: that the four
+    `test_the_application_role_may_execute_only_the_point_resolvers`: that the six
     sanctioned functions are the only other thing this role may call. Two tests
     because they are two facts — this one is a door, that one is a closed set — and
     a merge that folded them into one would have lost whichever fact it phrased
     second.
 
-    **What the four permitted functions can reach is pinned elsewhere, as
+    **What the six permitted functions can reach is pinned elsewhere, as
     equalities over their owners' grants**:
     `test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answers`
     below, and
@@ -1208,10 +1258,12 @@ def an_inventoried_execute(row: Any) -> bool:
     Two entries, and the asymmetry between them is the design. `pulse_care` holds
     the Care door and the door is discovered rather than named, because E10
     replaces it and a rule spelled with its name would retire with it. `pulse_app`
-    holds ADR 0094's point resolvers and E1-11's one writer, and those *are* named,
-    because the argument that admits each is an argument about that function's body
-    — a uuid out and no identity column read, or an address in and never a name —
-    and neither generalises to the next function somebody wants to grant.
+    holds ADR 0094's point resolvers, E1-11's and F2's two writers and ADR 0139's
+    subject lookup, and those *are* named, because the argument that admits each is
+    an argument about that function's body — a uuid out and no identity column
+    read, an address in and never a name, a pseudonymous subject out for a row id
+    the caller already holds — and none of them generalises to the next function
+    somebody wants to grant.
     """
     if row["grantee"] == CARE_ROLE:
         return True
@@ -1241,11 +1293,14 @@ def test_the_application_role_may_execute_only_the_point_resolvers(db_session: A
     file's own sweep missed once already, in the worst possible place. Until this
     epic the rule was that `pulse_app` held none of it. ADR 0094 opens three point
     resolvers, each answering one question with a uuid; E1-11's D7 opens one writer
-    that takes an address and never a name; and the security round's F2 opens a
-    second writer that takes a person and a section and writes the one role its own
-    body names. This is the assertion that those five are the only five.
+    that takes an address and never a name; the security round's F2 opens a second
+    writer that takes a person and a section and writes the one role its own body
+    names; and ADR 0139 opens a fourth resolver that answers the platform's subject
+    for a `user` row id, because E3-06's sweep posts a score keyed by that subject
+    and the column carrying it is revoked from this role. This is the assertion that
+    those six are the only six.
 
-    **Two of the five write, and that is not a widening of this rule but the
+    **Two of the six write, and that is not a widening of this rule but the
     instrument it now has to carry.** A grant bounds a table and its columns and
     cannot bound a column's *value*: there is no `GRANT INSERT (role =
     'INSTRUCTOR')`. So where a writer must be restricted to one value — an address
@@ -1260,13 +1315,24 @@ def test_the_application_role_may_execute_only_the_point_resolvers(db_session: A
     `SANCTIONED_APPLICATION_EXECUTE` at the head of this file, where every entry
     carries the sentence that admits it.
 
-    **Why an equality rather than a ceiling.** A sixth function granted to
-    `pulse_app` is a sixth door into whatever its owner can read, and nothing else
+    **Why an equality rather than a ceiling.** A seventh function granted to
+    `pulse_app` is a seventh door into whatever its owner can read, and nothing else
     in this build would mention it: `alembic check` reads no `pg_proc` entry in
     either direction, the grantee sweep below asks *who* holds something rather
     than *how many things*, and the refusal above is scoped to the Care door. A
     convenience wrapper that returned "the person and their name" would satisfy
     every other test in this file.
+
+    **E3-06's entry is what a legitimate widening looks like, and it is still a
+    widening.** `resolve_subject_for_user` answers `user.lms_user_id` for a row id
+    — the column E1-10's round-3 review revoked from this role — so a caller that
+    can enumerate `user.id` can now map ids to subjects. That is given back
+    deliberately, for one outbound need (SPEC §3.4's score is keyed by the
+    platform's subject), and it is written into the inventory's own bullet rather
+    than into a pull request nobody re-reads. What it does not give back is a name:
+    the owner's column grants do not move, which
+    `test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answers`
+    is what says.
 
     **Each sanctioned name must be *found*, not merely permitted**
     (`docs/MISTAKES.md` entry 35). A sweep that reported nothing for `pulse_app` —
@@ -1275,10 +1341,10 @@ def test_the_application_role_may_execute_only_the_point_resolvers(db_session: A
     satisfying it after the grants were dropped and the doors stopped working.
 
     **The mutation it exists to survive**: `GRANT EXECUTE ON FUNCTION public.<a
-    sixth definer function> TO pulse_app`, and its quieter sibling, a migration
+    seventh definer function> TO pulse_app`, and its quieter sibling, a migration
     that omits `REVOKE ALL … FROM PUBLIC` on a new definer function — `PUBLIC`
     includes `pulse_app`, so both arrive here.
-    **The near miss it tolerates**: a sixth `SECURITY DEFINER` function that
+    **The near miss it tolerates**: a seventh `SECURITY DEFINER` function that
     `pulse_app` may not execute. That is somebody else's door and
     `test_no_role_outside_this_scheme_is_granted_anything_in_public` is where its
     grantee is judged.
@@ -1293,10 +1359,12 @@ def test_the_application_role_may_execute_only_the_point_resolvers(db_session: A
     missing = [name for name in SANCTIONED_APPLICATION_EXECUTE if name not in executable]
     assert not missing, (
         f"`{APPLICATION_ROLE}` may execute {executable}, and {missing} are missing from it. Those "
-        "are ADR 0094's point-resolution functions and E1-11's `record_roster_email`: without the "
-        "first a verified subject reaches no stored identity on either door — E1-12's whole "
-        "subject — and without the last the roster sync can store no address at all, while every "
-        "refusal in this file stays green. It also means this sweep has not been seen finding an "
+        "are ADR 0094's point-resolution functions, E1-11's `record_roster_email` and ADR 0139's "
+        "`resolve_subject_for_user`: without the first a verified subject reaches no stored "
+        "identity on either door — E1-12's whole subject — without the second the roster sync can "
+        "store no address at all, and without the third E3-06's weekly sweep cannot name the "
+        "student it is posting a score for, while every refusal in this file stays green. It also "
+        "means this sweep has not been seen finding an "
         "`EXECUTE` on a role that certainly holds one, so the equality below would be satisfied by "
         "an instrument that reports nothing for anybody."
     )
@@ -1307,7 +1375,7 @@ def test_the_application_role_may_execute_only_the_point_resolvers(db_session: A
         f"{list(SANCTIONED_APPLICATION_EXECUTE)} and each entry carries the sentence that admits "
         "it, beside the constant at the top of this file. A `SECURITY DEFINER` function runs as "
         "its owner, so `EXECUTE` on one is a privilege on everything that owner can read — held by "
-        "the connection every screen in the product runs on. If a fifth is genuinely needed, add "
+        "the connection every screen in the product runs on. If a seventh is genuinely needed, add "
         "it there with its sentence and say in the pull request what the caller can now reach that "
         "it could not before."
     )
@@ -1336,6 +1404,17 @@ def test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answer
     **Exactly, not at least**, in both directions: the second list means the doors
     cannot answer and some other test is about to fail for a reason that reads as
     unrelated.
+
+    **E3-06 adds a function to this owner and must add nothing to this set**, which
+    is the pin its ADR (0139) rests on. `resolve_subject_for_user` answers
+    `user.lms_user_id` for a `user.id`, and both columns are already here for
+    `resolve_platform_user` — so the honest reading of that ticket is that it opens
+    a new *direction* through an unchanged blast radius. An entry appearing here in
+    its name would mean the opposite: that the door reaches something the five
+    columns did not, and the argument that admitted it was about a door that does
+    not exist. So this test is expected to stay **green** across that ticket, before
+    the migration and after it; a red here on E3-06's branch is the widening and not
+    the ticket landing.
 
     **What it cannot see** (`docs/MISTAKES.md` entry 14): a change *within* those
     six. The functions could come to return a different shape over the same columns,
@@ -1419,6 +1498,169 @@ def test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answer
 
 
 # ---------------------------------------------------------------------------
+# E3-06 — the sixth sanctioned door, and what it answers. ADR 0139.
+# ---------------------------------------------------------------------------
+#
+# The catalog rules above say the door is *sanctioned* and how wide its owner is.
+# What follows says what it *does*, because a grant list cannot tell a function
+# that answers a subject from one that answers nothing and from one that answers
+# somebody else's.
+SUBJECT_RESOLVER = "resolve_subject_for_user"
+
+# Every argument is a `CAST(:name AS uuid)` rather than a `:name::uuid`, for the
+# reason `FUNCTION_BODY` above records: SQLAlchemy's `text()` stops reading
+# `:name` as a bind parameter when a colon follows it, so the `::` spelling sends
+# the literal string. And the type is named rather than left to inference,
+# because psycopg sends a Python `None` with no type at all — an uncast NULL
+# makes Postgres answer "function does not exist" (42883) where these tests are
+# asking what an existing one returns.
+RESOLVE_SUBJECT_CALL = f"SELECT public.{SUBJECT_RESOLVER}(CAST(:user_id AS uuid))"
+
+# The statement that must stay refused while that function answers. This is the
+# read E1-10's round-3 review revoked, and the whole reason the sweep cannot
+# simply select the column it needs.
+ENUMERATE_SUBJECTS = 'SELECT lms_user_id FROM public."user" LIMIT 1'
+
+
+def require_the_subject_resolver(session: Any) -> None:
+    """Fail naming the deliverable when E3-06's subject lookup is not in the catalog.
+
+    A plain call at the top of a test body and never a fixture
+    (`docs/MISTAKES.md` entry 44): until the migration lands, the two tests below
+    have to read as a FAILED naming a function nobody has written yet, rather
+    than as an error raised from inside a query that happened to mention it.
+    """
+    defined = {row["name"] for row in security_definer_functions(session, APPLICATION_ROLE)}
+    assert SUBJECT_RESOLVER in defined, (
+        f"`public.{SUBJECT_RESOLVER}` is not a `SECURITY DEFINER` function in this schema; the "
+        f"ones that are, are {sorted(defined)}. ADR 0139 adds it as "
+        f"`public.{SUBJECT_RESOLVER}(user_id uuid) RETURNS text`, owned by "
+        f"`{RESOLVE_DEFINER_ROLE}` — whose column privileges do not change, because the two "
+        "columns it reads are already there — with `EXECUTE` granted to "
+        f"`{APPLICATION_ROLE}` and revoked from `PUBLIC`. Without it E3-06's sweep cannot name "
+        "the student whose score it is posting: SPEC §3.4's score is keyed by the platform's own "
+        "subject, and that column is revoked from the connection the sweep runs on."
+    )
+
+
+@pytest.mark.invariant
+def test_the_application_role_resolves_a_subject_for_a_user_and_is_still_refused_the_column(
+    committed_rows: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """ADR 0139's whole claim, and like ADR 0094's it is a pair rather than a permission.
+
+    The sweep may turn a `user` row id it is already holding into the subject it
+    must key a score by, and may not read the column that answers it. Both halves
+    are needed and neither is the claim on its own: a schema that refused both
+    satisfies every denial in this file and leaves the sweep unable to post a
+    single score, and a schema that granted the column back would make the sweep
+    a two-line change and reverse E1-10's round-3 fix — every screen's connection
+    able again to list every subject that ever launched and join a response back
+    to the person who gave it.
+
+    **The refusing half is asserted as a refused statement with its SQLSTATE, not
+    as an empty result** (SPEC §4.1). An absence passes against an empty table,
+    against a typo in a column name, and against a query that failed for some
+    other reason entirely.
+
+    **`user_identity` is refused in the same transaction as well**, because this
+    ticket's argument is that a *subject* is given back and a name is not. A
+    subject is pseudonymous — it names a person only to the platform that issued
+    it — and the moment this door also reaches a name the trade this inventory
+    records is not the trade that was made.
+
+    **The mutation it exists to survive**: `GRANT SELECT (lms_user_id) ON
+    public."user" TO pulse_app`, which is the change somebody reaches for when
+    the sweep cannot resolve a subject, and which no other test in this module
+    would report — the function would go on answering and every refusal here
+    would be about `user_identity`.
+    """
+    require_the_subject_resolver(committed_rows.session)
+    key = next(iter(metadata_tables["user"].primary_key.columns)).name
+    subject = f"e3-06-subject-{uuid4().hex[:12]}"
+    user = committed_rows.seed("user", {}, lms_user_id=subject)
+    committed_rows.commit()
+
+    with acting_as(committed_rows.session, APPLICATION_ROLE):
+        resolved = committed_rows.session.execute(
+            text(RESOLVE_SUBJECT_CALL), {"user_id": user[key]}
+        ).scalar_one()
+        enumeration = refused(committed_rows.session, ENUMERATE_SUBJECTS)
+        identity = refused(committed_rows.session, READ_IDENTITY)
+
+    assert resolved == subject, (
+        f"`{SUBJECT_RESOLVER}` answered {resolved!r} for a `user` row whose `lms_user_id` this "
+        f"test seeded as {subject!r}. A door that cannot answer leaves E3-06's sweep with no "
+        "subject to key a score by, and SPEC §3.4's score reaches a gradebook by the platform's "
+        "own identifier for the student or not at all."
+    )
+    assert enumeration is not None and sqlstate(enumeration) == INSUFFICIENT_PRIVILEGE, (
+        f"`{APPLICATION_ROLE}` read `user.lms_user_id` directly (the statement answered "
+        f"{enumeration!r}). E1-10's round-3 review revoked exactly that read: the column is the "
+        "LTI `sub` verbatim, so a connection holding it can enumerate every subject that has ever "
+        "launched and join a response back to a person — on the connection every screen in the "
+        "product runs on. ADR 0139's function exists so that a point lookup answers while this "
+        "stays refused; a green here with the function present means the revocation was undone "
+        "and the door was built anyway."
+    )
+    assert identity is not None and sqlstate(identity) == INSUFFICIENT_PRIVILEGE, (
+        f"`{APPLICATION_ROLE}` read `{IDENTITY_TABLE}` (the statement answered {identity!r}). "
+        "E3-06's door hands back a pseudonymous subject and the argument that admits it turns on "
+        "that word: a subject identifies a person only to the platform that issued it, while "
+        f"`{IDENTITY_TABLE}` carries the name and the address §4.1 keeps behind the Care door."
+    )
+
+
+def test_the_subject_resolver_answers_a_seeded_user_and_null_for_an_id_that_names_no_row(
+    committed_rows: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """Both directions, because the null is a defined answer and not an error.
+
+    ADR 0139: the function answers the LMS subject for a `user` row id and NULL
+    for an id that names no row. E3-06's sweep walks enrollments and a row can go
+    missing between the walk and the read, so "no such user" has to be a value
+    the caller can branch on rather than an exception that stops a section's
+    work — and it must not be somebody else's subject.
+
+    **The mutation this kills**: a body written with a join and a `LIMIT 1` that
+    answers *some* row's subject for an id matching none. Against a database with
+    one user — which is what a hand-run demo has — it is right every time, and
+    what it does in a term's worth of data is post one student's score under
+    another student's identifier.
+
+    **The control is the seeded id in the same transaction**, without which "it
+    answered NULL" is satisfied by a function that answers NULL for everything,
+    and every claim above would be evidence about a door that opens onto nothing.
+    """
+    require_the_subject_resolver(committed_rows.session)
+    key = next(iter(metadata_tables["user"].primary_key.columns)).name
+    subject = f"e3-06-subject-{uuid4().hex[:12]}"
+    user = committed_rows.seed("user", {}, lms_user_id=subject)
+    committed_rows.commit()
+    a_row_that_does_not_exist = uuid4()
+
+    with acting_as(committed_rows.session, APPLICATION_ROLE):
+        found = committed_rows.session.execute(
+            text(RESOLVE_SUBJECT_CALL), {"user_id": user[key]}
+        ).scalar_one()
+        absent = committed_rows.session.execute(
+            text(RESOLVE_SUBJECT_CALL), {"user_id": a_row_that_does_not_exist}
+        ).scalar_one()
+
+    assert found == subject, (
+        f"`{SUBJECT_RESOLVER}` answered {found!r} for the user this test seeded with "
+        f"{subject!r}. The assertion below is about a function that can answer at all; without "
+        "this one, a resolver that answers NULL for every id passes it."
+    )
+    assert absent is None, (
+        f"`{SUBJECT_RESOLVER}` answered {absent!r} for the id {a_row_that_does_not_exist!r}, "
+        "which names no `user` row. NULL is the defined answer for a missing row (ADR 0139): a "
+        "value here is another student's subject, and E3-06's sweep would post one student's "
+        "participation score into another student's line in a gradebook."
+    )
+
+
+# ---------------------------------------------------------------------------
 # The Care door: open, single, and audited.
 # ---------------------------------------------------------------------------
 
@@ -1453,13 +1695,13 @@ def test_neither_runtime_role_holds_any_privilege_on_user_identity(db_session: A
     **The execute mechanism is filtered out here and nowhere else**, and that is
     the asymmetry rather than an exemption. Both runtime roles hold `EXECUTE` on a
     definer function *by design* — `pulse_care` on the Care door, because §4 and
-    §6.2 require that door to be open, and since E1-12 and E1-11 `pulse_app` on
-    five functions that return no identity (ADR 0094, E1-11's D7 and the security
-    round's F2) — so a rule
+    §6.2 require that door to be open, and since E1-12, E1-11 and E3-06
+    `pulse_app` on six functions that return no identity (ADR 0094, E1-11's D7,
+    the security round's F2 and ADR 0139) — so a rule
     that reported either would fail against the correct schema. It is asserted
     separately instead, and on each side by an equality beside a refusal:
     `test_the_application_role_may_execute_only_the_point_resolvers` says which
-    five `pulse_app` may call, `test_the_application_role_may_not_execute_the_
+    six `pulse_app` may call, `test_the_application_role_may_not_execute_the_
     reveal_function` says it may not open the Care door, and
     `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door` says
     `pulse_care` may call exactly those two. Asked about a role a runtime role can
@@ -2915,10 +3157,10 @@ def test_the_downgrade_completes_when_a_role_it_revokes_from_is_absent(
 #
 # **E1-12 and E1-11 add a marked test on the inventory side of that line, and it
 # is deliberate rather than a drift.** `test_the_application_role_may_execute_only_
-# the_point_resolvers` is an equality over the five functions `pulse_app` may call,
+# the_point_resolvers` is an equality over the six functions `pulse_app` may call,
 # which by the rule above would be unmarked — but from the moment that set stopped
 # being empty, "the doors are the only doors" is the assertion that the set has not
-# grown, and there is no separate route-test that would notice a fifth door. The
+# grown, and there is no separate route-test that would notice one more door. The
 # mark follows the guarantee rather than the shape.
 #
 # **E0-26 item 1 added two marks by that same line, and they are doors.**
@@ -3919,20 +4161,21 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     the one function whose job is to return a name.
 
     **The allowed grantees on a definer function are `pulse_care`, and — since
-    E1-12, E1-11 and that ticket's security round — `pulse_app` on the five
+    E1-12, E1-11, that ticket's security round and E3-06 — `pulse_app` on the six
     functions `SANCTIONED_APPLICATION_EXECUTE` names.** E0-10's own sentence still governs
     the door that returns identity: `pulse_care` "gets `EXECUTE` on a **single**
-    `SECURITY DEFINER` function". What this epic adds is a different kind of
+    `SECURITY DEFINER` function". What these tickets add is a different kind of
     function — three point lookups answering with a uuid, owned by a role that
     reads five columns and no identity among them; one writer that takes an address
-    and can never write a name; and one that takes a person and a section and
-    writes the single role its body names — and each is admitted here **by name**,
-    out of that constant at the top of this file, rather than by widening the rule
-    to "the application role may execute definer functions". A sixth grant to
-    `pulse_app` therefore still appears below, which is the whole point of writing
-    the inventory down.
+    and can never write a name; one that takes a person and a section and writes
+    the single role its body names; and one that answers a pseudonymous subject for
+    a row id so a score can be posted against it — and each is admitted here **by
+    name**, out of that constant at the top of this file, rather than by widening
+    the rule to "the application role may execute definer functions". A seventh
+    grant to `pulse_app` therefore still appears below, which is the whole point of
+    writing the inventory down.
 
-    Which five they are is *not* this test's question. This sweep owns the grantee
+    Which six they are is *not* this test's question. This sweep owns the grantee
     axis — who is named in an ACL anywhere — and the count and contents are
     `test_the_application_role_may_execute_only_the_point_resolvers`'s, one
     equality in one place. E0-10's count for `pulse_care` is likewise
@@ -4028,7 +4271,7 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
         f"`{APPLICATION_ROLE}` on the functions `SANCTIONED_APPLICATION_EXECUTE` names, and "
         "nothing else: E0-10 gives the Care role `EXECUTE` on the door and E0-26 item 1 made that "
         f"door two halves, and `{APPLICATION_ROLE}` is refused that door in an `invariant`-marked "
-        "test above, with the five functions it *may* call pinned as an equality beside it. "
+        "test above, with the six functions it *may* call pinned as an equality beside it. "
         "Anything else holds a privilege that no ticket in this epic granted and that nothing in "
         "this repository will ever revoke.\n\n"
         "`PUBLIC` appearing here is the worst case and reads like the mildest, and it reads "

@@ -89,6 +89,10 @@ boundary: `metadata_tables` is asked for by both.
     its key set, the registration carries a token endpoint, and the wire mounts the
     container's host), the names that ticket's work order settles, the enqueue
     recorder E1-11's debounce module used, and a broker at a closed port.
+  - `fixtures/grade_sweep.py` — E3-06: one section that is both a gradebook the AGS
+    client can post to and a term's worth of answers the participation formula can
+    score, the `grade_sync` rows a test plants and reads back newest-first, and the
+    names that ticket's work order settles.
 
 Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
@@ -140,4 +144,5 @@ pytest_plugins = (
     "fixtures.grading",
     "fixtures.ags_client",
     "fixtures.line_item_creation",
+    "fixtures.grade_sweep",
 )

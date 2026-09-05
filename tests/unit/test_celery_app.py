@@ -394,13 +394,40 @@ WINDOW_DERIVATION_MINUTE = "30"
 RECLASSIFICATION_TASK_NAME = f"{TASKS_MODULE}.reclassify_floored_comments"
 RECLASSIFICATION_MINUTE = "45"
 
+# E3-06's entry: the weekly participation sweep, running
+# `app.jobs.tasks.post_participation_scores` on `crontab(day_of_week="mon",
+# hour="2", minute="20")` — that ticket's work order, D3. It walks every section
+# with a line item, recomputes each enrolled student's participation score and
+# posts through AGS only where the value differs from the latest `grade_sync`
+# row, which is SPEC §3.4's "Re-posted whenever a recomputation changes the
+# value, ordinarily after each week closes".
+#
+# Monday because SPEC §3.1 closes every survey window on Sunday at 23:59:59 in
+# the institution's timezone, so Monday is the first day the week that ended can
+# be scored at all. 02:20 because the 00:45 and 01:45 reclassification passes
+# get their attempts at that week's floored comments first — a sweep in front of
+# them posts a score computed from provisional verdicts and posts again when the
+# real ones land, turning §3.3's fail-open into two visible grade changes for one
+# week — and because the quarter-hour minutes are taken: this file names three of
+# them, the roster sync's 0, the window reconciler's 30 and the reclassification
+# sweep's 45.
+#
+# **The key is not asserted here, and this time not because the ticket left it
+# open.** D3 settles it as `post-participation-scores-weekly`, and
+# `tests/unit/test_the_participation_sweep_is_scheduled_weekly_and_run_by_a_task.py`
+# pins the key, the task and the crontab in one place. This inventory is an
+# equality over the *tasks*, so what E3-06 adds to it is the task and nothing
+# else; a second copy of the key and the slot here would be one fact asserted in
+# two files, which is how two records come to disagree.
+POST_PARTICIPATION_SCORES_TASK_NAME = f"{TASKS_MODULE}.post_participation_scores"
 
-def test_the_beat_schedule_holds_exactly_the_four_entries_that_have_landed(
+
+def test_the_beat_schedule_holds_exactly_the_five_entries_that_have_landed(
     configured_env: dict[str, str],
     import_app_module: Callable[[str], ModuleType | None],
     celery_application_in: Callable[[ModuleType], Any],
 ) -> None:
-    """E1-08 landed the first entry, E1-11 the second, E2-06 the third and E2-08 the fourth.
+    """The five beat entries that have landed, one per ticket, and E3-06 owns the fifth.
 
     **Rewritten by E1-08, per this test's own instruction at E0-03.** The
     original docstring: "This test is a record with a shelf life, and that is
@@ -437,23 +464,40 @@ def test_the_beat_schedule_holds_exactly_the_four_entries_that_have_landed(
     is down cannot fail or delay a student's submission (`docs/MISTAKES.md` entry
     41), which leaves this entry as the only thing that makes the promise good
     when the publish does not go out. Of the jobs E0-03 named, Monday reports are
-    still E4's and retention purges still E13's; if one of those has now landed
-    too, this test is again the record that has to change with it.
+    still E4's and retention purges still E13's.
+
+    **E3-06 is the fifth, and it is here because this test refused to let it
+    land quietly** (dispute E3-06-02). `app.jobs.tasks.post_participation_scores`
+    on `crontab(day_of_week="mon", hour="2", minute="20")`, the weekly recompute
+    that posts a participation score to a platform's gradebook when the computed
+    value differs from the latest `grade_sync` row — SPEC §3.4's "Re-posted
+    whenever a recomputation changes the value". It is the first entry in this
+    mapping that reaches *outside* the institution on its own cadence: the other
+    four read and write Pulse's own tables, and this one puts a number in front
+    of a student. Monday because §3.1 closes every window on Sunday at 23:59:59
+    institution time; 02:20 because the 00:45 and 01:45 reclassification passes
+    have had their attempts at that week's floored comments by then. The
+    implementer could not make this edit — the heavy lane keeps them out of
+    `tests/` — so the entry stopped at a dispute until the test author made it,
+    which is the conversation the equality exists to force.
 
     **An equality rather than a superset, and E1-11 paid for that choice while
-    E2-06 and E2-08 have each paid for it since.** Widening it to "contains these"
-    would let a fifth entry land with no diff here, and an entry in this mapping
-    is a job that runs against every section in the institution on a cadence
-    nobody at the keyboard sees. Being made to edit this test is the whole point
-    of the equality — and it is why the equality is over the *tasks* rather than
-    over the keys: a task is what actually runs, and it is what each of the four
-    tickets settled.
+    E2-06, E2-08 and E3-06 have each paid for it since.** Widening it to
+    "contains these" would let a sixth entry land with no diff here, and an entry
+    in this mapping is a job that runs against every section in the institution on
+    a cadence nobody at the keyboard sees. Being made to edit this test is the
+    whole point of the equality — and it is why the equality is over the *tasks*
+    rather than over the keys: a task is what actually runs, and it is what each
+    of the five tickets settled.
 
-    **The third and fourth entries are found by their tasks and not by their
-    keys**, because E2-06's work order and E2-08's each settle the task name, the
-    module and the cadence and settle no name for the schedule key. Asserting a
-    key here would pin an identifier the ticket leaves open; asserting the task is
-    asserting what the ticket says.
+    **The third, fourth and fifth entries are found by their tasks and not by
+    their keys**, for two different reasons. E2-06's work order and E2-08's each
+    settle the task name, the module and the cadence and settle no name for the
+    schedule key, so asserting one here would pin an identifier the ticket leaves
+    open. E3-06's D3 does settle a key — `post-participation-scores-weekly` — and
+    `test_the_participation_sweep_is_scheduled_weekly_and_run_by_a_task.py` pins
+    it there with the task and the crontab; repeating it here would be one fact in
+    two files.
 
     The name-and-task assertion is the strong half of the pair and is not
     left to stand on its own: a module that does not exist produces an empty
@@ -480,17 +524,20 @@ def test_the_beat_schedule_holds_exactly_the_four_entries_that_have_landed(
             ROSTER_SYNC_TASK_NAME,
             WINDOW_DERIVATION_TASK_NAME,
             RECLASSIFICATION_TASK_NAME,
+            POST_PARTICIPATION_SCORES_TASK_NAME,
         }
     )
     assert tasks == expected_tasks, (
         f"The beat schedule runs {tasks}, not exactly {expected_tasks} — its keys are "
         f"{sorted(entries)}. E1-08 landed the daily purge of the launch replay ledger (ADR 0089), "
         "E1-11 the hourly roster sync SPEC §7.3 asks for, E2-06 the hourly survey-window "
-        "reconciler that reaches a section which appeared mid-term, and E2-08 the hourly sweep of "
-        "floored classifications that is SPEC §3.3's 'then classified async'. No other ticket has "
-        "landed one: reports are E4, retention is E13. If one of those has now landed too, this "
-        "test is again the record that has to change with it — say which ticket owns the new "
-        "entry and assert what it is, rather than widening this equality to a superset check."
+        "reconciler that reaches a section which appeared mid-term, E2-08 the hourly sweep of "
+        "floored classifications that is SPEC §3.3's 'then classified async', and E3-06 the weekly "
+        "participation sweep that posts a score to a platform's gradebook when a recomputation "
+        "changes it (SPEC §3.4). No other ticket has landed one: reports are E4, retention is E13. "
+        "If one of those has now landed too, this test is again the record that has to change with "
+        "it — say which ticket owns the new entry and assert what it is, rather than widening this "
+        "equality to a superset check."
     )
 
     assert {PURGE_NONCES_SCHEDULE_KEY, ROSTER_SYNC_SCHEDULE_KEY} <= set(entries), (

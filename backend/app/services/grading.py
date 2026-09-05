@@ -10,19 +10,30 @@ nothing else — no network call, no AGS type, no job — so the arithmetic can 
 measured without a platform. That property is unchanged and worth keeping:
 `participation_scores` and every helper under it read the database and the clock.
 
-**The line item** is at the foot of the file: SPEC §3.4's "One AGS line item per
+**The line item** is in the middle of the file: SPEC §3.4's "One AGS line item per
 section: 'Pulse Participation', created by the tool on first launch". A staff
 launch asks for one through `request_line_item_creation`, a worker creates or
 reconciles to it through `ensure_line_item`, and the id the platform served is
 recorded on the section so that every later post can address it without walking a
-container again (ADR 0128, ADR 0135). Posting a *score* is still E3-06's, and the
-protocol is still `app.lti.ags`'s — what lives here is which sections get asked,
-when, and what may be written down afterwards.
+container again (ADR 0128, ADR 0135).
 
-`tests/unit/test_the_grading_module_reaches_no_network_ags_or_job.py` sweeps this
-file for exactly the imports the second half is made of. That sweep is E3-03's
-criterion 8, written while this module held only the first half; the disagreement
-and the repair it needs are in `docs/disputes/E3-05-01.md`.
+**The weekly recompute** is at the foot: SPEC §3.4's "Re-posted whenever a
+recomputation changes the value, ordinarily after each week closes."
+`post_scores_for_all_sections` walks the sections whose term has not long ended,
+computes each enrolled student's score through the formula above, compares it
+against the latest `grade_sync` row for that student and section, and posts only
+where the two differ (ADR 0137). The protocol is still `app.lti.ags`'s — what
+lives here is which sections get asked, which students, when, and what is written
+down afterwards.
+
+`tests/unit/test_the_grading_module_reaches_no_network_ags_or_job.py` is E3-03's
+criterion 8, and it is scoped to `participation_scores` and everything that
+function reaches rather than to the whole file — `docs/disputes/E3-05-01.md`
+carries the objection and the ruling that made it so, since SPEC §13 puts the
+passback in this same module and a file-wide sweep would refuse it the imports
+the spec says it holds. So the formula's own reach is guarded and the two halves
+below it are not, which is why an import added here belongs to one half or the
+other on purpose.
 
 ## The formula
 
@@ -67,43 +78,56 @@ one place (ADR 0131).
 
 import logging
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Final
+from typing import Any, Final
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import requests
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.lti.ags import LINE_ITEM_ID_MEMBER, find_or_create_line_item
+from app.lti.ags import (
+    LINE_ITEM_ID_MEMBER,
+    AgsCallError,
+    AgsConflictError,
+    AgsError,
+    find_or_create_line_item,
+    post_score,
+)
 from app.models.ai import Classification, ClassificationTask
 from app.models.base import Base
+from app.models.grades import GradeSync, GradeSyncOutcome
 from app.models.identity import Enrollment
 from app.models.lti import (
     AGS_LINE_ITEM_ADDRESS_COLUMN,
+    AgsCall,
     RegistrationAddressError,
     refuse_invalid_fetched_address,
 )
 from app.models.org import Section
 from app.models.survey import Answer, Response
-from app.models.term import Week
+from app.models.term import Term, Week
 from app.services import clock
 from app.services.authz import WriteSanction, guard_write, sanction_for
+from app.services.identity import subject_for_user
 from app.services.submissions import current_questions
 from app.services.survey_windows import DerivedWindow, windows_for_section
 from app.services.validity import REFUSED_VERDICT_TOKENS
 
 __all__ = [
+    "TERM_SWEEP_GRACE_DAYS",
     "ParticipationScore",
     "ensure_line_item",
     "outbound_transport",
     "participation_scores",
+    "post_scores_for_all_sections",
     "request_line_item_creation",
+    "score_timestamp_text",
 ]
 
 logger = logging.getLogger(__name__)
@@ -128,9 +152,10 @@ PER_CENT = Decimal(100)
 
 # Tier 3 compares against the section's earliest roster sync (ADR 0131). The row
 # is read through the table on `Base.metadata` rather than through
-# `app.models.lti.NrpsCall`, because this module may not name a module path
-# holding `lti` — that is the rule keeping E3-04's AGS client out of the formula,
-# and the roster-sync log happens to share a module with it.
+# `app.models.lti.NrpsCall`, because the **formula** may not reach a module path
+# holding `lti` — that is the rule keeping E3-04's AGS client out of the
+# arithmetic, and the roster-sync log happens to share a module with it. The
+# passback halves below reach that module freely and name it outright.
 NRPS_CALL = Base.metadata.tables["nrps_call"]
 
 
@@ -637,3 +662,554 @@ def ensure_line_item(
 
     guard_write(table="section", sanction=SANCTION)
     section.ags_line_item_url = identifier
+
+
+# ---------------------------------------------------------------------------
+# SPEC §3.4's weekly recompute: post a score when it has changed (E3-06).
+# ---------------------------------------------------------------------------
+
+# How long after a term's last day the sweep goes on walking its sections. Two
+# more weekly runs: one for the final week's post, one corrective pass for a
+# reclassification that lands late. It stops there rather than never because SPEC
+# §4 deletes raw responses at the end of the retention period — a sweep still
+# walking a finished term would eventually recompute every student's score against
+# comments that are no longer there and post the answer (ADR 0137).
+TERM_SWEEP_GRACE_DAYS: Final[int] = 14
+
+# What a conflict is recorded as. AGS 2.0 answers 409 when the platform holds a
+# score newer than the one posted, and `AgsConflictError` carries no status of its
+# own — it is the one refusal whose meaning is fixed by the protocol rather than
+# read off a response — so the number is written here (ADR 0052, ADR 0137).
+#
+# Writing it rather than leaving the column NULL is what makes the section heal:
+# D16 gives a `FAILED` row carrying a definite status a fresh delivery on the next
+# run, and a conflict recorded as NULL would instead be read as a delivery whose
+# outcome is unknown and re-sent byte for byte — the same instant the platform has
+# already refused, every week, for as long as it holds something newer.
+AGS_CONFLICT_STATUS: Final[int] = 409
+
+
+def score_timestamp_text(instant: datetime) -> str:
+    """The one rendering of a wire timestamp: UTC, ISO 8601, microseconds kept.
+
+    ADR 0052 makes a retry the identical body re-sent, and identical means byte
+    identical. `grade_sync` stores the instant that was sent, so a retry re-renders
+    that stored instant and has to produce the exact characters the platform
+    already accepted — which is only sound while there is one rendering, in one
+    place. Two would drift the first time somebody preferred `Z` to `+00:00`.
+
+    Three properties, each of which a different rendering gets wrong. A non-UTC
+    aware instant is **converted** rather than relabelled, so a value that has been
+    through a `timestamptz` column re-renders as what was sent. Microseconds
+    survive, because Postgres stores them and ADR 0052 would otherwise read two
+    deliveries a microsecond apart as retries of each other. And the offset is
+    spelled `+00:00`, which is `datetime.isoformat`'s own spelling.
+    """
+    return instant.astimezone(UTC).isoformat()
+
+
+@dataclass(frozen=True, slots=True)
+class _Delivery:
+    """One student's post, decided before any HTTP call is made.
+
+    The bytes are settled here rather than at the call site because ADR 0052's
+    retry identity depends on which of two sources they came from: a retry carries
+    the stored row's own characters and a new delivery carries the ones the formula
+    just produced. Deciding that in one place, for the whole section, is also what
+    makes "no HTTP call at all when nothing changed" a property of the shape rather
+    than of a branch somebody has to remember.
+    """
+
+    user_id: UUID
+    score_text: str
+    ledger_text: str
+    score_timestamp: datetime
+
+
+def post_scores_for_all_sections(
+    session: Session,
+    *,
+    settings: Settings,
+    http: requests.Session | None = None,
+    resolve: Callable[[str], Sequence[str]] | None = None,
+) -> dict[str, int]:
+    """Post every participation score that has changed since it was last sent.
+
+    SPEC §3.4's "Re-posted whenever a recomputation changes the value, ordinarily
+    after each week closes; fully automatic, no instructor action or override."
+    `app.jobs.tasks.post_participation_scores` runs this weekly; the caller owns the
+    session and the commit.
+
+    **A difference, not a schedule** (ADR 0137). A posted score is not final when
+    its week closes: E2-08's asynchronous reclassification can flip a comment that
+    fell to §3.3's fail-open floor weeks after the window shut, which lowers the
+    numerator of a number already sitting in somebody's gradebook. So the run is an
+    idempotent sweep that posts where the computed pair differs from the latest
+    `grade_sync` row and posts nothing otherwise, and the weekly beat entry is the
+    ordinary trigger rather than the definition of the work.
+
+    **No HTTP before a difference is found.** Scores and comparisons are computed
+    from the database first, and a section where nobody needs a post makes no call
+    at all — not a token grant, not a line-item read. Thirty thousand identical
+    re-posts every Monday morning against every platform at once is the shape that
+    avoids.
+
+    **No retry and no backoff, which is ADR 0132's stance one layer up.** A failed
+    post is recorded and left; the next weekly run is the retry, and it is the layer
+    that has the memory a retry needs — it knows what has already been sent. A 409
+    heals itself, because a conflict is recorded with its status and D16 gives a
+    definitely-refused row a *fresh* delivery, whose real-time instant is later than
+    whatever the platform holds. Re-sending the refused instant would ask the same
+    question every Monday for the rest of term, which is why that narrowing is part
+    of the sentence rather than a detail under it.
+
+    **Each section is a transaction of its own** (D15): its work is committed before
+    the next section starts, and a section that fails unexpectedly is rolled back,
+    logged and stepped over so that one platform's bad afternoon does not leave every
+    section after it ungraded. A post the platform *refused* is not such a failure —
+    it is recorded, and the section commits with the record in it.
+
+    **There is no savepoint, and its absence is the fix to a defect the commit grain
+    introduced.** `app.services.survey_windows.derive_windows_for_all_sections` holds
+    one because its whole walk is a single transaction, so a savepoint is the only
+    way to undo one section of it. Here the section *is* the transaction, so
+    `session.rollback()` takes back exactly the same work — and it is the only thing
+    that can be called after a failure arriving from the commit itself, which a
+    released savepoint cannot be rolled back after. The earlier shape held both, and
+    a commit that failed reached a handler whose first statement raised
+    `ResourceClosedError`: no log line, no rollback, no next section.
+
+    **A section whose commit fails counts as nothing rather than as what it sent.**
+    Its posts did reach the platform, and the rows describing them went back with the
+    transaction, so the returned counts and `grade_sync` agree with each other and
+    both under-report that section. Reporting the posts while holding no record of
+    them would leave §6.1's console and the table disagreeing about a run nobody can
+    reconstruct, and the next sweep re-posts what it finds no record of anyway.
+
+    **The commit is per section because the rows are the record of a side effect
+    that has already happened outside this process.** A score sitting in a gradebook
+    is not undone by a worker dying, and under one commit at the end of the run the
+    `grade_sync` and `ags_call` rows of every section already posted for would go
+    with it — leaving Pulse believing it had posted nothing and re-posting the lot
+    next Monday as new deliveries, with no account anywhere of the first ones. That
+    is the argument `app.jobs.tasks.create_line_item` already makes one layer up
+    about a single creation, at the grain a walk needs it.
+
+    **The residue is named rather than hidden**: a section that fails unexpectedly
+    still loses its own rows, because its work is one transaction and a half-written
+    section is not a record anybody can read. What D15 buys is that the loss is
+    contained to the section it happened in instead of taking the whole walk's
+    account with it (ADR 0137).
+
+    Answers `{"posted": p, "failed": f}` — the counts of attempted posts that the
+    platform took and did not, which is what the task hands to §6.1's console.
+    """
+    today = clock.today(session, settings=settings)
+    # One real-time instant for the whole run, and real rather than effective on
+    # purpose (ADR 0138): the AGS timestamp is a protocol ordering value the
+    # platform compares against the one it holds, so a tool stamping it from the
+    # development clock has made its own ordering rule movable. Content is
+    # effective-clock — `participation_scores` counts elapsed weeks off
+    # `clock.now` — and delivery is real-clock.
+    stamped_at = datetime.now(UTC)
+    transport = outbound_transport() if http is None else http
+
+    # The walk is a list of ids rather than of rows, because each section is
+    # committed before the next one begins and a commit expires every instance the
+    # session holds. Re-reading the row inside its own section is what an expiry
+    # would have done anyway, and it says what happens when the row has gone in the
+    # meantime instead of raising `ObjectDeletedError` out of an attribute access.
+    walked = list(
+        session.scalars(
+            select(Section.id)
+            .join(Term, Term.id == Section.term_id)
+            .where(
+                Section.lms_ags_line_items_url.is_not(None),
+                Term.end_date >= today - timedelta(days=TERM_SWEEP_GRACE_DAYS),
+            )
+            .order_by(Section.id)
+        )
+    )
+    logger.info("the participation sweep found %d gradebook(s) inside its own bound", len(walked))
+
+    posted = 0
+    failed = 0
+    for section_id in walked:
+        try:
+            answered = _post_one_sections_scores(
+                session,
+                section_id,
+                settings=settings,
+                http=transport,
+                resolve=resolve,
+                today=today,
+                stamped_at=stamped_at,
+            )
+            # D15. Everything this section wrote down about what it sent is durable
+            # here, before the next section is touched: the scores are already in a
+            # gradebook and the record of them may not depend on a walk over the rest
+            # of the institution finishing.
+            session.commit()
+        # Broad on purpose, and for `derive_windows_for_all_sections`' reason: a
+        # narrow catch would let one section whose data no longer resolves starve
+        # every section after it, this week and every week after.
+        except Exception as escaped:
+            # **One rollback, and no savepoint.** A section is a whole transaction
+            # now — the section before it committed and the section after it has not
+            # begun — so this takes back exactly the work a savepoint would have,
+            # and it is the only thing here that can be called after a *commit* has
+            # failed. A released savepoint cannot be rolled back, so the savepoint
+            # this loop used to hold turned a failed commit into a
+            # `ResourceClosedError` raised from inside this handler: the log line
+            # below never ran, the session was never returned to a usable state, and
+            # every remaining section of the institution was abandoned in silence
+            # (E3-06's security re-review).
+            session.rollback()
+            # **The traceback is deliberately withheld**, which is where this
+            # diverges from the window reconciler's `logger.exception`. A failure
+            # on this path can carry a participation figure in its own text — a
+            # refused insert renders its parameters, and those parameters are a
+            # student's score and their ledger — and E3's breakdown decision 10
+            # allows this job's log stream the outcome and the call and neither of
+            # those. The class names of the failure and its cause are what an
+            # operator reads; the rest is reproducible from the run.
+            logger.error(
+                "the participation sweep stepped over %s after an unexpected %s (%s)",
+                section_id,
+                type(escaped).__name__,
+                type(escaped.__cause__).__name__,
+            )
+            continue
+        posted += answered[0]
+        failed += answered[1]
+    return {"posted": posted, "failed": failed}
+
+
+def _post_one_sections_scores(
+    session: Session,
+    section_id: UUID,
+    *,
+    settings: Settings,
+    http: requests.Session | None,
+    resolve: Callable[[str], Sequence[str]] | None,
+    today: date,
+    stamped_at: datetime,
+) -> tuple[int, int]:
+    """One section's whole run: what changed, and what the platform said about it."""
+    section = session.get(Section, section_id)
+    if section is None:
+        logger.info(
+            "%s was in the walk and is not there any more, so nothing was posted for it",
+            section_id,
+        )
+        return 0, 0
+    if section.ags_line_item_url is None:
+        # ADR 0135's named window, closed by reusing the launch trigger's own
+        # bounded publish rather than by adding a second schedule. Called through
+        # this module so a substitution on it takes, and it never raises. Asked once
+        # for the whole gradebook rather than once per student, and nothing is
+        # posted this run: a score posted to an address this row does not hold goes
+        # somewhere nobody chose.
+        request_line_item_creation(session, section.id)
+        logger.info(
+            "%s records no participation column yet, so one was asked for and no score was posted "
+            "for it this run",
+            section.id,
+        )
+        return 0, 0
+
+    scores = participation_scores(session, section, settings=settings)
+    live = _live_enrollments(session, section, today=today)
+    deliveries = [
+        delivery
+        for user_id in sorted(scores)
+        if user_id in live
+        and (delivery := _delivery_for(session, section, user_id, scores[user_id], stamped_at))
+        is not None
+    ]
+    if not deliveries:
+        return 0, 0
+
+    subjects = _lms_user_ids(session, [delivery.user_id for delivery in deliveries])
+    try:
+        line_item = find_or_create_line_item(
+            session, section.id, http=http, settings=settings, resolve=resolve
+        )
+    except AgsError as refusal:
+        # The gradebook column could not be resolved, so no delivery was composed
+        # and no `grade_sync` row is owed: the record of the attempt is the
+        # `ags_call` rows the client already wrote. They survive because this is an
+        # answered refusal rather than a raise — the section's own transaction goes
+        # on to be committed by the walk, with those rows in it. The refusal's own
+        # text is never interpolated — `app/lti/ags.py` says why.
+        logger.warning(
+            "%s: its participation column could not be resolved (%s), so no score was posted for "
+            "it this run",
+            section.id,
+            type(refusal).__name__,
+        )
+        return 0, 0
+
+    posted = 0
+    failed = 0
+    for delivery in deliveries:
+        subject = subjects.get(delivery.user_id)
+        if subject is None:
+            # A student the platform has no subject for cannot be addressed at all.
+            # Unreachable through the foreign key, and answered rather than raised
+            # so one unreadable row does not end the walk.
+            logger.warning(
+                "%s: a student it would have posted for carries no LMS subject, so nothing was "
+                "sent for them",
+                section.id,
+            )
+            continue
+        outcome, response_code = _delivered(
+            session,
+            section,
+            delivery,
+            subject,
+            line_item,
+            http=http,
+            settings=settings,
+            resolve=resolve,
+        )
+        session.add(
+            GradeSync(
+                section_id=section.id,
+                user_id=delivery.user_id,
+                score_text=delivery.score_text,
+                ledger_text=delivery.ledger_text,
+                score_timestamp=delivery.score_timestamp,
+                outcome=outcome,
+                response_code=response_code,
+            )
+        )
+        session.flush()
+        if outcome is GradeSyncOutcome.POSTED:
+            posted += 1
+        else:
+            failed += 1
+    logger.info("%s: %d score(s) reached the platform and %d did not", section.id, posted, failed)
+    return posted, failed
+
+
+def _delivery_for(
+    session: Session,
+    section: Section,
+    user_id: UUID,
+    score: ParticipationScore,
+    stamped_at: datetime,
+) -> _Delivery | None:
+    """What to send this student, or `None` where the platform already has it.
+
+    ADR 0124's comparison, and there is no "the" row for a student and a section:
+    the latest one by `created_at` is what the current value is, and a reader that
+    took the last row written or the highest key would re-send whatever a student's
+    score happened to be in September.
+
+    Four answers, and the third is the whole of ADR 0052's retry identity:
+
+      - **No row, or a pair that differs** — a new delivery, carrying the characters
+        the formula just produced and this run's own instant.
+      - **A `POSTED` row whose stored pair equals the computed one** — nothing, and
+        no HTTP call on this student's account.
+      - **A `FAILED` row whose stored pair equals the computed one and whose
+        `response_code` is NULL** — a retry of *that* delivery, so the stored
+        characters and the stored instant go out again. ADR 0129 gives that NULL one
+        meaning: the call never reached the platform, so nobody knows whether the
+        score landed. That unknown is what byte identity exists for — a platform
+        that already holds the body accepts an equal timestamp as a repeat of one
+        delivery and a value differing by a character as a second grade.
+      - **A `FAILED` row whose stored pair equals the computed one and whose
+        `response_code` is a number** — a fresh delivery, at this run's own instant
+        (D16). The platform answered, and it answered no: the delivery was refused
+        rather than lost, so there is no unknown for byte identity to protect. It
+        matters most for a 409, where re-sending the refused instant asks the same
+        question the platform already refused — every Monday, for the rest of the
+        term — while a fresh real-time stamp is later than whatever the platform
+        holds and heals the column on the next run.
+
+    The comparison is over the **pair**, never the percentage alone. A
+    reclassification, a question set that changed a week's denominator or a late add
+    that moved which weeks count can each leave the number equal and the arithmetic
+    behind it different, and SPEC §3.4 puts that arithmetic in the comment beside
+    the score (ADR 0125).
+    """
+    latest = session.scalars(
+        select(GradeSync)
+        .where(GradeSync.section_id == section.id, GradeSync.user_id == user_id)
+        .order_by(GradeSync.created_at.desc())
+        .limit(1)
+    ).first()
+    if latest is not None and (latest.score_text, latest.ledger_text) == (
+        score.percentage,
+        score.ledger,
+    ):
+        if latest.outcome is GradeSyncOutcome.POSTED:
+            return None
+        if latest.response_code is None:
+            return _Delivery(
+                user_id=user_id,
+                score_text=latest.score_text,
+                ledger_text=latest.ledger_text,
+                score_timestamp=latest.score_timestamp,
+            )
+    return _Delivery(
+        user_id=user_id,
+        score_text=score.percentage,
+        ledger_text=score.ledger,
+        score_timestamp=stamped_at,
+    )
+
+
+def _delivered(
+    session: Session,
+    section: Section,
+    delivery: _Delivery,
+    subject: str,
+    line_item: Mapping[str, Any],
+    *,
+    http: requests.Session | None,
+    settings: Settings,
+    resolve: Callable[[str], Sequence[str]] | None,
+) -> tuple[GradeSyncOutcome, int | None]:
+    """Post one score and say what became of it, for the row that records the attempt.
+
+    Every failure is answered rather than raised, because one student's refusal must
+    not end the section's walk: a 409 on the alphabetically first student would
+    otherwise leave everybody after them ungraded for the rest of term, with one row
+    to explain it.
+
+    The three outcomes are told apart by what an operator does about them. A 409 is
+    recorded with its own literal status — the typed error carries none — because it
+    is the one refusal waiting cannot fix. A refusal carrying a status is recorded
+    with it. A call that never reached the platform is recorded with NULL, which is
+    the single meaning ADR 0129 gives that column.
+
+    **What is written here decides what the next run sends**, which is why the
+    distinction is a correctness property rather than a note for a console. D16
+    re-sends the stored bytes for a NULL and composes a fresh delivery for a status,
+    so a status written as NULL would loop a refusal for ever and a NULL written as
+    a status would turn a delivery that may already have landed into a second grade.
+
+    **No exception's text is logged or interpolated.** `app/lti/ags.py` documents
+    why: the message of a transport failure quotes the URL it could not reach, and
+    a Result read filtered to one student carries that student's `sub` in its query.
+    """
+    try:
+        post_score(
+            session,
+            section.id,
+            user_id=subject,
+            score=delivery.score_text,
+            ledger=delivery.ledger_text,
+            timestamp=score_timestamp_text(delivery.score_timestamp),
+            line_item=line_item,
+            http=http,
+            settings=settings,
+            resolve=resolve,
+        )
+    except AgsConflictError:
+        logger.warning(
+            "%s: the platform holds a newer score than the one offered for one of its students, so "
+            "that post was recorded as refused and not retried",
+            section.id,
+        )
+        return GradeSyncOutcome.FAILED, AGS_CONFLICT_STATUS
+    except AgsCallError as refusal:
+        logger.warning(
+            "%s: a score was refused with status %s (%s), and the next scheduled run is the retry",
+            section.id,
+            refusal.status,
+            type(refusal).__name__,
+        )
+        return GradeSyncOutcome.FAILED, refusal.status
+    except AgsError as refusal:
+        logger.warning(
+            "%s: a score could not be posted (%s), and the next scheduled run is the retry",
+            section.id,
+            type(refusal).__name__,
+        )
+        return GradeSyncOutcome.FAILED, None
+    return GradeSyncOutcome.POSTED, _accepted_status(session, section.id)
+
+
+def _accepted_status(session: Session, section_id: UUID) -> int | None:
+    """The status the platform answered on the call a successful post just made.
+
+    `post_score` answers nothing, so the status a `POSTED` row records is read off
+    the `ags_call` row that same post wrote — the newest one for this gradebook,
+    since the score request is the last call the client makes. Read rather than
+    assumed, because AGS 2.0 lets a platform answer either 200 or 201 to a Score and
+    a constant here would record one of them as the other.
+
+    Handing the status back from `post_score` would be plainer and is a change to a
+    shared signature rather than to this file, so it is proposed in this ticket's
+    pull request instead of taken.
+    """
+    return session.scalar(
+        select(AgsCall.response_code)
+        .where(AgsCall.section_id == section_id)
+        .order_by(AgsCall.called_at.desc())
+        .limit(1)
+    )
+
+
+def _live_enrollments(session: Session, section: Section, *, today: date) -> set[UUID]:
+    """The students holding a live enrollment in this section today.
+
+    SPEC §3.4's "Drops: scores stop updating; the LMS owns what happens to the
+    column", and this is the one place that stop exists: ADR 0131 has
+    `participation_scores` go on computing a departed student's score deliberately,
+    because the formula answers what the enrolled weeks add up to and is not the
+    place that decides who is still enrolled.
+
+    The predicate is `app.services.authz`'s own — `started_on <= today AND (ended_on
+    IS NULL OR ended_on >= today)` — so a drop-and-re-add has two rows and the live
+    one wins, and a student whose enrollment ends *today* still posts, because they
+    were enrolled today. Nothing is posted on the way out: no final zero, no
+    blanking. What a gradebook does with the entry of a student who left is the
+    platform's decision.
+    """
+    return set(
+        session.scalars(
+            select(Enrollment.user_id).where(
+                Enrollment.section_id == section.id,
+                Enrollment.started_on <= today,
+                or_(Enrollment.ended_on.is_(None), Enrollment.ended_on >= today),
+            )
+        )
+    )
+
+
+def _lms_user_ids(session: Session, user_ids: Sequence[UUID]) -> dict[UUID, str]:
+    """The platform's own subject for each of these students — the AGS `userId`.
+
+    **This module reads no column of `user`, and cannot.** An AGS Score names its
+    student by the LTI `sub`, which this system holds in exactly one place —
+    `user.lms_user_id` — and E1-10's round-3 security review revoked that read from
+    the application connection, because a connection able to make it can enumerate
+    every subject that ever launched and join a response back to the person who
+    gave it. So the subject comes from `app.services.identity.subject_for_user`,
+    which is ADR 0094's `SECURITY DEFINER` mechanism run backwards (ADR 0139).
+
+    **That door is not a containment, and this docstring said it was.** A scalar
+    definer function is callable per row inside a `SELECT`, and this connection
+    already lists `user.id`, so for anyone composing a query the door is as wide as
+    the revoked column: ADR 0139 records the enumeration as given back rather than
+    narrowed. What it buys is auditability — one inventoried, greppable function
+    with a signature, an owner and a stated argument — and the line at a *name*,
+    which stays unreachable from here by every mechanism this scheme has.
+
+    So the call per student is a cost, not a guarantee: one statement beside the
+    HTTP post each of these students is about to receive anyway. A student whose
+    row has gone between the enrollment walk and this read is absent from the
+    mapping, and the caller steps over them rather than failing the section they
+    were in.
+    """
+    return {
+        user_id: subject
+        for user_id in user_ids
+        if (subject := subject_for_user(session, user_id)) is not None
+    }

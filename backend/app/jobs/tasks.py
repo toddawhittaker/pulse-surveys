@@ -5,13 +5,24 @@ the worker reads the same clock the tool does (E2-04); `purge_launch_nonces` is
 E1-08's daily maintenance of the two launch tables, the two `sync_*` tasks are
 E1-11's roster pull, `derive_survey_windows` is E2-06's hourly reconciler over the
 weekly rhythm (§3.1), `reclassify_floored_comments` is E2-08's async half of
-§3.3's fail-open, and `create_line_item` is E3-05's half of §3.4's line item
-"created by the tool on first launch". Summaries and the posting of a score
-(§7.4, §3.4) are E4's and E3-06's, and each of those is a call into
-`app/services/` from here rather than domain logic written in this file — which is
-exactly the shape every task below takes: it opens a session and calls a service.
+§3.3's fail-open, `create_line_item` is E3-05's half of §3.4's line item "created
+by the tool on first launch", and `post_participation_scores` is E3-06's weekly
+recompute of §3.4's score. Summaries (§7.4) are E4's, and every one of these is a
+call into `app/services/` from here rather than domain logic written in this file
+— which is exactly the shape every task below takes: it opens a session and calls
+a service.
+
+**Who commits is part of that shape, and one task departs from it on purpose.**
+Every task here opens the session and commits it, because the service decides and
+writes while the caller owns the transaction. `post_participation_scores` does
+not: its service commits after each section, because the rows it writes are the
+record of scores that have already reached somebody else's gradebook and cannot be
+allowed to depend on a walk over the whole institution finishing. That task's
+docstring carries the argument, and it is the place to read before making this
+file consistent with itself.
 """
 
+import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -22,12 +33,14 @@ from app.lti.ags import AgsError
 from app.lti.in_flight import purge_expired_launch_states
 from app.lti.replay_guard import purge_expired_nonces
 from app.services import clock
-from app.services.grading import ensure_line_item
+from app.services.grading import ensure_line_item, post_scores_for_all_sections
 from app.services.roster_sync import sync_all_rosters, sync_section
 from app.services.survey_windows import derive_windows_for_all_sections
 from app.services.validity import (
     reclassify_floored_comments as sweep_unresolved_floored_comments,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @celery_app.task
@@ -252,3 +265,63 @@ def reclassify_floored_comments() -> int:
         reclassified = sweep_unresolved_floored_comments(session)
         session.commit()
         return reclassified
+
+
+@celery_app.task
+def post_participation_scores() -> dict[str, int]:
+    """Post every participation score that has changed since it was last sent (E3-06, SPEC §3.4).
+
+    The weekly recompute `app.jobs.schedules` runs on `crontab(day_of_week="mon",
+    hour="2", minute="20")`. SPEC §3.4: "Re-posted whenever a recomputation changes
+    the value, ordinarily after each week closes; fully automatic, no instructor
+    action or override."
+
+    A thin wrapper, like every task above: the session and the configuration are
+    this task's, and every decision — which sections are still inside the sweep's
+    bound, which students hold a live enrollment, what counts as a difference, and
+    which bytes a retry carries — is `app.services.grading`'s.
+
+    **The commit is not this task's, and it is the one task here that says so**
+    (work order D15). The service commits after each section, and this task does
+    not commit at all.
+
+    The convention every task above keeps — the caller owns the transaction, the
+    service decides and writes — is about transaction hygiene, and it is right
+    wherever the work is reversible: a roster half-applied is a roster nobody has
+    seen, so holding it to the end costs nothing and buys atomicity. This walk is
+    not that. Each section posts a score to somebody else's gradebook, and a score
+    that has arrived does not un-arrive because a worker died on the next section.
+    So the `grade_sync` and `ags_call` rows are the record of a side effect that has
+    already happened outside this process, and their durability is a correctness
+    property of the service rather than a matter of when the caller happens to
+    commit. Under one commit at the end, a worker killed mid-walk leaves every score
+    it had already posted in a gradebook with no record here that Pulse put it
+    there — and the next Monday posts them all again as new deliveries, because
+    `grade_sync` no longer says otherwise. `create_line_item` above makes the same
+    argument for a single creation; a walk needs it per section.
+
+    **There is deliberately no trailing commit here as a tail-cover.** Nothing in
+    the service writes outside a section, so by the time this returns there is
+    nothing left to commit — and a commit on this line would tell the next reader
+    that the task owns durability, which is the belief this docstring exists to
+    correct. `SessionLocal()`'s context manager discards whatever open transaction
+    a run leaves behind.
+
+    **This log line is the one place a number about the run belongs.** E3's
+    breakdown decision 10 allows this job's stream the section, the outcome and the
+    call, and no score, no ledger line and no LMS user id; the totals are counts of
+    posts rather than anything about a student, and they are written once for the
+    run rather than once per section.
+
+    Answers how many posts the platform took and how many it did not — the dict the
+    service composed, unchanged, for §6.1's console to render.
+    """
+    settings = Settings()
+    with SessionLocal() as session:
+        counts = post_scores_for_all_sections(session, settings=settings)
+        logger.info(
+            "the weekly participation sweep finished: %d score(s) posted, %d not",
+            counts["posted"],
+            counts["failed"],
+        )
+        return counts
