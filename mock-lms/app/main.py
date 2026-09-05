@@ -81,6 +81,7 @@ filter and the paging as well as the path.
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Annotated, Any
 from urllib.parse import parse_qsl, unquote
 
@@ -119,6 +120,7 @@ from app.config import (
     MEMBERSHIPS_PATH,
     MOCK_DEFECTS_PATH,
     MOCK_POSTED_SCORES_PATH,
+    MOCK_ROSTER_AMENDMENTS_PATH,
     REGISTRATION_PATH,
     RESULT_PATH,
     RESULTS_PATH,
@@ -143,7 +145,14 @@ from app.paging import (
     page_size,
     window,
 )
-from app.seed import MockContext, SeededPlatform, seeded_platform
+from app.seed import (
+    LEARNER_ROLES,
+    MockContext,
+    MockEnrollment,
+    SeededPlatform,
+    seeded_platform,
+    student,
+)
 from app.signing import SIGNATURE_ALGORITHM, IssuerKey
 from app.tokens import (
     ADVERTISED_SCOPES,
@@ -309,7 +318,10 @@ async def json_object(request: Request, subject: str) -> dict[str, Any]:
 # and `GET /mock/defects` are inspection surfaces no real platform serves (ADR
 # 0047), so there is no protocol credential to ask for and nothing a tool could
 # present. ADR 0134 says so out loud so a reviewer can tell the decision from an
-# oversight.
+# oversight. `POST /mock/roster-amendments` (E3-08, ADR 0142) joins them and is the
+# one that writes: it edits this process's own seeded roster, which is the same
+# scope the other two read, and it is tokenless for the same reason — a route no
+# platform serves has no scope a tool could hold for it.
 #
 # See `docs/adr/0099-the-mock-enforces-a-token-on-nrps-and-not-on-ags.md` and
 # `docs/adr/0134-the-mocks-ags-routes-map-to-scopes-one-per-route.md`.
@@ -986,7 +998,110 @@ def _register_ags(
         return JSONResponse(found, media_type=RESULT_MEDIA_TYPE)
 
 
-def _register_mock_inspection(app: FastAPI, grades: GradeBook) -> None:
+# The two things a roster amendment can ask for (E3-08), and the whole of what
+# `POST /mock/roster-amendments` serves: a registrar adds somebody to a section, or
+# ends somebody's enrollment in one. There is deliberately no reset action — CI
+# seeds a fresh stack per run and a local re-run re-seeds, so a route that put the
+# seed back would exist to make a drive re-runnable against a stack that has
+# already been driven, which is the state this platform's per-process memory
+# cannot honestly offer.
+ADD_ACTION = "add"
+DROP_ACTION = "drop"
+
+# What an amendment this platform cannot read is answered with. Distinct from the
+# `400` `json_object` gives a body that is not a JSON object at all: that says the
+# request carries no document, and this says the document carries no amendment.
+UNREADABLE_AMENDMENT = 422
+
+
+def _amendment_text(body: dict[str, Any], name: str, expected: str) -> str:
+    """One non-empty string member of an amendment, or `422` naming it.
+
+    `expected` completes the sentence a caller reads, so a refusal says what the
+    member is for rather than only that it is missing.
+    """
+    value = body.get(name)
+    if not isinstance(value, str) or not value:
+        raise HTTPException(
+            status_code=UNREADABLE_AMENDMENT,
+            detail=(
+                f"A roster amendment carries `{name}` as a non-empty string — {expected}. This "
+                f"one carries {json.dumps(value)}."
+            ),
+        )
+    return value
+
+
+def _amendment_ordinal(body: dict[str, Any]) -> int:
+    """The student ordinal an `add` names, or `422`.
+
+    A whole number from one upward, because that is what `app.seed.student` mints
+    an identifier from. `bool` is excluded explicitly: `True` is an `int` in
+    Python and `student(context, True)` would enroll `…-student-01` under a body
+    that named no student at all.
+    """
+    value = body.get("ordinal")
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise HTTPException(
+            status_code=UNREADABLE_AMENDMENT,
+            detail=(
+                "An `add` amendment carries `ordinal` as a whole number from 1 upward — which "
+                "student of the section to enroll, the way `app.seed.student` numbers them. This "
+                f"one carries {json.dumps(value)}."
+            ),
+        )
+    return value
+
+
+def _amendment_instant(body: dict[str, Any], name: str) -> str:
+    """One RFC 3339 instant member of an amendment, kept verbatim, or `422`.
+
+    Parsed here and stored unchanged, the way the seeded windows are: what the
+    roster serves has to be the string the caller sent (ADR 0048 puts enrollment
+    dates on an extension and fixes their shape), and re-rendering a timestamp
+    this platform received is exactly what `json_object` refuses to do for a
+    score.
+
+    **An offset is required.** `app.services.roster_sync` refuses a naive
+    enrollment timestamp per member — the member is ingested with no enrollment
+    row at all — so a mock that accepted one would answer `200` here and drop the
+    amended member silently from the tool's side of the wire.
+    """
+    value = _amendment_text(body, name, "an RFC 3339 instant carrying a UTC offset")
+    try:
+        read = datetime.fromisoformat(value)
+    except ValueError as failure:
+        raise HTTPException(
+            status_code=UNREADABLE_AMENDMENT,
+            detail=f"`{name}` is not an RFC 3339 instant: {failure}",
+        ) from failure
+    if read.utcoffset() is None:
+        raise HTTPException(
+            status_code=UNREADABLE_AMENDMENT,
+            detail=(
+                f"`{name}` carries no UTC offset. A tool reading an enrollment window refuses a "
+                "naive timestamp per member, so this platform refuses to publish one."
+            ),
+        )
+    return value
+
+
+def _amended_section(platform: SeededPlatform, body: dict[str, Any]) -> MockContext:
+    """The section an amendment names, by the label a person writes, or `404`."""
+    label = _amendment_text(body, "section", "the section as a timetable writes it")
+    context = platform.context_labelled(label)
+    if context is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No seeded section labelled {label!r}. The seeded labels are "
+                f"{sorted(seeded.label for seeded in platform.contexts)}."
+            ),
+        )
+    return context
+
+
+def _register_mock_inspection(app: FastAPI, platform: SeededPlatform, grades: GradeBook) -> None:
     """The `/mock/` surface, which no real platform serves."""
 
     @app.get(MOCK_POSTED_SCORES_PATH, summary="Mock only: every score this platform was sent")
@@ -1031,6 +1146,130 @@ def _register_mock_inspection(app: FastAPI, grades: GradeBook) -> None:
         platform serves.
         """
         return JSONResponse({"selectors": list(ALL_SELECTORS)})
+
+    @app.post(MOCK_ROSTER_AMENDMENTS_PATH, summary="Mock only: add to or drop from a roster")
+    async def amend_a_roster(request: Request) -> JSONResponse:
+        """Enroll somebody this section does not hold, or end somebody's enrollment.
+
+        **Why a route rather than a seed** (E3-08). SPEC §14.3's exit line for E3
+        is that "the mock-LMS gradebook shows correct percentages across enrollment
+        edge cases", and two of §3.4's cases are events rather than states: a
+        member the roster gains *after* a sync has already read it — §3.4's third
+        tier, which is measured against the section's first sync and so cannot
+        exist in a seed that was there before the first one ran — and a member who
+        leaves while a drive is watching. Both are what a registrar does to a live
+        section, and this is how a test does them here.
+
+        **Tokenless, like the two routes above and by the same decision.** ADR 0047
+        puts the `/mock/` namespace outside the protocol, and ADR 0134 says out
+        loud that nothing under it asks for a credential: no real platform serves
+        any of it, so there is no scope a tool could have been issued for one. What
+        it can reach is this process's own seed — which lasts until the container
+        restarts — and nothing else.
+
+        **The amendment is applied to the platform this process serves from**,
+        because that instance is what every route here closes over. `app.seed`
+        carries the two methods that do it and the argument for the class not being
+        frozen.
+
+        The refusals, in the order they are made:
+
+          - `400` — the body is not a JSON object (`json_object`, shared with the
+            AGS bodies);
+          - `422` — it is an object this route cannot read as an amendment: no
+            action it serves, no section named, an `add` with no ordinal, a `drop`
+            with no member or no instant;
+          - `404` — a section this platform does not seed, or (dropping) a member
+            that section does not hold;
+          - `409` — an `add` for an ordinal the section already holds, which would
+            otherwise publish one `sub` twice in one roster.
+
+        The `422` is answered before either `404`, and a caller can rely on that:
+        a `404` from this handler and a `404` from a router that knows no such path
+        are the same status, so the only refusal that proves the route is here at
+        all is one no router issues.
+        """
+        body = await json_object(request, "roster amendment")
+        action = _amendment_text(body, "action", f"either {ADD_ACTION!r} or {DROP_ACTION!r}")
+        if action not in (ADD_ACTION, DROP_ACTION):
+            raise HTTPException(
+                status_code=UNREADABLE_AMENDMENT,
+                detail=(
+                    f"{action!r} is not an amendment this platform serves. It serves "
+                    f"{ADD_ACTION!r} — enroll a student the section does not hold — and "
+                    f"{DROP_ACTION!r} — end an enrollment it does."
+                ),
+            )
+        if action == ADD_ACTION:
+            ordinal = _amendment_ordinal(body)
+            context = _amended_section(platform, body)
+            person = student(context, ordinal)
+            if platform.enrollment(person.user_id, context.context_id) is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"{context.label} already holds {person.user_id!r}. An `add` enrolls a "
+                        "member the section has never had — a re-enrollment is a different event "
+                        "and this platform does not serve it."
+                    ),
+                )
+            # Undated on purpose, and it is the whole point of the case. A member
+            # this platform supplies no enrollment window for is one SPEC §3.4
+            # dates from the section's start — *unless* they were first seen in a
+            # sync later than the section's first, which is the tier this route
+            # exists to make reachable. A window here would date them from it
+            # instead and the drive would be proving the first tier twice.
+            enrollment = MockEnrollment(
+                user_id=person.user_id,
+                context_id=context.context_id,
+                roles=LEARNER_ROLES,
+                status="Active",
+                opened_at=None,
+                closed_at=None,
+            )
+            platform.enroll(person, enrollment)
+            return JSONResponse(
+                {
+                    "section": context.label,
+                    "user_id": person.user_id,
+                    "status": enrollment.status,
+                },
+                status_code=201,
+            )
+
+        user_id = _amendment_text(body, "user_id", "the member's `sub` on this platform")
+        closed_at = _amendment_instant(body, "closed_at")
+        context = _amended_section(platform, body)
+        held = platform.enrollment(user_id, context.context_id)
+        if held is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"{context.label} holds no enrollment for {user_id!r}. A drop ends an "
+                    "enrollment this platform holds; it does not record one it never had."
+                ),
+            )
+        # `status` and `closed_at` are written together, the way the seeded drop
+        # is: NRPS says a member has left in its own vocabulary *and* on the
+        # extension, and a mock whose two halves disagreed would be one the tool
+        # has to pick a side in (`app.seed`'s own rule).
+        dropped = MockEnrollment(
+            user_id=held.user_id,
+            context_id=held.context_id,
+            roles=held.roles,
+            status="Inactive",
+            opened_at=held.opened_at,
+            closed_at=closed_at,
+        )
+        platform.amend_enrollment(dropped)
+        return JSONResponse(
+            {
+                "section": context.label,
+                "user_id": dropped.user_id,
+                "status": dropped.status,
+                "closed_at": dropped.closed_at,
+            }
+        )
 
 
 def create_app() -> FastAPI:
@@ -1087,5 +1326,5 @@ def create_app() -> FastAPI:
     _register_token(app, settings, key)
     _register_nrps(app, settings, platform, key)
     _register_ags(app, settings, platform, key, grades)
-    _register_mock_inspection(app, grades)
+    _register_mock_inspection(app, platform, grades)
     return app

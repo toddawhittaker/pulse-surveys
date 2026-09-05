@@ -141,6 +141,18 @@ MOCK_POSTED_SCORES_PATH = "/mock/posted-scores"
 # `MOCK_POSTED_SCORES_PATH`'s reason: no real platform serves it.
 MOCK_DEFECTS_PATH = "/mock/defects"
 
+# Where a roster is amended (E3-08). SPEC §14.3's exit proof for E3 drives the
+# enrollment cases of §3.4 against the running stack, and two of them cannot be
+# seeded: a member who joins *after* a sync has already read the roster, and a
+# member who leaves part-way through the drive. Both are things a registrar does
+# to a live section, so this route is how a test does them here.
+#
+# Under `/mock/` for `MOCK_POSTED_SCORES_PATH`'s reason and with its consequences:
+# no real platform serves it, so a tool that learned it would have learned
+# something that exists nowhere else, and there is no protocol credential to ask
+# for (ADR 0134's `/mock/` carve-out).
+MOCK_ROSTER_AMENDMENTS_PATH = "/mock/roster-amendments"
+
 
 class ConfigurationError(RuntimeError):
     """A configured value is missing or empty. Raised at application build time."""
