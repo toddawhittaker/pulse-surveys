@@ -55,3 +55,42 @@ Committed as 3e8d782.
   → **8 passed**. The module is fully green.
 - `make help` lists the target, so the `##` line parses the way the help grep
   expects.
+
+## 2026-09-05 — the runs
+
+All foreground, `.venv/bin` on PATH, on the committed tree.
+
+- `make test-as-ci` (first run, before the records): **exit 0**, 2679 passed in
+  4m34 under the scrub, whole target 6m00. `.env` back, no stash left, working
+  tree clean.
+- `.venv/bin/pytest tests/unit tests/integration -n 4 -q` (ambient, after the
+  records): **2679 passed** in 4m13.
+- `make test-as-ci` again on the final tree, whole log kept in the scratchpad:
+  **exit 0**. It scrubs all 29 names `.env.example` documents (the log prints
+  the list); the invariant half ran serially — **217 passed, none skipped**,
+  `check_invariants.py` OK, `check_invariant_assertions.py` OK over 161 marked
+  tests — and then 2679 passed. Nothing in the suite needed a variable the
+  scrub removed, so criterion 1 is proven by a run rather than by argument, and
+  criterion 3 holds with the autouse baseline in place.
+
+No dispute filed: the one red was mine to fix and the seven controls were green
+before I started.
+
+## 2026-09-05 — the counter was not bumped, and why
+
+The brief asked for `Caught: 1` → `Caught: 2` on entry 40, for the E3-06
+recurrence. **Not done, deliberately.** `docs/MISTAKES.md` says a bump is earned
+when the entry *stops* someone making the mistake, and explicitly not for
+"recording something already found"; PR #172's own summary says the E3-06 case
+was a CI-only failure found mid-build and then repaired. That is a detection.
+The precedent is inside this very entry: the E1-11 instance is marked "Not
+counted as a catch: CI caught it, the gate did not." Bumping here would make the
+one number that decides an entry's rank measure something different from what
+the file says it measures. The recurrence is recorded as an instance instead,
+and the deviation is reported to the orchestrator rather than settled quietly.
+
+Adding it took the detail file to four instances, so it was trimmed to the three
+most recent, which is what `docs/MISTAKES.md` asks for. The trimmed one is the
+founding E1-10 diagnosis; it is summarised in a sentence at the head of the file
+with a pointer to PR #105, and the one place the rule section leaned on it
+("Here the inference…") now names E1-10 so the sentence still stands on its own.
