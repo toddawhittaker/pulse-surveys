@@ -31,13 +31,27 @@ engine, and it happens before anything else touches the session. That ordering i
 load-bearing: one call to `for_pair` first would commit the sweep's work and this
 test would pass against the very shape it exists to refuse.
 
-**Which failure a red here is.** Against the sweep as it first shipped — one
-transaction, committed by the task — this module fails on the assertion that the
+**And the fix's own new failure mode is here too.** Committing per section
+creates a place a run can fail that did not exist before: the commit itself. It
+happens after that section's savepoint has been released, so a handler written
+for the *other* failure — roll the savepoint back, log, carry on — cannot run at
+all, and what an operator gets is a traceback about a closed transaction and a
+walk that stopped without saying where. A fix round has the defect density of the
+work it fixes, so the second test here is about the shape D15 introduced rather
+than the one it removed.
+
+**Which failure a red here is.** Neither test can fail on a missing symbol; both
+are about a sweep that exists. Against the sweep as it first shipped — one
+transaction, committed by the task — the first fails on the assertion that the
 posting section's row is visible on the second connection: the row is there in
-the session and nowhere else yet. It is not a missing-symbol red.
+the session and nowhere else yet. Against the sweep as the D15 round shipped it,
+the second fails on `raised is None`, because `ResourceClosedError` comes out of
+the handler and out of the sweep.
 """
 
+import logging
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -70,6 +84,19 @@ THE_UNEXPECTED_FAILURE = "e3-06-unexpected-failure-inside-one-section"
 # nothing here: this student's post is the one the poison stops, so no platform
 # is ever asked to recognise them.
 A_STUDENT_THIS_MODULE_INVENTED = "e3-06-durability-student"
+
+# What the failing commit raises. A `RuntimeError` carrying a string of this
+# module's own, because the *class* is immaterial and the *moment* is everything:
+# what the second test poses is a `session.commit()` that fails after the
+# section's savepoint has already been released, which is what a lost connection,
+# a deadlock victim or an idle-transaction terminate produces in production.
+THE_LOST_CONNECTION = "e3-06-commit-lost-the-connection"
+
+# Which call to the driving session's `commit` fails. The first is this module's
+# own control commit, which proves the hook is installed and passes through
+# unharmed; then one per section, and the middle section of three is the one that
+# fails — so the walk has a section before it and a section after it.
+THE_FAILING_COMMIT = 3
 
 
 class OnePoisonedSection:
@@ -134,10 +161,57 @@ def a_second_section_on_the_same_platform(gradebooks: Any, beside: Any, sweep_co
     gives.
     """
     book = gradebooks.beside(beside)
-    student = book.world.student(A_STUDENT_THIS_MODULE_INVENTED)
+    student = book.world.student(f"{A_STUDENT_THIS_MODULE_INVENTED}-{uuid4().hex[:8]}")
     sweep_contract.answered_fully(book.world, student, through=ELAPSED_WEEKS)
     book.world.rows.commit()
     return book
+
+
+class ACommitThatFailsOnce:
+    """The driving session's `commit`, raising on one call and passing every other through.
+
+    **The moment is the whole point.** D15 gives each section a savepoint and
+    then commits, so a `session.commit()` that fails is a failure arriving after
+    that savepoint has already been *released* — which is the state the shipped
+    handler's `savepoint.rollback()` cannot be called in. Nothing else in this
+    suite can reach that state: the poison above raises from the transport, while
+    the savepoint is still open and rolling it back is exactly right.
+
+    It counts, and both numbers are asserted. `calls` is what says the hook is on
+    the object the sweep actually commits through — a seam installed on some other
+    session would never be called at all — and `raised` is what says the failure
+    this test is about actually happened, rather than a walk that committed once
+    and stopped.
+    """
+
+    def __init__(self, inner: Any, *, failing_call: int) -> None:
+        self.inner = inner
+        self.failing_call = failing_call
+        self.calls = 0
+        self.raised = 0
+
+    def __call__(self) -> Any:
+        self.calls += 1
+        if self.calls == self.failing_call:
+            self.raised += 1
+            raise RuntimeError(THE_LOST_CONNECTION)
+        return self.inner()
+
+
+def logged_by(caplog: Any, prefix: str) -> list[Any]:
+    """Every captured record written by `prefix` or by a child of it.
+
+    A copy of `records_from` in
+    `tests/integration/test_the_sweep_never_logs_a_score_a_ledger_or_an_lms_user_id.py`
+    rather than an import of it: a test module that imports a sibling test module
+    depends on where pytest put `tests/` on `sys.path`, and an import error is not
+    a red.
+    """
+    return [
+        record
+        for record in caplog.records
+        if record.name == prefix or record.name.startswith(f"{prefix}.")
+    ]
 
 
 def test_a_successful_sections_rows_are_durable_though_another_section_failed_unexpectedly(
@@ -266,4 +340,156 @@ def test_a_successful_sections_rows_are_durable_though_another_section_failed_un
         "That is this test's seam being wrong rather than the sweep: the case D15 is about is the "
         "failure the client has no name for, and the poison would need to be raised somewhere the "
         "post's own error handling does not reach."
+    )
+
+
+def test_a_section_whose_commit_fails_is_stepped_over_and_the_rest_of_the_walk_still_lands(
+    gradebooks: Any,
+    grade_sync_rows: Any,
+    sweep_contract: Any,
+    ags_contract: Any,
+    window_settings: Any,
+    committed_clock_overrides: Any,
+    migrated_engine: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The failure D15's own fix made reachable: a commit that fails after its savepoint is gone.
+
+    Three sections. The middle one's `session.commit()` raises once — a lost
+    connection, a deadlock victim, an idle-transaction terminate, any of which
+    reaches the caller as an exception out of that call and none of which this
+    suite could produce before D15, because before D15 there was no per-section
+    commit to fail. The sweep must log it, step over it, and go on: the section
+    after it posts and its rows are durable.
+
+    **The mutation this kills is the shipped handler's own line**: an unguarded
+    `savepoint.rollback()` in the `except` that wraps a section's work. By the
+    time `session.commit()` is called the savepoint has been *released* — a
+    committed savepoint is not a thing that can be rolled back — so the handler's
+    first statement raises `ResourceClosedError` from inside the handler. The log
+    line never runs, the session is never rolled back, the `continue` never
+    happens, and every remaining section of the institution is abandoned in
+    silence, in a run that reports a traceback about a closed transaction rather
+    than about the section that failed. A handler that guards that call, or a
+    structure that does not hold a savepoint at that point, greens this test.
+
+    **Why the existing test above cannot see it.** Its poison raises from the
+    transport, while the section's savepoint is still open — where rolling it back
+    is exactly the right thing. The whole defect lives in the window between
+    `savepoint.commit()` and the end of `session.commit()`, and only a failure
+    from the commit itself lands there.
+
+    **The seam is a wrapper on the driving session's `commit`, and its own
+    correctness is a control.** It counts every call and passes each through
+    untouched except one. Before the sweep runs, this test commits through it
+    once itself and requires that call to have been seen and to have raised
+    nothing — which is what says the hook is installed on the object the sweep
+    commits through and that a pass-through commit still works. Then the sweep's
+    calls are the section commits, and the failure lands on the middle one.
+
+    **Which section fails is discovered, not assumed.** The order the sweep walks
+    sections in is not something E3-06 settles, so this asserts the *shape* of the
+    outcome — exactly one of three sections left no durable rows, and the other
+    two left one each — and takes the section that failed to be the one with none.
+    That is the same claim, and it is one an ordering cannot make false.
+
+    **The log assertion is an id and nothing else.** Criterion 7's rules hold
+    everywhere in this ticket: the section is named because an operator has to
+    know which gradebook stopped updating, and the score, the ledger and the
+    student are not, which
+    `test_the_sweep_never_logs_a_score_a_ledger_or_an_lms_user_id.py` is what
+    polices.
+    """
+    first = a_section_that_posts(gradebooks, sweep_contract)
+    second = a_second_section_on_the_same_platform(gradebooks, first, sweep_contract)
+    third = a_second_section_on_the_same_platform(gradebooks, second, sweep_contract)
+    walked = (first, second, third)
+    first.world.elapsed_through(committed_clock_overrides, ELAPSED_WEEKS)
+
+    assert len({book.id for book in walked}) == len(walked), (
+        f"The three sections are {[book.id for book in walked]}, and they are not three rows. "
+        "Every assertion below counts sections by their id, so two names for one section would "
+        "make 'exactly one failed' unreadable."
+    )
+    closes = {book.world.closes_at(ELAPSED_WEEKS) for book in walked}
+    assert len(closes) == 1, (
+        f"The three sections close course week {ELAPSED_WEEKS} at {sorted(closes)}. One clock is "
+        "moved for all three below, so more than one calendar leaves some of them with no elapsed "
+        "week and nothing to post — which reads here as a walk that skipped a section."
+    )
+
+    seam = ACommitThatFailsOnce(first.session.commit, failing_call=THE_FAILING_COMMIT)
+    monkeypatch.setattr(first.session, "commit", seam)
+    first.session.commit()
+
+    assert seam.calls == 1 and seam.raised == 0, (
+        f"The seam recorded {seam.calls} call(s) and {seam.raised} failure(s) after this test "
+        "committed through it once. It is installed on the session the sweep is handed, and a "
+        "pass-through commit has to reach the real one and return — without that, every count "
+        "below is about a hook that is not where the sweep commits."
+    )
+    caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.DEBUG, logger=sweep_contract.grading_logger)
+
+    _answered, raised = sweep_contract.run(
+        first.session, settings=window_settings, http=first.wire.session()
+    )
+
+    assert raised is None, (
+        f"The sweep raised {raised!r} when one section's commit failed. That is the defect this "
+        "test exists for: the section's savepoint was already released by the time the commit was "
+        "attempted, so the handler's `savepoint.rollback()` raises `ResourceClosedError` from "
+        "inside the `except` — the log line, the session rollback and the `continue` are all "
+        "skipped, and every section after this one is abandoned without a word. D1's promise is "
+        "that a section that fails is logged and stepped over, and it has to hold for the commit "
+        "as well as for the post."
+    )
+    assert seam.raised == 1, (
+        f"The seam was called {seam.calls} time(s) and raised {seam.raised} time(s). It fails on "
+        f"call {THE_FAILING_COMMIT} — this test's own control commit, then one per section — so "
+        "zero failures means the sweep committed fewer times than there are sections and D15's "
+        "per-section commit is not in force, which is a different red from this one."
+    )
+
+    durable = {book.id: grade_sync_rows.durable_for(migrated_engine, book.id) for book in walked}
+    absent = [book for book in walked if not durable[book.id][sweep_contract.grade_sync_table]]
+    landed = [book for book in walked if durable[book.id][sweep_contract.grade_sync_table]]
+
+    assert len(absent) == 1, (
+        f"{len(absent)} of {len(walked)} sections left no durable row in "
+        f"`{sweep_contract.grade_sync_table}`: {[book.id for book in absent]}. Exactly one commit "
+        "failed, so exactly one section should have nothing.\n\n"
+        "Two or more means the walk stopped at the failure rather than stepping over it. None "
+        "means the failed section's rows reached the database anyway — which happens when the "
+        "handler does not roll the session back, since the next section's commit then carries the "
+        "failed section's uncommitted work along with its own."
+    )
+    survived = {book.id: durable[book.id][sweep_contract.grade_sync_table] for book in landed}
+    assert all(len(rows) == 1 for rows in survived.values()), (
+        f"The sections that survived left {survived}. One row each: one student, one post, one "
+        "record of it — and durable without this test committing anything, which is what says the "
+        "walk carried on and committed after the failure rather than at the end of a run that "
+        "never finished."
+    )
+    assert all(durable[book.id][sweep_contract.ags_call_table] for book in landed), (
+        f"A second connection sees no `{sweep_contract.ags_call_table}` row for one of the sections "
+        "that posted. §6.1's call log is what an operator reads to find out what happened, and it "
+        "becomes durable with the section it belongs to."
+    )
+    assert not durable[absent[0].id][sweep_contract.ags_call_table], (
+        f"A second connection sees {durable[absent[0].id][sweep_contract.ags_call_table]} in "
+        f"`{sweep_contract.ags_call_table}` for the section whose commit failed. Its work was "
+        "rolled back with the failed transaction, so the call log has to go with it: a call row "
+        "without the `grade_sync` row beside it says a post was made that Pulse has no record of "
+        "sending."
+    )
+
+    text = ags_contract.logged_text(logged_by(caplog, sweep_contract.grading_logger))
+    assert str(absent[0].id) in text, (
+        f"Nothing written under `{sweep_contract.grading_logger}` names section {absent[0].id}, "
+        "whose commit failed and whose gradebook has therefore not been updated. D1 has a failing "
+        "section logged and stepped over, and the log line is the whole of 'stepped over' that "
+        "anybody can see — without it a section stops updating in silence and §6.1's console has "
+        f"nothing to show. What was logged:\n{text}"
     )
