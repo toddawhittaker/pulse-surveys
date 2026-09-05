@@ -102,7 +102,7 @@ from app.lti.ags import (
 from app.models.ai import Classification, ClassificationTask
 from app.models.base import Base
 from app.models.grades import GradeSync, GradeSyncOutcome
-from app.models.identity import Enrollment, User
+from app.models.identity import Enrollment
 from app.models.lti import (
     AGS_LINE_ITEM_ADDRESS_COLUMN,
     AgsCall,
@@ -114,6 +114,7 @@ from app.models.survey import Answer, Response
 from app.models.term import Term, Week
 from app.services import clock
 from app.services.authz import WriteSanction, guard_write, sanction_for
+from app.services.identity import subject_for_user
 from app.services.submissions import current_questions
 from app.services.survey_windows import DerivedWindow, windows_for_section
 from app.services.validity import REFUSED_VERDICT_TOKENS
@@ -1101,37 +1102,25 @@ def _live_enrollments(session: Session, section: Section, *, today: date) -> set
 def _lms_user_ids(session: Session, user_ids: Sequence[UUID]) -> dict[UUID, str]:
     """The platform's own subject for each of these students — the AGS `userId`.
 
-    **This read is blocked on a decision this ticket may not make, and the shape
-    below is a placeholder rather than the answer.** An AGS Score names its
-    student by the LTI `sub`, which this system stores in exactly one place —
-    `user.lms_user_id` — and the application connection may not read it. Two
-    separate guarantees say so and both are load-bearing:
+    **This module reads no column of `user`, and cannot.** An AGS Score names its
+    student by the LTI `sub`, which this system holds in exactly one place —
+    `user.lms_user_id` — and E1-10's round-3 security review revoked that read from
+    the application connection, because a connection able to make it can enumerate
+    every subject that ever launched and join a response back to the person who
+    gave it. So the subject is resolved a row at a time through
+    `app.services.identity.subject_for_user`, which is ADR 0094's `SECURITY
+    DEFINER` mechanism run backwards (ADR 0139): the function answers one row's
+    value while this connection holds no privilege on the column at all.
 
-      - `pulse_app` holds `SELECT (id)` on `user` and nothing more. E1-10's round-3
-        security review revoked `SELECT (lms_user_id)` because "a connection able
-        to read it can enumerate every subject that ever launched and join a
-        response back to the person who gave it", and
-        `tests/integration/test_identity_grants.py` holds the remaining column set
-        as an equality. So this statement raises `InsufficientPrivilege` on the
-        worker's own connection — every one of this module's tests that drives the
-        sweep through a migrating engine passes, and the one that drives it through
-        the Celery task does not.
-      - `tests/unit/test_no_service_reads_an_identity_table_directly.py`, which is
-        `invariant`-marked, refuses any module under `app/services/` that turns
-        `User` into rows at all. It is the application-side half of SPEC §8's
-        "enforced in the database, not just the application", and this function
-        fails it.
-
-    The sanctioned route is ADR 0094's third mechanism — a `SECURITY DEFINER`
-    resolver owned by `pulse_resolve_definer` answering one point question, the way
-    `resolve_platform_user` answers the forward one — but the reverse direction is
-    not the same trade: this connection can already enumerate `user.id`, so a
-    resolver from id to subject hands it every subject and undoes what the
-    revocation bought. That is a confidentiality decision with a migration behind
-    it, and it is the owner's to make rather than this ticket's.
+    A point lookup per student rather than one query for the section, because a
+    point lookup is the whole of what the door offers — and the cost is a statement
+    beside the HTTP call each of these students is about to receive anyway. A
+    student whose row has gone between the enrollment walk and this read is absent
+    from the mapping, and the caller steps over them rather than failing the
+    section they were in.
     """
-    if not user_ids:
-        return {}
-    return dict(
-        session.execute(select(User.id, User.lms_user_id).where(User.id.in_(list(user_ids)))).all()  # type: ignore[arg-type]
-    )
+    return {
+        user_id: subject
+        for user_id in user_ids
+        if (subject := subject_for_user(session, user_id)) is not None
+    }

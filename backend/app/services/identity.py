@@ -22,10 +22,19 @@ anyway: E1-10's round-3 review revoked `SELECT (lms_user_id)` on `user` from
 `pulse_app`, because a connection able to read that column can enumerate every
 subject that ever launched and join a response back to the person who gave it,
 and `pulse_app` holds no privilege on `person` at all. So every lookup below goes
-through a `SECURITY DEFINER` function that answers one point question with a uuid
-and reads no identity column (ADR 0094): this subject, this row. The connection
-resolves a subject it already holds from a token it has verified, and can never
-enumerate the subjects it does not.
+through a `SECURITY DEFINER` function that answers one point question (ADR 0094):
+this subject, this row. The connection resolves a subject it already holds from a
+token it has verified, and can never enumerate the subjects it does not.
+
+**Three of the four answer a uuid and one answers a subject**, and the asymmetry
+is a decision rather than an oversight. `subject_for_user` runs the mechanism
+backwards for SPEC §3.4's grade passback, which posts a score keyed by the LTI
+`sub` and can key it by nothing else, so it hands a value back where the others
+hand an id. What that gives back — a caller able to enumerate `user.id` can now
+map ids to subjects, one call at a time — is written out in ADR 0139 and in
+`views_sql/identity_resolution_v002.sql`. What it does not give back is a name:
+`user_identity` and `person.identity_name` stay unreachable from this connection
+by every mechanism this scheme has.
 
 **Two doors, two lookups, and deliberately not one clever query.** A launch
 reaches a person in two hops — the platform's `sub` to a `user` row, then ADR
@@ -66,17 +75,24 @@ __all__ = [
     "identity_behind_a_launch",
     "identity_behind_a_launch_subject",
     "person_behind_a_web_login",
+    "subject_for_user",
 ]
 
-# ADR 0094's three point resolvers, called and never joined to. Each takes what
-# the caller already holds and answers with a uuid or NULL, and `pulse_app` holds
-# `EXECUTE` on these three and on nothing else —
-# `tests/integration/test_identity_grants.py` is the inventory that keeps it that
-# way. `scalar_one` is safe on all three: a scalar function returns exactly one
-# row, and the value in it may be NULL.
+# ADR 0094's point resolvers, called and never joined to. Each takes what the
+# caller already holds and answers with one value or NULL, and the inventory of
+# what `pulse_app` may execute at all is
+# `tests/integration/test_identity_grants.py`'s. `scalar_one` is safe on every
+# one of them: a scalar function returns exactly one row, and the value in it may
+# be NULL.
+#
+# The first three answer a uuid and read the subject only to match on it. The
+# fourth runs the other way and answers the subject itself (ADR 0139) — the one
+# direction that hands a value back rather than an id, and the one whose consequence
+# is written out in `identity_resolution_v002.sql` and in that record.
 _PLATFORM_USER = text("SELECT public.resolve_platform_user(:lti_platform_id, :lms_user_id)")
 _PERSON_FOR_USER = text("SELECT public.resolve_person_for_user(:user_id)")
 _WEB_PERSON = text("SELECT public.resolve_web_person(:idp_issuer, :idp_subject)")
+_SUBJECT_FOR_USER = text("SELECT public.resolve_subject_for_user(:user_id)")
 
 # The two claims a launch is identified by, and the two an `id_token` is. Both
 # doors spell them the same way and neither spelling is this project's: `sub` and
@@ -174,4 +190,31 @@ def person_behind_a_web_login(session: Session, claims: Mapping[str, Any]) -> UU
     resolved: UUID | None = session.execute(
         _WEB_PERSON, {"idp_issuer": issuer, "idp_subject": subject}
     ).scalar_one()
+    return resolved
+
+
+def subject_for_user(session: Session, user_id: UUID) -> str | None:
+    """The platform's own subject for one stored `user` row, or `None` for no such row.
+
+    ADR 0094's mechanism run backwards, and the only caller is SPEC §3.4's grade
+    passback (ADR 0139): an AGS Score names its student by the LTI `sub` and by
+    nothing else, so a sweep holding a `user` row id has to be able to reach the
+    subject that row was created for.
+
+    **It is a point lookup and not a read of the column.** `pulse_app` holds no
+    `SELECT` on `user.lms_user_id` — E1-10's round-3 review revoked it, because a
+    connection able to read it can enumerate every subject that ever launched and
+    join a response back to the person who gave it — so this goes through the
+    `SECURITY DEFINER` function that answers one row's value while this connection
+    holds no read at all. What is handed back is a pseudonymous identifier the
+    issuing platform assigned; a name is refused here by every mechanism this
+    scheme has, and `user_identity` is unreachable from this connection entirely.
+
+    **`None` is a defined answer.** A row can go missing between the moment a
+    caller reads an enrollment and the moment it asks for the subject, and the
+    sweep steps over that student rather than failing the section it was in the
+    middle of. It is never somebody else's subject: the body matches on the
+    primary key.
+    """
+    resolved: str | None = session.execute(_SUBJECT_FOR_USER, {"user_id": user_id}).scalar_one()
     return resolved
