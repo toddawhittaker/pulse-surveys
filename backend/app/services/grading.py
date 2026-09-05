@@ -680,6 +680,12 @@ TERM_SWEEP_GRACE_DAYS: Final[int] = 14
 # score newer than the one posted, and `AgsConflictError` carries no status of its
 # own — it is the one refusal whose meaning is fixed by the protocol rather than
 # read off a response — so the number is written here (ADR 0052, ADR 0137).
+#
+# Writing it rather than leaving the column NULL is what makes the section heal:
+# D16 gives a `FAILED` row carrying a definite status a fresh delivery on the next
+# run, and a conflict recorded as NULL would instead be read as a delivery whose
+# outcome is unknown and re-sent byte for byte — the same instant the platform has
+# already refused, every week, for as long as it holds something newer.
 AGS_CONFLICT_STATUS: Final[int] = 409
 
 
@@ -751,15 +757,34 @@ def post_scores_for_all_sections(
     **No retry and no backoff, which is ADR 0132's stance one layer up.** A failed
     post is recorded and left; the next weekly run is the retry, and it is the layer
     that has the memory a retry needs — it knows what has already been sent. A 409
-    heals itself, because the next run's fresh real-time timestamp is later than
-    whatever the platform holds.
+    heals itself, because a conflict is recorded with its status and D16 gives a
+    definitely-refused row a *fresh* delivery, whose real-time instant is later than
+    whatever the platform holds. Re-sending the refused instant would ask the same
+    question every Monday for the rest of term, which is why that narrowing is part
+    of the sentence rather than a detail under it.
 
-    **Each section runs inside a savepoint**, the shape
-    `app.services.survey_windows.derive_windows_for_all_sections` already takes: a
-    section that fails unexpectedly rolls back its own partial work and the walk
-    carries on, because one platform's bad afternoon must not leave every section
-    after it in the walk ungraded. A post that the platform *refused* is not such a
-    failure — it is recorded, and the savepoint commits with the record in it.
+    **Each section runs inside a savepoint and is committed before the next one
+    starts** (D15). Two properties, and they are separate. The savepoint is
+    `app.services.survey_windows.derive_windows_for_all_sections`' shape: a section
+    that fails unexpectedly rolls back its own partial work and the walk carries on,
+    because one platform's bad afternoon must not leave every section after it in
+    the walk ungraded. A post the platform *refused* is not such a failure — it is
+    recorded, and the section commits with the record in it.
+
+    **The commit is per section because the rows are the record of a side effect
+    that has already happened outside this process.** A score sitting in a gradebook
+    is not undone by a worker dying, and under one commit at the end of the run the
+    `grade_sync` and `ags_call` rows of every section already posted for would go
+    with it — leaving Pulse believing it had posted nothing and re-posting the lot
+    next Monday as new deliveries, with no account anywhere of the first ones. That
+    is the argument `app.jobs.tasks.create_line_item` already makes one layer up
+    about a single creation, at the grain a walk needs it.
+
+    **The residue is named rather than hidden**: a section that fails unexpectedly
+    mid-post still loses its own rows, because its work is one savepoint and a
+    half-written section is not a record anybody can read. What D15 buys is that the
+    loss is contained to the section it happened in instead of taking the whole
+    walk's account with it (ADR 0137).
 
     Answers `{"posted": p, "failed": f}` — the counts of attempted posts that the
     platform took and did not, which is what the task hands to §6.1's console.
@@ -774,9 +799,14 @@ def post_scores_for_all_sections(
     stamped_at = datetime.now(UTC)
     transport = outbound_transport() if http is None else http
 
+    # The walk is a list of ids rather than of rows, because each section is
+    # committed before the next one begins and a commit expires every instance the
+    # session holds. Re-reading the row inside its own section is what an expiry
+    # would have done anyway, and it says what happens when the row has gone in the
+    # meantime instead of raising `ObjectDeletedError` out of an attribute access.
     walked = list(
         session.scalars(
-            select(Section)
+            select(Section.id)
             .join(Term, Term.id == Section.term_id)
             .where(
                 Section.lms_ags_line_items_url.is_not(None),
@@ -789,12 +819,12 @@ def post_scores_for_all_sections(
 
     posted = 0
     failed = 0
-    for one in walked:
+    for section_id in walked:
         savepoint = session.begin_nested()
         try:
             answered = _post_one_sections_scores(
                 session,
-                one,
+                section_id,
                 settings=settings,
                 http=transport,
                 resolve=resolve,
@@ -802,11 +832,20 @@ def post_scores_for_all_sections(
                 stamped_at=stamped_at,
             )
             savepoint.commit()
+            # D15. Everything this section wrote down about what it sent is durable
+            # here, before the next section is touched: the scores are already in a
+            # gradebook and the record of them may not depend on a walk over the rest
+            # of the institution finishing.
+            session.commit()
         # Broad on purpose, and for `derive_windows_for_all_sections`' reason: a
         # narrow catch would let one section whose data no longer resolves starve
         # every section after it, this week and every week after.
         except Exception as escaped:
+            # The savepoint takes this section's own partial work back — the named
+            # residue — and the rollback beside it returns the session to a state the
+            # next section can open a savepoint on, whatever the failure did to it.
             savepoint.rollback()
+            session.rollback()
             # **The traceback is deliberately withheld**, which is where this
             # diverges from the window reconciler's `logger.exception`. A failure
             # on this path can carry a participation figure in its own text — a
@@ -817,7 +856,7 @@ def post_scores_for_all_sections(
             # operator reads; the rest is reproducible from the run.
             logger.error(
                 "the participation sweep stepped over %s after an unexpected %s (%s)",
-                one.id,
+                section_id,
                 type(escaped).__name__,
                 type(escaped.__cause__).__name__,
             )
@@ -829,7 +868,7 @@ def post_scores_for_all_sections(
 
 def _post_one_sections_scores(
     session: Session,
-    section: Section,
+    section_id: UUID,
     *,
     settings: Settings,
     http: requests.Session | None,
@@ -838,6 +877,13 @@ def _post_one_sections_scores(
     stamped_at: datetime,
 ) -> tuple[int, int]:
     """One section's whole run: what changed, and what the platform said about it."""
+    section = session.get(Section, section_id)
+    if section is None:
+        logger.info(
+            "%s was in the walk and is not there any more, so nothing was posted for it",
+            section_id,
+        )
+        return 0, 0
     if section.ags_line_item_url is None:
         # ADR 0135's named window, closed by reusing the launch trigger's own
         # bounded publish rather than by adding a second schedule. Called through
@@ -941,17 +987,27 @@ def _delivery_for(
     took the last row written or the highest key would re-send whatever a student's
     score happened to be in September.
 
-    Three answers, and the middle one is the whole of ADR 0052's retry identity:
+    Four answers, and the third is the whole of ADR 0052's retry identity:
 
       - **No row, or a pair that differs** — a new delivery, carrying the characters
         the formula just produced and this run's own instant.
-      - **A `FAILED` row whose stored pair equals the computed one** — a retry of
-        *that* delivery, so the stored characters and the stored instant go out
-        again. A platform accepts an equal timestamp as a repeat of one delivery and
-        a different one as a second score, so re-deriving either here would turn a
-        retry into a grade the student never earned twice over.
       - **A `POSTED` row whose stored pair equals the computed one** — nothing, and
         no HTTP call on this student's account.
+      - **A `FAILED` row whose stored pair equals the computed one and whose
+        `response_code` is NULL** — a retry of *that* delivery, so the stored
+        characters and the stored instant go out again. ADR 0129 gives that NULL one
+        meaning: the call never reached the platform, so nobody knows whether the
+        score landed. That unknown is what byte identity exists for — a platform
+        that already holds the body accepts an equal timestamp as a repeat of one
+        delivery and a value differing by a character as a second grade.
+      - **A `FAILED` row whose stored pair equals the computed one and whose
+        `response_code` is a number** — a fresh delivery, at this run's own instant
+        (D16). The platform answered, and it answered no: the delivery was refused
+        rather than lost, so there is no unknown for byte identity to protect. It
+        matters most for a 409, where re-sending the refused instant asks the same
+        question the platform already refused — every Monday, for the rest of the
+        term — while a fresh real-time stamp is later than whatever the platform
+        holds and heals the column on the next run.
 
     The comparison is over the **pair**, never the percentage alone. A
     reclassification, a question set that changed a week's denominator or a late add
@@ -971,12 +1027,13 @@ def _delivery_for(
     ):
         if latest.outcome is GradeSyncOutcome.POSTED:
             return None
-        return _Delivery(
-            user_id=user_id,
-            score_text=latest.score_text,
-            ledger_text=latest.ledger_text,
-            score_timestamp=latest.score_timestamp,
-        )
+        if latest.response_code is None:
+            return _Delivery(
+                user_id=user_id,
+                score_text=latest.score_text,
+                ledger_text=latest.ledger_text,
+                score_timestamp=latest.score_timestamp,
+            )
     return _Delivery(
         user_id=user_id,
         score_text=score.percentage,
@@ -1008,6 +1065,12 @@ def _delivered(
     is the one refusal waiting cannot fix. A refusal carrying a status is recorded
     with it. A call that never reached the platform is recorded with NULL, which is
     the single meaning ADR 0129 gives that column.
+
+    **What is written here decides what the next run sends**, which is why the
+    distinction is a correctness property rather than a note for a console. D16
+    re-sends the stored bytes for a NULL and composes a fresh delivery for a status,
+    so a status written as NULL would loop a refusal for ever and a NULL written as
+    a status would turn a delivery that may already have landed into a second grade.
 
     **No exception's text is logged or interpolated.** `app/lti/ags.py` documents
     why: the message of a transport failure quotes the URL it could not reach, and

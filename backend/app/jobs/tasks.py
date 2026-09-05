@@ -11,6 +11,15 @@ recompute of §3.4's score. Summaries (§7.4) are E4's, and every one of these i
 call into `app/services/` from here rather than domain logic written in this file
 — which is exactly the shape every task below takes: it opens a session and calls
 a service.
+
+**Who commits is part of that shape, and one task departs from it on purpose.**
+Every task here opens the session and commits it, because the service decides and
+writes while the caller owns the transaction. `post_participation_scores` does
+not: its service commits after each section, because the rows it writes are the
+record of scores that have already reached somebody else's gradebook and cannot be
+allowed to depend on a walk over the whole institution finishing. That task's
+docstring carries the argument, and it is the place to read before making this
+file consistent with itself.
 """
 
 import logging
@@ -267,15 +276,36 @@ def post_participation_scores() -> dict[str, int]:
     the value, ordinarily after each week closes; fully automatic, no instructor
     action or override."
 
-    A thin wrapper, like every task above: the session, the configuration and the
-    commit are this task's, and every decision — which sections are still inside the
-    sweep's bound, which students hold a live enrollment, what counts as a
-    difference, and which bytes a retry carries — is `app.services.grading`'s.
+    A thin wrapper, like every task above: the session and the configuration are
+    this task's, and every decision — which sections are still inside the sweep's
+    bound, which students hold a live enrollment, what counts as a difference, and
+    which bytes a retry carries — is `app.services.grading`'s.
 
-    **One commit at the end, over a walk that already survives a section that
-    fails.** Each section runs in its own savepoint in the service, and a post the
-    platform refused is recorded rather than raised, so the commit stores whatever
-    the run managed and the next Monday picks up whatever is still different.
+    **The commit is not this task's, and it is the one task here that says so**
+    (work order D15). The service commits after each section, and this task does
+    not commit at all.
+
+    The convention every task above keeps — the caller owns the transaction, the
+    service decides and writes — is about transaction hygiene, and it is right
+    wherever the work is reversible: a roster half-applied is a roster nobody has
+    seen, so holding it to the end costs nothing and buys atomicity. This walk is
+    not that. Each section posts a score to somebody else's gradebook, and a score
+    that has arrived does not un-arrive because a worker died on the next section.
+    So the `grade_sync` and `ags_call` rows are the record of a side effect that has
+    already happened outside this process, and their durability is a correctness
+    property of the service rather than a matter of when the caller happens to
+    commit. Under one commit at the end, a worker killed mid-walk leaves every score
+    it had already posted in a gradebook with no record here that Pulse put it
+    there — and the next Monday posts them all again as new deliveries, because
+    `grade_sync` no longer says otherwise. `create_line_item` above makes the same
+    argument for a single creation; a walk needs it per section.
+
+    **There is deliberately no trailing commit here as a tail-cover.** Nothing in
+    the service writes outside a section, so by the time this returns there is
+    nothing left to commit — and a commit on this line would tell the next reader
+    that the task owns durability, which is the belief this docstring exists to
+    correct. `SessionLocal()`'s context manager discards whatever open transaction
+    a run leaves behind.
 
     **This log line is the one place a number about the run belongs.** E3's
     breakdown decision 10 allows this job's stream the section, the outcome and the
@@ -289,7 +319,6 @@ def post_participation_scores() -> dict[str, int]:
     settings = Settings()
     with SessionLocal() as session:
         counts = post_scores_for_all_sections(session, settings=settings)
-        session.commit()
         logger.info(
             "the weekly participation sweep finished: %d score(s) posted, %d not",
             counts["posted"],
