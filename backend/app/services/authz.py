@@ -1129,7 +1129,7 @@ class WriteSanction:
 # mapping, so a caller cannot authorize itself by constructing the sanction it
 # wants.
 #
-# **Two entries, and adding a third is the conversation.** `launch_provisioning`
+# **Three entries, and adding a fourth is the conversation.** `launch_provisioning`
 # is `app.services.provisioning`, E1-10's launch-time ingestion: SPEC §2.1 gives
 # courses and sections two arrival paths, "hourly roster sync + launch-time
 # ingestion", and §7.3 makes the first staff launch of a section the only thing
@@ -1154,6 +1154,20 @@ class WriteSanction:
 # write `section` would be inventing a section from a roster it could only fetch
 # because that section already existed.
 #
+# `grade_passback` is `app.services.grading`, E3-05's line-item creation, and it
+# takes `section` alone. SPEC §3.4 gives every section one AGS line item "created
+# by the tool on first launch", and the id of the one this tool creates lives on
+# `section.ags_line_item_url` (ADR 0128) — so the passback path is a writer of a
+# table `LMS_OWNED_TABLES` names, and it passes this chokepoint the way the other
+# two do rather than being excused from it. ADR 0136 is the record.
+#
+# **The rest of `section` is not in the entry, and the database says so a second
+# way.** This catalog cannot express a column, so it grants the table and the
+# grant `pulse_app` actually holds is column-scoped: `UPDATE (ags_line_item_url)`
+# and nothing else (`backend/app/views_sql/grade_passback_grants_v002.sql`). The
+# section code, the binding columns and ADR 0021's derived calendar columns are a
+# launch's discovery, and neither layer is the other's backstop.
+#
 # **The inventory is pinned in a test, not here** (`docs/MISTAKES.md` entry 35).
 # `tests/unit/test_a_sanctioned_writer_satisfies_the_chokepoint.py` compares this
 # mapping against a hand-written copy as an equality, so a writer or a table added
@@ -1161,6 +1175,7 @@ class WriteSanction:
 SANCTIONED_WRITERS: Final[Mapping[str, frozenset[str]]] = {
     "launch_provisioning": frozenset({"course", "section", "user"}),
     "roster_sync": frozenset({"user", "enrollment", "role_assignment"}),
+    "grade_passback": frozenset({"section"}),
 }
 
 
