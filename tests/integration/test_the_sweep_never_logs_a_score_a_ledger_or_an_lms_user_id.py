@@ -200,8 +200,11 @@ def test_the_sweep_logs_the_section_and_the_outcome_and_never_the_figures(
     path that logs a caught exception's text, which for a transport error can
     carry a URL with a `sub` in it (`app/lti/ags.py` says so in its own
     docstring); and — since the capture widened — E3-04's `recorded=` redaction
-    dropped, which puts the `userId` in a Score URL's query string into the call
-    log through a logger this test used to be blind to.
+    dropped, which puts the `user_id` filter of a **Result** read into the call
+    log through a logger this test used to be blind to. The Score post's own URL
+    is a line-item id and `/scores` and carries nobody; the read that filters by
+    a student's `sub` is `held_result`, which the 409 path re-reads, and that is
+    the URL the redaction is for.
 
     **What this deliberately does not assert** is that any particular sentence is
     logged. Which words a line uses is the implementer's; what the ticket fixes
@@ -370,7 +373,8 @@ def test_the_task_that_runs_the_sweep_logs_its_totals_and_no_students_figures(
         f"The second canary {AN_AGS_CANARY!r} is not in the captured text, and it was written "
         f"through `{ags_contract.module}` — the logger every HTTP call the task makes goes "
         "through. While this control is failing, the assertion below is not reading the module "
-        "that records a Score URL, and E3-04's redaction of that URL's query string could be "
+        "that records a **Result** read — `held_result`, which the 409 path re-reads, filtering "
+        "by a student's `sub` — and E3-04's redaction of that URL's query string could be "
         "regressed without a single test in this suite mentioning it (the review's LOW 4)."
     )
     assert_nothing_forbidden(
