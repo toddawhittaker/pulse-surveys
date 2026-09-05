@@ -20,12 +20,20 @@ updating a departed student's grade every Monday for the rest of term.
 **The predicate is the one `authz.py` already uses** (work order D10): a student
 posts while `started_on <= clock.today AND (ended_on IS NULL OR ended_on >=
 clock.today)` holds of any of their enrollment rows, so a drop-and-re-add has two
-rows and the live one wins. The boundary is `ended_on = clock.today`, and it is
-asserted from both sides one day apart, because that day is the whole width of
-the rule: a student whose enrollment ends today was enrolled today.
+rows and the live one wins.
 
-**Which failure a red here is.** Before E3-06 lands both tests are expected red
-on `pytest.fail` naming `app.services.grading` as a module that exposes no
+**It has two boundaries and both are asserted from both sides, one day apart**,
+because a day is the whole width of each rule. `ended_on = clock.today` is the
+one the criterion's own sentence is about: a student whose enrollment ends today
+was enrolled today. `started_on = clock.today` is the other end of the same
+`AND`, and it went unasserted until a mutation battery mutated `<=` to `<` and
+watched the whole suite stay green — a student is enrolled on the day they
+arrive, and a strict comparison silently withholds the first post of everybody
+who is added on a Monday morning. Each boundary gets one test posing both of its
+sides in one run, for the reason each of those tests states.
+
+**Which failure a red here is.** Before E3-06 lands all three tests are expected
+red on `pytest.fail` naming `app.services.grading` as a module that exposes no
 `post_scores_for_all_sections`, from a plain call in the test body
 (`docs/MISTAKES.md` entry 44).
 """
@@ -54,6 +62,20 @@ A_DAY_AFTER_THE_FIRST_WINDOW = date(2026, 10, 6)
 # something to post.
 ELAPSED_WEEKS = 1
 
+# The course week the `started_on` pair below dates its platform window from.
+# Course week 1 rather than the term week it falls in: SPEC §3.4's tier 1 is "the
+# earliest course week whose `closes_at` is at or after `lms_window_start`", so a
+# window start at week 1's *opening* instant credits a student from week 1
+# whatever day Pulse first saw them. That is what lets those two students differ
+# in `started_on` and in nothing else the formula can see.
+#
+# The opening instant rather than the closing one, though tier 1's comparison is
+# inclusive and either would credit week 1: the open sits a clear three days
+# inside the week on both sides of that `>=`, so this test cannot go red on the
+# one-character question `test_the_first_enrolled_week_follows_the_three_tiers.py`
+# owns.
+THE_FIRST_COURSE_WEEK = 1
+
 A_DAY = timedelta(days=1)
 
 
@@ -68,6 +90,23 @@ def bodies_for(book: Any, subject: str, sweep_contract: Any) -> list[dict[str, A
         for entry in book.posted()
         if str(entry.get(sweep_contract.user_member)) == subject
     ]
+
+
+def subjects_for(book: Any, count: int) -> list[str]:
+    """`count` subjects for this section: the platform's own first, then this module's.
+
+    `sweep_contract.students` cannot be used by the `started_on` test below — it
+    enrolls every student on the section's own start date, which is the one value
+    that test varies — so the subject half of what it does is repeated here. The
+    padding is safe for the same reason it is safe there: a mock platform records
+    a score against whatever `userId` it is sent — and the first subject, which
+    is the platform's own wherever the seeded context offers one, goes to the
+    student that test requires a real delivery for.
+    """
+    subjects = list(book.section.subjects)
+    while len(subjects) < count:
+        subjects.append(f"e3-06-start-boundary-{len(subjects) + 1}")
+    return subjects[:count]
 
 
 def test_an_enrollment_that_ends_today_still_posts_and_one_that_ended_yesterday_does_not(
@@ -162,6 +201,124 @@ def test_an_enrollment_that_ends_today_still_posts_and_one_that_ended_yesterday_
         sweep_contract.posted_key: 1,
         sweep_contract.failed_key: 0,
     }, f"The sweep answered {answered!r} where one of two students was still enrolled."
+
+
+def test_an_enrollment_that_starts_today_posts_and_one_that_starts_tomorrow_does_not(
+    gradebooks: Any,
+    grade_sync_rows: Any,
+    sweep_contract: Any,
+    window_settings: Any,
+    committed_clock_overrides: Any,
+    clock_service: Any,
+) -> None:
+    """The other end of D10's predicate, both sides, one day apart, in one sweep.
+
+    `started_on <= clock.today`. Two students in one section, answering
+    identically and credited from the same course week, differing in exactly one
+    value: one enrollment starts *today* and the other starts *tomorrow*. A
+    student is enrolled on the day they arrive, so the first must be posted for
+    and the second must not.
+
+    **The mutations this kills, and the first one survived a full battery run.**
+    The predicate written `started_on < clock.today`, which withholds the first
+    post of every student added on the morning of a sweep — invisible to every
+    other test in these eight modules, because they all enroll their students on
+    the section's own start date, weeks before any clock this suite stands on.
+    And the condition dropped altogether, caught by the tomorrow half: without it
+    a section's whole future roster gets a score the day the row appears.
+
+    **Both directions in one run**, for the reason the `ended_on` test above
+    gives: the refusing half alone is satisfied by a sweep that posts for nobody
+    and the accepting half alone by one that posts for everybody.
+
+    **The two students are made identical to the formula, and that control is the
+    whole instrument.** `lms_window_start` is set to course week 1's *opening*
+    instant for both, which is SPEC §3.4's tier 1 — the platform's own dated
+    window, which outranks `started_on` — so both are credited from week 1 and
+    `participation_scores` answers the same score for each. Without that, the
+    student starting tomorrow would have no elapsed enrolled week for the
+    *formula's* reason, no post would be made for them whatever the sweep's
+    predicate said, and this test would report a killed mutant while measuring
+    nothing (`docs/MISTAKES.md` entry 3). The equality is asserted before the
+    sweep runs, so a red there is this construction failing rather than the
+    criterion.
+
+    A member the platform dated earlier than Pulse first saw them is the ordinary
+    shape rather than a contrived one: it is what tier 1 exists for, and it is
+    what a roster sync writes for anybody added between two syncs.
+
+    **The control on the clock runs first**, as above: the effective date has to
+    be the one both enrollment dates were computed from, or the two students sit
+    on the same side of a boundary nobody posed.
+    """
+    book = gradebooks()
+    today_subject, tomorrow_subject = subjects_for(book, 2)
+    window_start = book.world.opens_at(THE_FIRST_COURSE_WEEK)
+    arriving_today = book.world.student(
+        today_subject,
+        started_on=A_DAY_AFTER_THE_FIRST_WINDOW,
+        lms_window_start=window_start,
+    )
+    arriving_tomorrow = book.world.student(
+        tomorrow_subject,
+        started_on=A_DAY_AFTER_THE_FIRST_WINDOW + A_DAY,
+        lms_window_start=window_start,
+    )
+    for student in (arriving_today, arriving_tomorrow):
+        sweep_contract.answered_fully(book.world, student, through=ELAPSED_WEEKS)
+    book.world.rows.commit()
+    today = book.world.clock_at(committed_clock_overrides, A_DAY_AFTER_THE_FIRST_WINDOW)
+
+    effective = clock_service.today(book.session, settings=window_settings)
+    assert effective == today, (
+        f"The clock service reads today as {effective!r} and this test moved the override to "
+        f"{today!r}. The two enrollment dates are computed from the second, so with the two "
+        "disagreeing both students sit on the same side of a boundary this test never posed."
+    )
+    arrived = sweep_contract.computed(book.world, arriving_today, settings=window_settings)
+    arriving = sweep_contract.computed(book.world, arriving_tomorrow, settings=window_settings)
+    assert arriving == arrived, (
+        f"The formula answers {arriving!r} for the student starting tomorrow and {arrived!r} for "
+        "the one starting today. They are seeded identically but for `started_on`, and both carry "
+        "the same `lms_window_start` — SPEC §3.4's tier 1, which outranks it — so the two scores "
+        "have to be the same score. Where they are not, the silence below belongs to the formula "
+        "and not to the sweep's live-enrollment predicate, and a mutation to that predicate would "
+        "leave this test green (`docs/MISTAKES.md` entry 3)."
+    )
+    book.wire.calls.clear()
+
+    answered, raised = sweep_contract.run(
+        book.session, settings=window_settings, http=book.wire.session()
+    )
+
+    assert raised is None, f"The sweep raised {raised!r}."
+    kept = grade_sync_rows.for_pair(book.id, arriving_today.user_id)
+    assert (
+        len(kept) == 1
+        and outcome_of(kept[0], sweep_contract) == (grade_sync_rows.outcomes()["posted"])
+    ), (
+        f"The student whose enrollment starts today has {kept}. D10's predicate is `started_on <= "
+        "clock.today` and a student is enrolled on the day they arrive; written with a strict `<` "
+        "it withholds the first post of everybody added on the morning of a sweep, and every other "
+        "test in these modules enrolls its students weeks earlier and never notices."
+    )
+    ahead = grade_sync_rows.for_pair(book.id, arriving_tomorrow.user_id)
+    assert not ahead, (
+        f"The student whose enrollment starts tomorrow has {ahead}. Their row exists — a roster "
+        "sync can record a future add — and until the day it names they are not enrolled, so a "
+        "sweep that posts for them is writing a participation grade for somebody who has not "
+        "started the course."
+    )
+    assert not bodies_for(book, arriving_tomorrow.subject, sweep_contract), (
+        f"The platform recorded {bodies_for(book, arriving_tomorrow.subject, sweep_contract)} for "
+        "the student who starts tomorrow. The absent row above is only half the claim: a sweep "
+        "that posted and failed to record would satisfy it while writing into that student's "
+        "column."
+    )
+    assert answered == {
+        sweep_contract.posted_key: 1,
+        sweep_contract.failed_key: 0,
+    }, f"The sweep answered {answered!r} where one of two students had started."
 
 
 def test_a_drop_after_a_post_leaves_the_platform_holding_what_the_last_post_sent(

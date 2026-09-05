@@ -44,13 +44,27 @@ would be a second implementation for the tests to agree with
 (`docs/MISTAKES.md` entry 19), and criterion 4's whole subject is a comparison
 between the formula's ledger and the platform's copy of it.
 
-**The environment.** Nothing here builds `Settings`. The suites ask for
-`window_settings` (`tests/fixtures/survey_windows.py`), which states
+**The environment, and it is a requirement this file makes of its callers.**
+Nothing here builds `Settings` — but the five module guards below (`sweep_function`,
+`score_timestamp_text`, `grace_days`, `post_scores_task` and `schedules_module`)
+import `app.services.grading`, `app.jobs.tasks` and `app.jobs.schedules`, and
+`app.jobs.tasks` imports `app.db`, which builds `Settings()` at module scope. So
+**every module that calls one of them must have `configured_env` somewhere in its
+fixture chain** (`docs/MISTAKES.md` entry 40). The six integration modules get it
+from `window_settings` (`tests/fixtures/survey_windows.py`), which states
 `ENVIRONMENT=development` and `INSTITUTION_TIMEZONE=America/New_York` over
-`configured_env`'s documented values — `docs/MISTAKES.md` entry 40. Development
-is required twice over: it is the only environment where the clock override
-applies at all (ADR 0109 part 4), and it is what makes the mock platform's own
-cleartext gradebook address reachable (ADR 0081).
+`configured_env`'s documented values; the unit module has no database and no
+clock, so it declares an autouse `_a_stated_environment` of its own.
+
+That sentence is here because its absence cost a red CI run: the unit module
+passed on every developer machine, where `.env` is exported, and failed on the
+xdist worker that happened to run it first, on a `ConfigurationError` naming
+`DATABASE_URL`. A fixture is where the declaration belongs, and the import is
+this file's.
+
+Development is required twice over: it is the only environment where the clock
+override applies at all (ADR 0109 part 4), and it is what makes the mock
+platform's own cleartext gradebook address reachable (ADR 0081).
 """
 
 from collections.abc import Callable, Iterator, Mapping

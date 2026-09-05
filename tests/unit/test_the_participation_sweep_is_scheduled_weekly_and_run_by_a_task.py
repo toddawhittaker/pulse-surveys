@@ -44,10 +44,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-# No `pytestmark` and no `pytest` import. `pyproject.toml` declares
-# `integration`, `lti`, `invariant` and `slow` and nothing else, and
-# `--strict-markers` refuses any other name; an unmarked module under
-# `tests/unit/` is what every other file here is.
+import pytest
+
+# No `pytestmark`. `pyproject.toml` declares `integration`, `lti`, `invariant`
+# and `slow` and nothing else, and `--strict-markers` refuses any other name; an
+# unmarked module under `tests/unit/` is what every other file here is. `pytest`
+# is imported for the environment fixture below and for nothing else — this
+# module carried no import of it at all until CI found the reason that fixture
+# exists.
 
 # `sweep_contract` comes from `tests/fixtures/grade_sweep.py`, reached as a
 # fixture rather than imported: an import of a fixtures module by name depends on
@@ -76,6 +80,33 @@ ITS_UTC_TEXT = "2026-03-02T14:05:09.123456+00:00"
 # give these two instants one string, and ADR 0052 would then read two different
 # deliveries as retries of each other.
 A_MOMENT = timedelta(microseconds=1)
+
+
+@pytest.fixture(autouse=True)
+def _a_stated_environment(configured_env: dict[str, str]) -> None:
+    """Every criterion here imports an `app.*` module, and one of them builds `Settings`.
+
+    `docs/MISTAKES.md` entry 40, measured rather than anticipated. This module was
+    green on every developer machine and red on an xdist worker in CI:
+    `test_the_task_that_runs_the_sweep_is_a_celery_task_taking_no_arguments`
+    raised `ConfigurationError` naming `DATABASE_URL`, `REDIS_URL` and
+    `SESSION_SECRET`. `sweep_contract.task()` imports `app.jobs.tasks`, which
+    imports `app.db`, which builds `Settings()` at module scope — so the test
+    passed only where some earlier test on the same worker happened to have laid
+    the environment down, and which tests share a worker changes every time one
+    is added anywhere in the suite. Locally it passed because a developer's `.env`
+    was exported.
+
+    **Declared for the module rather than test by test**, because the hazard is
+    the module's: `sweep_contract`'s other guards reach `app.services.grading` and
+    `app.jobs.schedules` by the same route, and the next test added here would
+    have to remember. The six integration modules that use the same fixture get
+    their environment from `window_settings`, which states its two values over
+    these.
+
+    Nothing here reads the environment and this fixture asserts nothing — it
+    states the values the imports run under, which is what entry 40 asks for.
+    """
 
 
 def task_named_by(entry: Any) -> str:
