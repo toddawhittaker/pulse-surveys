@@ -14,7 +14,7 @@ Before adding a line here, ask whether it would still be true if the process
 changed; if yes, it belongs elsewhere. No feature decisions, status, or
 changelog entries. Under 150 lines; growth means something here belongs elsewhere.
 
-**Active epic:** E2 — Weekly survey & validity. Tickets: `docs/tickets/e2/README.md`.
+**Active epic:** E3 — Grade passback. Tickets: `docs/tickets/e3/README.md`.
 
 ## Read before you start
 

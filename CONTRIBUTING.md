@@ -156,6 +156,15 @@ provider about a hundred times. Locally it is `make evals`, asked for by name.
 
 Fast gates run first and everything else waits on them.
 
+One difference between here and CI is not a gate but a configuration, and it has
+produced CI-only failures three times (`docs/MISTAKES.md` entry 40). CI's pytest
+job has no `.env` and exports none of the documented variables; your machine has
+both, so a green test gate locally does not prove that gate green there.
+`make test-as-ci` removes the difference — `.env` moved aside and restored when
+the run ends, every name `.env.example` documents unset, and then the same `test`
+gate. Run it before pushing a change that touches the test fixtures or anything
+that reads configuration.
+
 A job whose subject does not exist yet detects the absence and passes with a
 note naming the ticket that will make it enforcing. Landing that ticket includes
 removing its tolerance — a ticket that adds tests but leaves the test gate

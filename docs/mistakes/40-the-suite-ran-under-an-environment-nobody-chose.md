@@ -4,7 +4,23 @@
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*2 instances recorded; newest first.*
+*4 instances recorded. The three most recent are here — the two blocks below,
+newest first, and E1-11's with the rule. The fourth is the founding incident,
+E1-10 on PR #105, which is where its diagnosis now lives (it was carried here in
+full until FIX-03 trimmed this file to the three most recent, as
+`docs/MISTAKES.md` asks): CI found ten tests failing that had passed locally
+because `backend/migrations/env.py` had loaded the developer's `.env` into the
+pytest process, from three separate fixtures, and the fix was a whole-environment
+snapshot-and-restore around each of them plus a test stating the environment its
+claim was about. The rule below is what it produced.*
+
+*(2026-09-05, E3-06 on PR #172, and the recurrence this file's structural fix
+was written for. A fixture imported the jobs module without declaring its
+environment; it passed locally and every local round, and went red on a bare
+xdist worker in CI. It was repaired the declared way, and the class it belongs to
+was given its own ticket — FIX-03 — rather than a fourth instance of the same
+repair. **Not counted as a catch**, for the reason E1-11's was not: CI found it,
+the entry did not stop it.)*
 
 *(**A catch**, writing E2-07's tests, 2026-09-01. The ticket points
 `.env.example`'s `AI_PROVIDER_BASE_URL` at the in-stack mock, and a deployment
@@ -16,56 +32,6 @@ under a non-development environment and would have stopped in their own setup
 on a rule that is not their subject. The repair went into the two shared
 fixtures those modules already request, in the same tests-first round, instead
 of surfacing later as unexplained reds in CI's differently-ordered workers.)*
-
-*(E1-10, found by CI on PR #105 after three verified build rounds, two mutation
-batteries, and repeated green local runs of the full suite.
-
-The ten in-band cases of
-`tests/integration/test_launch_provisioning_defects.py::test_a_course_number_inside_spec_8s_bands_is_provisioned`
-assert that an ordinary staff launch provisions with no defect recorded. They
-drive the writer directly, and the writer reads `ENVIRONMENT` from the process
-per call: absent counts as a deployment, deliberately, and under a deployment's
-name the registration-address rules refuse the mock platform's cleartext
-`http://mock-lms:8000/...` roster address. Nothing in those tests' fixture
-chain set `ENVIRONMENT` — and they passed locally anyway.
-
-They passed because of a leak. The session-scoped `migrated_database` fixture
-runs `alembic upgrade head` in process, which executes
-`backend/migrations/env.py` — a documented third reader of `.env` — and that
-file calls `load_dotenv(<repo root>/.env, override=False)`. The call writes the
-developer's whole `.env`, `ENVIRONMENT=development` included, into `os.environ`
-for the rest of the pytest session; the fixture's own restore covers only the
-three variables it set itself. CI has no `.env` file: nothing leaked,
-`ENVIRONMENT` stayed unset, the rules were in force, and all ten cases failed
-with a `roster_address_refused` defect no local run had ever shown. The leak
-had three sites, not one — the same `env.py` runs again for every test that
-invokes an Alembic command itself (`alembic_config_pointed_at`), and again for
-the demo-seed database — and `monkeypatch` can undo none of them, because it
-only knows the names it set.
-
-The diagnosis had a false start worth keeping. With the variable explicitly
-unset the failing test still passed locally, which read as disproof of the
-environment theory; a probe on the refusal call showed `ENVIRONMENT=development`
-present at call time regardless, set during `migrated_database`'s setup.
-Reproduction was `ENVIRONMENT=` — the empty string, which `load_dotenv` does
-not override — and that one spelling produced CI's exact failure on a developer
-machine.
-
-The fix was two halves, both in the fixtures. All three Alembic-running sites
-now snapshot and restore the whole of `os.environ`
-(`whole_environment_restored` in `tests/fixtures/database.py`), so what
-`migrations/env.py` loads cannot outlive the command. And `registered_platform`
-pins the development name itself, so the ordinary-path tests state the
-environment their claim is about instead of inheriting whichever one the
-process happened to hold. Disabling only that pin line reproduces all ten CI
-failures; restoring it turns them green — measured, not assumed.
-
-The review re-pass had in fact priced this area: its deferred LOW says
-`_environment()` reads `os.environ` where every other reader uses `Settings`,
-and named "a dotenv-only dev run refusing the mock's address" as the cost. The
-cost arrived mirrored — a no-dotenv CI run refusing the mock's address — and
-what nobody priced was that the *tests'* environment was itself an accident of
-the dotenv leak.)*
 
 ## The rule
 
@@ -86,7 +52,7 @@ exactly what a foreign loader does not tell them.
 
 When a suite is green locally and red in CI, diff the *processes*, not the
 code: measure what each holds at the failing call with a probe, rather than
-inferring it from the fixtures that should have set it. Here the inference
+inferring it from the fixtures that should have set it. In E1-10 the inference
 ("nothing sets it, so it is unset in both") was wrong in both directions at
 once — and note that unset and empty behaved differently, so reproducing
 "absent" needed the spelling the loader would not override.
@@ -99,8 +65,13 @@ documented variables were never laid down. Sixteen of E1-10's course-number
 tests went red in CI with `ConfigurationError: DATABASE_URL — not set` (and
 every other variable), while every local run stayed green off `.env`. The fix
 made the fixture depend on `configured_env`, like every other Settings-building
-fixture. The process lesson underneath it: **the local `make ci` gate sources
-`.env`, and CI's pytest gate has none, so a green `make ci` does not prove the
-pytest gate green.** Before pushing, run the pytest gate once with `.env` moved
-aside — that is the only local run that shares CI's configuration. Not counted
+fixture. The process lesson underneath it: **a local run reads the documented
+values off the developer's machine — the shell exports them, and
+`backend/migrations/env.py` loads `.env` into the pytest process the first time a
+fixture applies a migration — while CI's pytest gate has neither, so a green
+local `make test` does not prove that gate green.** Before pushing, run
+`make test-as-ci`: it moves `.env` aside, unsets every name `.env.example`
+documents, and runs the same `test` gate in what is left, which is the one local
+run that shares CI's configuration. That command is FIX-03's, and until it
+existed the same reproduction was a by-hand dance that nobody ran. Not counted
 as a catch: CI caught it, the gate did not.
