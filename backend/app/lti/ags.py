@@ -171,6 +171,23 @@ LIMIT_PARAMETER: Final[str] = "limit"
 # far past anything real.
 MAX_PAGES_WALKED: Final[int] = 100
 
+# How long a single outbound call to a platform may take before it gives up, as a
+# `requests` `(connect, read)` pair. `ensure_line_item` holds `SELECT … FOR UPDATE`
+# on the section row across every call this client makes to create a line item, so
+# a platform that completes the TCP handshake and then never answers would hold
+# that row lock, the database connection and the worker slot without bound — and on
+# the single default queue that also stalls `reclassify_floored_comments`, so
+# §3.3's floored safety verdicts stop arriving. `requests`' own default is `None`,
+# which waits forever, so the bound is set here rather than inherited.
+#
+# The connect bound sits just over three seconds so it is longer than the doubled
+# TCP SYN retransmit a healthy but momentarily busy host can take, and the read
+# bound is ten seconds: an AGS create or a container page is a small document, and a
+# platform that has accepted the connection and not answered a small body in ten
+# seconds is one this tool gives up on rather than one it waits out. Neither is a
+# retry — there is none here (ADR 0132) — so the number is a ceiling on one attempt.
+AGS_REQUEST_TIMEOUT: Final[tuple[float, float]] = (3.05, 10.0)
+
 # The link relation a paged container advertises its next page under (RFC 8288 §3)
 # and the name of the header carrying it.
 NEXT_RELATION: Final[str] = "next"
@@ -513,18 +530,51 @@ def _registration_for(session: Session, platform: LtiPlatform) -> Any:
     return registration
 
 
+class _BoundedTransport(requests.Session):
+    """A `requests.Session` that dials under `AGS_REQUEST_TIMEOUT` unless a caller sets its own.
+
+    This client bounds the AGS calls it makes itself, explicitly, on the
+    `self.transport.request(...)` at the foot of `_Caller.made`. The call it does
+    *not* make itself is the token grant that precedes each of them:
+    `pylti1p3`'s `ServiceConnector.get_access_token` posts to the auth endpoint
+    over this same session with no `timeout`, and `ensure_line_item` holds the
+    section's row lock across it — so a token endpoint that completes the handshake
+    and then stalls holds that lock, the connection and the worker slot without
+    bound exactly as a stalled AGS call would.
+
+    Wrapping `pylti1p3` is the one thing this integration is told not to do, so the
+    bound is set on the session it dials through instead: any request that names no
+    `timeout` of its own — the token `POST` is the only one in this client — gets
+    `AGS_REQUEST_TIMEOUT`. A caller that passes a `timeout` keeps it, which is why
+    the explicit bound on the AGS call still reads exactly as written.
+
+    Built only where this client builds its own transport, which is production; a
+    test that injects a session drives its own object and the explicit bound on the
+    AGS call is what holds there.
+    """
+
+    def request(self, *args: Any, **keywords: Any) -> requests.Response:
+        keywords.setdefault("timeout", AGS_REQUEST_TIMEOUT)
+        return super().request(*args, **keywords)
+
+
 def _no_redirects(http: requests.Session | None) -> requests.Session:
     """The transport this client fetches over, with redirect-following turned off.
 
-    A copy of `app.services.roster_sync::_no_redirects`, and the same argument: a
+    A copy of `app.services.roster_sync::_no_redirects` in its redirect argument: a
     redirect is the same bypass as a hostile line-item id arriving one step
     earlier, because the address `refuse_invalid_fetched_address` judged is not the
     address the request ends at. `requests` has no session-level
     `allow_redirects`, so `max_redirects = 0` is the lever that reaches every call
     — any 30x then raises `TooManyRedirects`, a `RequestException`, which is
     recorded as a call this tool would not make.
+
+    **Where this copy diverges from the roster's**: the session this client builds
+    for itself is a `_BoundedTransport`, so the token grant `pylti1p3` posts over it
+    is bounded too (see that class). The roster sync has the same unbounded token
+    dial and is out of this ticket's scope; it is named in E3-05's pull request.
     """
-    session = requests.Session() if http is None else http
+    session = _BoundedTransport() if http is None else http
     session.max_redirects = 0
     return session
 
@@ -736,7 +786,9 @@ class _Caller:
         if body is not None and content_type is not None:
             headers["Content-Type"] = content_type
         try:
-            answered_call = self.transport.request(method, url, data=body, headers=headers)
+            answered_call = self.transport.request(
+                method, url, data=body, headers=headers, timeout=AGS_REQUEST_TIMEOUT
+            )
         except requests.RequestException as failure:
             _record_call(self.session, self.section_id, row_url, None)
             logger.warning(
