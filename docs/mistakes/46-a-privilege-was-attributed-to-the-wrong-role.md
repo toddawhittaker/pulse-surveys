@@ -45,14 +45,19 @@ into rows. Both fired. Neither was consulted before the decision was settled.
 
 ## The consequence
 
-E3-06 shipped as a design that is fully demonstrated and cannot run in
-production: the sweep computes, compares and composes correctly, and the step that
-turns a `user` row into an AGS `userId` raises on the worker's own connection. The
-repair is not a line of code — it is a `SECURITY DEFINER` resolver, a migration, a
-sixth entry in an inventory the file itself calls "a new door into identity that
-some later ticket opened without arguing for it", and a decision about whether the
-reverse direction gives back what the revocation bought. That is an owner's
-decision arriving at the end of a build rather than at the start of one.
+E3-06 reached the end of its first build as a design that was fully demonstrated
+and could not run in production: the sweep computed, compared and composed
+correctly, and the step that turns a `user` row into an AGS `userId` raised on the
+worker's own connection.
+
+The repair was not a line of code. It is `resolve_subject_for_user` — a `SECURITY
+DEFINER` function, a migration, a sixth entry in an inventory the file itself calls
+"a new door into identity that some later ticket opened without arguing for it",
+and a ruling on whether the reverse direction gives back what E1-10's revocation
+bought. ADR 0139 records it, and the honest reading in that record is that the
+property is narrowed rather than preserved. **That is the cost this entry is
+about**: an owner's confidentiality decision arriving at the end of a build rather
+than at the start of one, with a finished implementation already leaning on it.
 
 ## The rule
 

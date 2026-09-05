@@ -151,12 +151,11 @@ covers the final week's post plus one corrective pass.
   logs carries a score, a ledger line or an LMS user id, and the section-level
   catch withholds its traceback for that reason: a refused insert renders its own
   parameters, and those parameters are a student's score and their ledger.
-- **The sweep cannot yet obtain a student's LTI subject on the application
-  connection, and until that is settled it posts nothing in production.** An AGS
-  Score names its student by the `sub`, which lives only in `user.lms_user_id`;
-  `pulse_app` was refused `SELECT` on that column by E1-10's round-3 security
-  review, and `tests/unit/test_no_service_reads_an_identity_table_directly.py`
-  refuses a service module the read besides. The whole of this decision is
-  demonstrated against a connection that can read it; the resolution is a
-  confidentiality decision with a migration behind it and is recorded as this
-  ticket's open blocker rather than settled here.
+- **The sweep names its student through a definer function rather than by reading
+  a column.** An AGS Score is keyed by the LTI `sub`, which lives only in
+  `user.lms_user_id`, and `pulse_app` was refused `SELECT` on that column by
+  E1-10's round-3 security review. The sweep therefore resolves each subject
+  through `app.services.identity.subject_for_user`, one row at a time, and
+  `app/services/grading.py` reads no column of `user` by any route. ADR 0139
+  records that decision, what it gives back and what it does not; it arrived as
+  this ticket's blocker and was settled before it merged.
