@@ -467,3 +467,15 @@ structural guard and a behavioural test can disagree about one route, write the
 behavioural one: a sweep over the route table answers "is the class there", never
 "does the gate run", so every gate needs one test that drives the built
 application over HTTP and reads the status in both directions.
+
+## 48. A known gap was recorded only in a comment in the file that worked around it
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/48-a-known-gap-was-recorded-only-in-the-file-that-worked-around-it.md)
+
+**Rule.** A limitation you work around goes in the deferral file the next epic
+reads — `carried-from-eN.md` or `deferred.md`, with an owner — in the same change
+as the workaround. A paragraph in the spec that dodged it records the fact for
+the one person who already knows. And when a plan names a seeded fixture, check
+that the fixture reaches the product's own database rather than only the mock's:
+a platform offering a launch says the platform holds the section, never that the
+tool will provision it.
