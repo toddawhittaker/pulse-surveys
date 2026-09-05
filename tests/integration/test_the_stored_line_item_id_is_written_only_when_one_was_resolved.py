@@ -22,17 +22,29 @@ nothing ever — which is the state at HEAD — and the accepting half alone is
 satisfied by a writer that stores whatever it is handed. Neither is evidence
 about this ticket without the other (`docs/MISTAKES.md` entry 2).
 
-**What this module does not claim, said plainly.** E3-04's client already refuses
-a hostile line-item id and raises
+**Two tests, and the second exists because a mutation battery measured the first
+one's limit.** E3-04's client already refuses a hostile line-item id and raises
 (`test_a_line_item_answered_by_the_container_is_judged_before_it_is_addressed` in
 `test_the_ags_client_is_a_conformant_service_client.py`, which tells the judgment
-apart from the transport by the raise's `__cause__`). So the refusing half here
-would also be green against a writer whose own re-judgment was deleted: the layer
-below refuses first. That is a limit of this test and not a weakness in the
-criterion — what E3-05 owes and what is asserted here is the **outcome on the
-column**, which no other module asserts and which the two failure modes worth
-fearing both break: a writer that stored the container's address, an empty
-string, or the raw member it could not judge.
+apart from the transport by the raise's `__cause__`). So the first test below —
+which drives the real client — is green whether or not `ensure_line_item` does any
+judging of its own: the layer beneath refuses first, and the battery confirmed it,
+with **both** the deletion of the local re-judgment and the reordering of the store
+in front of it surviving. On today's tree nothing distinguished D3's re-judgment
+from dead code.
+
+The second test closes that by pinning the layer. It substitutes the client seam —
+`app.services.grading.find_or_create_line_item`, the name D3 has the writer call —
+for a stand-in that hands back a line item whose `id` the address rules refuse. The
+client cannot refuse anything, because the client is not running; the only code
+left that can is the writer's own judgment. That the substitution really took is
+asserted rather than assumed: the stand-in records its calls and is required to
+have been called, so a writer that reached the client by some other route fails
+here instead of passing on the real client's refusal (`docs/MISTAKES.md` entry 3).
+
+Both tests are kept. They are not two copies of one rule: the first says the
+outcome on the column is right when the whole stack runs, and the second says
+which layer produced it.
 
 **Driven under a deployment's `ENVIRONMENT`.** Every rule the address chokepoint
 applies is switched off under the development name (ADR 0081), so a refusal test
@@ -47,6 +59,7 @@ repository performs real DNS** — and the stub is
 guard is a plain call in the test body (`docs/MISTAKES.md` entry 44).
 """
 
+import logging
 from typing import Any
 
 import pytest
@@ -65,6 +78,21 @@ pytestmark = [pytest.mark.integration, pytest.mark.lti]
 # nothing. The same two values `test_the_ags_client_is_a_conformant_service_client.py`
 # uses, spelled here rather than imported across test modules.
 LOOPBACK_LINE_ITEM = "http://127.0.0.1:9/lineitems/1/lineitem?type_id=1"
+
+# A line-item address the same rules accept under the same deployment name, for the
+# accepting half of the substituted-client pair. A globally routable IPv4 literal
+# over `https`: a literal because the rules judge one without a lookup, and not
+# from a documentation range — `203.0.113.0/24` and `192.0.2.0/24` read like public
+# addresses and report `is_global` false, so either would be refused and the pair
+# would assert nothing. The same value
+# `test_a_launch_stores_the_gradebook_address_it_was_given.py` accepts on the
+# neighbouring column, so the two modules can be read side by side.
+AN_ACCEPTABLE_LINE_ITEM = "https://93.184.216.34/lineitems/1/lineitem?type_id=1"
+
+# The name D3 has `ensure_line_item` call into E3-04's client with. Substituting it
+# is what makes the writer's own judgment the only thing left that can refuse an
+# address, which is the whole instrument of the second test.
+CLIENT_SEAM = "find_or_create_line_item"
 
 WORKER_IS_OWED = (
     "E3-05's work order (D3) puts `ensure_line_item(session, section_id, *, http=None, "
@@ -98,6 +126,38 @@ def run(worker_callable: Any, session: Any, section_id: Any, **seams: Any) -> Ba
     except Exception as escaped:
         return escaped
     return None
+
+
+class ASubstitutedClient:
+    """A stand-in for E3-04's find-or-create that answers one line item and records the call.
+
+    Two jobs, and the second is what keeps the test from proving nothing. It hands
+    back an AGS line-item document built by `ags_contract.line_item_document`, so
+    the shape is E3-04's own rather than this file's invention. And it **counts its
+    calls**, because a substitution that silently missed — a writer reaching the
+    client through a module alias, say, so the patched name is never read — would
+    leave the real client running, the real client would refuse the hostile address
+    exactly as it does today, and the test would pass having pinned nothing
+    (`docs/MISTAKES.md` entry 3, and the reason this test exists at all).
+    """
+
+    def __init__(self, document: dict[str, Any]) -> None:
+        self.document = document
+        self.calls: list[tuple[Any, ...]] = []
+
+    def __call__(self, *arguments: Any, **keywords: Any) -> dict[str, Any]:
+        self.calls.append((arguments, keywords))
+        return dict(self.document)
+
+
+def errors_under(caplog: pytest.LogCaptureFixture, logger: str) -> list[Any]:
+    """Every error-level record one logger wrote, its children included."""
+    return [
+        record
+        for record in caplog.records
+        if record.levelno >= logging.ERROR
+        and (record.name == logger or record.name.startswith(f"{logger}."))
+    ]
 
 
 def pulse_items(section: Any, resource_id: str) -> list[dict[str, Any]]:
@@ -228,4 +288,168 @@ def test_a_fetched_line_item_id_the_address_rules_refuse_is_not_stored_and_one_t
         f"holds is {created[0].get(ags_contract.line_item_id_member)!r}. A column that does not "
         "name the platform's own line item is a score posted somewhere else, or — where it holds "
         "the container's address — every student's grade posted to a collection."
+    )
+
+
+def test_the_writer_judges_the_line_item_id_itself_when_the_client_hands_one_over(
+    ags_sections: Any,
+    service_wire: Any,
+    ags_contract: Any,
+    roster_contract: Any,
+    line_item_contract: Any,
+    deployment_settings: Any,
+    resolving: Any,
+    committed_rows: Any,
+    metadata_tables: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D3's own re-judgment, pinned to the layer that makes it — a battery survivor closed.
+
+    The test above is green whether or not `ensure_line_item` judges anything,
+    because E3-04's client refuses a hostile line-item id first and raises. A
+    mutation battery measured exactly that: **both** the deletion of the local
+    re-judgment **and** moving the store in front of it survived the whole suite.
+    That is the disclosed limit in this ticket's manifest, row 12, and this test is
+    what closes it.
+
+    **The instrument.** The client seam is substituted, so
+    `app.services.grading.find_or_create_line_item` hands back a line item of this
+    test's choosing and reaches no platform at all. With the client not running,
+    the only code that can refuse an address is the writer's own — D3:
+    "take the document's `id` member, judge it with `refuse_invalid_fetched_address(
+    settings.environment, column=AGS_LINE_ITEM_ADDRESS_COLUMN, address=identifier,
+    resolve=resolve)` … a `RegistrationAddressError` stores nothing, logs at error,
+    returns". Every assertion below is therefore about that judgment and nothing
+    else, which is what "pinning the layer" means here.
+
+    **The two mutations this kills**, and neither is killed anywhere else:
+
+      - **the re-judgment deleted.** The stand-in answers a loopback `id`, nothing
+        refuses it, and the column ends up holding an address this container will
+        fetch with the tool's own Bearer token on every later posting run.
+      - **the store moved in front of the judgment.** The refusal still happens and
+        still logs, and the column has already been written by the time it does —
+        which is `docs/MISTAKES.md` entry 29's shape exactly, a value kept before
+        the check that should have refused it, and invisible to any test that only
+        reads the log.
+
+    **That the substitution took is asserted, not assumed.** A writer that reached
+    the client by another route — a module alias, a late import — would leave the
+    real client running and the real client refuses this address anyway, so the
+    column assertion would be green and this test would have pinned nothing. The
+    stand-in counts its calls and is required to have been called once.
+
+    **The refusing half runs first, and the ordering is forced rather than
+    chosen.** The accepting half stores an id, and a section carrying one is one
+    D3 returns early for — so the pair can only be posed in this order on one
+    section. The accepting half is still what makes the refusal mean something: it
+    is the same substitution, the same section and the same deployment name, with
+    one address changed, and without it every assertion above holds of a writer
+    that stores nothing whatever it is handed.
+    """
+    section = ags_sections(roster_contract.https_platform_issuer)
+    resolver = resolving({section.host: (roster_contract.a_global_address,)})
+    ensure = worker(line_item_contract)
+    grading = line_item_contract.grading()
+    line_item_contract.named_in(
+        grading,
+        CLIENT_SEAM,
+        "E3-05's work order (D3) has `ensure_line_item` call E3-04's "
+        "`app.lti.ags.find_or_create_line_item(session, section_id, http=…, settings=…, "
+        "resolve=…)`. Substituting that name on this module is the only way to ask which layer "
+        "refuses a line-item address, since the client refuses one on its own.",
+    )
+    caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.DEBUG, logger=line_item_contract.grading_logger)
+
+    refusing = ASubstitutedClient(ags_contract.line_item_document(LOOPBACK_LINE_ITEM))
+    monkeypatch.setattr(grading, CLIENT_SEAM, refusing)
+
+    escaped = run(
+        ensure,
+        committed_rows.session,
+        section.id,
+        http=service_wire.session(),
+        settings=deployment_settings,
+        resolve=resolver,
+    )
+    committed_rows.commit()
+
+    assert len(refusing.calls) == 1, (
+        f"The substituted client was called {len(refusing.calls)} times. The writer either did "
+        "not reach the client at all, or reached it by a route this substitution does not "
+        f"cover — and in the second case E3-04's real client ran, refused "
+        f"{LOOPBACK_LINE_ITEM!r} on its own, and everything below would be green while pinning "
+        f"nothing. D3 has the writer call `{CLIENT_SEAM}` on its own module, which is what "
+        "makes the substitution reach it."
+    )
+    refused = line_item_contract.section_row(committed_rows, metadata_tables, section.id)
+    stored = refused.get(line_item_contract.line_item_column)
+    assert stored is None, (
+        f"The section carries `{line_item_contract.line_item_column}` = {stored!r} after a "
+        f"client that answered a line item whose `{ags_contract.line_item_id_member}` is "
+        f"{LOOPBACK_LINE_ITEM!r}. Nothing "
+        "beneath this writer refused it — the client is substituted — so a fetched address the "
+        "rules refuse is now the standing target of every posting run for this section.\n\n"
+        "Three things this can be, in the order worth checking. The writer does not judge the "
+        "address it is handed at all. It judges but stores first, which still logs and is still "
+        "wrong (`docs/MISTAKES.md` entry 29 — a value kept before the check that should have "
+        "refused it). Or it judges under a column constant that is in `FETCHED_COLUMNS` and not "
+        "in `LOOPBACK_REFUSED_COLUMNS`, in which case the judgment is running and loopback is "
+        "simply not among the things it refuses on this column — "
+        "`tests/unit/test_registration_address_constraints.py` is where that membership is "
+        "pinned, and E3-04's client refuses this same address on the same document."
+    )
+    assert errors_under(caplog, line_item_contract.grading_logger), (
+        "No error-level record arrived under "
+        f"`{line_item_contract.grading_logger}` when the address was refused. D3: the refusal "
+        "'stores nothing, logs at error, returns'. Without the record a section silently stops "
+        "acquiring a line item and §6.3's console has nothing to show for it — and the column "
+        "assertion above is equally true of a writer that never ran."
+    )
+    assert escaped is None, (
+        f"The refusal escaped as {escaped!r}. D3 has this path log and return: the next "
+        "qualifying launch retries, and a raise out of the worker turns a platform's bad "
+        "answer into a task failure an operator has to read a traceback to understand."
+    )
+
+    caplog.clear()
+    accepting = ASubstitutedClient(ags_contract.line_item_document(AN_ACCEPTABLE_LINE_ITEM))
+    monkeypatch.setattr(grading, CLIENT_SEAM, accepting)
+
+    escaped = run(
+        ensure,
+        committed_rows.session,
+        section.id,
+        http=service_wire.session(),
+        settings=deployment_settings,
+        resolve=resolver,
+    )
+    committed_rows.commit()
+
+    assert escaped is None, (
+        f"With an acceptable line-item address the same call raised {escaped!r}. The refusal "
+        "above would then hold of a writer that refuses every address there is, which is a "
+        "writer that never records a line item at all."
+    )
+    assert len(accepting.calls) == 1, (
+        f"The substituted client was called {len(accepting.calls)} times on the accepting half, "
+        "so this direction is not the one it claims to be."
+    )
+    accepted = line_item_contract.section_row(committed_rows, metadata_tables, section.id)
+    kept = accepted.get(line_item_contract.line_item_column)
+    assert kept == AN_ACCEPTABLE_LINE_ITEM, (
+        f"The section carries `{line_item_contract.line_item_column}` = {kept!r} and the client "
+        f"answered {AN_ACCEPTABLE_LINE_ITEM!r}, which the registration-address rules accept "
+        "under this deployment name. A writer that refuses an address a real platform would "
+        "advertise leaves the section with no line item and no score ever posted, and the "
+        "refusal above would be evidence about a writer that is simply inert."
+    )
+    logged = errors_under(caplog, line_item_contract.grading_logger)
+    written = [record.getMessage() for record in logged]
+    assert not written, (
+        "An acceptable line-item address was stored and an error-level record was written "
+        f"anyway: {written}. Then the error record asserted on the refusing half says nothing "
+        "about a refusal — it is written on every run."
     )
