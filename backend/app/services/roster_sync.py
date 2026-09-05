@@ -688,16 +688,25 @@ def request_section_sync(session: Session, section_id: UUID) -> bool:
     row at all" passes a debounce test and turns every section into one that syncs
     exactly once.
 
-    **A broker this call cannot reach must never fail the launch that made it.**
-    This runs on a request, after the launch has already committed and after the
-    person has already been authenticated, and what it is asking for is a
+    **A broker this call cannot reach must never fail the launch that made it, or
+    delay it.** This runs on a request, after the launch has already committed and
+    after the person has already been authenticated, and what it is asking for is a
     *background* job whose absence costs at most an hour — `sync_rosters` visits
-    every addressed section on the hour whatever happens here. So the publish is
-    made with `retry=False`, so a Redis that is down fails at once rather than
-    holding the request open through kombu's retry policy; with
-    `ignore_result=True`, so nothing reaches the result backend, which has a retry
-    policy of its own and is not consulted for a task whose answer nobody reads;
-    and inside a `try`, because the one thing that must not happen is a person
+    every addressed section on the hour whatever happens here. So the publish goes
+    through `app.jobs.celery_app.publish_once`, which attempts it once, on a
+    connection made for the call with its retries off and its socket timeouts
+    bounded, and keeps the result backend out of it.
+
+    **The bounded connection is E3-05's correction and not decoration.** Until then
+    this call published on the application's own connection, and `retry=False`
+    governs the publish rather than the connect: kombu opened that connection under
+    its own retry schedule first, so a broker refusing instantly held a verified,
+    committed launch for six seconds — measured — while a person waited at a door
+    they had already been let through. `docs/MISTAKES.md` entry 41 is the incident
+    and `docs/tickets/e3/carried-from-e2.md` carried the repair to whichever epic
+    next touched this door.
+
+    The `try` stays here, because the one thing that must not happen is a person
     being unable to enter the product because a queue was unavailable. The failure
     is logged at error level, which is the visibility (`docs/MISTAKES.md` entry
     26), and the caller is told `False`.
@@ -720,10 +729,11 @@ def request_section_sync(session: Session, section_id: UUID) -> bool:
     # Imported here rather than at module scope because `app.jobs.tasks` imports
     # this module: the task is a thin wrapper over these functions (D10), so a
     # top-level import would be a cycle.
+    from app.jobs.celery_app import publish_once
     from app.jobs.tasks import sync_section_roster
 
     try:
-        sync_section_roster.apply_async(args=[str(section_id)], retry=False, ignore_result=True)
+        publish_once(sync_section_roster, args=(str(section_id),))
     # Broad on purpose, and the docstring is the argument: kombu, redis-py and
     # Celery each raise their own family here, and an enumerated list of them is a
     # list that goes stale into a launch failure.
