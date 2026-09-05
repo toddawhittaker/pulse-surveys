@@ -1,4 +1,11 @@
-"""What a running application actually serves — one walk, for the two suites that ask.
+"""What a running application actually serves, and what each route depends on.
+
+Two questions live here, each asked by more than one suite and each answered in
+one place (`docs/MISTAKES.md` entry 13): which routes an application carries,
+however they were registered — `every_route` and `registered_paths` — and which
+callables sit in one route's dependency graph, however deeply nested —
+`dependencies_of`, moved here by E3-07 when a second sweep needed it. The library
+behaviour below is about the first pair; `dependencies_of` carries its own note.
 
 **The library behaviour this exists to survive: `fastapi` 0.141.1's
 `_IncludedRouter`.** On the pinned FastAPI, `app.include_router(...)` no longer
@@ -51,6 +58,32 @@ from typing import Any
 # reader can find rather than inside a `getattr` default.
 INCLUDED_ROUTER_ATTRIBUTE = "original_router"
 
+# Where the same wrapper keeps the arguments its own `include_router(...)` call
+# was made with, and the member of that object holding the dependency list.
+#
+# **Measured on the pinned `fastapi` 0.141.1, on 2026-09-05, by running the CSRF
+# sweep's own control against the library**: a dependency passed as
+# `include_router(..., dependencies=[Depends(dep)])` reaches the route **nowhere**
+# — `route.dependencies` is `[]` and the route's `dependant` graph holds only the
+# endpoint's own dependencies. The list survives on
+# `_IncludedRouter.include_context.dependencies` and nowhere else. So a sweep that
+# derives an inventory from the dependant graph cannot see an include-level
+# dependency at all, and the ruling of that date (E3-07 work order, D13a) is that
+# `tests/unit/test_every_mutating_route_carries_the_csrf_check.py` **refuses** the
+# include-level attachment rather than trying to attribute it — accumulating this
+# private context down through nested includes is the defeated-one-level-out
+# shape `docs/MISTAKES.md`'s closed-set entry is about.
+#
+# Named here rather than reached through a `getattr` default at the call site,
+# for the same reason `INCLUDED_ROUTER_ATTRIBUTE` is: a FastAPI that renames
+# either of these must fail at a constant a reader can find. The refusal check
+# treats an `_IncludedRouter` missing them as a stale pin and says so, rather than
+# reading the absence as "no include-level dependencies here" — which is a guard
+# going silently blind, and is exactly what the planted control next to it exists
+# to catch.
+INCLUDE_CONTEXT_ATTRIBUTE = "include_context"
+INCLUDE_CONTEXT_DEPENDENCIES = "dependencies"
+
 
 def every_route(application: Any) -> list[Any]:
     """Every route object reachable from `application`, through included routers too.
@@ -72,6 +105,42 @@ def every_route(application: Any) -> list[Any]:
         included = getattr(route, INCLUDED_ROUTER_ATTRIBUTE, None)
         if included is not None:
             pending.extend(included.routes)
+    return found
+
+
+def dependencies_of(dependant: Any, seen: set[int] | None = None) -> list[Any]:
+    """Every callable in one route's dependency graph, at any depth.
+
+    FastAPI holds a route's dependencies as a tree of `Dependant` objects, each
+    carrying the callable it resolves in `.call` and its own sub-dependencies in
+    `.dependencies`. A walk one level deep would see a dependency declared on the
+    route and miss one declared on a dependency of it — and "reachable by a
+    student session", like "checked for a CSRF token", is a property of the whole
+    graph, not of its first layer.
+
+    **Written for E2-09 and shared from E3-07.** Two sweeps now ask the same
+    question of the same kind of object: `tests/integration/test_the_student_read
+    _path_names_nothing_outside_the_enrollment.py` derives §4.1 item 1's inventory
+    from `require_student`, and `tests/unit/test_every_mutating_route_carries_the
+    _csrf_check.py` derives the CSRF sweep's currency 1 from
+    `csrf_verified_student`. Two copies of this walk is `docs/MISTAKES.md` entry
+    13 — one of them would learn about a new way FastAPI nests a `Dependant` and
+    the other would go on reporting a clean application.
+
+    The caller matches on the **object** the dependency is, never on its name: a
+    route whose graph happens to contain something else called
+    `csrf_verified_student` is not a route that carries this project's check.
+    """
+    seen = set() if seen is None else seen
+    if id(dependant) in seen:
+        return []
+    seen.add(id(dependant))
+    found: list[Any] = []
+    call = getattr(dependant, "call", None)
+    if call is not None:
+        found.append(call)
+    for child in getattr(dependant, "dependencies", ()) or ():
+        found.extend(dependencies_of(child, seen))
     return found
 
 

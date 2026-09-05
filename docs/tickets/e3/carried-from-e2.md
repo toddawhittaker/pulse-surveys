@@ -274,6 +274,42 @@ likely to add a mutating route.
 routes, asserted in both directions so a stale exemption fails as loudly as an
 unguarded route.
 
+**Closed by E3-07.** The done-when asked for a sweep over the built
+application's routes asserted in both directions, and both halves landed in the
+ticket that added the first mutating route since E2-08 — which is what made the
+sweep's red case something other than a plant.
+
+The sweep is `tests/unit/test_every_mutating_route_carries_the_csrf_check.py`.
+Its inventory is the built application's own route table, walked through
+`tests/fixtures/routing.py::every_route`, and it holds every route whose
+`methods` is `None` or names anything outside `GET`, `HEAD` and `OPTIONS` — by
+method and nothing else, because a body or a declaration is a property an author
+chooses per route ([ADR 0140](../../adr/0140-the-csrf-sweep-reads-two-currencies-over-a-method-based-inventory.md)).
+
+The check is read in two currencies, each with a control that finds it on a route
+that certainly holds it: `app.api.deps.csrf_verified_student` as an object
+anywhere in the route's dependency graph, and the route class E3-07 adds for a
+route appended to `router.routes`, which carries no dependency graph at all. A
+third way of attaching the dependency, at the `include_router` call, is refused
+rather than read — measured against the pinned FastAPI, it reaches no route — so
+the sweep fails loudly on any include carrying dependencies and names where to
+put it instead.
+
+The exemption ledger is four paths, each mapped to one sentence saying why that
+route cannot carry the check: the two LTI door legs and the two clock controls.
+An entry costs that sentence and both directions of assertion — every entry must
+still name a mutating route this application serves, so a route renamed or
+deleted with the entry left behind is red; and every exempt route must carry
+neither currency, so an exemption that has become unnecessary is red and the
+ledger shrinks. E3-07's own trigger is not on it, because a development route is
+refused outside development by the environment guard, which is a different
+control from CSRF.
+
+What the entry asked for is now the structural force it named as missing: a
+mutating route added tomorrow with the unchecked dependency is red on the day it
+lands, and the only two ways to make it green are to fix it or to argue for it in
+the ledger with a sentence.
+
 ## The launch-path roster enqueue still waits six seconds on a broker that is down
 
 `request_section_sync` publishes on an unbounded connection, so a staff launch

@@ -452,3 +452,18 @@ whichever role holds it. And a suite that drives a service through the migrating
 engine has not tested the grant at all — where behaviour depends on one, at least
 one test reaches the code through the connection production uses, or the
 grant-shaped failure passes review as a green suite.
+
+## 47. A route subclass's gate was discarded at dispatch while the class stayed visible
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/47-a-route-subclasss-gate-was-discarded-at-dispatch.md)
+
+**Rule.** On the pinned FastAPI, `include_router` does not serve the route objects
+a router holds: for a plain `starlette.routing.Route` it rebuilds one from the
+endpoint, the methods, the name and `include_in_schema` alone. So a route
+subclass's behaviour must live in its **endpoint** — anything put on `self.app`
+or on any other attribute is inert at dispatch, while the original object stays in
+`router.routes` for every sweep that walks them to find and approve. And where a
+structural guard and a behavioural test can disagree about one route, write the
+behavioural one: a sweep over the route table answers "is the class there", never
+"does the gate run", so every gate needs one test that drives the built
+application over HTTP and reads the status in both directions.
