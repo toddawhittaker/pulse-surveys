@@ -414,3 +414,15 @@ positional argument fails on a schedule that reads as a flake — argparse repor
 a *missing* required argument that was in fact given. Insert `--` before
 positional values built from generated identifiers, and drive the test with an
 identifier that starts with `-` rather than generating until one appears.
+
+## 46. A privilege was attributed to the wrong role, and the ticket was built on it
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/46-a-privilege-was-attributed-to-the-wrong-role.md)
+
+**Rule.** A settled decision that rests on a privilege is a claim about a role,
+and the role is the half that gets mistyped: execute the read as that role before
+the design is fixed on it, because a triple of column names reads identically
+whichever role holds it. And a suite that drives a service through the migrating
+engine has not tested the grant at all — where behaviour depends on one, at least
+one test reaches the code through the connection production uses, or the
+grant-shaped failure passes review as a green suite.

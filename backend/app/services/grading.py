@@ -1101,8 +1101,34 @@ def _live_enrollments(session: Session, section: Section, *, today: date) -> set
 def _lms_user_ids(session: Session, user_ids: Sequence[UUID]) -> dict[UUID, str]:
     """The platform's own subject for each of these students — the AGS `userId`.
 
-    Two columns and no more: `pulse_app` holds a column-scoped `SELECT` on `user`,
-    and the subject is the only thing a score post needs from that row.
+    **This read is blocked on a decision this ticket may not make, and the shape
+    below is a placeholder rather than the answer.** An AGS Score names its
+    student by the LTI `sub`, which this system stores in exactly one place —
+    `user.lms_user_id` — and the application connection may not read it. Two
+    separate guarantees say so and both are load-bearing:
+
+      - `pulse_app` holds `SELECT (id)` on `user` and nothing more. E1-10's round-3
+        security review revoked `SELECT (lms_user_id)` because "a connection able
+        to read it can enumerate every subject that ever launched and join a
+        response back to the person who gave it", and
+        `tests/integration/test_identity_grants.py` holds the remaining column set
+        as an equality. So this statement raises `InsufficientPrivilege` on the
+        worker's own connection — every one of this module's tests that drives the
+        sweep through a migrating engine passes, and the one that drives it through
+        the Celery task does not.
+      - `tests/unit/test_no_service_reads_an_identity_table_directly.py`, which is
+        `invariant`-marked, refuses any module under `app/services/` that turns
+        `User` into rows at all. It is the application-side half of SPEC §8's
+        "enforced in the database, not just the application", and this function
+        fails it.
+
+    The sanctioned route is ADR 0094's third mechanism — a `SECURITY DEFINER`
+    resolver owned by `pulse_resolve_definer` answering one point question, the way
+    `resolve_platform_user` answers the forward one — but the reverse direction is
+    not the same trade: this connection can already enumerate `user.id`, so a
+    resolver from id to subject hands it every subject and undoes what the
+    revocation bought. That is a confidentiality decision with a migration behind
+    it, and it is the owner's to make rather than this ticket's.
     """
     if not user_ids:
         return {}
