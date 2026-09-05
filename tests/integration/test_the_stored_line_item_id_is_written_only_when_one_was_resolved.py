@@ -60,7 +60,9 @@ guard is a plain call in the test body (`docs/MISTAKES.md` entry 44).
 """
 
 import logging
+import math
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -93,6 +95,59 @@ AN_ACCEPTABLE_LINE_ITEM = "https://93.184.216.34/lineitems/1/lineitem?type_id=1"
 # is what makes the writer's own judgment the only thing left that can refuse an
 # address, which is the whole instrument of the second test.
 CLIENT_SEAM = "find_or_create_line_item"
+
+# A sentinel for "the transport was called with no `timeout` keyword at all", which
+# is a distinct failing state from `timeout=None` and one the recorder has to be
+# able to tell from a real value of `None`.
+TIMEOUT_NOT_PASSED = object()
+
+
+def is_a_bounded_timeout(value: Any) -> bool:
+    """Whether `value` is a `requests` timeout that will actually make a stalled dial give up.
+
+    `requests` accepts a single number or a `(connect, read)` pair, and both have
+    to be finite and positive to bound anything: `None` waits forever, `0` is
+    rejected, and a `nan`/`inf` never elapses. A missing keyword — `TIMEOUT_NOT_PASSED`
+    — is the state the finding is about and is unbounded by definition.
+    """
+    if value is TIMEOUT_NOT_PASSED or value is None:
+        return False
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int | float):
+        return math.isfinite(value) and value > 0
+    if isinstance(value, tuple) and value:
+        return all(
+            isinstance(part, int | float)
+            and not isinstance(part, bool)
+            and math.isfinite(part)
+            and part > 0
+            for part in value
+        )
+    return False
+
+
+def recording_the_timeouts(base: Any) -> list[tuple[str, Any]]:
+    """Replace `base.request` with a recorder, and hand back the list it appends to.
+
+    Every outbound call the AGS client makes over this session is captured as
+    `(url, timeout)`, whether the client calls `.request(...)` directly — which is
+    what the transport uses at `ags.py:739` — or `.get`/`.post`, which route
+    through the same `self.request` on the instance. The base session is the wire's
+    own, so each request still reaches the in-process platform and the flow runs to
+    completion; the recorder only reads the `timeout` the client set on its way
+    past.
+    """
+    recorded: list[tuple[str, Any]] = []
+    original = base.request
+
+    def recording(method: str, url: str, **keywords: Any) -> Any:
+        recorded.append((url, keywords.get("timeout", TIMEOUT_NOT_PASSED)))
+        return original(method, url, **keywords)
+
+    base.request = recording  # type: ignore[method-assign]
+    return recorded
+
 
 WORKER_IS_OWED = (
     "E3-05's work order (D3) puts `ensure_line_item(session, section_id, *, http=None, "
@@ -452,4 +507,105 @@ def test_the_writer_judges_the_line_item_id_itself_when_the_client_hands_one_ove
         "An acceptable line-item address was stored and an error-level record was written "
         f"anyway: {written}. Then the error record asserted on the refusing half says nothing "
         "about a refusal — it is written on every run."
+    )
+
+
+def test_the_writer_dials_the_platform_under_a_bounded_transport_timeout(
+    ags_sections: Any,
+    service_wire: Any,
+    ags_contract: Any,
+    line_item_contract: Any,
+    committed_rows: Any,
+    metadata_tables: dict[str, Any],
+) -> None:
+    """The transport `ensure_line_item` reaches AGS over carries a finite timeout — security round.
+
+    **The finding (MEDIUM, bounded transport).** `ensure_line_item` holds
+    `SELECT … FOR UPDATE` on the section row across up to four outbound HTTP calls,
+    and the AGS transport dials with no `timeout`. A platform that completes the TCP
+    handshake and then never answers holds the row lock, the database connection
+    and the worker slot forever. There is one default queue, so a worker wedged
+    here also stops `reclassify_floored_comments`, and §3.3's floored safety
+    verdicts never arrive — a stalled gradebook write becomes a safety outage.
+
+    **The lock is not the bug and must not move.** It serializes two workers racing
+    to create one section's line item, and narrowing it to exclude the HTTP would
+    let both create one. The fix is a bounded timeout on the transport, so a dial
+    that stalls gives up and releases everything on its own.
+
+    **The pin.** The transport handed to the client is the wire's own session with
+    its `request` wrapped to record the `timeout` of every outbound call (see
+    `recording_the_timeouts`). The writer is driven to a successful creation so the
+    flow actually reaches the AGS calls at `ags.py:739`, and every call that is not
+    to the platform's OAuth token endpoint is required to carry a finite, positive
+    timeout. Today none do — the transport is dialled with no `timeout` keyword —
+    so this reds on a `FAILED` naming the unbounded call.
+
+    **The mutation this kills**: `self.transport.request(...)` with no `timeout=`,
+    which is `docs/MISTAKES.md` entry 41's own subject arriving on the AGS side —
+    a client library's default (`None`, wait forever) on a path that holds a lock,
+    a connection and a worker while it waits. The argument-capture pin is
+    deterministic; a genuinely stalled in-process server would be a stronger proof
+    but a slower and flakier one, and the finding accepts the capture.
+
+    **The token-acquisition path is the neighbouring risk, and this test does not
+    force it.** `self.connector.get_access_token` dials the OAuth endpoint, and
+    whether it shares this transport is not something the test can see from here;
+    calls to the token endpoint are therefore excluded from the hard assertion and
+    left to the implementer to bound, exactly as the finding directs. Where the
+    connector *does* use this session, its timeout is captured too and reported in
+    the failure message, so a reviewer can see whether it was bounded — but a
+    green here does not claim it was.
+
+    **The control comes first.** The AGS calls are required to be non-empty before
+    their timeouts are judged: a run that never reached the transport would satisfy
+    "every AGS call is bounded" vacuously, which is `docs/MISTAKES.md` entry 3.
+    """
+    section = ags_sections()
+    ensure = worker(line_item_contract)
+    base = service_wire.session()
+    recorded = recording_the_timeouts(base)
+
+    escaped = run(ensure, committed_rows.session, section.id, http=base)
+    committed_rows.commit()
+
+    assert escaped is None, (
+        f"Driving `ensure_line_item` against a working platform raised {escaped!r}, so the flow "
+        "did not reach the AGS transport and there is nothing here to have timed. This is a "
+        "control on the test, not the finding."
+    )
+    stored = line_item_contract.section_row(committed_rows, metadata_tables, section.id)
+    assert stored.get(line_item_contract.line_item_column) is not None, (
+        "The creation did not store a line-item id, so the writer did not run to completion and "
+        "may not have made the AGS calls this test is timing."
+    )
+    assert recorded, (
+        "The client made no outbound call at all over the transport this test handed it. Then "
+        "either the writer did not reach the client or it built a transport of its own — and a "
+        "timeout on a session nothing dials over bounds nothing (`docs/MISTAKES.md` entry 3)."
+    )
+
+    token_endpoint = (section.platform.discovery() or {}).get("token_endpoint")
+    token_path = urlsplit(token_endpoint).path if isinstance(token_endpoint, str) else None
+    ags_calls = [(url, timeout) for url, timeout in recorded if urlsplit(url).path != token_path]
+    token_calls = [(url, timeout) for url, timeout in recorded if urlsplit(url).path == token_path]
+
+    assert ags_calls, (
+        f"Every recorded call was to the token endpoint {token_endpoint!r}: {recorded!r}. The "
+        "finding is about the AGS transport at `ags.py:739`, so the flow has to reach at least one "
+        "line-item call for this test to say anything — a successful creation reads the container "
+        "and posts to it, both over this transport."
+    )
+    unbounded = [(url, timeout) for url, timeout in ags_calls if not is_a_bounded_timeout(timeout)]
+    assert not unbounded, (
+        f"These AGS calls were dialled with no bounded timeout: {unbounded!r} (a value of "
+        f"`{TIMEOUT_NOT_PASSED!r}` means no `timeout` keyword was passed at all). "
+        "`ensure_line_item` holds `SELECT … FOR UPDATE` on the section across these calls, so a "
+        "platform that completes the handshake and never answers holds the row lock, the database "
+        "connection and the worker slot forever — and on the single default queue that also stalls "
+        "`reclassify_floored_comments`, so §3.3's floored safety verdicts stop arriving. The lock "
+        "is correct and must stay; the transport has to carry a finite timeout.\n\n"
+        f"For the reviewer, the token-endpoint calls captured over this same transport were "
+        f"{token_calls!r}; those are the neighbouring `get_access_token` risk the finding leaves "
+        "to the implementer to bound, and this assertion does not force them."
     )
