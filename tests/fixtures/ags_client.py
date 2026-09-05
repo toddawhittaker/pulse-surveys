@@ -62,6 +62,7 @@ from uuid import uuid4
 
 import pytest
 
+from fixtures.roster_sync import SyncedSection
 from fixtures.supervision import require_table, single_primary_key
 
 # ---------------------------------------------------------------------------
@@ -601,6 +602,13 @@ def ags_sections(
     `line_item` stores an id on the section, which is the first branch of settled
     decision 7's find-or-create. Left `None`, the section holds none and the client
     has to read the container.
+
+    **Calling it twice starts a second platform.** That is `roster_platforms`'
+    behaviour and it is right for the two-platform case; for a second section of
+    the *same* institution it is wrong twice over — the mock registers under one
+    issuer and one client id, so the second registration is refused outright, and
+    `roster_platforms` mounts by host, so a second platform on that host would
+    replace the first on the wire. `beside` below is the second section.
     """
     started: list[AgsSection] = []
 
@@ -679,9 +687,85 @@ def ags_sections(
         )
         return section._replace(container=container)
 
+    def beside(section: AgsSection, *, container: str | bool = True) -> AgsSection:
+        """A second section on the platform that is **already** registered.
+
+        Calling this factory twice starts a second *platform*, which is what the
+        two-platform test needs and is exactly wrong for a test about two sections
+        of one institution: the mock is registered under one issuer and one client
+        id, so the second registration is refused by
+        `uq_lti_platform_issuer_client_id` before any test body runs.
+
+        So this seeds a section beside the first — same platform row, same
+        deployment row, same `ServiceWire` host, already mounted — and gives it a
+        **different seeded context**, which is what makes the two sections
+        distinguishable in every way a caller could need: their own
+        `lms_context_id`, their own launches, their own AGS line-items container
+        and therefore their own Score service addresses.
+
+        The containment chain above the section is deliberately *not* shared. Its
+        course and term are invented fresh, for the reason `roster_platforms`
+        gives about its own second call — two sections are two courses rather than
+        one row twice — and because a caller that then gives both sections the
+        same cohort would write one `lms_section_code` into one course and one
+        term twice, which E0-06's uniqueness refuses.
+        """
+        taken = {found.context.context_id for found in started}
+        platform = section.synced.platform
+        contexts = [found for found in platform.seeded_contexts() if found.context_id not in taken]
+        if not contexts:
+            pytest.fail(
+                f"This platform seeds {len(taken)} launch context(s) and every one of them is "
+                "already a section here. A second section needs a context of its own — its "
+                "`lms_context_id`, its launches and its AGS container all come from one — so a "
+                "test wanting more sections than the mock offers contexts has to say so in the "
+                "mock's own seed rather than reuse one."
+            )
+        context = contexts[0]
+        registration = section.synced.registration
+        sibling = SyncedSection(
+            committed_rows,
+            metadata_tables,
+            platform,
+            registration,
+            str(context.memberships_url),
+            context.context_id,
+            {
+                "lti_platform": registration.platform_row,
+                "lti_deployment": registration.deployment_row,
+            },
+        )
+        advertised = platform.line_items_url(context.launches[0])
+        assert advertised and str(advertised) != str(section.advertised), (
+            f"The second context advertises {advertised!r} as its line-items container and the "
+            f"first advertises {section.advertised!r}. Two sections that share one gradebook "
+            "container are one gradebook: nothing addressed to a section could be told from the "
+            "other's, which is the whole reason a caller asks for a second section."
+        )
+        stored = advertised if container is True else container
+        rewrite_section(
+            committed_rows,
+            metadata_tables,
+            sibling.id,
+            **{
+                SECTION_CONTAINER_COLUMN: None if stored is False else str(stored),
+                SECTION_LINE_ITEM_COLUMN: None,
+            },
+        )
+        built = AgsSection(
+            synced=sibling,
+            container=None if stored is False else str(stored),
+            advertised=str(advertised),
+            line_item_url=None,
+            context=context,
+        )
+        started.append(built)
+        return built
+
     start.wire = roster_platforms.wire  # type: ignore[attr-defined]
     start.repoint = repoint  # type: ignore[attr-defined]
     start.store_line_item = store_line_item  # type: ignore[attr-defined]
+    start.beside = beside  # type: ignore[attr-defined]
     yield start
 
 

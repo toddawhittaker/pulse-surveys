@@ -29,6 +29,17 @@ it — and, separately, the run under test is required to have logged **somethin
 of its own, because "no score in the logs" is trivially true of a service that
 writes no logs at all.
 
+**Three loggers, not two, and the third was a hole a security review found.**
+This module read `app.services.grading` and `app.jobs.tasks` and stopped there,
+while the sweep's every HTTP call goes through `app.lti.ags` — which is the
+module that logs a call's URL and status, holds E3-04's `recorded=` redaction of
+the query string, and says in its own docstring why a transport error's text is
+never written out. A regression in that redaction would put a `sub` into the
+stream through a logger neither test was looking at, and both would have stayed
+green. The prefix is captured here now, and **each canary goes through its own
+logger** so that dropping a prefix from the reader fails a control rather than
+quietly narrowing the search.
+
 **Format arguments are read, not only templates.** `logger.info("posted %s",
 score)` has a template with no score in it and a record whose rendered message
 carries one. `ags_contract.logged_text` folds in `getMessage()`, the raw `args`
@@ -69,6 +80,13 @@ A_QUESTION_COUNT = 3
 # extractor that read `record.msg` alone fails here rather than reporting a clean
 # log stream elsewhere.
 A_CANARY = "e3-06-canary-8f21c4"
+
+# The second canary, written through `app.lti.ags` and through nothing else. A
+# string of its own rather than the one above, because what it has to be able to
+# report is *which* logger went uncaptured: with one shared value, a reader that
+# had lost the AGS prefix would still find the canary the grading logger carried
+# and the control would pass over a search that no longer looks at the HTTP path.
+AN_AGS_CANARY = "e3-06-canary-ags-3d70b2"
 
 # What the canary line's template says. Deliberately carries no value of its own.
 A_CANARY_TEMPLATE = "control line for the log-policy assertion: %s"
@@ -151,15 +169,23 @@ def test_the_sweep_logs_the_section_and_the_outcome_and_never_the_figures(
     """Criterion 7 over the service, where every per-section and per-student line is written.
 
     One section, one student with a fractional score, one sweep. Afterwards
-    nothing written under `app.services.grading` or below it carries the score,
-    any line of the ledger, or the student's `lms_user_id`.
+    nothing written under `app.services.grading` **or under `app.lti.ags`**, or
+    below either, carries the score, any line of the ledger, or the student's
+    `lms_user_id`. The second prefix is where the sweep's HTTP calls are logged
+    and it was outside this search until a security review said so: the redaction
+    that keeps a `sub` out of a recorded URL lives there, and nothing in this
+    module could see it fail.
 
-    **Two controls stand in front of the assertion and both must hold.**
+    **Three controls stand in front of the assertion and all must hold.**
 
       - The canary: a line carrying a string certainly present, through the same
         logger at the same level, with the value in a *format argument*. If the
         extractor cannot find that, it cannot find a leak either and a green
         here means nothing.
+      - A second canary through `app.lti.ags`, so that the widened search is
+        proved rather than declared. A reader that lost that prefix would still
+        find the first canary and would report a clean stream having stopped
+        looking at the HTTP path.
       - The run's own output: at least one record from the sweep itself. D11
         gives it per-section counts at info or warning and a task-level summary,
         and without any of them "the logs carry no score" is true of a service
@@ -170,10 +196,12 @@ def test_the_sweep_logs_the_section_and_the_outcome_and_never_the_figures(
     **The mutations this kills**: a per-student `logger.info("posted %s for %s",
     score, user.lms_user_id)`, which is the line somebody writes while debugging
     and never takes out; a warning that interpolates the `ParticipationScore`
-    object, whose `repr` carries both the percentage and the ledger; and a
-    failure path that logs a caught exception's text, which for a transport error
-    can carry a URL with a `sub` in it (`app/lti/ags.py` says so in its own
-    docstring).
+    object, whose `repr` carries both the percentage and the ledger; a failure
+    path that logs a caught exception's text, which for a transport error can
+    carry a URL with a `sub` in it (`app/lti/ags.py` says so in its own
+    docstring); and — since the capture widened — E3-04's `recorded=` redaction
+    dropped, which puts the `userId` in a Score URL's query string into the call
+    log through a logger this test used to be blind to.
 
     **What this deliberately does not assert** is that any particular sentence is
     logged. Which words a line uses is the implementer's; what the ticket fixes
@@ -195,6 +223,7 @@ def test_the_sweep_logs_the_section_and_the_outcome_and_never_the_figures(
     forbidden = forbidden_in(score, student)
     caplog.set_level(logging.DEBUG)
     caplog.set_level(logging.DEBUG, logger=sweep_contract.grading_logger)
+    caplog.set_level(logging.DEBUG, logger=ags_contract.module)
 
     _answered, raised = sweep_contract.run(
         book.session, settings=window_settings, http=book.wire.session()
@@ -211,7 +240,10 @@ def test_the_sweep_logs_the_section_and_the_outcome_and_never_the_figures(
     )
 
     logging.getLogger(sweep_contract.grading_logger).info(A_CANARY_TEMPLATE, A_CANARY)
-    text = ags_contract.logged_text(records_from(caplog, sweep_contract.grading_logger))
+    logging.getLogger(ags_contract.module).info(A_CANARY_TEMPLATE, AN_AGS_CANARY)
+    text = ags_contract.logged_text(
+        records_from(caplog, sweep_contract.grading_logger, ags_contract.module)
+    )
 
     assert A_CANARY in text, (
         f"The canary {A_CANARY!r} is not in the captured text, and it was written through "
@@ -220,8 +252,18 @@ def test_the_sweep_logs_the_section_and_the_outcome_and_never_the_figures(
         "messages — and either way the search below has gone blind and would report a clean log "
         "stream whatever the sweep wrote (`docs/MISTAKES.md` entry 3)."
     )
+    assert AN_AGS_CANARY in text, (
+        f"The second canary {AN_AGS_CANARY!r} is not in the captured text, and it was written "
+        f"through `{ags_contract.module}` — the logger the sweep's every HTTP call goes through. "
+        "That prefix is read here because E3-04 redacts the query string of a URL it records and "
+        "logs a transport error's status rather than its text; a regression in either writes a "
+        "`sub` into this stream, and while this control is failing the search below is not looking "
+        "at that logger at all (the review's LOW 4)."
+    )
     assert_nothing_forbidden(
-        text, forbidden, f"What the sweep logged under `{sweep_contract.grading_logger}`"
+        text,
+        forbidden,
+        f"What the sweep logged under `{sweep_contract.grading_logger}` and `{ags_contract.module}`",
     )
 
 
@@ -242,7 +284,10 @@ def test_the_task_that_runs_the_sweep_logs_its_totals_and_no_students_figures(
     the one place a number is legitimately written. So this drives
     `app.jobs.tasks.post_participation_scores` — no arguments, its own session,
     one commit — and applies the same three prohibitions to everything written
-    under `app.jobs.tasks` and under `app.services.grading` during it.
+    under `app.jobs.tasks`, under `app.services.grading` and under `app.lti.ags`
+    during it. The third arrived with a security review: the task's HTTP calls
+    are logged there, including the URL of every Score post, and neither test in
+    this module was reading that logger.
 
     **The transport seam is substituted, which is the only way a task can reach
     the platform in this process.** D1 has `http` default to
@@ -277,6 +322,7 @@ def test_the_task_that_runs_the_sweep_logs_its_totals_and_no_students_figures(
     caplog.set_level(logging.DEBUG)
     caplog.set_level(logging.DEBUG, logger=sweep_contract.tasks_logger)
     caplog.set_level(logging.DEBUG, logger=sweep_contract.grading_logger)
+    caplog.set_level(logging.DEBUG, logger=ags_contract.module)
 
     try:
         answered = task()
@@ -305,8 +351,14 @@ def test_the_task_that_runs_the_sweep_logs_its_totals_and_no_students_figures(
     )
 
     logging.getLogger(sweep_contract.tasks_logger).info(A_CANARY_TEMPLATE, A_CANARY)
+    logging.getLogger(ags_contract.module).info(A_CANARY_TEMPLATE, AN_AGS_CANARY)
     text = ags_contract.logged_text(
-        records_from(caplog, sweep_contract.tasks_logger, sweep_contract.grading_logger)
+        records_from(
+            caplog,
+            sweep_contract.tasks_logger,
+            sweep_contract.grading_logger,
+            ags_contract.module,
+        )
     )
 
     assert A_CANARY in text, (
@@ -314,4 +366,13 @@ def test_the_task_that_runs_the_sweep_logs_its_totals_and_no_students_figures(
         f"`{sweep_contract.tasks_logger}` at info as a format argument. The search below has gone "
         "blind (`docs/MISTAKES.md` entry 3)."
     )
-    assert_nothing_forbidden(text, forbidden, "What the task and the service logged")
+    assert AN_AGS_CANARY in text, (
+        f"The second canary {AN_AGS_CANARY!r} is not in the captured text, and it was written "
+        f"through `{ags_contract.module}` — the logger every HTTP call the task makes goes "
+        "through. While this control is failing, the assertion below is not reading the module "
+        "that records a Score URL, and E3-04's redaction of that URL's query string could be "
+        "regressed without a single test in this suite mentioning it (the review's LOW 4)."
+    )
+    assert_nothing_forbidden(
+        text, forbidden, "What the task, the service and the AGS client logged"
+    )

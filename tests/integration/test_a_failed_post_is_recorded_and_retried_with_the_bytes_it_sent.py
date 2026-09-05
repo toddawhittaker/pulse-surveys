@@ -14,7 +14,7 @@ where a policy about *when* to try again belongs. What an operator sees is the
 act on" means for a ticket that builds no screen (E11 builds the screen; this
 decides what it will read).
 
-Four things are asserted here and each is a different failure.
+Five things are asserted here and each is a different failure.
 
   - **A refused post is a `FAILED` row carrying the status the platform
     answered**, and the next run tries again. A section whose posts are failing
@@ -25,6 +25,14 @@ Four things are asserted here and each is a different failure.
     — the ticket's own named trap: "if this ticket re-derives the percentage
     string, a retry after a network timeout can differ from the delivery it is
     retrying and the platform will take it as a second score."
+  - **And that re-send is for the unknown outcome only** (work order D16). A
+    `FAILED` row whose `response_code` is NULL is a call that never reached the
+    platform, so nobody knows whether the score landed and byte identity is what
+    keeps a repeat from becoming a second grade. A row carrying a definite status
+    was *refused*, not lost — the platform answered no — and it gets a fresh
+    delivery at this run's real time. Without that split a 409 loops for ever:
+    the platform refuses anything earlier than what it holds, and the stored
+    instant is what it already refused.
   - **The score timestamp names real time**, not the development clock's
     effective now. ADR 0109 exempts protocol ordering instants from the
     override, and the ticket's traps section says why it has to be settled here:
@@ -46,6 +54,12 @@ the request body recorded by `ServiceWire`.
 `post_scores_for_all_sections` — or, for the retry test, no
 `score_timestamp_text`. Both guards are plain calls in a test body
 (`docs/MISTAKES.md` entry 44).
+
+**One test here is red against the sweep as it first shipped**, deliberately:
+`test_a_failed_row_carrying_a_definite_status_gets_a_fresh_delivery_rather_than_the_stored_bytes`
+is D16's, and the first implementation took the stored-bytes branch for any
+`FAILED` row whose pair matched. It fails on the assertion about the delivered
+timestamp, not on a missing symbol.
 """
 
 import json
@@ -68,6 +82,15 @@ pytestmark = [pytest.mark.integration, pytest.mark.lti]
 # anything the tool could have sent differently, and it is not the `409` the
 # conflict test poses, so the two failures cannot be confused in a row.
 A_SERVER_FAILURE = 500
+
+# The status a planted row carries when the platform refused an earlier delivery
+# outright. Named here because work order D16 makes it the discriminator: a
+# `FAILED` row with *any* definite status was refused rather than lost, so the
+# next sweep owes it a fresh delivery, and 409 is the sharpest case because it is
+# the one status a re-send of the stored bytes can never fix. The conflict test
+# below asserts the same number from the other side — what gets *written* when a
+# post meets one.
+A_CONFLICT = 409
 
 # When a planted `grade_sync` row says it was written. This module's own values;
 # nothing reads them back as an answer.
@@ -307,13 +330,31 @@ def test_a_retry_of_a_failed_delivery_re_sends_the_stored_bytes_rather_than_a_ne
     """ADR 0052's retry identity, reconstructed from the row — and its other direction.
 
     A `FAILED` row is planted whose `(score_text, ledger_text)` equals what the
-    formula computes and whose `score_timestamp` is a distinctive instant in the
-    past, carrying microseconds. Work order D4: that pair is **a retry of that
-    delivery**, so the sweep re-sends the stored bytes —
+    formula computes, whose `response_code` is **NULL**, and whose
+    `score_timestamp` is a distinctive instant in the past carrying microseconds.
+    Work order D4: that pair is **a retry of that delivery**, so the sweep
+    re-sends the stored bytes —
     `score_timestamp_text(latest.score_timestamp)` on the wire, not a fresh
     instant. ADR 0052 has the platform accept an equal timestamp as a repeat of
     the same delivery and a *different* one as a new score, so this single field
     is the difference between a retry and a second grade.
+
+    **The NULL `response_code` is what makes the row retry-eligible, and it is
+    stated here since work order D16 narrowed the branch.** ADR 0129 gives that
+    column one meaning when it is NULL — the call never reached the platform — so
+    the outcome of that delivery is *unknown*, and an unknown outcome is the whole
+    reason byte identity exists: the platform may hold the score already, and a
+    re-send that differs by one character is a second grade rather than a repeat
+    of the first. A row carrying a definite status was refused rather than lost,
+    and D16 gives it a fresh delivery instead;
+    `test_a_failed_row_carrying_a_definite_status_gets_a_fresh_delivery_rather_than_the_stored_bytes`
+    below is that half. **The two tests plant the same row and differ in exactly
+    one value**, which is what makes either of them evidence about the branch
+    rather than about the shape of a `FAILED` row.
+
+    Before D16 this test planted a `500` here, which under the narrowed rule is a
+    definite status and would take the fresh-delivery branch — the byte-identity
+    assertion is unchanged, and it is the plant that was wrong.
 
     **The planted row is this test's, not a first run's** (`docs/MISTAKES.md`
     entry 31). And the instant is chosen so no fresh clock read can produce it:
@@ -328,6 +369,14 @@ def test_a_retry_of_a_failed_delivery_re_sends_the_stored_bytes_rather_than_a_ne
     sends whatever timestamp it last found in a row, which would freeze a
     section's deliveries at one instant for ever and make every later
     correction invisible to the platform's ordering rule.
+
+    **That second row carries a NULL `response_code` too, and that is the fix a
+    second defence layer would otherwise have hidden.** With a status on it, the
+    fresh delivery below would be what D16 owes *any* definitely-refused row, and
+    the assertion would pass without the differing pair doing any work at all —
+    one outcome, two mechanisms, and the test unable to say which produced it
+    (`docs/MISTAKES.md` entry 3). Held at NULL, the pair is the only thing that
+    differs from the retry above.
 
     **"Newer" there means newer than the row the retry above appended**, not
     merely newer than the first plant: the successful retry wrote its own
@@ -361,7 +410,7 @@ def test_a_retry_of_a_failed_delivery_re_sends_the_stored_bytes_rather_than_a_ne
         outcome=outcomes["failed"],
         score_timestamp=sweep_contract.a_stored_timestamp,
         created_at=AN_EARLIER_WRITE,
-        response_code=A_SERVER_FAILURE,
+        response_code=None,
     )
     stored_text = render(sweep_contract.a_stored_timestamp)
     book.wire.calls.clear()
@@ -404,7 +453,7 @@ def test_a_retry_of_a_failed_delivery_re_sends_the_stored_bytes_rather_than_a_ne
         outcome=outcomes["failed"],
         score_timestamp=sweep_contract.a_stored_timestamp,
         created_at=A_WRITE_NEWER_THAN_THIS_RUN,
-        response_code=A_SERVER_FAILURE,
+        response_code=None,
     )
     book.wire.calls.clear()
 
@@ -425,6 +474,127 @@ def test_a_retry_of_a_failed_delivery_re_sends_the_stored_bytes_rather_than_a_ne
         "found in a row, this section's deliveries are frozen at one moment for ever, and every "
         "later correction is refused by the platform's own ordering rule or silently ignored — "
         "and the retry assertion above would hold of a sweep that never derives a timestamp at all."
+    )
+
+
+# ---------------------------------------------------------------------------
+# A refusal is not a lost delivery: a definite status heals on the next run.
+# ---------------------------------------------------------------------------
+
+
+def test_a_failed_row_carrying_a_definite_status_gets_a_fresh_delivery_rather_than_the_stored_bytes(
+    gradebooks: Any,
+    grade_sync_rows: Any,
+    sweep_contract: Any,
+    window_settings: Any,
+    committed_clock_overrides: Any,
+) -> None:
+    """Work order D16: byte identity is for the *unknown* outcome and for nothing else.
+
+    The row planted here is the retry test's row with one value changed — its
+    `response_code` is `409` rather than NULL — and it must produce the opposite
+    behaviour: a **fresh** delivery stamped from real time, not the stored bytes
+    re-sent.
+
+    **Why the status is the discriminator.** ADR 0129 gives NULL one meaning: the
+    call never reached the platform, so nobody knows whether the score landed.
+    That is the case ADR 0052's equal-timestamp rule exists for — re-send the
+    exact bytes, and a platform that already has them treats the second delivery
+    as a repeat of the first rather than as a new grade. A row carrying a status
+    is the other thing entirely: the platform answered, and it answered *no*. The
+    delivery was refused, not lost, and re-sending the same instant asks the same
+    question that was already refused.
+
+    **A 409 is the case where that matters, and it is a loop.** The platform
+    holds something newer — an instructor hand-edited the column, which is the
+    ordinary way this happens — and refuses anything stamped earlier (ADR 0052).
+    Re-sending the stored instant is refused again for exactly the same reason,
+    every Monday, for the rest of term: the column stays wrong and the failure
+    keeps looking like a transient one. A fresh real-time stamp is later than
+    whatever the platform holds, so the next sweep heals the section by itself,
+    which is what makes "no in-run retry, the schedule is the retry" (ADR 0132)
+    a policy rather than a shrug.
+
+    **The mutation this kills**: the retry branch widened back to any `FAILED`
+    latest row whose pair matches — which is the shape the sweep shipped with, is
+    one predicate shorter, and passes every other test in this module.
+
+    **Its pair is the retry test above**, and neither is evidence on its own: a
+    sweep that always sends fresh bytes passes this one, a sweep that always
+    re-sends stored bytes passes that one, and only the two together say that the
+    branch is taken on the state D16 names. That is also why the row here is
+    planted with the *same* score, ledger and stored instant — one value differs,
+    so one value is what the answer can be attributed to.
+    """
+    book, people = a_student_with_a_score(gradebooks, sweep_contract, committed_clock_overrides)
+    student = people[0]
+    expected = sweep_contract.computed(book.world, student, settings=window_settings)
+    render = sweep_contract.timestamp_text()
+    outcomes = grade_sync_rows.outcomes()
+    grade_sync_rows.plant(
+        section_id=book.id,
+        user_id=student.user_id,
+        score_text=expected.percentage,
+        ledger_text=expected.ledger,
+        outcome=outcomes["failed"],
+        score_timestamp=sweep_contract.a_stored_timestamp,
+        created_at=AN_EARLIER_WRITE,
+        response_code=A_CONFLICT,
+    )
+    stored_text = render(sweep_contract.a_stored_timestamp)
+    book.wire.calls.clear()
+
+    before = datetime.now(UTC)
+    _answered, raised = sweep_contract.run(
+        book.session, settings=window_settings, http=book.wire.session()
+    )
+    after = datetime.now(UTC)
+
+    assert raised is None, f"The sweep raised {raised!r} over a row refused {A_CONFLICT}."
+    posts = score_posts(book)
+    assert len(posts) == 1, (
+        f"The sweep made {len(posts)} posts to the Score service: "
+        f"{[f'{call.method} {call.url}' for call in book.wire.calls]}. A latest row that was "
+        "*refused* still owes this student a delivery — the score the formula computes has never "
+        "reached the gradebook — so exactly one post should have left. None means a definite "
+        "status is being read as 'already posted', which is a section that stops updating the "
+        "first time a platform says no."
+    )
+    stamped = sent(posts[0]).get(sweep_contract.timestamp_member)
+    assert isinstance(stamped, str) and stamped, (
+        f"The post carried `{sweep_contract.timestamp_member}` = {stamped!r}. AGS 2.0 requires an "
+        "ISO 8601 instant on every Score, and it is the field the platform's ordering rule reads."
+    )
+    assert stamped != stored_text, (
+        f"The delivery went out carrying {stamped!r}, which is the stored instant "
+        f"{sweep_contract.a_stored_timestamp!r} rendered by "
+        f"`{sweep_contract.timestamp_text_name}`. The row it is answering carries "
+        f"`{sweep_contract.response_code_column}` {A_CONFLICT}: the platform saw that delivery and "
+        "refused it for holding something newer, so re-sending the same instant asks the same "
+        "question and gets the same answer — this week, and every week after it. D16 keeps the "
+        "stored bytes for the row whose outcome is unknown (a NULL status) and gives this one a "
+        "fresh delivery, which is later than whatever the platform holds and therefore heals the "
+        "column by itself."
+    )
+    delivered = datetime.fromisoformat(stamped)
+    assert before - A_TOLERANCE <= delivered <= after + A_TOLERANCE, (
+        f"The delivery went out stamped {stamped!r}, and real time around the call ran from "
+        f"{before!r} to {after!r}. It is not the stored instant, which the assertion above "
+        "settles, but it is not this run's real-time instant either — and D6 makes that the one "
+        "thing a fresh delivery may carry, because the platform's ordering rule compares it "
+        "against what it already holds."
+    )
+    rows = grade_sync_rows.for_pair(book.id, student.user_id)
+    assert len(rows) == 2, (
+        f"There are {len(rows)} `grade_sync` rows after a refused delivery was answered with a "
+        f"fresh one: {rows}. ADR 0124 appends a row per post and never rewrites the one before it, "
+        "so the refusal has to still be there — it is what tells an operator the column was wrong "
+        "for a week and what says when it stopped being."
+    )
+    assert outcome_of(rows[0], sweep_contract) == outcomes["posted"], (
+        f"The newest row carries outcome {outcome_of(rows[0], sweep_contract)!r} after a delivery "
+        "the platform accepted. A heal that is not recorded as a post leaves the next sweep "
+        "comparing against a failure and posting again for ever."
     )
 
 

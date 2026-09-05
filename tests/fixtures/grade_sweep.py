@@ -402,18 +402,37 @@ class GradeSyncRows:
             )
         return table
 
+    def calls_table(self) -> Any:
+        """`ags_call`, or a failure naming what SPEC §6.1 puts there."""
+        table = self.tables.get(AGS_CALL_TABLE)
+        if table is None:
+            pytest.fail(
+                f"There is no `{AGS_CALL_TABLE}` table (there are {sorted(self.tables)}). SPEC §6.1 "
+                "puts it at the grain of one HTTP call the tool made to a platform service, and "
+                "E3-02 builds it; criterion 2 reads it as the second witness that no call was made."
+            )
+        return table
+
     def link(self, target: str) -> str:
         """The one column on `grade_sync` whose foreign key names a row of `target`."""
-        table = self.table()
+        return self.link_on(self.table(), target)
+
+    def call_link(self, target: str) -> str:
+        """The same on `ags_call` — §6.1's row names the section whose call it records."""
+        return self.link_on(self.calls_table(), target)
+
+    def link_on(self, table: Any, target: str) -> str:
+        """The one column on `table` whose foreign key names a row of `target`."""
         found = sorted(
             {key.parent.name for key in table.foreign_keys if key.column.table.name == target}
         )
         if len(found) != 1:
             pytest.fail(
-                f"`{GRADE_SYNC_TABLE}` has {len(found)} foreign keys into `{target}` ({found}); it "
+                f"`{table.name}` has {len(found)} foreign keys into `{target}` ({found}); it "
                 f"references {sorted({key.column.table.name for key in table.foreign_keys})}. SPEC "
-                "§8 gives each row exactly one student and one section, and these tests address "
-                "rows through those two columns."
+                "§8 gives each `grade_sync` row exactly one student and one section, and §6.1 puts "
+                "`ags_call` at the grain of one call about one section; these tests address rows "
+                "through those columns."
             )
         return found[0]
 
@@ -519,15 +538,46 @@ class GradeSyncRows:
 
     def calls(self) -> list[dict[str, Any]]:
         """Every `ags_call` row there is, read the same way."""
-        table = self.tables.get(AGS_CALL_TABLE)
-        if table is None:
-            pytest.fail(
-                f"There is no `{AGS_CALL_TABLE}` table (there are {sorted(self.tables)}). SPEC §6.1 "
-                "puts it at the grain of one HTTP call the tool made to a platform service, and "
-                "E3-02 builds it; criterion 2 reads it as the second witness that no call was made."
-            )
+        table = self.calls_table()
         self.rows.commit()
         return [dict(row) for row in self.rows.session.execute(table.select()).mappings()]
+
+    def durable_for(self, engine: Any, section_id: Any) -> dict[str, list[dict[str, Any]]]:
+        """Both passback tables for one section, read on a connection of its own.
+
+        **Nothing here commits, and that is the whole difference from the readers
+        above.** Every one of those ends this suite's transaction first, so a row
+        the sweep wrote and did not commit becomes durable *because a test looked
+        at it* — which is fine for every question but one. D15's question is
+        whether a section's record survives without anybody committing after the
+        run, so this opens a second connection and reads only what is committed
+        there: the same thing a worker killed between two sections would have
+        left behind.
+
+        The section link is discovered on each table rather than assumed, so a
+        schema where `ags_call` does not name its section says so here instead of
+        answering with somebody else's calls.
+        """
+        from sqlalchemy import select
+
+        grade_sync = self.table()
+        calls = self.calls_table()
+        posted_column = self.link(SECTION_TABLE)
+        called_column = self.call_link(SECTION_TABLE)
+        with engine.connect() as connection:
+            posted = [
+                dict(row)
+                for row in connection.execute(
+                    select(grade_sync).where(grade_sync.c[posted_column] == section_id)
+                ).mappings()
+            ]
+            made = [
+                dict(row)
+                for row in connection.execute(
+                    select(calls).where(calls.c[called_column] == section_id)
+                ).mappings()
+            ]
+        return {GRADE_SYNC_TABLE: posted, AGS_CALL_TABLE: made}
 
 
 # ---------------------------------------------------------------------------
@@ -582,8 +632,23 @@ class SweptWorld(GradingWorld):
             )
         return dict(found[0])
 
-    def build_on(self, section_id: Any, *, cohort: str, question_count: int) -> "SweptWorld":
-        """Give an existing section a calendar, its windows and a question set."""
+    def build_on(
+        self,
+        section_id: Any,
+        *,
+        cohort: str,
+        question_count: int,
+        questions_from: "SweptWorld | None" = None,
+    ) -> "SweptWorld":
+        """Give an existing section a calendar, its windows and a question set.
+
+        `questions_from` is how a **second** section of the same institution is
+        built: it answers through the set that world already planted rather than
+        planting one of its own. Everything else here is per-section or per-term
+        and can be seeded again — the windows hang off this section, and the
+        eighteen `week` rows hang off this section's own term — but the question
+        set is neither. See `adopt_question_set` below.
+        """
         calendar = self.calendar
         self.cohort = cohort
         self.length_weeks, self.first_term_week, start = SEEDED_COHORTS[cohort]
@@ -614,9 +679,47 @@ class SweptWorld(GradingWorld):
         self.windows = {
             course_week: self.seed_window(course_week) for course_week in self.course_weeks
         }
-        self.plant_question_set(version=1, question_count=question_count)
+        if questions_from is None:
+            self.plant_question_set(version=1, question_count=question_count)
+        else:
+            self.adopt_question_set(questions_from, question_count=question_count)
         self.rows.commit()
         return self
+
+    def adopt_question_set(self, other: "SweptWorld", *, question_count: int) -> None:
+        """Answer through the set another world in this database has already planted.
+
+        **`question_set.version` is unique across the deployment**, and that is
+        the schema saying what SPEC §3.2 says: there is one question set in force
+        for the institution, not one per section. So a second section built into
+        the same database cannot plant its own version 1 — the insert is refused —
+        and it should not want to: two sections whose students answered different
+        questions have denominators that are not comparable, which is the thing
+        §3.4's percentage is supposed to be.
+
+        Nothing is written here. The three pieces of state a world reads its
+        questions through are taken from the world that planted them, so both
+        sections' answers go through the same `question` rows, which is what
+        actually happens in a deployment.
+        """
+        if not other.questions:
+            pytest.fail(
+                "The world this one is built beside has no question set to answer through, so "
+                "there is nothing to adopt and this section's students would have no items to "
+                "complete. `build_on` plants the set for the first section of a database; a "
+                "second built before the first has nothing to share."
+            )
+        if len(other.questions) != question_count:
+            pytest.fail(
+                f"This section was asked for a {question_count}-question set and the set already "
+                f"in force carries {len(other.questions)}. The set is institution-wide and unique "
+                "by version, so two sizes in one database means a second *version* — which is a "
+                "different fixture (`plant_question_set`) and a different test: the denominator "
+                "criterion's, not this one's."
+            )
+        self.question_sets = dict(other.question_sets)
+        self.questions = dict(other.questions)
+        self.shape_of = dict(other.shape_of)
 
     # -- the clock, in dates rather than instants -----------------------------
 
@@ -720,6 +823,12 @@ def gradebooks(
     `container` is passed straight through to `ags_sections`: `False` gives a
     section with no gradebook address at all, which is criterion 8's second
     half.
+
+    **A second section of the same institution is `gradebooks.beside(book)`, not
+    a second call to this factory.** Calling it twice registers the mock platform
+    twice, which its own `uq_lti_platform_issuer_client_id` refuses before a test
+    body runs. D15's durability test is the caller: one run, two sections, one of
+    them failing.
     """
     built: list[Gradebook] = []
 
@@ -730,13 +839,70 @@ def gradebooks(
         container: str | bool = True,
         line_item: bool = True,
     ) -> Gradebook:
-        section = ags_sections(container=container)
+        return on_section(
+            ags_sections(container=container),
+            cohort=cohort,
+            question_count=question_count,
+            line_item=line_item,
+        )
+
+    def beside(
+        book: Gradebook,
+        *,
+        cohort: str = DEFAULT_COHORT,
+        question_count: int = 5,
+        container: str | bool = True,
+        line_item: bool = True,
+    ) -> Gradebook:
+        """A second gradebook on the platform the first one registered.
+
+        The factory above starts a platform per call, which for two sections of
+        one institution is refused by the registration's own uniqueness — the
+        second `lti_platform` row carries the same issuer and client id. So a
+        second section is built beside the first: same platform, same deployment,
+        same wire, its own launch context, its own AGS container and its own line
+        item.
+
+        **The cohort is the caller's and defaults to the same one**, which is safe
+        because the two sections sit in different courses: `ags_sections.beside`
+        invents a containment chain of its own, so one `lms_section_code` written
+        twice is two rows under two courses rather than E0-06's refused pair.
+
+        **The question set is the one thing above the section that is shared**,
+        because it is the one thing this build seeds that a database holds once:
+        `question_set.version` is unique deployment-wide (SPEC §3.2's set in force
+        for the institution), while the windows are this section's and the weeks
+        are its own term's. So the sibling adopts rather than plants, and both
+        sections' students answer the same `question` rows — which is what
+        happens in a deployment and is what makes their percentages comparable.
+        """
+        return on_section(
+            ags_sections.beside(book.section, container=container),
+            cohort=cohort,
+            question_count=question_count,
+            line_item=line_item,
+            questions_from=book.world,
+        )
+
+    def on_section(
+        section: Any,
+        *,
+        cohort: str,
+        question_count: int,
+        line_item: bool,
+        questions_from: SweptWorld | None = None,
+    ) -> Gradebook:
         world = SweptWorld(
             Fall2026(committed_rows.seed, committed_rows.session, metadata_tables),
             committed_rows,
         )
         world.people_chain = {"lti_platform": section.synced.registration.platform_row}
-        world.build_on(section.id, cohort=cohort, question_count=question_count)
+        world.build_on(
+            section.id,
+            cohort=cohort,
+            question_count=question_count,
+            questions_from=questions_from,
+        )
 
         created: dict[str, Any] = {}
         identifier: str | None = None
@@ -758,6 +924,7 @@ def gradebooks(
         return gradebook
 
     start.wire = ags_sections.wire  # type: ignore[attr-defined]
+    start.beside = beside  # type: ignore[attr-defined]
     yield start
 
 
