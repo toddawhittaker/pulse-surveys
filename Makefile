@@ -212,6 +212,45 @@ test: invariants ## pytest unit + integration with coverage, four workers
 	$(call banner,pytest unit + integration)
 	@pytest tests/unit tests/integration -n 4 --cov=backend/app --cov-report=term-missing
 
+# The same gate as `test` above, run under CI's configuration rather than this
+# machine's — which is not the same thing, and the difference has produced
+# CI-only failures three times (docs/MISTAKES.md entry 40).
+#
+# A developer's process holds the documented variables two ways: exported by the
+# shell, and loaded out of `.env` by `backend/migrations/env.py`, which runs in
+# the pytest process the first time a fixture applies a migration. CI has no
+# `.env` and exports none of them, so a green `make test` here does not prove the
+# pytest gate green there. This target removes that difference: the file moved
+# aside, every name `.env.example` documents unset, and then `test` unchanged.
+#
+# **Only the documented names go.** DOCKER_HOST, PATH and HOME stay, because the
+# integration tests still need a reachable Docker daemon for testcontainers. This
+# reproduces CI's configuration, not a bare login shell.
+#
+# The names come from `.env.example` rather than from a list here, so a variable
+# added to that file is scrubbed by the next run of this target with no edit —
+# the list that goes stale is the one nothing derives.
+#
+# The restore is a trap rather than a line at the end, so a failing run, a
+# collection error and a Ctrl-C all give the file back; it is guarded on the
+# stash existing, so it is also correct when there was no `.env` to move.
+.PHONY: test-as-ci
+test-as-ci: ## `make test` with .env moved aside and every documented variable unset — CI's configuration
+	$(call banner,pytest gate under CI's configuration (no .env, no documented variables))
+	@set -e; \
+	stash=".env.test-as-ci.$$$$"; \
+	trap 'if [ -f "$$stash" ]; then mv -f "$$stash" .env; fi' EXIT INT TERM; \
+	if [ -f .env ]; then \
+		mv .env "$$stash"; \
+		echo "    .env moved aside as $$stash — restored when this run ends"; \
+	fi; \
+	scrub=""; \
+	for name in $$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' .env.example); do \
+		scrub="$$scrub -u $$name"; \
+	done; \
+	echo "    unset for this run:$$scrub"; \
+	env $$scrub $(MAKE) test
+
 .PHONY: e2e
 # Enforcing since E0-18: the specs exist, so this runs the suite unconditionally
 # — an empty tests/e2e fails loudly rather than skipping. It assumes the Compose

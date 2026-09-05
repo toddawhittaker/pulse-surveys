@@ -288,3 +288,34 @@ def configured_env(
     for name, value in documented_env.items():
         monkeypatch.setenv(name, value)
     return dict(documented_env)
+
+
+@pytest.fixture
+def unconfigured_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    documented_env: dict[str, str],
+) -> dict[str, str]:
+    """A process environment that satisfies no documented variable at all.
+
+    The opt-out from `documented_environment_baseline` in `tests/conftest.py`, which
+    lays `.env.example`'s values down for every test in the session (FIX-03). A test
+    whose subject is what an *unconfigured* application does has to state that, or
+    the baseline answers for it and the test reports a refusal that could no longer
+    happen.
+
+    **The order is the whole fixture.** The working directory moves first, because
+    `Settings` reads `.env` through `env_file` and the repository root has one on a
+    developer's machine: names deleted from the process and then read back out of
+    that file is the same false green, arriving by the other door. Then every name
+    `.env.example` documents is removed. Both halves are `monkeypatch`'s, so the
+    baseline is back in place at teardown without this fixture knowing what it held.
+
+    Returns the names it cleared, so a test can assert it cleared something — an
+    `.env.example` that failed to parse would clear nothing and leave a refusal test
+    passing against a fully configured process.
+    """
+    monkeypatch.chdir(tmp_path)
+    for name in documented_env:
+        monkeypatch.delenv(name, raising=False)
+    return dict(documented_env)
