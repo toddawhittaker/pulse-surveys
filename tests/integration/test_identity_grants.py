@@ -3642,17 +3642,35 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
 #     edit (E0-05's `lms_` marker), which is the argument
 #     `section(lms_context_memberships_url)` already carries one line up.
 #
-# **`section(ags_line_item_url)` is deliberately absent**, and that absence is this
-# entry's load-bearing half. E3-02 creates the column and writes nothing to it;
-# E3-05 is its writer and is the ticket that spends the privilege, with the record
-# beside it. A grant issued here would be one nothing in the tree uses, which is
-# the convenience grant this whole set exists to make visible.
+# **E3-05 spends the last one, and it is the column E3-02 deliberately left
+# unspent.** That ticket created `section.ags_line_item_url` and wrote nothing to
+# it, and this entry used to say so: "E3-05 is its writer and is the ticket that
+# spends the privilege, with the record beside it. A grant issued here would be
+# one nothing in the tree uses." E3-05 is that ticket, and this is that record.
+#
+#   - `section(ags_line_item_url)` — the id of the line item this tool creates in
+#     the platform's gradebook (SPEC §3.4, ADR 0128). It carries no `lms_` prefix
+#     because it is Pulse's own doing rather than the platform's, and it is
+#     `UPDATE` rather than `INSERT` because the section row already exists: a
+#     launch discovers the section, and the line item is created afterwards by a
+#     job. The writer is `app.services.grading::ensure_line_item` under the
+#     `grade_passback` sanction (ADR 0136), pinned in
+#     `tests/unit/test_a_sanctioned_writer_satisfies_the_chokepoint.py`.
+#
+# **The column grain is the whole point of the entry**, and it is the same
+# argument every row above rests on: the alternative is `UPDATE` on `section`
+# table-wide, which would hand this connection `lms_section_code`, `lms_context_id`
+# and ADR 0021's four derived calendar columns — a launch's discovery, revisable
+# by the grading path. It is also more than the sanction catalog can express: that
+# catalog names tables, so `grade_passback → {section}` is as narrow as it can be
+# said there, and this row is what makes the real grain a column.
 RUNTIME_COLUMN_PRIVILEGES = frozenset(
     {
         (APPLICATION_ROLE, "course", "lms_title", "UPDATE"),
         (APPLICATION_ROLE, "course", "title_is_fallback", "UPDATE"),
         (APPLICATION_ROLE, "section", "lms_context_memberships_url", "UPDATE"),
         (APPLICATION_ROLE, "section", "lms_ags_line_items_url", "UPDATE"),
+        (APPLICATION_ROLE, "section", "ags_line_item_url", "UPDATE"),
         (APPLICATION_ROLE, "user", "id", "SELECT"),
         (APPLICATION_ROLE, "enrollment", "ended_on", "UPDATE"),
         (APPLICATION_ROLE, "enrollment", "lms_window_start", "UPDATE"),
@@ -4217,9 +4235,11 @@ def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_
         "**An entry naming a column** — `…public.classification.verdict` rather than "
         "`…public.classification` — is a grant `has_table_privilege` does not report at all, so "
         "it is read out of `pg_attribute.attacl` instead. The expected set at column level is "
-        "`RUNTIME_COLUMN_PRIVILEGES`, which held nothing until E1-10 and now holds three "
-        "column-scoped `UPDATE`s and one column-scoped `SELECT`, each with its sentence. Anything "
-        "else at column grain is a "
+        "`RUNTIME_COLUMN_PRIVILEGES`, which held nothing until E1-10 and has grown by a named "
+        "ticket at a time since — E1-11's three on `enrollment`, E3-02's container address and "
+        "E3-05's line-item id — each entry carrying the sentence it comes from. A count is "
+        "deliberately not given here: it went stale twice, and the constant is the inventory. "
+        "Anything else at column grain is a "
         "widening by definition, and on an append-only table it is the whole of how append-only "
         "stops being true.\n\n"
         "The second list means this scheme has lost a grant it needs: without `SELECT` on "

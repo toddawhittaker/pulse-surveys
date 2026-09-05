@@ -276,67 +276,28 @@ def recompute_response_validity(session: Session, response: Response) -> bool:
 # ---------------------------------------------------------------------------
 
 
-# The connection this publish is made on, and it is deliberately not the one the
-# worker uses. `docs/MISTAKES.md` entry 41's three protections turned out not to be
-# enough on their own, and this is the measurement:
-#
-#     apply_async(retry=False, ignore_result=True)   against a closed port
-#         → kombu.exceptions.OperationalError after 6.04s
-#
-# `retry=False` governs the *publish* retry policy and nothing else.
-# `kombu.Connection.default_channel` — which the publish reaches through when it is
-# handed no connection — runs `_ensure_connection` with kombu's own defaults
-# (`interval_start=2, interval_step=2`), so a broker that refuses instantly is
-# retried on a schedule of its own before the publish is ever attempted. Six
-# seconds is under entry 41's twenty and over SPEC §10's 2.5-second budget for the
-# whole submit round trip, so the request is still hanging on a background
-# dependency — just less obviously.
-#
-# So the connection is made here, for this publish, with the retries off where they
-# actually live, and its socket timeouts bounded. Measured on the same closed port:
-# **0.037s**; against a blackholed address, where the refusal never comes at all,
-# **1.04s** rather than the two minutes the operating system would otherwise spend.
-# Against a broker that answers, the message is published in 0.046s.
-#
-# **Scoped to this connection and not set on `celery_app`.** A worker whose broker
-# blips must reconnect rather than give up, so `broker_transport_options` is the
-# wrong place for `max_retries: 0` — it is the request path that may not wait, and
-# only the request path.
-PUBLISH_TRANSPORT_OPTIONS = {
-    "max_retries": 0,
-    "socket_connect_timeout": 1.0,
-    "socket_timeout": 1.0,
-}
-PUBLISH_CONNECT_TIMEOUT = 1.0
-
-
 def enqueue_reclassification() -> bool:
     """Ask a worker to run the sweep below soon, and never fail or delay the request.
 
-    `docs/MISTAKES.md` entry 41 is the whole design of these lines, and each
-    protection is doing a different job:
+    `docs/MISTAKES.md` entry 41 is the whole design of these lines, and the three
+    protections that make the publish itself bounded — one attempt, a connection
+    made for the call with its retries off and its socket timeouts bounded, and no
+    result backend — are `app.jobs.celery_app.publish_once`'s, which carries the
+    measurement that says why each is there. E3-05 moved them: three request paths
+    now publish, and one shape for all three is entry 13's rule about a hazard
+    worked around in only one of the places facing it.
 
-      - **`retry=False`** — the publish is attempted once. Entry 41's incident is
-        `task.delay(...)` against a Redis that was not there holding each request
-        "for roughly twenty seconds and then raised", out of a handler that had
-        already done its own job.
-      - **a connection of this call's own, with `max_retries: 0` and bounded socket
-        timeouts** — see `PUBLISH_TRANSPORT_OPTIONS` above, which carries the
-        measurement. Without it the two protections above still leave six seconds
-        on a request that SPEC §10 gives two and a half.
-      - **`ignore_result=True`** — nothing reads this task's answer, and the result
-        backend has a connection and a retry policy of its own. A task whose result
-        nobody wants must not consult it.
+    What stays here is the half that is this caller's:
+
       - **the broad `except`** — the submission is already stored and committed by
         the time this runs, and the one thing that must not happen is a student
         being told their week failed because a queue was unavailable. kombu,
         redis-py and Celery each raise their own family here, and an enumerated
         list of them is a list that goes stale into a failed submission.
-
-    **The scheduled entry is what covers the gap.** `app.jobs.schedules` runs the
-    same sweep hourly, so a publish that failed costs at most an hour of a floored
-    verdict standing — which is exactly the trade entry 41's rule describes. The
-    failure is logged at error level, which is the visibility.
+      - **The scheduled entry is what covers the gap.** `app.jobs.schedules` runs
+        the same sweep hourly, so a publish that failed costs at most an hour of a
+        floored verdict standing — which is exactly the trade entry 41's rule
+        describes. The failure is logged at error level, which is the visibility.
 
     Answers whether the publish went out, for a caller that wants to say so; no
     caller has to.
@@ -344,15 +305,11 @@ def enqueue_reclassification() -> bool:
     # Imported here rather than at module scope because `app.jobs.tasks` imports
     # this module: the task is a thin wrapper over these functions, so a top-level
     # import would be a cycle. Same shape as `app.services.roster_sync`'s trigger.
-    from app.jobs.celery_app import celery_app
+    from app.jobs.celery_app import publish_once
     from app.jobs.tasks import reclassify_floored_comments as task
 
     try:
-        with celery_app.connection_for_write(
-            transport_options=PUBLISH_TRANSPORT_OPTIONS,
-            connect_timeout=PUBLISH_CONNECT_TIMEOUT,
-        ) as connection:
-            task.apply_async(retry=False, ignore_result=True, connection=connection)
+        publish_once(task)
     except Exception:
         logger.exception(
             "a floored classification could not be enqueued for re-classification; the "

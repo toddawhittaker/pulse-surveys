@@ -6,13 +6,34 @@ the next test." The definition of done names the two tests this module owes:
 "one integration test proving the session dependency opens and closes a
 transaction, and one asserting the rollback fixture isolates writes."
 
-The second of those is a pair rather than a single test, and it has to be. A
-test asserting that a row is *absent* passes when the row was never written,
-when the fixture handed back a connection to the wrong database, and when the
-test that was supposed to write it was never collected — `docs/MISTAKES.md`
-entry 3, which is what a lone "the row is gone" assertion is made of. So one
-test writes and proves the write landed, and the next reads and proves both that
-the write is gone and that it is looking somewhere the write could have been.
+The second of those asserts an *absence*, and an absence passes when the row was
+never written, when the fixture handed back a connection to the wrong database,
+and when whatever was supposed to write it never ran — `docs/MISTAKES.md` entry 3,
+which is what a lone "the row is gone" assertion is made of. So the write is made,
+read back, and only then rolled back, and the reader proves it is looking
+somewhere the write could have been before it says the write is gone.
+
+**It used to be two tests, and that shape was incorrect.** The writing half set a
+module global and the reading half asserted it, which makes the pair a statement
+about the order pytest happens to run them in. CI runs `pytest-xdist -n 4` under
+the default load distribution, which gives no same-worker and no ordering
+guarantee, so the two halves can land on different workers — and E3-05's added
+tests reshuffled the distribution enough to split them. The module went red in CI
+and green locally, which is this repository's known reshuffle failure shape: the
+repair is the test's own declaration, never the change that exposed it.
+
+So the pair is one test now. It drives the `db_session` fixture's **own generator
+function** — found through the plugin registry, called with the fixtures it
+declares, and resumed to run the very `finally` block that closes the session and
+rolls the transaction back — twice in a row: write and read back in the first
+lifetime, and look for what was written in the second. Nothing is copied out of
+`tests/fixtures/database.py`, deliberately: a test that re-implemented the
+fixture's body would be asserting that SQLAlchemy rolls back, not that this
+project's isolation fixture does (`docs/MISTAKES.md` entry 19). Both of the old
+guards survive — the write is required to read back before the teardown runs, and
+the second lifetime is required to see `alembic_version` before it is allowed to
+say the canary is gone — and the premise the module global used to stand in for is
+now established inside the same test, where nothing can deselect it.
 
 **"Tears down cleanly" is not asserted here, and cannot honestly be.** The
 container is torn down when the session ends, which is after the last test has
@@ -29,8 +50,9 @@ of its own, and something that has to be handed a session is not one.
 """
 
 import inspect
-from collections.abc import Callable
-from contextlib import suppress
+import sys
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from types import ModuleType
 from typing import Any
 from urllib.parse import urlsplit
@@ -73,11 +95,17 @@ POSITIONAL_PARAMETER_KINDS = (
     inspect.Parameter.POSITIONAL_OR_KEYWORD,
 )
 
-# Whether the writing half of the pair below actually ran. The reading half
-# asserts an absence, and an absence is satisfied by the write never having
-# happened — by a deselection, by a rename, by someone running the second test
-# alone to reproduce something. This makes that case say so instead of passing.
-_WRITER_RAN = False
+# Where the rollback fixture is declared, and what it is called there. Reached
+# through pytest's own plugin registry rather than with an `import` statement:
+# this module's docstring already refuses that import — "a test module importing a
+# fixtures module by name works only because of where pytest puts `tests/` on
+# `sys.path`, and a collection error is not a failing test" — and the rule holds
+# just as well for the fixture as for the named tuple it hands back.
+#
+# The name is `tests/conftest.py`'s own spelling in `pytest_plugins`, which is what
+# pytest registers the module under.
+DATABASE_FIXTURES_PLUGIN = "fixtures.database"
+ROLLBACK_FIXTURE = "db_session"
 
 
 def session_dependency_in(module: ModuleType) -> Callable[[], Any] | None:
@@ -143,6 +171,87 @@ async def resolve(value: Any) -> Any:
     question the ticket leaves open.
     """
     return await value if inspect.isawaitable(value) else value
+
+
+def the_rollback_fixtures_own_generator(request: pytest.FixtureRequest) -> Callable[..., Any]:
+    """The generator function `db_session` is declared as, not a copy of its body.
+
+    Reached rather than reimplemented, and that is the whole reason this test can
+    say anything: the subject is *this project's* isolation fixture, so a test that
+    wrote its own connect-begin-rollback would be asserting that SQLAlchemy rolls
+    back and would stay green through any change to the fixture
+    (`docs/MISTAKES.md` entry 19).
+
+    **What `@pytest.fixture` hands back has changed shape across pytest versions**
+    — the decorated function itself on older ones, a definition object with the
+    function inside it on 8.4 and after — so each known accessor is tried in turn
+    and whichever produces a generator function wins. A version that produces none
+    fails here, naming what was found, rather than erroring somewhere further in.
+
+    Every failure below is a `pytest.fail` in a helper called from a test body, so
+    an environment where the plugin is not registered reads as this test's own red
+    (`docs/MISTAKES.md` entry 44).
+    """
+    module = request.config.pluginmanager.get_plugin(DATABASE_FIXTURES_PLUGIN)
+    if module is None:
+        module = sys.modules.get(DATABASE_FIXTURES_PLUGIN)
+    if module is None:
+        pytest.fail(
+            f"pytest has no plugin registered as `{DATABASE_FIXTURES_PLUGIN}`, so this test "
+            "cannot reach the fixture it is about. `tests/conftest.py` lists it in "
+            "`pytest_plugins` under exactly that name."
+        )
+
+    declared = getattr(module, ROLLBACK_FIXTURE, None)
+    if declared is None:
+        pytest.fail(
+            f"`{DATABASE_FIXTURES_PLUGIN}` declares no `{ROLLBACK_FIXTURE}`. E0-04's definition "
+            "of done owes 'one asserting the rollback fixture isolates writes', and that "
+            "fixture is the thing being asserted about."
+        )
+
+    candidates: list[Any] = []
+    accessor = getattr(declared, "_get_wrapped_function", None)
+    if callable(accessor):
+        candidates.append(accessor())
+    candidates.append(getattr(declared, "__wrapped__", None))
+    candidates.append(declared)
+    for candidate in candidates:
+        if candidate is not None and inspect.isgeneratorfunction(candidate):
+            return candidate
+
+    pytest.fail(
+        f"`{DATABASE_FIXTURES_PLUGIN}.{ROLLBACK_FIXTURE}` is {declared!r}, and none of the "
+        "accessors this test knows about got a generator function out of it. The fixture "
+        "yields a session and rolls its transaction back afterwards, so a non-generator here "
+        "means either the fixture stopped having a teardown half — which is the property "
+        "under test — or pytest has changed how a fixture is stored again, in which case the "
+        "accessor list in `the_rollback_fixtures_own_generator` is the one line that changes."
+    )
+
+
+@contextmanager
+def a_rollback_session(request: pytest.FixtureRequest) -> Iterator[Any]:
+    """One whole lifetime of the real `db_session` fixture, set up and torn down.
+
+    The arguments are filled from the fixture's own signature through
+    `request.getfixturevalue`, so a parameter added to it later is supplied rather
+    than turning this into a `TypeError` about a test (`docs/MISTAKES.md` entry 22).
+
+    The exit resumes the generator, which is exactly what pytest does at teardown:
+    it runs the `finally` block that closes the session, rolls the transaction back
+    and closes the connection. Nothing here decides *how* the fixture isolates —
+    only that its own teardown has run.
+    """
+    make = the_rollback_fixtures_own_generator(request)
+    arguments = [request.getfixturevalue(name) for name in inspect.signature(make).parameters]
+    generator = make(*arguments)
+    session = next(generator)
+    try:
+        yield session
+    finally:
+        with suppress(StopIteration):
+            next(generator)
 
 
 @pytest.fixture
@@ -243,65 +352,80 @@ async def test_the_session_dependency_opens_and_closes_a_transaction(
     )
 
 
-def test_a_write_through_the_rollback_fixture_lands_within_the_test(db_session: Any) -> None:
-    """The writing half of the isolation pair, which has to prove it wrote.
+def test_a_write_in_one_rollback_session_is_gone_from_the_next(
+    request: pytest.FixtureRequest,
+) -> None:
+    """Criterion 3's second half: per-test isolation, in one test rather than two.
 
-    On its own this asserts something nearly trivial — an insert is readable by
-    the transaction that made it. Its job is to make the next test mean
-    something: if the write silently did not happen, "the row is gone" is true
-    for the wrong reason, and the pair would report isolation that nothing had
-    tested.
+    "A test that writes a row does not leak into the next test." Two lifetimes of
+    the real `db_session` fixture, one after the other, driven through the
+    fixture's own generator so the teardown that runs between them is the fixture's
+    own and not this test's idea of it.
 
-    The table is created here rather than by a migration or a fixture, and that
-    is the sharper version of the criterion. Postgres keeps DDL inside the
-    transaction, so if `db_session` really rolls back, the table goes with the
-    row — and the next test can assert against a name that could not have
+    **Both of the old pair's guards are here, and neither is padding.** The write
+    is read back *before* the teardown, so "the table is gone" cannot be true
+    because nothing was ever written — which is the premise the module global used
+    to stand in for, established now inside the same test where nothing can
+    deselect it. And the second lifetime has to see `alembic_version` before it is
+    allowed to say the canary is absent, because a fixture handing back a
+    connection to some other database would otherwise report perfect isolation
+    while looking at the wrong server (`docs/MISTAKES.md` entry 3, both times).
+
+    **Why it is one test now.** As a pair it was a statement about the order pytest
+    happened to run two functions in, and CI runs `pytest-xdist -n 4` under the
+    default load distribution, which promises neither an order nor a shared worker.
+    E3-05's added tests reshuffled the distribution and split the pair, and the
+    module went red in CI while staying green locally. The repair is the test's own
+    declaration; the assertion it makes is unchanged.
+
+    **The table is created inside the session rather than by a migration**, which
+    is the sharper version of the criterion: Postgres keeps DDL inside the
+    transaction, so if the fixture really rolls back then the table goes with the
+    row, and the second lifetime asserts against a name that could not have
     survived by any other route.
+
+    **The teardown is asserted to have happened**, not assumed. A `finally` that
+    stopped rolling back would leave the canary committed and the second lifetime
+    would find it; a `finally` that stopped running at all would leave the first
+    transaction open, and an uncommitted table is invisible to a second connection
+    for a reason that has nothing to do with isolation. Requiring the first
+    session to be out of its transaction is what tells those two apart.
     """
-    global _WRITER_RAN
+    with a_rollback_session(request) as first:
+        first.execute(text(CREATE_ISOLATION_CANARY))
+        first.execute(text(INSERT_ISOLATION_CANARY), {"note": ISOLATION_CANARY_NOTE})
 
-    db_session.execute(text(CREATE_ISOLATION_CANARY))
-    db_session.execute(text(INSERT_ISOLATION_CANARY), {"note": ISOLATION_CANARY_NOTE})
+        written = list(first.execute(text(SELECT_ISOLATION_CANARY)).scalars())
+        assert written == [ISOLATION_CANARY_NOTE], (
+            f"The row written in this session reads back as {written!r}. Until a write lands, "
+            "the second lifetime below cannot tell isolation from nothing having happened."
+        )
 
-    written = list(db_session.execute(text(SELECT_ISOLATION_CANARY)).scalars())
-    assert written == [ISOLATION_CANARY_NOTE], (
-        f"The row written in this test reads back as {written!r}. Until a write lands, the "
-        "test below cannot tell isolation from nothing having happened."
+    assert not first.in_transaction(), (
+        "The first session still holds an open transaction after the fixture's own teardown "
+        "ran, so nothing rolled anything back and the canary is merely invisible rather than "
+        "gone. A second connection cannot see an uncommitted table either way, which is "
+        "exactly why this is asserted here instead of being read off the absence below."
     )
 
-    _WRITER_RAN = True
+    with a_rollback_session(request) as second:
+        assert second is not first, (
+            "Both lifetimes handed back the same session object, so the second is not a fresh "
+            "one and 'the previous test's write is gone' is being asked of the transaction that "
+            "made it."
+        )
 
+        visible = second.execute(text(TABLE_EXISTS), {"name": ALEMBIC_VERSION_TABLE}).scalar()
+        assert visible is not None, (
+            f"This session cannot see `{ALEMBIC_VERSION_TABLE}`, so it is not looking at the "
+            "migrated database — and an assertion that a canary table is absent would pass for "
+            "that reason rather than because the first lifetime was rolled back."
+        )
 
-def test_the_next_test_cannot_see_what_the_previous_one_wrote(db_session: Any) -> None:
-    """Criterion 3's second half: per-test isolation, asserted from the other side.
-
-    Two guards stand in front of the assertion, and both exist because this is
-    an absence:
-
-      - the writing test above must have run, or there was never anything to
-        leak and this passes on an empty premise;
-      - this session must be able to see the schema at all, checked against
-        `alembic_version`. A fixture that handed back a connection to some other
-        database would otherwise report perfect isolation while looking at the
-        wrong server.
-    """
-    assert _WRITER_RAN, (
-        "The test that writes the canary row did not run before this one, so there is "
-        "nothing here to have leaked and this test would pass against a fixture that "
-        "isolates nothing. Run the module, not this test on its own."
-    )
-
-    visible = db_session.execute(text(TABLE_EXISTS), {"name": ALEMBIC_VERSION_TABLE}).scalar()
-    assert visible is not None, (
-        f"This session cannot see `{ALEMBIC_VERSION_TABLE}`, so it is not looking at the "
-        "migrated database — and an assertion that a canary table is absent would pass for "
-        "that reason rather than because the previous test was rolled back."
-    )
-
-    leaked = db_session.execute(text(TABLE_EXISTS), {"name": ISOLATION_CANARY_TABLE}).scalar()
-    assert leaked is None, (
-        f"`{ISOLATION_CANARY_TABLE}` still exists, so the previous test's transaction was "
-        "committed or left open rather than rolled back. Per-test isolation is what keeps a "
-        "suite's result independent of the order it runs in; without it, a test passes or "
-        "fails depending on what ran before it."
-    )
+        leaked = second.execute(text(TABLE_EXISTS), {"name": ISOLATION_CANARY_TABLE}).scalar()
+        assert leaked is None, (
+            f"`{ISOLATION_CANARY_TABLE}` still exists, so the first lifetime's transaction was "
+            "committed rather than rolled back. Per-test isolation is what keeps a suite's "
+            "result independent of the order it runs in; without it, a test passes or fails "
+            "depending on what ran before it."
+        )

@@ -84,6 +84,11 @@ boundary: `metadata_tables` is asked for by both.
     registry reached by discovery, a registered platform whose section carries the
     gradebook address a launch advertised, the `ags_call` rows a run leaves, and
     the score string and ledger string a caller hands over.
+  - `fixtures/line_item_creation.py` — E3-05: the launch door with a gradebook the
+    tool can actually reach behind it (the platform knows where the tool publishes
+    its key set, the registration carries a token endpoint, and the wire mounts the
+    container's host), the names that ticket's work order settles, the enqueue
+    recorder E1-11's debounce module used, and a broker at a closed port.
 
 Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
@@ -134,4 +139,5 @@ pytest_plugins = (
     "fixtures.signing_key_tool",
     "fixtures.grading",
     "fixtures.ags_client",
+    "fixtures.line_item_creation",
 )

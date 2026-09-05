@@ -44,6 +44,12 @@ instance below fixed — still has the three-protection shape and the same six
 seconds on the launch path. It is a shared module outside E2-08, so it is carried
 in `docs/tickets/e2/deferred.md` with a done-when rather than changed there.)*
 
+*(Closed by E3-05 on 2026-09-04, the ticket that added a second enqueue to that
+door. Both now publish through `app.jobs.celery_app.publish_once`, which is where
+the bounded connection and its measurement live, and a launch against a closed
+port is timed under SPEC §10's budget with both refusals required — so a door that
+publishes nothing cannot pass by being fast.)*
+
 *(E1-11, found by running the whole suite after every one of the ticket's own
 suites was green.*
 

@@ -962,11 +962,17 @@ def _upsert_section(
     address is the roster address's exact mirror in every line of this — same
     trigger, same writer, same "changed means the platform moved it" rule.
 
-    **`ags_line_item_url` is written nowhere here**, and that is E3-02's scope
-    rather than an omission: the column holds the id of a line item this tool has
-    not created yet, E3-04 is what creates it and E3-05 is what records the id. The
-    application role holds no `UPDATE` on that column until then, so a writer added
-    here would be refused by the database as well as by this sentence.
+    **`ags_line_item_url` is written nowhere here**, and it is not an omission: the
+    column holds the id of a line item a launch has not created, `app.lti.ags`
+    creates it, and `app.services.grading.ensure_line_item` is its only writer —
+    on a worker, after the launch, under its own sanction (ADR 0136).
+
+    **That separation is this module's own from E3-05 on**, and it is worth saying
+    plainly because it used to be the database's: the application role now holds a
+    column-scoped `UPDATE` on `ags_line_item_url`, and `launch_provisioning`'s
+    catalog entry already names `section`, so a writer added here would pass both
+    controls. What keeps the id out of a launch is that a launch has not made the
+    call that produces one.
 
     A guard refusal is logged here and travels, exactly as `_upsert_course`'s does
     — and it is the case that makes the shared savepoint load-bearing, because by

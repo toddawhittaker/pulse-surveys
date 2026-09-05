@@ -60,9 +60,11 @@ place that would show it, not a silent 500.
 **The enqueue happens after the commit, and it cannot fail the request.** A
 submission accepted on §3.3's floor still owes a model's verdict, so a sweep is
 published for it — with retries off, with the result backend out of it, and inside
-a broad `except` (`docs/MISTAKES.md` entry 41). All three of those live in
-`app.services.validity.enqueue_reclassification`, which is also what the hourly beat
-entry runs, so the request path and the schedule cannot come apart.
+a broad `except` (`docs/MISTAKES.md` entry 41). The publish is
+`app.jobs.celery_app.publish_once`, which every request path in the product
+enqueues through, and the `except` and the answer are
+`app.services.validity.enqueue_reclassification`'s — which is also what the hourly
+beat entry runs, so the request path and the schedule cannot come apart.
 """
 
 from uuid import UUID

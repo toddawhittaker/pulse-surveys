@@ -486,9 +486,10 @@ class Section(UuidPrimaryKey, Base):
     #
     # `ags_line_item_url` is the id of the line item **this tool creates** in that
     # container, which is Pulse's own doing and so carries no marker — the same
-    # split `course.level` sits on. E3-02 adds the column and E3-05 is what writes
-    # it; the application role holds no `UPDATE` on it until then, which is that
-    # ticket's paperwork rather than this one's.
+    # split `course.level` sits on. E3-02 added the column and E3-05 is what writes
+    # it: `app.services.grading.ensure_line_item` is its only writer, holding the
+    # `grade_passback` sanction and the column-scoped `UPDATE` the application role
+    # was granted for exactly this and nothing else (ADR 0136).
     #
     # Both nullable, and NULL is a **state** rather than a missing value, in the
     # same spirit as the never-synced roster above: a platform that grants this
