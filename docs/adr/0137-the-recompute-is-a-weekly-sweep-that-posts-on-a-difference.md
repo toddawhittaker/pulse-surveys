@@ -165,16 +165,29 @@ price of the two decisions above.**
   deliberate trade against recomputing a finished term from data that is no longer
   there, and it is stated here so a later ticket that wants the other behaviour
   argues for it rather than discovering it.
-- **A section that fails unexpectedly mid-post still loses its own rows.** The
-  residue of the commit grain: each section's work is one savepoint, so an
-  unexpected failure rolls that section back — a half-written section is not a
-  record anybody can read, and the alternative is committing rows about a post that
-  may never have been composed. What the per-section commit buys is that the loss
-  is *contained* to the section it happened in, instead of the walk's whole account
-  going with it. The next run recomputes that section from scratch and posts what
-  differs, so the residue is a section whose account of one run is missing rather
-  than a section that stops being posted for; what cannot be recovered is the
-  record of a post that had already reached the platform when the failure hit.
+- **A section that fails unexpectedly still loses its own rows.** The residue of
+  the commit grain: a section is a whole transaction, so an unexpected failure
+  rolls that section back — a half-written section is not a record anybody can
+  read, and the alternative is committing rows about a post that may never have
+  been composed. What the per-section commit buys is that the loss is *contained*
+  to the section it happened in, instead of the walk's whole account going with it.
+  The next run recomputes that section from scratch and posts what differs, so the
+  residue is a section whose account of one run is missing rather than a section
+  that stops being posted for; what cannot be recovered is the record of a post
+  that had already reached the platform when the failure hit. The counts the run
+  answers with under-report that section for the same reason, deliberately, so the
+  dict §6.1's console renders and the rows it sits beside say the same thing.
+- **The walk holds no savepoint, and the commit grain is why.** The sibling walk
+  in `app.services.survey_windows.derive_windows_for_all_sections` holds one
+  because its whole pass is a single transaction and a savepoint is the only way to
+  undo one section of it; here the section *is* the transaction, so a plain
+  `session.rollback()` takes back exactly the same work. The first version of this
+  decision kept both, which made the commit itself a place a run could fail with a
+  released savepoint still in hand — `savepoint.rollback()` then raised
+  `ResourceClosedError` from inside the handler meant to contain the failure, and
+  every remaining section was abandoned in silence. E3-06's security re-review
+  found it; a fix round has the defect density of the work it fixes, and this
+  residue is the record of that.
 - A difference is noticed up to a week late. A student whose score changes on
   Tuesday sees it on Monday. E3-07's development trigger runs the same sweep on
   demand for a demonstration; nothing in E3 shortens the production cadence.
