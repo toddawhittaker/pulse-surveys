@@ -12,3 +12,4 @@ for an epic.
 | 01 | [The survey page reads the way its owner asked](FIX-01-student-surface-copy.md) | `fix/student-surface-copy` | |
 | 02 | [The eval set measures fluent off-topic English](FIX-02-eval-fluent-off-topic.md) | `fix/eval-fluent-off-topic` | |
 | 03 | [Every test starts from the documented environment](FIX-03-test-env-parity.md) | `fix/test-env-parity` | |
+| 04 | [The runtime moves to Python 3.14](FIX-04-python-3-14.md) | `fix/python-3-14` | |
