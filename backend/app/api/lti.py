@@ -55,6 +55,7 @@ from app.lti.launch import (
 )
 from app.lti.registration import JWKS_PATH, NoSigningKeyError, published_key_set
 from app.services.authz import Door
+from app.services.grading import request_line_item_creation
 from app.services.provisioning import provision_from_launch
 from app.services.roster_sync import request_section_sync
 
@@ -192,6 +193,22 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
     thirty. It runs after the commit because the worker that picks the job up reads
     its own connection and would otherwise find a section this request has not
     written yet.
+
+    **And the participation column beside it** (E3-05, SPEC §3.4: one line item per
+    section, "created by the tool on first launch"). It is the same shape and
+    deliberately the same one decision: both triggers ride
+    `provision_from_launch`'s answer, so §7.3's rule about *who* may cause them —
+    an instructor yes, a leadership role only inside their own purview, a student
+    never — is computed once and this router asks nothing of its own about roles.
+    `request_line_item_creation` decides whether there is anything to ask for, and
+    it answers no for a section with no gradebook address and for one whose column
+    this tool has already recorded.
+
+    **Neither enqueue can fail this launch or delay it.** Both publish through
+    `app.jobs.celery_app.publish_once` — one attempt, on a connection made for the
+    call with its retries off and its socket timeouts bounded — and both catch
+    broadly, because by this line the launch is verified, committed and owed a
+    response (`docs/MISTAKES.md` entry 41).
     """
     settings = request.app.state.settings
     form = form_body(await request.body())
@@ -209,6 +226,7 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
     await run_in_threadpool(session.commit)
     if section_id is not None:
         await run_in_threadpool(request_section_sync, session, section_id)
+        await run_in_threadpool(request_line_item_creation, session, section_id)
     return await landing_with_session(
         claims,
         door=Door.LAUNCH,

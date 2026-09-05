@@ -4,11 +4,12 @@
 the worker reads the same clock the tool does (E2-04); `purge_launch_nonces` is
 E1-08's daily maintenance of the two launch tables, the two `sync_*` tasks are
 E1-11's roster pull, `derive_survey_windows` is E2-06's hourly reconciler over the
-weekly rhythm (§3.1), and `reclassify_floored_comments` is E2-08's async half of
-§3.3's fail-open. Summaries and grade passback (§7.4, §3.4) are E4 and E3's work,
-and each of those is a call into `app/services/` from here rather than domain logic
-written in this file — which is exactly the shape every task below takes: it opens
-a session and calls a service.
+weekly rhythm (§3.1), `reclassify_floored_comments` is E2-08's async half of
+§3.3's fail-open, and `create_line_item` is E3-05's half of §3.4's line item
+"created by the tool on first launch". Summaries and the posting of a score
+(§7.4, §3.4) are E4's and E3-06's, and each of those is a call into
+`app/services/` from here rather than domain logic written in this file — which is
+exactly the shape every task below takes: it opens a session and calls a service.
 """
 
 from datetime import UTC, datetime
@@ -20,6 +21,7 @@ from app.jobs.celery_app import celery_app
 from app.lti.in_flight import purge_expired_launch_states
 from app.lti.replay_guard import purge_expired_nonces
 from app.services import clock
+from app.services.grading import ensure_line_item
 from app.services.roster_sync import sync_all_rosters, sync_section
 from app.services.survey_windows import derive_windows_for_all_sections
 from app.services.validity import (
@@ -132,6 +134,39 @@ def sync_section_roster(section_id: str) -> None:
     settings = Settings()
     with SessionLocal() as session:
         sync_section(session, UUID(section_id), settings=settings)
+        session.commit()
+
+
+@celery_app.task
+def create_line_item(section_id: str) -> None:
+    """Create one section's participation column, or reconcile to the one already there.
+
+    SPEC §3.4's "created by the tool on first launch", which
+    `app.services.grading.request_line_item_creation` publishes after a staff
+    launch has been committed and `app.api.lti.launch` is what calls that.
+
+    A thin wrapper, like every task above: the session, the configuration and the
+    commit are this task's, and every decision — whether the section needs one, what
+    the platform is asked for, and whether the answered address may be recorded — is
+    `app.services.grading`'s.
+
+    **The section is a string on the wire and a `UUID` here**, for
+    `sync_section_roster`'s reason: a Celery argument is serialised to JSON and a
+    `UUID` is not a JSON type. Parsing it here rather than accepting either shape
+    means a caller that enqueued something else fails in the worker log with a
+    `ValueError` naming the value, instead of reaching a query that matches no
+    section at all.
+
+    **No retry, and the `AgsError` family propagates.** A platform that refused this
+    call is not more likely to accept it a second later, and the next qualifying
+    launch of the section is the retry (ADR 0135). What reaches the worker log is
+    the section, the outcome and the call — creation carries no score, no ledger
+    and no LMS user id, which is what E3's breakdown decision 10 settled the log
+    could hold.
+    """
+    settings = Settings()
+    with SessionLocal() as session:
+        ensure_line_item(session, UUID(section_id), settings=settings)
         session.commit()
 
 

@@ -1,12 +1,28 @@
-"""SPEC §3.4's participation score, computed and nothing else — E3-03.
+"""SPEC §3.4's participation score, and the gradebook column it is posted to — E3-03, E3-05.
 
-For one section, this answers what fraction of the items each enrolled student
-could have completed they have completed, and the per-week ledger that goes
-beside it. It reads the database through a sync `Session` and does nothing else:
-no network call, no AGS type, no job. Posting is E3-04's and E3-05's, and the
-schedule is E3-06's, so the arithmetic can be measured without a platform
-(`tests/unit/test_the_grading_module_reaches_no_network_ags_or_job.py` is the
-sweep that keeps it that way).
+Two halves, which is what SPEC §13 gives this file: "participation formula + AGS
+passback".
+
+**The formula** answers, for one section, what fraction of the items each
+enrolled student could have completed they have completed, and the per-week
+ledger that goes beside it. It reads the database through a sync `Session` and
+nothing else — no network call, no AGS type, no job — so the arithmetic can be
+measured without a platform. That property is unchanged and worth keeping:
+`participation_scores` and every helper under it read the database and the clock.
+
+**The line item** is at the foot of the file: SPEC §3.4's "One AGS line item per
+section: 'Pulse Participation', created by the tool on first launch". A staff
+launch asks for one through `request_line_item_creation`, a worker creates or
+reconciles to it through `ensure_line_item`, and the id the platform served is
+recorded on the section so that every later post can address it without walking a
+container again (ADR 0128, ADR 0135). Posting a *score* is still E3-06's, and the
+protocol is still `app.lti.ags`'s — what lives here is which sections get asked,
+when, and what may be written down afterwards.
+
+`tests/unit/test_the_grading_module_reaches_no_network_ags_or_job.py` sweeps this
+file for exactly the imports the second half is made of. That sweep is E3-03's
+criterion 8, written while this module held only the first half; the disagreement
+and the repair it needs are in `docs/disputes/E3-05-01.md`.
 
 ## The formula
 
@@ -49,29 +65,53 @@ dropped student that it computes for an enrolled one, so the behaviour lives in
 one place (ADR 0131).
 """
 
+import logging
 from collections import defaultdict
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Final
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+import requests
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.lti.ags import LINE_ITEM_ID_MEMBER, find_or_create_line_item
 from app.models.ai import Classification, ClassificationTask
 from app.models.base import Base
 from app.models.identity import Enrollment
+from app.models.lti import (
+    AGS_LINE_ITEM_ADDRESS_COLUMN,
+    RegistrationAddressError,
+    refuse_invalid_fetched_address,
+)
 from app.models.org import Section
 from app.models.survey import Answer, Response
 from app.models.term import Week
 from app.services import clock
+from app.services.authz import WriteSanction, guard_write, sanction_for
 from app.services.submissions import current_questions
 from app.services.survey_windows import DerivedWindow, windows_for_section
 from app.services.validity import REFUSED_VERDICT_TOKENS
 
-__all__ = ["ParticipationScore", "participation_scores"]
+__all__ = [
+    "ParticipationScore",
+    "ensure_line_item",
+    "outbound_transport",
+    "participation_scores",
+    "request_line_item_creation",
+]
+
+logger = logging.getLogger(__name__)
+
+# This module's name in `authz.SANCTIONED_WRITERS`, resolved once at import so a
+# name the catalog does not hold fails at startup rather than at the first write.
+# `app.services.roster_sync` resolves its own the same way, for the same reason.
+SANCTION: Final[WriteSanction] = sanction_for("grade_passback")
 
 # SPEC §3.4's ledger line and the character its lines are joined with.
 LEDGER_LINE = "Week {course_week}: {completed} of {total} items"
@@ -390,3 +430,210 @@ def _percentage(completed: int, total: int) -> str:
     """The canonical percentage string: one decimal place, always, rounded half up."""
     quotient = Decimal(completed) / Decimal(total) * PER_CENT
     return str(quotient.quantize(PERCENTAGE_PLACES, rounding=ROUND_HALF_UP))
+
+
+# ---------------------------------------------------------------------------
+# SPEC §3.4's line item: asked for on a launch, created by a worker (E3-05).
+# ---------------------------------------------------------------------------
+
+
+def outbound_transport() -> requests.Session | None:
+    """The HTTP transport the creation worker calls a platform over. `None` in production.
+
+    A module-level seam and not a detail: `app.lti.ags` takes its transport as an
+    argument precisely so a test can drive it, and a Celery task has no caller to
+    pass one. So the worker asks this function, and a test substitutes it — the
+    same role ADR 0101's `resolve` plays for name resolution, and the same argument
+    (`tests/fixtures/line_item_creation.py::reaching_the_platform` is the
+    substitution).
+
+    `None` is the honest production answer rather than a built session: the client
+    builds one of its own, with redirects off and its resolution pinned, and a
+    session assembled here would be a second place those decisions could be made.
+
+    **Consulted through this module, never bound at import.** `ensure_line_item`
+    calls `outbound_transport()` by name, so a substitution on
+    `app.services.grading` takes; a `from app.services.grading import
+    outbound_transport` elsewhere would bind the original and the substitution
+    would silently do nothing.
+    """
+    return None
+
+
+def request_line_item_creation(session: Session, section_id: UUID) -> bool:
+    """Ask for this section's participation column to be created, if it needs one.
+
+    SPEC §3.4's "created by the tool on first launch", from the door's side.
+    `app.api.lti.launch` calls it after a staff launch has been committed, on the
+    section `provision_from_launch` answered — which is the *only* decision point
+    about who may trigger this. §7.3's rule (an instructor launch triggers, a
+    leadership launch triggers only inside the launcher's own purview, a student
+    launch triggers nothing) is already computed there, and asking it a second time
+    here would be two answers to one question (`docs/MISTAKES.md` entry 13). The
+    ruling of 2026-09-04 makes the student half a requirement rather than a
+    default: a student launch must never cause a write to a platform's gradebook.
+
+    **Two conditions, and each is a different fact about the section** (ADR 0135):
+
+      - **No container address** — the platform advertised no AGS claim, so there
+        is nowhere to create a column and nothing a worker could do but fail. E3-02
+        settled that this is a configuration and not a fault, so it records no
+        defect; an institution that grants this tool no gradebook scope would
+        otherwise put a line on §6.3's console for every one of its sections.
+      - **An id already recorded** — the column exists and this tool knows its
+        address, so there is nothing to ask for. That check is the idempotence and
+        the retry rule in one: while the id is NULL every qualifying launch asks
+        again, and the moment one is stored no launch asks anything. It is also
+        what pays for the deliberate absence of a debounce here, since a section in
+        the steady state costs one column read per staff launch.
+
+    **It never raises and never delays the launch.** The publish goes through
+    `app.jobs.celery_app.publish_once`, so a broker that is not there refuses at
+    once rather than holding a request that has already done its own job
+    (`docs/MISTAKES.md` entry 41), and the broad `except` is what keeps a queue
+    outage from becoming a person unable to enter the product. The failure is
+    logged at error level, which is the visibility, and the next qualifying launch
+    is the retry — there is no scheduled backstop in this ticket, and ADR 0135
+    names E3-06's sweep as the one that becomes it.
+
+    Answers whether a publish went out, for a caller that wants to say so.
+    """
+    section = session.get(Section, section_id)
+    if section is None:
+        logger.warning(
+            "no section %s exists to ask a participation column for; a launch resolved an "
+            "identifier this connection cannot read back",
+            section_id,
+        )
+        return False
+    if section.lms_ags_line_items_url is None:
+        logger.info(
+            "section %s advertises no gradebook container, so no participation column was asked "
+            "for (a platform that grants no AGS scope is a state rather than a fault)",
+            section_id,
+        )
+        return False
+    if section.ags_line_item_url is not None:
+        return False
+
+    # Imported here rather than at module scope because `app.jobs.tasks` imports
+    # this module: the task is a thin wrapper over these functions, so a top-level
+    # import would be a cycle. Same shape as `app.services.roster_sync`'s trigger.
+    from app.jobs.celery_app import publish_once
+    from app.jobs.tasks import create_line_item
+
+    try:
+        publish_once(create_line_item, args=(str(section_id),))
+    # Broad on purpose, and the docstring is the argument: kombu, redis-py and
+    # Celery each raise their own family here, and an enumerated list of them is a
+    # list that goes stale into a failed launch.
+    except Exception:
+        logger.exception(
+            "section %s could not be enqueued for a participation column; the next staff launch "
+            "will ask again",
+            section_id,
+        )
+        return False
+    return True
+
+
+def ensure_line_item(
+    session: Session,
+    section_id: UUID,
+    *,
+    http: requests.Session | None = None,
+    settings: Settings | None = None,
+    resolve: Callable[[str], Sequence[str]] | None = None,
+) -> None:
+    """Create or reconcile to this section's participation column, and record its address.
+
+    The worker half of SPEC §3.4's first-launch creation, and the only writer of
+    `section.ags_line_item_url`. `app.jobs.tasks.create_line_item` is what runs it;
+    the caller owns the session and the commit.
+
+    **The row is locked first, and everything is decided under the lock.** Two
+    staff launches of one section seconds apart are ordinary — a class opening the
+    tool at the top of the hour — and both may reach a worker before either has
+    written anything. `SELECT … FOR UPDATE` makes the second wait for the first,
+    and re-reading both columns afterwards is what turns that wait into an answer:
+    the second finds the id its predecessor recorded and returns without calling
+    anything. Without the re-read the lock would only have serialised two identical
+    creates.
+
+    **No HTTP is attempted before either check.** A column that already exists and
+    a section with no gradebook are both decided off the row, so the ordinary
+    steady-state cost of this task is one locked read.
+
+    **The answered id is judged before it is stored**, by the same fetched-address
+    rules the roster address is judged by (`app.models.lti`). It is an address the
+    *platform* chose at run time, and this tool fetches it with its own credentials
+    on a schedule with nobody present — so a refusal stores nothing, logs at error,
+    and leaves the column NULL for the next qualifying launch to retry. E3-04's
+    client judges it as well, one layer down; two layers judging one untrusted
+    value is the intent rather than an oversight, and neither is written in terms of
+    the other.
+
+    **The write passes the chokepoint.** `section` is LMS-owned (SPEC §2.1, §8), so
+    the assignment is preceded by `guard_write` with this module's own catalog
+    entry — ADR 0090's rule, and ADR 0136 records why `grade_passback` holds
+    `section` and why the database narrows it to one column.
+
+    Every AGS failure is left to propagate to the worker's log: creation carries no
+    score, no ledger and no user identifier, so there is nothing in the traceback
+    that may not appear there (E3's breakdown decision 10).
+    """
+    settings = Settings() if settings is None else settings
+    section = session.get(Section, section_id, with_for_update=True)
+    if section is None:
+        logger.warning(
+            "no section %s exists to create a participation column for; it was deleted after this "
+            "job was enqueued",
+            section_id,
+        )
+        return
+    if section.ags_line_item_url is not None:
+        logger.info(
+            "section %s already records a participation column, so this run created nothing",
+            section_id,
+        )
+        return
+    if section.lms_ags_line_items_url is None:
+        logger.info(
+            "section %s advertises no gradebook container, so there is nothing to create a "
+            "participation column in",
+            section_id,
+        )
+        return
+
+    document = find_or_create_line_item(
+        session,
+        section_id,
+        http=outbound_transport() if http is None else http,
+        settings=settings,
+        resolve=resolve,
+    )
+    identifier = document.get(LINE_ITEM_ID_MEMBER)
+    if not isinstance(identifier, str) or not identifier:
+        logger.error(
+            "the platform served a participation column carrying no address of its own for "
+            "section %s, so nothing was recorded",
+            section_id,
+        )
+        return
+    try:
+        refuse_invalid_fetched_address(
+            settings.environment,
+            column=AGS_LINE_ITEM_ADDRESS_COLUMN,
+            address=identifier,
+            resolve=resolve,
+        )
+    except RegistrationAddressError:
+        logger.exception(
+            "the address the platform gave its participation column is one this environment will "
+            "not fetch, so nothing was recorded for section %s",
+            section_id,
+        )
+        return
+
+    guard_write(table="section", sanction=SANCTION)
+    section.ags_line_item_url = identifier
