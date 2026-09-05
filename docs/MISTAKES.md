@@ -346,6 +346,21 @@ the fixture was never told. And when a suite is green locally and red in CI,
 probe what each process actually holds at the failing call; do not infer it from
 the fixtures that should have set it.
 
+**In this repository the first sentence is now structural, and FIX-03 is where
+that happened.** Every test on every xdist worker starts from `.env.example`'s
+documented values, laid down by `documented_environment_baseline` in
+`tests/conftest.py` — session-scoped and autouse, so a test that declares
+nothing gets them too, which is the half no author can be relied on to notice.
+A test whose subject is an *unconfigured* application therefore has to say so,
+with `unconfigured_env` (`tests/fixtures/repo.py`); without that declaration the
+baseline answers for it and a refusal test asserts a refusal that can no longer
+happen. And `make test-as-ci` runs the pytest gate under CI's configuration —
+`.env` moved aside, every documented name unset — so the local-versus-CI half of
+this entry is one command rather than a dance. The rule above still governs
+everything the baseline does not cover: a test about a value that is *not* one
+of the documented names, every fixture that hosts a `.env`-loading tool in
+process, and any repository where nothing lays the environment down at all.
+
 ## 41. A request path inherited a background job's dependency, at that dependency's default retry policy
 
 **Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/41-a-request-path-inherited-a-background-dependency.md)

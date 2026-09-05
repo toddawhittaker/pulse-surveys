@@ -6,14 +6,22 @@ needs a name the ticket does not spell — an environment variable, a JSON key �
 the choice is made once, in a named constant, and marked as the test's choice so
 it is cheap to change. Everything below inherits that rule.
 
-Nothing lives here any more except this index. The fixtures are in
-`tests/fixtures/`, loaded as plugins by the tuple below, and a test still asks
+Nothing lives here except this index and one fixture that has to be here to do its
+job — `documented_environment_baseline`, at the foot of this file. FIX-03 makes it
+session-scoped and autouse so that every test on every xdist worker starts from
+`.env.example`'s documented values, and a fixture in a plugin module could not be
+relied on to run before a test that asks for nothing. The rest of the fixtures are
+in `tests/fixtures/`, loaded as plugins by the tuple below, and a test still asks
 for one by name — there is nothing to import. They are **not** split into
 per-directory `conftest.py` files, because they cross the unit and integration
 boundary: `metadata_tables` is asked for by both.
 
   - `fixtures/repo.py` — the repository's own files: `.env.example`, the two
-    Compose files, the CI workflow, and the Celery application lookup.
+    Compose files, the CI workflow, and the Celery application lookup. Also the two
+    environment fixtures a test states its configuration with: `configured_env`,
+    which lays the documented values down for one test, and FIX-03's
+    `unconfigured_env`, which takes them away again — the opt-out from the session
+    baseline at the foot of this file.
   - `fixtures/database.py` — E0-04: a testcontainers Postgres on the image the
     stack deploys, production's three roles, `alembic upgrade head` once per
     session, and a transaction-rollback session per test.
@@ -92,8 +100,16 @@ complete.
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
 `tests/__init__.py`, so this directory is the import root for everything under
-it.
+it. That is also what lets the import below reach `fixtures.repo` directly rather
+than through the plugin tuple — the fixture at the foot of this file needs the
+parser and the path, not a fixture.
 """
+
+import os
+from collections.abc import Iterator
+
+import pytest
+from fixtures.repo import ENV_EXAMPLE_PATH, parse_dotenv
 
 pytest_plugins = (
     "fixtures.repo",
@@ -121,3 +137,60 @@ pytest_plugins = (
     "fixtures.submit",
     "fixtures.student_read",
 )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def documented_environment_baseline() -> Iterator[dict[str, str]]:
+    """Lay `.env.example`'s documented values into `os.environ` for the whole session.
+
+    FIX-03. Application modules build `Settings()` at import time, so any test that
+    reaches one through a transitive import needs the environment laid down first.
+    The rule until now was that each test declares `configured_env`, which depends on
+    every author noticing an import chain — and `docs/MISTAKES.md` entry 40 is the
+    record of that not happening, more than once, each time green on the author's
+    machine off `.env` and red in CI, which has no `.env` at all. Under `pytest-xdist`
+    it is
+    red only on the worker where no earlier test happened to run `configured_env`
+    first, which is why it survives repeated local runs.
+
+    **Autouse and session-scoped**, so it runs once per worker process before
+    anything else, including on a worker whose whole share of the suite asks for no
+    fixture at all. It is in this file rather than in a plugin module because that is
+    the one place a fixture nobody requests is guaranteed to be collected.
+
+    **It sets values unconditionally.** Parity with CI means the documented value
+    wins over whatever the developer's shell happens to export; a fixture that needs
+    real values — the container's coordinates, a test's chosen `ENVIRONMENT` — runs
+    later and wins, which is the order that already holds today.
+
+    **It lays the documented placeholders and nothing else, so it depends on no
+    container.** `.env.example`'s `DATABASE_URL` is the uninterpolated template
+    `postgresql+psycopg://${DB_APP_USER}:...@db:5432/${DB_NAME}` — exactly what
+    `configured_env` already supplies — and SQLAlchemy builds an engine from it
+    lazily, so nothing connects. A baseline that depended on the session Postgres
+    would demand Docker for a single-test run.
+
+    **No `chdir`.** Pydantic gives the process environment priority over `env_file`,
+    and this sets every name `.env.example` documents, so a developer's own `.env`
+    cannot supply one of them; a name that file does not document has no `Settings`
+    field, which `tests/unit/test_env_example_sync.py` holds in both directions.
+
+    **Snapshot and restore rather than `monkeypatch`**, which is function-scoped and
+    cannot serve a session fixture — the same reason `fixtures/database.py`'s
+    `environment` gives, and the same idiom.
+    """
+    documented = (
+        parse_dotenv(ENV_EXAMPLE_PATH.read_text(encoding="utf-8"))
+        if ENV_EXAMPLE_PATH.is_file()
+        else {}
+    )
+    previous = {name: os.environ.get(name) for name in documented}
+    os.environ.update(documented)
+    try:
+        yield dict(documented)
+    finally:
+        for name, was_set_to in previous.items():
+            if was_set_to is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = was_set_to
