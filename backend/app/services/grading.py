@@ -763,13 +763,28 @@ def post_scores_for_all_sections(
     question every Monday for the rest of term, which is why that narrowing is part
     of the sentence rather than a detail under it.
 
-    **Each section runs inside a savepoint and is committed before the next one
-    starts** (D15). Two properties, and they are separate. The savepoint is
-    `app.services.survey_windows.derive_windows_for_all_sections`' shape: a section
-    that fails unexpectedly rolls back its own partial work and the walk carries on,
-    because one platform's bad afternoon must not leave every section after it in
-    the walk ungraded. A post the platform *refused* is not such a failure — it is
-    recorded, and the section commits with the record in it.
+    **Each section is a transaction of its own** (D15): its work is committed before
+    the next section starts, and a section that fails unexpectedly is rolled back,
+    logged and stepped over so that one platform's bad afternoon does not leave every
+    section after it ungraded. A post the platform *refused* is not such a failure —
+    it is recorded, and the section commits with the record in it.
+
+    **There is no savepoint, and its absence is the fix to a defect the commit grain
+    introduced.** `app.services.survey_windows.derive_windows_for_all_sections` holds
+    one because its whole walk is a single transaction, so a savepoint is the only
+    way to undo one section of it. Here the section *is* the transaction, so
+    `session.rollback()` takes back exactly the same work — and it is the only thing
+    that can be called after a failure arriving from the commit itself, which a
+    released savepoint cannot be rolled back after. The earlier shape held both, and
+    a commit that failed reached a handler whose first statement raised
+    `ResourceClosedError`: no log line, no rollback, no next section.
+
+    **A section whose commit fails counts as nothing rather than as what it sent.**
+    Its posts did reach the platform, and the rows describing them went back with the
+    transaction, so the returned counts and `grade_sync` agree with each other and
+    both under-report that section. Reporting the posts while holding no record of
+    them would leave §6.1's console and the table disagreeing about a run nobody can
+    reconstruct, and the next sweep re-posts what it finds no record of anyway.
 
     **The commit is per section because the rows are the record of a side effect
     that has already happened outside this process.** A score sitting in a gradebook
@@ -820,7 +835,6 @@ def post_scores_for_all_sections(
     posted = 0
     failed = 0
     for section_id in walked:
-        savepoint = session.begin_nested()
         try:
             answered = _post_one_sections_scores(
                 session,
@@ -831,7 +845,6 @@ def post_scores_for_all_sections(
                 today=today,
                 stamped_at=stamped_at,
             )
-            savepoint.commit()
             # D15. Everything this section wrote down about what it sent is durable
             # here, before the next section is touched: the scores are already in a
             # gradebook and the record of them may not depend on a walk over the rest
@@ -841,10 +854,16 @@ def post_scores_for_all_sections(
         # narrow catch would let one section whose data no longer resolves starve
         # every section after it, this week and every week after.
         except Exception as escaped:
-            # The savepoint takes this section's own partial work back — the named
-            # residue — and the rollback beside it returns the session to a state the
-            # next section can open a savepoint on, whatever the failure did to it.
-            savepoint.rollback()
+            # **One rollback, and no savepoint.** A section is a whole transaction
+            # now — the section before it committed and the section after it has not
+            # begun — so this takes back exactly the work a savepoint would have,
+            # and it is the only thing here that can be called after a *commit* has
+            # failed. A released savepoint cannot be rolled back, so the savepoint
+            # this loop used to hold turned a failed commit into a
+            # `ResourceClosedError` raised from inside this handler: the log line
+            # below never ran, the session was never returned to a usable state, and
+            # every remaining section of the institution was abandoned in silence
+            # (E3-06's security re-review).
             session.rollback()
             # **The traceback is deliberately withheld**, which is where this
             # diverges from the window reconciler's `logger.exception`. A failure
@@ -1170,17 +1189,22 @@ def _lms_user_ids(session: Session, user_ids: Sequence[UUID]) -> dict[UUID, str]
     `user.lms_user_id` — and E1-10's round-3 security review revoked that read from
     the application connection, because a connection able to make it can enumerate
     every subject that ever launched and join a response back to the person who
-    gave it. So the subject is resolved a row at a time through
-    `app.services.identity.subject_for_user`, which is ADR 0094's `SECURITY
-    DEFINER` mechanism run backwards (ADR 0139): the function answers one row's
-    value while this connection holds no privilege on the column at all.
+    gave it. So the subject comes from `app.services.identity.subject_for_user`,
+    which is ADR 0094's `SECURITY DEFINER` mechanism run backwards (ADR 0139).
 
-    A point lookup per student rather than one query for the section, because a
-    point lookup is the whole of what the door offers — and the cost is a statement
-    beside the HTTP call each of these students is about to receive anyway. A
-    student whose row has gone between the enrollment walk and this read is absent
-    from the mapping, and the caller steps over them rather than failing the
-    section they were in.
+    **That door is not a containment, and this docstring said it was.** A scalar
+    definer function is callable per row inside a `SELECT`, and this connection
+    already lists `user.id`, so for anyone composing a query the door is as wide as
+    the revoked column: ADR 0139 records the enumeration as given back rather than
+    narrowed. What it buys is auditability — one inventoried, greppable function
+    with a signature, an owner and a stated argument — and the line at a *name*,
+    which stays unreachable from here by every mechanism this scheme has.
+
+    So the call per student is a cost, not a guarantee: one statement beside the
+    HTTP post each of these students is about to receive anyway. A student whose
+    row has gone between the enrollment walk and this read is absent from the
+    mapping, and the caller steps over them rather than failing the section they
+    were in.
     """
     return {
         user_id: subject
