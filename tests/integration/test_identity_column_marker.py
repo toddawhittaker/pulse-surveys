@@ -66,6 +66,20 @@ treating a skip, an xfail or an empty collection in that pass as a failure. Do
 not count them from this paragraph — `pytest -m invariant --collect-only` is the
 only currency that sees both marking forms (`docs/MISTAKES.md` entry 35).
 
+**E3-08 adds a rule phrased over neither a column nor a row, and it is at the very
+foot of the file.** E3-06 opened `public.resolve_subject_for_user(uuid)` (ADR
+0139), a `SECURITY DEFINER` function `pulse_app` may execute, and a view that
+calls it carries `user.lms_user_id` for every row it returns. Every rule above is
+silent on that view: the function's body is a quoted string, so Postgres records
+the view's dependency on the *function* and none on the column, and the
+`pg_get_viewdef` reading above looks for whole-row spellings rather than for a
+name. `test_no_view_names_the_subject_resolving_definer` reads the same
+decompiled text for that one name. It is here rather than in a module of its own
+because it is a third currency for the same disclosure — `docs/MISTAKES.md` entry
+35, which is about a guard enumerating the currencies a privilege can be held in
+and missing the one the design deliberately uses — and a reader asking "what may a
+view read of a person" should find all three answers in one file.
+
 **E1-12 adds the first table this convention has had to reach on its own**, at the
 foot of the file. `web_login_subject` maps an IdP `(issuer, subject)` pair to a
 `person`, and neither of its two text columns is named anything the identity
@@ -3769,4 +3783,262 @@ def test_a_reached_table_recognised_by_nothing_is_reported_and_a_marked_one_is_n
         "whether the sweeps above can see anything on the table, and a whole-table marker is one "
         "of the three shapes they read — so a report that names a marked table would be asking "
         "every ticket to record an exemption for a table it has just marked correctly."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E3-08 — the third currency: a view that calls the subject-resolving definer.
+#
+# E3-06 needed a student's `sub` to put in an AGS score and `pulse_app` holds no
+# read of `user.lms_user_id`, so ADR 0139 opened
+# `public.resolve_subject_for_user(uuid)` — `SECURITY DEFINER`, owned by
+# `pulse_resolve_definer`, `EXECUTE` granted to the application role. That record
+# states plainly what it costs: "a scalar function is callable per row inside a
+# `SELECT`", so the enumeration E1-10's revocation bought is given back, and what
+# is bought for it is a name a reviewer can grep for.
+#
+# This is the rule that makes that name worth something on the read side. Every
+# guard above is blind to it, and each for its own reason:
+#
+#   - the **column-grain** sweep reads `pg_depend`, and a view calling the function
+#     records an edge to the function rather than to `user.lms_user_id`. The
+#     function's body is a quoted SQL string that Postgres does not parse into
+#     dependencies, so the column the view really returns appears in no catalog row
+#     the sweep reads;
+#   - the **whole-row** rules ask about `refobjsubid = 0` and about `alias.*` in the
+#     decompiled text, and a function call is neither;
+#   - the **join-key** rule is phrased over columns of `user`, `user_identity` and
+#     `person`, and the only column such a view need name is `user.id`, which is a
+#     structural key and allowed.
+#
+# So `CREATE VIEW weekly_report AS SELECT r.id, resolve_subject_for_user(u.id) AS
+# who FROM …` puts every respondent's LMS subject on an instructor read path with
+# every §4.1 guard in this repository green — a view is read with its owner's
+# privileges, so the grant model does not stop it either. SPEC §4 keys responses to
+# that value and forbids identity reaching an instructor or a leadership role "in
+# any view"; a subject is the value a name is resolved from through the Care door,
+# and it re-identifies a person at the platform in one step.
+# ---------------------------------------------------------------------------
+
+# The function ADR 0139 adds, by the **bare** name a decompiled definition carries.
+# `public.` is deliberately absent: `pg_get_viewdef` drops the qualification the
+# search path makes redundant, so a view written `public.resolve_subject_for_user(
+# u.id)` is stored as `resolve_subject_for_user(u.id)` and a token carrying the
+# schema would match the author's spelling and not Postgres's. The bare name
+# matches both, and over-matches a longer name containing it — which fails closed
+# and is the direction a guard should be wrong in.
+#
+# `tests/integration/test_the_roster_definers_answer_a_point_query_and_nothing_more.py`
+# spells the same function as a whole call with its casts, for a different
+# question. The two are copies for the reason `IDENTITY_NAME_FRAGMENTS` above is
+# copied three times: a test module importing a sibling test module resolves only
+# because of where pytest puts `tests/` on `sys.path`, and a collection error is
+# not a failing test. Change one, change both.
+SUBJECT_RESOLVER_FUNCTION = "resolve_subject_for_user"
+
+# Whether the migrated database really holds a function of that name. This is the
+# rule's canary rather than a schema assertion (`docs/MISTAKES.md` entry 3): the
+# sweep below is a search for one string, and a search for a name nothing in the
+# schema has is green for ever while a door under some other name stands open. If
+# ADR 0139's function is renamed, this is what says so instead of the sweep quietly
+# passing.
+SUBJECT_RESOLVER_PRESENT = """
+    SELECT count(*)
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = :name
+"""
+
+# The two views the control plants: one that calls the definer, and one that reads
+# the same table's join key and calls nothing. Named for the ticket so that one
+# surviving a fixture change is traceable to the test that made it.
+PLANTED_SUBJECT_RESOLVER_VIEW = "e3_08_planted_subject_resolver_view"
+PLANTED_JOIN_KEY_ONLY_VIEW = "e3_08_planted_join_key_only_view"
+
+
+def subject_resolver_is_present(connection: Any) -> bool:
+    """Does `public.resolve_subject_for_user` exist under exactly that name?"""
+    found = connection.execute(
+        text(SUBJECT_RESOLVER_PRESENT), {"name": SUBJECT_RESOLVER_FUNCTION}
+    ).scalar()
+    return bool(found)
+
+
+def views_naming_the_subject_resolver(connection: Any) -> list[str]:
+    """Every view whose stored definition names the subject-resolving definer.
+
+    Matched case-insensitively as a substring of the decompiled text. Postgres
+    folds an unquoted function name to lower case and this one is created
+    unquoted, so the fold is belt and braces rather than a case anybody can
+    produce — and it costs nothing, where missing one would cost the guard.
+    """
+    return sorted(
+        view
+        for view, definition in view_definitions(connection).items()
+        if SUBJECT_RESOLVER_FUNCTION in definition.lower()
+    )
+
+
+@pytest.mark.invariant
+def test_no_view_names_the_subject_resolving_definer(migrated_engine: Any) -> None:
+    """No view spends the capability ADR 0139 handed back.
+
+    The function answers one student's `sub` to a caller that already holds the
+    row id, which is what E3-06's passback needs. Inside a view it answers every
+    student's, to everyone who may read that view — and the view's reader needs no
+    privilege of their own, because a view runs with its owner's.
+
+    **Why no rule above reports it.** A view calling the function depends on the
+    *function*: the body is a quoted string, so Postgres records no dependency on
+    `user.lms_user_id` and the column-grain sweep is silent. There is no
+    whole-row reference and no `alias.*`, so both whole-row readings are silent.
+    The only column such a view need name on `user` is `id`, which
+    `JOIN_KEY_COLUMNS` allows by design. Three guards, three different reasons,
+    one uncovered door — `docs/MISTAKES.md` entry 35 one level out from the
+    incident that wrote it.
+
+    **The mutation this exists to survive**: `resolve_subject_for_user` planted
+    into the definition of any one view in the migrated database — as a select-list
+    item, in a `WHERE` clause, or under an alias — turns this red and names the
+    view. `test_a_view_that_calls_the_subject_resolving_definer_is_flagged` is the
+    same mutation planted and required, so the sweep is proved able to *find* the
+    name rather than trusted because it reports none.
+
+    **Two non-vacuity guards run first and a third is the canary.** The scan is
+    over the views that exist, so an empty catalog satisfies "none of them names
+    it" perfectly; a `pg_get_viewdef` answering empty strings satisfies it too, and
+    would be a scan that had gone blind rather than a schema that is clean; and a
+    search for a *name* is green for ever if the name is wrong, so the function is
+    required to exist under exactly the name being searched for.
+
+    **What it cannot see, said rather than implied** (`docs/MISTAKES.md` entry 14).
+    A second function that wraps this one: its body is a quoted string too, so a
+    view calling the wrapper carries neither name in its own definition. A `.sql`
+    file under `backend/app/views_sql/` that no revision has executed — this reads
+    the migrated database, exactly as the `pg_depend` rules above do, and
+    `test_identity_separated_views.py` is where the file-side half of that pair
+    lives. A view outside the `public` schema, which every sweep in this module is
+    scoped to and which nothing in this deployment creates. And anything that
+    reaches the function outside a view: application code, a materialised report
+    built by a job, a `SECURITY DEFINER` function of its own. Those are other doors
+    with other guards; this one is about views.
+    """
+    with migrated_engine.connect() as connection:
+        views = public_views(connection)
+        definitions = view_definitions(connection)
+        resolver_present = subject_resolver_is_present(connection)
+        naming = views_naming_the_subject_resolver(connection)
+
+    assert views, (
+        "The migrated database holds no view in `public`, so this sweep looked at nothing and "
+        "would report success. `test_identity_separated_views.py` is where their absence is "
+        "diagnosed."
+    )
+    assert any(definition.strip() for definition in definitions.values()), (
+        f"`pg_get_viewdef` answered nothing readable for any of the {len(views)} views in "
+        "`public`, so the text this rule searches is empty and the search below can never match. "
+        "That is a blind scan reporting a clean schema, not a clean schema."
+    )
+    assert resolver_present, (
+        f"No function called `{SUBJECT_RESOLVER_FUNCTION}` exists in `public`, so this rule is "
+        "searching every view for a name nothing in the schema has and will stay green whatever "
+        "any view does. ADR 0139 ships it in "
+        "`backend/app/views_sql/identity_resolution_v002.sql` and grants `EXECUTE` to `pulse_app`; "
+        "if it has been renamed, rename it here in the same change, and if it has been dropped "
+        "then E3-06's passback can no longer resolve a subject at all."
+    )
+
+    assert not naming, (
+        f"{naming} — each is a view whose definition calls `{SUBJECT_RESOLVER_FUNCTION}`, and that "
+        "function answers `user.lms_user_id`, the LTI `sub` SPEC §4 keys every response to. Called "
+        "once per row inside a view it hands whoever reads that view every respondent's subject, "
+        "which resolves to a named person at the platform that issued it — and a view is read with "
+        "its owner's privileges, so the revocation that keeps `pulse_app` off the column does not "
+        "stop it.\n\n"
+        "Every other identity rule in this module is green against such a view: the function's "
+        "body is a quoted string, so the catalog records a dependency on the function and none on "
+        "the column, and there is neither a whole-row reference nor a read of any column of `user` "
+        "beyond its key.\n\n"
+        "ADR 0139 opened this door for one caller — E3-06's weekly sweep, which holds a row id and "
+        "posts one score — and says in its Consequences that what the shape buys over re-granting "
+        "the column is auditability rather than containment. A view is where that name stops being "
+        "auditable: the call is made once, at migration time, and every read after it is silent. "
+        "If a read path genuinely needs a subject, it needs an argument for reaching identity at "
+        "all (SPEC §4: identity is never displayed to instructors or any leadership role, in any "
+        "view), and that argument belongs in a record rather than in a view definition."
+    )
+
+
+@pytest.mark.invariant
+def test_a_view_that_calls_the_subject_resolving_definer_is_flagged(db_session: Any) -> None:
+    """The sweep found on a subject that certainly has the property, and on one that does not.
+
+    The invariant above reports nothing on a healthy schema, which is also what a
+    sweep that has stopped working reports (`docs/MISTAKES.md` entry 3, and entry
+    35's rule that a mechanism be *found* on a subject that has it). So the
+    mutation that rule names is planted here and required to be reported: a view
+    over `user` that calls `resolve_subject_for_user` for every row — the exact
+    shape a reporting view would take if somebody needed a per-respondent key and
+    reached for the door E3-06 opened.
+
+    **The near miss is the second plant**, and it is what says the search
+    discriminates: a view over the same table reading only its primary key, which
+    is a read `JOIN_KEY_COLUMNS` allows and which every real read view in this
+    schema makes. A rule that reported it would be reporting the table rather than
+    the call, and would be turned off by the first person who read the red.
+
+    **The mutations this control kills:** the token narrowed to a spelling
+    `pg_get_viewdef` does not emit — `public.resolve_subject_for_user`, which the
+    decompiler strips back to the bare name; the scan reading a view's *output
+    column names* rather than its definition, which sees `subject` and not the
+    call; and the enumeration narrowed to views the migration created, which would
+    pass over this plant and every later one.
+
+    Both views are planted inside `db_session`'s transaction and rolled back with
+    it — Postgres puts DDL inside the transaction — so `public` is unchanged
+    afterwards and the assertions run in the same transaction as the plant.
+    """
+    session = db_session
+    connection = session.connection()
+    if not subject_resolver_is_present(connection):
+        pytest.fail(
+            f"No function called `{SUBJECT_RESOLVER_FUNCTION}` exists in `public`, so this control "
+            "cannot plant a view that calls one. ADR 0139 ships it in "
+            "`backend/app/views_sql/identity_resolution_v002.sql`, applied by revision "
+            "`f3b7d05c9e42`. Without it there is nothing to demonstrate the sweep against, and the "
+            "invariant beside this test is searching for a name the schema does not have."
+        )
+
+    user_key = primary_key_of(connection, USER_TABLE)
+    # One statement per line with its own suppression, as every other control in
+    # this file does: every value interpolated is a constant from this module or a
+    # name read out of the catalog, nothing reaches these from outside the file,
+    # and both statements are rolled back with `db_session`'s transaction.
+    #
+    # The call is written **schema-qualified**, which is the author's spelling and
+    # not the one this rule searches for. That is deliberate: `pg_get_viewdef`
+    # decompiles it back to the bare name, and a search narrowed to the qualified
+    # form would be green here — which is the second mutation this control names.
+    calling_view = f'CREATE VIEW {PLANTED_SUBJECT_RESOLVER_VIEW} AS SELECT u."{user_key}" AS user_id, public.{SUBJECT_RESOLVER_FUNCTION}(u."{user_key}") AS subject FROM public."{USER_TABLE}" u'  # noqa: S608
+    join_key_view = f'CREATE VIEW {PLANTED_JOIN_KEY_ONLY_VIEW} AS SELECT u."{user_key}" AS user_id FROM public."{USER_TABLE}" u'  # noqa: S608
+    session.execute(text(calling_view))
+    session.execute(text(join_key_view))
+
+    connection = session.connection()
+    naming = views_naming_the_subject_resolver(connection)
+
+    assert PLANTED_SUBJECT_RESOLVER_VIEW in naming, (
+        f"A view calling `{SUBJECT_RESOLVER_FUNCTION}` once per row of `{USER_TABLE}` was planted "
+        f"and the sweep did not report it; it reported {naming}. Then the invariant beside this "
+        "test reports nothing because it can see nothing, and a reporting view carrying every "
+        "respondent's LMS subject would ship through it. The likeliest causes are a search for a "
+        "schema-qualified spelling — `pg_get_viewdef` decompiles the call back to the bare name — "
+        "and an enumeration that misses a view this test has just created."
+    )
+    assert PLANTED_JOIN_KEY_ONLY_VIEW not in naming, (
+        f"The sweep reported `{PLANTED_JOIN_KEY_ONLY_VIEW}`, which reads one structural key of "
+        f"`{USER_TABLE}` and calls nothing; it reported {naming}. A rule that fires on the table "
+        "rather than on the call would name every read view in this schema — `JOIN_KEY_COLUMNS` "
+        "exists because a read view has to be able to join — and a guard that reds on the ordinary "
+        "case is a guard somebody switches off."
     )

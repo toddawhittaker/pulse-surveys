@@ -1,13 +1,22 @@
 # Entry 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 7**
+**Caught: 8**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*12 occurrences recorded; six of them are catches. This file keeps the three
-most recent instances; the rest live in git history — it is carrying five today,
-because the oldest of them and the addendum under it are one lesson and trimming
-one without the other would leave a paragraph referring to nothing.*
+*13 occurrences recorded; seven of them are catches. This file keeps the three
+most recent instances; the rest live in git history — plus the oldest catch and
+the addendum under it, which are one lesson, and trimming one without the other
+would leave a paragraph referring to nothing.*
+
+*(**A catch**, writing the E3 exit cleanup's tests, 2026-09-06. The view guards
+on identity enumerate two currencies — a column dependency and a whole-row
+reference — and ADR 0139's definer function is a third that neither sees: the
+function body is a quoted SQL string, so a view calling it records no
+dependency edge to the identity column at all. The new sweep was written with a
+planted calling view, a join-key-only near miss that must not be flagged, and a
+canary asserting a function of exactly the searched name exists — because a
+guard that only ever reports absence cannot say whether it can see anything.)*
 
 *(**A catch**, writing E3-04's tests, 2026-09-04. The ticket's criterion 6 is a
 triple per AGS route — absent token refused, wrong scope refused, right scope
@@ -43,47 +52,6 @@ the two week-axis indexes that certainly exist and to refuse a column
 (`response.first_submitted_at`) that nothing indexes. Without them, the day the
 listener was registered on the wrong event, three criteria would have gone green
 over a sweep nobody had watched.)*
-
-*(Building E2-08, 2026-09-02. Three discovery walks in one ticket's test
-machinery each reported a deliverable missing while it was present, and each
-repair widened the walk by exactly the one level the last failure exposed: a
-Celery task filtered by `__module__`, which a task proxy reports as
-`celery.local` (`docs/disputes/E2-08-02.md`); a request model required to be
-*defined* in the route module, while SPEC §13 homes it in `app/schemas/`
-(`docs/disputes/E2-08-06.md`); then the same walk again, blind to the model
-being nested behind `list[...]` in the model it did find. None of the three
-applied this entry's rule when the walk was written — a discovery that
-enumerates candidates must *find* a subject certainly present, as a control —
-so every failure was a red naming the code instead of a red naming the walk,
-and each was caught by a run rather than by reading. The repair that ended it
-closed the class: both discovery helpers now carry a control asserting they
-find something the tree certainly holds.)*
-
-*(**A catch**, writing E2-03's refusal tests, 2026-09-01. The refusal test
-asserts that the raw foreign-key-violation shape is absent from the migration's
-failure, read through a new reader that walks the server's `message_primary`,
-`message_detail` and SQLSTATE chain. Entry 35's rule turned that absence
-assertion into a second control: the same reader and the same SQLSTATE walk are
-run against a real foreign key violation and required to find it, by phrase and
-by code. Without it, a reader that returned nothing — a driver whose `diag`
-moved, a chain walk that stopped early — would have made the absence assertion
-pass against the exact defect the ticket exists to remove, and the test would
-have gone green the moment its machinery broke.)*
-
-*(**A catch**, writing the E1 re-review fix's closure sweep, 2026-08-31. The
-re-review had found M6's own defect recurring — three new confidentiality-denial
-test modules outside the isolated §4.1 pass — and the sweep written to close it
-was about to enumerate the currencies a module can hold the `invariant` marker
-in: module-level `pytestmark` and per-test decorator, both accepted. That
-enumeration reads `test_the_dev_console_names_nobody.py` as compliant while only
-one of its tests sits inside the pass, and it goes on approving the module as
-undecorated denial tests accrue to it — the role the scheme is built around,
-holding its privilege the unusual way. The entry's rule turned the enumeration
-around: pin the single currency the design uses — the module-level form — and
-refuse the rest, so a module holding its marker any other way is red until it
-adopts the form, never silently approved. The control corollary is applied too:
-the sweep's planted tree carries a module for each currency, including the
-per-test-only one, and asserts exactly which are demanded and which are found.)*
 
 *(**The catch**, writing E0-34's tests — the guard that reads
 `backend/app/views_sql/*.sql` looking for an identity column. It enumerates two

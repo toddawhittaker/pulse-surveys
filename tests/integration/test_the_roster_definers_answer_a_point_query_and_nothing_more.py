@@ -310,19 +310,43 @@ def a_subject_row(committed_rows: Any, metadata_tables: dict[str, Any]) -> Any:
 def test_the_application_role_resolves_a_subject_it_holds_and_is_still_refused_the_column(
     committed_rows: Any, a_subject_row: Any, metadata_tables: dict[str, Any]
 ) -> None:
-    """ADR 0094's whole claim, and it is a pair rather than a permission.
+    """The column refusal, and the half of ADR 0094's pair that ADR 0139 gave back.
 
-    "`pulse_app` can resolve a subject it already holds from a verified token or a
-    roster document, and can never enumerate subjects it does not."
+    ADR 0094 stated one sentence: "`pulse_app` can resolve a subject it already
+    holds from a verified token or a roster document, and can never enumerate
+    subjects it does not." The resolving half is asserted below and stands. **The
+    never-enumerate half stopped being true in E3-06**, so this docstring states
+    the position rather than repeating the claim. ADR 0139 adds
+    `public.resolve_subject_for_user(uuid)` — shipped in
+    `backend/app/views_sql/identity_resolution_v002.sql`, `EXECUTE` granted to
+    `pulse_app` — and a scalar function is callable once per row: `SELECT
+    public.resolve_subject_for_user(u.id) FROM public."user" u` reads every
+    subject in the schema on the application connection, and does it while this
+    test is green. ADR 0139's Consequences say it in its own words: "the property
+    E1-10's revocation bought is given back here, not narrowed."
 
-    **The refusing half is `invariant`-marked and is the reason this ticket needs a
-    definer at all.** Re-granting `SELECT (lms_user_id)` would make the sync a
-    two-line change and would reverse E1-10's round-3 fix: every screen's
-    connection could again list every subject that ever launched and join a
-    response back to the person who gave it. So the refusal is asserted as a
-    *refused statement* with its SQLSTATE, not as an empty result — an absence
-    passes against a table that happens to be empty, against a typo in a column
-    name, and against a query that failed for some other reason entirely.
+    **Nothing below is weakened, because the column refusal is what makes the
+    definer the only door.** A door has a name, an owner, an inventory entry and a
+    record arguing for it, so a second route to `lms_user_id` is a change somebody
+    has to make and defend; a re-granted `SELECT (lms_user_id)` is a column any
+    join in any module can pick up unremarked, and it would reverse E1-10's
+    round-3 fix wholesale. That difference is auditability rather than
+    containment, and ADR 0139 refuses to be cited as the second — but it is the
+    whole of what the refusal below still buys, and it is lost the moment the
+    grant comes back. So the refusal is asserted as a *refused statement* with its
+    SQLSTATE, not as an empty result: an absence passes against a table that
+    happens to be empty, against a typo in a column name, and against a query that
+    failed for some other reason entirely.
+
+    **What guards the returned capability is a rule about who may spend it, and it
+    is not here.** A read path that put the call inside a view would carry every
+    respondent's subject to everyone who reads that view, and the identity sweeps
+    would stay green through it: the function's body is a quoted string, so the
+    view records a dependency on the *function* and none on `user.lms_user_id`,
+    and no rule phrased over columns or over marked tables sees the name.
+    `test_no_view_names_the_subject_resolving_definer` in
+    `tests/integration/test_identity_column_marker.py` is the guard on that state,
+    read out of `pg_get_viewdef`.
 
     **The permitting half is what stops the fix being a wall.** A schema that
     refused both would satisfy every denial test in this repository and leave the
