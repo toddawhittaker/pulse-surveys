@@ -28,9 +28,11 @@ recommendation), that half lands here too, on E4-04's logic — this job then
 does two writes per walk: summaries, then any due release batch.
 
 Read first: SPEC §5.1, §3.1; breakdown decisions 2 and 6;
-`backend/app/jobs/tasks.py` and `celery_app.py` (the `publish_once` shape
-and the beat inventory test it will trip); E3-06's ticket and ADR 0137/0138
-for the sweep pattern; E4-05's contract.
+`backend/app/jobs/tasks.py`, `celery_app.py` (the `publish_once` shape) and
+`backend/app/jobs/schedules.py` (`BEAT_SCHEDULE` — the beat entry goes
+there, beside E3's Monday 02:20 passback, and the beat inventory test it
+trips); E3-06's ticket and ADR 0137/0138 for the sweep pattern; E4-05's
+contract.
 
 ## Scope
 

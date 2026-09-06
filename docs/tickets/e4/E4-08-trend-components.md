@@ -2,7 +2,8 @@
 
 **ID:** E4-08
 **Branch:** `e4/trend-components`
-**Depends on:** nothing — builds against the README's payload sketch
+**Depends on:** E4-16 for merge order only — builds day one against the
+README's payload sketch; the PR waits for the runner
 **Lane:** light
 **Security-relevant:** minimally — no data access; the one §4.1-adjacent
 duty is that nothing here invents copy (labels come from the copy modules
@@ -20,17 +21,19 @@ below, shared 1–5 y-scale, one legend). The x-axis is the course week
 rule — and week navigation's control renders here even though the page wires
 it in E4-11.
 
-This ticket also takes the carried week-eyebrow item: **WeekEyebrow cannot
-say how long a course runs** (`frontend/src/components/WeekEyebrow.tsx`).
-The report's context makes the gap visible — "WK 04" of what? — and this
-diff is already in the component's neighborhood. The carried entry's
-done-when governs.
+One wording fact to hold apart: the chart axis follows **§2.2's chart
+wording** ("WK 01…" with the quiet "TERM 04…" sub-label), while
+`WeekEyebrow`'s wording was separately fixed by the FIX-01 ruling of
+2026-09-03 as `COURSE WK NN, TERM WK NN` — that ruling governs the eyebrow
+only, and nothing here restyles the eyebrow toward the chart or the chart
+toward the eyebrow. (The eyebrow's carried course-length entry is
+deliberately not this ticket's — README decision 9 says why it passes
+through.)
 
 Read first: `docs/DESIGN_BRIEF.md`, `design/tokens.css`, SPEC §7.6 (the
 motion budget: hero line draws once, 600ms, everything else 150–220ms, all
 motion gone under `prefers-reduced-motion`), §2.2, §5.1; the payload sketch
-in this breakdown's README; the carried week-eyebrow entry via
-`carried-from-e3.md`'s pass-through list.
+in this breakdown's README; E4-16's runner conventions once merged.
 
 ## Scope
 
@@ -42,7 +45,6 @@ in this breakdown's README; the carried week-eyebrow entry via
   arithmetic in the frontend; the server supplies both numbers (E4-07's
   criterion on the week axis).
 - A gap week (null mean) renders as a gap, not a zero — a zero is a rating.
-- The WeekEyebrow course-length fix per its carried done-when.
 - Keyboard and screen-reader basics in-slice (§14.2 item 4): the chart's
   data is reachable as text (the design brief's data-table equivalent or
   aria approach — follow what it says, do not invent one).
@@ -61,9 +63,7 @@ in this breakdown's README; the carried week-eyebrow entry via
 5. Motion: the hero line's draw animation exists once, within budget, and is
    absent under `prefers-reduced-motion` — asserted at the CSS/attribute
    level.
-6. WeekEyebrow states the course length per its carried done-when, and its
-   existing usages still pass.
-7. No component in this diff fetches, imports the API client, or reads
+6. No component in this diff fetches, imports the API client, or reads
    session state — props in, DOM out.
 
 ## Known traps

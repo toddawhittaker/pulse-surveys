@@ -1,6 +1,6 @@
 # E4 — Instructor Monday report: build order
 
-Fifteen tickets decomposing SPEC §14.3's E4 entry. Each is sized for a single
+Sixteen tickets decomposing SPEC §14.3's E4 entry. Each is sized for a single
 focused session and leaves the repository in a working state: CI green,
 Compose stack healthy, nothing half-wired at a boundary. E4 is **not** a ⚠
 epic, but its entry marks one path for line-by-line human review anyway: the
@@ -26,8 +26,11 @@ the first PR that needs it); a PR that defers something adds it there in the
 same PR, and E4-15 runs the cleanup pass over the file.
 
 **Lanes in this breakdown:** four tickets are light — E4-08, E4-09, E4-10 and
-E4-11, the frontend work, which is the first light-lane work any epic has had.
-Everything else is heavy, and the reasons are structural rather than cautious:
+E4-11, the frontend work. Light lanes have precedent (E1-02, E1-03, E1-07 and
+E2-10 all rode light), and E2-10 — the student survey form — is the direct
+frontend precedent whose deferrals this breakdown inherits: the week-eyebrow
+entry and the frontend-runner entry both trace to it. Everything else is
+heavy, and the reasons are structural rather than cautious:
 the epic's substance is read paths (`backend/app/views_sql/`), services,
 routes, jobs, a migration chain and an AI task, and every one of those sits in
 a named heavy row or under `backend/app/`'s fail-closed default. Two lane
@@ -38,9 +41,16 @@ lane table makes *any path matching `*care*`* heavy wherever it lives, and
 `frontend/src/routes/care/` matches it literally. Doubt means heavy; the
 ticket is one docstring, so the cost is small.
 
+**Reviewer exception declared at breakdown**, per `review-pr`'s own rule for
+epics whose subject is a moved reviewer's specialty: **`prompt-eval` runs
+per-PR on E4-05**, the ticket that adds the epic's model task and settles the
+floor question — a floor decision that waited for the boundary pass would be
+exactly the deferral the reviewer exists to catch. The other boundary-only
+reviewers stay at the boundary (E4-15).
+
 ## Decisions ruled at breakdown
 
-Nine decisions settled before the first ticket branch, recorded here so no
+Ten decisions settled before the first ticket branch, recorded here so no
 ticket re-litigates them. None changes what the product does — SPEC §5.1 and
 §4 already say what the report shows and hides — so none carries a spec edit.
 Each is a construction decision the spec does not make; the contestable ones
@@ -76,13 +86,19 @@ ticket may depart from only by saying so.
 4. **§4.1 item 7 is asserted here as a chokepoint, and E5 flows through it.**
    E4 builds no comparison set — that is E5 — but the report payload carries
    the comparison fields from day one, populated only through one suppression
-   helper that refuses any figure computed from fewer than
-   `benchmark_min_sections_default` sections (`backend/app/config.py`, which
-   already exists). The invariant test plants a thin comparison figure and
-   proves it is suppressed at the payload boundary. E5's benchmarks route
-   through the same helper or its own invariant fails. This is what "asserted
-   from E4" can honestly mean in an epic with no benchmark data: the rule is
-   enforced where the figures will pass, not vacuously claimed. E4-07 owns it.
+   helper that enforces **both** configured minimums —
+   `benchmark_min_sections_default` and `benchmark_min_respondents_default`
+   (`backend/app/config.py`, both already exist; §11 question 1 names the
+   pair) — because a guard built against one of two thresholds is the
+   closed-set defeat `docs/MISTAKES.md` records: E5 routes a mean over three
+   sections and four respondents through it and ships a figure §5.1 means to
+   suppress. The invariant test plants figures on both sides of each minimum
+   and proves suppression *and* passage at the payload boundary — the
+   positive control is what makes the absence mean suppression rather than
+   emptiness. E5's benchmarks route through the same helper or their own
+   invariant fails. This is what "asserted from E4" can honestly mean in an
+   epic with no benchmark data: the rule is enforced where the figures will
+   pass, not vacuously claimed. E4-07 owns it.
 5. **The report payload contract is sketched in this file and frozen enough
    to build against.** The frontend tickets (E4-08 through E4-11) build
    against fixtures shaped like the sketch below and never wait on the
@@ -104,12 +120,26 @@ ticket may depart from only by saying so.
    than validating it, and E4-01 settles the details with its ADR. It merges
    before E4-11, the epic's first instructor-facing surface — the inherited
    deadline, enforced by build order rather than by a sentence.
-9. **E4 takes three candidate tickets no epic owned:** the week eyebrow that
-   cannot say how long a course runs (E4-08, which rebuilds that component's
-   context anyway), the stale Care-landing docstring (E4-13), and the launch
-   nonce purge's missing `SELECT` grant (E4-14 — taken because the carried
-   entry's owner is whichever epic next touches the runtime grants, and
-   E4-02 does).
+9. **E4 takes two candidate tickets no epic owned:** the stale Care-landing
+   docstring (E4-13), and the launch nonce purge's missing `SELECT` grant
+   (E4-14 — taken because the carried entry's owner is whichever epic next
+   touches the runtime grants, and E4-02 does). The week eyebrow's
+   course-length entry is deliberately **not** taken: its done-when puts the
+   wire half on a heavy path (`app.services.survey_read` and a schema field),
+   and its FIX-01 note says the rendering half now waits on an owner ruling
+   about where the total sits in the ruled `COURSE WK NN, TERM WK NN` string.
+   It passes through with that fact; the ruling would let a later ticket take
+   it whole.
+10. **The frontend test runner lands as E4-16, first.** E2 deliberately
+   deferred a frontend unit-test runner, with the revisit trigger "when a
+   screen's logic outgrows what the end-to-end suite pins cheaply" — and E4's
+   four component tickets are that moment: their acceptance criteria are
+   component tests, and a repository with no runner cannot execute them. The
+   runner is heavy work (root `package.json`, and a CI gate in
+   `.github/workflows/`), so it gets its own small ticket rather than
+   arriving inside a light diff as an undeclared dependency choice. E4-08,
+   E4-09 and E4-10 may cut and build on day one, but their PRs merge after
+   E4-16's.
 
 ## Build order
 
@@ -122,14 +152,15 @@ ticket may depart from only by saying so.
 | 05 | [The weekly summary task](E4-05-weekly-summary-task.md) | `e4/weekly-summary-task` | heavy | none | The gateway's third task under §5.1's contracts: prompt, typed contract, eval cases, and the floors question settled with the gate that enforces it. |
 | 06 | [The summary generation job](E4-06-summary-generation-job.md) | `e4/summary-generation-job` | heavy | 02, 05 | The Monday beat entry: per section, per closed week, per stream, generate once and store, small-N weeks included. |
 | 07 | [The report API](E4-07-report-api.md) | `e4/report-api` | heavy | 02, 03, 04 | `api/instructor.py`: the report payload, the published-week list, and §4.1 item 7's chokepoint and invariant assertion. |
-| 08 | [The trend components](E4-08-trend-components.md) | `e4/trend-components` | light | none | PulseTrendChart and TrendPair against fixture data: stacked pair, shared 1–5 scale, one legend, course-week axis with the term-week sub-label. Takes the week-eyebrow carry. |
-| 09 | [The stat components](E4-09-stat-components.md) | `e4/stat-components` | light | none | RatingHistogram, StatPair and ResponseRateBar against fixture data: this-week distributions, workload mean and median, response and validity rates. |
-| 10 | [The comment components](E4-10-comment-components.md) | `e4/comment-components` | light | none | CommentCard, AiPanel and the instructor SmallNNotice against fixture data: grouped lists led by their summaries, empty-group notice, status chips. |
+| 08 | [The trend components](E4-08-trend-components.md) | `e4/trend-components` | light | 16 (merge order only) | PulseTrendChart and TrendPair against fixture data: stacked pair, shared 1–5 scale, one legend, course-week axis with the term-week sub-label. |
+| 09 | [The stat components](E4-09-stat-components.md) | `e4/stat-components` | light | 16 (merge order only) | RatingHistogram, StatPair and ResponseRateBar against fixture data: this-week distributions, workload mean and median, response and validity rates. |
+| 10 | [The comment components](E4-10-comment-components.md) | `e4/comment-components` | light | 16 (merge order only) | CommentCard, AiPanel and the instructor SmallNNotice against fixture data: grouped lists led by their summaries, empty-group notice, status chips. |
 | 11 | [The report page](E4-11-report-page.md) | `e4/report-page` | light | 01, 07, 08, 09, 10 | InstructorMondayReport assembled: route, data fetch, week navigation, loading and error and small-N states, and the in-slice e2e path. |
 | 12 | [The report's copy, and the inventory grows over it](E4-12-report-copy-and-inventory.md) | `e4/report-copy-and-inventory` | heavy | 08, 09, 10, 11 | Aggregate-language growth over the report surface, the two gradebook strings, the credit-rule instructor half, the string convention, and the collector's symlink gap. |
 | 13 | [The Care landing docstring](E4-13-care-landing-docstring.md) | `e4/care-landing-docstring` | heavy | none | The carried one-liner: the stale docstring in `frontend/src/routes/care/` says what the landing actually is. |
 | 14 | [The nonce purge can run](E4-14-nonce-purge-grant.md) | `e4/nonce-purge-grant` | heavy | none | The carried grant defect: `pulse_app` gets what a `DELETE ... WHERE` needs, the purge is driven to completion, and the privilege record says why `SELECT` was withheld. |
 | 15 | [E4 exit](E4-15-e4-exit.md) | `e4/e4-exit` | heavy | all | §14.3's exit clause driven against a seeded diverging two-stream story; boundary reviews; the de-anonymization statement verified; `../e5/carried-from-e4.md`. |
+| 16 | [The frontend test runner](E4-16-frontend-test-runner.md) | `e4/frontend-test-runner` | heavy | none | The carried E2 deferral, whose revisit trigger this epic trips: a component-test runner, one proof test, and the CI gate that makes red mean stop. |
 
 ## Dependency graph
 
@@ -138,9 +169,9 @@ ticket may depart from only by saying so.
 02 ─┬─ 04 ─┬─ 07 ─┐          │
 03 ─┼──────┘      ├── 11 ── 12 ── 15
 05 ─┴─ 06         │
-08 ───────────────┤
-09 ───────────────┤
-10 ───────────────┘
+16 ─┬─ 08 ────────┤
+    ├─ 09 ────────┤
+    └─ 10 ────────┘
 13 ─────────────────────────────── (free-standing, any time)
 14 ─────────────────────────────── (free-standing, any time)
 ```
@@ -148,12 +179,15 @@ ticket may depart from only by saying so.
 (07 needs 02, 03 and 04; 06 needs 02 and 05 and feeds nothing but the data
 E4-11 renders — the page tolerates an absent summary row, so 06 is not on
 11's critical path, but 15's exit drive needs it. 01's edge into 11 is the
-inherited deadline, not a code dependency. 12 reads the strings 08–11 ship.)
+inherited deadline, not a code dependency. 16's edges into 08, 09 and 10 are
+merge order only — they build in parallel and their PRs wait. 12 reads the
+strings 08–11 ship.)
 
-**Nine starts run in parallel on day one:** 01, 02, 03, 05, 08, 09, 10, 13
-and 14 are all free-standing. The standing rules for parallel builds govern:
-partition sequential identifiers up front, no two tickets touching the same
-file, migration chains re-pointed at merge. The three migration-adding
+**Ten tickets cut on day one:** 01, 02, 03, 05, 13, 14 and 16 are
+free-standing, and 08, 09 and 10 build beside them against fixtures, merging
+after 16. The standing rules for parallel builds govern: partition
+sequential identifiers up front, no two tickets touching the same file,
+migration chains re-pointed at merge. The three migration-adding
 tickets are 02, 03 and 14; they take chain slots in that order off head
 `c4a8e51db9f3`, and whichever merges later re-points, as E3-01 did. ADR
 numbers are assigned per wave at cut time, next free 0144; MISTAKES next
@@ -219,7 +253,8 @@ it. The entries' own done-whens govern; the tickets point at them.
 | The credit-rule explanation, instructor half | E4-12, scoped to what the report actually shows |
 | The copy collector's symlinked-directory gap | E4-12 |
 | The rendered student surface's string convention | E4-12 |
-| The week eyebrow's course length | E4-08 |
+| The week eyebrow's course length | not taken — decision 9 says why (the wire half is heavy-lane work and the rendering half waits on an owner ruling); passes through with that fact |
+| The frontend unit-test runner (E2's deferral, revisit trigger now tripped) | E4-16 |
 | The stale Care-landing docstring | E4-13 |
 | The daily purge of the launch replay ledger cannot run | E4-14 |
 
@@ -228,8 +263,10 @@ Everything else in `carried-from-e3.md` — the roster token dial, the
 test, `post_score`'s return, the provisioning docstring, the rehoming
 proposal, the clock-route origin check, the runbook, `PERSON_TABLES`, the
 TypeScript 7 wait, the session-read sweep's limits, the rewound-clock family,
-the ruff target version, and the denial-module collection floor — is owned by
-later epics or by paths E4 does not touch, and passes through to
+the ruff target version, the denial-module collection floor, and the week
+eyebrow's course length (re-carried with decision 9's fact) — is owned by
+later epics, by paths E4 does not touch, or by a ruling not yet made, and
+passes through to
 `../e5/carried-from-e4.md` at E4-15 under the same completeness rule E3 used.
 Two get re-checked at exit rather than merely re-listed: the session-read
 sweep (does it reach the new report modules) and `PERSON_TABLES` (asked of

@@ -2,7 +2,8 @@
 
 **ID:** E4-10
 **Branch:** `e4/comment-components`
-**Depends on:** nothing — builds against the README's payload sketch
+**Depends on:** E4-16 for merge order only — builds day one against the
+README's payload sketch; the PR waits for the runner
 **Lane:** light
 **Security-relevant:** these components render student words to instructors;
 they must render exactly what the payload hands them — no timestamp display

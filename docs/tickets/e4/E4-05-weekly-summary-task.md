@@ -4,11 +4,17 @@
 **Branch:** `e4/weekly-summary-task`
 **Depends on:** nothing
 **Lane:** heavy — `backend/app/ai/` matches no lane row and sits under
-`backend/app/`, so the fail-closed rule applies.
+`backend/app/`, so the fail-closed rule applies. Named out loud because the
+lane table's closing paragraph also says `backend/app/ai/` belongs in no
+heavy-lane row (it is a review trigger, not a lane row): the fail-closed
+paragraph still governs the lane, and doubt means heavy — a mid-build
+re-lane argument is settled here, not at the PR.
 **Security-relevant:** comment text leaves the database and goes to the AI
 provider — the same boundary the validity task already crosses, with the
 same rules: no identity accompanies it, and the output is a typed contract,
-never trusted prose. `prompt-eval` fires on the diff.
+never trusted prose. `app-security` fires on the diff per `review-pr`'s
+table, and `prompt-eval` runs per-PR on this ticket by the exception the
+epic README declares at breakdown.
 
 ## Context
 
@@ -48,11 +54,10 @@ shape end to end); `tests/evals/` layout; ADR 0002 on gate tolerances.
 - Eval cases in `tests/evals/`: the §5.1 contract as typed cases —
   criticism preserved through paraphrase, a small-N week's two comments
   still summarized, an empty week producing the contract's empty shape, a
-  mixed week where both praise and a specific complaint survive.
-- The validity eval set's fluent-off-topic gap, closed while this diff is in
-  the eval directory anyway: cases where a comment is fluent, substantive in
-  form, and about nothing ("my roommate's cat had a hard week") — the gap
-  the E3-era interactive drive found recorded as an E3 candidate.
+  mixed week where both praise and a specific complaint survive. The
+  validity set's fluent-off-topic family (ten cases, FIX-02, 2026-09-03,
+  `tests/evals/validity/cases.py`) is prior art for case design here — it
+  already exists and nothing in this ticket re-adds it.
 
 ## Acceptance criteria
 
@@ -69,14 +74,12 @@ shape end to end); `tests/evals/` layout; ADR 0002 on gate tolerances.
 4. The empty-week and small-N cases hold: two comments in, a summary out;
    zero comments in, the contract's stated empty shape out, never an
    invented theme.
-5. The fluent-off-topic validity cases are in the eval set and the validity
-   gate still clears its floors.
-6. The gate question is settled, not dodged: either this ticket sets an
+5. The gate question is settled, not dodged: either this ticket sets an
    enforcing floor for the summary task's eval metrics, or the ADR records
    why the floor waits (and for what measurement), the way E2 staged the
-   validity floors. Silence is not an option; `prompt-eval` checks for
-   exactly this.
-7. Prompt version and model id flow through the task's return so E4-06 can
+   validity floors. Silence is not an option; `prompt-eval` runs on this PR
+   by the README's declared exception and checks for exactly this.
+6. Prompt version and model id flow through the task's return so E4-06 can
    store them without re-deriving.
 
 ## Decisions this ticket settles
@@ -86,7 +89,7 @@ shape end to end); `tests/evals/` layout; ADR 0002 on gate tolerances.
   input, its shape should say so now — or the ADR should say E7 re-derives
   and why. Recommendation: carry themes with per-theme comment counts now;
   it costs one field and spares E7 a second model call over the same text.
-- **The floor question** (criterion 6). Recommendation: ship the cases
+- **The floor question** (criterion 5). Recommendation: ship the cases
   enforcing shape and content properties now, set numeric floors after the
   first real-provider measurement run, dated and owned — the E2 pattern.
 - **One call per stream or one call for both.** Two calls match "per-stream"

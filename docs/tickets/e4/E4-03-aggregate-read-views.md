@@ -30,7 +30,9 @@ Read first: SPEC §3.2, §3.3 (validity rate's definition lives there), §5.1,
 `teaching_instructor_v001.sql` (the shapes and naming conventions);
 `backend/app/services/survey_read.py`'s header (how a read module states its
 §4.1 predicate); the identity-column marker sweep in
-`tests/unit/test_identity_column_marker.py`.
+`tests/integration/test_identity_column_marker.py` (not the
+`tests/unit/test_lms_owned_column_marker.py` sweep, which is a different
+guard).
 
 ## Scope
 
@@ -95,10 +97,12 @@ Read first: SPEC §3.2, §3.3 (validity rate's definition lives there), §5.1,
 
 - **A wrong aggregate is invisible** — E3-03's warning transposed: a wrong
   mean renders as a plausible chart. Prefer asserting the forbidden state,
-  and mutate the SQL (in the migration, where mutations are live) to prove
-  the tests can fail.
-- **`docs/MISTAKES.md` entry 3:** every windowing rule asserted on both
-  sides of its boundary.
+  and verify by mutation, not by reading (`docs/MISTAKES.md` entry 3):
+  mutate the SQL in the migration, where mutations are live, to prove the
+  tests can fail — and where a test could be satisfied by emptiness, assert
+  non-emptiness first.
+- **Every windowing rule asserted on both sides of its boundary** — the
+  boundary-pair discipline the E3 formula tickets held to.
 - **The dev clock crosses currencies** — ADR 0142's lesson: course-week
   derivation under a moved dev clock must not make these views' answers
   depend on the calendar date CI runs on. Tests pin their clock.

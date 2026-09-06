@@ -25,10 +25,13 @@ refusal, driven from the session — not a parameter check.
 
 This ticket owns §4.1 item 7's assertion (breakdown decision 4): the payload
 carries the `comparison` member from day one, populated only through one
-suppression helper reading `benchmark_min_sections_default`, and the
-invariant test plants a thin comparison figure and proves suppression at the
-payload boundary. E5's real benchmarks flow through this helper or fail
-their own invariant.
+suppression helper enforcing **both** configured minimums —
+`benchmark_min_sections_default` and `benchmark_min_respondents_default`
+(§11 question 1 names the pair; a helper reading one of two thresholds is
+the closed-set defeat the mistakes ledger records). The invariant test
+plants figures on both sides of each minimum and proves suppression and
+passage at the payload boundary. E5's real benchmarks flow through this
+helper or fail their own invariant.
 
 Read first: SPEC §5.1, §4.1 (items 6 and 7), §2.2; breakdown decisions 4, 5
 and 6; the payload sketch in this breakdown's README;
@@ -66,9 +69,12 @@ read module's §4.1 predicate).
    summary table return — a test proves the service adds no field, no
    count, and no ordering information beyond them (no widening at the
    assembly layer, §4.1 item 6's spirit).
-5. The item-7 invariant: a planted comparison figure over fewer than the
-   configured minimum sections is absent from the serialized payload — and
-   the helper is the only way to populate the member, proven structurally
+5. The item-7 invariant carries its own positive control, because in E4 the
+   member is otherwise always empty and an assertion on absence alone would
+   survive deleting the helper: a planted figure clearing **both** minimums
+   appears in the serialized payload, and the same figure under either
+   minimum — sections and respondents each driven separately — is absent.
+   The helper is the only way to populate the member, proven structurally
    (the member's type is private to the helper's module, or an equivalent
    the ADR defends).
 6. An absent summary row renders as the schema's explicit absent state,

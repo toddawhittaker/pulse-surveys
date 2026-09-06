@@ -89,9 +89,13 @@ Read first: SPEC §14.2 item 6, §14.3's E4 entry and exit line; §5.1 whole
   denial-module entry's sharpest fact. The boundary record states the
   invariant count before and after E4 so a silent shrink has a named
   baseline, even though the structural floor remains carried.
-- **Seed identifiers partition like everything else** — the NURS-prefix
-  lesson (MISTAKES 48): new seed entities take names that collide with
-  nothing existing tests assert about.
+- **The seeded fixture must reach the product's own database, not only the
+  mock's** — `docs/MISTAKES.md` entry 48's actual rule, and this drive is
+  its exact shape: a platform offering a launch says the platform holds the
+  section, never that the tool will provision it. Verify the diverging
+  story's rows exist on the Pulse side before trusting a green drive.
+  Separately, new seed entities take names that collide with nothing
+  existing tests assert about.
 - **A drive on the dev clock crosses currencies** — ADR 0142 before any
   clock arithmetic in the spec's fixtures.
 - **The review-fixture worry is real at boundaries** — reviewers can leave

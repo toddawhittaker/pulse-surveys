@@ -2,7 +2,8 @@
 
 **ID:** E4-09
 **Branch:** `e4/stat-components`
-**Depends on:** nothing — builds against the README's payload sketch
+**Depends on:** E4-16 for merge order only — builds day one against the
+README's payload sketch; the PR waits for the runner
 **Lane:** light
 **Security-relevant:** minimally; the aggregate-language rules (§4.1 item 4)
 govern every label this ticket ships, and E4-12's inventory will collect
