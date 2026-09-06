@@ -477,6 +477,67 @@ def chain_row(session: Any, tables: dict[str, Any], name: str, chain: dict[str, 
     return seed_row(session, tables, name, chain)
 
 
+# The one column in this schema whose legal value depends on another column of the
+# same row: `question.stream`, which E4-02 adds. SPEC §3.2 gives the instrument
+# three answer shapes, and §5.1 groups what students write under "About the
+# instructor" and "About the course"; the column is what says which of those two a
+# question belongs to, under two `CHECK`s — a workload question carries no stream,
+# and every other kind carries one.
+#
+# **This helper fills nothing nullable**, so without the fill below every `question`
+# row it writes would be a non-workload question with a null stream, refused by the
+# first `CHECK` inside whichever fixture happened to seed one. That is the
+# late-schema-rule shape `docs/MISTAKES.md` entry 13 names — a new constraint on an
+# existing table failing dozens of tests inside their own seeding — and the tables
+# that reach `question` through a foreign key (`answer`, and `classification`
+# behind it) mean the rows are seeded by modules with nothing to do with E4.
+#
+# **A test whose subject is the stream passes its own value.** An override wins
+# here as it does everywhere else in this helper, including an override of `None`,
+# so nothing filled here is ever a value a test then reads back
+# (`docs/MISTAKES.md` entry 30): the module measuring the two `CHECK`s names both
+# columns on every insert it makes.
+QUESTION_TABLE_NAME = "question"
+QUESTION_KIND_COLUMN = "kind"
+QUESTION_STREAM_COLUMN = "stream"
+WORKLOAD_QUESTION_KIND = "workload"
+SEEDED_QUESTION_STREAM = "INSTRUCTOR"
+
+
+def enumerated_text(value: Any) -> str:
+    """The stored spelling of an enumerated value, whether it came as a member or a string.
+
+    `question.kind` is a SQLAlchemy `Enum`, so a caller may hand this helper either
+    a `QuestionKind` member or the lowercase string the database stores, and
+    `invented_value` above hands it the second. Dispatching on one spelling and
+    meeting the other is `docs/MISTAKES.md` entry 13's shape in miniature.
+    """
+    return str(getattr(value, "value", value))
+
+
+def fill_dependent_columns(table: Any, values: dict[str, Any]) -> None:
+    """Fill a nullable column whose legality depends on another column of the same row.
+
+    Called after the ordinary fill rather than inside it, so that `kind` is already
+    decided — by an override or by `invented_value` — before the stream that has to
+    agree with it is chosen. Column order in the declared table therefore does not
+    matter, which it would if this were a case inside the loop.
+
+    Two situations leave the row exactly as it was: a caller who named the column
+    itself, and a database that does not have the column yet. The second is what
+    keeps this a no-op until E4-02's migration lands.
+    """
+    if table.name != QUESTION_TABLE_NAME or QUESTION_STREAM_COLUMN in values:
+        return
+    if QUESTION_STREAM_COLUMN not in table.c:
+        return
+    kind = enumerated_text(values.get(QUESTION_KIND_COLUMN)).lower()
+    if kind == WORKLOAD_QUESTION_KIND:
+        values[QUESTION_STREAM_COLUMN] = None
+    else:
+        values[QUESTION_STREAM_COLUMN] = SEEDED_QUESTION_STREAM
+
+
 def seed_row(
     session: Any,
     tables: dict[str, Any],
@@ -554,6 +615,8 @@ def seed_row(
         if column.nullable:
             continue
         values[column.name] = invented_value(table, column)
+
+    fill_dependent_columns(table, values)
 
     statement = table.insert().values(**values).returning(*table.columns)
     try:

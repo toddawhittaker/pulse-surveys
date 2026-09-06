@@ -3760,6 +3760,17 @@ MEMBER_OF_ROLES = """
 #     here. No view over either table exists yet — E11's console is where one would
 #     be — so nothing joins a score to a person on any connection.
 #     Decided and spent in E3-02.
+#   - **E4-02 adds four tables and spends nothing.** `weekly_summary`,
+#     `moderation_state`, `release_batch` and `release_batch_member` appear in no
+#     tuple below, and their absence is the record: that ticket
+#     creates the schema E4 shares and writes no row into any of it. The writers
+#     are elsewhere — the summary job is E4-06, the release is E4-04, and every
+#     moderation writer is E6 — and each grants what it spends, because a grant
+#     issued for a writer that does not exist widens the runtime role for nobody.
+#     The equality below is what makes that absence enforced rather than intended,
+#     and `tests/integration/test_report_schema.py` asks the same question of those
+#     four tables by name, at column grain as well as table grain, so that a
+#     widening arriving with a new entry here still has to be argued for twice.
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),

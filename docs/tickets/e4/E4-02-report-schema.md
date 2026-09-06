@@ -45,10 +45,16 @@ append-only record); the `PERSON_TABLES` entry in `carried-from-e3.md`.
   the next two and re-point at merge, the E3-01 procedure).
 - The models, in whichever module §13's layout supports — a new
   `models/report.py` needs the ADR to say why no existing module fits.
-- The grants files: who writes summaries (the worker), who reads them, who
-  writes moderation state (nothing yet — the grant can wait for E6 if the
-  ADR says so), who writes release batches. Least privilege, stated
-  per-column where that is what least privilege means.
+  *(Built as `models/report.py`. ADR 0145 argues it and records what this
+  sentence assumed and should not have: §13 does not merely fail to support a
+  reporting module, it places `summary` in `ai.py`, and §8's core-table list
+  names `summary` and `moderation_action` where this ships four differently
+  named tables. That is a spec edit, raised in the pull request, and not an
+  ADR's to make.)*
+- **No grants.** This bullet asked which grants each writer needs; the
+  settled design issues none, because this ticket writes no row into any of
+  the four tables it creates and a privilege lands in the change that spends
+  it. Criterion 6 below carries the correction and the reason.
 - The `PERSON_TABLES` standing question, answered for every table this
   ticket adds, in the PR body.
 
@@ -62,14 +68,40 @@ append-only record); the `PERSON_TABLES` entry in `carried-from-e3.md`.
 3. The summary row requires `prompt_version` and `model_id` — a summary with
    no provenance is a refused insert.
 4. The moderation status has a database-enforced value set matching §5.2's
-   lifecycle vocabulary plus the initial state, and its default is the
-   initial state. A planted out-of-vocabulary write is refused.
+   lifecycle vocabulary, and the initial state is the **absence of a row**.
+   A planted out-of-vocabulary write is refused.
+
+   *(Corrected while building. This criterion asked for a column default —
+   "its default is the initial state" — and the settled design records the
+   status as an append-only record whose latest row governs, so there is no
+   column and no default: a comment with no `moderation_state` row is
+   published. That is what makes the breakdown's decision 3, "exactly one
+   value ever written during E4", a count of zero writes, and it leaves every
+   writer to E6.
+   [ADR 0145](../../adr/0145-the-report-schema-has-its-own-module-and-moderation-starts-by-absence.md)
+   weighs the mutable column this rejects. Corrected here rather than left to
+   read as a criterion nobody met — `docs/MISTAKES.md` entry 1.)*
 5. No table this ticket adds carries an identity column beyond what its ADR
    justifies, and the identity-column marker sweep still passes over the new
    surface.
-6. The grants follow the E3-02 shape: version-numbered SQL in
-   `backend/app/views_sql/`, applied by the migration, with a test asserting
-   the runtime role holds exactly the declared privileges and nothing wider.
+6. **No grant is added**, and a test asserts that neither runtime role holds
+   any privilege — at table grain and at column grain — on any of the four
+   tables this ticket creates.
+
+   *(Corrected while building. This criterion asked for the E3-02 shape:
+   version-numbered SQL in `backend/app/views_sql/`, applied by the migration,
+   with a test asserting the runtime role holds exactly the declared
+   privileges. As written it cannot be satisfied, because the settled design
+   spends nothing: E4-02 creates the schema E4 shares and writes no row into
+   any of it, so there is no grants file to version and no privilege to
+   declare. The writers grant what they spend — E4-06 for the summary, E4-04
+   for the release, E6 for every moderation state — which is the rule every
+   grants file in `backend/app/views_sql/` states and this ticket's own known
+   trap: "a grant added 'for later' is scope". So the criterion is its own
+   inverse, asserted in both currencies with a control on each probe
+   (`docs/MISTAKES.md` entry 35), and the privilege-equality record in
+   `tests/integration/test_identity_grants.py` gains the four tables at empty
+   tuples.)*
 7. The mutation battery for the schema rules runs against the migration, not
    the model (the memory of inert model-side mutations governs).
 

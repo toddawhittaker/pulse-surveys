@@ -274,6 +274,30 @@ SHAPE_OF_POSITION = {
     WORKLOAD_POSITION: "workload",
 }
 
+# Which of §5.1's two streams each of the five belongs to, and `None` for the one
+# that belongs to neither. SPEC §3.2 numbers them: Q1 and Q2 are about the
+# instructor, Q3 and Q4 about the course, and Q5 is the workload figure, which
+# §5.1 groups under nothing — the report has two comment groups, "About the
+# instructor" and "About the course", and no third.
+#
+# **Written here rather than left to the seeding walker**, which fills the column
+# with a stream that satisfies E4-02's `CHECK`s and means nothing (see
+# `fill_dependent_columns` in tests/fixtures/supervision.py). These five *are*
+# §3.2's five, so a world built here is one whose questions carry the stream they
+# really have — and every ticket from E4-03 on reads that column to decide which
+# group a comment appears in. Applied only where the column exists, so this stays
+# a no-op until E4-02's migration lands.
+STREAM_COLUMN = "stream"
+INSTRUCTOR_STREAM = "INSTRUCTOR"
+COURSE_STREAM = "COURSE"
+STREAM_OF_POSITION: dict[int, str | None] = {
+    INSTRUCTOR_RATING_POSITION: INSTRUCTOR_STREAM,
+    INSTRUCTOR_COMMENT_POSITION: INSTRUCTOR_STREAM,
+    COURSE_RATING_POSITION: COURSE_STREAM,
+    COURSE_COMMENT_POSITION: COURSE_STREAM,
+    WORKLOAD_POSITION: None,
+}
+
 # ---------------------------------------------------------------------------
 # This suite's own values. None of them is a claim about anything the system
 # decides.
@@ -629,6 +653,8 @@ class SubmitWorld:
             if conditional is not None:
                 values[REQUIRED_IF_POSITION_COLUMN] = conditional
                 values[REQUIRED_IF_AT_MOST_COLUMN] = REQUIRED_AT_MOST
+            if STREAM_COLUMN in table.c:
+                values[STREAM_COLUMN] = STREAM_OF_POSITION[position]
             self.questions[position] = self.rows.seed(QUESTION_TABLE, chain, **values)
 
     def close_the_window(self) -> None:
