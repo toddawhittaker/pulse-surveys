@@ -206,9 +206,10 @@ NON_MOCK_CLIENT_IDS = {
 # So the rule pinned below is a class: the parsed host is `localhost` — case-folded,
 # one trailing dot stripped — **or** it is an IP literal that `ipaddress` calls
 # loopback, which is the whole of `127.0.0.0/8`, `::1`, and the IPv4-mapped
-# `::ffff:127.0.0.1` — measured on Python 3.13, this repository's floor, that last
-# one answers `is_loopback` directly, and `ipv4_mapped` is the version-portable
-# route to the same answer rather than the only one.
+# `::ffff:127.0.0.1` — measured on Python 3.13 and re-measured on 3.14, this
+# repository's floor, that last one answers `is_loopback` directly, and
+# `ipv4_mapped` is the version-portable route to the same answer rather than the
+# only one.
 #
 # Spelled as they appear in a URL: an IPv6 literal is bracketed there and bare in
 # `urlsplit(...).hostname`.

@@ -239,7 +239,7 @@ services:
       #
       # The glob rather than the exact name: the store is a `shelve`, and which
       # files the interpreter's `dbm` implementation puts behind that name is
-      # not this file's business — on python 3.13 it is `dbm.sqlite3`, and the
+      # not this file's business — on python 3.14 it is `dbm.sqlite3`, and the
       # write that matters lands in `beat-schedule-wal` while `beat-schedule`
       # itself keeps the mtime it was created with. Taking the youngest of them
       # is what makes the check survive a different `dbm`. The age is printed

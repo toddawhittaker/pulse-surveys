@@ -472,7 +472,7 @@ application over HTTP and reads the status in both directions.
 
 ## 48. A known gap was recorded only in a comment in the file that worked around it
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/48-a-known-gap-was-recorded-only-in-the-file-that-worked-around-it.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/48-a-known-gap-was-recorded-only-in-the-file-that-worked-around-it.md)
 
 **Rule.** A limitation you work around goes in the deferral file the next epic
 reads — `carried-from-eN.md` or `deferred.md`, with an owner — in the same change

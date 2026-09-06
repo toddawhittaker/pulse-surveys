@@ -430,8 +430,9 @@ def is_a_loopback_host(host: str | None) -> bool:
 
     **The IPv4-mapped form is unwrapped first, deliberately, and not because
     `is_loopback` gets it wrong.** Measured on the interpreter this project pins:
-    on 3.13 `ip_address("::ffff:127.0.0.1").is_loopback` is already `True`,
-    because that version reads the mapped address through. So a check written as
+    on 3.13 and again on 3.14 `ip_address("::ffff:127.0.0.1").is_loopback` is
+    already `True`, because those versions read the mapped address through. So a
+    check written as
     "`is_loopback`, and failing that `ipv4_mapped.is_loopback`" has a second half
     that never runs here — a guard nobody has executed, which is a comment
     (`docs/MISTAKES.md` entry 9). Asking `ipv4_mapped` first gives the same
