@@ -60,9 +60,16 @@ pytestmark = pytest.mark.lti
 # in-two-runs.md` describes for mypy and this suite avoids for the same reason.
 DEFECT_QUERY_PARAM = "defect"
 
-# The fifteen wrong-launch selectors and the three near-miss/edge selectors
-# `app.wrong_launches.ALL_SELECTORS` declares, copied here as this suite's own
-# vocabulary for the reason above. If a name below stops matching the mock's
+# Every wrong-launch and near-miss/edge selector `app.wrong_launches.ALL_SELECTORS`
+# declares, copied here as this suite's own vocabulary for the reason above.
+# **Counted in prose here until E3-08, and no longer**: the sentence read "the
+# fifteen wrong-launch selectors and the three near-miss/edge selectors", which
+# went stale the first time the tuple grew and again when this round added
+# `no_roster_service`. The number was never load-bearing — the two tests below
+# compare this tuple against the served list in both directions — so it is gone
+# rather than corrected (`docs/MISTAKES.md` entry 1: a record that has to be
+# re-derived on every edit is a record that will be wrong).
+# If a name below stops matching the mock's
 # own constant, every test that selects it starts failing on the 400 refusal
 # `WrongLaunchMinter.mint` gives an unrecognised name — loudly, not silently.
 FOREIGN_SIGNATURE = "foreign_signature"
@@ -92,6 +99,20 @@ TITLELESS_CONTEXT = "titleless_context"
 # is two tests that cannot tell which rule fired — E1-07's own rule, kept here.
 TITLELESS_CONTEXT_WITH_LABEL = "titleless_context_with_label"
 
+# Added by E3-08's boundary round (R6 / LO-M5), and a near-miss fixture rather
+# than a wrong launch: a launch with no `namesroleservice` claim is **not**
+# malformed. LTI 1.3 makes each service claim independent, so a platform whose
+# administrator enabled grade passback and not roster access signs exactly this,
+# and the tool must provision the section and ask for its gradebook column anyway.
+# It is `TITLELESS_CONTEXT`'s shape one claim up — the whole claim removed rather
+# than emptied, because an absent key is what such a launch carries on the wire.
+#
+# Driven by
+# `tests/integration/test_a_staff_launch_with_no_roster_claim_still_gets_its_gradebook_column.py`,
+# which is the executed guard on the round's R6 fix in
+# `app.services.provisioning.provision_from_launch`.
+NO_ROSTER_SERVICE = "no_roster_service"
+
 ALL_SELECTORS: tuple[str, ...] = (
     FOREIGN_SIGNATURE,
     RIGHT_KEY_TAMPERED_CLAIMS,
@@ -112,6 +133,7 @@ ALL_SELECTORS: tuple[str, ...] = (
     ONLY_MENTOR_ROLE,
     TITLELESS_CONTEXT,
     TITLELESS_CONTEXT_WITH_LABEL,
+    NO_ROSTER_SERVICE,
 )
 
 # The separator E1-10 splits a context label on, and how many parts it expects:
@@ -367,7 +389,7 @@ def test_the_served_defect_vocabulary_is_the_platforms_own_all_selectors(
 def test_this_suites_copied_selector_names_are_the_ones_the_platform_serves(
     mock_platform: Any,
 ) -> None:
-    """This module's own eighteen-plus-one literals, checked against the served list.
+    """This module's own copied literals, checked against the served list.
 
     The copy at the top of this file is the one ADR 0088's consequences record
     as unenforced — "a name renamed in `app.wrong_launches` without a matching

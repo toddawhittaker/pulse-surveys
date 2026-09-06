@@ -1,11 +1,18 @@
 # Entry 8. Prescribing a fix without probing it
 
-**Caught: 7**
+**Caught: 8**
 
-*7 preventions recorded: the two set out in "What happened" below, and the five
-notes above — three from earlier reviews (E0-17, a second E0-10, E0-26) and this
-fix round's two, round 2's caught and then unmade when round 3 probed harder,
-round 3's the one that stood.*
+*8 preventions recorded: the two set out in "What happened" below, and the six
+notes above — three from earlier reviews (E0-17, a second E0-10, E0-26), E1 batch
+A's two (round 2's caught and then unmade when round 3 probed harder, round 3's
+the one that stood), and E3-08's, on a prescription that named a file that could
+not do the job.*
+
+*Owed housekeeping, not done here: this file holds six instance notes and
+`docs/MISTAKES.md` says three. It was already over before this bump, and trimming
+three paragraphs of somebody else's history as a side effect of adding one — on a
+shared file, mid fix-round — is how two branches collide. The notes are
+oldest-first; the three to keep are the last three.*
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -101,6 +108,27 @@ exposed by removing rule 6, exactly entry 9's demand made on a guard that would
 otherwise be a comment. The one-line prescription was correct; the probe is what
 let it be believed rather than argued, and it is the same fifteen minutes each
 time.)*
+
+*(In E3-08's boundary fix round, on a prescription handed to the test author, and
+the probe was one file deep. The instruction was to "extend `MockPlatform.mint`
+with a way to omit a named service claim from the `id_token`", on the stated
+ground that the fixture "already carries the E1-07 defect selector — a
+claim-omission selector is the same machinery". Read before it was written:
+`mint` never touches a claim. It POSTs an authorization request with `?defect=` and
+reads back whatever the platform signed; the selector vocabulary and every claim
+edit live in `mock-lms/app/wrong_launches.py::WrongLaunchMinter.mint`, and none of
+its nineteen selectors removes a service claim. Had the prescription been followed,
+`mint` would have grown an `omit_claim` keyword that omits nothing, and the door
+test written on it would have driven a launch **still carrying** the roster claim —
+so `provision_from_launch` would have answered a section id for the ordinary
+reason, the line item would have been created, and the test would have gone
+**green while exercising none of the fix it was written to guard**, reported as
+"the executed guard the fix currently lacks". That is this entry's consequence
+exactly, on a guard commissioned to close a coverage gap. Probing also found the
+change is two-sided — `tests/integration/test_mock_lms_wrong_launches.py` asserts
+its copied `ALL_SELECTORS` equals the served list in both directions, so neither
+half lands alone — which turned "write the test" into a partition question with a
+named blocker instead of a green nobody could have questioned.)*
 
 **What happened.** `hide_input_in_errors=True` was the obvious fix for a
 credential appearing in a pydantic validation error. It cleans `str(exc)` and

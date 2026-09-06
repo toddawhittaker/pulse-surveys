@@ -183,7 +183,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 8. Prescribing a fix without probing it
 
-**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/08-prescribing-a-fix-without-probing-it.md)
+**Caught: 8** · [the incidents, the root cause, and the whole rule](mistakes/08-prescribing-a-fix-without-probing-it.md)
 
 ## 15. A property test's generator excluded the case its own docstring named
 
@@ -467,6 +467,20 @@ structural guard and a behavioural test can disagree about one route, write the
 behavioural one: a sweep over the route table answers "is the class there", never
 "does the gate run", so every gate needs one test that drives the built
 application over HTTP and reads the status in both directions.
+
+## 49. A test asserted a fail-open return value as if it were a decision
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/49-a-test-asserted-a-fail-open-return-value-as-if-it-were-a-decision.md)
+
+**Rule.** Before asserting a return value, read what the function returns on
+failure. Where a contract deliberately collapses "refused" and "the dependency was
+down" into one value — every fail-open publish, every `return False` in an
+`except`, anything entry 41 or ADR 0135 governs — that value cannot be a test's
+observable, because the suite's own environment decides it. Assert the effect: the
+intercepted enqueue, the row, the call the platform recorded. And when a *pair* is
+built on such a value, both halves are compromised and only one of them looks it —
+so check the green one by deleting the condition it guards and requiring it to go
+red.
 
 ## 48. A known gap was recorded only in a comment in the file that worked around it
 
