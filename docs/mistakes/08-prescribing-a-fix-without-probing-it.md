@@ -1,12 +1,13 @@
 # Entry 8. Prescribing a fix without probing it
 
-**Caught: 8**
+**Caught: 9**
 
-*8 preventions recorded: the two set out in "What happened" below, and the six
+*9 preventions recorded: the two set out in "What happened" below, and the six
 notes above — three from earlier reviews (E0-17, a second E0-10, E0-26), E1 batch
 A's two (round 2's caught and then unmade when round 3 probed harder, round 3's
-the one that stood), and E3-08's, on a prescription that named a file that could
-not do the job.*
+the one that stood), and E3-08's **two**, both in one round and both on a
+prescribed mechanism that read perfectly: a fixture that could not do the job, and
+a name shape one word too wide.*
 
 *Owed housekeeping, not done here: this file holds six instance notes and
 `docs/MISTAKES.md` says three. It was already over before this bump, and trimming
@@ -128,7 +129,21 @@ exactly, on a guard commissioned to close a coverage gap. Probing also found the
 change is two-sided — `tests/integration/test_mock_lms_wrong_launches.py` asserts
 its copied `ALL_SELECTORS` equals the served list in both directions, so neither
 half lands alone — which turned "write the test" into a partition question with a
-named blocker instead of a green nobody could have questioned.)*
+named blocker instead of a green nobody could have questioned.
+
+And a second time in the same round, on the same author's next prescription. The
+re-verification battery found a real survivor — a module-level `invariant` marker
+deletable with the denial-name sweep staying green — and the fix prescribed was an
+`_exposure` name shape. Probed by globbing the shape against the tree and reading
+each match's marker before adding it: **four** modules carry `_exposure`, and two
+of them, `test_dev_console_exposure.py` and `test_docs_exposure.py`, hold
+`invariant` **per test** by E0-41's deliberate decision — one case of three in the
+second, as its own docstring says. The sweep demands a *module-level* marker, so
+the shape would have reddened both; and the natural repair for that red is to
+hoist their markers, which enrols in CI's isolated §4.1 pass exactly the tests
+E0-41 chose to leave out. Two narrow shapes went in instead, with the excluded
+pair encoded as a planted near miss rather than as a comment. The prescription was
+one word too wide and read perfectly, which is this entry's second case verbatim.)*
 
 **What happened.** `hide_input_in_errors=True` was the obvious fix for a
 credential appearing in a pydantic validation error. It cleans `str(exc)` and

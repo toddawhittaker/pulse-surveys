@@ -129,6 +129,39 @@ MODULE_MARKS = "pytestmark"
 # nothing about a student" — and a shape added only when a module already uses it
 # is a convention that keeps being discovered one module late. Both have planted
 # samples below, in both directions, per this file's own rule.
+# **`_trigger_exposure` and `_control_exposure` are E3-08's**, added by the fix
+# round's re-verification battery, which found a genuine survivor: commenting out
+# `test_dev_passback_trigger_exposure.py`'s module-level marker left this sweep
+# green, because that module's name carried no shape at all. The isolated pass
+# quietly dropped seven collected tests, and `scripts/ci/check_invariants.py` sees
+# a skip, an xfail or an empty collection — never a *smaller* one — so nothing
+# anywhere reported it.
+#
+# **The obvious shape for it is `_exposure`, and `_exposure` is wrong.** Four
+# modules carry it, and only two of them may be demanded:
+#
+#   - `test_dev_passback_trigger_exposure.py` — module-level marker, E3-07's
+#     `/dev/passback` gate. Demanded, by `_trigger_exposure`.
+#   - `test_dev_clock_control_exposure.py` — module-level marker, E2-04's
+#     `/dev/clock` gate. Demanded, by `_control_exposure`, which is added beside
+#     it for the reason `carries_nothing` was: a shape added only once a second
+#     module needs it is a convention that keeps being discovered one module late.
+#   - `test_dev_console_exposure.py` and `test_docs_exposure.py` — **not
+#     demanded, and they must not be.** Both hold `invariant` per test, by E0-41's
+#     deliberate decision: `test_docs_exposure.py`'s own docstring says its marked
+#     case is "the one of the three that is". A shape reaching them would demand a
+#     module-level marker and so enrol the tests E0-41 left out — the widening this
+#     file's docstring warns about, "on the strength of their module's name".
+#
+# So the two shapes name the *gate on a `/dev` write control*, which is the class
+# that is marked module-wide, and the planted `docs_exposure` near miss below is
+# what holds the line in both directions rather than this comment alone.
+#
+# **Nothing here reaches `test_no_backend_module_reads_the_mock_only_score_log.py`
+# either, and that is also deliberate.** That module is ADR 0047's architectural
+# rule about which package may read a mock-only surface, not a §4.1 denial, and its
+# own docstring says so; a shape matching it would demand a marker it must not
+# have.
 DENIAL_NAME_SHAPES = (
     "_names_nobody",
     "_name_nobody",
@@ -136,6 +169,8 @@ DENIAL_NAME_SHAPES = (
     "names_nothing",
     "never_logs",
     "carries_nothing",
+    "_trigger_exposure",
+    "_control_exposure",
 )
 
 # Two real modules that certainly carry the module-level marker, used as the
@@ -150,12 +185,20 @@ CERTAINLY_MARKED = (
 )
 
 # ---------------------------------------------------------------------------
-# The planted tree for the control. Seven modules: five the shapes must demand
-# and two they must not. Among the demanded five, every marking state a module
-# can be in — the module-level form, the list form, per-test decoration, and
-# nothing at all — and every shape in `DENIAL_NAME_SHAPES`, so that a shape added
-# to that tuple and matched by nothing here is not left as a rule nobody has run
-# in either direction (`docs/MISTAKES.md` entry 3).
+# The planted tree for the control: modules the shapes must demand, and modules
+# they must not. Among the demanded ones, every marking state a module can be in —
+# the module-level form, the list form, per-test decoration, and nothing at all —
+# and every shape in `DENIAL_NAME_SHAPES`, so that a shape added to that tuple and
+# matched by nothing here is not left as a rule nobody has run in either direction
+# (`docs/MISTAKES.md` entry 3).
+#
+# **Counted in prose here until E3-08, and no longer.** It read "Seven modules:
+# five the shapes must demand and two they must not", which was already wrong by
+# four when E3's round added two shapes and three samples, and would have gone
+# wrong again now. The numbers were never load-bearing — `PLANTED_DEMANDED` and
+# `PLANTED_CARRYING_THE_MARKER` below are the inventory the tests read — so they
+# are gone rather than re-derived (`docs/MISTAKES.md` entry 1: a record that has to
+# be recomputed on every edit is a record that will be wrong).
 #
 # Planted under `tmp_path` rather than pointed at real files, because a control
 # built out of the tree it is controlling moves when the tree moves: the day
@@ -219,6 +262,28 @@ PLANTED_MODULES = {
     "test_a_planted_row_carries_nothing_about_a_student.py": (
         f"import pytest\n\n\n{A_DENIAL_TEST}"
     ),
+    # Demanded, and E3-08's trigger-gate shape — unmarked, so it is demanded *and*
+    # flagged. This is the shape whose absence let a real module's marker be
+    # deleted with this sweep staying green, so the sample that matters is the one
+    # proving the shape **reports**: a shape that matched and never reported would
+    # have left the survivor exactly where it was.
+    "test_a_planted_dev_passback_trigger_exposure.py": f"import pytest\n\n\n{A_DENIAL_TEST}",
+    # Demanded, and E3-08's other gate shape. Marked in the bare module-level form,
+    # which is the state the real `test_dev_clock_control_exposure.py` is in — so
+    # between this and the sample above, the new pair is exercised on both sides of
+    # the marker as well as on both sides of the match.
+    "test_a_planted_dev_clock_control_exposure.py": (
+        f"import pytest\n\npytestmark = pytest.mark.{MARKER}\n\n\n{A_DENIAL_TEST}"
+    ),
+    # Not demanded, and **the near miss that carries the whole exclusion**: a
+    # module whose name ends in `_exposure` and is none of this project's `/dev`
+    # write-control gates. It stands for two real modules —
+    # `test_dev_console_exposure.py` and `test_docs_exposure.py` — which hold
+    # `invariant` per test by E0-41's deliberate decision, so a shape written as a
+    # bare `_exposure` would demand a module-level marker from them and enrol the
+    # tests that ticket left out. Unmarked, so a matcher widened to `_exposure`
+    # fails here rather than in somebody else's module three tickets from now.
+    "test_a_planted_docs_exposure.py": f"import pytest\n\n\n{A_DENIAL_TEST}",
     # Not demanded: the name carries no denial shape. Unmarked, so a sweep that
     # demanded it would fail on it and this module would be red against a test
     # that is nobody's §4.1 invariant.
@@ -255,12 +320,15 @@ PLANTED_DEMANDED = {
     "test_a_planted_launch_view_name_nobody.py",
     "test_a_planted_sweep_never_logs_a_score_or_a_ledger.py",
     "test_a_planted_row_carries_nothing_about_a_student.py",
+    "test_a_planted_dev_passback_trigger_exposure.py",
+    "test_a_planted_dev_clock_control_exposure.py",
 }
 
 PLANTED_CARRYING_THE_MARKER = {
     "test_a_planted_page_repeats_nothing_it_was_handed.py",
     "test_a_planted_write_names_nothing_from_the_launch.py",
     "test_a_planted_sweep_never_logs_a_score_or_a_ledger.py",
+    "test_a_planted_dev_clock_control_exposure.py",
 }
 
 
