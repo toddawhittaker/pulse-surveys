@@ -1,5 +1,16 @@
 # 42. A CI verdict was read off a stale check summary between two pushes
 
+## Instance: A boundary record cited a failed run as green (2026-09-06)
+
+The E3 boundary record (`docs/tickets/e3/boundary-review.md`, "The
+verification, in kind") cited CI run 34001273838 on commit 6ebc4a8 as
+"completed, successful, head matched." The run had completed with
+conclusion `failure` — "Test · pytest + invariants" was red — and was never
+re-run. The false green sat in a permanent record, cited alongside two runs
+that genuinely were green, and was caught only by the post-merge closing
+consistency pass, which re-resolved every cited run by id rather than
+trusting the earlier resolution's own report. Corrected 2026-09-06.
+
 ## Instance: PR #154 was marked ready on a green that belonged to no run (2026-09-03)
 
 Two commits were pushed to `e2/invariant-pass-coverage` seconds apart. The
@@ -33,3 +44,9 @@ PR's checks) until one run's `headSha` equals the final commit AND
 `status == completed`; only that run's `conclusion` is a verdict. A watcher's
 exit proves some run ended, not which. This applies to every "green" spoken
 aloud: in a report, in a PR body, before `gh pr ready`, before any merge.
+
+**Resolving by id is not the verdict — the conclusion field is.** The second
+instance resolved the exact run and the exact commit and still reported
+green, because nobody read past `status == completed` to check what it
+concluded with. Assert `conclusion == success` explicitly; a run resolved
+correctly by id and by head SHA can still have finished with `failure`.

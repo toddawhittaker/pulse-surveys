@@ -145,9 +145,11 @@ def test_the_application_role_cannot_retire_a_signing_key(
     run-time reason to want to set. A grant that arrived with it would be the
     narrowest-looking widening in the ticket and the most dangerous: retiring the
     last live key takes the deployment to 503 at `/lti/jwks` with no key to sign
-    with, and retiring the newest one silently moves the signer back to a key
-    platforms may already have stopped accepting. Neither is a write a request
-    path should be able to make.
+    with, and retiring the oldest one silently moves the signer. Under ADR 0143
+    `retire` *is* the switch — the oldest live key signs — so a request path able
+    to set this column can change which key the tool signs with, at a moment no
+    operator chose and with no wait for platforms to have re-read the key set.
+    Neither is a write a request path should be able to make.
 
     **The mutation this kills:** a column-level grant — `GRANT UPDATE (retired_at)
     ON tool_signing_key TO pulse_app` — which is invisible to a table-wide

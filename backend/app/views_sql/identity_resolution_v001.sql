@@ -17,6 +17,12 @@
 -- holds from a verified token or a roster document, and can never enumerate
 -- subjects it does not.
 --
+-- (Amended by ADR 0139, E3-06: the never-enumerate half stopped being true of
+-- pulse_app when identity_resolution_v002.sql added resolve_subject_for_user
+-- for the passback. It stays true of the functions THIS file ships. The guard
+-- on a read path spending the returned enumeration is the view-text sweep in
+-- tests/integration/test_identity_column_marker.py.)
+--
 -- The owner is pulse_resolve_definer, a NOLOGIN role that exists for nothing
 -- else, so "the definer's privileges" is a list you can read in this file
 -- against these bodies (ADR 0043's pattern, ADR 0094). It holds SELECT on five

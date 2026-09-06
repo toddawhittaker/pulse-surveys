@@ -987,7 +987,9 @@ class ToolSigningKey(UuidPrimaryKey, Base):
     it verify too, and a one-row table has nowhere to put the second key. That
     index is gone. What replaces it is a rule the readers hold rather than the
     schema: the **published** set is every row with `retired_at IS NULL`, and the
-    **signing** key is the newest of those, ordered `created_at DESC, id DESC`.
+    **signing** key is the oldest of those, ordered `created_at ASC, id ASC`
+    (`docs/adr/0143`, which supersedes ADR 0127's newest-signs choice in part so
+    that `generate` publishes rather than switches, and `retire` is the switch).
     Both live in `app.lti.registration`, so the api container and the celery
     worker resolve the same row — which is ADR 0082's deciding fact, unchanged.
     The tie-break on `id` is not decoration: two rows can share a `created_at`,
@@ -1034,8 +1036,8 @@ class ToolSigningKey(UuidPrimaryKey, Base):
     private_key_pem: Mapped[str] = mapped_column(Text, nullable=False)
     # When this key was supplied, defaulted to the insert moment so that the
     # writer never has to state it. It is what orders the live keys, so the
-    # newest supplied key is the one that signs; `AwareDateTime` refuses a naive
-    # value at the bind boundary (ADR 0019).
+    # oldest supplied key is the one that signs (ADR 0143); `AwareDateTime`
+    # refuses a naive value at the bind boundary (ADR 0019).
     created_at: Mapped[datetime] = mapped_column(
         AwareDateTime, nullable=False, server_default=text("now()")
     )

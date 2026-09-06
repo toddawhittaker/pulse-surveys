@@ -126,9 +126,18 @@ one is now MISTAKES entry 49.
 
 ## The verification, in kind
 
-No green was believed on its author's word. CI was resolved by run id
-against the exact head three times (33999804072 on bac63f4, 34001273838 on
-6ebc4a8, 34007542530 on dc8aaae — each completed, successful, head matched).
+No green was believed on its author's word — and one of this record's own
+citations failed that standard. As first written, this paragraph reported
+three runs resolved by run id (33999804072 on bac63f4, 34001273838 on
+6ebc4a8, 34007542530 on dc8aaae) as each completed, successful, head
+matched. Two were. Run 34001273838 on 6ebc4a8 completed with conclusion
+`failure` — "Test · pytest + invariants" was red — and was never re-run.
+6ebc4a8 is also the commit the seven boundary reviews read, so the reviews
+read a tree whose suite was red until the fix round (3b10536 through
+981813b) turned it green. The branch head abb9555 was green by run
+34012189893 before the PR was marked ready, and the epic head 6239b85 by
+run 34029121896 after the merge. Corrected 2026-09-06 by the closing
+consistency pass; the incident is MISTAKES entry 42's second.
 Two mutation batteries ran: the exit proof's (seven kills, one predicted
 survivor — the dev sync control's clock stamp, time-dependent by nature —
 covered the same day by a deterministic pair asserting both clock
@@ -202,3 +211,32 @@ recorded rather than reconciled (the zero row's kill came from the message
 assertion, not the predicted exception, which is what proved the guard is
 the last thing before the wire). After the reconciliation test the isolated
 pass stands at 238 and the suite at 2983.
+
+## Addendum, 2026-09-06 — a reviewer the roster missed
+
+The roster above names seven reviewers and treats the standing set as
+complete. It was not: `privacy-authz`, whose triggers include
+`services/authz.py`, `views_sql/`, and the org models — all changed by this
+epic — ran on no E3 diff at any point in the epic. The pass ran
+retroactively on 2026-09-06 against the epic's cumulative diff at the
+merged head 6239b85, with a fresh context.
+
+Verdict: no live exposure. Two findings, both closed in the cleanup PR
+that carries this addendum:
+
+- MEDIUM — nothing structural kept a future view from spending
+  `resolve_subject_for_user`, the definer through which ADR 0139 returns
+  the subject enumeration E1-10 revoked. The function body is a quoted SQL
+  string, so a view calling it records no dependency edge to
+  `user.lms_user_id`, and the column-grain identity sweeps cannot see the
+  name. Closed by a view-text sweep asserting no view's definition names
+  the function.
+- LOW — the roster-definer invariant test still claimed the application
+  role "can never enumerate subjects it does not" hold, a property ADR
+  0139 made false; the column-refusal assertion it makes is kept, and its
+  claim is narrowed to what the assertions prove.
+
+Checked and reported clean by the same pass: AGS payload and log
+redaction, `grade_sync`'s reader set, the staff-exclusion predicate, the
+dev triggers' environment-then-origin gates, and the two column-scoped
+grants with their downgrade revokes.

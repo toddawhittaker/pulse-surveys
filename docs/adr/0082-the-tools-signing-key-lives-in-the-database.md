@@ -2,16 +2,22 @@
 
 **Amended in part by
 [ADR 0127](0127-the-published-key-set-carries-every-unretired-key-and-the-newest-signs.md)
-(E3-01), and its open supply question answered by
-[ADR 0126](0126-a-signing-key-reaches-a-deployment-through-an-operator-command.md).**
+(E3-01), its open supply question answered by
+[ADR 0126](0126-a-signing-key-reaches-a-deployment-through-an-operator-command.md),
+and ADR 0127's selection rule amended in turn by
+[ADR 0143](0143-the-oldest-live-key-signs-so-that-generate-is-not-the-switch.md)
+(E3-08).**
 The table is no longer held to one row: the published key set is every row with
-`retired_at IS NULL` and the tool signs with the newest of those, which is the
-rotation overlap this record's consequences said a rotation ticket would have to
-revisit first. Three paragraphs below are marked where they have stopped being
-current. Everything else here stands — the database as custody, the private PEM
-as the only stored half, the derived `kid`, the unencrypted column, the withheld
-write grants, and the deciding fact that two processes must sign with one key,
-which is why ADR 0127's ordering has a tie-break.
+`retired_at IS NULL` and the tool signs with the **oldest** of those, ordered
+`created_at ASC, id ASC` — ADR 0127 chose the newest; ADR 0143 reversed the
+direction and kept the tie-break. This is the rotation overlap this record's
+consequences said a rotation ticket would have to revisit first. Three
+paragraphs below are marked where they have stopped being current, and the
+newest-signs paragraph carries a second mark for ADR 0143. Everything else here
+stands — the database as custody, the private PEM as the only stored half, the
+derived `kid`, the unencrypted column, the withheld write grants, and the
+deciding fact that two processes must sign with one key, which is why the
+ordering has a tie-break.
 
 ## Context
 
@@ -65,6 +71,12 @@ whether its assertions verify.
 > NULL`, and the signer is the newest of those by `created_at DESC, id DESC` — so
 > two rows are two published keys rather than two identities, and no process
 > decides for itself which one signs.
+>
+> **The "newest" half above is superseded in turn by ADR 0143 (E3-08).** The
+> signer is now the oldest live key, ordered `created_at ASC, id ASC`; the
+> tie-break is unchanged, and the rest of this paragraph — two rows as two
+> published keys, with no process deciding for itself which one signs — still
+> holds.
 
 **An existing key is kept, never rotated.** Rotation is the dangerous failure
 because it is invisible at the moment it happens: a fresh key signs perfectly,
