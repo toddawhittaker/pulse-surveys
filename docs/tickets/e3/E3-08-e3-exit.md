@@ -97,7 +97,7 @@ seed functions named above.
 | a platform-dated late add (`with_the_add_and_the_drop`) | denominator starts at the platform's date |
 | an undated member active from the start (`without_an_enrollment_window`) | denominator starts at the section's start date — §3.4's accepted under-credit, asserted as the intended behaviour and not as a defect |
 | a late add first seen after the section's first roster sync | denominator starts at the week of that sync |
-| the dropped member of `with_the_add_and_the_drop` | the score stops updating and the last posted value stands |
+| the dropped member of `with_the_add_and_the_drop` | never posted at all — the platform reports him Inactive at the section's first sync, so Pulse never enrolls him (ADR 0095; the E3-08-02 ruling corrected this cell, which originally expected "stops updating and the last value stands"). That half of the drops rule is driven by a member dropped mid-drive, whose classmates re-post in the same sweep while his last posted value stands |
 
 ## What this ticket owes `carried-from-e3.md`
 

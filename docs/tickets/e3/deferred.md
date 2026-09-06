@@ -35,3 +35,12 @@ explanation is owed and where it is owed from.
 
 Sources: SPEC §3.3 and §3.4, ADR 0125, ADR 0137, and E3-06's ticket, which lists
 "Whether a lowered score is announced anywhere" among the decisions it settles.
+
+---
+
+**E3-08's cleanup pass, 2026-09-05:** this file holds one entry, it is still
+open, and it is carried — `../e4/carried-from-e3.md` re-lists it with its
+owner (E8 for the student half, E4 for the instructor half) and its done-when
+unchanged. Nothing else was deferred through this file during the epic; the
+items E3's own reviews deferred are recorded in the carried file directly,
+per the boundary record.
