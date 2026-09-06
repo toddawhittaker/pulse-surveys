@@ -66,6 +66,7 @@ import inspect
 import io
 import json
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from datetime import UTC, datetime
 from types import ModuleType
 from typing import Any
 from urllib.parse import parse_qs, urlsplit, urlunsplit
@@ -86,6 +87,13 @@ from fixtures.supervision import require_column, require_table, single_primary_k
 # `backend/app/services/roster_sync.py`." The package root is `backend/`, so the
 # import path is `app.services....`.
 ROSTER_SYNC_MODULE = "app.services.roster_sync"
+
+# The instant a signing key row sorts under when it carries no `created_at`. Only
+# `stored_signing_key` below uses it, and only while `created_at` does not exist:
+# E3-01 adds that column, and before it lands every row answers the same value so
+# the ordering falls through to the tie-break on `id`. Aware, because ADR 0019
+# makes every stored instant aware and a naive one would not compare with them.
+BEFORE_ANY_KEY = datetime(1970, 1, 1, tzinfo=UTC)
 
 # The one callable the work order spells (D9): "`roster_sync.request_section_sync(
 # session, section_id)` skips the enqueue when the section has an `nrps_call` row
@@ -556,8 +564,9 @@ class ServiceWire:
         self.calls: list[ServiceCall] = []
         self.rosters: dict[str, ComposedRoster] = {}
         self.failures: dict[tuple[str, str], int] = {}
-        self.answers: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
+        self.answers: dict[tuple[str, str], tuple[int, Any, str]] = {}
         self.redirects: dict[tuple[str, str], str] = {}
+        self.transport_failures: set[tuple[str, str]] = set()
         self.refuse_unauthenticated = False
         self.strip_authorization = False
 
@@ -607,8 +616,15 @@ class ServiceWire:
         self.failures.pop(_route_key(url), None)
         self.answers.pop(_route_key(url), None)
         self.redirects.pop(_route_key(url), None)
+        self.transport_failures.discard(_route_key(url))
 
-    def answering(self, url: str, payload: Mapping[str, Any], status_code: int = 200) -> None:
+    def answering(
+        self,
+        url: str,
+        payload: Any,
+        status_code: int = 200,
+        content_type: str = "application/json",
+    ) -> None:
         """Answer `payload` at `url`'s host and path, with a status this endpoint would use.
 
         For the security round's F3: a token endpoint that answers 200 with a body
@@ -621,8 +637,34 @@ class ServiceWire:
         Keyed by host and path (`_route_key`), and dispute E1-11-04 is why: two
         platforms share the `/token` path, so a sabotage keyed by path alone
         reached both and F3's healthy section could never sync.
+
+        **`payload` is any JSON document and `content_type` is settable**, both
+        added by E3-04. An AGS line-item container is a JSON *array* served under
+        `application/vnd.ims.lis.v2.lineitemcontainer+json`, and the one thing this
+        wire has to be able to serve that no mock platform will is a container
+        holding a line item whose `id` points somewhere hostile — the address the
+        *platform* chose at run time, which is the half of the fetched-address rules
+        a stored column cannot pose. Nothing that called this before passes either
+        argument, so both defaults are what it did.
         """
-        self.answers[_route_key(url)] = (status_code, dict(payload))
+        self.answers[_route_key(url)] = (status_code, payload, content_type)
+
+    def failing_the_transport(self, url: str) -> None:
+        """Raise a `requests` connection error at `url`'s host and path.
+
+        The one failure a status code cannot express, and ADR 0129 gives it exactly
+        one meaning in the call log: a NULL `response_code` is a call that never
+        reached the platform. `failing` above answers *an* HTTP status, which is a
+        call that reached it and was refused — a different row and a different
+        sentence to an operator — so a suite that could only produce the second
+        would leave the NULL branch of every writer unexercised.
+
+        A real `requests.ConnectionError` rather than a bare `Exception`, because a
+        client is entitled to catch its transport's own family and a stand-in
+        outside it would be caught by nothing and would report a client that
+        handles transport failure as one that does not.
+        """
+        self.transport_failures.add(_route_key(url))
 
     def redirecting(self, url: str, to: str) -> None:
         """Answer a 302 at `url`'s host and path, pointing at `to`.
@@ -692,6 +734,17 @@ class ServiceWire:
         # here would be about something else. Matched by host and path (dispute
         # E1-11-04), so a sabotage installed for one platform's endpoint does not
         # answer another platform's endpoint at the same path.
+        # A transport failure answers before every other branch, for the reason a
+        # configured status does: a test that asks what the client records when a
+        # call never reaches the platform is asking about that and nothing else.
+        if route in self.transport_failures:
+            import requests
+
+            raise requests.ConnectionError(
+                f"This wire was asked to fail the transport at {url!r}, so nothing was sent. ADR "
+                "0129 gives a NULL `response_code` exactly one meaning — a call that never reached "
+                "the platform — and this is the only thing in this suite that produces one."
+            )
         failing = self.failures.get(route)
         if failing is not None:
             return _Answer(
@@ -708,10 +761,10 @@ class ServiceWire:
             )
         canned = self.answers.get(route)
         if canned is not None:
-            status, payload = canned
+            status, payload, content_type = canned
             return _Answer(
                 status,
-                {"content-type": "application/json"},
+                {"content-type": content_type},
                 json.dumps(payload).encode("utf-8"),
             )
 
@@ -1248,6 +1301,29 @@ def stored_signing_key(committed_rows: Any, metadata_tables: dict[str, Any]) -> 
     `tests/integration/test_the_tool_publishes_its_key_set.py` uses, and it is
     deliberately a separate row from that module's so neither test depends on the
     other's ordering.
+
+    **Which row, once there can be more than one.** This used to hand back
+    `existing[0]` — the first row the database returned — and that was unambiguous
+    only while `uq_tool_signing_key_one_row` held the table to one. E3-01 drops
+    that index, so the first row is now whichever the planner happens to return,
+    and it can be a retired one. The key a platform driver signs with has to be
+    the key the *tool* signs with, or every ground-truth roster read in this suite
+    fails at the mock's token check for a reason that has nothing to do with the
+    sync (`docs/MISTAKES.md` entry 22). So the choice is made by ADR 0143's own
+    rule — the **oldest** row with `retired_at IS NULL`, ordered `created_at ASC,
+    id ASC` — written out here rather than read from the implementation, which is
+    what keeps `tests/integration/test_the_signer_selects_the_oldest_live_key.py`
+    from comparing the tool against a copy of itself (entry 19).
+
+    **The direction is ADR 0143's and it used to be the other way.** ADR 0127 made
+    the newest live key sign; ADR 0143 supersedes that paragraph, because under
+    newest-signs `generate` is the switch — the tool begins signing with a key no
+    platform has fetched, and every service call fails until each platform
+    re-reads the key set. Under the rule written out above `generate` publishes
+    and `retire` switches. A copy of the superseded rule here would hand the
+    platform driver the wrong key the moment a test plants a second one, and the
+    roster read would fail at the mock's token check rather than at an assertion
+    about signing.
     """
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
@@ -1259,11 +1335,22 @@ def stored_signing_key(committed_rows: Any, metadata_tables: dict[str, Any]) -> 
             "E1-06 publishes the key set out of it, and D11 signs this ticket's client assertion "
             "with the same row — without it nothing here can request a token at all."
         )
-    existing = list(
-        committed_rows.session.execute(require_table(metadata_tables, table).select()).mappings()
-    )
+    existing = [
+        dict(row)
+        for row in committed_rows.session.execute(
+            require_table(metadata_tables, table).select()
+        ).mappings()
+    ]
+    usable = [row for row in existing if row.get("retired_at") is None]
+    if usable:
+        oldest = min(usable, key=lambda row: (row.get("created_at") or BEFORE_ANY_KEY, row["id"]))
+        return str(oldest["private_key_pem"])
     if existing:
-        return str(existing[0]["private_key_pem"])
+        pytest.fail(
+            f"`{table}` holds {len(existing)} row(s) and every one of them is retired, so the tool "
+            "publishes no key set and can sign nothing. A fixture that generated a fresh key here "
+            "would hide that state behind a working sync; a test that wants it says so itself."
+        )
     pem = (
         rsa.generate_private_key(public_exponent=65537, key_size=2048)
         .private_bytes(

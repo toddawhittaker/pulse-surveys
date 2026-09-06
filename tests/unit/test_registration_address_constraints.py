@@ -114,6 +114,13 @@ must be green today: they are arithmetic on this module's own constants and on
 fixtures that already exist, and a red one means these tests are broken rather
 than that the code is.
 
+**E3-02 adds one test to the foot of this module and nothing else**, and it is the
+one exception to the paragraph above: `test_both_gradebook_columns_are_judged_and_
+refuse_loopback` is red on today's tree, on the two columns that ticket adds to the
+two tuples this file already pins. It is here rather than in a module of its own
+because a second home for "what is in `FETCHED_COLUMNS`" would be a second record
+of one fact, and one of the two would go stale.
+
 ADR 0077's own refusal tests, in `tests/unit/test_oidc_provider_configuration.py`,
 are untouched by this ticket and must keep passing. This module borrows that
 one's vocabulary where the question is the same and says where it differs; the
@@ -322,6 +329,17 @@ AN_EMPTY_ANSWER_NAME = "silent.platform.invalid"
 # at run time and refuses loopback, the key set address is written by an operator
 # and admits it. Held against `app.models.lti`'s own two tuples by a control.
 ROSTER_ADDRESS_COLUMN = "lms_context_memberships_url"
+
+# The two gradebook columns E3-02 adds to `section`, spelled by that ticket's work
+# order. **Not this module's choice** in any part: `lms_ags_line_items_url` is the
+# AGS line-item container a launch advertises, `lms_`-marked because the platform
+# supplies it; `ags_line_item_url` is the id of the line item this tool creates in
+# that container, which is Pulse's own and therefore carries no `lms_` prefix.
+# Both are addresses this container fetches — E3-04 lists and creates in the
+# container, E3-05 and E3-06 post to the line item — which is what puts them in
+# both tuples below.
+AGS_LINE_ITEMS_COLUMN = "lms_ags_line_items_url"
+AGS_LINE_ITEM_COLUMN = "ags_line_item_url"
 
 # The host a development stack's own roster lives on, for the exemption. Compared
 # by equality against the parsed hostname, never as a substring — the near miss is
@@ -2734,6 +2752,74 @@ def test_the_fetched_columns_split_on_loopback_the_way_this_module_drives_them()
     assert JWKS_URL not in CODE_LOOPBACK_REFUSED, (
         f"`{JWKS_URL}` is among {tuple(CODE_LOOPBACK_REFUSED)}, so ADR 0096's split has moved and "
         "the sidecar acceptance above contradicts it."
+    )
+
+
+@pytest.mark.parametrize("column", (AGS_LINE_ITEMS_COLUMN, AGS_LINE_ITEM_COLUMN))
+def test_both_gradebook_columns_are_judged_and_refuse_loopback(column: str) -> None:
+    """E3-02 criterion 2: the enumerations cannot quietly shrink.
+
+    > The new address column appears in `FETCHED_COLUMNS` and
+    > `LOOPBACK_REFUSED_COLUMNS`, and whatever test pins those enumerations fails if
+    > the column is dropped from either.
+
+    This is that test, and it is here rather than in a module of its own because
+    this file is where those two tuples are already pinned — a second home for the
+    same rule would be two records of one fact, and one of them would go stale
+    (`docs/MISTAKES.md` entry 19).
+
+    **Both tuples, and each does a different job.** `FETCHED_COLUMNS` is what makes
+    an address judged at all: E3-04 lists and creates line items in the container,
+    and E3-05 and E3-06 post scores to the line item, both with the tool's own
+    client credentials attached and nobody present — the same SSRF surface the
+    roster address is, arriving through a different claim.
+    `LOOPBACK_REFUSED_COLUMNS` is the narrower rule ADR 0096 draws: a key-set
+    sidecar on `127.0.0.1` is an ordinary deployment and stays legal on `jwks_url`,
+    while an address a *platform chooses at run time* may not name this machine.
+    Both gradebook addresses are chosen by the platform — one advertised in a
+    claim, one returned by the platform when a line item is created — so both are on
+    the refusing side of that split.
+
+    **The mutation this kills:** either column dropped from either tuple, which is
+    `docs/MISTAKES.md` entry 35's shape — a guard that enumerates the things it
+    covers, quietly missing one. A column absent from `FETCHED_COLUMNS` is not
+    judged at all; a column absent from `LOOPBACK_REFUSED_COLUMNS` is judged and
+    admits `http://127.0.0.1:9999/lineitems` out of a launch claim.
+
+    **The behaviour behind this pin** is the loopback pair in
+    `tests/integration/test_a_launch_stores_the_gradebook_address_it_was_given.py`,
+    which drives a loopback container address through the writer and requires it
+    refused. A membership assertion on its own would be satisfied by a tuple nobody
+    reads; that module is what says the tuple is consulted.
+
+    **The control beside it** is the test above, which finds the roster column in
+    both tuples and `jwks_url` in exactly one — so a red here is a statement about
+    these two columns rather than about a build whose tuples are empty.
+    """
+    from app.models.lti import FETCHED_COLUMNS as CODE_FETCHED
+    from app.models.lti import LOOPBACK_REFUSED_COLUMNS as CODE_LOOPBACK_REFUSED
+
+    assert (
+        ROSTER_ADDRESS_COLUMN in CODE_FETCHED and ROSTER_ADDRESS_COLUMN in CODE_LOOPBACK_REFUSED
+    ), (
+        f"`{ROSTER_ADDRESS_COLUMN}` is not in both tuples — fetched {tuple(CODE_FETCHED)}, "
+        f"loopback-refused {tuple(CODE_LOOPBACK_REFUSED)}. That column has been in both since ADR "
+        "0096, so this is a build whose enumerations are not what this file thinks they are, and "
+        "the assertions below would be about a tuple that means something else."
+    )
+    assert column in CODE_FETCHED, (
+        f"`{column}` is not among the fetched columns {tuple(CODE_FETCHED)}. E3-02 stores it on "
+        "`section` and E3-04 fetches it with the tool's own client credentials, on a schedule, "
+        "with nobody watching — so a column outside this tuple is an address that reaches the "
+        "database without being judged at all, which is the hole the roster address had until a "
+        "security review found it."
+    )
+    assert column in CODE_LOOPBACK_REFUSED, (
+        f"`{column}` is not among {tuple(CODE_LOOPBACK_REFUSED)}, so a launch claim naming "
+        "`http://127.0.0.1:9999/lineitems` is stored and later fetched with a Bearer token "
+        "attached. ADR 0096's split admits loopback on the columns an *operator* writes and "
+        "refuses it on the ones a *platform* chooses at run time, and both gradebook addresses are "
+        "the platform's."
     )
 
 

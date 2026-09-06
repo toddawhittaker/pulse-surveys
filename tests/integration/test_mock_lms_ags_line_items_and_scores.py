@@ -3,8 +3,9 @@
 E0-15 builds the *platform* side of Assignment and Grade Services 2.0: line-item
 creation and listing, and score posting that records what it received. SPEC §3.4
 is what will use it — one line item per section called "Pulse Participation",
-scored as valid weeks completed over weeks elapsed — so the line item created
-below carries §3.4's label and maximum rather than an invented one.
+scored as completed items over total items across the student's elapsed weeks
+(ruled 2026-09-04) — so the line item created below carries §3.4's label and
+maximum rather than an invented one.
 
 **How a test finds the service.** Out of the AGS endpoint claim in the launch,
 which carries the line-items URL and the scopes a token may be requested for.
@@ -24,8 +25,13 @@ concatenation is refused.
 
 **What is deliberately not here.** Tool-side line-item management, the
 participation formula and retry handling are E3's, and E0-15's out-of-scope list
-says so. Nothing below asserts what Pulse computes or when it posts. There is no
-token-flow test either, for the reason `test_mock_lms_nrps_roster.py` gives.
+says so. Nothing below asserts what Pulse computes or when it posts.
+
+**Nor is the credential the subject here, and since E3-04 there is one.** These
+routes now require an access token carrying the scope each takes, which
+`MockPlatform`'s AGS helpers attach so that every call below still differs from its
+neighbours in the thing it is about. What the platform refuses, and with which
+status and code, is `tests/integration/test_mock_lms_ags_requires_a_token.py`.
 
 **The readback is two surfaces, and that is the point of it.** A conformant AGS
 `Result` carries `userId`, `resultScore` and `resultMaximum` and nothing else —
@@ -103,6 +109,12 @@ pytestmark = pytest.mark.lti
 # tool will request.
 AGS_LINE_ITEM_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem"
 AGS_SCORE_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/score"
+
+# The two read-only scopes beside them, which E3-04 needs here because the raw
+# calls this module still makes — a line-item container asked for an over-large
+# limit, and a result URL followed — now go through a credential.
+AGS_LINE_ITEM_READONLY_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem.readonly"
+AGS_RESULT_READONLY_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/result.readonly"
 
 # The score this suite posts. Every value is chosen to be one no implementation
 # would arrive at by accident, which is the whole point of the round trip:
@@ -832,7 +844,7 @@ def test_a_negative_score_is_refused(
     """A grade below nothing is not a grade, and it folds into the gradebook.
 
     Measured: `scoreGiven: -5` is accepted and produces a `Result` of `-5`.
-    Canvas answers 422. E3 computes valid weeks over weeks elapsed, which cannot
+    Canvas answers 422. E3 computes completed items over total items, which cannot
     go negative, so a negative arriving at this service is a tool defect the
     platform should refuse rather than record — and a `Result` of `-5` is a
     number a student sees.
@@ -1768,8 +1780,11 @@ def test_a_limit_above_the_cap_is_clamped_rather_than_refused(
     """
     created = mock_platform.create_line_item(signed_launch)
     over_large = 10**6
-    response = mock_platform.service_get(
-        mock_platform.with_query(mock_platform.line_items_url(signed_launch), {"limit": over_large})
+    response = mock_platform.ags_get(
+        mock_platform.with_query(
+            mock_platform.line_items_url(signed_launch), {"limit": over_large}
+        ),
+        scope=AGS_LINE_ITEM_READONLY_SCOPE,
     )
     assert response.status_code == 200, (
         f"Asking the line-item container for `limit={over_large}` answered "
@@ -1859,7 +1874,7 @@ def test_the_score_response_hands_back_a_result_url_that_answers(
         "which carries no `resultUrl`. AGS returns it so a tool can read back the result it just "
         "caused, and E0-15 makes it the same URL a `Result` identifies itself by."
     )
-    read = mock_platform.service_get(str(body["resultUrl"]))
+    read = mock_platform.ags_get(str(body["resultUrl"]), scope=AGS_RESULT_READONLY_SCOPE)
     assert read.status_code == 200, (
         f"The `resultUrl` the platform handed back — `{body['resultUrl']}` — answered "
         f"{read.status_code}. A URL a platform returns and does not serve is a link a tool "
@@ -1901,7 +1916,7 @@ def test_every_result_identifies_itself_with_a_url_that_answers(
             f"The result {result!r} carries no `id`. AGS makes a result's `id` the URL it lives "
             "at, and E0-15 makes that URL one a tool can follow."
         )
-        read = mock_platform.service_get(identifier)
+        read = mock_platform.ags_get(identifier, scope=AGS_RESULT_READONLY_SCOPE)
         assert read.status_code == 200, (
             f"A result identifies itself as `{identifier}` and that URL answered "
             f"{read.status_code}. The identifier is composed and never served — which reads as "

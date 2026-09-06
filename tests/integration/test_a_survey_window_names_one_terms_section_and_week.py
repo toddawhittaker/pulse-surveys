@@ -206,8 +206,8 @@ def test_a_window_whose_week_belongs_to_another_term_is_refused(
     Why it matters beyond tidiness: SPEC §2.2 puts the week axis inside a term,
     so a window keyed to another term's week 3 opens a section's survey against
     a week its own calendar does not contain, and §3.4's participation
-    denominator — "valid weeks completed ÷ weeks elapsed" — is then counted over
-    two different calendars.
+    denominator — the items of every week the student was enrolled for, ruled
+    2026-09-04 — is then assembled over two different calendars.
     """
     require_columns(window_table(metadata_tables), WINDOW_KEY_COLUMNS)
 

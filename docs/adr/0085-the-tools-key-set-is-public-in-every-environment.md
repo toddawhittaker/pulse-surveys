@@ -1,5 +1,15 @@
 # 0085 — The tool's key set is public in every environment, and its `kid` is the key's thumbprint
 
+**Amended in part by
+[ADR 0127](0127-the-published-key-set-carries-every-unretired-key-and-the-newest-signs.md)
+(E3-01).** The route publishes every unretired key rather than one, its 503 now
+names the command that supplies a key
+([ADR 0126](0126-a-signing-key-reaches-a-deployment-through-an-operator-command.md)),
+and rotation is no longer unbuilt. The paragraphs that have stopped being current
+are marked below. The two decisions this record is actually about — that the
+route is public in every environment, and that `kid` is the RFC 7638 thumbprint —
+are untouched, and so is its refusal to serve an empty key set.
+
 ## Context
 
 E1-06 part 4 gives the tool a JWKS route: a platform verifies the
@@ -44,6 +54,12 @@ the modulus in a document that passes every other check.
 **A deployment holding no `tool_signing_key` row answers 503**, with a body that
 says only that this deployment publishes no key set.
 
+> **Amended by ADR 0127 (E3-01).** The refusal is keyed on the *usable* rows
+> rather than on the row count, because a deployment can hold several keys and
+> have retired every one of them. The body names the command that supplies a key,
+> which it could not do while the demo seed was the only writer: a refusal naming
+> nothing runnable is one its reader can only escalate.
+
 ## Alternatives rejected
 
 **Gating the route on `ENVIRONMENT=development`.** The shape three neighbouring
@@ -84,6 +100,10 @@ indexed read of a one-row table and it holds no lock, but it is a public endpoin
 that does work, which nothing else in this tool's surface is yet. If that ever
 matters the answer is the per-process cache rejected above, with a measurement.
 
+> **Amended by ADR 0127 (E3-01).** It is a read of the unretired rows and a JWK
+> derived per key, over a table with a handful of rows. Still milliseconds, and
+> still the same answer if it ever stops being.
+
 **`pulse_app` can now read the tool's private key.** That is the widening
 `tool_signing_key_grants_v001.sql` carries and ADR 0082 anticipated — "the grant
 lands in E1-06 with the code that spends it". `SELECT` alone, so the role cannot
@@ -95,6 +115,13 @@ platform that has fetched this document holds one `kid`; replacing the row
 changes both the `kid` and the key with no overlap window, and every assertion
 signed by the old key fails from that moment. ADR 0082 owns that question.
 
+> **Answered by ADR 0127 (E3-01).** The document carries every unretired key, so
+> a platform that has fetched it during a rotation holds both `kid`s, and the
+> overlap is what the retiring key's assertions go on verifying against.
+
 **A non-development deployment answers 503 here until somebody supplies a key.**
 That is ADR 0082's deliberate gap made loud rather than a new one, and it is
 carried with a done-when in `docs/tickets/e1/deferred.md`.
+
+> **Closed by ADR 0126 (E3-01).** `scripts/signing_key.py generate` is what
+> somebody runs, and the refusal says so.

@@ -46,18 +46,20 @@ does not apply.
 
 **The second half of this module is the other end of the same token** — a
 service being presented one, added in E1-11's fix round for the roster and used
-by NRPS alone. It is here rather than in `app.nrps` because a token is only ever
+by both Advantage services since E3-04 turned the AGS enforcement on beside the
+first AGS client (ADR 0134). It is here rather than in `app.nrps` because a token
+is only ever
 good if this endpoint issued it, and the rules for reading one back are the
 mirror image of `issued_token`'s for minting one: same issuer, same audience,
 same key, same clock. Two copies of that arithmetic in two modules would be two
 places for it to drift (`docs/MISTAKES.md` entry 13). Which *scope* opens which
-service stays with the service: `authorised_token` is asked for one and asks no
-questions about what it means.
+service stays with the service: `authorised_token` is asked for one scope or
+several and asks no questions about what any of them mean.
 """
 
 import secrets
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -487,8 +489,10 @@ def granted_token(
 
 
 # ---------------------------------------------------------------------------
-# The other end of the same token: a service being presented one (E1-11 fix
-# round). NRPS only — AGS stays unauthenticated until its first client exists.
+# The other end of the same token: a service being presented one. NRPS since
+# E1-11's fix round, AGS since E3-04, which built the first AGS client and turned
+# the enforcement on in the same change (ADR 0134). Both go through
+# `authorised_token` below; which scopes open which route stays with the service.
 # ---------------------------------------------------------------------------
 
 # RFC 6750 §3.1's two error codes, and the status each answers with. Two codes
@@ -672,11 +676,11 @@ def verified_access_token(
 
 def authorised_token(
     authorization: str | None,
-    required_scope: str,
+    accepted_scopes: str | Sequence[str],
     settings: PlatformSettings,
     key: IssuerKey,
 ) -> Mapping[str, Any]:
-    """The claims of a token this platform issued that carries `required_scope`.
+    """The claims of a token this platform issued that carries one of `accepted_scopes`.
 
     The one door a service goes through, so that "what makes a call authorised"
     is answered in one place rather than once per route
@@ -691,19 +695,39 @@ def authorised_token(
     service comparing the whole `scope` claim against its own string refuses that
     tool while passing every single-scope test.
 
+    **A route may accept more than one scope, and E3-04 is why** (ADR 0134). AGS
+    2.0 gives its line-item routes a writing scope and a read-only sibling, and a
+    read is opened by either: a tool that holds only `…/scope/lineitem.readonly`
+    is entitled to list a container and to read one line item. So this takes one
+    scope or several and passes on any of them. It is still membership of the
+    granted list — `…/scope/lineitem.readonly` *contains* `…/scope/lineitem` as a
+    prefix, so any check written as a substring or a prefix test hands a read-only
+    credential the ability to create a gradebook column.
+
     403 rather than 401 for a token that is good and does not carry the scope,
     per RFC 6750 §3.1: the client's credential is not the problem and a fresh one
-    of the same shape would be refused identically.
+    of the same shape would be refused identically. The challenge's `scope`
+    parameter lists every scope that would have opened the route, space-delimited
+    as RFC 6750 §3 spells it, because that parameter is the only thing in a
+    refusal that tells a client what to ask its token endpoint for next — and
+    naming one of two would send half of them for a credential they need not get.
     """
+    accepted = (accepted_scopes,) if isinstance(accepted_scopes, str) else tuple(accepted_scopes)
+    if not accepted:
+        raise ValueError(
+            "`authorised_token` was asked to admit a call on no scope at all. A route behind an "
+            "empty accepted set can never be reached, and a caller that meant a route to be open "
+            "does not call this at all."
+        )
     claims = verified_access_token(presented_credential(authorization), settings, key)
     granted = str(claims.get("scope", "")).split()
-    if required_scope not in granted:
+    if not any(scope in granted for scope in accepted):
         raise ServiceTokenError(
             FORBIDDEN,
-            f"The access token presented was granted for {granted} and this service requires "
-            f"{required_scope!r}. Ask this platform's token endpoint for a token carrying that "
-            "scope; the credential presented is otherwise good and will never reach this service.",
+            f"The access token presented was granted for {granted} and this service requires one "
+            f"of {list(accepted)}. Ask this platform's token endpoint for a token carrying one of "
+            "them; the credential presented is otherwise good and will never reach this service.",
             error=INSUFFICIENT_SCOPE,
-            scope=required_scope,
+            scope=" ".join(accepted),
         )
     return claims

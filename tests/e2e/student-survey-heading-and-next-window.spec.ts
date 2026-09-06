@@ -32,12 +32,15 @@
 //
 // **Nothing here provisions anything.** The seeded world already enrols
 // `mock-lms-user-learner` in both sections this file reads, and
-// `student-survey-confidentiality.spec.ts` records why that matters: an earlier
+// `student-survey-confidentiality.spec.ts` records the history: an earlier
 // attempt to stand a second enrollment up with a staff launch into
-// `NURS-8100-Q2FF` could not, because `scripts/seed.py` seeds no NURS prefix and
-// the launch is recorded as an `unknown_prefix` defect. Only student launches are
-// driven here, so no roster address is stored and
-// `exit-dean-both-doors.spec.ts`'s witness over `MATH-140-E1FF` is untouched.
+// `NURS-8100-Q2FF` could not, because `scripts/seed.py` then seeded no NURS
+// prefix and the launch was recorded as an `unknown_prefix` defect. **E3-08 added
+// that prefix**, so such a launch would provision a section today — this file
+// still makes none, because the two sections it reads are already seeded and a
+// third would buy it nothing. Only student launches are driven here, so no roster
+// address is stored and `exit-dean-both-doors.spec.ts`'s witness over
+// `MATH-140-E1FF` is untouched.
 //
 // **The clock is global state on a shared stack.** `playwright.config.ts` pins
 // `workers` to 1 for that reason; every test sets the minute it needs and
@@ -47,11 +50,11 @@
 // This spec cannot be run without a seeded, running Compose stack; its green is
 // the stack-up run and CI.
 
-import { test, expect, type Locator } from '@playwright/test';
+import { test, expect, type Locator } from "@playwright/test";
 
-import { setTheClockTo, clearTheClock } from './support/clock';
-import { placementInto } from './support/doors';
-import { databaseStatement, deriveSurveyWindows } from './support/stack';
+import { setTheClockTo, clearTheClock } from "./support/clock";
+import { placementInto } from "./support/doors";
+import { databaseStatement, deriveSurveyWindows } from "./support/stack";
 import {
   CONFIDENTIALITY,
   LEARNER_SUBJECT,
@@ -60,10 +63,10 @@ import {
   clearTheWeek,
   landOnTheSurvey,
   sectionBlock,
-} from './support/survey';
+} from "./support/survey";
 
-const MATHEMATICS: SectionUnderTest = { label: 'MATH-140-E1FF', code: 'E1FF' };
-const BIOLOGY: SectionUnderTest = { label: 'BIOL-215-R3WW', code: 'R3WW' };
+const MATHEMATICS: SectionUnderTest = { label: "MATH-140-E1FF", code: "E1FF" };
+const BIOLOGY: SectionUnderTest = { label: "BIOL-215-R3WW", code: "R3WW" };
 const BOTH = [MATHEMATICS, BIOLOGY] as const;
 
 // The two headings, in the order the owner ruled: "prefix, number, then section
@@ -82,7 +85,7 @@ const BOTH = [MATHEMATICS, BIOLOGY] as const;
 // written out in the ticket itself, so that one is the ruling verbatim rather
 // than this file's reading of it. The control below reads the stored title,
 // number and term name back out of the database before either is believed.
-const TERM_NAME = 'Fall 2026';
+const TERM_NAME = "Fall 2026";
 const BIOLOGY_HEADING = `BIOL 215 R3WW — Cell Biology, ${TERM_NAME}`;
 const MATHEMATICS_HEADING = `MATH 140 E1FF — College Algebra, ${TERM_NAME}`;
 
@@ -106,9 +109,9 @@ const STORED_COURSE = {
 // `MATH-140-E1FF` runs six weeks from term week 1 (start letter `E`, 17 August)
 // so the same week is its *fourth*. A screen serving the term week in the course
 // week's place would read `COURSE WK 04` for both.
-const BOTH_WINDOWS_OPEN = '2026-09-11T19:00';
-const BIOLOGY_EYEBROW = { course: '01', term: '04' };
-const MATHEMATICS_EYEBROW = { course: '04', term: '04' };
+const BOTH_WINDOWS_OPEN = "2026-09-11T19:00";
+const BIOLOGY_EYEBROW = { course: "01", term: "04" };
+const MATHEMATICS_EYEBROW = { course: "04", term: "04" };
 
 // Monday 5 October at nine in the morning — `student-survey.spec.ts`'s
 // `AFTER_THE_WINDOW`. Term week 7's window closed at 23:59:59 on Sunday the 4th,
@@ -116,15 +119,15 @@ const MATHEMATICS_EYEBROW = { course: '04', term: '04' };
 // opening on Friday the 9th at 18:00. Daylight time is still in force in
 // `America/New_York` on that date, so the abbreviation the page derives is EDT.
 // `BIOL-215-R3WW` runs to term week 15, so week 8 is comfortably inside it.
-const AFTER_A_WINDOW = '2026-10-05T09:00';
+const AFTER_A_WINDOW = "2026-10-05T09:00";
 const DATED_IN_OCTOBER =
-  'When the next survey for this course opens at 6:00PM EDT on Friday, October 9, it appears here.';
+  "When the next survey for this course opens at 6:00PM EDT on Friday, October 9, it appears here.";
 
 // The same instant expressed for SQL, for the one test that has to talk about
 // "windows after now" to the database. `-04` is the offset `America/New_York`
 // keeps while daylight time is in force, which is the whole reason the sentence
 // above says EDT.
-const AFTER_A_WINDOW_AS_SQL = '2026-10-05 09:00:00-04';
+const AFTER_A_WINDOW_AS_SQL = "2026-10-05 09:00:00-04";
 
 // Wednesday 4 November at midday. US daylight time ends on Sunday 1 November
 // 2026, so `America/New_York` is on standard time by then and the abbreviation
@@ -136,13 +139,13 @@ const AFTER_A_WINDOW_AS_SQL = '2026-10-05 09:00:00-04';
 // **This is the mutation-killer for a hardcoded EDT.** The October case above and
 // this one are the same code path over two dates, and only the pair can tell a
 // derived abbreviation from a written one.
-const AFTER_A_WINDOW_IN_NOVEMBER = '2026-11-04T12:00';
+const AFTER_A_WINDOW_IN_NOVEMBER = "2026-11-04T12:00";
 const DATED_IN_NOVEMBER =
-  'When the next survey for this course opens at 6:00PM EST on Friday, November 6, it appears here.';
+  "When the next survey for this course opens at 6:00PM EST on Friday, November 6, it appears here.";
 
 // The sentence a section with no future window keeps — E2-10's, unchanged by this
 // ticket and named here because the dated one has to be told from it.
-const UNDATED = 'When the next survey for this course opens, it appears here.';
+const UNDATED = "When the next survey for this course opens, it appears here.";
 
 // `design/tokens.css`: `--text-3: 20px;  /* section headings */` and `--text-2:
 // 16px;  /* body, comment text */`. Criterion 3 makes the course heading the
@@ -153,9 +156,9 @@ const SECTION_HEADING_PX = 20;
 
 // The placement the learner launches through. One launch shows every section they
 // are enrolled in, so which of the two it names does not matter.
-let placement = '';
+let placement = "";
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async ({ browser }) => {
   test.setTimeout(120_000);
@@ -193,7 +196,7 @@ test.afterAll(async ({ browser }) => {
   }
 });
 
-test('the seeded world holds the courses, the term and the two open windows this spec names', async ({
+test("the seeded world holds the courses, the term and the two open windows this spec names", async ({
   page,
 }) => {
   // **The control, and nothing here is about FIX-01.** Every heading assertion
@@ -208,10 +211,10 @@ test('the seeded world holds the courses, the term and the two open windows this
     expect(
       courseAndTermOf(section.code),
       `The stored course and term for ${section.code} are not what this spec transcribed from ` +
-        '`mock-lms/app/seed.py` and `scripts/seed.py`. Every heading assertion in this file is ' +
-        'built out of these three values, so a difference here would redden them against a ' +
-        'correct page. Two lines in this answer means more than one section carries that code, ' +
-        'and the heading would then be about whichever one the page happened to show.',
+        "`mock-lms/app/seed.py` and `scripts/seed.py`. Every heading assertion in this file is " +
+        "built out of these three values, so a difference here would redden them against a " +
+        "correct page. Two lines in this answer means more than one section carries that code, " +
+        "and the heading would then be about whichever one the page happened to show.",
     ).toBe(STORED_COURSE[section.code]);
   }
 
@@ -223,19 +226,19 @@ test('the seeded world holds the courses, the term and the two open windows this
       block,
       `The learner has no block for ${section.code} at ${BOTH_WINDOWS_OPEN}. The seeded world ` +
         "enrols them in both of this file's sections; a block missing here is an enrollment the " +
-        'seed no longer holds, or one that is not live on the pretended day.',
+        "seed no longer holds, or one that is not live on the pretended day.",
     ).toBeVisible();
     await expect(
       block.getByTestId(SUBMIT),
       `${section.code} is on screen without a submit control, so its week is not open. Term week ` +
-        '4 opens on Friday 11 September at 18:00 and closes on Sunday the 13th at 23:59:59; a ' +
+        "4 opens on Friday 11 September at 18:00 and closes on Sunday the 13th at 23:59:59; a " +
         "section showing the closed state here is one whose own dates do not cover that week, or " +
-        'one whose windows were never materialized (ADR 0111).',
+        "one whose windows were never materialized (ADR 0111).",
     ).toBeVisible();
   }
 });
 
-test('each open course sits under its own heading naming prefix, number, section, title and term', async ({
+test("each open course sits under its own heading naming prefix, number, section, title and term", async ({
   page,
 }) => {
   // Acceptance criterion 1, first half: "the page shows each course under its own
@@ -265,20 +268,22 @@ test('each open course sits under its own heading naming prefix, number, section
     [MATHEMATICS, MATHEMATICS_HEADING],
   ] as const) {
     await expect(
-      page.getByTestId(sectionBlock(section.code)).getByRole('heading', {
+      page.getByTestId(sectionBlock(section.code)).getByRole("heading", {
         name: heading,
         exact: true,
       }),
       `${section.code} is not under a heading reading ${JSON.stringify(heading)}. The order is ` +
         "the owner's ruling of 2026-09-03: prefix, number, then section code, then the em-dash " +
         "title, then the term's name. A heading missing the term name is the page that never " +
-        'says which term this is; one missing the section code is the §2.2 code that used to sit ' +
-        'beside it having been dropped rather than folded in.',
+        "says which term this is; one missing the section code is the §2.2 code that used to sit " +
+        "beside it having been dropped rather than folded in.",
     ).toHaveCount(1);
   }
 });
 
-test('the week eyebrow names both of the two week axes in words', async ({ page }) => {
+test("the week eyebrow names both of the two week axes in words", async ({
+  page,
+}) => {
   // Acceptance criterion 1, second half: "the eyebrow reads `COURSE WK NN, TERM
   // WK NN`". SPEC §2.2 gives a course-level page two axes — the course week with
   // a quiet term-week sub-label — and until this ruling the page printed them as
@@ -308,14 +313,16 @@ test('the week eyebrow names both of the two week axes in words', async ({ page 
     await expect(
       page.getByTestId(sectionBlock(section.code)),
       `${section.code}'s eyebrow does not read "COURSE WK ${weeks.course}, TERM WK ${weeks.term}". ` +
-        'SPEC §2.2 keeps the two axes apart because a 12-week section that started in term week 4 ' +
-        'is not thirteen weeks into itself, and the ruling of 2026-09-03 makes the page say which ' +
-        'is which in words.',
-    ).toContainText(new RegExp(`COURSE WK ${weeks.course},\\s*TERM WK ${weeks.term}`));
+        "SPEC §2.2 keeps the two axes apart because a 12-week section that started in term week 4 " +
+        "is not thirteen weeks into itself, and the ruling of 2026-09-03 makes the page say which " +
+        "is which in words.",
+    ).toContainText(
+      new RegExp(`COURSE WK ${weeks.course},\\s*TERM WK ${weeks.term}`),
+    );
   }
 });
 
-test('a course heading is set at the section-heading step of the type scale and above body copy', async ({
+test("a course heading is set at the section-heading step of the type scale and above body copy", async ({
   page,
 }) => {
   // Acceptance criterion 3: "each course's heading gets a clearly larger type
@@ -340,11 +347,11 @@ test('a course heading is set at the section-heading step of the type scale and 
 
   const heading = page
     .getByTestId(sectionBlock(BIOLOGY.code))
-    .getByRole('heading', { name: BIOLOGY_HEADING, exact: true });
+    .getByRole("heading", { name: BIOLOGY_HEADING, exact: true });
   await expect(
     heading,
-    'The course heading is not on screen, so there is nothing here to measure. The heading itself ' +
-      'is asserted by its own test above; this one is about its size.',
+    "The course heading is not on screen, so there is nothing here to measure. The heading itself " +
+      "is asserted by its own test above; this one is about its size.",
   ).toHaveCount(1);
 
   // The confidentiality sentence is this page's ordinary body copy — SPEC §4.1
@@ -353,9 +360,9 @@ test('a course heading is set at the section-heading step of the type scale and 
   const bodyCopy = page.getByText(CONFIDENTIALITY, { exact: true });
   await expect(
     bodyCopy,
-    'The confidentiality sentence is not on this screen, and it is what the heading is measured ' +
-      'against. Its own rule is `student-survey-confidentiality.spec.ts`\'s; here it is simply a ' +
-      'run of governed body copy that is certainly present.',
+    "The confidentiality sentence is not on this screen, and it is what the heading is measured " +
+      "against. Its own rule is `student-survey-confidentiality.spec.ts`'s; here it is simply a " +
+      "run of governed body copy that is certainly present.",
   ).toHaveCount(1);
 
   const headingPx = await pixelsOf(heading);
@@ -365,20 +372,20 @@ test('a course heading is set at the section-heading step of the type scale and 
     headingPx,
     `The course heading renders at ${headingPx}px. \`design/tokens.css\` names \`--text-3\` ` +
       `(${SECTION_HEADING_PX}px) as the section-heading step of the scale, and criterion 3 makes ` +
-      'this heading the page\'s visual headline. A value equal to the body size below is the ' +
-      'shipped state; a value near but not equal to the token is a hand-typed size rather than ' +
-      'the scale.',
+      "this heading the page's visual headline. A value equal to the body size below is the " +
+      "shipped state; a value near but not equal to the token is a hand-typed size rather than " +
+      "the scale.",
   ).toBe(SECTION_HEADING_PX);
   expect(
     headingPx,
     `The heading renders at ${headingPx}px and this page's body copy at ${bodyPx}px. The step is ` +
-      'what makes several courses on one screen tell each other apart, so it is asserted as well ' +
-      'as the absolute size: a reshuffle that moved both together would satisfy the token check ' +
-      'and leave the screen exactly as flat as it is today.',
+      "what makes several courses on one screen tell each other apart, so it is asserted as well " +
+      "as the absolute size: a reshuffle that moved both together would satisfy the token check " +
+      "and leave the screen exactly as flat as it is today.",
   ).toBeGreaterThan(bodyPx);
 });
 
-test('a closed section names when its next survey opens, and says so in Eastern Daylight Time', async ({
+test("a closed section names when its next survey opens, and says so in Eastern Daylight Time", async ({
   page,
 }) => {
   // Acceptance criterion 2, first direction. The section is closed — term week
@@ -405,15 +412,15 @@ test('a closed section names when its next survey opens, and says so in Eastern 
       block.getByText(DATED_IN_OCTOBER, { exact: true }),
       `${BIOLOGY.code} does not say when its next survey opens. At ${AFTER_A_WINDOW} term week ` +
         "7's window has closed and term week 8's opens on Friday 9 October at 18:00 in " +
-        '`America/New_York`, where daylight time is still in force — so the sentence the owner ' +
-        'ruled on 2026-09-03 reads exactly this. The plain sentence in its place is the ' +
-        'placeholder withholding a date the system already holds.',
+        "`America/New_York`, where daylight time is still in force — so the sentence the owner " +
+        "ruled on 2026-09-03 reads exactly this. The plain sentence in its place is the " +
+        "placeholder withholding a date the system already holds.",
     ).toHaveCount(1);
     await expect(
       block.getByText(UNDATED, { exact: true }),
-      'The undated sentence is on screen beside the dated one. Only one of the two is ever ' +
-        'right for a given section, and both together is a fallback rendered as well as the ' +
-        'answer rather than instead of it.',
+      "The undated sentence is on screen beside the dated one. Only one of the two is ever " +
+        "right for a given section, and both together is a fallback rendered as well as the " +
+        "answer rather than instead of it.",
     ).toHaveCount(0);
 
     // `design/Usage Rules.md` §4: "Missed weeks state facts and the next window;
@@ -421,7 +428,7 @@ test('a closed section names when its next survey opens, and says so in Eastern 
     // countdown or a reproach.
     expect(
       (await block.innerText()).toLowerCase(),
-      'A student who missed a week is told what is true and nothing else. A countdown, a tally ' +
+      "A student who missed a week is told what is true and nothing else. A countdown, a tally " +
         'of missed weeks, or the word "missed" itself is the guilt language that rule forbids.',
     ).not.toMatch(/missed|overdue|late|you did not|remember to/);
   } finally {
@@ -429,7 +436,7 @@ test('a closed section names when its next survey opens, and says so in Eastern 
   }
 });
 
-test('the same section in November says Eastern Standard Time, because the date decides', async ({
+test("the same section in November says Eastern Standard Time, because the date decides", async ({
   page,
 }) => {
   // Acceptance criterion 2, and the reason it says "with a derived zone
@@ -454,22 +461,24 @@ test('the same section in November says Eastern Standard Time, because the date 
       block.getByText(DATED_IN_NOVEMBER, { exact: true }),
       `${BIOLOGY.code} does not name Friday 6 November in standard time. At ` +
         `${AFTER_A_WINDOW_IN_NOVEMBER} term week 11's window has closed and term week 12's opens ` +
-        'on Friday the 6th at 18:00; daylight time ended on Sunday 1 November 2026, so the ' +
-        'abbreviation `Intl.DateTimeFormat` derives for that date is EST. `EDT` here is an ' +
-        'abbreviation somebody wrote down, which is what the ruling forbids in as many words: ' +
+        "on Friday the 6th at 18:00; daylight time ended on Sunday 1 November 2026, so the " +
+        "abbreviation `Intl.DateTimeFormat` derives for that date is EST. `EDT` here is an " +
+        "abbreviation somebody wrote down, which is what the ruling forbids in as many words: " +
         '"derive, never hardcode".',
     ).toHaveCount(1);
     await expect(
       block.getByText(DATED_IN_OCTOBER, { exact: true }),
-      'The October sentence is on a November screen, so the date is not being read off the ' +
-        'window at all.',
+      "The October sentence is on a November screen, so the date is not being read off the " +
+        "window at all.",
     ).toHaveCount(0);
   } finally {
     await clearTheClock(page);
   }
 });
 
-test('a closed section with no window ahead of it keeps the plain sentence', async ({ page }) => {
+test("a closed section with no window ahead of it keeps the plain sentence", async ({
+  page,
+}) => {
   // Acceptance criterion 2, second direction: "one with no future window keeps
   // the current sentence".
   //
@@ -503,17 +512,19 @@ test('a closed section with no window ahead of it keeps the plain sentence', asy
     const block = await landOnTheSurvey(page, placement, BIOLOGY.code);
     await expect(
       block.getByText(DATED_IN_OCTOBER, { exact: true }),
-      'The dated sentence is not on screen before this test removes the windows it names. Every ' +
-        'assertion after the removal is about a fallback, and a page that never dated anything ' +
-        'in the first place would satisfy all of them.',
+      "The dated sentence is not on screen before this test removes the windows it names. Every " +
+        "assertion after the removal is about a fallback, and a page that never dated anything " +
+        "in the first place would satisfy all of them.",
     ).toHaveCount(1);
 
-    const removed = Number(databaseStatement(`select count(*) from survey_window where ${filter};`));
+    const removed = Number(
+      databaseStatement(`select count(*) from survey_window where ${filter};`),
+    );
     expect(
       removed,
       `No \`survey_window\` row for ${BIOLOGY.code} opens after ${AFTER_A_WINDOW_AS_SQL}, so the ` +
-        'delete below changes nothing and the reload would show the same screen for a reason ' +
-        'that has nothing to do with the fallback.',
+        "delete below changes nothing and the reload would show the same screen for a reason " +
+        "that has nothing to do with the fallback.",
     ).toBeGreaterThan(0);
     databaseStatement(`delete from survey_window where ${filter};`);
 
@@ -524,12 +535,12 @@ test('a closed section with no window ahead of it keeps the plain sentence', asy
       `With ${removed} future window(s) removed, ${BIOLOGY.code} still has an open enrollment and ` +
         'nothing ahead of it. FIX-01 item 4: "a section with no future window keeps the current ' +
         'sentence". A dated sentence here is a formatter given nothing and printing something ' +
-        'anyway.',
+        "anyway.",
     ).toHaveCount(1);
     await expect(
       afterwards.getByText(DATED_IN_OCTOBER, { exact: true }),
-      'The dated sentence survived the removal of the window it names, so the page is not ' +
-        'reading the instant from the answer at all.',
+      "The dated sentence survived the removal of the window it names, so the page is not " +
+        "reading the instant from the answer at all.",
     ).toHaveCount(0);
   } finally {
     // The rows come back from the job that wrote them, not from this file. The
@@ -542,7 +553,9 @@ test('a closed section with no window ahead of it keeps the plain sentence', asy
 
 /** The computed `font-size` of one element, in whole pixels. */
 async function pixelsOf(locator: Locator): Promise<number> {
-  const size = await locator.evaluate((element) => window.getComputedStyle(element).fontSize);
+  const size = await locator.evaluate(
+    (element) => window.getComputedStyle(element).fontSize,
+  );
   return Number.parseFloat(size);
 }
 
@@ -557,7 +570,7 @@ async function pixelsOf(locator: Locator): Promise<number> {
 function courseAndTermOf(code: string): string {
   return databaseStatement(
     "select c.lms_number || '|' || c.lms_title || '|' || t.name from section s " +
-      'join course c on c.id = s.course_id join term t on t.id = s.term_id ' +
+      "join course c on c.id = s.course_id join term t on t.id = s.term_id " +
       `where s.lms_section_code = ${quoted(code)};`,
   );
 }

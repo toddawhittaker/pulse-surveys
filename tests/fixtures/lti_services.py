@@ -16,15 +16,29 @@ is hardcoded here either. `link_relations_in` and `instant_of` sit beside
 `signed_launch` and exist so that a test module can exercise the paging-header
 parser and the timestamp comparison without importing this file by name.
 
-**Since E1-11's fix round the roster is behind a token, and this driver holds it.**
-The mock's NRPS route requires an access token its own endpoint issued carrying the
-membership scope, so every roster read here goes through `roster_get`, which asks
-`service_token` for one — one place rather than one per module
-(`docs/MISTAKES.md` entry 13). **AGS deliberately stays unauthenticated** until a
-grade-passback client exists, which SPEC §14.3 gives to E3, which is why
-`refuse_an_unspecified_ags_token_flow` is still here and is still called by every
-AGS path. What the platform must refuse, and with which status and code, is
-`tests/integration/test_mock_lms_nrps_requires_a_token.py` and not this file.
+**Both Advantage services are behind a token now, and this driver holds one per
+scope.** E1-11's fix round put the roster behind the membership scope, so every
+roster read here goes through `roster_get`; E3-04 does the same for AGS, so every
+line-item, score and result call here goes through `ags_get` or `ags_post` with the
+scope its route needs. One place rather than one per module (`docs/MISTAKES.md`
+entry 13), and the per-route map is written on `ags_token` below rather than
+re-derived at each call site.
+
+**`refuse_an_unspecified_ags_token_flow` is gone**, and its deletion is E3-04's.
+That guard existed to report an AGS 401 as a gap in a ticket rather than as a
+defect, on E1-06's argument that "a service refusing before a conformant client
+exists would be refusing this repository's own tests" — an argument its own
+docstring said would expire with the first AGS client. E3-04 builds that client and
+turns the enforcement on in the same ticket, so a 401 from AGS is now a fact about
+the request rather than a gap, and
+`tests/integration/test_mock_lms_ags_requires_a_token.py` is what says which
+request gets which refusal.
+
+**The `/mock/` prefix stays tokenless and that is a decision, not an oversight**
+(ADR 0047, ADR 0134). `GET /mock/posted-scores` is an inspection surface no real
+platform serves, so `posted_scores` below presents no credential and must keep
+working without one. What either service must refuse, and with which status and
+code, is the two `test_mock_lms_*_requires_a_token.py` modules and not this file.
 """
 
 import importlib
@@ -134,9 +148,19 @@ MOCK_POSTED_SCORES_PATH = "/mock/posted-scores"
 MOCK_DEFECTS_PATH = "/mock/defects"
 SERVED_SELECTORS_MEMBER = "selectors"
 
-# The two AGS scopes SPEC §3.4 needs: one line item per section, and a score
-# posted to it. Specification constants, not preferences.
+# The four scopes AGS 2.0 defines, spelled as the specification spells them and as
+# the mock's own `ADVERTISED_SCOPES` advertises them. Specification constants, not
+# preferences: a tool asks its token endpoint for exactly these strings.
+#
+# **The read-only pair arrives with E3-04**, which is when a scope first has to be
+# asked for by name rather than merely named. `lineitem.readonly` is also the
+# superstring the carried entry is about — it contains `lineitem` as a prefix — so a
+# platform comparing scopes by substring accepts a read-only token everywhere the
+# writing scope is required, and `test_mock_lms_ags_requires_a_token.py` is where
+# both directions of that are asserted.
 AGS_LINE_ITEM_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem"
+AGS_LINE_ITEM_READONLY_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem.readonly"
+AGS_RESULT_READONLY_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/result.readonly"
 AGS_SCORE_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/score"
 
 # The scope a token has to carry before this platform will serve a roster, spelled
@@ -629,41 +653,7 @@ class MockPlatform:
         """
         return local_target(url)
 
-    @staticmethod
-    def refuse_an_unspecified_ags_token_flow(response: Any, url: str) -> None:
-        """Turn a 401 or a 403 from **AGS** into a named gap rather than a puzzling red.
-
-        Real LTI Advantage services sit behind an OAuth 2.0 client-credentials
-        grant against the platform's token endpoint. E0-15 does not mention one
-        and E0-14 built none, so this suite drove both services unauthenticated.
-
-        **Narrowed to AGS, because for NRPS the premise has ended.** This guard
-        existed to say "no conformant client exists yet, so a refusal is a gap in
-        a ticket rather than a defect" — E1-06's own argument, that a service
-        refusing before a conformant client exists would refuse this repository's
-        own tests. E1-11 built that client for the roster, so the mock's NRPS
-        route now requires a token and this suite presents one: see
-        `service_token` below, and `test_mock_lms_nrps_requires_a_token.py` for
-        the refusals it is required to answer with.
-
-        AGS keeps the guard, and keeps it for the unchanged reason: SPEC §14.3
-        gives grade passback to E3, so no AGS client exists yet, and a platform
-        that started refusing there would turn every E0-15 line-item and score test
-        red for a reason none of them is about (`docs/MISTAKES.md` entry 22).
-        """
-        if response.status_code in (401, 403):
-            pytest.fail(
-                f"The platform answered {response.status_code} for `{url}`, so it requires an "
-                "access token for an Advantage service this suite calls unauthenticated. NRPS "
-                "requires one and this driver presents it; **AGS deliberately does not** — SPEC "
-                "§14.3 gives grade passback to E3 and no AGS client exists yet, so a service "
-                "refusing there would be refusing this repository's own tests. If AGS is meant to "
-                "start requiring "
-                "a token, that is a ticket rather than something to guess at in "
-                "tests/fixtures/lti_services.py."
-            )
-
-    # -- access tokens, obtained the one way (E1-11's enforcement) -------------
+    # -- access tokens, obtained the one way (E1-11's and E3-04's enforcement) --
 
     def service_token_grant(self, scope: str) -> dict[str, Any]:
         """One access token for `scope`, and the whole response the platform granted.
@@ -710,36 +700,80 @@ class MockPlatform:
         """One freshly granted access token for `scope`, as a string."""
         return str(self.service_token_grant(scope)["access_token"])
 
-    def nrps_token(self) -> str:
-        """This platform's roster token, granted once and reused for the run of a test.
+    def cached_service_token(self, scope: str) -> str:
+        """One access token for `scope`, granted once per platform and reused.
 
         Cached per platform instance so that walking a five-page roster is five
         reads rather than five grants: an assertion is single-use at this endpoint
         (RFC 7523 §3's `jti`), so a fresh grant per page would be five signatures
         to prove nothing about paging. A test that needs a *particular* token —
         stale, wrong-scoped, forged — builds it itself rather than asking here.
+
+        Keyed by scope rather than holding one string, which is what E3-04 needed:
+        AGS is four scopes where NRPS is one, and **a token per scope, never a union
+        of them**. A driver that asked for every scope at once would present a
+        credential that opens every route, and the wrong-scope half of every
+        enforcement test would be unposeable through this driver.
         """
-        if NRPS_MEMBERSHIP_SCOPE not in self._service_tokens:
-            self._service_tokens[NRPS_MEMBERSHIP_SCOPE] = self.service_token(NRPS_MEMBERSHIP_SCOPE)
-        return self._service_tokens[NRPS_MEMBERSHIP_SCOPE]
+        if scope not in self._service_tokens:
+            self._service_tokens[scope] = self.service_token(scope)
+        return self._service_tokens[scope]
+
+    def nrps_token(self) -> str:
+        """This platform's roster token. See `cached_service_token`."""
+        return self.cached_service_token(NRPS_MEMBERSHIP_SCOPE)
+
+    def ags_token(self, scope: str) -> str:
+        """This platform's token for one AGS `scope`. See `cached_service_token` (E3-04).
+
+        The map from route to scope is ADR 0134's and is written here rather than at
+        each call site (`docs/MISTAKES.md` entry 13):
+
+          - `POST …/line_items`   — `lineitem`
+          - `GET …/line_items`    — `lineitem` or `lineitem.readonly`
+          - `GET …/line_items/{}` — `lineitem` or `lineitem.readonly`
+          - `POST …/scores`       — `score`
+          - `GET …/results[/{}]`  — `result.readonly`
+
+        The two read paths in this driver ask for the **read-only** scope, which is
+        what a conformant reader asks for and which is also the half of the any-of
+        rule a driver holding only the writing scope would never exercise.
+        """
+        return self.cached_service_token(scope)
 
     def service_get(self, url: str, accept: str | None = None, *, token: str | None = None) -> Any:
         """GET one Advantage URL the platform advertised.
 
         `token`, when given, is presented as the `Bearer` credential RFC 6750 §2.1
-        describes — and its presence is also what says this call is one the
-        platform is entitled to refuse. A call that presents nothing is an AGS
-        call, where a refusal is still a gap rather than a defect.
+        describes. A call that presents nothing is one the platform is entitled to
+        refuse on either service since E3-04 — the only routes that still answer a
+        tokenless GET are under the `/mock/` prefix, which is not the protocol
+        (ADR 0047).
         """
         headers: dict[str, str] = {}
         if accept:
             headers["accept"] = accept
         if token is not None:
             headers["authorization"] = f"Bearer {token}"
-        response = self.client.get(self.local(url), headers=headers or None)
-        if token is None:
-            self.refuse_an_unspecified_ags_token_flow(response, url)
-        return response
+        return self.client.get(self.local(url), headers=headers or None)
+
+    def ags_get(self, url: str, accept: str | None = None, *, scope: str) -> Any:
+        """GET one AGS URL with a token for `scope` attached. See `ags_token`."""
+        return self.service_get(url, accept=accept, token=self.ags_token(scope))
+
+    def ags_post(
+        self,
+        url: str,
+        payload: Mapping[str, Any],
+        content_type: str,
+        accept: str | None = None,
+        *,
+        scope: str,
+    ) -> Any:
+        """POST one AGS document with a token for `scope` attached. See `ags_token`."""
+        return self.service_post(
+            url, payload, content_type, accept=accept, token=self.ags_token(scope)
+        )
 
     def roster_get(self, url: str, accept: str | None = NRPS_MEDIA_TYPE) -> Any:
         """GET one NRPS URL with this platform's own roster token attached.
@@ -756,19 +790,26 @@ class MockPlatform:
         payload: Mapping[str, Any],
         content_type: str,
         accept: str | None = None,
+        *,
+        token: str | None = None,
     ) -> Any:
         """POST one JSON document to an Advantage URL, under the media type AGS fixes.
 
         The body is serialised here rather than handed to httpx's `json=`
         keyword, because that keyword would set `application/json` and overwrite
         the media type the specification requires the request to carry.
+
+        `token` is presented exactly as `service_get` presents one, and is the half
+        E3-04 added: a POST to a line-item container or a score service is a call the
+        platform refuses without a credential. A caller that means to be refused —
+        which is every test in `test_mock_lms_ags_requires_a_token.py` — passes none.
         """
         headers = {"content-type": content_type}
         if accept:
             headers["accept"] = accept
-        response = self.client.post(self.local(url), content=json.dumps(payload), headers=headers)
-        self.refuse_an_unspecified_ags_token_flow(response, url)
-        return response
+        if token is not None:
+            headers["authorization"] = f"Bearer {token}"
+        return self.client.post(self.local(url), content=json.dumps(payload), headers=headers)
 
     def service_claim(self, launch: SignedLaunch, claim: str, member: str, purpose: str) -> str:
         """One member of one service claim, or a failure naming what is missing.
@@ -993,11 +1034,12 @@ class MockPlatform:
         container *refuses*. Those need the raw answer, and they need it without
         knowing the media type AGS fixes for the request.
         """
-        return self.service_post(
+        return self.ags_post(
             self.line_items_url(launch),
             payload,
             LINE_ITEM_MEDIA_TYPE,
             accept=LINE_ITEM_MEDIA_TYPE,
+            scope=AGS_LINE_ITEM_SCOPE,
         )
 
     def created_line_item(
@@ -1040,7 +1082,11 @@ class MockPlatform:
         rather than failed, because which of the two E0-15 meant is not
         something this file decides — what every caller needs is the line items.
         """
-        response = self.service_get(url, accept=LINE_ITEM_CONTAINER_MEDIA_TYPE)
+        response = self.ags_get(
+            url,
+            accept=LINE_ITEM_CONTAINER_MEDIA_TYPE,
+            scope=AGS_LINE_ITEM_READONLY_SCOPE,
+        )
         assert response.status_code == 200, (
             f"Listing line items at `{url}` answered {response.status_code} rather than 200. "
             "E0-15's scope: 'Assignment and Grade Services 2.0 stubs: line-item creation and "
@@ -1077,6 +1123,7 @@ class MockPlatform:
                 self.with_query(self.line_items_url(launch), query),
                 LINE_ITEM_CONTAINER_MEDIA_TYPE,
                 "line item container",
+                token=self.ags_token(AGS_LINE_ITEM_READONLY_SCOPE),
             )
         ]
 
@@ -1101,7 +1148,9 @@ class MockPlatform:
 
     def post_score(self, line_item: Mapping[str, Any], payload: Mapping[str, Any]) -> Any:
         """POST one score against a line item, to the URL AGS derives from its `id`."""
-        return self.service_post(self.scores_url(line_item), payload, SCORE_MEDIA_TYPE)
+        return self.ags_post(
+            self.scores_url(line_item), payload, SCORE_MEDIA_TYPE, scope=AGS_SCORE_SCOPE
+        )
 
     def line_item_id(self, line_item: Mapping[str, Any]) -> str:
         """A line item's own URL, or a failure saying it has none."""
@@ -1124,6 +1173,14 @@ class MockPlatform:
         version of this helper accepted four shapes because the ticket named
         none, and every one of the three it no longer accepts is now a mock that
         does not do what the ticket says.
+
+        **No credential, deliberately, and it stays that way after E3-04.** The
+        `/mock/` prefix is not the AGS namespace and is not the protocol: ADR 0047
+        makes this an inspection surface no real platform serves, and ADR 0134 says
+        out loud that it is outside the enforcement so a reviewer can tell the
+        decision from an oversight. If this route ever starts refusing a tokenless
+        read, that is the enforcement having been applied by path rather than by
+        route, and `test_mock_lms_ags_requires_a_token.py` holds the assertion.
         """
         response = self.service_get(MOCK_POSTED_SCORES_PATH)
         assert response.status_code == 200, (
@@ -1171,7 +1228,9 @@ class MockPlatform:
 
     def result_page(self, url: str) -> ResultPage:
         """Fetch one page of a result container and read its paging header."""
-        response = self.service_get(url, accept=RESULT_CONTAINER_MEDIA_TYPE)
+        response = self.ags_get(
+            url, accept=RESULT_CONTAINER_MEDIA_TYPE, scope=AGS_RESULT_READONLY_SCOPE
+        )
         assert response.status_code == 200, (
             f"The AGS Result service answered {response.status_code} for `{url}`. E0-15: 'The "
             "conformant AGS Results endpoint answers for the same line item.' Body begins "
@@ -1215,6 +1274,7 @@ class MockPlatform:
                 self.with_query(self.results_url(line_item), query),
                 RESULT_CONTAINER_MEDIA_TYPE,
                 "result container",
+                token=self.ags_token(AGS_RESULT_READONLY_SCOPE),
             )
         ]
 

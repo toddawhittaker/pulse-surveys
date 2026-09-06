@@ -439,6 +439,25 @@ _HOLDS_THE_TEACHING_INSTRUCTOR_GRANT = text(
     ")"
 )
 
+# Everybody holding an assignment whose scope names one section — the staff of that
+# section, whatever role the assignment carries. E3-08's boundary round (EE-M1)
+# reads it to answer "is this member of the roster somebody who teaches here", and
+# `section_scoped_assignees` below is the only caller.
+#
+# **`section_id` is the assignment's own column, not a purview.**
+# `public.assignment_scope` is a projection of `role_assignment` and expands no
+# containment, so a dean's row names their college and answers nothing here — which
+# is what keeps a dean enrolled in a course as a learner a learner. SPEC §2.1
+# scopes exactly one role to a section, so today this is the teaching instructor
+# and it is written as the *grain* rather than as that role, because a role added
+# at section grain by a later ticket is staff of that section on the day it is
+# added and nobody should have to remember to add it here.
+_SECTION_SCOPED_ASSIGNEES = text(
+    "SELECT DISTINCT granted.person_id"
+    " FROM public.assignment_scope AS granted"
+    " WHERE granted.section_id = :section_id"
+)
+
 # Which courses a person leads, out of the Lead Faculty mapping and not out of
 # the assignment row. SPEC §2.1 puts "one lead per course" on the mapping; E0-09
 # measured that `role_assignment` accepts two `LEAD_FACULTY` rows on one course
@@ -912,6 +931,38 @@ def teaching_instructor_assigned(session: Session, *, person_id: UUID, section_i
     return bool(answer)
 
 
+def section_scoped_assignees(session: Session, *, section_id: UUID) -> set[UUID]:
+    """The people holding an assignment scoped to this section — its staff (EE-M1).
+
+    Asked by SPEC §3.4's participation sweep before it delivers a score. A roster
+    container carries everybody the platform lists, instructors included, and the
+    sync writes an `enrollment` row for each — so without this the sweep posts a
+    participation percentage into the gradebook column of the person doing the
+    grading, computed from the weeks they did not fill in their own survey. §3.4
+    makes the score a student's: "completed items ÷ total items across the
+    student's elapsed weeks".
+
+    **It answers people, not members.** The caller holds `user` ids and this
+    answers `person` ids, because those are two different keys for two different
+    things (ADR 0024) and the hop between them is a definer call the caller makes —
+    `app.services.identity.person_for_user`. Answering members would put that hop
+    inside this module and give it a second thing to be about.
+
+    **It lives here because the view does.** E0-41's rule is that
+    `public.assignment_scope` is read through this module and nowhere else, and
+    `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` enforces it.
+    `teaching_instructor_assigned` above is the neighbouring question — one person,
+    one section, one role — and this is the set, for a caller that has to sort a
+    roster into two kinds of people.
+
+    **Not an authorization decision**, exactly as its neighbour is not: it opens
+    nothing and refuses nothing, and what a caller does with the answer is the
+    caller's rule. A false *yes* withholds a grade from a student; a false *no*
+    posts one to a member of staff. Neither widens anybody's purview.
+    """
+    return set(session.execute(_SECTION_SCOPED_ASSIGNEES, {"section_id": section_id}).scalars())
+
+
 def resolve_scope(
     session: Session,
     *,
@@ -1129,7 +1180,7 @@ class WriteSanction:
 # mapping, so a caller cannot authorize itself by constructing the sanction it
 # wants.
 #
-# **Two entries, and adding a third is the conversation.** `launch_provisioning`
+# **Three entries, and adding a fourth is the conversation.** `launch_provisioning`
 # is `app.services.provisioning`, E1-10's launch-time ingestion: SPEC §2.1 gives
 # courses and sections two arrival paths, "hourly roster sync + launch-time
 # ingestion", and §7.3 makes the first staff launch of a section the only thing
@@ -1154,6 +1205,20 @@ class WriteSanction:
 # write `section` would be inventing a section from a roster it could only fetch
 # because that section already existed.
 #
+# `grade_passback` is `app.services.grading`, E3-05's line-item creation, and it
+# takes `section` alone. SPEC §3.4 gives every section one AGS line item "created
+# by the tool on first launch", and the id of the one this tool creates lives on
+# `section.ags_line_item_url` (ADR 0128) — so the passback path is a writer of a
+# table `LMS_OWNED_TABLES` names, and it passes this chokepoint the way the other
+# two do rather than being excused from it. ADR 0136 is the record.
+#
+# **The rest of `section` is not in the entry, and the database says so a second
+# way.** This catalog cannot express a column, so it grants the table and the
+# grant `pulse_app` actually holds is column-scoped: `UPDATE (ags_line_item_url)`
+# and nothing else (`backend/app/views_sql/grade_passback_grants_v002.sql`). The
+# section code, the binding columns and ADR 0021's derived calendar columns are a
+# launch's discovery, and neither layer is the other's backstop.
+#
 # **The inventory is pinned in a test, not here** (`docs/MISTAKES.md` entry 35).
 # `tests/unit/test_a_sanctioned_writer_satisfies_the_chokepoint.py` compares this
 # mapping against a hand-written copy as an equality, so a writer or a table added
@@ -1161,6 +1226,7 @@ class WriteSanction:
 SANCTIONED_WRITERS: Final[Mapping[str, frozenset[str]]] = {
     "launch_provisioning": frozenset({"course", "section", "user"}),
     "roster_sync": frozenset({"user", "enrollment", "role_assignment"}),
+    "grade_passback": frozenset({"section"}),
 }
 
 

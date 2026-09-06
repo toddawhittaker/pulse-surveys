@@ -14,10 +14,12 @@ foreign key limbs mirroring `uq_section_id_term_id` and `uq_week_id_term_id`.
 
 **Why it matters beyond tidiness.** SPEC §2.2 puts the week axis inside a term,
 so a response keyed to another term's week 3 records a submission against a week
-its own section's calendar does not contain — and §3.4's participation is "valid
-weeks completed ÷ weeks elapsed to date", a ratio then counted over two
-different calendars. `survey_window` refuses the pairing and `response` accepts
-it, so today the two tables can disagree about what a week is.
+its own section's calendar does not contain — and §3.4's participation is
+completed items ÷ total items across the weeks the student was enrolled for
+(ruled 2026-09-04), a ratio then assembled over two different calendars: the
+answer rows hang off a response in one calendar and the week's item total comes
+from the other. `survey_window` refuses the pairing and `response` accepts it, so
+today the two tables can disagree about what a week is.
 
 **Both limbs are attempted separately, and each is isolated by the term the
 response itself claims.** A test that only ever writes a row disagreeing on both

@@ -1,8 +1,20 @@
 # Entry 29. A value was repaired before the check that should have refused it
 
-**Caught: 1**
+**Caught: 2**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
+
+*(**A catch**, building E3-04, 2026-09-04. The AGS client is handed a
+participation percentage as a *string* and has to put that string on the wire
+unchanged, because ADR 0052 makes a retry the identical body re-sent and a value
+the poster re-derives is not provably the value it is retrying. The obvious way to
+get a number into a JSON body is `float(score)`, and this entry is what stopped it:
+`float()` is a repair, and it accepts `" 61.5 "`, `"1_0"`, `"nan"` and `"1e400"` —
+a wider language than RFC 8259's `number` — and then re-spells whatever it took, so
+`61.50` would leave as `61.5`. The score is checked against JSON's own number
+grammar first and refused loudly if it is not one, and only then placed into the
+document. Same shape as the scope-splitting instance below: a standard-library
+parser named after a concept is not a check against that concept's grammar.)*
 
 *(One review pass after the entry was written, and it is the same
 class with a different tool — which is the sharpening worth keeping: **the repair

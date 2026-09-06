@@ -55,14 +55,29 @@ from app.lti.launch import (
 )
 from app.lti.registration import JWKS_PATH, NoSigningKeyError, published_key_set
 from app.services.authz import Door
+from app.services.grading import request_line_item_creation
 from app.services.provisioning import provision_from_launch
 from app.services.roster_sync import request_section_sync
 
-# What a caller is told when this deployment holds no signing key. Short on
-# purpose: the route is public in every environment, and the operator's copy of
-# this — which table, which command — is in `app.lti.registration`, where
-# somebody reading a traceback or the code will find it.
-NO_KEY_SET_DETAIL = "This deployment publishes no LTI key set."
+# What a caller is told when this deployment holds no usable signing key.
+#
+# **It names the command that fixes it** (E3-01 criterion 4). Until E3-01 there
+# was nothing to name: the demo seed was the only writer and it refuses to run
+# outside development, so the body said only that no key set is published and
+# whoever read it could do nothing but escalate. The supply path exists now, and
+# a refusal that does not name it is a refusal that wastes the one reader who
+# could act on it.
+#
+# **What that discloses, and why it is acceptable.** This route is public in
+# every environment (ADR 0085), so the sentence goes to anybody who asks. It
+# names a script in this tool's own repository and nothing about this
+# deployment — no path on disk, no role, no address, no whether-a-key-once-
+# existed. What it tells an unauthenticated reader is that this installation
+# cannot sign yet, which the 503 already told them.
+NO_KEY_SET_DETAIL = (
+    "This deployment publishes no LTI key set: it holds no signing key that has not been retired. "
+    "An operator supplies one with `python scripts/signing_key.py generate`."
+)
 
 # RFC 9110's status for a server that is working and cannot serve this yet.
 SERVICE_UNAVAILABLE = 503
@@ -178,6 +193,22 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
     thirty. It runs after the commit because the worker that picks the job up reads
     its own connection and would otherwise find a section this request has not
     written yet.
+
+    **And the participation column beside it** (E3-05, SPEC §3.4: one line item per
+    section, "created by the tool on first launch"). It is the same shape and
+    deliberately the same one decision: both triggers ride
+    `provision_from_launch`'s answer, so §7.3's rule about *who* may cause them —
+    an instructor yes, a leadership role only inside their own purview, a student
+    never — is computed once and this router asks nothing of its own about roles.
+    `request_line_item_creation` decides whether there is anything to ask for, and
+    it answers no for a section with no gradebook address and for one whose column
+    this tool has already recorded.
+
+    **Neither enqueue can fail this launch or delay it.** Both publish through
+    `app.jobs.celery_app.publish_once` — one attempt, on a connection made for the
+    call with its retries off and its socket timeouts bounded — and both catch
+    broadly, because by this line the launch is verified, committed and owed a
+    response (`docs/MISTAKES.md` entry 41).
     """
     settings = request.app.state.settings
     form = form_body(await request.body())
@@ -195,6 +226,7 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
     await run_in_threadpool(session.commit)
     if section_id is not None:
         await run_in_threadpool(request_section_sync, session, section_id)
+        await run_in_threadpool(request_line_item_creation, session, section_id)
     return await landing_with_session(
         claims,
         door=Door.LAUNCH,

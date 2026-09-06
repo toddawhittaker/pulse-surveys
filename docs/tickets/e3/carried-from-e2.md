@@ -46,6 +46,47 @@ needs. Source: `docs/tickets/e1/deferred.md`, E1-05 item 1.
 **Owner:** E3, the first epic to register a real platform.
 **Done when:** the deferred entry's.
 
+**Closed by E3-01.** The done-when asked for "a documented and tested way to put
+a signing key in that table — with the rotation question answered too", and both
+halves shipped in one pull request.
+
+The supply path is `scripts/signing_key.py`, an operator command with `generate`,
+`list` and `retire <kid>`, connecting on `DATABASE_URL` for the address and
+`DB_SUPERUSER`/`DB_SUPERUSER_PASSWORD` for the identity — the same three
+variables a migration reads, so no configuration variable was added, and the
+application role still holds `SELECT` on the table and no write of any kind
+([ADR 0126](../../adr/0126-a-signing-key-reaches-a-deployment-through-an-operator-command.md)).
+It is driven as a program against migrated databases the demo seed has never run
+against, which is the half of the entry that mattered: a path proven only where
+the seed works is proven in the one place it is not needed.
+
+The rotation question is answered by
+[ADR 0127](../../adr/0127-the-published-key-set-carries-every-unretired-key-and-the-newest-signs.md).
+`uq_tool_signing_key_one_row` is dropped and two columns replace it: the
+published key set at `/lti/jwks` is every row with `retired_at IS NULL`, and the
+tool signs with the newest of those by `created_at DESC, id DESC`. A rotation is
+`generate`, a wait long enough for platforms to re-fetch the key set, then
+`retire` on the old key — and both keys verify in between. A retired key leaves
+the set immediately and its row stays as the record of what this deployment used
+to sign with. A deployment with no *live* key still answers 503, in a sentence
+that now names the command that fixes it.
+
+The rule was revised at the E3 boundary: [ADR 0143](../../adr/0143-the-oldest-live-key-signs-so-that-generate-is-not-the-switch.md)
+supersedes ADR 0127 in part, and the oldest live key signs.
+
+Three limits stated rather than left to be discovered. Nothing expires a key or
+bounds how many the published set carries: `retire` is a command somebody has to
+run, and `list` exists so the state a rotation is halfway through is visible. The
+migration's downgrade **refuses** when it meets more than one *live* key, because
+below that revision the table permits one row and completing would have to choose
+which identity survives — the one discarded being the private half of a key a
+platform may already have been registered against; retirement is the route down,
+which is why the guard counts live rows rather than stored ones. And a downgrade
+that does complete **discards the retired-key records**, which the one-row schema
+has nowhere to hold: no identity anything still verifies against is lost, but the
+record of what this deployment used to sign with is, and only a backup has it
+afterwards. ADR 0127 carries all three.
+
 ## AGS still answers without a token
 
 E1's fix round enforced the client-credentials token on NRPS only; the AGS
@@ -55,6 +96,24 @@ Source: `docs/tickets/e1/deferred.md`, "From the E1-11 fix round".
 **Owner:** E3, paired with the first AGS client.
 **Done when:** ADR 0099's consequences — enforcement lands with that client, the
 way NRPS's landed with E1-11's.
+
+**Closed by E3-04.** The done-when asked for enforcement to land with the client
+rather than after it, and both halves shipped in one pull request: the client is
+`backend/app/lti/ags.py` and the six AGS routes require a token in the same
+change.
+
+Each route names the scopes AGS 2.0 defines for it — the create takes the
+line-item scope, the two line-item reads take that or its read-only sibling, the
+score post takes the score scope, and both result reads take the result read-only
+scope ([ADR 0134](../../adr/0134-the-mocks-ags-routes-map-to-scopes-one-per-route.md)).
+The credential is judged before the query parameters and before the context
+lookup, which is the roster route's order copied, so both containers' `ge=1` page
+bounds came out of the route signatures and are read by `app.paging::page_number`
+behind the credential — the consequence ADR 0099 wrote down when the roster's own
+bound moved, arriving in the ticket that record named. The `/mock/` prefix stays
+tokenless by decision (ADR 0047), with a test that says so, so an enforcement
+applied to the application rather than to the routes is caught rather than
+shipped.
 
 ## The registration chokepoint stores a CSP-breaking authorization endpoint verbatim
 
@@ -123,6 +182,21 @@ substring. Recorded in PR #109.
 **Owner:** whichever ticket widens the mock's `ADVERTISED_SCOPES`.
 **Done when:** if a new scope is a superstring of another, a pair proves the
 check is membership rather than substring.
+
+**Closed by E3-04.** No scope was added; the pair became expressible because a
+second service started enforcing. `…/scope/lineitem.readonly` was already
+advertised and already contains `…/scope/lineitem` as a prefix, and until AGS
+required a credential there was no route on which the two could be told apart.
+
+Both halves are asserted on the route that creates a gradebook column: a token
+granted only the read-only line-item scope is refused 403 `insufficient_scope`
+there, and a token granted the writing scope creates a line item the container
+then lists. The refused half alone would be satisfied by a route that refuses
+every credential, which is why the accepted half is asserted past the 201 and
+against the container's own contents. `app.tokens::authorised_token` compares
+membership of RFC 6749 §3.3's space-delimited list, so the substring, prefix and
+`startswith` implementations each die against the first half while passing every
+other test in the module.
 
 ## The reveal-subject guard, restated
 
@@ -203,6 +277,42 @@ likely to add a mutating route.
 routes, asserted in both directions so a stale exemption fails as loudly as an
 unguarded route.
 
+**Closed by E3-07.** The done-when asked for a sweep over the built
+application's routes asserted in both directions, and both halves landed in the
+ticket that added the first mutating route since E2-08 — which is what made the
+sweep's red case something other than a plant.
+
+The sweep is `tests/unit/test_every_mutating_route_carries_the_csrf_check.py`.
+Its inventory is the built application's own route table, walked through
+`tests/fixtures/routing.py::every_route`, and it holds every route whose
+`methods` is `None` or names anything outside `GET`, `HEAD` and `OPTIONS` — by
+method and nothing else, because a body or a declaration is a property an author
+chooses per route ([ADR 0140](../../adr/0140-the-csrf-sweep-reads-two-currencies-over-a-method-based-inventory.md)).
+
+The check is read in two currencies, each with a control that finds it on a route
+that certainly holds it: `app.api.deps.csrf_verified_student` as an object
+anywhere in the route's dependency graph, and the route class E3-07 adds for a
+route appended to `router.routes`, which carries no dependency graph at all. A
+third way of attaching the dependency, at the `include_router` call, is refused
+rather than read — measured against the pinned FastAPI, it reaches no route — so
+the sweep fails loudly on any include carrying dependencies and names where to
+put it instead.
+
+The exemption ledger is four paths, each mapped to one sentence saying why that
+route cannot carry the check: the two LTI door legs and the two clock controls.
+An entry costs that sentence and both directions of assertion — every entry must
+still name a mutating route this application serves, so a route renamed or
+deleted with the entry left behind is red; and every exempt route must carry
+neither currency, so an exemption that has become unnecessary is red and the
+ledger shrinks. E3-07's own trigger is not on it, because a development route is
+refused outside development by the environment guard, which is a different
+control from CSRF.
+
+What the entry asked for is now the structural force it named as missing: a
+mutating route added tomorrow with the unchecked dependency is red on the day it
+lands, and the only two ways to make it green are to fix it or to argue for it in
+the ledger with a sentence.
+
 ## The launch-path roster enqueue still waits six seconds on a broker that is down
 
 `request_section_sync` publishes on an unbounded connection, so a staff launch
@@ -214,6 +324,29 @@ port. Source: `../e2/deferred.md`.
 launch door's suites, which should move with it.
 **Done when:** the deferred entry's — the bounded connection, and a test that
 times a staff launch against a broker at a closed port under a stated budget.
+
+**Closed by E3-05.** Both halves of the done-when landed in the ticket that added
+a second enqueue to the same door.
+
+`request_section_sync` publishes through `app.jobs.celery_app.publish_once`,
+which is where the bounded shape now lives: one attempt, a connection made for
+the call with `max_retries: 0` and its socket timeouts bounded, and no result
+backend. The constants moved out of `app.services.validity` rather than being
+copied, so the three request paths that enqueue — the submit path's
+re-classification, the launch door's roster sync and the launch door's line-item
+creation — cannot come apart (`docs/MISTAKES.md` entry 13). Each caller keeps its
+own broad `except`, its own error log and its own answer, because what to do
+about a broker that is not there is a different question per caller.
+
+The measurement is
+`tests/integration/test_a_staff_launch_is_prompt_with_the_broker_at_a_closed_port.py`:
+a real instructor launch with the broker at a closed loopback port, under SPEC
+§10's 2.5-second budget, asserting *both* error-level refusals — one under
+`app.services.roster_sync` and one under `app.services.grading` — so that a door
+which published nothing cannot satisfy the budget by being fast. The section it
+drives is required to hold both service addresses, to carry no line-item id and
+to have no `nrps_call` row at all, so neither trigger can be correctly silent and
+the roster debounce cannot fire (`docs/MISTAKES.md` entry 7).
 
 ## The unproven structural battery rows
 
@@ -384,6 +517,14 @@ standing ADR's, or an earlier boundary's, not re-owned here.
 
 - **Grade passback reading validity state — E3.** E2-08 writes
   `response.is_valid` and nothing reads it yet; E3 is the first reader.
+  **Superseded 2026-09-04, and left above as E2's own hand-off.** The item-based
+  formula does not read that column — it counts completed items from the answer
+  rows and each comment's most recent classification, a finer grain than a
+  per-response verdict carries — and the column already had a reader,
+  `backend/app/api/student.py`, which returns a student their own submission's
+  verdict. E3 does consume the validity *machinery* (§3.3's refused set decides
+  whether a comment item counts). `README.md`'s carried table holds the full
+  ruling, and E3-08 re-lists from this entry as amended rather than as written.
 - **Validity-rate surfaces, and growing the copy inventory over them — E4**
   (instructor and leadership only, §3.3).
 - **The student results view — E8.**

@@ -286,6 +286,7 @@ def sync_section(
     http: requests.Session | None = None,
     settings: Settings | None = None,
     resolve: Callable[[str], Sequence[str]] | None = None,
+    called_at: datetime | None = None,
 ) -> None:
     """Pull one section's roster and write what it says. The whole of the sync.
 
@@ -316,6 +317,14 @@ def sync_section(
     for the reason `http` is: no test in this repository may reach a name server,
     because a hostname resolves differently on a developer's machine and in CI —
     and a rule measured against a resolver is measuring the machine.
+
+    **`called_at` stamps this sync's `nrps_call` rows, and every production caller
+    leaves it `None`** — which is the real instant, the way ADR 0109 has it. The
+    one caller that supplies it is E3-08's `POST /dev/roster-sync`, so that a drive
+    on a pretended clock leaves a call log on the same axis as the enrollment dates
+    beside it; ADR 0142 carries the whole argument, and the parameter is here
+    rather than a clock threaded through the module because that is the only thing
+    the exception needs.
 
     **The connection goes to the address that was judged.** Each host the walk
     judges is pinned to the first address it resolved to, and
@@ -396,6 +405,7 @@ def sync_section(
         resolve=resolve,
         exempt_host=url_host(address),
         pins=pins,
+        called_at=called_at,
     )
     if walked is None:
         return
@@ -413,7 +423,12 @@ def sync_section(
     # **The two other clocks in this module stay real, deliberately.** The NRPS
     # debounce window and the `nrps_call` log both read `datetime.now(UTC)`: they
     # are protocol and observability instants, not calendar ones, and ADR 0109 lists
-    # them among the clocks the service does not touch.
+    # them among the clocks the service does not touch. E3-08 puts one exception
+    # beside the second of those and nowhere near the first: a caller may hand this
+    # function the instant its call rows are stamped with, and the only caller that
+    # does is the development sync control, which has to leave a log on the same
+    # axis as the pretended clock its drive is standing on (ADR 0142). Every
+    # production path passes nothing and gets the real instant.
     _ingest(
         session,
         section,
@@ -608,6 +623,7 @@ def sync_all_rosters(
     session: Session,
     http: requests.Session | None = None,
     settings: Settings | None = None,
+    called_at: datetime | None = None,
 ) -> None:
     """Sync every section that carries a stored roster address. The hourly job's body.
 
@@ -632,6 +648,9 @@ def sync_all_rosters(
     complete, and the walk moves on. A broad `except` here is defended by that
     boundary — it cannot swallow a bug into a green run, because a failed section
     still leaves a red mark an operator reads.
+
+    `called_at` is handed to every section's sync unchanged; `sync_section` carries
+    what it is for and who passes it.
     """
     addressed = list(
         session.scalars(select(Section.id).where(Section.lms_context_memberships_url.is_not(None)))
@@ -642,15 +661,17 @@ def sync_all_rosters(
     for section_id in addressed:
         savepoint = session.begin_nested()
         try:
-            sync_section(session, section_id, http=http, settings=settings)
+            sync_section(session, section_id, http=http, settings=settings, called_at=called_at)
             savepoint.commit()
         except Exception:
             savepoint.rollback()
             logger.exception("the scheduled roster walk could not sync section %s", section_id)
-            _record_section_failure(session, section_id)
+            _record_section_failure(session, section_id, called_at=called_at)
 
 
-def _record_section_failure(session: Session, section_id: UUID) -> None:
+def _record_section_failure(
+    session: Session, section_id: UUID, *, called_at: datetime | None = None
+) -> None:
     """Leave a call row for a section whose scheduled sync failed unexpectedly (F3).
 
     Against the section's own stored address, `response_code` NULL: §6.1's console
@@ -664,7 +685,7 @@ def _record_section_failure(session: Session, section_id: UUID) -> None:
     try:
         section = session.get(Section, section_id)
         address = section.lms_context_memberships_url if section is not None else None
-        _record_call(session, section_id, address or "", None, None)
+        _record_call(session, section_id, address or "", None, None, called_at=called_at)
     except Exception:
         logger.exception(
             "section %s failed and its failure could not be recorded either", section_id
@@ -684,28 +705,68 @@ def request_section_sync(session: Session, section_id: UUID) -> bool:
     after any section synced — which, on an hourly schedule across a few hundred
     sections, is every launch trigger there is.
 
+    **And it is closed at both ends**, which it was not until PR #178's security
+    round: a row dated *after* real now is not memory of a call and does not
+    debounce anything. See the comment on the query for the case that made an open
+    top a live defect rather than a tidiness point.
+
     **A section nobody has ever called is enqueued.** "Skip if there is any call
     row at all" passes a debounce test and turns every section into one that syncs
     exactly once.
 
-    **A broker this call cannot reach must never fail the launch that made it.**
-    This runs on a request, after the launch has already committed and after the
-    person has already been authenticated, and what it is asking for is a
+    **A broker this call cannot reach must never fail the launch that made it, or
+    delay it.** This runs on a request, after the launch has already committed and
+    after the person has already been authenticated, and what it is asking for is a
     *background* job whose absence costs at most an hour — `sync_rosters` visits
-    every addressed section on the hour whatever happens here. So the publish is
-    made with `retry=False`, so a Redis that is down fails at once rather than
-    holding the request open through kombu's retry policy; with
-    `ignore_result=True`, so nothing reaches the result backend, which has a retry
-    policy of its own and is not consulted for a task whose answer nobody reads;
-    and inside a `try`, because the one thing that must not happen is a person
+    every addressed section on the hour whatever happens here. So the publish goes
+    through `app.jobs.celery_app.publish_once`, which attempts it once, on a
+    connection made for the call with its retries off and its socket timeouts
+    bounded, and keeps the result backend out of it.
+
+    **The bounded connection is E3-05's correction and not decoration.** Until then
+    this call published on the application's own connection, and `retry=False`
+    governs the publish rather than the connect: kombu opened that connection under
+    its own retry schedule first, so a broker refusing instantly held a verified,
+    committed launch for six seconds — measured — while a person waited at a door
+    they had already been let through. `docs/MISTAKES.md` entry 41 is the incident
+    and `docs/tickets/e3/carried-from-e2.md` carried the repair to whichever epic
+    next touched this door.
+
+    **A section with no stored roster address is enqueued like any other, and the
+    job is a no-op.** This trigger asks about the debounce and about nothing else —
+    `a_section_with_no_address` is a fixture in its own contract suite, which
+    asserts an enqueue for exactly that case — and `sync_section` is where SPEC
+    §7.3's never-synced state is honoured: it logs and returns without a call and
+    without a row. Until E3-08's boundary round the question never arrived here,
+    because `app.services.provisioning` answered no section id at all for a launch
+    that stored no address; that answer also fed the launch door's *gradebook*
+    trigger, so one missing service claim silenced the other service too (LO-M5).
+    Moving the gate off the shared answer means this path now sees a section it
+    used not to, and what it costs is a published job that wakes and does nothing,
+    for the launches of a platform that advertises AGS and not NRPS.
+
+    The `try` stays here, because the one thing that must not happen is a person
     being unable to enter the product because a queue was unavailable. The failure
     is logged at error level, which is the visibility (`docs/MISTAKES.md` entry
     26), and the caller is told `False`.
     """
-    since = datetime.now(UTC) - DEBOUNCE_WINDOW
+    # **The window is closed at both ends** (PR #178's security round). It was
+    # `called_at >= now - DEBOUNCE_WINDOW` and open at the top, which reads as
+    # harmless — a call cannot be made in the future — and stopped being true the
+    # moment E3-08 gave `POST /dev/roster-sync` the effective clock (ADR 0142): a
+    # developer standing the clock in October writes call rows dated in October,
+    # and every launch trigger for that section is then debounced by them until
+    # real time catches up, weeks later. The debounce is *memory*, and a row dated
+    # after now is not memory of anything. The bound also holds for a clock skew or
+    # a restored dump, neither of which is this feature's doing.
+    now = datetime.now(UTC)
     recent = session.scalars(
         select(NrpsCall.id)
-        .where(NrpsCall.section_id == section_id, NrpsCall.called_at >= since)
+        .where(
+            NrpsCall.section_id == section_id,
+            NrpsCall.called_at >= now - DEBOUNCE_WINDOW,
+            NrpsCall.called_at <= now,
+        )
         .limit(1)
     ).first()
     if recent is not None:
@@ -720,10 +781,11 @@ def request_section_sync(session: Session, section_id: UUID) -> bool:
     # Imported here rather than at module scope because `app.jobs.tasks` imports
     # this module: the task is a thin wrapper over these functions (D10), so a
     # top-level import would be a cycle.
+    from app.jobs.celery_app import publish_once
     from app.jobs.tasks import sync_section_roster
 
     try:
-        sync_section_roster.apply_async(args=[str(section_id)], retry=False, ignore_result=True)
+        publish_once(sync_section_roster, args=(str(section_id),))
     # Broad on purpose, and the docstring is the argument: kombu, redis-py and
     # Celery each raise their own family here, and an enumerated list of them is a
     # list that goes stale into a launch failure.
@@ -773,8 +835,10 @@ def _registration_for(session: Session, platform: LtiPlatform) -> Any:
 
     Built through `OrmToolConf`, which is the one construction path this tool has
     for a registration — E1-11 taught it to fill in the tool's private key and
-    `kid` as well, so the inbound door and this outbound client read the same row
-    of `tool_signing_key` and a platform verifying either sees the same key.
+    `kid` as well, so the inbound door and this outbound client resolve the same
+    signing key and a platform verifying either sees the same key. Which key that
+    is, once a rotation can be in progress, is
+    `app.lti.registration.current_signing_key` for both of them (ADR 0127).
 
     The two refusals are loud because they are facts about the *deployment* rather
     than about one section: a registration with no token endpoint and a tool with
@@ -793,9 +857,10 @@ def _registration_for(session: Session, platform: LtiPlatform) -> Any:
         )
     if registration.get_tool_private_key() is None:
         raise NoSigningKeyError(
-            "This deployment holds no `tool_signing_key` row, so there is nothing to sign a "
-            "`client_assertion` with and no platform will issue this tool a token. ADR 0082 "
-            "records that a real deployment needs a supply route before it needs anything else."
+            "This deployment holds no signing key that has not been retired, so there is nothing "
+            "to sign a `client_assertion` with and no platform will issue this tool a token. "
+            "`python scripts/signing_key.py generate` supplies one (ADR 0126), and retiring the "
+            "last live key reaches this state too (ADR 0127)."
         )
     return registration
 
@@ -810,6 +875,7 @@ def _walked_roster(
     resolve: Callable[[str], Sequence[str]] | None,
     exempt_host: str | None,
     pins: dict[str, str],
+    called_at: datetime | None = None,
 ) -> tuple[list[Mapping[str, Any]], bool] | None:
     """Every member of the container at `address`, following `rel="next"` to the end.
 
@@ -819,6 +885,10 @@ def _walked_roster(
     enrollment of a member the container did not carry: a member missing from a
     *complete* walk has left, and a member missing from a *truncated* one is on a
     page this tool never fetched.
+
+    `called_at` is the instant every row this walk writes is stamped with, and
+    `None` — which is what every production caller passes — means the real one.
+    `_record_call` carries the rule and ADR 0142 the one exception.
 
     **One `nrps_call` row per HTTP call**, which is D9's grain and is load-bearing
     three times over: it is SPEC §6.1's "NRPS and AGS call logs with response
@@ -907,7 +977,7 @@ def _walked_roster(
         connector.get_access_token([MEMBERSHIP_SCOPE])
     except LtiServiceException as refusal:
         answered = _answered_status(refusal)
-        _record_call(session, section_id, address, answered, None)
+        _record_call(session, section_id, address, answered, None, called_at=called_at)
         logger.warning(
             "the token endpoint answered %s for section %s, so no call was made to its roster at "
             "%s: this deployment's credentials were refused rather than its roster service",
@@ -917,7 +987,7 @@ def _walked_roster(
         )
         return None
     except requests.RequestException:
-        _record_call(session, section_id, address, None, None)
+        _record_call(session, section_id, address, None, None, called_at=called_at)
         logger.exception(
             "no access token could be obtained for section %s, so no call was made to its roster "
             "at %s",
@@ -967,7 +1037,7 @@ def _walked_roster(
             # Against the section's stored address, never the hostile one: a URL the
             # platform chose, written into a record a console reads back, is a second
             # channel the review named. The refused URL is in the log line only.
-            _record_call(session, section_id, address, None, None)
+            _record_call(session, section_id, address, None, None, called_at=called_at)
             logger.warning(
                 "section %s was told to fetch a roster page at %s, which this container refuses: "
                 "%s. The walk stopped and kept the %d member(s) already read.",
@@ -991,7 +1061,7 @@ def _walked_roster(
             answered_page = service.get_nrps_data(members_url=called)
         except LtiServiceException as refusal:
             answered = _answered_status(refusal)
-            _record_call(session, section_id, called, answered, None)
+            _record_call(session, section_id, called, answered, None, called_at=called_at)
             logger.warning(
                 "the roster at %s answered %s, so section %s was not ingested past the %d member(s) "
                 "already read",
@@ -1002,7 +1072,7 @@ def _walked_roster(
             )
             return members, False
         except requests.RequestException:
-            _record_call(session, section_id, called, None, None)
+            _record_call(session, section_id, called, None, None, called_at=called_at)
             logger.exception(
                 "the roster at %s could not be reached for section %s, which keeps the %d member(s) "
                 "already read and closes nobody",
@@ -1013,7 +1083,7 @@ def _walked_roster(
             return members, False
         page = _page_members(answered_page)
         following = _next_page_url(answered_page["headers"])
-        _record_call(session, section_id, called, 200, len(page))
+        _record_call(session, section_id, called, 200, len(page), called_at=called_at)
         members.extend(page)
     return members, True
 
@@ -1208,15 +1278,25 @@ def _record_call(
     url: str,
     response_code: int | None,
     members_seen: int | None,
+    *,
+    called_at: datetime | None = None,
 ) -> None:
-    """Write down one NRPS HTTP call. Not LMS-owned, so no sanction is spent here."""
+    """Write down one NRPS HTTP call. Not LMS-owned, so no sanction is spent here.
+
+    **`called_at` defaults to the real instant, and every production path takes
+    that default.** ADR 0109 lists this log among the clocks the development
+    override deliberately does not move: it is an observability instant, and a
+    console reading "this section was called at" has to answer when the request
+    actually left. The one caller that supplies the argument is E3-08's
+    development sync control (`app.api.dev`), and ADR 0142 carries why.
+    """
     session.add(
         NrpsCall(
             section_id=section_id,
             url=url,
             response_code=response_code,
             members_seen=members_seen,
-            called_at=datetime.now(UTC),
+            called_at=datetime.now(UTC) if called_at is None else called_at,
         )
     )
     session.flush()

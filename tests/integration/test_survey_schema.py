@@ -297,8 +297,9 @@ def test_a_second_response_for_the_same_student_section_and_week_is_refused(
     row per section and week, and would say nothing about the student.
 
     **The mutation it kills:** the unique constraint left off altogether, which
-    lets a student submit twice in a week and doubles their weight in every
-    aggregate SPEC §5 computes while the participation denominator stays at one.
+    lets a student submit twice in a week — doubling their weight in every
+    aggregate SPEC §5 computes, and giving §3.4's item count two sets of `answer`
+    rows to credit against a week that has one set of items to complete.
     """
     require_columns(survey_table(metadata_tables, RESPONSE), RESPONSE_KEY_COLUMNS)
 
@@ -337,8 +338,9 @@ def test_a_second_response_for_the_same_student_section_and_week_is_refused(
     assert duplicated, (
         "One student wrote two responses for one section in one week. SPEC §8: '`response` is "
         "unique per (student, section, week)', and E2-05's first criterion makes the database "
-        "the thing that refuses it. Two rows are two votes: §3.3's validity rate and §3.4's "
-        "participation score both count responses, and the denominator is weeks, not rows."
+        "the thing that refuses it. Two rows are two votes: §3.3's validity rate counts "
+        "responses, and §3.4's participation score counts the items of a week whose total comes "
+        "from the question set rather than from the rows submitted."
     )
 
 
@@ -350,9 +352,10 @@ def test_the_same_student_may_respond_to_the_same_section_in_a_later_week(
     The half that fails when the constraint is written over `(user_id,
     section_id)` alone — which is the natural mistake, reads correctly, and
     would let a student answer a section's survey exactly once per term. SPEC
-    §3.1 makes the survey weekly and §3.4 scores "valid weeks completed ÷ weeks
-    elapsed", so a rule that permits one response per section is a rule that
-    caps every student's participation at a single week.
+    §3.1 makes the survey weekly and §3.4 scores completed items ÷ total items
+    across the student's elapsed weeks (ruled 2026-09-04), so a rule that permits
+    one response per section is a rule that caps every student's participation at
+    a single week's items.
 
     **The mutation it kills:** dropping `week_id` from the unique constraint.
     """
@@ -379,9 +382,9 @@ def test_the_same_student_may_respond_to_the_same_section_in_a_later_week(
     except DatabaseError as rejected:
         pytest.fail(
             f"A student was refused a response in a second week of the same section: {rejected}. "
-            "The survey runs every week (SPEC §3.1) and participation is scored over weeks "
-            "elapsed (§3.4), so a uniqueness rule without the week makes every student's second "
-            "week unwritable."
+            "The survey runs every week (SPEC §3.1) and participation is scored over the items of "
+            "every elapsed week (§3.4), so a uniqueness rule without the week makes every "
+            "student's second week unwritable."
         )
 
 

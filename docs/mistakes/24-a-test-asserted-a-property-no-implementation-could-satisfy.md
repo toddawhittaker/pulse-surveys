@@ -1,8 +1,27 @@
 # Entry 24. A test asserted a property no implementation could satisfy
 
-**Caught: 1**
+**Caught: 2**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
+
+*(A fifth instance, E3-06, caught before the test was written on 2026-09-05, and
+a prevention rather than an incident. The ruling on
+[E3-06-01](../disputes/E3-06-01.md) sends five planted `grade_sync.created_at`
+constants into the real past, because the column defaults to `now()` and a row
+dated inside the section's future calendar out-sorts anything a real clock can
+produce. Four of the five are safe. The fifth is planted *after* a run that
+posted, and that run appended a row of its own stamped by real time — so in the
+real past it can never be the latest row for its pair: the sweep compares against
+the run's own row, finds the computed pair already sent, posts nothing, and
+`len(fresh) == 1` is red against every correct implementation. The sub-shape is
+new — **a constant whose correct value is relative to a clock, prescribed as an
+absolute** — and it hides because the ordering it breaks is between a planted row
+and a row written earlier in the same test rather than between two planted ones.
+What would have shipped: a second dispute on the same test, or an implementer
+stamping `created_at` from the movable development clock, which is the thing the
+first dispute refused. The repair is to derive that one constant from real time
+instead of writing a date down, and to say in the module why it is the only
+planted instant that sits in the future.)*
 
 *(A fourth instance, E2-05, ruled in [E2-05-01](../disputes/E2-05-01.md) on
 2026-09-01, and the first counted catch: the implementer recognised the shape
@@ -42,28 +61,14 @@ preference order: give the deployment fixture a token endpoint on a host distinc
 from the roster host, or make the reader attribute each exemption to its reason.)*
 
 *(A second instance, E0-26 item 1, ruled the same way in
-[E0-26-01](../disputes/E0-26-01.md). Same entry, different sub-shape: not a needle
-that collides with prose, but **a predicate that read a rendering carrying more
-than the property under test**.
-`test_the_reveal_takes_the_records_identifier_and_nothing_else` compared
-`pg_get_function_identity_arguments(oid)` against `'uuid'` to pin the reveal's
-argument type. That function renders the parameter's **name** as well —
-`in_reveal_id uuid` — so the assertion refused the exact signature the ticket
-settles, the signature its own failure message told the reader to build, and the
-signature its own module printed in `THE_INTERFACE`. Only an anonymous parameter
-could satisfy it, and nothing anywhere asked for one. The implementer declined the
-workaround, wrote the objection, and waited — which is what entry 24's own closing
-paragraph says to do and is the opposite of what happened the first time.
-The repair is `array_to_string(p.proargtypes::regtype[], ',')`, which carries types
-and no names. **Two neighbouring spellings are traps and were measured during the
-ruling**: `p.proargtypes::regtype[]::text` renders `[0:0]={uuid}` rather than
-`{uuid}`, because `oidvector` is zero-based, so a literal comparison there is the
-same false red one layer down; and `p.oid::regprocedure::text` is
-`search_path`-dependent, schema-qualifying when the function is not visible on the
-current path, which makes it right for a failure message and wrong for a
-predicate. The column was also called `arguments` while holding a rendering of
-names *and* types, and is now called `argument_types`, because the name is what
-invited the comparison.)*
+[E0-26-01](../disputes/E0-26-01.md): a predicate compared against
+`pg_get_function_identity_arguments(oid)`, a rendering that carries the
+parameter's **name** as well as its type, so only an anonymous parameter could
+have satisfied it and nothing had asked for one. **Trimmed to the three most
+recent instances**, which is this file's rule; the measurement behind it — the two
+neighbouring spellings that are traps, and the column renamed from `arguments` to
+`argument_types` — is in git history and in the dispute, and the rule it produced
+is stated below.)*
 
 
 **What happened.** E0-13's leak detector searched every rendering of `Settings`

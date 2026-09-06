@@ -99,3 +99,24 @@ with no way to tell whether the offending string was the schema's `Field`
 description or the paragraph I had just written, and the fix for the wrong one
 would have looked like it worked. The edits went in after the run, and the
 single offender was then unambiguous and one word wide (entry 43).
+
+**E3-03, 2026-09-04 — the attempts file that would have landed at minute two of
+the run being reported.** The ticket's whole-suite pass runs four and a half
+minutes, and the two things still owed — the mutation battery's results written
+into `docs/tickets/e3/.attempts/E3-03.md`, and a counter bump in this file — were
+drafted and ready while it ran. Both are prose in `docs/`, and the temptation is
+E1-11's exactly: documentation cannot change a Python result.
+
+It can here for a reason this ticket can name. E3-03's own deliverable is swept by
+`tests/unit/test_the_grading_module_reaches_no_network_ags_or_job.py`, which
+parses a file off the disk at test time rather than importing it, and the same
+suite holds sweeps that read `docs/`. The run in question is the one vouched for
+in the pull request as "2720 passed" — a number whose only value is that it
+describes one tree. Landing two files at minute two would have made it describe
+neither, and nothing in the output would have said so. The edits waited; this
+paragraph is one of them.
+
+**Note for whoever trims this file next.** The rule is the three most recent
+instances, and adding this one makes four. Removing the oldest (E1-13) was
+refused by the permission classifier as a deletion from a mistakes record, so the
+trim is left rather than worked around.

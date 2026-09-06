@@ -1,10 +1,29 @@
 # Entry 19. A test held its expectation in a copy of the thing it was checking
 
-**Caught: 6**
+**Caught: 7**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
 *6 caught; this file keeps three instances. Dated from git, the oldest recorded was E0-15's (added 2026-08-18) — dropped in E1's Batch D, leaving E0-33, E0-28 and E1-D. The paragraphs below are not in date order; cite them by content, not position.*
+
+*(**A catch**, writing E3-04's tests, 2026-09-04, in two places that look
+different and are the same. The first: the enforcement module's whole subject is
+which scope opens which AGS route, and `mock-lms/app/ags.py` declares all four as
+constants — importing them would put the route map and the assertion about the
+route map in one blast radius, so a scope respelled in the mock would move both
+and stay green. They are transcribed from the IMS specifications with a comment
+saying they deliberately are not derived, and the mock's own `ADVERTISED_SCOPES`
+is then read *through the platform's discovery document* — which is where a tool
+finds them — rather than imported, so the two copies are held against each other
+by the platform at run time. The second is the score maximum: criterion 4 says
+the client posts "the line item's own maximum", and the assertion reads that
+maximum back from the platform's line-item document rather than from the number
+this suite seeded with, so a client that echoed a constant is caught by the
+platform's own refusal rather than by a literal agreeing with itself. The same
+reading is why the ledger and the percentage in `tests/fixtures/ags_client.py`
+are values a caller hands over and nothing in that file derives: a fixture that
+computed either would be a second implementation for criterion 3's comparison to
+agree with, and the comparison is the criterion.)*
 
 *(Writing E0-28's tests, over the two page-size caps. The ticket's own complaint
 about item 10 is that `MAX_LINE_ITEM_LIMIT` "is a number no test names" — removing

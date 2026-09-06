@@ -80,7 +80,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from fixtures.routing import every_route
+from fixtures.routing import dependencies_of, every_route
 from fixtures.student_read import (
     AUTHENTICATE_HEADER,
     AUTHENTICATE_SCHEME,
@@ -116,26 +116,13 @@ PLANTED_OPEN_PATH = "/e2-09-planted/open-to-anybody"
 SECTION_PARAMETERS = ("section_id", "section", "section_code")
 
 
-def dependencies_of(dependant: Any, seen: set[int] | None = None) -> list[Any]:
-    """Every callable in one route's dependency graph, at any depth.
-
-    FastAPI holds a route's dependencies as a tree of `Dependant` objects, each
-    carrying the callable it resolves in `.call` and its own sub-dependencies in
-    `.dependencies`. A walk one level deep would see a dependency declared on the
-    route and miss one declared on a dependency of it — and "reachable by a
-    student session" is a property of the whole graph, not of its first layer.
-    """
-    seen = set() if seen is None else seen
-    if id(dependant) in seen:
-        return []
-    seen.add(id(dependant))
-    found: list[Any] = []
-    call = getattr(dependant, "call", None)
-    if call is not None:
-        found.append(call)
-    for child in getattr(dependant, "dependencies", ()) or ():
-        found.extend(dependencies_of(child, seen))
-    return found
+# `dependencies_of` was defined here until E3-07 and now lives in
+# `tests/fixtures/routing.py`, unchanged, beside the route walk it is always used
+# with. E3-07's CSRF sweep asks the same question of the same kind of object —
+# which callables are in this route's dependency graph — and two copies of that
+# walk is `docs/MISTAKES.md` entry 13: one of them would learn about a new way
+# FastAPI nests a `Dependant` and the other would go on reporting a clean
+# application. Nothing about what this module asserts moved with it.
 
 
 def student_visible_routes(application: Any, dependency: Any) -> list[Any]:

@@ -1,0 +1,34 @@
+-- The one column the line-item writer needs — ticket E3-05, SPEC §3.4, §8,
+-- ADR 0001, ADR 0090, ADR 0128, ADR 0136.
+--
+-- `grade_passback_grants_v001.sql` is E3-02's file and it says why this one
+-- exists: "`section.ags_line_item_url` is deliberately not granted here. E3-02
+-- creates that column and writes nothing to it; E3-05 is its writer and is the
+-- ticket that spends the privilege, with the record beside it." This is that
+-- ticket, so this is that grant. Nothing in v001 changes and nothing here
+-- re-issues anything it already granted.
+--
+-- **What spends it.** SPEC §3.4 gives every section one AGS line item, "created
+-- by the tool on first launch", and `app.services.grading.ensure_line_item`
+-- records the id of the one the platform served so that every later post can
+-- address it without walking a container again (ADR 0128, and ADR 0052's retry
+-- identity rests on it). That write is the only one this grant pays for.
+--
+-- **Column-scoped, not table-wide, and the alternative is the argument.** `UPDATE
+-- ON public.section` would hand the application connection `lms_section_code`,
+-- the launch binding columns and ADR 0021's four derived calendar columns — every
+-- one of which is a launch's own discovery and none of which a gradebook write has
+-- any business near. The application-layer catalog in `app.services.authz` cannot
+-- express a column, so this file is the only place the narrowing can be stated;
+-- neither layer is the other's backstop (ADR 0045).
+--
+-- **The revoke is column-grain too**, and that is not a matter of symmetry: a
+-- column ACL entry lives in `pg_attribute.attacl` and `REVOKE UPDATE ON
+-- public.section FROM pulse_app` does not reach it. The migration's `downgrade`
+-- names the column, exactly as `c7e2a41b90f5` does for the container address.
+--
+-- Recorded in `RUNTIME_COLUMN_PRIVILEGES` in
+-- `tests/integration/test_identity_grants.py` with the sentence it rests on, and
+-- that inventory is an equality.
+
+GRANT UPDATE (ags_line_item_url) ON public.section TO pulse_app;

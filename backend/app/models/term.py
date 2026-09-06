@@ -239,8 +239,9 @@ class SurveyWindow(UuidPrimaryKey, Base):
     `(week_id, term_id)` into `week (id, term_id)`. A window pairing a section in
     one term with a week in another finds no matching row on one limb or the
     other. Without it a window opens a section's survey against a week its own
-    calendar does not contain, and §3.4's participation denominator ("valid weeks
-    completed ÷ weeks elapsed") is counted over two different calendars.
+    calendar does not contain, and §3.4's participation denominator — the items of
+    every week the student was enrolled for — is counted over two different
+    calendars.
 
     **`term_id` is NOT NULL, and that is what makes both limbs bite.** Postgres
     evaluates a composite foreign key under `MATCH SIMPLE`, which skips the check

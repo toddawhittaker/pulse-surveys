@@ -343,7 +343,10 @@ def test_a_comment_left_out_is_accepted_when_its_likert_is_three(
     assert responses[0]["is_valid"] is True, (
         f"A complete submission with both comments left blank stored `is_valid` "
         f"{responses[0]['is_valid']!r}. §3.3: 'Optional comments left blank do not affect "
-        "validity', and E3's participation formula reads this column."
+        "validity'. That is a claim about this column and about nothing else: §3.4's score does "
+        "not read it — the item formula ruled on 2026-09-04 works from the answer rows and each "
+        "comment's latest classification — and the same §3.3 sentence goes on to say that a blank "
+        "optional comment still costs its item."
     )
     assert world.answers_of(
         responses[0]
@@ -477,7 +480,7 @@ def test_a_submission_into_a_closed_window_is_refused(
     **The mutation it kills:** the window resolved and then ignored, or resolved
     with `>=` where §3.1's close is inclusive-of-the-second and the comparison
     should refuse afterwards. Either way a submission lands in a week that has
-    closed, and §3.4's score counts a week the report already published.
+    closed, and §3.4's score credits items in a week the report already published.
     """
     student = a_student_in_an_open_window(
         open_submit_tool, submit_world, signed_in_student, mock_ai_endpoint, closed_already
@@ -494,8 +497,9 @@ def test_a_submission_into_a_closed_window_is_refused(
     registry_key_of(refused)
     assert world.responses() == [], (
         f"A submission into a closed window stored {world.responses()}. §3.1 makes a missed week "
-        "unfillable, and §3.4 scores 'valid weeks completed ÷ weeks elapsed to date' over exactly "
-        "these rows."
+        "unfillable, and §3.4 counts the items completed in exactly these rows against every item "
+        "of every elapsed week — so a row written after the close credits items for a week the "
+        "student could no longer answer."
     )
 
 

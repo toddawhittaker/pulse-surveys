@@ -38,14 +38,16 @@ distinguishable" — and a platform answering one code for all six is a platform
 whose client cannot tell a clock problem from a key problem.
 
 **The services did not begin requiring a token here**, which was E1-06's ruling and
-not an omission: enforcement paired with E1-11's client. **That pairing has since
-landed for NRPS.** The roster route now refuses a read that carries no token, one
-the endpoint never issued, or one without the membership scope, and those refusals
-are asserted in `test_mock_lms_nrps_requires_a_token.py` rather than here — this
-module's subject is the endpoint that grants the token, not the service that checks
-it. `MockPlatform.refuse_an_unspecified_ags_token_flow`, which used to report a 401
-from either service as a gap, is narrowed to **AGS**, where the original argument
-still holds: SPEC §14.3 gives grade passback to E3, so no AGS client exists yet.
+not an omission: enforcement paired with the conformant client of each service.
+**Both pairings have since landed.** E1-11's fix round put the roster behind the
+membership scope; E3-04 built the first AGS client and put line items, scores and
+results behind the four AGS scopes in the same ticket. Those refusals are asserted
+in `test_mock_lms_nrps_requires_a_token.py` and
+`test_mock_lms_ags_requires_a_token.py` rather than here — this module's subject is
+the endpoint that grants a token, not the services that check one.
+`MockPlatform.refuse_an_unspecified_ags_token_flow`, which reported a 401 from
+either service as a gap in a ticket, is deleted: there is no service left whose
+refusal is a gap.
 
 What the conformance test at the foot of this module asserts is unchanged and is
 the whole sequence completing — token requested with a tool-signed assertion, token

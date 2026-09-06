@@ -31,7 +31,11 @@ in this file — as an equality, in the shape
 uses — and widening it is a visible diff in a test rather than a line added to a
 module nobody re-reads. E1-11's roster sync added the second entry, deliberately, and
 that pull request edited this constant and said why — including the two tables
-E1-10 predicted for it and it did not take.
+E1-10 predicted for it and it did not take. **E3-05's grade passback is the third**,
+holding `section` alone so that SPEC §3.4's line-item id has a writer; that pull
+request edited this constant too, and moved `UNCATALOGUED_WRITER` on to the next
+writer nobody has granted yet, since the forged-sanction tests below need a name the
+catalog really does not hold.
 
 **What this module does not assert.** Whether the writer *calls* the guard is next
 door, in `tests/unit/test_every_writer_of_an_lms_owned_relation_names_the_guard.py`
@@ -68,13 +72,41 @@ import pytest
 # Held here rather than read out of `authz` for the reason `docs/MISTAKES.md`
 # entry 19 gives: a constant compared against itself asserts nothing, and a writer
 # quietly added to the guard would take this file's assertion with it.
+#
+# **E3-05 adds the third entry, `grade_passback`, and it holds one table.** SPEC
+# §3.4 gives every section one AGS line item "created by the tool on first
+# launch", and the id of that line item lives on `section.ags_line_item_url` (ADR
+# 0128) — a column E3-02 created and deliberately left unwritten. So the grade
+# passback path is a writer of `section`, which `LMS_OWNED_TABLES` names, and it
+# satisfies the chokepoint the same way the other two do rather than being excused
+# from it.
+#
+# The *rest* of `section` is not in the entry and that is the load-bearing half.
+# `lms_section_code`, `lms_context_id`, the binding columns and ADR 0021's derived
+# calendar columns are a launch's discovery and this writer has no business
+# anywhere near them; the database says the same thing one layer down, where
+# ADR 0136 spends a column-scoped `UPDATE` on `ags_line_item_url` alone rather
+# than a table-wide one (`RUNTIME_COLUMN_PRIVILEGES` in
+# `tests/integration/test_identity_grants.py`). The catalog cannot express a
+# column, so the two controls are not the same control and neither replaces the
+# other.
 SANCTIONED_WRITERS_EXPECTED: dict[str, frozenset[str]] = {
     "launch_provisioning": frozenset({"course", "section", "user"}),
     "roster_sync": frozenset({"user", "enrollment", "role_assignment"}),
+    "grade_passback": frozenset({"section"}),
 }
 
 LAUNCH_PROVISIONING = "launch_provisioning"
 ROSTER_SYNC = "roster_sync"
+GRADE_PASSBACK = "grade_passback"
+
+# The one table the grade passback writer is granted, and one guarded table it is
+# not. `user` is the interesting refusal: SPEC §4 keys every response to
+# `user.lms_user_id`, a passback reads that value to address a score, and a
+# sanction that reached the table would let the grading path edit the identity the
+# whole confidentiality model is built on.
+GRADE_PASSBACK_TABLE = "section"
+UNSANCTIONED_FOR_THE_PASSBACK = "user"
 
 # The tables each writer is granted, and one guarded table each is not.
 # `enrollment` against the launch writer is the interesting pair: it is in
@@ -86,14 +118,20 @@ UNSANCTIONED_GUARDED_TABLE = "enrollment"
 ROSTER_SYNC_TABLES = ("user", "enrollment")
 UNSANCTIONED_FOR_THE_SYNC = "section"
 
-# A writer nobody has put in the catalog. **E1-11's name used to be this
-# constant**, on the ground that it was "the writer that will legitimately be
-# added later"; E1-11 has now added it, so the name here moves to the next writer
-# this repository knows it will want and does not yet have. SPEC §3.4's grade
-# passback is E3's, it writes nothing LMS-owned today, and a `guard_write` that
-# accepted it would be accepting a later ticket's grant early — which is exactly
-# the failure a catalog exists to make visible.
-UNCATALOGUED_WRITER = "grade_passback"
+# A writer nobody has put in the catalog. **This constant has moved twice, and
+# each move is the same event**: E1-11's name used to be here, on the ground that
+# it was "the writer that will legitimately be added later", and E1-11 added it;
+# E3-05's `grade_passback` took its place and E3-05 has now added that. So the
+# name moves again, to the next writer this repository knows it will want and does
+# not yet have.
+#
+# E11's registration and repair console is that writer. `docs/tickets/e3/carried-from-e2.md`
+# names it twice — it is "the first surface that writes `lti_platform` from outside
+# the seed", and it is what a squatted `(course, term, lms_section_code)` binding
+# would be repaired through, which is a write to `section`. It writes nothing
+# today, and a `guard_write` that accepted its name would be accepting a later
+# ticket's grant early — exactly the failure a catalog exists to make visible.
+UNCATALOGUED_WRITER = "admin_console"
 
 # SPEC §2.1's fifth owned item, and the one that is a purview grant rather than an
 # attribute. It is a *row* rather than a table — the teaching instructor is an
@@ -371,6 +409,7 @@ def test_a_write_with_no_sanction_is_still_refused_on_every_guarded_table(
     [
         *((LAUNCH_PROVISIONING, table) for table in SANCTIONED_TABLES),
         *((ROSTER_SYNC, table) for table in ROSTER_SYNC_TABLES),
+        (GRADE_PASSBACK, GRADE_PASSBACK_TABLE),
     ],
 )
 def test_a_sanctioned_writer_may_write_each_table_its_catalog_entry_names(
@@ -384,6 +423,10 @@ def test_a_sanctioned_writer_may_write_each_table_its_catalog_entry_names(
     way for either to be discovered before a roster sync has an address to call.
     ADR 0045 names E1's roster sync for the rest, and E1-11 spends `user` and
     `enrollment` of them — that ticket's other arrival path, "hourly roster sync".
+    E3-05 adds `grade_passback` and `section`: SPEC §3.4's line item is "created by
+    the tool on first launch" and the id it comes back with is stored on the
+    section row (ADR 0128), so grade passback is a writer of an LMS-owned table and
+    calls the chokepoint like everything else.
 
     **Parametrised per writer and table rather than asserted once**, so a mechanism
     that happens to work for `user` and not for `enrollment` names which one — and
@@ -426,6 +469,47 @@ def test_a_sanctioned_writer_is_refused_a_guarded_table_its_own_entry_does_not_n
         authz,
         "a write to `course` by the same sanction",
         table="course",
+        sanction=sanction,
+    )
+
+
+def test_the_grade_passback_writer_is_refused_the_table_the_confidentiality_model_is_keyed_to(
+    authz: Any,
+) -> None:
+    """E3-05's entry is one table wide, asserted from the side that matters.
+
+    The pair above says `grade_passback` may write `section`. This says what it
+    may not, and the table is chosen rather than arbitrary: SPEC §4 keys every
+    stored response to `user.lms_user_id`, which is the launch's `sub` claim
+    verbatim, and a grade passback reads exactly that value to address a score. So
+    `user` is the table this writer is nearest to and has least business in — a
+    sanction that reached it would let the grading path rewrite the identity the
+    confidentiality model is built on, and ADR 0045 puts `user` in the guarded set
+    for that reason and no other.
+
+    **The mutation this kills**: `grade_passback` given `LMS_OWNED_TABLES` rather
+    than one name — the shape a writer takes when somebody copies the entry above
+    it — and the wider one, a `guard_write` that answers "is this writer
+    sanctioned?" rather than "is this writer sanctioned for this table?". The
+    second is already refused for the launch writer one test up; it is asserted
+    again here because a catalog gains entries and a mechanism that regressed
+    would be caught on whichever entry a test happened to name.
+
+    **The pair is inside this test**, so the refusal is known to be about the
+    table: the same sanction, on the table its entry does name, has to return.
+    """
+    sanction = authz.sanction_for(GRADE_PASSBACK)
+
+    refused(
+        authz,
+        f"a write to `{UNSANCTIONED_FOR_THE_PASSBACK}` by the grade passback writer",
+        table=UNSANCTIONED_FOR_THE_PASSBACK,
+        sanction=sanction,
+    )
+    permitted(
+        authz,
+        f"a write to `{GRADE_PASSBACK_TABLE}` by the same sanction",
+        table=GRADE_PASSBACK_TABLE,
         sanction=sanction,
     )
 

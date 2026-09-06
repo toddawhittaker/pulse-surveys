@@ -287,9 +287,23 @@ NURSING_INQUIRY = MockContext(
 )
 
 
-@dataclass(frozen=True)
+@dataclass
 class SeededPlatform:
-    """Everything the platform knows, assembled once and read from every request."""
+    """Everything the platform knows, assembled once and read from every request.
+
+    **The roster is amendable, and only through the two methods at the end of this
+    class** (E3-08). SPEC §14.3's exit proof for E3 needs states no single seed can
+    hold — a member who joins after a roster sync has already run, and a member who
+    leaves part-way through a drive — and this platform's state is per process, held
+    by the instance `app.main.create_app` builds and closed over by every route it
+    registers. So an amendment mutates that instance rather than building a second
+    one, and this class is not frozen for that reason alone.
+
+    `MockUser`, `MockContext`, `MockPlacement` and `MockEnrollment` stay frozen:
+    what an amendment changes is *which* enrollments the platform holds, never what
+    one of them says. Nothing but `POST /mock/roster-amendments` calls either
+    method, and nothing calls one while the seed is being assembled.
+    """
 
     users: tuple[MockUser, ...]
     contexts: tuple[MockContext, ...]
@@ -304,6 +318,33 @@ class SeededPlatform:
         """The seeded section with this context ID, or `None`."""
         return next(
             (context for context in self.contexts if context.context_id == context_id),
+            None,
+        )
+
+    def context_labelled(self, label: str) -> MockContext | None:
+        """The seeded section a person would write as `label`, or `None`.
+
+        The amendment route addresses a section the way a timetable does —
+        `NURS-8100-Q2FF` — because that is what a developer and an end-to-end spec
+        both hold, while the context identifier is this platform's own invention.
+        Labels are unique across the seed, and a second section with one would be
+        two sections a launch page could not tell apart either.
+        """
+        return next((context for context in self.contexts if context.label == label), None)
+
+    def enrollment(self, user_id: str, context_id: str) -> MockEnrollment | None:
+        """This person's enrollment in this section, or `None` if they have none.
+
+        `roles` answers the same question for a launch, which needs the roles and
+        not the window; an amendment needs the row itself, because dropping a
+        member rewrites it.
+        """
+        return next(
+            (
+                enrollment
+                for enrollment in self.enrollments
+                if enrollment.user_id == user_id and enrollment.context_id == context_id
+            ),
             None,
         )
 
@@ -379,6 +420,45 @@ class SeededPlatform:
             placement
             for placement in self.placements
             if self.roles(user.user_id, placement.context.context_id) is not None
+        )
+
+    # -- The amendment seam (E3-08) -------------------------------------
+    #
+    # Two methods, and between them they are the whole of what
+    # `POST /mock/roster-amendments` can do to this platform: enroll somebody the
+    # seed does not hold, and end an enrollment it does. Neither can rewrite a
+    # person, a section or a placement, so an amended platform still launches
+    # exactly the cast the seed publishes.
+
+    def enroll(self, user: MockUser, enrollment: MockEnrollment) -> None:
+        """Add one member to the end of one section's roster.
+
+        Appended rather than inserted, because `enrollments_in` serves a roster in
+        seeded order and a membership container divides its pages in that order: a
+        member added in the middle would move everybody after them across a page
+        boundary between two reads of the same roster.
+
+        The person is added to `users` when this platform has never seen them,
+        which is what puts an address on their member document
+        (`app.nrps.member_document` reads it from there). Adding them twice would
+        publish one `sub` under two records, so an existing user is left alone.
+        """
+        if self.user(user.user_id) is None:
+            self.users = (*self.users, user)
+        self.enrollments = (*self.enrollments, enrollment)
+
+    def amend_enrollment(self, replacement: MockEnrollment) -> None:
+        """Replace the enrollment this one is for, keeping its place in the roster.
+
+        Addressed by `(user_id, context_id)`, which is what the seed holds at most
+        one of. In place rather than removed and re-appended, for `enroll`'s
+        reason: the order a roster is served in is the order its pages divide on.
+        """
+        self.enrollments = tuple(
+            replacement
+            if held.user_id == replacement.user_id and held.context_id == replacement.context_id
+            else held
+            for held in self.enrollments
         )
 
 

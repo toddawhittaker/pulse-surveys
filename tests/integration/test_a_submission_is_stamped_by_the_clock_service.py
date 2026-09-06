@@ -11,9 +11,10 @@ statement about the schema and it is satisfied by a path that calls
 `datetime.now(UTC)` itself, which is the same defect one layer up: SPEC §3.1 puts
 every window at a wall-clock time in the institution's zone, ADR 0109 makes the
 development clock a database offset that every scheduling read goes through, and
-E3's participation formula will read a submission's time against the window that
-accepted it. A submission stamped from the process clock while the window was
-resolved from the moved one is a row that disagrees with itself.
+§3.4's score counts the items of the week a response is filed under. A submission
+stamped from the process clock while the window was resolved from the moved one is
+a row that disagrees with itself: its timestamp falls outside the very window
+whose week its answers are credited to.
 
 **Both directions of the line are here** (`docs/MISTAKES.md` entry 3). The clock
 is moved thirty days forward in both tests and only the window moves with it: in

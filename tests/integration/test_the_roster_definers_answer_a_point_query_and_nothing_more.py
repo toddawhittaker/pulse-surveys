@@ -74,6 +74,18 @@ RESOLVE_PLATFORM_USER = (
     "public.resolve_platform_user(CAST(:platform AS uuid), CAST(:subject AS text))"
 )
 RESOLVE_PERSON_FOR_USER = "public.resolve_person_for_user(CAST(:user_id AS uuid))"
+
+# E3's own definer, added to the Care denial below by the E3-08 boundary round
+# (IC-H3). The passback needs a student's `lms_user_id` to put in the AGS `userId`
+# member, and `pulse_app` holds no read of that column — E1-10's round-3 review
+# revoked it because "a connection able to read it can enumerate every subject
+# that ever launched and join a response back to the person who gave it". So the
+# sweep goes through a point-query door of the same shape as the two above, and it
+# belongs in the same denial: it is the one function in this file that answers a
+# **subject** rather than an internal id, which is the value SPEC §4 keys every
+# response to. Spelled on `resolve_person_for_user`'s pattern, which is this
+# file's convention for a definer taking one user id.
+RESOLVE_SUBJECT_FOR_USER = "public.resolve_subject_for_user(CAST(:user_id AS uuid))"
 RECORD_ROSTER_EMAIL = "public.record_roster_email(CAST(:user_id AS uuid), CAST(:email AS text))"
 RECORD_TEACHING_INSTRUCTOR = (
     "public.record_teaching_instructor(CAST(:person_id AS uuid), CAST(:section_id AS uuid))"
@@ -298,19 +310,53 @@ def a_subject_row(committed_rows: Any, metadata_tables: dict[str, Any]) -> Any:
 def test_the_application_role_resolves_a_subject_it_holds_and_is_still_refused_the_column(
     committed_rows: Any, a_subject_row: Any, metadata_tables: dict[str, Any]
 ) -> None:
-    """ADR 0094's whole claim, and it is a pair rather than a permission.
+    """The column refusal, and the half of the v001 pair that ADR 0139 gave back.
 
+    The pair this test was written to hold is the header comment of
+    `backend/app/views_sql/identity_resolution_v001.sql`, at its lines 16-18:
     "`pulse_app` can resolve a subject it already holds from a verified token or a
-    roster document, and can never enumerate subjects it does not."
+    roster document, and can never enumerate subjects it does not." It is that
+    file's claim about the functions that file ships, and **not** a line of ADR
+    0094 — which argues the scheme and states no such pair, so citing the record
+    for it would send a reader looking for a sentence that is not there. What it
+    records is the state before E3-06; the header itself carries a dated ADR 0139
+    qualification, added in the same change as this docstring.
+    `tests/integration/test_identity_grants.py` scopes the same quotation the same
+    way, at `RESOLVE_DEFINER_COLUMN_PRIVILEGES`.
 
-    **The refusing half is `invariant`-marked and is the reason this ticket needs a
-    definer at all.** Re-granting `SELECT (lms_user_id)` would make the sync a
-    two-line change and would reverse E1-10's round-3 fix: every screen's
-    connection could again list every subject that ever launched and join a
-    response back to the person who gave it. So the refusal is asserted as a
-    *refused statement* with its SQLSTATE, not as an empty result — an absence
-    passes against a table that happens to be empty, against a typo in a column
-    name, and against a query that failed for some other reason entirely.
+    The resolving half is asserted below and stands. **The never-enumerate half
+    stopped being true in E3-06**, so this docstring states the position rather
+    than repeating the claim. ADR 0139 adds
+    `public.resolve_subject_for_user(uuid)` — shipped in
+    `backend/app/views_sql/identity_resolution_v002.sql`, `EXECUTE` granted to
+    `pulse_app` — and a scalar function is callable once per row: `SELECT
+    public.resolve_subject_for_user(u.id) FROM public."user" u` reads every
+    subject in the schema on the application connection, and does it while this
+    test is green. ADR 0139's Consequences say it in its own words: "the property
+    E1-10's revocation bought is given back here, not narrowed."
+
+    **Nothing below is weakened, because the column refusal is what makes the
+    definer the only door.** A door has a name, an owner, an inventory entry and a
+    record arguing for it, so a second route to `lms_user_id` is a change somebody
+    has to make and defend; a re-granted `SELECT (lms_user_id)` is a column any
+    join in any module can pick up unremarked, and it would reverse E1-10's
+    round-3 fix wholesale. That difference is auditability rather than
+    containment, and ADR 0139 refuses to be cited as the second — but it is the
+    whole of what the refusal below still buys, and it is lost the moment the
+    grant comes back. So the refusal is asserted as a *refused statement* with its
+    SQLSTATE, not as an empty result: an absence passes against a table that
+    happens to be empty, against a typo in a column name, and against a query that
+    failed for some other reason entirely.
+
+    **What guards the returned capability is a rule about who may spend it, and it
+    is not here.** A read path that put the call inside a view would carry every
+    respondent's subject to everyone who reads that view, and the identity sweeps
+    would stay green through it: the function's body is a quoted string, so the
+    view records a dependency on the *function* and none on `user.lms_user_id`,
+    and no rule phrased over columns or over marked tables sees the name.
+    `test_no_view_names_the_subject_resolving_definer` in
+    `tests/integration/test_identity_column_marker.py` is the guard on that state,
+    read out of `pg_get_viewdef`.
 
     **The permitting half is what stops the fix being a wall.** A schema that
     refused both would satisfy every denial test in this repository and leave the
@@ -549,6 +595,7 @@ def test_the_care_role_may_not_execute_either_of_the_roster_definers(committed_r
         for call in (
             RESOLVE_PLATFORM_USER,
             RESOLVE_PERSON_FOR_USER,
+            RESOLVE_SUBJECT_FOR_USER,
             RECORD_ROSTER_EMAIL,
             RECORD_TEACHING_INSTRUCTOR,
         ):
@@ -577,8 +624,12 @@ def test_the_care_role_may_not_execute_either_of_the_roster_definers(committed_r
         "PUBLIC` is the line whose absence produces exactly this, and Postgres grants `EXECUTE` to "
         f"`PUBLIC` by default. What the failures were: {reachable}.\n\n"
         f"`record_teaching_instructor` is in this list from the security round's F2 and is the "
-        "sharpest of the four: it writes a `role_assignment` row, and the role that may already "
-        "read that table is the one whose own live-`CARE` assignment is what the reveal checks."
+        "sharpest of the five: it writes a `role_assignment` row, and the role that may already "
+        "read that table is the one whose own live-`CARE` assignment is what the reveal checks. "
+        "`resolve_subject_for_user` is E3-08's boundary round (IC-H3) and is the sharpest of the "
+        "*reads*: it answers the `sub` claim verbatim, which is the value SPEC §4 keys every "
+        "response to, so a Care role that could call it holds an unlogged re-identification path "
+        "beside the audited one E0-26 built."
     )
 
 

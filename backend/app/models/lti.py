@@ -22,8 +22,9 @@ and a key sitting in a table no code opens is a credential at rest with no owner
 code by one ticket — the two move together across E1-05/E1-06 because the
 registration document's keys are the column names on both sides. It still adds no
 configuration variable: custody is the database (`docs/adr/0082`), the seed
-generates it in development, and no `app.config.Settings` field resolves to it,
-which is what the epic README's rule keys the `.env.example` line on.
+generates it in development and `scripts/signing_key.py` supplies it anywhere
+else (`docs/adr/0126`), and no `app.config.Settings` field resolves to it, which
+is what the epic README's rule keys the `.env.example` line on.
 
 **The platform's service addresses arrived here in E1-05.** §7.3 leaves the OIDC
 authorization endpoint to the registration, and E0-23 put the columns for it in
@@ -130,9 +131,35 @@ AUTH_TOKEN_URL_COLUMN = "auth_token_url"  # noqa: S105 - a column name, not a cr
 # `isinstance(str)` check, and `169.254.169.254` was a value a launch could name.
 ROSTER_SERVICE_ADDRESS_COLUMN = "lms_context_memberships_url"
 
-# The three this container fetches, as opposed to the one it hands to a browser.
+# E3-02's two gradebook addresses, which are not registration columns either and
+# which reach these rules for the same reason the roster address does.
+#
+# `section.lms_ags_line_items_url` is the AGS line-item **container** for one
+# launched context. It arrives on a staff launch as the `lineitems` member of the
+# AGS endpoint claim and is stored exactly as the roster address is; the platform
+# publishes it and Pulse never edits it, which is what the `lms_` marker means (ADR
+# 0014). `section.ags_line_item_url` is the id of the line item this tool
+# **creates** in that container — SPEC §3.4's one line item per section — which is
+# Pulse's own doing and so carries no marker. E3-02 adds both columns and writes
+# only the first; E3-05 is the writer of the second.
+#
+# Both are addresses this container fetches with the tool's own client credentials,
+# on a schedule, with nobody present: E3-04 lists and creates in the container, and
+# E3-05 and E3-06 post scores to the line item. That is the same server-side
+# request forgery surface the roster address is, arriving through a second claim,
+# so the answer is these same enumerations rather than a second scheme beside them.
+AGS_CONTAINER_ADDRESS_COLUMN = "lms_ags_line_items_url"
+AGS_LINE_ITEM_ADDRESS_COLUMN = "ags_line_item_url"
+
+# The five this container fetches, as opposed to the one it hands to a browser.
 # Rules 3 and 4 below are the whole of that distinction.
-FETCHED_COLUMNS = (JWKS_URL_COLUMN, AUTH_TOKEN_URL_COLUMN, ROSTER_SERVICE_ADDRESS_COLUMN)
+FETCHED_COLUMNS = (
+    JWKS_URL_COLUMN,
+    AUTH_TOKEN_URL_COLUMN,
+    ROSTER_SERVICE_ADDRESS_COLUMN,
+    AGS_CONTAINER_ADDRESS_COLUMN,
+    AGS_LINE_ITEM_ADDRESS_COLUMN,
+)
 
 # The columns loopback is refused on, and E1-11's security round widened it. Rule 3
 # began as `authorization_endpoint` alone — the one address a *browser* resolves, so
@@ -148,7 +175,20 @@ FETCHED_COLUMNS = (JWKS_URL_COLUMN, AUTH_TOKEN_URL_COLUMN, ROSTER_SERVICE_ADDRES
 # operator never pointed the tool at — the textbook server-side request forgery. ADR
 # 0096 records why the two fetched columns split here where rule 4 (link-local) keeps
 # them together.
-LOOPBACK_REFUSED_COLUMNS = (AUTHORIZATION_ENDPOINT_COLUMN, ROSTER_SERVICE_ADDRESS_COLUMN)
+#
+# **E3-02's two gradebook addresses join it, and the split decides them the same
+# way.** ADR 0096 admits loopback on the columns an *operator* writes by hand and
+# refuses it on the ones a *platform* chooses at run time. Both gradebook addresses
+# are the platform's: the container is advertised in a launch claim, and the line
+# item's own id is whatever the platform answers when this tool creates one. So a
+# loopback in either is a service on this container that nobody registered, which
+# is the request forgery the roster address's own round found.
+LOOPBACK_REFUSED_COLUMNS = (
+    AUTHORIZATION_ENDPOINT_COLUMN,
+    ROSTER_SERVICE_ADDRESS_COLUMN,
+    AGS_CONTAINER_ADDRESS_COLUMN,
+    AGS_LINE_ITEM_ADDRESS_COLUMN,
+)
 
 # The port rule 5's resolution is asked under. `getaddrinfo` wants a service as
 # well as a host, and every address judged here is opened over TLS in the case
@@ -917,7 +957,7 @@ class LtiDeployment(UuidPrimaryKey, Base):
 
 
 class ToolSigningKey(UuidPrimaryKey, Base):
-    """This tool's own RSA private key — one row, and the tool's one identity.
+    """This tool's own RSA private keys — the set it publishes, and the one that signs.
 
     LTI 1.3 is asymmetric in both directions. `LtiPlatform` above holds where a
     *platform's* public keys are fetched from; this holds the private half of the
@@ -938,15 +978,29 @@ class ToolSigningKey(UuidPrimaryKey, Base):
     a copy that can drift out of step with what it was derived from
     (`docs/MISTAKES.md` entry 19).
 
-    **At most one row, by the same expression-index shape `institution` uses
-    (ADR 0072).** A check constraint sees one row at a time and cannot count its
-    own table; a unique index on a constant can, because the second row collides
-    with the first and the error names this index. The index is emphatically
-    *not* on `private_key_pem`: unique key material permits any number of rows
-    holding *different* keys, which is precisely the state this refuses. Two rows
-    is not an untidy state to reconcile later — it is two identities for one
-    tool, and whichever row a process reads first decides whether its assertions
-    verify.
+    **More than one row, since E3-01, and `retired_at` is what tells them apart**
+    (`docs/adr/0127`). E1-05 held this table to a single row with a unique index
+    on the constant expression `(true)`, which made the tool's identity provably
+    one key and made rotation structurally impossible: a rotation needs a period
+    in which the retiring key and its replacement are published together, so that
+    assertions signed before the switch still verify while assertions signed after
+    it verify too, and a one-row table has nowhere to put the second key. That
+    index is gone. What replaces it is a rule the readers hold rather than the
+    schema: the **published** set is every row with `retired_at IS NULL`, and the
+    **signing** key is the oldest of those, ordered `created_at ASC, id ASC`
+    (`docs/adr/0143`, which supersedes ADR 0127's newest-signs choice in part so
+    that `generate` publishes rather than switches, and `retire` is the switch).
+    Both live in `app.lti.registration`, so the api container and the celery
+    worker resolve the same row — which is ADR 0082's deciding fact, unchanged.
+    The tie-break on `id` is not decoration: two rows can share a `created_at`,
+    because it is server-defaulted and Postgres gives every statement in one
+    transaction the same `now()`, and an ordering that stopped at the timestamp
+    would leave the choice between them to the storage layer.
+
+    **A retired row stays.** Retirement takes a key out of the published set
+    immediately and leaves the record of what this deployment used to sign with;
+    deleting it would answer that question with nothing, at the moment somebody
+    is asking it.
 
     **`pulse_app` holds `SELECT` on this table and nothing else**, granted by
     E1-06 in `tool_signing_key_grants_v001.sql` — the ticket whose code spends
@@ -954,32 +1008,43 @@ class ToolSigningKey(UuidPrimaryKey, Base):
     role holding read access to a private key it never opens is a credential at
     rest with no owner. `GET /lti/jwks` (`app.lti.registration`) is that code,
     and E1-11's `client_assertion` is the second reader. The write privileges
-    stay withheld, because the seed writes this row as the superuser and an
-    application connection that could write here could rotate the tool's
-    identity. `RUNTIME_BASE_TABLE_PRIVILEGES` in the §4.1 suite carries the
-    entry, which is where that widening has its loud conversation.
+    stay withheld, and E3-01 is the ticket that most invited widening them: its
+    supply path is an operator command holding the privileged credential
+    (`docs/adr/0126`), not a grant. An application connection that could write
+    here could rotate the tool's identity, and `retired_at` is the column a
+    request path would most like to set — retiring the last live key takes the
+    deployment to 503 at `/lti/jwks`. `RUNTIME_BASE_TABLE_PRIVILEGES` in the §4.1
+    suite carries the entry, which is where that widening has its loud
+    conversation.
 
     **Not a person table.** It holds no subject, no name and no address, so
     `PERSON_TABLES` does not change — the question `docs/tickets/e1/deferred.md`
     item 2 asks of this ticket, answered.
 
-    The key is generated by `scripts/seed.py::seed_tool_signing_key`, behind ADR
-    0063's development guard. A non-development deployment has no key until the
-    epic that first registers a real platform supplies one, which is a deliberate
-    gap with an entry in `docs/tickets/e1/deferred.md` rather than an oversight.
+    A row is written by `scripts/signing_key.py` in any deployment, and by
+    `scripts/seed.py::seed_tool_signing_key` in development behind ADR 0063's
+    guard. The seed still writes one key and never rotates: rotation is the
+    operator's command, not a side effect of re-running a demo loader.
     """
 
     __tablename__ = "tool_signing_key"
-    # Named explicitly, like `uq_institution_one_row`: the `ix` template in
-    # `app.models.base` interpolates a column name, and a textual expression has
-    # none to give it. The migration spells the same name.
-    __table_args__ = (Index("uq_tool_signing_key_one_row", text("(true)"), unique=True),)
 
     # PKCS#8 PEM, unencrypted. Unencrypted because the process that reads it has
     # nowhere to get a passphrase from: a passphrase in the same database is not
     # a second factor, and one in the environment moves custody back to the place
     # ADR 0082 rejects. What protects this column is the grant on it.
     private_key_pem: Mapped[str] = mapped_column(Text, nullable=False)
+    # When this key was supplied, defaulted to the insert moment so that the
+    # writer never has to state it. It is what orders the live keys, so the
+    # oldest supplied key is the one that signs (ADR 0143); `AwareDateTime`
+    # refuses a naive value at the bind boundary (ADR 0019).
+    created_at: Mapped[datetime] = mapped_column(
+        AwareDateTime, nullable=False, server_default=text("now()")
+    )
+    # When this key stopped being published, or NULL while it still is. Nullable
+    # because "not retired" is the ordinary state and a sentinel instant would be
+    # a date somebody has to remember is not a date.
+    retired_at: Mapped[datetime | None] = mapped_column(AwareDateTime, nullable=True)
 
 
 class LtiLaunchNonce(UuidPrimaryKey, Base):
@@ -1141,6 +1206,20 @@ class LaunchDefectKind(StrEnum):
     # record of a launch that did not reach it — the launch itself still lands,
     # and it is the *binding* that was refused (ADR 0108).
     CONTEXT_OUTSIDE_PURVIEW = "context_outside_purview"
+    # E3-02's, and the exact mirror of `ROSTER_ADDRESS_REFUSED` above. A launch
+    # advertises its AGS line-item container in the endpoint claim, the address is
+    # judged by the same rules the roster address passes, and one those rules will
+    # not let this container fetch leaves `section.lms_ags_line_items_url` NULL and
+    # is recorded here. The launch itself still lands.
+    #
+    # **It is a different fact from the two states beside it**, which is why it is
+    # a kind of its own rather than a second use of the roster kind. A section
+    # whose platform advertised no AGS claim at all has no gradebook address and no
+    # fault — SPEC §7.3's never-synced shape, applied to the gradebook — and E11's
+    # surface has nothing to ask anybody to do about it. This kind says the
+    # opposite: an address *was* advertised and this deployment will not call it,
+    # which is a conversation with whoever configured the platform.
+    AGS_ADDRESS_REFUSED = "ags_address_refused"
 
 
 class LaunchDefect(UuidPrimaryKey, Base):
@@ -1340,4 +1419,119 @@ class NrpsCall(UuidPrimaryKey, Base):
     # single transaction — a server default would give a paged walk one timestamp
     # for every page, which is true of the transaction and not of the calls.
     # `AwareDateTime` refuses a naive value at the bind boundary (ADR 0019).
+    called_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)
+
+
+class AgsCall(UuidPrimaryKey, Base):
+    """One HTTP call this tool made to a section's AGS service (E3-02).
+
+    SPEC §6.1 puts "NRPS and AGS call logs with response codes — `nrps_call` and
+    `ags_call` respectively, each at the grain of one HTTP call the tool made to a
+    platform service" on the admin console, and only the NRPS half was ever built.
+    This is the other half, and `NrpsCall` above is the model it is copied from
+    rather than merely resembles: read that docstring first, because every piece of
+    reasoning it gives about the grain and about `response_code` is repeated here
+    unchanged and is not re-argued.
+
+    **The grain is one HTTP call and not one post**, which matters more here than
+    it does for the roster. Posting one score is two calls in the ordinary case —
+    the token endpoint, then the score — and creating the section's line item is
+    another two before either. An operator looking at a gradebook that stopped
+    updating needs to see which of those failed, and a row per post cannot say.
+    `grade_sync` in `app.models.grades` is the per-post record beside this one; the
+    two answer different questions and neither is derivable from the other.
+
+    **`response_code` is nullable and NULL has exactly one meaning: the call never
+    reached the platform.** That is `NrpsCall`'s semantics for the same column and
+    it is deliberately identical, so E11's console reads one idea rather than two.
+    A transport failure and a refusal are different facts on that surface — one is
+    a network, one is a registration — so a 401 recorded as NULL would be a tool
+    being refused every hour that reads as an unreachable host.
+
+    **`url` is always the AGS address; `response_code` is sometimes the token
+    endpoint's**, and that pairing is `NrpsCall`'s too (ADR 0095). When the token
+    endpoint refuses, the gradebook is never asked at all, so there is one row,
+    under the address the call was for, carrying the status the token endpoint
+    answered. A row filed under an OAuth address would be a row about the
+    platform's credential surface in the middle of one section's gradebook history.
+
+    **No count column.** `NrpsCall` carries `members_seen` because a roster page
+    has a size worth recording and because "synced but empty" is a state SPEC §7.3
+    names. An AGS call has no such number — a score post carries one score, and a
+    container listing is walked for one line item — so nothing here would read it.
+    E3-04 and E3-06 are the tickets that make the calls, and a column added now for
+    them to fill is a column added before anybody knows what would go in it.
+
+    **Not LMS-owned, so no `guard_write` and no sanction.** SPEC §2.1's ownership
+    list is courses, sections, section codes, enrollments and teaching instructors;
+    this is Pulse's own record of what Pulse did, exactly as `nrps_call` and
+    `launch_defect` are.
+
+    **Not a person table.** A section reference, a URL, an HTTP status and a
+    timestamp — no subject, no name, no address, and no reference to any table that
+    holds one — so `PERSON_TABLES` does not change and no identity-separated view
+    is owed. The person walk in
+    `tests/integration/test_identity_column_marker.py` does not reach it at all.
+
+    **Append-only by grant** (`grade_passback_grants_v001.sql`): `pulse_app` holds
+    `SELECT` and `INSERT` here and neither `UPDATE` nor `DELETE`. E13's retention
+    purge is what will trim it, on its own connection and with its own rule.
+
+    **It carries `NrpsCall`'s composite, and this paragraph used to say it needed
+    none.** Until E3-08's boundary round it read: "Nothing reads this table on a
+    request path: E11's console is the only reader SPEC §6.1 names, it is not
+    built, and an index maintained on every insert for a query nobody runs is a
+    write nobody reads." Both halves went stale in E3-06. The participation sweep
+    reads this table **once per delivery** — `app.services.grading._accepted_status`
+    asks for the newest row belonging to the section it has just posted into, to
+    record which status the platform answered — and while that read is on a
+    scheduled job rather than on a person's request, it happens per student per
+    section per week over a log that gains a row per HTTP call and is purged by
+    nothing until E13's retention pass. Without an index it is a sequential scan
+    of the whole term's calls, per student. So the table carries
+    `(section_id, called_at)`, which is exactly the shape and exactly the reasoning
+    of `NrpsCall`'s (DM-H1).
+    """
+
+    __tablename__ = "ags_call"
+    __table_args__ = (
+        # The sweep's per-delivery read: newest row for one section
+        # (`ORDER BY called_at DESC LIMIT 1` within a `section_id` equality). A
+        # plain column list rather than a descending expression, for the reason
+        # `d2f6a913c47e` gives after reversing the `nrps_call` composite: `alembic
+        # check` compares declared key columns and cannot compare an expression, so
+        # a descending index is one the drift gate cannot hold the migration to.
+        # Postgres serves `ORDER BY … DESC LIMIT 1` from an ascending index by a
+        # backward scan at the same cost.
+        Index("ix_ags_call_section_id_called_at", "section_id", "called_at"),
+    )
+
+    # Which section's gradebook the call was about. RESTRICT, matching every other
+    # reference to `section` in this schema: losing a section should refuse rather
+    # than silently take its call history with it. No `index=True` — the composite
+    # declared in `__table_args__` above leads with this column and serves every
+    # lookup a single-column index would, so a second one is a write nobody reads.
+    section_id: Mapped[UUID] = mapped_column(
+        ForeignKey("section.id", ondelete="RESTRICT"), nullable=False
+    )
+    # The AGS address the call was for — the container, or a line item, or the
+    # scores or results service derived from one. Not the section's stored
+    # address in the ordinary case: a line item's own id is a different URL from
+    # the container it lives in, and recording the stored one would lose which of
+    # the two failed. Never the token endpoint, even when the token endpoint is
+    # what refused; see the class docstring, which this comment used to
+    # contradict. The two exceptions are the section's stored container address,
+    # which is what a refused platform-chosen URL is recorded under so that a
+    # hostile string never reaches an operator's console, and a Result read
+    # filtered to one student, recorded without its query so that no LMS user id
+    # reaches this table.
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    # The HTTP status the platform answered with. NULL means no answer at all: see
+    # the class docstring.
+    response_code: Mapped[int | None] = mapped_column(nullable=True)
+    # When the call was made. Written by the caller rather than defaulted, for
+    # `NrpsCall`'s reason: several calls are written in one transaction and a
+    # server default would give them all one timestamp, which is true of the
+    # transaction and not of the calls. `AwareDateTime` refuses a naive value at
+    # the bind boundary (ADR 0019).
     called_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)

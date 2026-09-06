@@ -161,7 +161,7 @@ def test_the_answer_names_the_course_week_and_the_term_week_the_window_is_over(
         asserted rather than one. A page that labels term week 13 as "week 13 of
         your course" tells a student in a 15-week section that they are three
         weeks further through it than they are, and §3.4 scores participation over
-        weeks elapsed;
+        the items of every week they were enrolled for;
       - **the offset without §2.2's inclusive `+ 1` answers 9**, the ordinary
         off-by-one, which a section whose window sits in its own first week could
         never distinguish from a correct 1 minus nothing;

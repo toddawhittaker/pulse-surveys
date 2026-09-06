@@ -23,12 +23,18 @@
 //
 // **Nothing here provisions anything, and that is the repair.** An earlier
 // version of this file staff-launched into `NURS-8100-Q2FF` to stand up a second
-// enrollment, and the premise could not be met: `scripts/seed.py` seeds no NURS
-// prefix, so the launch records an `unknown_prefix` defect and creates no section
-// at all (measured on this stack, 2026-09-03, from `launch_defect` and the
-// `prefix` table). The seeded world already holds what this file needs — the
+// enrollment, and at the time the premise could not be met: `scripts/seed.py`
+// seeded no NURS prefix, so the launch recorded an `unknown_prefix` defect and
+// created no section at all (measured on this stack, 2026-09-03, from
+// `launch_defect` and the `prefix` table). **E3-08 has since added the prefix** —
+// its exit table names that section's windowless member, so the exit proof could
+// not work around the gap the way this file did — and a staff launch into
+// `NURS-8100-Q2FF` now provisions a section. This file still does not make one,
+// because it never needed to: the seeded world already holds what it reads — the
 // learner in both sections above, both windows open at that minute, verified by
-// the epic-boundary review — so the learner is simply landed and read.
+// the epic-boundary review — so the learner is simply landed and read. Standing
+// up a third section here would add a provisioning step for nothing and would put
+// this spec in the way of `exit-grade-passback.spec.ts`, which drives all three.
 //
 // **That is also why `MATH-140-E1FF` is safe to use here.**
 // `exit-dean-both-doors.spec.ts` records it as "the one no other spec launches
@@ -45,11 +51,11 @@
 // This spec cannot be run without a seeded, running Compose stack; its green is
 // the stack-up run and CI.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from "@playwright/test";
 
-import { setTheClockTo, clearTheClock } from './support/clock';
-import { placementInto } from './support/doors';
-import { deriveSurveyWindows } from './support/stack';
+import { setTheClockTo, clearTheClock } from "./support/clock";
+import { placementInto } from "./support/doors";
+import { deriveSurveyWindows } from "./support/stack";
 import {
   CONFIDENTIALITY,
   LEARNER_SUBJECT,
@@ -59,10 +65,10 @@ import {
   clearTheWeek,
   landOnTheSurvey,
   sectionBlock,
-} from './support/survey';
+} from "./support/survey";
 
-const MATHEMATICS: SectionUnderTest = { label: 'MATH-140-E1FF', code: 'E1FF' };
-const BIOLOGY: SectionUnderTest = { label: 'BIOL-215-R3WW', code: 'R3WW' };
+const MATHEMATICS: SectionUnderTest = { label: "MATH-140-E1FF", code: "E1FF" };
+const BIOLOGY: SectionUnderTest = { label: "BIOL-215-R3WW", code: "R3WW" };
 const BOTH = [MATHEMATICS, BIOLOGY] as const;
 
 // Term week 4's window, an hour after it opened. Transcribed from the seeded
@@ -71,13 +77,13 @@ const BOTH = [MATHEMATICS, BIOLOGY] as const;
 // Monday 7 September, and SPEC §3.1 opens each week's survey on the Friday at
 // 18:00 in the institution's timezone. Daylight time is still in force, so
 // nothing here turns on the November changeover.
-const BOTH_WINDOWS_OPEN = '2026-09-11T19:00';
+const BOTH_WINDOWS_OPEN = "2026-09-11T19:00";
 
 // The placement the learner launches through. One launch shows every section
 // they are enrolled in, so which of the two it names does not matter.
-let placement = '';
+let placement = "";
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async ({ browser }) => {
   test.setTimeout(120_000);
@@ -120,7 +126,9 @@ test.afterAll(async ({ browser }) => {
   }
 });
 
-test('the learner has two sections with an open survey at this clock', async ({ page }) => {
+test("the learner has two sections with an open survey at this clock", async ({
+  page,
+}) => {
   // **The premise, and the control on everything this file's machinery does.**
   // Nothing here is about E2-17: it asserts what the seeded world does today, so
   // a red is the seed, the clock or the stack — never the ticket.
@@ -145,20 +153,20 @@ test('the learner has two sections with an open survey at this clock', async ({ 
     await expect(
       block,
       `The learner has no block for ${section.code} at ${BOTH_WINDOWS_OPEN}. The seeded world ` +
-        'enrols them in both of this file\'s sections; a block missing here is an enrollment the ' +
-        'seed no longer holds, or one that is not live on the pretended day.',
+        "enrols them in both of this file's sections; a block missing here is an enrollment the " +
+        "seed no longer holds, or one that is not live on the pretended day.",
     ).toBeVisible();
     await expect(
       block.getByTestId(SUBMIT),
       `${section.code} is on screen without a submit control, so its week is not open and ` +
-        'answerable. Term week 4 opens on Friday 11 September at 18:00 and closes on Sunday the ' +
-        '13th at 23:59:59; a section showing the closed state here is one whose own dates do not ' +
-        'cover that week, or one whose windows were never materialized (ADR 0111).',
+        "answerable. Term week 4 opens on Friday 11 September at 18:00 and closes on Sunday the " +
+        "13th at 23:59:59; a section showing the closed state here is one whose own dates do not " +
+        "cover that week, or one whose windows were never materialized (ADR 0111).",
     ).toBeVisible();
   }
 });
 
-test('the confidentiality sentence renders once on a screen carrying two open surveys', async ({
+test("the confidentiality sentence renders once on a screen carrying two open surveys", async ({
   page,
 }) => {
   // Criterion 6. SPEC §4.1 item 5, under the ruling of 2026-09-03: once per
@@ -186,8 +194,8 @@ test('the confidentiality sentence renders once on a screen carrying two open su
     await expect(
       page.getByTestId(sectionBlock(section.code)).getByTestId(SUBMIT),
       `${section.code} has no open survey on this screen, so a count of one confidentiality ` +
-        'sentence would be the per-section rendering being correct for a student with one ' +
-        'course rather than the ruling being kept.',
+        "sentence would be the per-section rendering being correct for a student with one " +
+        "course rather than the ruling being kept.",
     ).toBeVisible();
   }
 
@@ -210,12 +218,12 @@ test('the confidentiality sentence renders once on a screen carrying two open su
 
   await expect(
     page.getByText(CONFIDENTIALITY, { exact: true }),
-    'The confidentiality sentence is on this screen ' +
+    "The confidentiality sentence is on this screen " +
       `${JSON.stringify(perBlock)} times inside the section blocks alone. SPEC §4.1 item 5 ` +
-      'allows it exactly once per surface, and the ruling of 2026-09-03 reads a surface as a ' +
-      'screen: a student enrolled in two courses whose windows are open at the same minute is ' +
-      'one screen, not two. Twice is the per-section submit bar it is rendered from today; zero ' +
-      'is a sentence that was lifted out of the submit bar and put nowhere, which is the same ' +
-      'item unenforced from the other side.',
+      "allows it exactly once per surface, and the ruling of 2026-09-03 reads a surface as a " +
+      "screen: a student enrolled in two courses whose windows are open at the same minute is " +
+      "one screen, not two. Twice is the per-section submit bar it is rendered from today; zero " +
+      "is a sentence that was lifted out of the submit bar and put nowhere, which is the same " +
+      "item unenforced from the other side.",
   ).toHaveCount(1);
 });

@@ -171,7 +171,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 12** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 15** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 16. A mutation harness reported kills it had not made
 
@@ -183,7 +183,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 8. Prescribing a fix without probing it
 
-**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/08-prescribing-a-fix-without-probing-it.md)
+**Caught: 9** · [the incidents, the root cause, and the whole rule](mistakes/08-prescribing-a-fix-without-probing-it.md)
 
 ## 15. A property test's generator excluded the case its own docstring named
 
@@ -191,7 +191,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 19. A test held its expectation in a copy of the thing it was checking
 
-**Caught: 6** · [the incidents, the root cause, and the whole rule](mistakes/19-a-test-held-its-expectation-in-a-copy-of.md)
+**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/19-a-test-held-its-expectation-in-a-copy-of.md)
 
 ## 14. An enumeration was reported as an impossibility
 
@@ -199,7 +199,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 6** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
+**Caught: 8** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
 
 **Rule.** When a guard enumerates mechanisms, require it to *find* each one on a
 subject that certainly has it, as a control. A guard that only ever reports
@@ -212,7 +212,7 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 ## 34. A pipeline discarded a non-zero exit and printed a line that read as success
 
-**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
+**Caught: 5** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
 
 **Rule.** Never read a gate's result through a pipe. `cmd | tail` reports the
 exit status of `tail`, so a failing gate prints a passing line. Redirect to a
@@ -236,7 +236,7 @@ file and check the status, or run the gate bare.
 
 ## 29. A value was repaired before the check that should have refused it
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/29-a-value-was-repaired-before-the-check-that-should.md)
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/29-a-value-was-repaired-before-the-check-that-should.md)
 
 ## 33. A class-tree split put a case on the wrong side, and the docstring said otherwise
 
@@ -284,7 +284,7 @@ file and check the status, or run the gate bare.
 
 ## 24. A test asserted a property no implementation could satisfy
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/24-a-test-asserted-a-property-no-implementation-could-satisfy.md)
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/24-a-test-asserted-a-property-no-implementation-could-satisfy.md)
 
 ## 25. Two lockfiles resolved the same package to two versions
 
@@ -326,7 +326,7 @@ doing nothing.
 
 ## 39. A gate run was invalidated by edits that landed while it ran
 
-**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/39-a-gate-run-was-invalidated-by-edits-that.md)
+**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/39-a-gate-run-was-invalidated-by-edits-that.md)
 
 **Rule.** While a gate runs, the tree it runs in is read-only — no edits, no
 checkouts, no restores. A verdict is valid only for the tree it started on; if
@@ -395,18 +395,20 @@ read its timing as well as its result.
 
 ## 42. A CI verdict was read off a stale check summary between two pushes
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/42-a-ci-verdict-was-read-off-a-stale-summary.md)
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/42-a-ci-verdict-was-read-off-a-stale-summary.md)
 
 **Rule.** The only CI verdict that exists is a **completed** run whose head SHA
 equals the final commit. A pull request's check rollup queried between two
 pushes can answer for the superseded run — an empty failure list is not a green.
 Before reporting green or marking anything ready, resolve the run by id, assert
-`status == completed`, and assert its `headSha` equals the commit being vouched
-for; a watch command's clean exit proves only that some run finished.
+`status == completed`, assert `conclusion == success`, and assert its `headSha`
+equals the commit being vouched for; a watch command's clean exit proves only
+that some run finished, and resolving a run by id is not itself the verdict —
+the `conclusion` field is, and a run can complete with a failing conclusion.
 
 ## 43. A broad guard's pattern matched ordinary prose, and named a file that runs no SQL
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/43-a-broad-guards-pattern-matched-ordinary-prose.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/43-a-broad-guards-pattern-matched-ordinary-prose.md)
 
 **Rule.** Prose in a **non-docstring** string under `backend/app/` is read by the
 org-views SQL sweep, which excuses docstrings and nothing else. Before spending a
@@ -417,3 +419,82 @@ comma or after `from`, `join`, `into`, `update`, `table` or `using`; running tha
 one module answers it in under a second. **Reword the prose; never widen the
 guard**, and leave a comment beside the reworded string saying why, or the next
 edit puts the comma back.
+
+## 44. A guard raised in a fixture turned a module's reds into setup errors
+
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/44-a-guard-raised-in-a-fixture-turned-reds-into-errors.md)
+
+**Rule.** A tests-first suite's red must be a FAILED, never an ERROR: an error at
+setup proves nothing about the assertion the test exists to make, survives the
+implementation landing, and a wall of ERRORs reads to a hurried eye as "the suite
+is red" — the exact wrong conclusion. Put a schema-or-deliverable guard in the
+test body (a plain helper called as the first statement), never in a fixture,
+and have the red-run verification count error-kind reds as divergences, not
+reds.
+
+## 45. A generated base64url identifier began with a dash and argparse read it as an option
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/45-a-generated-identifier-began-with-a-dash.md)
+
+**Rule.** base64url output begins with `-` about one value in sixty-four, so any
+CLI that accepts a generated identifier (a `kid`, a hash, a token) as a
+positional argument fails on a schedule that reads as a flake — argparse reports
+a *missing* required argument that was in fact given. Insert `--` before
+positional values built from generated identifiers, and drive the test with an
+identifier that starts with `-` rather than generating until one appears.
+
+## 46. A privilege was attributed to the wrong role, and the ticket was built on it
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/46-a-privilege-was-attributed-to-the-wrong-role.md)
+
+**Rule.** A settled decision that rests on a privilege is a claim about a role,
+and the role is the half that gets mistyped: execute the read as that role before
+the design is fixed on it, because a triple of column names reads identically
+whichever role holds it. And a suite that drives a service through the migrating
+engine has not tested the grant at all — where behaviour depends on one, at least
+one test reaches the code through the connection production uses, or the
+grant-shaped failure passes review as a green suite.
+
+## 47. A route subclass's gate was discarded at dispatch while the class stayed visible
+
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/47-a-route-subclasss-gate-was-discarded-at-dispatch.md)
+
+**Rule.** On the pinned FastAPI, `include_router` does not serve the route objects
+a router holds: for a plain `starlette.routing.Route` it rebuilds one from the
+endpoint, the methods, the name and `include_in_schema` alone. So a route
+subclass's behaviour must live in its **endpoint** — anything put on `self.app`
+or on any other attribute is inert at dispatch, while the original object stays in
+`router.routes` for every sweep that walks them to find and approve. And where a
+structural guard and a behavioural test can disagree about one route, write the
+behavioural one: a sweep over the route table answers "is the class there", never
+"does the gate run", so every gate needs one test that drives the built
+application over HTTP and reads the status in both directions.
+
+## 48. A known gap was recorded only in a comment in the file that worked around it
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/48-a-known-gap-was-recorded-only-in-the-file-that-worked-around-it.md)
+
+**Rule.** A limitation you work around goes in the deferral file the next epic
+reads — `carried-from-eN.md` or `deferred.md`, with an owner — in the same change
+as the workaround. A paragraph in the spec that dodged it records the fact for
+the one person who already knows. And when a plan names a seeded fixture, check
+that the fixture reaches the product's own database rather than only the mock's:
+a platform offering a launch says the platform holds the section, never that the
+tool will provision it.
+
+## 49. A test asserted a fail-open return value as if it were a decision
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/49-a-test-asserted-a-fail-open-return-value-as-if-it-were-a-decision.md)
+
+**Rule.** Before asserting a return value, read what the function returns on
+failure. Where a contract deliberately collapses "refused" and "the dependency was
+down" into one value — every fail-open publish, every `return False` in an
+`except`, anything entry 41 or ADR 0135 governs — that value cannot be a test's
+observable, because the suite's own environment decides it. Assert the effect: the
+intercepted enqueue, the row, the call the platform recorded. And when a *pair* is
+built on such a value, both halves are compromised and only one of them looks it —
+so check the green one by deleting the condition it guards and requiring it to go
+red. **Establish which layer you are standing on first**: a ruling's sentence
+describes what a caller sees, not what the callee does — the sweep walks past where
+the client raises, and a test that borrows the wrong shape is satisfied by any
+layer that declines quietly, or reds against a correct tree.

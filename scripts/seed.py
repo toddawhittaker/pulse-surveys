@@ -492,6 +492,23 @@ PREFIXES: tuple[DemoPrefix, ...] = (
     DemoPrefix(code="STAT", department="Mathematics"),
     DemoPrefix(code="MIS", department="Mathematics"),
     DemoPrefix(code="BIOL", department="Biology"),
+    # **`NURS` is here so the mock platform's third section can be launched from**
+    # (E3-08). `mock-lms/app/seed.py` seeds `NURS-8100-Q2FF`, and a launch naming a
+    # prefix this institution does not hold is refused as an `unknown_prefix`
+    # defect — so that section reached no database, and SPEC §3.4's undated tier
+    # and later-sync tier, whose only seeded cases live in it, could not be driven
+    # against the running stack at all. E2 recorded the gap in a spec comment
+    # (`tests/e2e/student-survey-heading-and-next-window.spec.ts`) and worked
+    # around it; E3's exit proof cannot, because the exit table names that
+    # section's windowless member.
+    #
+    # Grouped under Biology rather than given a department of its own, which keeps
+    # the people graph exactly as it is: every seeded department carries a chair,
+    # and a new one would need a person invented for it whose only purpose is to
+    # chair a prefix the demo has no course in. The course itself is not seeded
+    # either — a launch upserts the course it names, which is how `NURS 8100`
+    # arrives with the title the platform sends.
+    DemoPrefix(code="NURS", department="Biology"),
     DemoPrefix(code="PSYC", department="Psychology"),
     DemoPrefix(code="CSCI", department="Computer Science"),
     DemoPrefix(code="BUSA", department="Business Administration"),
@@ -1898,13 +1915,19 @@ def seed_tool_signing_key(session: Session, configuration: Mapping[str, str]) ->
     row — the api container and the celery worker are two processes and one tool,
     and they have to sign with the same key.
 
-    **An existing row is kept, never rotated.** Rotation is the dangerous shape,
-    because it fails invisibly: a fresh key signs perfectly, and nothing goes
-    wrong until a platform that already fetched the old public half rejects an
-    assertion, hours later, somewhere else. So this reads first and writes only
-    into an empty table, which also keeps `make seed` re-runnable — the ordinary
-    state of every development database after the first run is that a key is
-    already there.
+    **An existing row is kept, and this function never rotates.** E3-01 made
+    rotation buildable — the published key set carries every unretired key and
+    the tool signs with the newest (`docs/adr/0127`) — and deliberately left it
+    to `scripts/signing_key.py`, an operator command (`docs/adr/0126`). A demo
+    loader that rotated on a re-run would do the dangerous thing invisibly: a
+    fresh key signs perfectly, and nothing goes wrong until a platform that
+    already fetched the old public half rejects an assertion, hours later,
+    somewhere else. So this reads first and writes only into an empty table,
+    which also keeps `make seed` re-runnable — the ordinary state of every
+    development database after the first run is that a key is already there.
+    "Empty" is the whole table and not the live rows: a developer who has retired
+    their only key wants `signing_key.py generate`, which says so, rather than a
+    seed run quietly supplying one.
 
     **The guard is checked here rather than only in `main`**, exactly as
     `seed_mock_platform` is and for the same reason: `main` checks it before it

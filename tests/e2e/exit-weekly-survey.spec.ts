@@ -301,7 +301,8 @@ test('a valid submission leaves one response and a real classification for every
   //   1. *The accepted path writes no `classification` rows.* The submission is
   //      stored, the screen congratulates the student, and every comment is
   //      unjudged — so §3.3's validity is decided by nothing and E3's
-  //      participation formula counts a week that was never classified. Caught by
+  //      participation formula credits every comment item in the week, there being
+  //      no verdict left that could refuse one (fail open). Caught by
   //      the sentinel: the join is a `left join`, so an unjudged comment comes
   //      back carrying `no classification row` rather than not coming back.
   //   2. *The real path writes the floor markers.* A classification stamped
@@ -309,8 +310,9 @@ test('a valid submission leaves one response and a real classification for every
   //      distinction erased in the direction nobody notices — every downstream
   //      reader that excludes floored rows then excludes rows a model produced.
   //   3. *A resubmission inserts instead of revising in place (ADR 0115).* The
-  //      week is then answered twice, and E3's participation formula divides by a
-  //      denominator that counted it once. **Killed by the resubmission leg at the
+  //      week is then answered twice, so E3 counts two sets of `answer` rows
+  //      against a week that has one set of items to complete. **Killed by the
+  //      resubmission leg at the
   //      foot of this test and by nothing else** — a fact measured rather than
   //      assumed: the mutation was applied live (the unique constraint dropped in
   //      the migration and the submit path made to insert) and this test stayed
@@ -463,9 +465,10 @@ test('a valid submission leaves one response and a real classification for every
     responseCountForThisWeek(),
     `Revising this week left more than one \`response\` row for ${LEARNER_SUBJECT} in ` +
       `${SECTION_CODE} on term week ${TERM_WEEK}. ADR 0115 revises a submission's answers in ` +
-      'place; a path that inserts instead answers the week twice, and E3 divides participation ' +
-      'by a denominator that counted it once. SPEC §3.1 also says a student sees exactly one ' +
-      'open survey at a time per section, and two rows is what that rule reads like from below.',
+      'place; a path that inserts instead answers the week twice, and E3 then counts two sets of ' +
+      'answers against a week that has one set of items. SPEC §3.1 also says a student sees ' +
+      'exactly one open survey at a time per section, and two rows is what that rule reads like ' +
+      'from below.',
   ).toBe(1);
 
   // And the row that survived is the revised one. **This is the half the count

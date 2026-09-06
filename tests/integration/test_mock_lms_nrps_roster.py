@@ -454,9 +454,10 @@ def test_walking_every_page_of_a_roster_returns_each_member_exactly_once(
     the pages and counting them once has to give the same number. Catches the
     off-by-one that overlaps pages — an offset advanced by one less than the page
     size, or a next URL that repeats the offset it was served at — which duplicates
-    a member per page boundary. E3 divides valid weeks by weeks elapsed per
-    student; a student who appears twice in a synced roster is either two students
-    or one whose enrollment window is written twice.
+    a member per page boundary. E3 scores each student on the items they completed
+    across the weeks they were enrolled for; a student who appears twice in a
+    synced roster is either two students or one whose enrollment window is written
+    twice — and the enrollment window is what selects those weeks.
 
     The guard above the assertion is not ceremony: over a roster that fits on one
     page the comparison is `n == n` for any implementation at all, so a mock that

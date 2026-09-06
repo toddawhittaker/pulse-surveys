@@ -81,6 +81,32 @@ boundary: `metadata_tables` is asked for by both.
   - `fixtures/student_read.py` — E2-09: the names that ticket settles, a student
     enrolled in one section and not in its sibling, and the door their read path
     is asked through with a session a real launch issued.
+  - `fixtures/signing_key_tool.py` — E3-01: `scripts/signing_key.py` run as a
+    program against a migrated database of its own, the RFC 7638 thumbprint of a
+    stored key, and the sign-and-verify pair a retirement is planted with.
+  - `fixtures/grading.py` — E3-03: the module contract the participation formula
+    is asked through, a section whose course weeks are not its term weeks, and
+    students enrolled on the dates a test chose with the answers and verdicts it
+    chose.
+  - `fixtures/ags_client.py` — E3-04: the AGS client and the `PlatformProfile`
+    registry reached by discovery, a registered platform whose section carries the
+    gradebook address a launch advertised, the `ags_call` rows a run leaves, and
+    the score string and ledger string a caller hands over.
+  - `fixtures/line_item_creation.py` — E3-05: the launch door with a gradebook the
+    tool can actually reach behind it (the platform knows where the tool publishes
+    its key set, the registration carries a token endpoint, and the wire mounts the
+    container's host), the names that ticket's work order settles, the enqueue
+    recorder E1-11's debounce module used, and a broker at a closed port.
+  - `fixtures/grade_sweep.py` — E3-06: one section that is both a gradebook the AGS
+    client can post to and a term's worth of answers the participation formula can
+    score, the `grade_sync` rows a test plants and reads back newest-first, and the
+    names that ticket's work order settles.
+  - `fixtures/dev_console.py` — E3-07: the `/dev` console built with the mock
+    identity provider mounted so its roster fetch resolves in process, the reader
+    that says which `data-testid` a page carries and which form encloses it, and
+    the same-origin value a browser would send from that page. The shared home
+    for a builder four modules already keep a copy of; those copies are not
+    migrated yet, and the file says so.
 
 Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
@@ -136,6 +162,12 @@ pytest_plugins = (
     "fixtures.ai_tasks",
     "fixtures.submit",
     "fixtures.student_read",
+    "fixtures.signing_key_tool",
+    "fixtures.grading",
+    "fixtures.ags_client",
+    "fixtures.line_item_creation",
+    "fixtures.grade_sweep",
+    "fixtures.dev_console",
 )
 
 

@@ -81,6 +81,7 @@ filter and the paging as well as the path.
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Annotated, Any
 from urllib.parse import parse_qsl, unquote
 
@@ -93,11 +94,15 @@ from app.ags import (
     LINE_ITEM_CONTAINER_MEDIA_TYPE,
     LINE_ITEM_MEDIA_TYPE,
     LINE_ITEM_PAGE_SIZE,
+    LINE_ITEM_READONLY_SCOPE,
+    LINE_ITEM_SCOPE,
     MAX_LINE_ITEM_LIMIT,
     MAX_RESULT_LIMIT,
     RESULT_CONTAINER_MEDIA_TYPE,
     RESULT_MEDIA_TYPE,
     RESULT_PAGE_SIZE,
+    RESULT_READONLY_SCOPE,
+    SCORE_SCOPE,
     GradeBook,
     GradeServiceError,
     LineItem,
@@ -115,6 +120,7 @@ from app.config import (
     MEMBERSHIPS_PATH,
     MOCK_DEFECTS_PATH,
     MOCK_POSTED_SCORES_PATH,
+    MOCK_ROSTER_AMENDMENTS_PATH,
     REGISTRATION_PATH,
     RESULT_PATH,
     RESULTS_PATH,
@@ -139,7 +145,14 @@ from app.paging import (
     page_size,
     window,
 )
-from app.seed import MockContext, SeededPlatform, seeded_platform
+from app.seed import (
+    LEARNER_ROLES,
+    MockContext,
+    MockEnrollment,
+    SeededPlatform,
+    seeded_platform,
+    student,
+)
 from app.signing import SIGNATURE_ALGORITHM, IssuerKey
 from app.tokens import (
     ADVERTISED_SCOPES,
@@ -167,6 +180,12 @@ FORM_MEDIA_TYPE = "application/x-www-form-urlencoded"
 # hangs rather than one that fails — and a token endpoint that hangs is a tool
 # that hangs. The backend sets the same bound on its own client.
 OUTBOUND_TIMEOUT_SECONDS = 5.0
+
+# The page-size parameter both AGS containers implement, named here because a
+# refusal has to say which parameter it objects to. `page` is `app.paging`'s own
+# `PAGE_PARAMETER`; this is the other half of the pair that came out of the two
+# route signatures when AGS started requiring a credential (ADR 0099, ADR 0134).
+LIMIT_PARAMETER = "limit"
 
 # How many path segments come before the user identifier in `RESULT_PATH`.
 # Counted off `RESULTS_PATH` rather than written as a number, so that moving
@@ -273,28 +292,93 @@ async def json_object(request: Request, subject: str) -> dict[str, Any]:
 # gradebook is built per application exactly as the issuer key is, so two
 # platforms started in one process hold two gradebooks (ADR 0049).
 #
-# **NRPS is authenticated and AGS is not, and the split is deliberate.** A real
-# platform puts both behind an OAuth 2.0 client-credentials grant. E0-14 built no
-# token endpoint and E0-15 specified none, so an endpoint that answered 401 then
-# would have answered it to a tool with nothing to present; E1-06 built the grant
-# (`app.tokens`) and ruled that enforcement pairs with the first conformant
-# client, because a service refusing before one exists would be refusing this
-# repository's own tests.
+# **Both services are authenticated, and each waited for the client it would be
+# refusing.** A real platform puts both behind an OAuth 2.0 client-credentials
+# grant. E0-14 built no token endpoint and E0-15 specified none, so an endpoint
+# that answered 401 then would have answered it to a tool with nothing to present;
+# E1-06 built the grant (`app.tokens`) and ruled that enforcement pairs with the
+# first conformant client, because a service refusing before one exists would be
+# refusing this repository's own tests.
 #
-#   - **The roster requires a token now.** E1-11 built the conformant client, so
-#     that argument has expired for NRPS: `memberships` below refuses a call that
-#     presents no token this platform issued for the membership scope, and
-#     `tests/integration/test_mock_lms_nrps_requires_a_token.py` holds the
+#   - **The roster required a token first.** E1-11 built the conformant NRPS
+#     client, so that argument expired for NRPS: `memberships` below refuses a
+#     call that presents no token this platform issued for the membership scope,
+#     and `tests/integration/test_mock_lms_nrps_requires_a_token.py` holds the
 #     contract. Landed in E1-11's fix round, which E1-15's exit clause 5 needs.
-#   - **AGS still answers without one, and that is the same argument still
-#     standing.** No grade-passback client exists: §3.4 is the passback rule and
-#     SPEC §14.3 gives the work to **E3 — Grade passback**, which is where the
-#     first AGS client is built and therefore where this ends. E3 owns the
-#     enforcement; it is recorded with that owner and its "done when" in
-#     `docs/tickets/e1/deferred.md`. Until then a token is presentable at every
-#     AGS route below and required at none.
+#   - **AGS requires one since E3-04**, in the same change as the first AGS
+#     client (`backend/app/lti/ags.py`), which is what makes the pairing
+#     structural rather than promised. Each route takes the scope AGS 2.0 defines
+#     for it, the two line-item reads take the writing scope or its read-only
+#     sibling, and the credential is judged before the query parameters and the
+#     context lookup on every one of them.
+#     `tests/integration/test_mock_lms_ags_requires_a_token.py` holds the
+#     contract; the per-route map is ADR 0134's.
 #
-# See `docs/adr/0099-the-mock-enforces-a-token-on-nrps-and-not-on-ags.md`.
+# **The `/mock/` prefix is outside this, by decision.** `GET /mock/posted-scores`
+# and `GET /mock/defects` are inspection surfaces no real platform serves (ADR
+# 0047), so there is no protocol credential to ask for and nothing a tool could
+# present. ADR 0134 says so out loud so a reviewer can tell the decision from an
+# oversight. `POST /mock/roster-amendments` (E3-08, ADR 0142) joins them and is the
+# one that writes: it edits this process's own seeded roster, which is the same
+# scope the other two read, and it is tokenless for the same reason — a route no
+# platform serves has no scope a tool could hold for it.
+#
+# See `docs/adr/0099-the-mock-enforces-a-token-on-nrps-and-not-on-ags.md` and
+# `docs/adr/0134-the-mocks-ags-routes-map-to-scopes-one-per-route.md`.
+
+
+def _not_a_page(parameter: str, value: str | None) -> str:
+    """Why a paging parameter this container will not serve on was refused.
+
+    **400 rather than 422**, which is E0-28 item 2's code for a parameter a
+    container will not serve on and the one ADR 0099 already applied to the
+    roster's cursor when its bound moved behind the credential: 400 says this
+    platform read the request and will not serve it, which is a sentence a tool's
+    author acts on, while a 422 reports that a value could not be parsed — a
+    different fact, and one a handler judging the value itself is no longer in a
+    position to state. It is deliberately not the 404 that a page *past* the end
+    answers with: page nine of a three-page container is a client following a
+    header into nowhere, and page zero is a cursor no collection could have.
+
+    The parameter is named, so that a tool's author reads one sentence and acts on
+    it and so that a test can attribute the refusal to the cursor rather than to
+    something else about the request.
+    """
+    return (
+        f"`{parameter}={value}` is not a {parameter} of this container. Both `{PAGE_PARAMETER}` "
+        f"and `{LIMIT_PARAMETER}` are whole numbers from {FIRST_PAGE} upwards — the cursor a walk "
+        "moves by and the size of the page it asks for. A page past the end of the collection is a "
+        "different answer, and this is not that."
+    )
+
+
+def require_a_token(
+    request: Request, settings: PlatformSettings, key: IssuerKey, *accepted: str
+) -> None:
+    """Refuse this request unless it presents a token this platform issued for a scope it takes.
+
+    Every rule about the token is in `app.tokens`; what lives here is the
+    translation of a refusal into the status and the RFC 6750 §3 challenge it
+    carries. The challenge is a header rather than a body member because that is
+    where a client reads it — a bare 401 is indistinguishable from a route that
+    has moved.
+
+    One translation rather than one per service, because every service that
+    enforces answers a refusal the same way and two copies of that mapping are two
+    places for one of them to drift (`docs/MISTAKES.md` entry 13).
+
+    `accepted` is one scope or several, and several is the AGS line-item case: a
+    read is opened by the writing scope or by its read-only sibling (ADR 0134).
+    `authorised_token` is what decides membership.
+    """
+    try:
+        authorised_token(request.headers.get("authorization"), accepted, settings, key)
+    except ServiceTokenError as refusal:
+        raise HTTPException(
+            status_code=refusal.status_code,
+            detail=refusal.description,
+            headers={"WWW-Authenticate": refusal.challenge()},
+        ) from refusal
 
 
 def require_context(platform: SeededPlatform, context_id: str) -> MockContext:
@@ -580,10 +664,9 @@ def _register_nrps(
         move covers `?page=abc`, which the framework would also have answered
         before the token was looked at.
 
-        Every rule about the token is in `app.tokens`; this turns a refusal into
-        the status and the RFC 6750 §3 challenge it carries. The challenge is a
-        header rather than a body member because that is where a client reads it
-        — a bare 401 is indistinguishable from a route that has moved.
+        Every rule about the token is in `app.tokens` and the translation of a
+        refusal into a status and a challenge is in `require_a_token` above, which
+        every enforcing service on this platform goes through.
 
         The verification is RSA arithmetic and this is a synchronous handler, so
         FastAPI already runs it in a threadpool; there is nothing to hand off
@@ -623,14 +706,7 @@ def _register_nrps(
         following a header into nowhere, and page zero is a cursor no collection
         could ever have.
         """
-        try:
-            authorised_token(request.headers.get("authorization"), MEMBERSHIP_SCOPE, settings, key)
-        except ServiceTokenError as refusal:
-            raise HTTPException(
-                status_code=refusal.status_code,
-                detail=refusal.description,
-                headers={"WWW-Authenticate": refusal.challenge()},
-            ) from refusal
+        require_a_token(request, settings, key, MEMBERSHIP_SCOPE)
 
         refused = [
             name
@@ -675,13 +751,34 @@ def _register_nrps(
 
 
 def _register_ags(
-    app: FastAPI, settings: PlatformSettings, platform: SeededPlatform, grades: GradeBook
+    app: FastAPI,
+    settings: PlatformSettings,
+    platform: SeededPlatform,
+    key: IssuerKey,
+    grades: GradeBook,
 ) -> None:
-    """Assignment and Grade Services 2.0: line items, scores and results."""
+    """Assignment and Grade Services 2.0: line items, scores and results, authenticated.
+
+    **Every route here requires a token, and which scope opens which is ADR
+    0134's** — the map is in this module's Advantage comment above and nowhere
+    else in `mock-lms/`. The check runs before the query parameters and before the
+    context lookup on every one of them, exactly as the roster's does: an
+    unauthenticated caller learns that it needs a credential and learns nothing
+    about which sections this platform seeds, which filters a container
+    implements, or where its cursor starts.
+    """
 
     @app.post(LINE_ITEMS_PATH, summary="AGS 2.0: create a line item in a section")
     async def create_line_item(context_id: str, request: Request) -> JSONResponse:
-        """Store one line item and answer with the identifier scores are posted to."""
+        """Store one line item and answer with the identifier scores are posted to.
+
+        The writing scope alone, never the read-only sibling: a credential granted
+        only to read a gradebook must not be able to add a column to it, and
+        `…/scope/lineitem.readonly` contains `…/scope/lineitem` as a prefix, so
+        this is the route on which the difference between membership and substring
+        is a product difference.
+        """
+        require_a_token(request, settings, key, LINE_ITEM_SCOPE)
         require_context(platform, context_id)
         payload = await json_object(request, "line item")
         try:
@@ -697,8 +794,8 @@ def _register_ags(
         resource_link_id: str | None = None,
         resource_id: str | None = None,
         tag: str | None = None,
-        limit: Annotated[int | None, Query(ge=1)] = None,
-        page: Annotated[int, Query(alias=PAGE_PARAMETER, ge=1)] = 1,
+        limit: Annotated[str | None, Query()] = None,
+        page: Annotated[str | None, Query(alias=PAGE_PARAMETER)] = None,
     ) -> JSONResponse:
         """One page of this section's line items, in creation order.
 
@@ -712,19 +809,39 @@ def _register_ags(
         appears only where a next page exists. The next URL is built from the
         query this request carried, so a filtered container's second page is the
         second page *of that filter* rather than of everything.
+
+        Either line-item scope opens it. AGS gives the container a read-only scope
+        precisely so a tool that only reads need not hold a writing credential.
+
+        **`page` and `limit` are typed here as unbounded strings, and that is ADR
+        0099's own recorded consequence arriving.** Both carried `ge=1`, which
+        FastAPI enforces before the handler is entered at all, so `?page=0`
+        answered 422 — naming the parameter, its bound and the fact that this
+        container pages — to a caller who had presented nothing. The bound and the
+        default live in `app.paging::page_number` now, read below and behind the
+        credential, which is where the roster's went when its own enforcement
+        landed. `?page=abc` and `?limit=abc` move with them, for the same reason.
         """
+        require_a_token(request, settings, key, LINE_ITEM_SCOPE, LINE_ITEM_READONLY_SCOPE)
+        requested = page_number(page)
+        if requested is None:
+            raise HTTPException(status_code=400, detail=_not_a_page(PAGE_PARAMETER, page))
+        asked = None if limit is None else page_number(limit)
+        if limit is not None and asked is None:
+            raise HTTPException(status_code=400, detail=_not_a_page(LIMIT_PARAMETER, limit))
+
         require_context(platform, context_id)
         found = grades.line_items(
             context_id,
             LineItemFilters(resource_link_id=resource_link_id, resource_id=resource_id, tag=tag),
         )
-        size = page_size(limit, LINE_ITEM_PAGE_SIZE, MAX_LINE_ITEM_LIMIT)
+        size = page_size(asked, LINE_ITEM_PAGE_SIZE, MAX_LINE_ITEM_LIMIT)
         try:
-            shown = window(found, page, size)
+            shown = window(found, requested, size)
         except PageOutOfRangeError as refusal:
             raise HTTPException(status_code=404, detail=str(refusal)) from refusal
         base = advertised(settings.line_items_url(context_id), request.url.query)
-        header = link_header(base, page, page_count(len(found), size))
+        header = link_header(base, requested, page_count(len(found), size))
         return JSONResponse(
             [line_item.document for line_item in shown],
             media_type=LINE_ITEM_CONTAINER_MEDIA_TYPE,
@@ -732,7 +849,7 @@ def _register_ags(
         )
 
     @app.get(LINE_ITEM_PATH, summary="AGS 2.0: one line item")
-    def read_line_item(context_id: str, line_item_id: str) -> JSONResponse:
+    def read_line_item(request: Request, context_id: str, line_item_id: str) -> JSONResponse:
         """The line item at its own `id`, which is what makes that `id` a URL.
 
         **What this route is for**, because it arrived in E0-15 without a
@@ -748,7 +865,11 @@ def _register_ags(
         minted" is asked; a platform that minted one and routed only `…/3` would
         have handed a tool an id it cannot use, and E3 would meet that as a 404
         on a URL the platform itself composed.
+
+        Either line-item scope opens it, as for the container: reading one line
+        item and listing them are one permission.
         """
+        require_a_token(request, settings, key, LINE_ITEM_SCOPE, LINE_ITEM_READONLY_SCOPE)
         return JSONResponse(
             require_line_item(platform, grades, context_id, line_item_id).document,
             media_type=LINE_ITEM_MEDIA_TYPE,
@@ -760,7 +881,12 @@ def _register_ags(
 
         The body is not modelled, defaulted or normalised anywhere between the
         socket and the store — see `json_object` above and ADR 0047.
+
+        The score scope alone. A gradebook any roster token can write to is the
+        thing the scope check exists to prevent, and neither line-item scope
+        carries permission to put a grade in front of a student.
         """
+        require_a_token(request, settings, key, SCORE_SCOPE)
         line_item = require_line_item(platform, grades, context_id, line_item_id)
         payload = await json_object(request, "score")
         try:
@@ -779,8 +905,8 @@ def _register_ags(
         context_id: str,
         line_item_id: str,
         user_id: str | None = None,
-        limit: Annotated[int | None, Query(ge=1)] = None,
-        page: Annotated[int, Query(alias=PAGE_PARAMETER, ge=1)] = 1,
+        limit: Annotated[str | None, Query()] = None,
+        page: Annotated[str | None, Query(alias=PAGE_PARAMETER)] = None,
     ) -> JSONResponse:
         """The conformant `Result` container: the current grade, and nothing else.
 
@@ -805,16 +931,30 @@ def _register_ags(
         and advertised an unfiltered `first`, `last` or `current` hands a tool
         the whole class the moment it follows one — and it fails open, which is
         the paging defect that looks most like working.
+
+        The result read-only scope, which is the only one AGS 2.0 defines for
+        this container. Its `page` and `limit` moved out of the signature for the
+        reason `list_line_items` above gives at length: two containers with the
+        same pair of declarations is `docs/MISTAKES.md` entry 13's shape exactly,
+        and a repair reaching one of them is a repair reaching half of it.
         """
+        require_a_token(request, settings, key, RESULT_READONLY_SCOPE)
+        requested = page_number(page)
+        if requested is None:
+            raise HTTPException(status_code=400, detail=_not_a_page(PAGE_PARAMETER, page))
+        asked = None if limit is None else page_number(limit)
+        if limit is not None and asked is None:
+            raise HTTPException(status_code=400, detail=_not_a_page(LIMIT_PARAMETER, limit))
+
         line_item = require_line_item(platform, grades, context_id, line_item_id)
         found = grades.results(line_item, user_id=user_id)
-        size = page_size(limit, RESULT_PAGE_SIZE, MAX_RESULT_LIMIT)
+        size = page_size(asked, RESULT_PAGE_SIZE, MAX_RESULT_LIMIT)
         try:
-            shown = window(found, page, size)
+            shown = window(found, requested, size)
         except PageOutOfRangeError as refusal:
             raise HTTPException(status_code=404, detail=str(refusal)) from refusal
         base = advertised(settings.results_url(context_id, line_item_id), request.url.query)
-        header = link_header(base, page, page_count(len(found), size))
+        header = link_header(base, requested, page_count(len(found), size))
         return JSONResponse(
             list(shown),
             media_type=RESULT_CONTAINER_MEDIA_TYPE,
@@ -838,7 +978,11 @@ def _register_ags(
         The identifier comes from `addressed_user_id` rather than from the route
         parameter, for the reason that function gives at length: one decode of
         what the wire carried, whatever the server did to the path on the way in.
+
+        The result read-only scope, the same one the container takes: this is one
+        entry of that container addressed directly, not a second permission.
         """
+        require_a_token(request, settings, key, RESULT_READONLY_SCOPE)
         line_item = require_line_item(platform, grades, context_id, line_item_id)
         user_id = addressed_user_id(request)
         found = grades.result(line_item, user_id)
@@ -854,7 +998,110 @@ def _register_ags(
         return JSONResponse(found, media_type=RESULT_MEDIA_TYPE)
 
 
-def _register_mock_inspection(app: FastAPI, grades: GradeBook) -> None:
+# The two things a roster amendment can ask for (E3-08), and the whole of what
+# `POST /mock/roster-amendments` serves: a registrar adds somebody to a section, or
+# ends somebody's enrollment in one. There is deliberately no reset action — CI
+# seeds a fresh stack per run and a local re-run re-seeds, so a route that put the
+# seed back would exist to make a drive re-runnable against a stack that has
+# already been driven, which is the state this platform's per-process memory
+# cannot honestly offer.
+ADD_ACTION = "add"
+DROP_ACTION = "drop"
+
+# What an amendment this platform cannot read is answered with. Distinct from the
+# `400` `json_object` gives a body that is not a JSON object at all: that says the
+# request carries no document, and this says the document carries no amendment.
+UNREADABLE_AMENDMENT = 422
+
+
+def _amendment_text(body: dict[str, Any], name: str, expected: str) -> str:
+    """One non-empty string member of an amendment, or `422` naming it.
+
+    `expected` completes the sentence a caller reads, so a refusal says what the
+    member is for rather than only that it is missing.
+    """
+    value = body.get(name)
+    if not isinstance(value, str) or not value:
+        raise HTTPException(
+            status_code=UNREADABLE_AMENDMENT,
+            detail=(
+                f"A roster amendment carries `{name}` as a non-empty string — {expected}. This "
+                f"one carries {json.dumps(value)}."
+            ),
+        )
+    return value
+
+
+def _amendment_ordinal(body: dict[str, Any]) -> int:
+    """The student ordinal an `add` names, or `422`.
+
+    A whole number from one upward, because that is what `app.seed.student` mints
+    an identifier from. `bool` is excluded explicitly: `True` is an `int` in
+    Python and `student(context, True)` would enroll `…-student-01` under a body
+    that named no student at all.
+    """
+    value = body.get("ordinal")
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise HTTPException(
+            status_code=UNREADABLE_AMENDMENT,
+            detail=(
+                "An `add` amendment carries `ordinal` as a whole number from 1 upward — which "
+                "student of the section to enroll, the way `app.seed.student` numbers them. This "
+                f"one carries {json.dumps(value)}."
+            ),
+        )
+    return value
+
+
+def _amendment_instant(body: dict[str, Any], name: str) -> str:
+    """One RFC 3339 instant member of an amendment, kept verbatim, or `422`.
+
+    Parsed here and stored unchanged, the way the seeded windows are: what the
+    roster serves has to be the string the caller sent (ADR 0048 puts enrollment
+    dates on an extension and fixes their shape), and re-rendering a timestamp
+    this platform received is exactly what `json_object` refuses to do for a
+    score.
+
+    **An offset is required.** `app.services.roster_sync` refuses a naive
+    enrollment timestamp per member — the member is ingested with no enrollment
+    row at all — so a mock that accepted one would answer `200` here and drop the
+    amended member silently from the tool's side of the wire.
+    """
+    value = _amendment_text(body, name, "an RFC 3339 instant carrying a UTC offset")
+    try:
+        read = datetime.fromisoformat(value)
+    except ValueError as failure:
+        raise HTTPException(
+            status_code=UNREADABLE_AMENDMENT,
+            detail=f"`{name}` is not an RFC 3339 instant: {failure}",
+        ) from failure
+    if read.utcoffset() is None:
+        raise HTTPException(
+            status_code=UNREADABLE_AMENDMENT,
+            detail=(
+                f"`{name}` carries no UTC offset. A tool reading an enrollment window refuses a "
+                "naive timestamp per member, so this platform refuses to publish one."
+            ),
+        )
+    return value
+
+
+def _amended_section(platform: SeededPlatform, body: dict[str, Any]) -> MockContext:
+    """The section an amendment names, by the label a person writes, or `404`."""
+    label = _amendment_text(body, "section", "the section as a timetable writes it")
+    context = platform.context_labelled(label)
+    if context is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No seeded section labelled {label!r}. The seeded labels are "
+                f"{sorted(seeded.label for seeded in platform.contexts)}."
+            ),
+        )
+    return context
+
+
+def _register_mock_inspection(app: FastAPI, platform: SeededPlatform, grades: GradeBook) -> None:
     """The `/mock/` surface, which no real platform serves."""
 
     @app.get(MOCK_POSTED_SCORES_PATH, summary="Mock only: every score this platform was sent")
@@ -899,6 +1146,130 @@ def _register_mock_inspection(app: FastAPI, grades: GradeBook) -> None:
         platform serves.
         """
         return JSONResponse({"selectors": list(ALL_SELECTORS)})
+
+    @app.post(MOCK_ROSTER_AMENDMENTS_PATH, summary="Mock only: add to or drop from a roster")
+    async def amend_a_roster(request: Request) -> JSONResponse:
+        """Enroll somebody this section does not hold, or end somebody's enrollment.
+
+        **Why a route rather than a seed** (E3-08). SPEC §14.3's exit line for E3
+        is that "the mock-LMS gradebook shows correct percentages across enrollment
+        edge cases", and two of §3.4's cases are events rather than states: a
+        member the roster gains *after* a sync has already read it — §3.4's third
+        tier, which is measured against the section's first sync and so cannot
+        exist in a seed that was there before the first one ran — and a member who
+        leaves while a drive is watching. Both are what a registrar does to a live
+        section, and this is how a test does them here.
+
+        **Tokenless, like the two routes above and by the same decision.** ADR 0047
+        puts the `/mock/` namespace outside the protocol, and ADR 0134 says out
+        loud that nothing under it asks for a credential: no real platform serves
+        any of it, so there is no scope a tool could have been issued for one. What
+        it can reach is this process's own seed — which lasts until the container
+        restarts — and nothing else.
+
+        **The amendment is applied to the platform this process serves from**,
+        because that instance is what every route here closes over. `app.seed`
+        carries the two methods that do it and the argument for the class not being
+        frozen.
+
+        The refusals, in the order they are made:
+
+          - `400` — the body is not a JSON object (`json_object`, shared with the
+            AGS bodies);
+          - `422` — it is an object this route cannot read as an amendment: no
+            action it serves, no section named, an `add` with no ordinal, a `drop`
+            with no member or no instant;
+          - `404` — a section this platform does not seed, or (dropping) a member
+            that section does not hold;
+          - `409` — an `add` for an ordinal the section already holds, which would
+            otherwise publish one `sub` twice in one roster.
+
+        The `422` is answered before either `404`, and a caller can rely on that:
+        a `404` from this handler and a `404` from a router that knows no such path
+        are the same status, so the only refusal that proves the route is here at
+        all is one no router issues.
+        """
+        body = await json_object(request, "roster amendment")
+        action = _amendment_text(body, "action", f"either {ADD_ACTION!r} or {DROP_ACTION!r}")
+        if action not in (ADD_ACTION, DROP_ACTION):
+            raise HTTPException(
+                status_code=UNREADABLE_AMENDMENT,
+                detail=(
+                    f"{action!r} is not an amendment this platform serves. It serves "
+                    f"{ADD_ACTION!r} — enroll a student the section does not hold — and "
+                    f"{DROP_ACTION!r} — end an enrollment it does."
+                ),
+            )
+        if action == ADD_ACTION:
+            ordinal = _amendment_ordinal(body)
+            context = _amended_section(platform, body)
+            person = student(context, ordinal)
+            if platform.enrollment(person.user_id, context.context_id) is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"{context.label} already holds {person.user_id!r}. An `add` enrolls a "
+                        "member the section has never had — a re-enrollment is a different event "
+                        "and this platform does not serve it."
+                    ),
+                )
+            # Undated on purpose, and it is the whole point of the case. A member
+            # this platform supplies no enrollment window for is one SPEC §3.4
+            # dates from the section's start — *unless* they were first seen in a
+            # sync later than the section's first, which is the tier this route
+            # exists to make reachable. A window here would date them from it
+            # instead and the drive would be proving the first tier twice.
+            enrollment = MockEnrollment(
+                user_id=person.user_id,
+                context_id=context.context_id,
+                roles=LEARNER_ROLES,
+                status="Active",
+                opened_at=None,
+                closed_at=None,
+            )
+            platform.enroll(person, enrollment)
+            return JSONResponse(
+                {
+                    "section": context.label,
+                    "user_id": person.user_id,
+                    "status": enrollment.status,
+                },
+                status_code=201,
+            )
+
+        user_id = _amendment_text(body, "user_id", "the member's `sub` on this platform")
+        closed_at = _amendment_instant(body, "closed_at")
+        context = _amended_section(platform, body)
+        held = platform.enrollment(user_id, context.context_id)
+        if held is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"{context.label} holds no enrollment for {user_id!r}. A drop ends an "
+                    "enrollment this platform holds; it does not record one it never had."
+                ),
+            )
+        # `status` and `closed_at` are written together, the way the seeded drop
+        # is: NRPS says a member has left in its own vocabulary *and* on the
+        # extension, and a mock whose two halves disagreed would be one the tool
+        # has to pick a side in (`app.seed`'s own rule).
+        dropped = MockEnrollment(
+            user_id=held.user_id,
+            context_id=held.context_id,
+            roles=held.roles,
+            status="Inactive",
+            opened_at=held.opened_at,
+            closed_at=closed_at,
+        )
+        platform.amend_enrollment(dropped)
+        return JSONResponse(
+            {
+                "section": context.label,
+                "user_id": dropped.user_id,
+                "status": dropped.status,
+                "closed_at": dropped.closed_at,
+            }
+        )
 
 
 def create_app() -> FastAPI:
@@ -954,6 +1325,6 @@ def create_app() -> FastAPI:
     _register_authorization(app, settings, platform, key, wrong_launches)
     _register_token(app, settings, key)
     _register_nrps(app, settings, platform, key)
-    _register_ags(app, settings, platform, grades)
-    _register_mock_inspection(app, grades)
+    _register_ags(app, settings, platform, key, grades)
+    _register_mock_inspection(app, platform, grades)
     return app
