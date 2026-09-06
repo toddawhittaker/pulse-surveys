@@ -88,6 +88,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
+from math import isfinite
 from typing import Any, Final
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID, uuid4
@@ -482,8 +483,15 @@ def post_score(
     """
     settings = Settings() if settings is None else settings
     section, container = _gradebook_of(session, section_id)
+    # **A standalone post asks for the score scope and nothing else** (PR #178's
+    # security round). Building the caller with the default set gave this path a
+    # token carrying the line-item **write** scope as well — a credential that can
+    # create and re-point columns, spent on a call that posts one score. The sweep
+    # holds both because it resolves the column and then posts (LO-M2, and the
+    # grant it saves is per section rather than per student); a caller that hands
+    # the line item in has already done the resolving somewhere else.
     call = (
-        GradebookCaller(session, section, container, http, settings, resolve)
+        GradebookCaller(session, section, container, http, settings, resolve, (SCORE_SCOPE,))
         if caller is None
         else caller
     )
@@ -1147,12 +1155,19 @@ def line_item_maximum(line_item: Mapping[str, Any]) -> float:
     own maximum, and a client that filled in a default here would be posting a
     number out of a denominator the platform disagrees with.
 
-    **Zero and a negative are refused beside the absent and the unreadable**
-    (E3-08's boundary round, LO-H1), and the three are one refusal because they are
-    one condition: there is no denominator to scale a percentage into. A guard
-    written `if not maximum` would take `None` and `0` and let a negative through,
-    and one written `if maximum is None` would take exactly one of the three — so
-    the check is on the value's sign, after its type.
+    **Zero, a negative and a non-finite value are refused beside the absent and
+    the unreadable** (E3-08's boundary round, LO-H1; the last of them from PR
+    #178's security round), and they are one refusal because they are one
+    condition: there is no denominator to scale a percentage into. A guard written
+    `if not maximum` would take `None` and `0` and let a negative through; one
+    written `if maximum is None` would take exactly one of the five; and the sign
+    test alone lets `nan` and `inf` past — `nan <= 0` is `False` because every
+    comparison with a NaN is, and infinity is not nonpositive. `json.loads` accepts
+    the bare `NaN` and `Infinity` literals, so a platform can put either in a line
+    item and both used to reach the scaler, which turned them into the strings
+    `NaN` and `Infinity` for the JSON-number check downstream to refuse — a refusal
+    in the wrong place, naming the wrong thing, one guard too late. The message
+    below named all three all along; now the code does.
 
     Nothing is dialled before this answers. The refusal is raised rather than
     logged-and-skipped here because this module's job is one call: the sweep is what
@@ -1165,7 +1180,7 @@ def line_item_maximum(line_item: Mapping[str, Any]) -> float:
             f"the line item states `{SCORE_MAXIMUM_MEMBER}` {maximum!r}, which is not a number, so "
             "there is no denominator to post a percentage against (ADR 0051)."
         )
-    if maximum <= 0:
+    if not isfinite(maximum) or maximum <= 0:
         raise AgsCallError(
             f"the line item states `{SCORE_MAXIMUM_MEMBER}` {maximum!r}, which is a column no "
             "score can be scaled into. Nothing was posted: a percentage of a maximum that is zero "
