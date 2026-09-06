@@ -60,16 +60,32 @@ set, `.env.example`'s `mock-idp` addresses are refused at startup and
 `create_app()` would raise inside the setup of a test about a completely
 different gate (`docs/MISTAKES.md` entry 22).
 
-**Which failure a red here is.** Every test in this module begins by calling
-`declared_passback_path`, a plain function in a test body rather than a fixture,
-so on a tree where E3-07 is unbuilt each one is a **FAILED** saying `app.api.dev`
-exposes no `DEV_PASSBACK_PATH` — never an ERROR in somebody's setup
-(`docs/MISTAKES.md` entry 44). It is called first in every test, including the two
-that would otherwise pass on an unbuilt tree: a refusal asserted against a path
-nothing registers is satisfied by the absence rather than by the gate, and the
-guard is what keeps that from reading as a green.
+**Every gate below is asked of BOTH `DevControlRoute` paths**, added by E3-08's
+security round. E3-07's own review found a route subclass's gate discarded at
+dispatch — `docs/MISTAKES.md` entry 47, whose rule ends "every gate needs one test
+that drives the built application over HTTP and reads the status in both
+directions" — and E3-08 registers a **second** control the same way, `POST
+/dev/roster-sync`. A suite that walked only the first would go on certifying the
+route class while the new door swung open on exactly the regression entry 47
+records. So the paths come from `DEV_CONTROL_PATHS` and every dispatch-level case
+here runs once per control.
 
-Once the constant exists the reds become assertions: a 404 where a 303 belongs,
+**The module keeps its name deliberately**, though it now covers both. Renaming it
+would move it out of `DENIAL_NAME_SHAPES`'s `_trigger_exposure` and through the
+`_control_exposure` shape instead, churning the sweep that exists to notice this
+module losing its marker — for a filename. What a reader needs is this paragraph,
+and the paths are named in the parametrisation's own ids.
+
+**Which failure a red here is.** Every test in this module begins by resolving its
+control's path constant through `DEV_CONTROL_PATHS`, a plain call in a test body
+rather than a fixture, so on a tree where either trigger is unbuilt each case is a
+**FAILED** naming the constant `app.api.dev` does not expose — never an ERROR in
+somebody's setup (`docs/MISTAKES.md` entry 44). It is called first in every test,
+including the ones that would otherwise pass on an unbuilt tree: a refusal
+asserted against a path nothing registers is satisfied by the absence rather than
+by the gate, and the guard is what keeps that from reading as a green.
+
+Once the constants exist the reds become assertions: a 404 where a 303 belongs,
 a 404 where a 403 belongs, or a status other than 404 from a deployment.
 """
 
@@ -80,15 +96,19 @@ from fixtures.dev_console import (
     CROSS_SITE_ORIGIN,
     CROSS_SITE_REFUSED,
     DEV_CONSOLE_PATH,
-    DEV_PASSBACK_PATH,
+    DEV_CONTROL_PATHS,
     OPAQUE_ORIGIN,
     ORIGIN_HEADER,
     PROBED_METHODS,
-    declared_passback_path,
 )
 from fixtures.routing import registered_paths
 
 pytestmark = pytest.mark.invariant
+
+# The two `DevControlRoute` paths every dispatch-level case below is asked of,
+# as the ids the runner reports under. Sorted so the report order is stable and a
+# reader comparing two runs is comparing the same rows.
+DEV_CONTROLS = tuple(sorted(DEV_CONTROL_PATHS))
 
 ENVIRONMENT_VARIABLE = "ENVIRONMENT"
 
@@ -180,7 +200,9 @@ def baseline_is_404(client: Any, environment: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("control", DEV_CONTROLS)
 def test_the_passback_trigger_is_a_route_this_application_carries(
+    control: str,
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -208,11 +230,19 @@ def test_the_passback_trigger_is_a_route_this_application_carries(
     refusals: an application carrying no routes at all would fail the trigger
     assertion for a reason that has nothing to do with E3-07.
 
-    **Dies until E3-07's route is registered**, which is the state HEAD is in.
-    **Must not die** once it is: this is the one test in this module that has to
-    be green before the others mean anything.
+    **Green for both controls, and this paragraph used to say otherwise.** It read
+    "dies until E3-07's route is registered, which is the state HEAD is in", which
+    has not been true since that ticket shipped. Both triggers are registered now,
+    so both rows are expected green — a red here is a control whose route is not
+    registered at all, and the parametrisation's id names which.
+
+    **Must not die** once both are: this is the one test in this module that has to
+    be green before the others mean anything, and it is parametrised for exactly
+    that reason — a refusal asserted against an unregistered path is satisfied by
+    the absence, so each control needs its own existence control rather than
+    borrowing the other's.
     """
-    declared = declared_passback_path()
+    declared = DEV_CONTROL_PATHS[control]()
     application = application_in(DEVELOPMENT, monkeypatch)
     paths = registered_paths(application)
 
@@ -224,10 +254,10 @@ def test_the_passback_trigger_is_a_route_this_application_carries(
     )
     assert declared in paths, (
         f"This application registers no route at `{declared}` (it registers {sorted(paths)}). "
-        "E3-07 adds the passback trigger to the development console: `POST "
-        f"{DEV_PASSBACK_PATH}` runs SPEC §3.4's sweep over every eligible section and redirects "
-        f"back to `{DEV_CONSOLE_PATH}`. Until it exists, every 404 asserted in this module is the "
-        "404 of a route nobody wrote."
+        f"E3-07 adds the passback trigger to the development console and E3-08 the {control!r} "
+        "one beside it, both on the same `DevControlRoute`; each runs its walk and redirects back "
+        f"to `{DEV_CONSOLE_PATH}`. Until this one exists, every 404 asserted against it in this "
+        "module is the 404 of a route nobody wrote."
     )
 
 
@@ -236,9 +266,11 @@ def test_the_passback_trigger_is_a_route_this_application_carries(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("control", DEV_CONTROLS)
 @pytest.mark.parametrize("environment", DEPLOYMENT_ENVIRONMENTS)
 def test_the_passback_trigger_answers_404_to_every_method_outside_development(
     environment: str,
+    control: str,
     configured_env: dict[str, str],
     deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
@@ -271,7 +303,7 @@ def test_the_passback_trigger_answers_404_to_every_method_outside_development(
     equality against the one safe name, so every other name — including one nobody
     thought of — must land on the closed side.
     """
-    declared = declared_passback_path()
+    declared = DEV_CONTROL_PATHS[control]()
     client = client_for(application_in(environment, monkeypatch))
     serving_normally(client, environment)
     baseline_is_404(client, environment)
@@ -294,7 +326,9 @@ def test_the_passback_trigger_answers_404_to_every_method_outside_development(
     )
 
 
+@pytest.mark.parametrize("control", DEV_CONTROLS)
 def test_a_cross_site_post_outside_development_answers_404_rather_than_403(
+    control: str,
     configured_env: dict[str, str],
     deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
@@ -319,7 +353,7 @@ def test_a_cross_site_post_outside_development_answers_404_rather_than_403(
     with no origin check whatsoever, and that one by a build with no environment
     gate.
     """
-    declared = declared_passback_path()
+    declared = DEV_CONTROL_PATHS[control]()
     environment = DEPLOYMENT_ENVIRONMENTS[0]
     client = client_for(application_in(environment, monkeypatch))
     serving_normally(client, environment)
@@ -342,7 +376,9 @@ def test_a_cross_site_post_outside_development_answers_404_rather_than_403(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("control", DEV_CONTROLS)
 def test_the_passback_trigger_answers_404_to_every_method_but_post_in_development(
+    control: str,
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -367,7 +403,7 @@ def test_the_passback_trigger_answers_404_to_every_method_but_post_in_developmen
     every method including `POST` would satisfy every assertion here and ship no
     feature at all.
     """
-    declared = declared_passback_path()
+    declared = DEV_CONTROL_PATHS[control]()
     client = client_for(application_in(DEVELOPMENT, monkeypatch))
     serving_normally(client, DEVELOPMENT)
     baseline_is_404(client, DEVELOPMENT)
@@ -389,7 +425,9 @@ def test_the_passback_trigger_answers_404_to_every_method_but_post_in_developmen
     )
 
 
+@pytest.mark.parametrize("control", DEV_CONTROLS)
 def test_a_cross_site_origin_is_refused_inside_development_with_a_403(
+    control: str,
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -421,7 +459,7 @@ def test_a_cross_site_origin_is_refused_inside_development_with_a_403(
     this application's own origin runs the sweep and posts a score. A build that
     refused every origin would satisfy this test and delete the feature.
     """
-    declared = declared_passback_path()
+    declared = DEV_CONTROL_PATHS[control]()
     client = client_for(application_in(DEVELOPMENT, monkeypatch))
     serving_normally(client, DEVELOPMENT)
 
@@ -437,7 +475,9 @@ def test_a_cross_site_origin_is_refused_inside_development_with_a_403(
     )
 
 
+@pytest.mark.parametrize("control", DEV_CONTROLS)
 def test_the_literal_null_origin_is_refused_inside_development(
+    control: str,
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -463,7 +503,7 @@ def test_the_literal_null_origin_is_refused_inside_development(
     an unbuilt route refuses this for a reason that has nothing to do with the
     string.
     """
-    declared = declared_passback_path()
+    declared = DEV_CONTROL_PATHS[control]()
     client = client_for(application_in(DEVELOPMENT, monkeypatch))
     serving_normally(client, DEVELOPMENT)
 

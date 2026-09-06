@@ -39,6 +39,15 @@ pytestmark = [pytest.mark.integration, pytest.mark.lti]
 # that agrees with whatever number it finds.
 DEBOUNCE_SECONDS = 300
 
+# How far into the future the row in the future-dated case is stamped. **A day, not
+# a second**, and the size is the point: the row this guards against is written by
+# E3-08's `/dev/roster-sync` control, which stamps `nrps_call` on the *effective*
+# clock (ADR 0142) — and a developer stands that clock weeks out, as
+# `tests/e2e/exit-grade-passback.spec.ts` does at 2026-10-26. A second ahead would
+# be inside the window's own width and would test the boundary rather than the
+# direction.
+A_DAY = 86_400
+
 # How far either side of that line the two halves of the pair sit. One second,
 # because a pair at an hour and a minute is equally satisfied by a window anywhere
 # between them — the same argument E1-06's lifetime bound is asserted with (300
@@ -94,6 +103,13 @@ def record_a_call(committed_rows: Any, roster_rows: Any, roster_contract: Any) -
     row would take however long a sync takes, and the boundary it is asking about
     is a second wide (`docs/MISTAKES.md` entry 7 — a verification window equal to
     the thing's own debounce).
+
+    **A negative `seconds_ago` stamps the row in the future**, which is not a trick
+    of the arithmetic but the state E3-08's security round found reachable: the
+    `/dev/roster-sync` control writes `nrps_call` on the effective clock (ADR 0142),
+    so a developer standing the clock forward leaves rows dated ahead of real time.
+    The test that poses it says so in as many words rather than relying on a reader
+    noticing the sign.
     """
 
     def record(section_id: Any, *, seconds_ago: int) -> Any:
@@ -202,6 +218,80 @@ def test_a_launch_trigger_is_debounced_by_a_call_inside_the_window_and_not_by_on
         f"ago, one second past D9's {DEBOUNCE_SECONDS}-second window, was not enqueued. A "
         "debounce that never expires is a section that syncs once and then only on the hour, and "
         "the launch trigger SPEC §7.3 describes stops existing."
+    )
+
+
+def test_a_future_dated_call_row_does_not_debounce_a_launch_trigger(
+    roster_sync: Any,
+    synced_section: Any,
+    a_section_with_no_address: Any,
+    committed_rows: Any,
+    record_a_call: Any,
+    enqueues: Any,
+) -> None:
+    """E3-08's security round: a row dated in the future is not memory of a sync.
+
+    The probe D9 describes is "younger than five minutes", and it was written with
+    a lower bound only — `called_at >= now - DEBOUNCE_WINDOW`, open at the top. A
+    row dated *ahead* of real time satisfies that for as long as it takes real time
+    to reach it, so the section's launch trigger is silent until then.
+
+    **The row is reachable, which is what makes this a finding rather than a
+    curiosity.** E3-08's `/dev/roster-sync` control stamps `nrps_call` on the
+    **effective** clock (ADR 0142) — deliberately, so a member first seen by it is
+    credited from the week the developer is standing in — while the debounce is
+    measured in real minutes. A developer who stands the clock in October and
+    syncs has written rows dated weeks ahead, and every launch-triggered sync for
+    those sections is suppressed until October actually arrives. On a shared
+    development stack that is a roster that silently stops updating.
+
+    **The mutation this kills**: the upper bound dropped again, leaving
+    `called_at >= now - DEBOUNCE_WINDOW`. Invisible to every other test in this
+    module, because all of them date their rows in the past.
+
+    **Both directions in one run**, which is what makes either mean anything. A
+    fix written as "drop the debounce" passes the future half perfectly and undoes
+    D9 — thirty students opening the tool at the top of the hour asking the
+    platform for one roster thirty times — so an ordinary in-window row is posed in
+    the same run on a second section and required to still be skipped. The two
+    sections are separate because the debounce is per-section
+    (`test_the_debounce_is_measured_per_section_rather_than_across_the_institution`
+    is what settles that), so one section cannot hold both states at once.
+
+    **The section carrying no address is the one used for the control**, as the
+    module's other tests do: the debounce reads `nrps_call` and never the address.
+    """
+    ahead = a_section_with_no_address(synced_section)
+    record_a_call(ahead, seconds_ago=-A_DAY)
+    record_a_call(synced_section.id, seconds_ago=DEBOUNCE_SECONDS - A_SECOND)
+
+    before = len(enqueues.calls)
+    roster_sync.call(
+        roster_sync.request_section_sync,
+        session=committed_rows.session,
+        section_id=ahead,
+    )
+
+    assert len(enqueues.calls) == before + 1, (
+        f"A section whose only `nrps_call` row is dated {A_DAY} seconds in the *future* was not "
+        "enqueued on a launch trigger. D9's window is 'younger than five minutes', and a row "
+        "stamped ahead of real time is not a record that this section was synced — it is a record "
+        "written by `/dev/roster-sync` on a clock somebody moved (ADR 0142). Read with a lower "
+        "bound only, it suppresses this section's launch trigger until real time catches up, which "
+        "for a stack standing in October is weeks of a roster that quietly stops updating."
+    )
+
+    within = len(enqueues.calls)
+    roster_sync.call(
+        roster_sync.request_section_sync,
+        session=committed_rows.session,
+        section_id=synced_section.id,
+    )
+    assert len(enqueues.calls) == within, (
+        f"A section called {DEBOUNCE_SECONDS - A_SECOND} seconds ago — an ordinary row, inside D9's "
+        f"{DEBOUNCE_SECONDS}-second window — was enqueued in the same run. This is the control on "
+        "the assertion above: a probe 'fixed' by dropping the debounce altogether passes that one "
+        "and undoes SPEC §7.3's whole reason for debouncing the launch trigger."
     )
 
 

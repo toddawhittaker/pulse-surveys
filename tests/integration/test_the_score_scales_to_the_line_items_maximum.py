@@ -90,7 +90,22 @@ THE_UNSCALED_VALUE = 61.5
 # cannot be scored into at all; `None` is a platform that served a line item with
 # no maximum, which AGS permits a container to do for a line item it did not ask
 # this tool to create.
-REFUSED_MAXIMA = (0, -50, None)
+REFUSED_MAXIMA = (0, -50, None, float("nan"), float("inf"))
+
+# The two E3-08's security round adds, and why they are reachable rather than
+# pathological. `json.loads` accepts the bare literals `NaN`, `Infinity` and
+# `-Infinity` by default — they are not JSON, and Python's decoder takes them
+# anyway — so a platform (or a proxy, or a fixture) that serves
+# `{"scoreMaximum": NaN}` hands this client a float, not a parse error.
+#
+# **Neither is caught by a `maximum <= 0` guard.** `float("nan") <= 0` is `False`,
+# because every comparison with NaN is; `float("inf") <= 0` is `False` because
+# infinity is not nonpositive. So both walk straight past a guard whose own refusal
+# message names them, and the division then produces `nan` or `0.0` and posts it.
+# The parametrisation is what keeps them separate: a guard written `if not
+# maximum` takes `0` and `None` and neither of these, and one written
+# `if maximum <= 0` takes three of the five.
+NON_FINITE_IDS = ("nan", "infinity")
 
 # What a token grant carries its requested scopes in, and how RFC 6749 §3.3
 # delimits them. The specification's, not this suite's.
@@ -289,6 +304,94 @@ def test_a_line_item_read_asks_the_platform_for_the_writing_scope(
     )
 
 
+def test_a_standalone_post_asks_for_the_score_scope_and_not_the_line_item_write(
+    ags_client: Any,
+    ags_sections: Any,
+    service_wire: Any,
+    committed_rows: Any,
+    ags_contract: Any,
+) -> None:
+    """E3-08's security round: the standalone post path takes a score credential, and only that.
+
+    `post_score` called with no caller — the standalone path, which is what the
+    dev trigger and any single-section retry take — built its connector from the
+    sweep's scope set and so asked the platform for a token carrying the
+    **line-item write** scope to post a score with.
+
+    **Why that is worth a finding rather than tidiness.** AGS separates the two on
+    purpose: `…/scope/score` posts a result, `…/scope/lineitem` creates, edits and
+    **deletes** columns. A credential minted for a score post that also carries the
+    write scope is a token that can drop every column in that gradebook, held for
+    whatever lifetime the platform grants, obtained on a path that had no reason to
+    ask. Least privilege is the whole of AGS's scope split, and this is the one
+    call in the client that does not need the writing half.
+
+    **The mutation this kills**: the standalone path inheriting `SWEEP_SCOPES`
+    again. Invisible to every behavioural test in the epic — the post succeeds
+    either way, because the mock grants what it is asked for and the tool holds
+    both scopes — so nothing but the grant on the wire can see it.
+
+    **Read off the platform's own token endpoint**, the observable R2 uses one
+    section over: what the platform was asked for, rather than a constant in a
+    module this test may not import.
+
+    **Two halves, and the second is the non-vacuity guard.** No grant asks for the
+    line-item scope; *and* some grant asks for the score scope — without which
+    "nothing asked for the write scope" is satisfied perfectly by a client that
+    made no grant at all, which is also what a client that never reached the
+    platform looks like.
+
+    **The line item is resolved before the wire is cleared.** Finding or creating
+    it legitimately takes a `lineitem` grant (R2, asserted above), so a test that
+    counted grants across both steps would find the write scope for a reason this
+    ruling does not touch. What is asserted here is the grants made by the *post*.
+    """
+    section = ags_sections()
+    token_path = token_path_of(section)
+    created, identifier = a_line_item_out_of(section, ags_contract, ags_contract.score_maximum)
+    section = ags_sections.store_line_item(section, identifier)
+    grade = ags_contract.grade(section.subjects[0])
+    service_wire.calls.clear()
+
+    _answered, raised = call_the_client(
+        ags_client,
+        ags_client.post_score,
+        section,
+        committed_rows,
+        service_wire,
+        line_item=created,
+        user_id=grade.user_id,
+        score=grade.score,
+        ledger=grade.ledger,
+        timestamp=grade.timestamp,
+    )
+    assert raised is None, (
+        f"The standalone post raised {raised!r}, so it may not have reached the platform at all "
+        "and the grants below would be a record of however far it got."
+    )
+
+    grants = scopes_asked_for(service_wire, token_path)
+    assert grants, (
+        f"The standalone post made no token grant — the calls it made were "
+        f"{[str(call.url) for call in service_wire.calls]}. Every AGS route requires a bearer "
+        "token this platform issued (ADR 0134), so a post that took no grant made no post, and "
+        "the assertion below would be about nothing."
+    )
+    asked_to_write = [scopes for scopes in grants if ags_contract.line_item_scope in scopes]
+    assert not asked_to_write, (
+        f"A token grant made while posting a score asked for {ags_contract.line_item_scope!r}: "
+        f"{grants}. That scope creates, edits and deletes gradebook columns; a score post needs "
+        f"{ags_contract.score_scope!r} and nothing else. The standalone path inherited the sweep's "
+        "scope set, so a credential able to delete every column in the gradebook was minted for a "
+        "call that only ever writes one number."
+    )
+    assert any(ags_contract.score_scope in scopes for scopes in grants), (
+        f"No token grant made while posting a score asked for {ags_contract.score_scope!r}: "
+        f"{grants}. This is the half that says the post still authorised itself — without it, "
+        "'nothing asked for the write scope' is satisfied by a client that asked for nothing."
+    )
+
+
 # ---------------------------------------------------------------------------
 # R1 — the posted value scales, and a nonpositive maximum is walked past.
 # ---------------------------------------------------------------------------
@@ -398,7 +501,9 @@ def test_the_posted_value_scales_to_a_found_line_items_maximum(
     )
 
 
-@pytest.mark.parametrize("maximum", REFUSED_MAXIMA, ids=["zero", "negative", "absent"])
+@pytest.mark.parametrize(
+    "maximum", REFUSED_MAXIMA, ids=["zero", "negative", "absent", *NON_FINITE_IDS]
+)
 def test_a_nonpositive_maximum_is_walked_past_rather_than_divided_by(
     ags_client: Any,
     ags_sections: Any,
@@ -425,10 +530,22 @@ def test_a_nonpositive_maximum_is_walked_past_rather_than_divided_by(
          subject, and asserting it in two places would put one rule in two
          inventories.
 
-    **The three maxima are parametrised rather than folded together**, because
-    they are three values and a guard written as `if not maximum` gets `None` and
-    `0` right and a negative one wrong, while `if maximum is None` gets exactly
-    one of the three. Each is its own row so the runner names which.
+    **The maxima are parametrised rather than folded together**, because they are
+    five values and no single sloppy guard takes them all: `if not maximum` gets
+    `None` and `0` right and a negative one wrong, `if maximum is None` gets
+    exactly one, and `if maximum <= 0` — the guard as shipped — gets three and lets
+    both non-finite values through. Each is its own row so the runner names which.
+
+    **NaN and Infinity are E3-08's security round**, and they are reachable rather
+    than pathological: `json.loads` accepts the bare literals `NaN` and `Infinity`
+    by default — they are not JSON and Python's decoder takes them anyway — so a
+    document carrying `{"scoreMaximum": NaN}` arrives here as a float. `nan <= 0`
+    is `False` because every comparison with NaN is, and `inf <= 0` is `False`
+    because infinity is not nonpositive. Both therefore walk past a guard whose own
+    refusal message names them, and the division then produces `nan` or `0.0` and
+    **posts it**: a gradebook column holding `NaN` is a grade nobody can read, and
+    one holding `0.0` is a statement about a student this tool reached by dividing
+    by infinity.
 
     **The positive control is the test above**, which posts through the identical
     path against a maximum that *can* be scored into — without it, "nothing was
@@ -474,8 +591,12 @@ def test_a_nonpositive_maximum_is_walked_past_rather_than_divided_by(
     after = ags_contract.scores_posted(section.platform, identifier)
     assert after == before, (
         f"A score reached the platform against a line item whose maximum is {maximum!r}. Before "
-        f"the call the platform held {before}; it now holds {after}. R1: a maximum that is "
-        "missing, zero or negative means the section is walked past with a logged refusal, never "
-        "a post — there is no value that means anything in a column that cannot be scored into, "
-        "and `0`, `inf` and `nan` are each worse than an absent grade."
+        f"the call the platform held {before}; it now holds {after}. R1, widened by E3-08's "
+        "security round: a maximum that is missing, zero, negative **or not finite** means the "
+        "section is walked past with a logged refusal, never a post — there is no value that means "
+        "anything in a column that cannot be scored into, and `0`, `inf` and `nan` are each worse "
+        "than an absent grade.\n\n"
+        "If this is the `nan` or `infinity` row, the guard is almost certainly still written "
+        "`maximum <= 0`: both comparisons answer `False`, so the value reaches the division and "
+        "what got posted is whatever `percentage / 100 x maximum` produced."
     )
