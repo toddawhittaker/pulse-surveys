@@ -37,13 +37,21 @@ be told from a control that never worked** (ADR 0079's own consequences section
 says so about the console next door), so the two modules are a pair and each
 names the other.
 
-**Not marked `invariant`, deliberately.** The isolated pass is SPEC §4.1's — the
-confidentiality denials, what a reader may see. This gate protects a *write*: it
-is the same shape as the clock control's, which is marked because the row that
-control writes moves what every visibility read in the product answers. Nothing
-this trigger does discloses anything about anybody; it posts a grade the platform
-already receives on a weekly beat. If a later reading puts it in §4.1's scope,
-the marker goes at module level and this paragraph says why it moved.
+**Marked `invariant`, and this paragraph is the record of the marker moving.**
+It used to say the opposite, on the argument that SPEC §4.1's isolated pass is
+about what a *reader* may see while this gate protects a *write*. E3-08's
+boundary round (IC-H2) read it the other way and that reading governs: a
+deployment on which a stranger can pull this trigger is one where anybody can
+make the tool post participation percentages into every gradebook it holds an
+address for, and §3.4's ledger travels in the AGS comment beside each of them —
+so the write *is* a disclosure, to every instructor holding that gradebook, of
+per-week completion detail for a class nobody asked about. The neighbouring clock
+control carries the marker for a weaker version of the same reason. The rule the
+old paragraph got right is that a marker is a claim about scope and not a
+decoration; what it got wrong is the scope.
+
+CI runs this module in the isolated pass and treats a skip, an xfail or an empty
+collection as a failure (`scripts/ci/check_invariants.py`).
 
 Every test asking for a deployment's `ENVIRONMENT` also asks for
 `deployed_identity_provider` (E0-39), for the reason
@@ -79,6 +87,8 @@ from fixtures.dev_console import (
     declared_passback_path,
 )
 from fixtures.routing import registered_paths
+
+pytestmark = pytest.mark.invariant
 
 ENVIRONMENT_VARIABLE = "ENVIRONMENT"
 

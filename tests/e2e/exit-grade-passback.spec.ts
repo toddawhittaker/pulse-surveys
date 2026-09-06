@@ -10,14 +10,22 @@
 // read back off `GET /mock/posted-scores` — the platform's record of what it was
 // sent (ADR 0047), not Pulse's record of what it sent.
 //
+// **One assertion here is not an exit-table row.** E3-08's boundary round ruled
+// (R7) that the sweep delivers only for members holding a student-shaped role in
+// the section, and P4 reads the instructor's absence from the `BIOL-215-R3WW`
+// gradebook beside the learner's own entry from the same sweep. It is here rather
+// than only in `tests/integration/` because this is the one place the real roster
+// sync writes the instructor's `enrollment` row — the row the defect selected on.
+//
 // **THIS SPEC MOVES THE CLOCK ACROSS SIX WEEKS AND AMENDS TWO ROSTERS.** It must
 // not run in the main Playwright project: a neighbouring spec that ran while the
 // stack pretended it was October, or after this file dropped the learner from
-// `MATH-140-E1FF`, would fail pointing at its own subject. E3-08's work order
-// puts it in a `grade-passback-exit` project that runs after the others, with the
-// main project ignoring this file. Until that split lands, a run of the whole
-// suite will red its neighbours as well as itself, and that is the split's
-// absence rather than a defect in either.
+// `MATH-140-E1FF`, would fail pointing at its own subject. **That split is in
+// place**: `playwright.config.ts` puts this file in a `grade-passback-exit`
+// project ordered after the main one by `dependencies`, and the main project
+// ignores it (ADR 0142's consequences). The ordering is only ever proven by a run
+// of the whole suite, so a neighbour that starts failing on a pretended clock is
+// the first thing to check if that configuration is edited.
 //
 // **Every expected percentage and every ledger below is hand-computed from SPEC
 // §3.4, with the arithmetic beside it** (E3-08 criterion 1, `docs/MISTAKES.md`
@@ -1210,6 +1218,12 @@ test("P4: the late add starts at his own week, the undated member starts at the 
   //      gradebook column, on a denominator resting on a `started_on` nothing
   //      supplied (ADR 0095). Caught by `expectTheDroppedMemberIsAbsent` at the
   //      foot of this case, and again at P5 and P6.
+  //   6. *The delivery selection choosing by enrollment dates alone* (E3-08's
+  //      boundary ruling R7), which posts a participation percentage into the
+  //      instructor's own column: the roster sync writes an `enrollment` row for
+  //      every member of a container, and an instructor's is live and dated
+  //      exactly like a student's. Caught by his absence from the BIOL log, read
+  //      beside the learner's entry from the same sweep.
   //
   // **Why the learner's silence is not confusable with an unchanged value.** Had
   // he stayed enrolled he would be 4 of 30 = 13.3, which is not the 16.0 the
@@ -1275,6 +1289,22 @@ test("P4: the late add starts at his own week, the undated member starts at the 
       "1 and 2 in full and missed 3 and 4: 10 completed over 4 × 5 = 20, which is " +
       "10/20 × 100 = 50.0.",
   );
+
+  // E3-08's boundary ruling R7, read on the real stack. The learner's entry
+  // asserted immediately above is the positive control: it comes from this sweep
+  // and this section, so the absence below is a statement about the instructor
+  // rather than about a sweep that did nothing.
+  expect(
+    scoresFor(entries, BIOL.context, INSTRUCTOR),
+    `The mock gradebook for ${BIOL.label} holds scores for ${INSTRUCTOR}, who teaches it: ` +
+      `${JSON.stringify(scoresFor(entries, BIOL.context, INSTRUCTOR))}. SPEC §3.4 makes the ` +
+      "score a student's — completed items ÷ total items across the student's elapsed weeks — and " +
+      "R7 delivers only for members holding a student-shaped role in the section. The roster sync " +
+      "writes an `enrollment` row for every member of a container, instructors included, so a " +
+      "sweep choosing by enrollment dates alone writes a participation percentage into the column " +
+      "of the person doing the grading. The learner posted in this same sweep, asserted just " +
+      "above, so this is not a section the sweep skipped.",
+  ).toEqual([]);
 
   expectTheGradebookShows(
     entries,

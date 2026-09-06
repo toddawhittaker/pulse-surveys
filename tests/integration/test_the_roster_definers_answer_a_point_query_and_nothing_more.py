@@ -74,6 +74,18 @@ RESOLVE_PLATFORM_USER = (
     "public.resolve_platform_user(CAST(:platform AS uuid), CAST(:subject AS text))"
 )
 RESOLVE_PERSON_FOR_USER = "public.resolve_person_for_user(CAST(:user_id AS uuid))"
+
+# E3's own definer, added to the Care denial below by the E3-08 boundary round
+# (IC-H3). The passback needs a student's `lms_user_id` to put in the AGS `userId`
+# member, and `pulse_app` holds no read of that column — E1-10's round-3 review
+# revoked it because "a connection able to read it can enumerate every subject
+# that ever launched and join a response back to the person who gave it". So the
+# sweep goes through a point-query door of the same shape as the two above, and it
+# belongs in the same denial: it is the one function in this file that answers a
+# **subject** rather than an internal id, which is the value SPEC §4 keys every
+# response to. Spelled on `resolve_person_for_user`'s pattern, which is this
+# file's convention for a definer taking one user id.
+RESOLVE_SUBJECT_FOR_USER = "public.resolve_subject_for_user(CAST(:user_id AS uuid))"
 RECORD_ROSTER_EMAIL = "public.record_roster_email(CAST(:user_id AS uuid), CAST(:email AS text))"
 RECORD_TEACHING_INSTRUCTOR = (
     "public.record_teaching_instructor(CAST(:person_id AS uuid), CAST(:section_id AS uuid))"
@@ -549,6 +561,7 @@ def test_the_care_role_may_not_execute_either_of_the_roster_definers(committed_r
         for call in (
             RESOLVE_PLATFORM_USER,
             RESOLVE_PERSON_FOR_USER,
+            RESOLVE_SUBJECT_FOR_USER,
             RECORD_ROSTER_EMAIL,
             RECORD_TEACHING_INSTRUCTOR,
         ):
@@ -577,8 +590,12 @@ def test_the_care_role_may_not_execute_either_of_the_roster_definers(committed_r
         "PUBLIC` is the line whose absence produces exactly this, and Postgres grants `EXECUTE` to "
         f"`PUBLIC` by default. What the failures were: {reachable}.\n\n"
         f"`record_teaching_instructor` is in this list from the security round's F2 and is the "
-        "sharpest of the four: it writes a `role_assignment` row, and the role that may already "
-        "read that table is the one whose own live-`CARE` assignment is what the reveal checks."
+        "sharpest of the five: it writes a `role_assignment` row, and the role that may already "
+        "read that table is the one whose own live-`CARE` assignment is what the reveal checks. "
+        "`resolve_subject_for_user` is E3-08's boundary round (IC-H3) and is the sharpest of the "
+        "*reads*: it answers the `sub` claim verbatim, which is the value SPEC §4 keys every "
+        "response to, so a Care role that could call it holds an unlogged re-identification path "
+        "beside the audited one E0-26 built."
     )
 
 

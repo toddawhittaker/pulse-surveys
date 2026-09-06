@@ -112,7 +112,31 @@ MODULE_MARKS = "pytestmark"
 # first version of this sweep on exactly that letter. Adding a shape is a
 # widening of a convention rather than a closing of a class; the module docstring
 # says where the inventory ends and who owns the class.
-DENIAL_NAME_SHAPES = ("_names_nobody", "_name_nobody", "repeats_nothing", "names_nothing")
+# **`never_logs` and `carries_nothing` are E3's**, added by that epic's boundary
+# round (IC-M4). E3 wrote four denial modules and the first two shapes above
+# reached only two of them:
+#
+#   - `test_the_sweep_never_logs_a_score_a_ledger_or_an_lms_user_id.py` — the
+#     passback's log stream, matched by `never_logs`;
+#   - `test_the_ags_call_row_and_the_client_log_names_nothing_about_a_student.py`
+#     — matched by `names_nothing`, which was already here;
+#   - `test_the_dev_console_names_nobody.py` — `_names_nobody`, already here;
+#   - `test_the_student_read_path_names_nothing_outside_the_enrollment.py` —
+#     `names_nothing`, already here.
+#
+# `carries_nothing` is added beside `never_logs` because it is the other sentence
+# an author reaches for about a *record* rather than a *view* — "the row carries
+# nothing about a student" — and a shape added only when a module already uses it
+# is a convention that keeps being discovered one module late. Both have planted
+# samples below, in both directions, per this file's own rule.
+DENIAL_NAME_SHAPES = (
+    "_names_nobody",
+    "_name_nobody",
+    "repeats_nothing",
+    "names_nothing",
+    "never_logs",
+    "carries_nothing",
+)
 
 # Two real modules that certainly carry the module-level marker, used as the
 # control that the reader below can find one on this tree rather than only on a
@@ -180,10 +204,39 @@ PLANTED_MODULES = {
     # nothing, so it is demanded *and* flagged: a shape that matched but never
     # reported would be as silent as one that never matched.
     "test_a_planted_launch_view_name_nobody.py": f"import pytest\n\n\n{A_DENIAL_TEST}",
+    # Demanded, and E3's log shape. Marked in the list form, because the real
+    # module it stands for carries `integration` and `lti` too — so this sample
+    # exercises the shape on the marking state that module is actually in, rather
+    # than on the bare form the first sample already covers.
+    "test_a_planted_sweep_never_logs_a_score_or_a_ledger.py": (
+        f"import pytest\n\npytestmark = [pytest.mark.{MARKER}, pytest.mark.integration]\n\n\n"
+        f"{A_DENIAL_TEST}"
+    ),
+    # Demanded, and E3's record shape — unmarked, so it is demanded *and* flagged.
+    # A shape that matched but never reported would be as silent as one that never
+    # matched, which is why each new shape gets one sample on each side of the
+    # marker as well as one on each side of the match.
+    "test_a_planted_row_carries_nothing_about_a_student.py": (
+        f"import pytest\n\n\n{A_DENIAL_TEST}"
+    ),
     # Not demanded: the name carries no denial shape. Unmarked, so a sweep that
     # demanded it would fail on it and this module would be red against a test
     # that is nobody's §4.1 invariant.
     "test_a_planted_module_about_something_else.py": f"import pytest\n\n\n{A_DENIAL_TEST}",
+    # Not demanded, and the near miss for `never_logs`: a module *about* logging
+    # that denies nothing. `logs_the_outcome` is the sentence E3-06's own scope
+    # uses for what the task is *supposed* to write, and a matcher reading for a
+    # bare "logs" would drag every such module into the §4.1 pass — where its
+    # first skip would fail CI for a rule it was never part of.
+    "test_a_planted_task_logs_the_outcome_and_the_section.py": (
+        f"import pytest\n\n\n{A_DENIAL_TEST}"
+    ),
+    # Not demanded, and the near miss for `carries_nothing`: `carries_nothing` is
+    # not `carries_no_score`, and a module asserting a row *carries* something is
+    # the opposite claim. A matcher reading for a bare "carries" takes both.
+    "test_a_planted_row_carries_the_section_and_the_status.py": (
+        f"import pytest\n\n\n{A_DENIAL_TEST}"
+    ),
     # Not demanded, and the near miss that matters: `asserts_nothing` is not
     # `names_nothing` or `repeats_nothing`. The real
     # `test_the_invariant_gate_refuses_a_test_that_asserts_nothing.py` is a guard
@@ -200,11 +253,14 @@ PLANTED_DEMANDED = {
     "test_a_planted_log_names_nobody.py",
     "test_a_planted_console_names_nobody_at_all.py",
     "test_a_planted_launch_view_name_nobody.py",
+    "test_a_planted_sweep_never_logs_a_score_or_a_ledger.py",
+    "test_a_planted_row_carries_nothing_about_a_student.py",
 }
 
 PLANTED_CARRYING_THE_MARKER = {
     "test_a_planted_page_repeats_nothing_it_was_handed.py",
     "test_a_planted_write_names_nothing_from_the_launch.py",
+    "test_a_planted_sweep_never_logs_a_score_or_a_ledger.py",
 }
 
 

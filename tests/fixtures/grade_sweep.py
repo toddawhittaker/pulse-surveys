@@ -88,8 +88,10 @@ from fixtures.ags_client import (
 from fixtures.grading import (
     ENDED_ON_COLUMN,
     ENROLLMENT_TABLE,
+    INSTRUCTOR_ROLE,
     INSUFFICIENT,
     NONSENSE,
+    STARTED_ON_COLUMN,
     SUBSTANTIVE,
     GradingWorld,
     Student,
@@ -1014,8 +1016,10 @@ def sweep_contract() -> Any:
         container_column = SECTION_CONTAINER_COLUMN
         line_item_column = SECTION_LINE_ITEM_COLUMN
         enrollment_table = ENROLLMENT_TABLE
+        started_on_column = STARTED_ON_COLUMN
         ended_on_column = ENDED_ON_COLUMN
         lms_user_id_column = LMS_USER_ID_COLUMN
+        instructor_role = INSTRUCTOR_ROLE
 
         user_member = SCORE_USER_MEMBER
         given_member = SCORE_GIVEN_MEMBER

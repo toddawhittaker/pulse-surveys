@@ -5,10 +5,21 @@ not its term weeks, students enrolled into it on dates the test chose, and
 answers whose comments carry the verdicts the test chose. A copy of any of them
 in each module is `docs/MISTAKES.md` entry 13, so all three live here.
 
+**E3-08's boundary round adds a fourth**: a member of that section who is not a
+student. `person_for`, `teaches`, `instructors_of` and `persons_linked_to` build
+and read the rows that say somebody **teaches** a section — ADR 0024's
+`person`-to-`user` link and E0-09's `INSTRUCTOR` `role_assignment` at section
+grain — because the sweep was found posting a participation score for a section's
+instructor, whose enrollment row is live and dated exactly like a student's.
+Nothing above them changes: an instructor-shaped member is `student(...)` plus two
+more rows written by two more calls, so the world that tells the two apart is the
+world every other module here already builds.
+
 **What this file decides, and what it refuses to.** Every table, column and
 token below is transcribed from a settled record — E2-05's survey schema, E0-08's
 `enrollment`, E1-11's two platform-dated columns (ADR 0095), ADR 0055's
-`classification` shape, SPEC §3.2's five questions and SPEC §3.4's ledger line.
+`classification` shape, ADR 0024's person link, E0-09's role vocabulary and scope
+grain, SPEC §3.2's five questions and SPEC §3.4's ledger line.
 The only thing this file invents is which cohort the section is, which subjects
 the students carry and which instants the clock is moved to, and each of those is
 an *input* the calling test names rather than an answer it reads back
@@ -74,7 +85,13 @@ from fixtures.submit import (
     WORKLOAD_HOURS_COLUMN,
     shape_column,
 )
-from fixtures.supervision import foreign_key_columns, require_table, single_primary_key
+from fixtures.supervision import (
+    ROLE_SCOPE_GRAIN,
+    SupervisionGraph,
+    foreign_key_columns,
+    require_table,
+    single_primary_key,
+)
 from fixtures.survey_windows import (
     SECTION_TABLE,
     SEEDED_COHORTS,
@@ -121,6 +138,33 @@ LEDGER_JOIN = "\n"
 ENROLLMENT_TABLE = "enrollment"
 NRPS_CALL_TABLE = "nrps_call"
 
+# E0-09's people graph, for the one member shape `student` above cannot build: a
+# section's **instructor**. E3-08's boundary round (EE-M1) found the sweep posting
+# a participation score into the instructor's own gradebook column, because the
+# delivery selection asked only about enrollment dates — and an instructor holds a
+# live enrollment exactly like a student's. Telling the two apart needs the rows
+# that say what somebody *is* in a section, which are these.
+#
+# `person` and its link to `user` are ADR 0024's, spelled the way
+# `tests/fixtures/web_identity.py` spells them: "`person.user_id` — nullable,
+# unique, foreign key to `user.id`", and that direction is the only one. The link
+# is what makes a launch subject reach a person, and therefore what makes a
+# `role_assignment` reach the member a score would be posted for.
+PERSON_TABLE = "person"
+PERSON_USER_COLUMN = "user_id"
+
+# The role a section's teacher holds, spelled as SPEC §2.1's canonical chain
+# spells it and matched against whatever the column enumerates by
+# `SupervisionGraph.role_value` — so the enum's spelling stays the implementer's.
+# **The scope grain is never this file's choice**: it comes from `ROLE_SCOPE_GRAIN`
+# in `tests/fixtures/supervision.py`, which is E0-09's rule and §2.1's table
+# ("INSTRUCTOR(section)"), and is the same constant
+# `test_the_roster_definers_answer_a_point_query_and_nothing_more.py` pins its own
+# instructor rows to. A grain invented here would seed a row E0-09's role-grain
+# rule refuses, and the test would fail inside its own fixture
+# (`docs/MISTAKES.md` entry 13).
+INSTRUCTOR_ROLE = "INSTRUCTOR"
+
 # **`response`'s four references are spelled, not discovered, and E2-05 is why.**
 # `20260903_b1e7d4a90c26_a_response_names_one_terms_section_and_week` gives the
 # table *composite consistency* foreign keys beside its plain ones —
@@ -154,6 +198,20 @@ LMS_WINDOW_END_COLUMN = "lms_window_end"
 # (ADR 0131): "`nrps_call`: `id` uuid PK, `section_id` FK→section RESTRICT NOT
 # NULL indexed, ... `called_at` AwareDateTime NOT NULL."
 CALLED_AT_COLUMN = "called_at"
+
+# How many members that call read back, and NULL where it read none — a refused
+# token, a refused address, a transport that never connected. E3-08's boundary
+# round (LO-M4) narrows tier 3's comparison to rows where this is **not** NULL: a
+# call that read no roster saw no member, so it cannot be the sync a member was
+# "first seen in", and counting it dates every undated member of the section from
+# an outage.
+MEMBERS_SEEN_COLUMN = "members_seen"
+
+# What `roster_sync_at` writes when the caller does not say. A small positive
+# count rather than zero: zero is a roster that was read and found empty, which is
+# a *successful* call and would make the constant's own name a lie the first time
+# somebody read the fixture to find out what a refusal looks like.
+A_ROSTER_READ = 5
 
 # ADR 0055: one `task` column typed as an enum with one member today, and a
 # verdict closed per task by a check constraint — `task <> 'COMMENT_VALIDITY' OR
@@ -377,6 +435,7 @@ class GradingWorld:
         self.questions: dict[int, Any] = {}
         self.shape_of: dict[int, str] = {}
         self.people_chain: dict[str, Any] = {}
+        self._graph: SupervisionGraph | None = None
 
     # -- the session and the tables -----------------------------------------
 
@@ -542,6 +601,134 @@ class GradingWorld:
             user_id=user[self.key_of(USER_TABLE)],
         )
 
+    # -- the other kind of member: somebody who teaches ----------------------
+    #
+    # **Three rows, three calls, and nothing here composes them.** An
+    # instructor-shaped member of a section is a `user` with a live enrollment
+    # (that is `student` above, unchanged), a `person` linked to that user, and an
+    # `INSTRUCTOR` assignment scoped to a section. Which section that assignment
+    # names is the whole question a two-hat member poses — instructor in one,
+    # student in another — so a fixture that built the pair in one call would be
+    # answering it, and the test would read its own setup back
+    # (`docs/MISTAKES.md` entry 30; `tests/fixtures/web_identity.py` makes the
+    # same refusal in as many words for the same three rows).
+
+    @property
+    def graph(self) -> SupervisionGraph:
+        """E0-09's assignment builder on this world's own session.
+
+        **One builder per world**, because `SupervisionGraph` caches the
+        containment chain it seeds: two builders on one session would invent two
+        hierarchies, and a node taken from one of them would silently sit under a
+        different course than the caller meant.
+
+        Lazily, only because most worlds never ask — `SupervisionGraph.__init__`
+        does no work and cannot fail, so nothing about a red depends on this.
+        Every method on it that reaches `role_assignment` can `pytest.fail`, which
+        is why they are all reached from a test body rather than from a fixture
+        (`docs/MISTAKES.md` entry 44).
+        """
+        if self._graph is None:
+            self._graph = SupervisionGraph(self.session, self.tables)
+        return self._graph
+
+    def person_for(self, student: Student) -> Any:
+        """One `person` row whose `user_id` names this member's `user` row, and its key.
+
+        ADR 0024's direction and the only one: the link lives on `person`, is
+        nullable and is unique, so one member has at most one person. A member
+        with no `person` row holds no assignment and can hold none — which is
+        what an ordinary student is (ADR 0028), and is why this is a separate
+        call rather than something `student` does.
+        """
+        table = require_table(self.tables, PERSON_TABLE)
+        if PERSON_USER_COLUMN not in table.c:
+            pytest.fail(
+                f"`{PERSON_TABLE}` declares no `{PERSON_USER_COLUMN}` (it declares "
+                f"{[column.name for column in table.columns]}). ADR 0024 puts the person-to-user "
+                "link there — 'nullable, unique, foreign key to `user.id`' — and without it there "
+                "is no way to say that the member holding an enrollment is the same individual as "
+                "the person holding a role assignment."
+            )
+        person = self.seed(PERSON_TABLE, {}, **{PERSON_USER_COLUMN: student.user_id})
+        return person[self.key_of(PERSON_TABLE)]
+
+    def teaches(self, person_id: Any, section_id: Any) -> Any:
+        """One `INSTRUCTOR` `role_assignment` scoped to one section, held by one person.
+
+        The scope grain is left to `SupervisionGraph.assign`, which takes it from
+        `ROLE_SCOPE_GRAIN` — E0-09's rule and SPEC §2.1's table. `reports_to` is
+        an explicit null: who an instructor answers to is §2.1's own subject and
+        is asserted in `tests/integration/test_role_assignment_graph.py`, so a
+        supervision edge invented here would be this fixture deciding it.
+        """
+        return self.graph.assign(
+            INSTRUCTOR_ROLE,
+            scope=section_id,
+            person=person_id,
+            reports_to=None,
+        )
+
+    def instructors_of(self, section_id: Any) -> list[Any]:
+        """The `person` id of every `INSTRUCTOR` assignment scoped to one section.
+
+        Read back out of the database rather than collected as the rows are
+        written, for the reason `SupervisionGraph.assignments_of` gives about the
+        same question: a list built in Python holds whatever the caller put in it
+        whether or not the row landed.
+
+        How this schema records "scoped to a section" is discovered by
+        `scope_overrides` rather than named, because E0-09 left three shapes open;
+        the copy of this lookup in
+        `tests/integration/test_the_roster_sync_writes_members_emails_and_the_teaching_instructor.py`
+        explains why guessing would fail every caller inside its own setup.
+        """
+        from sqlalchemy import select
+
+        graph = self.graph
+        table = graph.assignments
+        scope = graph.scope_overrides(ROLE_SCOPE_GRAIN[INSTRUCTOR_ROLE], section_id)
+        self.session.flush()
+        statement = select(table.c[graph.person_column]).where(
+            table.c[graph.role_column] == graph.role_value(INSTRUCTOR_ROLE),
+            *(table.c[name] == value for name, value in scope.items()),
+        )
+        return list(self.session.execute(statement).scalars())
+
+    def persons_linked_to(self, student: Student) -> list[Any]:
+        """The key of every `person` row whose `user_id` names this member's `user` row.
+
+        A list rather than one row, so "this member is nobody in the people graph"
+        and "this member is exactly this person" are two readings of one answer
+        and neither needs a caller to catch an exception.
+        """
+        from sqlalchemy import select
+
+        table = require_table(self.tables, PERSON_TABLE)
+        self.session.flush()
+        statement = select(table.c[self.key_of(PERSON_TABLE)]).where(
+            table.c[PERSON_USER_COLUMN] == student.user_id
+        )
+        return list(self.session.execute(statement).scalars())
+
+    def enrollments_of(self, student: Student) -> list[dict[str, Any]]:
+        """Every `enrollment` row this member holds in **this world's** section.
+
+        Read back out of the database, so a premise about what the sweep's
+        delivery selection is looking at is a statement about stored rows rather
+        than about what a fixture believes it wrote.
+        """
+        from sqlalchemy import select
+
+        table = require_table(self.tables, ENROLLMENT_TABLE)
+        self.session.flush()
+        statement = select(table).where(
+            table.c[self.link(ENROLLMENT_TABLE, USER_TABLE)] == student.user_id,
+            table.c[self.link(ENROLLMENT_TABLE, SECTION_TABLE)]
+            == self.section_row[self.key_of(SECTION_TABLE)],
+        )
+        return [dict(row) for row in self.session.execute(statement).mappings()]
+
     def link(self, table_name: str, target: str) -> str:
         """The column on `table_name` that names one row of `target` by itself.
 
@@ -602,12 +789,30 @@ class GradingWorld:
                 "discovery ambiguous; see the constants at the top of this file."
             )
 
-    def roster_sync_at(self, called_at: datetime) -> Any:
+    def roster_sync_at(
+        self, called_at: datetime, *, members_seen: int | None = A_ROSTER_READ
+    ) -> Any:
         """One `nrps_call` row for this section, at the instant the caller named.
 
-        Tier 3's comparison is against the **section's earliest** call (ADR 0131),
-        so a test that wants a late first sync seeds one row and a test that wants
-        no sync history seeds none — which is the tier-2 state seeded data is in.
+        Tier 3's comparison is against the **section's earliest** call that
+        actually read a roster (ADR 0131, narrowed by E3-08's boundary round
+        LO-M4), so a test that wants a late first sync seeds one row and a test
+        that wants no sync history seeds none — which is the tier-2 state seeded
+        data is in.
+
+        **`members_seen` defaults to a real read, and the default is load-bearing
+        rather than a convenience.** LO-M4 narrows the tier-3 comparison to rows
+        where `members_seen IS NOT NULL`: a call the platform refused read no
+        roster, so it saw no member and cannot be the sync a member was "first seen
+        in". Before that ruling this helper wrote no `members_seen` at all, so
+        every row it seeded was NULL — and every tier-3 test in
+        `test_the_first_enrolled_week_follows_the_three_tiers.py` would have
+        stopped being a tier-3 test the moment the filter landed, silently, by
+        falling through to tier 2 with a tier-3 expectation
+        (`docs/MISTAKES.md` entry 22: a new rule making an earlier ticket's tests
+        unrunnable). The default keeps those tests meaning what they meant, and a
+        caller that wants a *refusal* row asks for `members_seen=None` in as many
+        words.
         """
         return self.seed(
             NRPS_CALL_TABLE,
@@ -617,6 +822,7 @@ class GradingWorld:
                     self.key_of(SECTION_TABLE)
                 ],
                 CALLED_AT_COLUMN: called_at,
+                MEMBERS_SEEN_COLUMN: members_seen,
             },
         )
 
