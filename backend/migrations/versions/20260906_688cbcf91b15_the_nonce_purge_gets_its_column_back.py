@@ -62,7 +62,7 @@ EXPIRES_AT_COLUMN = "expires_at"
 # of the `GRANT` it reverses rather than a table-grain guess that happens to
 # have no effect.
 REVOKE_THE_EXPIRY_COLUMN = (
-    f"REVOKE SELECT ({EXPIRES_AT_COLUMN}) ON public.{NONCE_TABLE} FROM pulse_app"
+    f"REVOKE SELECT ({EXPIRES_AT_COLUMN}) ON public.{NONCE_TABLE} FROM pulse_app"  # noqa: S608
 )
 
 
