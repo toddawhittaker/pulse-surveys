@@ -40,3 +40,16 @@ healthcheck comment) followed.
 before this ticket started — with a comment beside it saying so and naming the
 carried-forward item. Not a sixth pin moved and deliberately not read by the new
 test module.
+
+## 2026-09-06 — the lockfiles rebuilt on 3.14, nothing moved
+
+A fresh `compilevenv` (uv, `--python 3.14 --seed`, python 3.14.6) with nothing in
+it but `pip-tools==7.6.1` and `click<8.3` — click 8.2.1, so no false `--no-index`
+header — then the two `pip-compile` commands exactly as `Makefile`'s `lock`
+target writes them, run from the repo root. Both exited 0.
+
+The whole diff is two header lines, `Python 3.13` → `Python 3.14`, one per file.
+**No package version moved and no hash set changed**, which is what the
+pre-ticket probe predicted: every pinned version already ships a wheel that 3.14
+accepts, so the resolve had nothing to force. Nothing to revert, and nothing to
+name in the PR body as a forced bump.
