@@ -17,10 +17,15 @@ from (`docs/MISTAKES.md` entry 19). The drift would be a key set advertising a
 key that no longer signs anything.
 
 **One rule for which keys those are, and this module is where it lives** (ADR
-0127, which widens ADR 0082's one-row rule). The **published** set is every
-stored key with `retired_at IS NULL`, so a rotation can carry the retiring key
-and its replacement at once; the **signing** key is the newest of those, ordered
-`created_at DESC, id DESC`. `live_signing_keys` below answers both, which is what
+0127, which widens ADR 0082's one-row rule; ADR 0143, which reverses the half
+below). The **published** set is every stored key with `retired_at IS NULL`, so a
+rotation can carry the retiring key and its replacement at once; the **signing**
+key is the **oldest** of those, ordered `created_at ASC, id ASC` — so generating a
+replacement publishes it without switching to it, and retiring the incumbent is
+what performs the switch, after however long the operator wants platforms to have
+had to re-fetch. It said "the newest of those" until E3-08's boundary round, which
+made `generate` an outage nobody could see the end of.
+`live_signing_keys` below answers both, which is what
 keeps the two processes agreeing and what keeps the `kid` in an assertion header
 naming a key the published set actually carries. Two ordering columns rather than
 one, deliberately: `created_at` is server-defaulted and Postgres gives every
@@ -331,7 +336,7 @@ def public_jwk(private_key_pem: str) -> dict[str, str]:
 
 
 def live_signing_keys(session: Session) -> list[ToolSigningKey]:
-    """Every stored key that has not been retired, newest first (ADR 0127).
+    """Every stored key that has not been retired, **oldest first** (ADR 0143).
 
     The one place the rotation rule is written down. Both readers spend it: the
     key set publishes all of them, and the signer takes the first. Writing it
@@ -340,18 +345,29 @@ def live_signing_keys(session: Session) -> list[ToolSigningKey]:
     published document does not carry — refused at the platform, with nothing on
     this side to look at.
 
+    **The oldest live key signs, and this ordering was `desc` until E3-08's
+    boundary round.** ADR 0127 had the newest sign, which made `generate` the
+    switch: the instant an operator supplied a replacement, the tool began signing
+    with a key no platform had fetched yet, and every service call failed until
+    every platform happened to re-read the key set — an outage the operator could
+    neither see nor bound, at the moment they were being careful. Oldest-signs
+    separates the two acts: `generate` publishes and changes nothing, `retire`
+    performs the switch, after a wait the operator chooses. ADR 0143 supersedes
+    ADR 0127 in that part and states the price — key material stays in use for
+    longer, which is the thing a rotation is shortening.
+
     **Ordered on two columns.** `created_at` is server-defaulted and Postgres
     gives every statement in one transaction the same `now()`, so two keys
     supplied together share an instant; without the tie-break on `id` the choice
     between them belongs to the storage layer, and the api container and the
     celery worker can then sign with different keys. That is ADR 0082's deciding
-    fact, and it is the reason this ordering is not "newest by timestamp".
+    fact, and it is the reason this ordering is not "oldest by timestamp".
     """
     return list(
         session.scalars(
             select(ToolSigningKey)
             .where(ToolSigningKey.retired_at.is_(None))
-            .order_by(ToolSigningKey.created_at.desc(), ToolSigningKey.id.desc())
+            .order_by(ToolSigningKey.created_at.asc(), ToolSigningKey.id.asc())
         )
     )
 
@@ -376,16 +392,22 @@ def current_signing_key(session: Session) -> ToolSigningKey | None:
 def published_key_set(session: Session) -> dict[str, Any]:
     """This tool's key set, as RFC 7517 §5 shapes one: `{"keys": [...]}`.
 
-    Every live key, oldest-signed assertions included: a rotation is a period in
-    which the retiring key and its replacement are both published, so that what
-    was signed before the switch still verifies while what is signed after it
-    verifies too (ADR 0127). A retired key leaves this document immediately and
-    stays in the database as the record of what this deployment used to sign with.
+    Every live key: a rotation is a period in which the retiring key and its
+    replacement are both published, so that what was signed before the switch still
+    verifies while what is signed after it verifies too (ADR 0127). A retired key
+    leaves this document immediately and stays in the database as the record of what
+    this deployment used to sign with.
+
+    **The key that is signing is not the newest one here** (ADR 0143): a freshly
+    generated key is published for platforms to fetch while the older one goes on
+    signing, and `retire` is what moves the signature. So a reader of this document
+    cannot tell which key is in use from its order, and nothing should try — the
+    `kid` in an assertion header is what names the signer.
 
     A deployment with no live key refuses rather than serving `{"keys": []}`, and
     the row count is not what decides that — every stored key can be retired.
     """
-    live = live_signing_keys(session)
+    live = live_signing_keys(session)  # oldest first; every one of them is published
     if not live:
         raise NoSigningKeyError(
             "This deployment holds no signing key that has not been retired, so the tool has "
