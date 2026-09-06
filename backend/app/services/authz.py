@@ -78,8 +78,12 @@ was standing in for is unchanged and is stated above: `enrollment` carries a
 predicate answers a boolean.
 
 **The grant does not protect the views themselves, and this ticket added three.**
-Measured on the pinned Postgres: all five views are owned by `pulse_admin` with
-`security_invoker` off, so each executes with its owner's privileges. A `_v002` of
+Measured on the pinned Postgres: every read view in `public` is owned by
+`pulse_admin` with `security_invoker` off, so each executes with its owner's
+privileges. No count is written here — the set grows with every ticket that ships
+a read view, and a number in a comment is a record with a scheduled expiry
+(`docs/MISTAKES.md` entry 1); E4-03's three report views were the widening that
+made the count this sentence used to carry false. A `_v002` of
 `assignment_scope`, `lead_faculty_course` or `containment_path` that joined
 `public.person` would hand `pulse_app` a name, and no grant would be consulted on
 the way. What stands between that and a deployment is ADR 0041's rule — a view
