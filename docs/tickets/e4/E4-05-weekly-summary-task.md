@@ -13,8 +13,8 @@ re-lane argument is settled here, not at the PR.
 provider — the same boundary the validity task already crosses, with the
 same rules: no identity accompanies it, and the output is a typed contract,
 never trusted prose. `app-security` fires on the diff per `review-pr`'s
-table, and `prompt-eval` runs per-PR on this ticket by the exception the
-epic README declares at breakdown.
+table, and `prompt-eval` runs per-PR on this ticket by the reviewer
+addition the epic README declares at breakdown.
 
 ## Context
 
@@ -78,7 +78,7 @@ shape end to end); `tests/evals/` layout; ADR 0002 on gate tolerances.
    enforcing floor for the summary task's eval metrics, or the ADR records
    why the floor waits (and for what measurement), the way E2 staged the
    validity floors. Silence is not an option; `prompt-eval` runs on this PR
-   by the README's declared exception and checks for exactly this.
+   by the README's declared reviewer addition and checks for exactly this.
 6. Prompt version and model id flow through the task's return so E4-06 can
    store them without re-deriving.
 

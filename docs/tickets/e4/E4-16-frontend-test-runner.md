@@ -14,10 +14,13 @@ committed) and a new CI gate; `app-security` fires via the manifest paths.
 E2 deliberately did not add a frontend unit-test runner, with the cost
 stated — component-level regressions surface in a browser run instead of a
 unit run — and the revisit trigger "when a screen's logic outgrows what the
-end-to-end suite pins cheaply" (`docs/tickets/e3/carried-from-e2.md`, passed
-through to `carried-from-e3.md`). E4 is that moment, structurally: three
-component tickets whose acceptance criteria are component tests, building in
-parallel, none of which can execute a test today — `frontend/package.json`
+end-to-end suite pins cheaply". The entry lives in
+`docs/tickets/e3/carried-from-e2.md`'s "Owned by the spec already" section,
+which `carried-from-e3.md` passes through in one sentence without naming
+members — so the source file is where the entry is read and closed. E4 is
+the revisit moment, structurally: four component tickets whose acceptance
+criteria are component tests, three of them building in parallel, none of
+which can execute a test today — `frontend/package.json`
 has `dev`, `build`, `typecheck`, `lint` and nothing else, and the Playwright
 config runs `tests/e2e/` only.
 
@@ -57,14 +60,20 @@ tolerances); the pin-and-lockfile rule in `CLAUDE.md`.
 2. A frontend diff trips the new gate through the change-detection route; a
    docs-only diff does not — both directions asserted the way the existing
    detection tests assert job selection.
-3. Every added package is exactly pinned and the lockfile is committed; the
-   exact-pin equality guard and all existing Node-facing gates stay green.
+3. Every added package is exactly pinned and the lockfile is committed. No
+   automated guard checks arbitrary packages for exact pins (the only
+   pin-equality guard is scoped to `@types/node`), so the pin discipline
+   here is enforced by review against the pin rule — the PR body says so —
+   and all existing Node-facing gates stay green.
 4. The bundle budget gate is untouched — a test runner is dev-only and the
    built bundle proves it by not changing.
 5. The ADR records the runner choice, the rejected alternatives, and the
    component-test conventions E4-08/09/10 build to.
-6. The carried entry closes in `carried-from-e3.md` with what closed it and
-   what tripped the revisit trigger.
+6. The carried entry closes **in its source file**,
+   `docs/tickets/e3/carried-from-e2.md`, with what closed it and what
+   tripped the revisit trigger — `carried-from-e3.md` has no row for it to
+   close (its section passes through unenumerated), and E4-15's ledger
+   should note that fact rather than hunt for a missing line.
 
 ## Known traps
 

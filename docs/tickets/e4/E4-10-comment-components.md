@@ -28,7 +28,9 @@ flagged and excluded variants are built and proven against fixtures because
 
 Read first: `docs/DESIGN_BRIEF.md`, `design/tokens.css`, SPEC §7.6, §5.1,
 §5.2 (the variants' meanings), §4 (what never renders: timestamps, identity,
-anything ordering-revealing); the payload sketch.
+anything ordering-revealing); the payload sketch; E4-16's conventions ADR
+(test file placement and what renders a component under test — settled once
+there, not per ticket).
 
 ## Scope
 

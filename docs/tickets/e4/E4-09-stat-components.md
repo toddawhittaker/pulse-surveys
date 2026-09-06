@@ -25,8 +25,10 @@ to refuse). Labels live in the copy module layout so the inventory governs
 them.
 
 Read first: `docs/DESIGN_BRIEF.md`, `design/tokens.css`, SPEC §7.6, §5.1,
-§4.1 items 4 and 5; the payload sketch; the existing components
-(`WorkloadSlider.tsx` for the numeric conventions the survey side set).
+§4.1 items 4 and 5; the payload sketch; E4-16's conventions ADR (test file
+placement and what renders a component under test — settled once there, not
+per ticket); the existing components (`WorkloadSlider.tsx` for the numeric
+conventions the survey side set).
 
 ## Scope
 

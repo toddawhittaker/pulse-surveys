@@ -41,12 +41,16 @@ lane table makes *any path matching `*care*`* heavy wherever it lives, and
 `frontend/src/routes/care/` matches it literally. Doubt means heavy; the
 ticket is one docstring, so the cost is small.
 
-**Reviewer exception declared at breakdown**, per `review-pr`'s own rule for
-epics whose subject is a moved reviewer's specialty: **`prompt-eval` runs
-per-PR on E4-05**, the ticket that adds the epic's model task and settles the
-floor question — a floor decision that waited for the boundary pass would be
-exactly the deferral the reviewer exists to catch. The other boundary-only
-reviewers stay at the boundary (E4-15).
+**Reviewer addition declared at breakdown:** **`prompt-eval` runs per-PR on
+E4-05**, the ticket that adds the epic's model task and settles the floor
+question — a floor decision that waited for the boundary pass would be
+exactly the deferral the reviewer exists to catch. Named honestly: this is
+not `review-pr`'s own exception, whose condition is an epic whose *declared
+subject* is the moved reviewer's specialty — E4's subject is the report, and
+one ticket touches `backend/app/ai/`. It is a breakdown decision to run
+*more* review than the skill's default on one PR, which the skill's
+gate-weakening rules do not restrict. The other boundary-only reviewers stay
+at the boundary (E4-15).
 
 ## Decisions ruled at breakdown
 
