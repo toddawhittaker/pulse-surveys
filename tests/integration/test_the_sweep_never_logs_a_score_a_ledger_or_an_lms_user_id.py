@@ -15,11 +15,16 @@ deployment runs, and retained on a schedule nobody in this project chose. SPEC �
 makes re-identification reachable only through the Care queue and only with an
 audit row; a log line reaches it with neither.
 
-**Three forbidden things and each hides differently.** The score is a short
+**Four forbidden things and each hides differently.** The score is a short
 numeric string, so the world it is asserted over is built to make it a *fraction*
 — a value containing a decimal point cannot be a substring of a uuid, and a bare
 `100` in a log line could be anything. The ledger lines are long and distinctive.
-The `lms_user_id` is the AGS `userId` and the thing §4 is actually about.
+The `lms_user_id` is the AGS `userId` and the thing §4 is actually about. **The
+fourth is a comment's own text**, added by E3-08's boundary round (IC-M1): the
+sweep reads `answer.comment_text` to decide whether a comment item completed, so
+the words pass through the service on every run, and a comment is the most
+identifying thing a student writes — §4 randomises comment display order and never
+shows a timestamp beside one, and a log line has a timestamp by construction.
 
 **The capture is proved before it is trusted.** `docs/MISTAKES.md` entry 3's
 canary rule: a search that has gone blind reports the same clean result as a
@@ -46,6 +51,15 @@ carries one. `ags_contract.logged_text` folds in `getMessage()`, the raw `args`
 and `exc_text` for exactly that reason, and the canary goes through a format
 argument so that a build of the extractor which stopped reading them says so.
 
+**This module is in the §4.1 invariant pass** (E3-08's boundary round, IC-H1).
+What it forbids a log stream to carry is a student's `lms_user_id` beside their
+participation score and its per-week ledger — SPEC §4's first line, "identity is
+never displayed to instructors or any leadership role, in any view", reaching the
+one surface every operator can read without a role at all. A denial nobody runs is
+a rule that ships unenforced, so CI runs it in the isolated pass and treats a
+skip, an xfail or an empty collection as a failure
+(`scripts/ci/check_invariants.py`).
+
 **Which failure a red here is.** Before E3-06 lands both tests are expected red
 on `pytest.fail` naming `app.services.grading` as a module that exposes no
 `post_scores_for_all_sections`, or `app.jobs.tasks` as one that exposes no
@@ -57,8 +71,9 @@ import logging
 from typing import Any
 
 import pytest
+from fixtures.grading import A_COMMENT
 
-pytestmark = [pytest.mark.integration, pytest.mark.lti]
+pytestmark = [pytest.mark.invariant, pytest.mark.integration, pytest.mark.lti]
 
 # `gradebooks` and `sweep_contract` come from `tests/fixtures/grade_sweep.py`;
 # `ags_contract` from `tests/fixtures/ags_client.py`; `line_item_contract` from
@@ -119,9 +134,10 @@ def a_world_with_a_fractional_score(
 def forbidden_in(score: Any, student: Any) -> dict[str, str]:
     """The strings no log line may carry, each with the reason it may not.
 
-    Taken from the formula's own answer and from the `user` row, never composed
-    here: what must not leak is the exact value this run computed and the exact
-    subject it computed it for.
+    Taken from the formula's own answer, from the `user` row and from the text the
+    student actually wrote, never composed here: what must not leak is the exact
+    value this run computed, the exact subject it computed it for, and the exact
+    words it read on the way.
     """
     forbidden = {
         score.percentage: (
@@ -132,6 +148,18 @@ def forbidden_in(score: Any, student: Any) -> dict[str, str]:
             "an LMS user id — SPEC §4 keys every response to it and makes re-identification "
             "reachable only through the Care queue with an audit row; a log line reaches it with "
             "neither"
+        ),
+        # E3-08's boundary round, IC-M1. The sweep reads `answer.comment_text` to
+        # decide whether a comment item completed, so the text passes through the
+        # service — and a comment is the most identifying thing a student writes.
+        # SPEC §4 randomises comment display order and never shows a timestamp
+        # beside one, precisely because *when* somebody said something narrows who
+        # said it; a log line carries both, plus the section, and is retained on a
+        # schedule nobody in this project chose.
+        A_COMMENT: (
+            "a comment's text — the most identifying thing a student writes, which §4.1 item 3 "
+            "keeps from instructors below the threshold and §4 never shows with a timestamp "
+            "beside it. A log line has a timestamp by construction"
         ),
     }
     for line in score.ledger.splitlines():

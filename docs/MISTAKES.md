@@ -183,7 +183,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 8. Prescribing a fix without probing it
 
-**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/08-prescribing-a-fix-without-probing-it.md)
+**Caught: 9** · [the incidents, the root cause, and the whole rule](mistakes/08-prescribing-a-fix-without-probing-it.md)
 
 ## 15. A property test's generator excluded the case its own docstring named
 
@@ -455,7 +455,7 @@ grant-shaped failure passes review as a green suite.
 
 ## 47. A route subclass's gate was discarded at dispatch while the class stayed visible
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/47-a-route-subclasss-gate-was-discarded-at-dispatch.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/47-a-route-subclasss-gate-was-discarded-at-dispatch.md)
 
 **Rule.** On the pinned FastAPI, `include_router` does not serve the route objects
 a router holds: for a plain `starlette.routing.Route` it rebuilds one from the
@@ -467,3 +467,32 @@ structural guard and a behavioural test can disagree about one route, write the
 behavioural one: a sweep over the route table answers "is the class there", never
 "does the gate run", so every gate needs one test that drives the built
 application over HTTP and reads the status in both directions.
+
+## 49. A test asserted a fail-open return value as if it were a decision
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/49-a-test-asserted-a-fail-open-return-value-as-if-it-were-a-decision.md)
+
+**Rule.** Before asserting a return value, read what the function returns on
+failure. Where a contract deliberately collapses "refused" and "the dependency was
+down" into one value — every fail-open publish, every `return False` in an
+`except`, anything entry 41 or ADR 0135 governs — that value cannot be a test's
+observable, because the suite's own environment decides it. Assert the effect: the
+intercepted enqueue, the row, the call the platform recorded. And when a *pair* is
+built on such a value, both halves are compromised and only one of them looks it —
+so check the green one by deleting the condition it guards and requiring it to go
+red. **Establish which layer you are standing on first**: a ruling's sentence
+describes what a caller sees, not what the callee does — the sweep walks past where
+the client raises, and a test that borrows the wrong shape is satisfied by any
+layer that declines quietly, or reds against a correct tree.
+
+## 48. A known gap was recorded only in a comment in the file that worked around it
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/48-a-known-gap-was-recorded-only-in-the-file-that-worked-around-it.md)
+
+**Rule.** A limitation you work around goes in the deferral file the next epic
+reads — `carried-from-eN.md` or `deferred.md`, with an owner — in the same change
+as the workaround. A paragraph in the spec that dodged it records the fact for
+the one person who already knows. And when a plan names a seeded fixture, check
+that the fixture reaches the product's own database rather than only the mock's:
+a platform offering a launch says the platform holds the section, never that the
+tool will provision it.

@@ -16,7 +16,10 @@ caller.** SPEC §7.3 names AGS score semantics and NRPS paging as the two places
 platforms deviate, and E3-04 posts scores and walks a line-item container. A
 field added here for a deviation nobody has met is a field nobody knows what to
 put in — E3's later tickets and whichever ticket meets a real platform are the
-ones that will know. See ADR 0132.
+ones that will know. SPEC §7.3 names the two deviations, and SPEC §14.3's E3 entry
+is where "the mechanism plus the mock's profile only" is settled; ADR 0132, cited
+here until E3-08's boundary round, is about where this package sits and says
+nothing about its fields.
 
 **Nothing here is a configuration knob.** These are facts about somebody else's
 software, resolved from the registration's issuer; an operator has no more say in

@@ -55,10 +55,39 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
 
+  // Two projects, and the second one exists to run last (E3-08).
+  //
+  // `tests/e2e/exit-grade-passback.spec.ts` drives SPEC §14.3's exit proof for E3
+  // across six weeks of pretended time and amends two of the mock platform's
+  // rosters on the way — it drops the learner from `MATH-140-E1FF` and adds a
+  // member to `NURS-8100-Q2FF`, neither of which this stack can undo. A spec that
+  // ran after it would fail pointing at its own subject: a door, a window or a
+  // survey, reading a world some other file had moved. So it is lifted out of the
+  // main project, which ignores it, and into one that `dependencies` orders after
+  // every other spec has finished.
+  //
+  // `dependencies` is a project-level ordering and not a fixture: Playwright runs
+  // `chromium` to completion first, and skips this project if it failed. That is
+  // the wanted behaviour — a drive over a stack whose earlier specs did not pass
+  // is measuring something else — and it is also why the ordering claim is only
+  // proven by running the whole suite rather than this file alone.
   projects: [
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+      testIgnore: /exit-grade-passback\.spec\.ts$/,
+    },
+    {
+      name: 'grade-passback-exit',
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: /exit-grade-passback\.spec\.ts$/,
+      dependencies: ['chromium'],
+      // Longer than the suite's 30s, because each case here waits on two
+      // asynchronous halves the other specs never touch: the worker creating a
+      // section's AGS line item after a staff launch, and the participation sweep
+      // being re-triggered until it has one to post to. The file sets its own
+      // per-case budget on top of this; this is what covers the hooks.
+      timeout: 60_000,
     },
   ],
 });

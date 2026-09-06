@@ -26,12 +26,25 @@ driven against a platform by any test at all — no token exchange to inspect, n
 session is built here. `app.services.roster_sync`'s module docstring makes the
 same argument at length.
 
-**A token per scope, never a union.** AGS 2.0 defines four scopes and this client
-asks for exactly the one the call it is about to make needs: a container read asks
-for the read-only line-item scope, a create asks for the writing one, a score post
-asks for the score scope, and a result read asks for the result scope. A tool that
-asked for all four at once would present a credential opening every route on every
-call, and the platform's own per-route rule would then be measuring nothing.
+**One grant per gradebook conversation, for the scopes that conversation needs**
+(E3-08's boundary round, LO-M1 and LO-M2). AGS 2.0 defines four scopes and this
+client never asks for all four: a caller states the set its walk will use, and
+every call in that walk spends the one token — which `ServiceConnector` caches per
+scope set, so a section's whole sweep costs a single round trip to the token
+endpoint rather than one per student. A call for a scope outside the stated set
+takes a grant of its own, which is how the Result read on the 409 path stays on a
+credential the ordinary walk never holds.
+
+This paragraph used to read "a token per scope, never a union", and both halves of
+what changed are rulings rather than drift. **The line-item reads ask for the
+writing scope**, not its read-only sibling: the tool holds `lineitem` anyway
+because it creates the column, so the sibling reduces no privilege and costs a
+second credential on the very next call — a platform that grants exactly what was
+asked hands back a token the client cannot create with. **And the grant is hoisted
+to the section walk**, because built per student it is a full round trip carrying a
+`client_assertion` this tool signs, plus the platform's own fetch of this tool's
+key set to verify it, per student, on a Monday morning, against a platform
+rate-limiting the whole institution.
 
 **There is no retry and no backoff here, and that is a decision** (ADR 0132). One
 attempt per HTTP call, exactly as the roster sync makes one attempt per page: the
@@ -46,11 +59,14 @@ against a platform under load is a loop against every section at once. The clien
 reads back what the platform holds for that user and raises `AgsConflictError`
 carrying it, so the caller has a fact rather than a guess (ADR 0052).
 
-**The score string, the ledger and the timestamp are carried, never re-derived.**
-Each is a value the caller handed over and each reaches the platform byte for
-byte. ADR 0052's retry identity rests on it: a value the poster re-derives is not
-provably the value it is retrying, and `61.5`, `61.50` and `0.615` are one number
-and three strings.
+**The ledger and the timestamp are carried, never re-derived**, and the score is
+carried as far as the arithmetic that puts it in the column's own units. Each is a
+value the caller handed over: the ledger and the timestamp reach the platform byte
+for byte, and the percentage is scaled to the line item's maximum by one decimal
+expression and by nothing else (LO-H1). ADR 0052's retry identity rests on this:
+`61.5`, `61.50` and `0.615` are one number and three strings, so nothing here
+re-spells a value, and the one derived number is derived the same way every time
+from inputs a retry re-supplies unchanged.
 
 **Nothing here logs a score, a ledger line or an LMS user id**, and nothing writes
 one into `ags_call`. A worker's log stream is read by whoever is on call and kept
@@ -71,6 +87,8 @@ import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from decimal import Decimal
+from math import isfinite
 from typing import Any, Final
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID, uuid4
@@ -101,7 +119,10 @@ __all__ = [
     "AgsCallError",
     "AgsConflictError",
     "AgsError",
+    "GradebookCaller",
     "find_or_create_line_item",
+    "gradebook_caller",
+    "line_item_maximum",
     "post_score",
 ]
 
@@ -116,6 +137,20 @@ LINE_ITEM_READONLY_SCOPE: Final[str] = (
 )
 RESULT_READONLY_SCOPE: Final[str] = "https://purl.imsglobal.org/spec/lti-ags/scope/result.readonly"
 SCORE_SCOPE: Final[str] = "https://purl.imsglobal.org/spec/lti-ags/scope/score"
+
+# **Nothing asks for `LINE_ITEM_READONLY_SCOPE` any more**, and it stays here
+# because it is one of the four the specification names and because a platform's
+# own per-route rule (ADR 0134) admits it beside the writing scope. E3-08's
+# boundary round (LO-M1) moved both reads onto `LINE_ITEM_SCOPE`: this tool must
+# hold the writing scope to create the column at all, so asking for the read-only
+# sibling withholds nothing it does not already have and costs a second grant.
+
+# What one section's whole sweep spends: the reads that resolve the column and the
+# posts that follow them, on one credential (LO-M2). The Result read on the 409
+# path is deliberately outside it — that read carries a student's `sub` in a query
+# and happens on one branch of one refusal, so it takes a grant of its own rather
+# than riding a token every ordinary post also holds.
+SWEEP_SCOPES: Final[tuple[str, ...]] = (LINE_ITEM_SCOPE, SCORE_SCOPE)
 
 # The media types AGS 2.0 fixes. Sent rather than `application/json` because a
 # platform is entitled to content-negotiate on them, and a tool that asked for
@@ -286,12 +321,41 @@ class AgsConflictError(AgsError):
 # ---------------------------------------------------------------------------
 
 
+def gradebook_caller(
+    session: Session,
+    section_id: UUID,
+    *,
+    http: requests.Session | None = None,
+    settings: Settings | None = None,
+    resolve: Callable[[str], Sequence[str]] | None = None,
+    scopes: Sequence[str] = SWEEP_SCOPES,
+) -> "GradebookCaller":
+    """One section's AGS conversation, for a caller that will make several calls.
+
+    E3-08's boundary round, LO-M2. A sweep posting for a section's whole roster
+    builds this once and hands it to `find_or_create_line_item` and to every
+    `post_score`, so the section costs one token grant rather than one per student.
+    A caller making a single call passes nothing and each entry point builds its
+    own, which is what every test in this repository does.
+
+    `scopes` is the set that conversation will spend, defaulting to the sweep's
+    two; `GradebookCaller.granted_for` is what one call asks for.
+
+    Refuses the same way the entry points do — a section that is gone, or one with
+    no stored gradebook container, raises rather than being handled quietly.
+    """
+    settings = Settings() if settings is None else settings
+    section, container = _gradebook_of(session, section_id)
+    return GradebookCaller(session, section, container, http, settings, resolve, scopes)
+
+
 def find_or_create_line_item(
     session: Session,
     section_id: UUID,
     http: requests.Session | None = None,
     settings: Settings | None = None,
     resolve: Callable[[str], Sequence[str]] | None = None,
+    caller: "GradebookCaller | None" = None,
 ) -> Mapping[str, Any]:
     """The section's "Pulse Participation" line item, created if the gradebook holds none.
 
@@ -319,10 +383,19 @@ def find_or_create_line_item(
     fetched-address rules are judged under, and `resolve` is the resolution seam
     those rules take (ADR 0101); both default to values built here, so a caller that
     has neither passes neither.
+
+    `caller` is a conversation already opened over this section (`gradebook_caller`),
+    which a sweep hands in so the whole section shares one grant. Where it is given
+    it supplies the transport, the registration and the credential, and `http`,
+    `settings` and `resolve` are not read.
     """
     settings = Settings() if settings is None else settings
     section, container = _gradebook_of(session, section_id)
-    call = _Caller(session, section, container, http, settings, resolve)
+    call = (
+        GradebookCaller(session, section, container, http, settings, resolve, (LINE_ITEM_SCOPE,))
+        if caller is None
+        else caller
+    )
 
     stored = section.ags_line_item_url
     if stored is not None:
@@ -358,20 +431,41 @@ def post_score(
     http: requests.Session | None = None,
     settings: Settings | None = None,
     resolve: Callable[[str], Sequence[str]] | None = None,
+    caller: "GradebookCaller | None" = None,
 ) -> None:
-    """Post one student's participation score to `line_item`, exactly as it was handed over.
+    """Post one student's participation score to `line_item`, scaled to its maximum.
 
     `user_id` is the platform's own subject string for the student, `score` the
     canonical percentage string, `ledger` the per-week ledger SPEC §3.4 puts in the
     AGS `comment` member, and `timestamp` the RFC 3339 instant naming the
-    *recomputation* rather than the attempt. All four go on the wire unchanged.
+    *recomputation* rather than the attempt. The user id, the ledger and the
+    timestamp go on the wire unchanged; the score is the one value this client
+    computes with, and it computes exactly one thing with it.
+
+    **The percentage is scaled to the column's own maximum** (E3-08's boundary
+    round, LO-H1): `scoreGiven = percentage / 100 x scoreMaximum`, posted beside
+    that same maximum. Every line item this tool *creates* is out of 100, where
+    scaling is the identity and the caller's own characters go on the wire
+    unchanged — but an instructor can re-point a column's points in every LMS in the
+    sector, and ADR 0051 already has this client send the column's own maximum, so
+    an unscaled `61.5` against a column out of 50 is a grade of 123% for every
+    student in that section.
+
+    **A maximum that is missing, zero or negative is refused before any call**
+    (`line_item_maximum`). There is no value that means anything in a column
+    nothing can be scored into, and `0`, `inf` and `nan` are each worse than an
+    absent grade; the sweep walks such a section past with a logged refusal, which
+    is the shape ADR 0135 gives a section with no address at all.
 
     **`timestamp` is a string rather than a `datetime`, and the reason is the same
-    one that keeps `score` a string.** ADR 0052 makes a retry the identical body
+    one that kept `score` unrounded.** ADR 0052 makes a retry the identical body
     re-sent, and identical means byte-identical: a value round-tripped through a
     `datetime` comes back spelled however this tool renders it, so `+00:00` becomes
     `Z` and a platform recording what it received records a different document from
-    the one the first attempt sent. The caller owns the spelling.
+    the one the first attempt sent. The caller owns the spelling. The scaled score
+    is derived rather than carried, and the derivation is deterministic from the two
+    values a retry re-supplies — so a retry sends the same characters unless the
+    *column* changed underneath it, which is a body that should differ.
 
     **The maximum is the line item's own** (ADR 0051), read off the document rather
     than assumed to be `PULSE_SCORE_MAXIMUM`. A hundred is right for every column
@@ -380,22 +474,38 @@ def post_score(
     what the specification lets it do and what this tool's own mock does — answers
     422 to a client holding a constant.
 
+    `caller` is a conversation already opened over this section, which a sweep hands
+    in so a section's whole roster shares one token grant; where it is given,
+    `http`, `settings` and `resolve` are not read.
+
     Answers nothing. A post that did not happen raises: `AgsConflictError` where
     the platform holds something newer, `AgsCallError` otherwise.
     """
     settings = Settings() if settings is None else settings
     section, container = _gradebook_of(session, section_id)
-    call = _Caller(session, section, container, http, settings, resolve)
+    # **A standalone post asks for the score scope and nothing else** (PR #178's
+    # security round). Building the caller with the default set gave this path a
+    # token carrying the line-item **write** scope as well — a credential that can
+    # create and re-point columns, spent on a call that posts one score. The sweep
+    # holds both because it resolves the column and then posts (LO-M2, and the
+    # grant it saves is per section rather than per student); a caller that hands
+    # the line item in has already done the resolving somewhere else.
+    call = (
+        GradebookCaller(session, section, container, http, settings, resolve, (SCORE_SCOPE,))
+        if caller is None
+        else caller
+    )
 
     identifier = _line_item_id(line_item)
+    maximum = line_item_maximum(line_item)
     call.judged_line_item(identifier)
     profile = profile_for(call.platform.issuer)
     body = _score_document(
         user_id=user_id,
-        score=score,
+        score=_scaled_score(score, maximum),
         ledger=ledger,
         timestamp=timestamp,
-        maximum=_line_item_maximum(line_item),
+        maximum=maximum,
         profile=profile,
     )
     address = _service_address(identifier, SCORES_SEGMENT)
@@ -602,13 +712,25 @@ def _pinned(
     return http
 
 
-class _Caller:
+class GradebookCaller:
     """One section's AGS conversation: whose credentials, over what, judged how.
 
-    Assembled once per entry point rather than per call, for the reason
+    Assembled once per section rather than per call, for the reason
     `sync_all_rosters` builds its connector inside the per-section function: a
     connector built once for several sections would present the first platform's
     credentials to every gradebook after it.
+
+    **Public since E3-08's boundary round, and for one caller** (LO-M2). A sweep
+    that posts for thirty students in a section builds this once and hands it to
+    every call — `gradebook_caller` is the factory — so the section costs one token
+    grant rather than thirty. Everything about which platform, which transport and
+    which credential is still decided here; what the caller gained is the ability to
+    say "the same conversation" across several entry points.
+
+    **`scopes` is what that conversation will ask for**, and `made` spends the one
+    token for the whole set (`ServiceConnector` caches per scope set). A call naming
+    a scope outside the set takes its own grant, which keeps the 409 path's Result
+    read off the credential every ordinary post holds.
 
     The pin table is shared by reference with the adapter that reads it, so an
     address judged here is already pinned by the time the next request leaves.
@@ -626,12 +748,14 @@ class _Caller:
         http: requests.Session | None,
         settings: Settings,
         resolve: Callable[[str], Sequence[str]] | None,
+        scopes: Sequence[str] = SWEEP_SCOPES,
     ) -> None:
         self.session = session
         self.section_id = section.id
         self.container = container
         self.settings = settings
         self.resolve = resolve
+        self.scopes = tuple(scopes)
         self.pins: dict[str, str] = {}
         self.unpinned_hosts: set[str] = set()
         self.transport = _pinned(_no_redirects(http), self.pins, self.unpinned_hosts)
@@ -692,6 +816,21 @@ class _Caller:
     def judged_line_item(self, identifier: str) -> None:
         """Judge one line-item id — stored, listed or just created — before addressing it."""
         self.judged(AGS_LINE_ITEM_ADDRESS_COLUMN, identifier)
+
+    # -- which credential one call spends ------------------------------------
+
+    def granted_for(self, scope: str) -> list[str]:
+        """The scope set a call needing `scope` asks its token for (LO-M2).
+
+        The conversation's own set where the call is part of it, so every call in a
+        section's walk spends one grant — `ServiceConnector` caches a token per
+        scope set, and asking for the same set twice is one round trip. The scope
+        alone where it is not, which is a second grant on purpose: the 409 path's
+        Result read is a per-student address on a branch of one refusal, and giving
+        it a credential every ordinary post also carries would widen what a stolen
+        token opens for the sake of a call this client makes almost never.
+        """
+        return list(self.scopes) if scope in self.scopes else [scope]
 
     def judged_container(self, address: str) -> None:
         """Judge the container's first page, or a `rel="next"` the platform advertised."""
@@ -754,7 +893,7 @@ class _Caller:
         """
         row_url = url if recorded is None else recorded
         try:
-            token = self.connector.get_access_token([scope])
+            token = self.connector.get_access_token(self.granted_for(scope))
         except LtiServiceException as refusal:
             answered = _answered_status(refusal)
             _record_call(self.session, self.section_id, row_url, answered)
@@ -841,7 +980,7 @@ class _Caller:
 # ---------------------------------------------------------------------------
 
 
-def _stored_line_item(call: _Caller, stored: str) -> Mapping[str, Any] | None:
+def _stored_line_item(call: "GradebookCaller", stored: str) -> Mapping[str, Any] | None:
     """The line item at the id the section holds, or `None` if the platform will not serve it.
 
     `None` rather than a raise, and ADR 0133 is why: an id the platform no longer
@@ -851,7 +990,7 @@ def _stored_line_item(call: _Caller, stored: str) -> Mapping[str, Any] | None:
     """
     call.judged_line_item(stored)
     try:
-        answered = call.made(LINE_ITEM_READONLY_SCOPE, stored, accept=LINE_ITEM_MEDIA_TYPE)
+        answered = call.made(LINE_ITEM_SCOPE, stored, accept=LINE_ITEM_MEDIA_TYPE)
     except AgsCallError:
         logger.info(
             "section %s: the line-item id it holds could not be read, so the container will be "
@@ -871,7 +1010,7 @@ def _stored_line_item(call: _Caller, stored: str) -> Mapping[str, Any] | None:
     return document if isinstance(document, Mapping) else None
 
 
-def _walked_container(call: _Caller) -> list[Mapping[str, Any]]:
+def _walked_container(call: "GradebookCaller") -> list[Mapping[str, Any]]:
     """Every line item the section's container serves, following `rel="next"` to the end.
 
     The container is asked with AGS 2.0's own `resourceId` filter, because a
@@ -901,9 +1040,7 @@ def _walked_container(call: _Caller) -> list[Mapping[str, Any]]:
             )
         call.judged_container(following)
         walked.add(following)
-        answered = call.made(
-            LINE_ITEM_READONLY_SCOPE, following, accept=LINE_ITEM_CONTAINER_MEDIA_TYPE
-        )
+        answered = call.made(LINE_ITEM_SCOPE, following, accept=LINE_ITEM_CONTAINER_MEDIA_TYPE)
         if not answered.ok:
             raise AgsCallError(
                 f"the line-item container at {following} answered {answered.status_code}, so this "
@@ -916,7 +1053,7 @@ def _walked_container(call: _Caller) -> list[Mapping[str, Any]]:
     return items
 
 
-def _created_line_item(call: _Caller) -> Mapping[str, Any]:
+def _created_line_item(call: "GradebookCaller") -> Mapping[str, Any]:
     """Create the section's "Pulse Participation" column and answer what the platform stored.
 
     The three members ADR 0133 fixes, and each is load-bearing. `resourceId` is
@@ -1011,12 +1148,51 @@ def _line_item_id(line_item: Mapping[str, Any]) -> str:
     return identifier
 
 
-def _line_item_maximum(line_item: Mapping[str, Any]) -> Any:
+def line_item_maximum(line_item: Mapping[str, Any]) -> float:
     """The maximum a line item is scored out of, read off the platform's own document.
 
     Never defaulted to `PULSE_SCORE_MAXIMUM`: ADR 0051 posts against the column's
     own maximum, and a client that filled in a default here would be posting a
     number out of a denominator the platform disagrees with.
+
+    **Zero, a negative and a non-finite value are refused beside the absent and
+    the unreadable** (E3-08's boundary round, LO-H1; the last of them from PR
+    #178's security round), and they are one refusal because they are one
+    condition: there is no denominator to scale a percentage into. A guard written
+    `if not maximum` would take `None` and `0` and let a negative through; one
+    written `if maximum is None` would take exactly one of the five; and the sign
+    test alone lets `nan` and `inf` past — `nan <= 0` is `False` because every
+    comparison with a NaN is, and infinity is not nonpositive. `json.loads` accepts
+    the bare `NaN` and `Infinity` literals, so a platform can put either in a line
+    item and both used to reach the scaler, which turned them into the strings
+    `NaN` and `Infinity` for the JSON-number check downstream to refuse — a refusal
+    in the wrong place, naming the wrong thing, one guard too late. The message
+    below named all three all along; now the code does.
+
+    **For a zero or a negative maximum this guard is the last control before the
+    wire**, and the two halves of the refusal are not equally defended: the
+    non-finite half has an in-process fallback in `_score_document`'s JSON-number
+    check, and the sign half has none. Measured by deleting the guard in PR #178's
+    battery — a score against a column out of zero then reaches the platform as
+    `scoreGiven` 0 beside `scoreMaximum` 0.0, and nothing in AGS 2.0 obliges a
+    platform to refuse it. This tool's own mock answers 422 because ADR 0051 had it
+    refuse a disagreeing maximum rather than rescale, which is the mock's decision
+    and not a property of the protocol; a platform that stored the pair would put
+    an undefined fraction in a student's gradebook.
+
+    **The enumeration above reaches every value this guard *judges*, and one it
+    does not.** `math.isfinite` raises `OverflowError` on an `int` too large to
+    convert to a float — a value a platform can legally send — and that escapes as
+    an unhandled error rather than as a refusal this function decided, so what
+    catches it is the sweep's per-section rollback. Fail-closed, and accepted on
+    that ground: nothing is posted either way, and the section is walked past with
+    a worse log line than the refusal below would have given. It is stated here so
+    the list is not read as wider than it is.
+
+    Nothing is dialled before this answers. The refusal is raised rather than
+    logged-and-skipped here because this module's job is one call: the sweep is what
+    walks a section past, in `app.services.grading`, with the log line ADR 0135's
+    no-address case gives.
     """
     maximum = line_item.get(SCORE_MAXIMUM_MEMBER)
     if not isinstance(maximum, int | float) or isinstance(maximum, bool):
@@ -1024,7 +1200,53 @@ def _line_item_maximum(line_item: Mapping[str, Any]) -> Any:
             f"the line item states `{SCORE_MAXIMUM_MEMBER}` {maximum!r}, which is not a number, so "
             "there is no denominator to post a percentage against (ADR 0051)."
         )
-    return maximum
+    if not isfinite(maximum) or maximum <= 0:
+        raise AgsCallError(
+            f"the line item states `{SCORE_MAXIMUM_MEMBER}` {maximum!r}, which is a column no "
+            "score can be scaled into. Nothing was posted: a percentage of a maximum that is zero "
+            "or negative is not a grade, and `0`, `inf` and `nan` are each worse in a gradebook "
+            "than an absent one."
+        )
+    return float(maximum)
+
+
+def _scaled_score(score: str, maximum: float) -> str:
+    """The canonical percentage as this column's own number: `percentage / 100 x maximum`.
+
+    E3-08's boundary round, LO-H1. The percentage is what SPEC §3.4 computes and
+    what `grade_sync.score_text` stores; what a gradebook holds is a value out of
+    the column's maximum, and the two are equal only for the columns this tool
+    created itself.
+
+    **A column out of 100 carries the caller's characters, unchanged.** Scaling by
+    `100 / 100` is the identity on the *number*, and this client's oldest promise is
+    about the *string*: ADR 0052 rests the retry identity on the value being the one
+    that was handed over, and `61.5` and `61.50` are one number and two strings. So
+    the identity case is a carry rather than an arithmetic that happens to agree —
+    which also means R1 changed nothing at all for every line item this tool creates
+    (SPEC §3.4's default maximum is 100), and every existing assertion about what
+    reaches a platform is about a column of exactly that kind.
+
+    **Decimal arithmetic for the rest, and it is not fussiness.** `61.5 / 100 * 50`
+    in binary floating point is `30.749999999999996`, and a percentage that a
+    gradebook shows to three more digits than anybody asked for is a number an
+    instructor has to explain. Decimal division by 100 is exact, so the value posted
+    is the value the arithmetic names.
+
+    **The maximum is spelled the way the platform spelled it** (`str(maximum)`),
+    so a column out of `50` scales against fifty rather than against whatever
+    binary value a float carries.
+
+    `normalize` drops the trailing zeros the multiplication introduces and
+    `format(..., "f")` keeps the result out of exponent notation, so `100` is `100`
+    rather than `1E+2` — both are JSON numbers, and one of them is what a person
+    reading a request body expects to see.
+    """
+    out_of = Decimal(str(maximum))
+    if out_of == PULSE_SCORE_MAXIMUM:
+        return score
+    scaled = (Decimal(score) * out_of) / Decimal(100)
+    return format(scaled.normalize(), "f")
 
 
 def _score_document(
@@ -1038,12 +1260,16 @@ def _score_document(
 ) -> str:
     """One AGS score, as the JSON text that goes on the wire.
 
+    `score` is the value this column is scored out of — `_scaled_score`'s answer,
+    not the caller's percentage — and it arrives here as the characters that go on
+    the wire.
+
     **The text rather than a dictionary, because `scoreGiven` has to arrive
-    exactly as the caller spelled it.** `61.5` and `61.50` are one float and two
+    exactly as it was spelled.** `61.5` and `61.50` are one float and two
     strings, so a value round-tripped through a JSON decoder and re-encoded is not
     provably the value being retried (ADR 0052) — and a JSON serialiser is
-    precisely a thing that re-spells a number. So the caller's string is placed
-    into the document itself.
+    precisely a thing that re-spells a number. So the string is placed into the
+    document itself.
 
     Placed, and not interpolated: the score is checked against RFC 8259's own
     number grammar first, because a string written into a JSON document unchecked

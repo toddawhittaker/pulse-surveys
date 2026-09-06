@@ -58,7 +58,7 @@ after a closed list of verbs let `TRACE` reach the router's `405`.
 `app.services.clock` is what applies the row, and only where `is_development`; ADR
 0109 carries the design and the list of clocks it deliberately does not touch.
 
-**It grows a passback trigger in E3-07**, and that is the one control here that
+**It grows a passback trigger in E3-07**, and it is the first control here that
 reaches another system. SPEC §3.4's participation sweep runs on a weekly beat
 which fires on real time, while the formula counts weeks off the pretend clock
 above, so the epic's behaviour is not drivable by hand at all without a way to run
@@ -70,6 +70,17 @@ and no CSRF token, so nothing else distinguishes a POST the developer meant from
 one a page they were reading made on their behalf, and what this control writes
 lands in somebody else's gradebook. ADR 0140 and ADR 0141 carry the sweep that
 requires the check and the trigger's own decisions.
+
+**It grows a roster-sync trigger in E3-08**, the second such control and
+registered exactly the same way. SPEC §7.3 reads a roster on the hour and on a
+staff launch, debounced against that section's own last call by five minutes of
+*real* time — so neither half moves when the clock above does, and a developer who
+amends a roster cannot make the tool re-read it inside an afternoon. `POST
+/dev/roster-sync` walks every section carrying a stored address, and the
+`nrps_call` rows it writes are stamped on the effective clock rather than on real
+time, which is the one behaviour here that departs from the production path it
+runs. ADR 0142 carries that decision and ADR 0109 the list of clocks it is an
+exception to.
 
 **Every interpolated value goes through `html.escape` with `quote=True`.** The
 subjects and labels come from the mock provider's roster, which is trusted, but
@@ -118,6 +129,7 @@ from app.models.clock import ClockOverride
 from app.models.org import Course, Prefix, Section
 from app.services import clock
 from app.services.grading import post_scores_for_all_sections
+from app.services.roster_sync import sync_all_rosters
 from app.services.survey_windows import open_windows_now
 
 router = APIRouter(tags=["dev"])
@@ -146,6 +158,12 @@ DEV_CLOCK_CLEAR_PATH = "/dev/clock/clear"
 # than written into the route, because the console's own form, the CSRF sweep and
 # both trigger suites address the one value.
 DEV_PASSBACK_PATH = "/dev/passback"
+
+# E3-08's roster-sync trigger, the second control on the same footing. SPEC §7.3
+# pulls a roster on the hour and on a launch, debounced by five *real* minutes, so
+# a developer standing the clock somewhere in October cannot make the tool re-read
+# a roster within an afternoon. This runs the walk now. ADR 0142.
+DEV_ROSTER_SYNC_PATH = "/dev/roster-sync"
 
 # Where the console reads the roster from. The mock provider publishes its
 # registration and its seed together (ADR 0058) under this path on the issuer's
@@ -226,6 +244,10 @@ CLOCK_CLEAR_TESTID = "clock-clear"
 
 # The passback section's one control (E3-07).
 PASSBACK_RUN_TESTID = "passback-run"
+
+# The roster section's one control (E3-08), read by `tests/e2e/
+# exit-grade-passback.spec.ts` and by nothing else on this page.
+ROSTER_SYNC_RUN_TESTID = "roster-sync-run"
 
 # The form field `POST /dev/clock` reads: an HTML `datetime-local` value — a wall
 # time with no offset, minute precision — read in the institution's timezone.
@@ -940,6 +962,45 @@ def passback_section() -> str:
     </form>"""
 
 
+def roster_section() -> str:
+    """The roster-sync trigger, and the debounce that is the reason for it (E3-08).
+
+    **Why a control exists at all.** SPEC §7.3 pulls a roster on the hour and on a
+    staff launch, and the launch trigger is debounced against the section's own
+    last call by five minutes of *real* time (`app.services.roster_sync`). Neither
+    of those moves when the clock above does, so a developer who adds somebody to
+    a roster and wants the tool to see them has to wait — for the hour, or for the
+    debounce — whatever the pretended clock says. This button is the whole of what
+    closes that gap, and it is the same shape and the same gates as the passback
+    trigger beside it.
+
+    **What it does that the hourly walk does not**, said here because it is the
+    one behavioural difference and a developer reading the page is who needs to
+    know: the `nrps_call` rows this run writes are stamped on the effective clock
+    rather than on real time. SPEC §3.4 credits a member first seen in a sync later
+    than their section's first from the week of that sync, and that comparison puts
+    a call log beside an enrollment date — so a sync driven at a pretended October
+    while its log says today would answer a question about the calendar the stack
+    happens to be running on. ADR 0142 carries the decision; every scheduled and
+    launch-triggered sync is untouched by it.
+
+    Static markup, no interpolation: the two values written into it are module
+    constants.
+    """
+    return f"""    <h2>Roster</h2>
+    <p>
+      Read every registered section's roster now (SPEC §7.3), rather than waiting for
+      the hour or for the five-minute debounce a launch trigger carries — neither of
+      which moves when the clock above does. The call rows this run writes are dated
+      on the pretended clock, so a member first seen by it is credited from the week
+      that clock is standing in; every other sync in this product logs real time.
+    </p>
+    <form class="clock" method="post" action="{escape(DEV_ROSTER_SYNC_PATH, quote=True)}">
+      <button data-testid="{escape(ROSTER_SYNC_RUN_TESTID, quote=True)}" type="submit"
+        >Sync every roster now</button>
+    </form>"""
+
+
 @router.get(DEV_CONSOLE_PATH, summary="Development-only test console for both entry doors")
 def dev_console(request: Request, session: Session = Depends(get_session)) -> HTMLResponse:
     """Render the console, or `404` outside development.
@@ -968,6 +1029,7 @@ def dev_console(request: Request, session: Session = Depends(get_session)) -> HT
 {launcher_section(launcher_origins(session))}
 {clock_section(session, settings)}
 {passback_section()}
+{roster_section()}
 {sections_section(console_sections(session, settings))}"""
     return HTMLResponse(page(body))
 
@@ -1237,6 +1299,60 @@ async def run_a_passback_now(request: Request) -> Response:
     return RedirectResponse(DEV_CONSOLE_PATH, status_code=SEE_OTHER)
 
 
+async def run_a_roster_sync_now(request: Request) -> Response:
+    """Pull every registered section's roster on the effective clock, then `303`.
+
+    **Every section that carries a stored address**, which is the whole of what
+    SPEC §7.3's scheduled half knows about which sections exist — so this control
+    runs exactly the hourly job's walk and takes no argument to narrow it, for the
+    reason `run_a_passback_now` takes none.
+
+    **Synchronous and in the request**, the same decision the passback trigger
+    made: a developer clicks the button and reads the sections table below it, and
+    enqueuing the work would make the page's answer say nothing about whether a
+    roster was read. A walk over a development stack's handful of sections is a
+    few HTTP calls to a mock in the same Compose network.
+
+    **The gates are the route's, not this function's** — see `DevControlRoute`.
+
+    Answers a `303` back to the console, so a browser reload does not run a second
+    sync.
+    """
+    settings: Settings = request.app.state.settings
+    await run_in_threadpool(sync_every_roster_now, settings)
+    return RedirectResponse(DEV_CONSOLE_PATH, status_code=SEE_OTHER)
+
+
+def sync_every_roster_now(settings: Settings) -> None:
+    """Open a session, walk every addressed roster on the effective clock, commit.
+
+    **It opens its own session**, for the reason `replace_the_override` gives: the
+    route is a plain `starlette.routing.Route` and has no `Depends` to be handed
+    one by.
+
+    **The commit is this function's**, unlike the passback trigger's next door.
+    `app.services.roster_sync.sync_all_rosters` runs each section inside a
+    savepoint and commits none of them — `app.jobs.tasks.sync_rosters` is the other
+    caller and says the same — so a caller that did not commit would walk every
+    roster in the institution and store nothing.
+
+    **The call rows are stamped on the effective clock, and this line is the whole
+    of that decision** (ADR 0142). SPEC §3.4's third tier compares a member's first
+    sighting against the day of their section's earliest `nrps_call`, and the dates
+    on the other side of that comparison already come from `app.services.clock`
+    (`sync_section`'s `started_on`). A drive standing the clock in October against
+    a call log written today is therefore comparing two different calendars, and
+    which answer it gets depends on the real date the drive is run on. Reading the
+    clock once, here, rather than per call row, so that one walk's rows share an
+    instant the way one walk's HTTP calls almost do.
+    """
+    with SessionLocal() as session:
+        sync_all_rosters(
+            session, settings=settings, called_at=clock.now(session, settings=settings)
+        )
+        session.commit()
+
+
 def post_every_changed_score(settings: Settings) -> None:
     """Open a session and run the sweep, committing nothing.
 
@@ -1257,18 +1373,20 @@ def post_every_changed_score(settings: Settings) -> None:
         post_scores_for_all_sections(session, settings=settings)
 
 
-# The three controls, each matching its path for every method. Appended rather than
+# The four controls, each matching its path for every method. Appended rather than
 # decorated because `APIRouter.api_route` requires a method list, which is the thing
 # that has to go — see `AnyMethodRoute`. One route per path, so there is no ordering
 # between a route that serves `POST` and a route that refuses everything else, and
 # no way to reintroduce the router's `405` by moving one of them.
 #
-# The passback trigger is a `DevControlRoute` and the clock pair is not: the
-# trigger reaches another system on a request nobody authenticated, and the pair
-# is the CSRF sweep's declared exemption (ADR 0140, ADR 0141).
+# The two triggers are `DevControlRoute`s and the clock pair is not: each trigger
+# reaches another system on a request nobody authenticated — one posts a grade, the
+# other spends this deployment's credentials on a platform's roster service — and
+# the pair is the CSRF sweep's declared exemption (ADR 0140, ADR 0141, ADR 0142).
 router.routes.append(AnyMethodRoute(DEV_CLOCK_SET_PATH, set_the_dev_clock))
 router.routes.append(AnyMethodRoute(DEV_CLOCK_CLEAR_PATH, clear_the_dev_clock))
 router.routes.append(DevControlRoute(DEV_PASSBACK_PATH, run_a_passback_now))
+router.routes.append(DevControlRoute(DEV_ROSTER_SYNC_PATH, run_a_roster_sync_now))
 
 
 def posted_field(body: bytes, name: str) -> str | None:

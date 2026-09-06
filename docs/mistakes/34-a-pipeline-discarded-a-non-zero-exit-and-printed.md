@@ -142,3 +142,11 @@ the thing being reported to somebody who cannot run it themselves, the status ha
 to be captured from the command rather than inferred from what it printed — and
 an agent with no shell is exactly that somebody, which is what made this
 expensive rather than merely wrong.
+
+**Instance, 2026-09-06 (E3-08, not counted — the entry did not stop it).**
+During the security round, `pytest … 2>&1 | tail -1` reported the tail's
+exit status, the shell chain continued past five failing tests, and the
+commit behind them was pushed before the red was read. The recovery cost a
+follow-up commit and a re-run; the rule's fix — redirect to a file, check
+the status, then read the file — was applied to every later gate in the
+session.

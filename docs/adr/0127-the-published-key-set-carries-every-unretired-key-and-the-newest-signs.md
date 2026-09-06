@@ -1,6 +1,12 @@
 # 0127 — The published key set carries every unretired key, and the newest one signs
 
-**Status:** Accepted
+**Status:** Accepted, superseded in part by
+[ADR 0143](0143-the-oldest-live-key-signs-so-that-generate-is-not-the-switch.md)
+— **the signer is the oldest live key**, ordered `created_at ASC, id ASC`, so that
+`generate` publishes without switching and `retire` performs the switch. The
+"newest one signs" paragraph below, and the ordering in this record's title, are
+what that supersedes; everything else here stands.
+
 **Date:** 2026-09-04
 **Tickets:** E3-01
 

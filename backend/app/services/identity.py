@@ -76,6 +76,7 @@ __all__ = [
     "identity_behind_a_launch",
     "identity_behind_a_launch_subject",
     "person_behind_a_web_login",
+    "person_for_user",
     "subject_for_user",
 ]
 
@@ -165,8 +166,29 @@ def identity_behind_a_launch_subject(
     ).scalar_one()
     if user_id is None:
         return ResolvedIdentity(person_id=None, user_id=None)
-    person_id = session.execute(_PERSON_FOR_USER, {"user_id": user_id}).scalar_one()
-    return ResolvedIdentity(person_id=person_id, user_id=user_id)
+    return ResolvedIdentity(person_id=person_for_user(session, user_id), user_id=user_id)
+
+
+def person_for_user(session: Session, user_id: UUID) -> UUID | None:
+    """The person ADR 0024 links to this `user` row, or `None` where none is linked.
+
+    The second hop of the pair above, on its own, for a caller that already holds a
+    `user` id and wants to know whether the people graph has anything to say about
+    them. `None` is the ordinary answer for a student: ADR 0028 gives a student a
+    `user` row and no `person`, so an absent link is a state rather than a failure.
+
+    **A definer call, and this is the only kind of read it opens.** `pulse_app` is
+    granted nothing at all on `public.person`, so this function is how a service
+    reaches the link — one value in, one id out, never joined to (ADR 0094).
+
+    E3-08's boundary round is what made it a public name. It was inlined into the
+    launch pair above, and `app.services.grading` needs the same hop to answer
+    R7's question — whether a member of a roster is somebody who *teaches* that
+    section — so it is one function rather than a second copy of one statement
+    (`docs/MISTAKES.md` entry 13).
+    """
+    person_id: UUID | None = session.execute(_PERSON_FOR_USER, {"user_id": user_id}).scalar_one()
+    return person_id
 
 
 def person_behind_a_web_login(session: Session, claims: Mapping[str, Any]) -> UUID | None:

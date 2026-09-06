@@ -1010,12 +1010,20 @@ def test_the_post_carries_the_line_items_own_maximum_and_a_disagreeing_one_is_re
     finds. §3.4's default is 100 and a default is not a guarantee: an instructor can
     change a column's points in every LMS in the sector.
 
-    **What this deliberately does not assert**, and it is a boundary rather than a
-    gap (`docs/MISTAKES.md` entry 14): whether `scoreGiven` is rescaled when the
-    maximum is not 100. ADR 0051 settles the maximum and settles nothing about the
-    value, so pinning one here would be this test deciding it. Only the maximum sent
-    is compared, and it is compared against the platform's own line-item document
-    rather than against the number this file seeded with.
+    **What this asserts, and where the other half now lives.** Only the maximum
+    sent is compared here, against the platform's own line-item document rather
+    than against the number this file seeded with. Whether `scoreGiven` is
+    *rescaled* when the maximum is not 100 used to be named here as deliberately
+    open, on the ground that ADR 0051 settled the maximum and settled nothing about
+    the value. **E3-08's boundary round settled it** (LO-H1): `scoreGiven =
+    percentage / 100 x scoreMaximum`, posted beside that same maximum, and a
+    maximum that is missing, zero or negative walks the section past with a logged
+    refusal. That is asserted in
+    `tests/integration/test_the_score_scales_to_the_line_items_maximum.py`, which
+    drives this same path at this same maximum and hand-computes `61.5 / 100 x 50
+    = 30.75`. The two are a pair and neither is the other's substitute: this test
+    says the maximum sent is the line item's, that one says the value is scaled to
+    it, and a client can get either right while getting the other wrong.
 
     **The pair is inside the test.** A post carrying 100 against the same line item is
     driven by hand and required to be refused 422, so "the client sent 50" is a
@@ -1737,74 +1745,14 @@ def test_a_refused_token_and_a_transport_failure_each_leave_their_own_ags_call_r
     )
 
 
-def test_no_ags_call_row_carries_a_score_a_ledger_line_or_an_lms_user_id(
-    ags_client: Any,
-    ags_sections: Any,
-    service_wire: Any,
-    committed_rows: Any,
-    ags_rows: Any,
-    ags_contract: Any,
-) -> None:
-    """Criterion 8's forbidden state, asserted over the values rather than the columns.
-
-    "`ags_call` rows are written for successes and for failures, and carry no score
-    value." Settled decision 5 widens that to what the row may hold at all: `url`,
-    `response_code`, `called_at`, `section_id` — "no score, no ledger, no user id in
-    the row".
-
-    **Asserted over the values, not over the column names** (`docs/MISTAKES.md` entry
-    2: prefer asserting the forbidden state). A column called `detail` or `note`
-    holding the posted percentage passes any check made against a list of names, and
-    that is the shape a well-meaning "record why it failed" change takes. So every
-    value of every row for this section is searched for the three strings the client
-    was actually handed.
-
-    **The guard first.** The rows are required to be non-empty and the score post is
-    required to have happened, because a table with nothing in it satisfies every
-    absence assertion below and would report a client that writes nothing as one that
-    writes safely (`docs/MISTAKES.md` entry 3).
-    """
-    section = ags_sections()
-    answered, raised = drive(
-        ags_client,
-        ags_client.find_or_create_line_item,
-        section,
-        committed_rows,
-        service_wire,
-    )
-    assert raised is None, f"Finding or creating the line item raised {raised!r}."
-
-    grade = ags_contract.grade(section.subjects[0])
-    _posted, raised = drive(
-        ags_client,
-        ags_client.post_score,
-        section,
-        committed_rows,
-        service_wire,
-        line_item=answered,
-        grade=grade,
-    )
-    assert raised is None, f"Posting the score raised {raised!r}."
-
-    recorded = ags_rows.calls_for(section.id)
-    assert recorded, (
-        f"The client wrote no `{ags_contract.call_table}` row for this section, so every absence "
-        "below is an absence in an empty table."
-    )
-    forbidden = {
-        "the score the caller handed over": grade.score,
-        "a ledger line": grade.ledger.splitlines()[0],
-        "the LMS user id": grade.user_id,
-    }
-    for row in recorded:
-        rendered = " ".join(str(value) for value in row.values())
-        for what, value in forbidden.items():
-            assert value not in rendered, (
-                f"An `{ags_contract.call_table}` row carries {what} ({value!r}): {row!r}. Settled "
-                "decision 5 keeps this log to the URL, the status, the instant and the section — a "
-                "call log that grew a value column is a per-student record of standing on a table "
-                "§6.1 puts on an operator's console."
-            )
+# Criterion 8's forbidden state — no score, no ledger and no `lms_user_id` in an
+# `ags_call` row — moved to
+# `tests/integration/test_the_ags_call_row_and_the_client_log_names_nothing_about_a_student.py`
+# by E3-08's boundary round (IC-M3), so that it sits inside CI's isolated §4.1
+# pass. It is a confidentiality denial, and a denial nobody is guaranteed to run is
+# a rule that ships unenforced. It is not duplicated here: two copies of one denial
+# is `docs/MISTAKES.md` entry 13, and the copy outside the isolated pass would be
+# the one still passing while the marked one was skipped.
 
 
 # ---------------------------------------------------------------------------
@@ -2147,107 +2095,17 @@ def test_the_platform_profile_decides_the_progress_members_that_reach_the_platfo
 
 
 # ---------------------------------------------------------------------------
-# Criterion 10 — nothing this code logs carries a score, a ledger or a user id.
+# Criterion 10 — nothing this code logs carries a score, a ledger or a user id —
+# moved to
+# `tests/integration/test_the_ags_call_row_and_the_client_log_names_nothing_about_a_student.py`
+# by E3-08's boundary round (IC-M3), for the reason given where criterion 8's
+# forbidden state used to sit: it is a §4.1 denial and belongs in the isolated
+# pass, and one denial in two places is `docs/MISTAKES.md` entry 13.
+#
+# The test below stays here: its subject is the one branch where the client holds
+# a URL with a student's subject *in the path*, which is a property of this
+# client's conflict handling rather than a §4.1 denial about a record.
 # ---------------------------------------------------------------------------
-
-
-def test_nothing_the_client_logs_carries_a_score_a_ledger_line_or_an_lms_user_id(
-    ags_client: Any,
-    ags_sections: Any,
-    service_wire: Any,
-    committed_rows: Any,
-    ags_contract: Any,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Criterion 10, over what the code logs while it both succeeds and fails.
-
-    "No log line emitted by this code contains a score, a ledger line, or an LMS user
-    id, asserted by a test over what the code logs rather than by reading it." SPEC
-    §4.1's confidentiality model is about read paths, and this is the same value
-    arriving somewhere nobody reviews: a worker's log stream, kept longer than any
-    table and read by whoever is on call.
-
-    **Both a success and a failure, because they log different things.** The line a
-    failing post writes is where the body it was trying to send ends up — "posting
-    %r failed" is the natural sentence and it carries the score, the ledger and the
-    student's `sub` in one go. The failure here is a refused token, which is the one
-    an operator will actually meet.
-
-    **The whole record is searched, not `record.msg`.** `getMessage()` renders the
-    format arguments in, which is where a value hides from a check made against the
-    template alone — `logger.info("posted %s", score)` has a template with no score
-    in it. The arguments and any formatted exception text are folded in as well.
-
-    **The guard first.** Something must have been logged, or the absence below is an
-    absence in an empty capture and would report a silent client as a safe one
-    (`docs/MISTAKES.md` entry 3). This is the one assertion here that is about
-    *presence*, and it is what makes the rest mean anything.
-    """
-    section = ags_sections()
-    grade = ags_contract.grade(section.subjects[0])
-
-    with caplog.at_level(logging.DEBUG):
-        answered, raised = drive(
-            ags_client,
-            ags_client.find_or_create_line_item,
-            section,
-            committed_rows,
-            service_wire,
-        )
-        assert raised is None, f"Finding or creating the line item raised {raised!r}."
-        _posted, raised = drive(
-            ags_client,
-            ags_client.post_score,
-            section,
-            committed_rows,
-            service_wire,
-            line_item=answered,
-            grade=grade,
-        )
-        assert raised is None, f"Posting the score raised {raised!r}."
-
-        service_wire.failing(token_endpoint(section.platform), 500)
-        drive(
-            ags_client,
-            ags_client.post_score,
-            section,
-            committed_rows,
-            service_wire,
-            line_item=answered,
-            grade=grade,
-        )
-
-    from_client = [
-        record for record in caplog.records if str(record.name).startswith(ags_contract.module)
-    ]
-    assert from_client, (
-        f"No log record came from a logger named `{ags_contract.module}` across a successful "
-        "find-or-create, a successful post and a post whose token was refused. Two things look "
-        f"like this and they are different: the client logs nothing at all — which SPEC §6.1's "
-        "'AGS call logs' does not ask for but a silent failing passback is worse than a loud one — "
-        "or it logs under a logger this suite is not looking for, which is a name to settle in the "
-        "pull request rather than something to guess at here. Loggers that did record something: "
-        f"{sorted({record.name for record in caplog.records})}."
-    )
-    # The forbidden values are searched over the **whole** capture rather than over
-    # the client's own records. A value that reached a log stream reached it whoever
-    # emitted it, and a filter is exactly how "we do not log that" survives the line
-    # that hands it to somebody who does (`docs/MISTAKES.md` entry 2: assert the
-    # forbidden state). The presence guard above is what keeps this from being an
-    # absence in an empty capture.
-    text = ags_contract.logged_text(caplog.records)
-    for what, value in (
-        ("the score the caller handed over", grade.score),
-        ("a ledger line", grade.ledger.splitlines()[0]),
-        ("the LMS user id", grade.user_id),
-    ):
-        assert value not in text, (
-            f"A log record emitted while the client ran carries {what} ({value!r}). What was "
-            f"logged was:\n{text[:2000]}\n\nA worker's log stream is read by whoever is on call and "
-            "kept longer than any table in this system; a participation figure against an LMS user "
-            "id there is a statement about a named person's standing, outside every read path §4.1 "
-            "governs."
-        )
 
 
 def test_a_transport_failure_on_the_conflict_re_read_logs_no_student_subject(

@@ -37,13 +37,21 @@ be told from a control that never worked** (ADR 0079's own consequences section
 says so about the console next door), so the two modules are a pair and each
 names the other.
 
-**Not marked `invariant`, deliberately.** The isolated pass is SPEC §4.1's — the
-confidentiality denials, what a reader may see. This gate protects a *write*: it
-is the same shape as the clock control's, which is marked because the row that
-control writes moves what every visibility read in the product answers. Nothing
-this trigger does discloses anything about anybody; it posts a grade the platform
-already receives on a weekly beat. If a later reading puts it in §4.1's scope,
-the marker goes at module level and this paragraph says why it moved.
+**Marked `invariant`, and this paragraph is the record of the marker moving.**
+It used to say the opposite, on the argument that SPEC §4.1's isolated pass is
+about what a *reader* may see while this gate protects a *write*. E3-08's
+boundary round (IC-H2) read it the other way and that reading governs: a
+deployment on which a stranger can pull this trigger is one where anybody can
+make the tool post participation percentages into every gradebook it holds an
+address for, and §3.4's ledger travels in the AGS comment beside each of them —
+so the write *is* a disclosure, to every instructor holding that gradebook, of
+per-week completion detail for a class nobody asked about. The neighbouring clock
+control carries the marker for a weaker version of the same reason. The rule the
+old paragraph got right is that a marker is a claim about scope and not a
+decoration; what it got wrong is the scope.
+
+CI runs this module in the isolated pass and treats a skip, an xfail or an empty
+collection as a failure (`scripts/ci/check_invariants.py`).
 
 Every test asking for a deployment's `ENVIRONMENT` also asks for
 `deployed_identity_provider` (E0-39), for the reason
@@ -52,16 +60,40 @@ set, `.env.example`'s `mock-idp` addresses are refused at startup and
 `create_app()` would raise inside the setup of a test about a completely
 different gate (`docs/MISTAKES.md` entry 22).
 
-**Which failure a red here is.** Every test in this module begins by calling
-`declared_passback_path`, a plain function in a test body rather than a fixture,
-so on a tree where E3-07 is unbuilt each one is a **FAILED** saying `app.api.dev`
-exposes no `DEV_PASSBACK_PATH` — never an ERROR in somebody's setup
-(`docs/MISTAKES.md` entry 44). It is called first in every test, including the two
-that would otherwise pass on an unbuilt tree: a refusal asserted against a path
-nothing registers is satisfied by the absence rather than by the gate, and the
-guard is what keeps that from reading as a green.
+**Every gate below is asked of BOTH `DevControlRoute` paths**, added by E3-08's
+security round. E3-07's own review found a route subclass's gate discarded at
+dispatch — `docs/MISTAKES.md` entry 47, whose rule ends "every gate needs one test
+that drives the built application over HTTP and reads the status in both
+directions" — and E3-08 registers a **second** control the same way, `POST
+/dev/roster-sync`. A suite that walked only the first would go on certifying the
+route class while the new door swung open on exactly the regression entry 47
+records. So the paths come from `DEV_CONTROL_PATHS` and every dispatch-level case
+here runs once per control.
 
-Once the constant exists the reds become assertions: a 404 where a 303 belongs,
+**And the inventory itself is reconciled against the router**, because a
+hand-written list of what to cover is covered exactly as well as somebody's
+memory. `test_this_modules_control_inventory_is_every_dev_control_route_registered`
+walks the `DevControlRoute` instances `app.api.dev`'s router holds and requires
+that set to equal the one `DEV_CONTROL_PATHS` resolves to, both directions — so a
+third control added later cannot get zero dispatch coverage in silence. It is an
+inventory check and not a gate check; the gates are the tests below it.
+
+**The module keeps its name deliberately**, though it now covers both. Renaming it
+would move it out of `DENIAL_NAME_SHAPES`'s `_trigger_exposure` and through the
+`_control_exposure` shape instead, churning the sweep that exists to notice this
+module losing its marker — for a filename. What a reader needs is this paragraph,
+and the paths are named in the parametrisation's own ids.
+
+**Which failure a red here is.** Every test in this module begins by resolving its
+control's path constant through `DEV_CONTROL_PATHS`, a plain call in a test body
+rather than a fixture, so on a tree where either trigger is unbuilt each case is a
+**FAILED** naming the constant `app.api.dev` does not expose — never an ERROR in
+somebody's setup (`docs/MISTAKES.md` entry 44). It is called first in every test,
+including the ones that would otherwise pass on an unbuilt tree: a refusal
+asserted against a path nothing registers is satisfied by the absence rather than
+by the gate, and the guard is what keeps that from reading as a green.
+
+Once the constants exist the reds become assertions: a 404 where a 303 belongs,
 a 404 where a 403 belongs, or a status other than 404 from a deployment.
 """
 
@@ -72,13 +104,20 @@ from fixtures.dev_console import (
     CROSS_SITE_ORIGIN,
     CROSS_SITE_REFUSED,
     DEV_CONSOLE_PATH,
-    DEV_PASSBACK_PATH,
+    DEV_CONTROL_PATHS,
     OPAQUE_ORIGIN,
     ORIGIN_HEADER,
     PROBED_METHODS,
-    declared_passback_path,
+    registered_dev_control_paths,
 )
 from fixtures.routing import registered_paths
+
+pytestmark = pytest.mark.invariant
+
+# The two `DevControlRoute` paths every dispatch-level case below is asked of,
+# as the ids the runner reports under. Sorted so the report order is stable and a
+# reader comparing two runs is comparing the same rows.
+DEV_CONTROLS = tuple(sorted(DEV_CONTROL_PATHS))
 
 ENVIRONMENT_VARIABLE = "ENVIRONMENT"
 
@@ -166,11 +205,87 @@ def baseline_is_404(client: Any, environment: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# The inventory this module's parametrisation rests on, reconciled against the
+# routes that actually exist.
+# ---------------------------------------------------------------------------
+
+
+def test_this_modules_control_inventory_is_every_dev_control_route_registered(
+    configured_env: dict[str, str],
+) -> None:
+    """`DEV_CONTROL_PATHS` and the registered `DevControlRoute` set are the same set.
+
+    **Why a hand-written inventory needs this.** Every gate below is parametrised
+    over `DEV_CONTROL_PATHS`, a two-entry literal in
+    `tests/fixtures/dev_console.py`. Nothing reconciled it against the application
+    until now, so the coverage it drives was exactly as complete as somebody's
+    memory: a third control appended to the router with no entry beside it gets
+    **zero** dispatch-level coverage, silently, and this module goes on reporting
+    a full green over two of three doors. That is `docs/MISTAKES.md` entry 35's
+    shape — a guard that enumerates and is never made to find what it missed — and
+    it is the gap E3-08's own security round created by making the inventory two
+    entries long instead of one.
+
+    **The mutation this kills**: a third `DevControlRoute` registered in
+    `app.api.dev` without a `DEV_CONTROL_PATHS` entry. Before this test that is
+    invisible everywhere — the route serves, the console links it, every existing
+    test stays green, and the new control's environment gate and origin check are
+    asserted by nothing.
+
+    **Both directions, because they are different defects with different repairs.**
+    A registered control missing from the inventory is untested code. A listed path
+    that no `DevControlRoute` serves is a test suite probing a door that does not
+    exist, whose 404s read as a closed gate — which is the failure the route
+    existence control next door is about, arriving through the inventory instead.
+    The message names each difference separately.
+
+    **What this is not.** It answers "is the class on the route" and never "does
+    the gate run" — entry 47's own warning about sweeps over route tables. The
+    tests below are what drive the built application over HTTP and read the status
+    in both directions; this one only makes sure they are driven over everything.
+
+    **Non-vacuity comes first**: an empty derived set makes the equality true of an
+    empty inventory and false of nothing, so the walk is required to have found a
+    control before its answer is compared against anything.
+    """
+    registered = registered_dev_control_paths()
+    listed = {control: DEV_CONTROL_PATHS[control]() for control in DEV_CONTROLS}
+
+    assert registered, (
+        "Walking `app.api.dev`'s router found no `DevControlRoute` at all. Either no control is "
+        "registered — in which case every 404 this module asserts is the 404 of a route nobody "
+        "wrote — or the walk is reading the wrong thing: `include_router` rebuilds a plain route "
+        "from its endpoint, so the subclass instances live in the router's own `routes` list and "
+        "nowhere else (`docs/MISTAKES.md` entry 47). Either way the comparison below would be "
+        "between two sets neither of which describes this application."
+    )
+
+    unlisted = sorted(registered - set(listed.values()))
+    assert not unlisted, (
+        f"`app.api.dev` registers `DevControlRoute`s at {unlisted} that `DEV_CONTROL_PATHS` does "
+        f"not name (it names {listed}). Every gate in this module is parametrised over that "
+        "mapping, so those controls have no environment gate and no origin check asserted "
+        "anywhere — a development-only write control reachable in production, or cross-site, with "
+        "a full green suite over the ones somebody remembered. Add the path to "
+        "`tests/fixtures/dev_console.py` beside the others and the coverage follows."
+    )
+    unregistered = sorted(set(listed.values()) - registered)
+    assert not unregistered, (
+        f"`DEV_CONTROL_PATHS` names {unregistered}, which no `DevControlRoute` in `app.api.dev` "
+        f"serves (it serves {sorted(registered)}). Every refusal this module asserts against such "
+        "a path is satisfied by the path not existing, so the rows for it are green over nothing — "
+        "and a control that was renamed rather than removed is now untested under its new name too."
+    )
+
+
+# ---------------------------------------------------------------------------
 # The control, before any refusal below is believed.
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("control", DEV_CONTROLS)
 def test_the_passback_trigger_is_a_route_this_application_carries(
+    control: str,
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -198,11 +313,19 @@ def test_the_passback_trigger_is_a_route_this_application_carries(
     refusals: an application carrying no routes at all would fail the trigger
     assertion for a reason that has nothing to do with E3-07.
 
-    **Dies until E3-07's route is registered**, which is the state HEAD is in.
-    **Must not die** once it is: this is the one test in this module that has to
-    be green before the others mean anything.
+    **Green for both controls, and this paragraph used to say otherwise.** It read
+    "dies until E3-07's route is registered, which is the state HEAD is in", which
+    has not been true since that ticket shipped. Both triggers are registered now,
+    so both rows are expected green — a red here is a control whose route is not
+    registered at all, and the parametrisation's id names which.
+
+    **Must not die** once both are: this is the one test in this module that has to
+    be green before the others mean anything, and it is parametrised for exactly
+    that reason — a refusal asserted against an unregistered path is satisfied by
+    the absence, so each control needs its own existence control rather than
+    borrowing the other's.
     """
-    declared = declared_passback_path()
+    declared = DEV_CONTROL_PATHS[control]()
     application = application_in(DEVELOPMENT, monkeypatch)
     paths = registered_paths(application)
 
@@ -214,10 +337,10 @@ def test_the_passback_trigger_is_a_route_this_application_carries(
     )
     assert declared in paths, (
         f"This application registers no route at `{declared}` (it registers {sorted(paths)}). "
-        "E3-07 adds the passback trigger to the development console: `POST "
-        f"{DEV_PASSBACK_PATH}` runs SPEC §3.4's sweep over every eligible section and redirects "
-        f"back to `{DEV_CONSOLE_PATH}`. Until it exists, every 404 asserted in this module is the "
-        "404 of a route nobody wrote."
+        f"E3-07 adds the passback trigger to the development console and E3-08 the {control!r} "
+        "one beside it, both on the same `DevControlRoute`; each runs its walk and redirects back "
+        f"to `{DEV_CONSOLE_PATH}`. Until this one exists, every 404 asserted against it in this "
+        "module is the 404 of a route nobody wrote."
     )
 
 
@@ -226,9 +349,11 @@ def test_the_passback_trigger_is_a_route_this_application_carries(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("control", DEV_CONTROLS)
 @pytest.mark.parametrize("environment", DEPLOYMENT_ENVIRONMENTS)
 def test_the_passback_trigger_answers_404_to_every_method_outside_development(
     environment: str,
+    control: str,
     configured_env: dict[str, str],
     deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
@@ -261,7 +386,7 @@ def test_the_passback_trigger_answers_404_to_every_method_outside_development(
     equality against the one safe name, so every other name — including one nobody
     thought of — must land on the closed side.
     """
-    declared = declared_passback_path()
+    declared = DEV_CONTROL_PATHS[control]()
     client = client_for(application_in(environment, monkeypatch))
     serving_normally(client, environment)
     baseline_is_404(client, environment)
@@ -284,7 +409,9 @@ def test_the_passback_trigger_answers_404_to_every_method_outside_development(
     )
 
 
+@pytest.mark.parametrize("control", DEV_CONTROLS)
 def test_a_cross_site_post_outside_development_answers_404_rather_than_403(
+    control: str,
     configured_env: dict[str, str],
     deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
@@ -309,7 +436,7 @@ def test_a_cross_site_post_outside_development_answers_404_rather_than_403(
     with no origin check whatsoever, and that one by a build with no environment
     gate.
     """
-    declared = declared_passback_path()
+    declared = DEV_CONTROL_PATHS[control]()
     environment = DEPLOYMENT_ENVIRONMENTS[0]
     client = client_for(application_in(environment, monkeypatch))
     serving_normally(client, environment)
@@ -332,7 +459,9 @@ def test_a_cross_site_post_outside_development_answers_404_rather_than_403(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("control", DEV_CONTROLS)
 def test_the_passback_trigger_answers_404_to_every_method_but_post_in_development(
+    control: str,
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -357,7 +486,7 @@ def test_the_passback_trigger_answers_404_to_every_method_but_post_in_developmen
     every method including `POST` would satisfy every assertion here and ship no
     feature at all.
     """
-    declared = declared_passback_path()
+    declared = DEV_CONTROL_PATHS[control]()
     client = client_for(application_in(DEVELOPMENT, monkeypatch))
     serving_normally(client, DEVELOPMENT)
     baseline_is_404(client, DEVELOPMENT)
@@ -379,7 +508,9 @@ def test_the_passback_trigger_answers_404_to_every_method_but_post_in_developmen
     )
 
 
+@pytest.mark.parametrize("control", DEV_CONTROLS)
 def test_a_cross_site_origin_is_refused_inside_development_with_a_403(
+    control: str,
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -411,7 +542,7 @@ def test_a_cross_site_origin_is_refused_inside_development_with_a_403(
     this application's own origin runs the sweep and posts a score. A build that
     refused every origin would satisfy this test and delete the feature.
     """
-    declared = declared_passback_path()
+    declared = DEV_CONTROL_PATHS[control]()
     client = client_for(application_in(DEVELOPMENT, monkeypatch))
     serving_normally(client, DEVELOPMENT)
 
@@ -427,7 +558,9 @@ def test_a_cross_site_origin_is_refused_inside_development_with_a_403(
     )
 
 
+@pytest.mark.parametrize("control", DEV_CONTROLS)
 def test_the_literal_null_origin_is_refused_inside_development(
+    control: str,
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -453,7 +586,7 @@ def test_the_literal_null_origin_is_refused_inside_development(
     an unbuilt route refuses this for a reason that has nothing to do with the
     string.
     """
-    declared = declared_passback_path()
+    declared = DEV_CONTROL_PATHS[control]()
     client = client_for(application_in(DEVELOPMENT, monkeypatch))
     serving_normally(client, DEVELOPMENT)
 

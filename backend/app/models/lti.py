@@ -1475,20 +1475,40 @@ class AgsCall(UuidPrimaryKey, Base):
     `SELECT` and `INSERT` here and neither `UPDATE` nor `DELETE`. E13's retention
     purge is what will trim it, on its own connection and with its own rule.
 
-    **No index beyond the primary key's, and that is a decision.** `NrpsCall`
-    carries a composite because the debounce probe reads it on the request path of
-    every staff launch, measured at 2,006 buffers against 5. Nothing reads this
-    table on a request path: E11's console is the only reader SPEC §6.1 names, it
-    is not built, and an index maintained on every insert for a query nobody runs
-    is a write nobody reads. E11 adds one when it knows its own access path.
+    **It carries `NrpsCall`'s composite, and this paragraph used to say it needed
+    none.** Until E3-08's boundary round it read: "Nothing reads this table on a
+    request path: E11's console is the only reader SPEC §6.1 names, it is not
+    built, and an index maintained on every insert for a query nobody runs is a
+    write nobody reads." Both halves went stale in E3-06. The participation sweep
+    reads this table **once per delivery** — `app.services.grading._accepted_status`
+    asks for the newest row belonging to the section it has just posted into, to
+    record which status the platform answered — and while that read is on a
+    scheduled job rather than on a person's request, it happens per student per
+    section per week over a log that gains a row per HTTP call and is purged by
+    nothing until E13's retention pass. Without an index it is a sequential scan
+    of the whole term's calls, per student. So the table carries
+    `(section_id, called_at)`, which is exactly the shape and exactly the reasoning
+    of `NrpsCall`'s (DM-H1).
     """
 
     __tablename__ = "ags_call"
+    __table_args__ = (
+        # The sweep's per-delivery read: newest row for one section
+        # (`ORDER BY called_at DESC LIMIT 1` within a `section_id` equality). A
+        # plain column list rather than a descending expression, for the reason
+        # `d2f6a913c47e` gives after reversing the `nrps_call` composite: `alembic
+        # check` compares declared key columns and cannot compare an expression, so
+        # a descending index is one the drift gate cannot hold the migration to.
+        # Postgres serves `ORDER BY … DESC LIMIT 1` from an ascending index by a
+        # backward scan at the same cost.
+        Index("ix_ags_call_section_id_called_at", "section_id", "called_at"),
+    )
 
     # Which section's gradebook the call was about. RESTRICT, matching every other
     # reference to `section` in this schema: losing a section should refuse rather
-    # than silently take its call history with it. No `index=True` — see the class
-    # docstring for why this table carries no index of its own yet.
+    # than silently take its call history with it. No `index=True` — the composite
+    # declared in `__table_args__` above leads with this column and serves every
+    # lookup a single-column index would, so a second one is a write nobody reads.
     section_id: Mapped[UUID] = mapped_column(
         ForeignKey("section.id", ondelete="RESTRICT"), nullable=False
     )

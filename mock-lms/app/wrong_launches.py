@@ -43,6 +43,7 @@ from app.launch import (
     CONTEXT_CLAIM,
     DEPLOYMENT_ID_CLAIM,
     MESSAGE_TYPE_CLAIM,
+    NRPS_CLAIM,
     ROLES_CLAIM,
     VERSION_CLAIM,
     AuthorizationRequestError,
@@ -100,7 +101,7 @@ WRONG_DEFECTS: tuple[str, ...] = (
     EXP_PAST,
 )
 
-# -- The four near-miss and edge fixtures: valid launches, not wrong ones ---
+# -- The five near-miss and edge fixtures: valid launches, not wrong ones ---
 #
 # Same selector, same vocabulary, because E1-10 and E1-08 ask for these the
 # same way they ask for a wrong one. What each mints is syntactically and
@@ -119,11 +120,28 @@ TITLELESS_CONTEXT = "titleless_context"
 # defect per mint is this module's own rule, and it is what keeps the two apart.
 TITLELESS_CONTEXT_WITH_LABEL = "titleless_context_with_label"
 
+# **A launch from a platform that grants grade passback and not roster access**
+# (E3-08's boundary round, LO-M5). LTI 1.3 makes the two Advantage service claims
+# independent: an administrator can enable AGS without NRPS, and a launch then
+# carries the gradebook endpoint and no `namesroleservice` at all. Nothing else
+# about it is wrong — it is a launch this platform would sign unprompted if its
+# administrator had configured it that way, which is why it belongs here beside
+# the titleless pair rather than among the defects.
+#
+# It exists because the round's fix is on exactly that path: the tool used to key
+# its *gradebook* trigger on whether a roster address arrived, so this
+# configuration got a section with no participation column and no error anywhere.
+# Every other launch this platform mints carries both claims, so without this mint
+# the case cannot be driven through the door at all — E1-07's own reason for
+# existing (`docs/MISTAKES.md` entry 28), one specification claim further out.
+NO_ROSTER_SERVICE = "no_roster_service"
+
 NEAR_MISS_FIXTURES: tuple[str, ...] = (
     ONLY_TEACHING_ASSISTANT_ROLE,
     ONLY_MENTOR_ROLE,
     TITLELESS_CONTEXT,
     TITLELESS_CONTEXT_WITH_LABEL,
+    NO_ROSTER_SERVICE,
 )
 
 # Every name the selector answers to, wrong and near-miss together — the set
@@ -287,6 +305,16 @@ class WrongLaunchMinter:
             del context_claim["title"]
             del context_claim["label"]
             id_token = self._signed({**claims, CONTEXT_CLAIM: context_claim})
+        elif name == NO_ROSTER_SERVICE:
+            # The AGS claim stays and the NRPS one goes, which is the whole
+            # difference: this is a launch from a platform granting grade passback
+            # and not roster access. Deleted from a copy rather than rebuilt, for
+            # `titleless_context`'s reason — every other claim is the one
+            # `id_token_claims` composed, so the mint carries exactly one
+            # difference from a correct launch.
+            without_roster = dict(claims)
+            del without_roster[NRPS_CLAIM]
+            id_token = self._signed(without_roster)
         else:  # name == TITLELESS_CONTEXT_WITH_LABEL — the only selector left
             # The `label` stays, and it is the whole difference from the mint
             # above: a tool can still read a prefix and a course number out of

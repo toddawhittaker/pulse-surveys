@@ -251,16 +251,25 @@ def provision_from_launch(
     because the write precedes the read inside one transaction, rather than
     provisioning nothing until their second visit.
 
-    **What it answers is the section a roster can now be fetched for**, or `None`.
-    SPEC §7.3 pulls NRPS "on schedule and on launch (debounced)", and the launch
-    half needs a section id — so this hands one back rather than making the door
-    resolve a context claim to a row for itself, which would put domain logic in a
-    router §13 keeps thin. It is `None` for every launch that did not both discover
-    a section and store an address for it: a student's launch, a staff launch whose
-    context could not be read, a staff launch by a leadership person whose own
-    assignments do not reach that context, and a staff launch whose platform
-    advertised no roster address or an address this container may not fetch. Each
-    of those is a section with no roster to pull rather than a sync to skip.
+    **What it answers is the section this launch bound**, or `None`. SPEC §7.3
+    pulls NRPS "on schedule and on launch (debounced)" and SPEC §3.4 creates a
+    participation column "on first launch"; both of the door's triggers need a
+    section id, so this hands one back rather than making the door resolve a context
+    claim to a row for itself, which would put domain logic in a router §13 keeps
+    thin. It is `None` for every launch that bound no section: a student's launch, a
+    staff launch whose context could not be read, and a staff launch by a leadership
+    person whose own assignments do not reach that context.
+
+    **It is not `None` for a launch that stored no roster address**, and that
+    sentence is E3-08's boundary round (LO-M5) rather than the original reading.
+    This used to answer for "a section a roster can now be fetched for", which made
+    the roster address decide whether the *gradebook* column was asked for as well
+    — so a platform advertising AGS and not NRPS, which is a supported
+    configuration, got a section with no column and no error at all. What each
+    service does about a section that lacks its address is now that service's own
+    business: the line-item trigger enqueues nothing without a gradebook container,
+    and a roster sync over a section with no roster address is the no-op
+    `sync_section` already documents.
 
     Nothing here commits: the caller owns the transaction, exactly as
     `app.lti.replay_guard.claim_nonce` leaves its claim to ride inside the
@@ -643,13 +652,24 @@ def _ingest_the_context(
         return None
     both_or_neither.commit()
 
-    if address is None:
-        # A section with no stored address is SPEC §7.3's never-synced state and
-        # there is nothing to trigger: "it has no way of its own to learn that a
-        # section exists" cuts both ways, and a sync enqueued with no URL to call
-        # would write a failed call record that makes never-synced look like a
-        # platform refusing the tool.
-        return None
+    # **The answer is the section, and it does not depend on the roster address**
+    # (E3-08's boundary round, LO-M5). This used to `return None` where `address`
+    # was None, on the reasoning that a section with no stored address is SPEC
+    # §7.3's never-synced state with nothing to trigger. That is true of the roster
+    # and it is not true of the gradebook: LTI 1.3 makes the two service claims
+    # independent, a platform administrator can enable grade passback without
+    # roster access, and this answer is what *both* of the door's triggers ride on.
+    # So a launch from such a platform provisioned a section, stored its gradebook
+    # container, and then asked for no participation column — leaving the section
+    # with no column, no error and a weekly sweep that skips it for the life of the
+    # term. Each service answers for itself now:
+    # `grading.request_line_item_creation` enqueues nothing for a section with no
+    # gradebook container, and a roster sync enqueued for a section with no roster
+    # address is a job `roster_sync.sync_section` answers by logging §7.3's
+    # never-synced state and returning — no call, no row. That is a published job
+    # that does nothing, on the launches of a platform advertising one service and
+    # not the other, and it is the price of the two triggers being independent.
+    #
     # Re-read rather than threaded back out of the savepoint above, because the
     # section this launch resolves to is `_section_bound_to`'s answer whether the
     # row was written a moment ago or three terms back, and one lookup on a staff

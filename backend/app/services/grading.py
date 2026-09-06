@@ -96,7 +96,10 @@ from app.lti.ags import (
     AgsCallError,
     AgsConflictError,
     AgsError,
+    GradebookCaller,
     find_or_create_line_item,
+    gradebook_caller,
+    line_item_maximum,
     post_score,
 )
 from app.models.ai import Classification, ClassificationTask
@@ -113,8 +116,8 @@ from app.models.org import Section
 from app.models.survey import Answer, Response
 from app.models.term import Term, Week
 from app.services import clock
-from app.services.authz import WriteSanction, guard_write, sanction_for
-from app.services.identity import subject_for_user
+from app.services.authz import WriteSanction, guard_write, sanction_for, section_scoped_assignees
+from app.services.identity import person_for_user, subject_for_user
 from app.services.submissions import current_questions
 from app.services.survey_windows import DerivedWindow, windows_for_section
 from app.services.validity import REFUSED_VERDICT_TOKENS
@@ -337,9 +340,25 @@ def _first_sync_day(session: Session, section: Section, *, zone: ZoneInfo) -> da
     is in and which makes every member of it tier 2. ADR 0131 takes the earliest
     call rather than any student's own first-sighting date, because only the log
     can say what the section's *first* sync was.
+
+    **Only calls that read a roster count** (E3-08's boundary round, LO-M4).
+    `nrps_call` is SPEC §6.1's log at the grain of one HTTP call, so it holds the
+    attempts as well as the reads: a call the platform refused, one the token
+    endpoint refused before the roster was asked at all, and one this container
+    refused to make are all rows here, and `members_seen` is NULL on every one of
+    them (`app.services.roster_sync._record_call`). Counting those as "the
+    section's first sync" dates the tier-3 boundary from a sync that never
+    happened — and the ordinary way to get one is a new registration whose first
+    scheduled walk ran before its credentials were right, which then costs every
+    undated member of that section the weeks between, permanently. A read that
+    found an empty roster is a different thing and does count: `members_seen` is
+    `0` there, which is not NULL.
     """
     earliest: datetime | None = session.scalar(
-        select(func.min(NRPS_CALL.c.called_at)).where(NRPS_CALL.c.section_id == section.id)
+        select(func.min(NRPS_CALL.c.called_at)).where(
+            NRPS_CALL.c.section_id == section.id,
+            NRPS_CALL.c.members_seen.is_not(None),
+        )
     )
     return None if earliest is None else earliest.astimezone(zone).date()
 
@@ -932,8 +951,16 @@ def _post_one_sections_scores(
 
     subjects = _lms_user_ids(session, [delivery.user_id for delivery in deliveries])
     try:
-        line_item = find_or_create_line_item(
+        # One conversation for the whole section, and one token grant with it
+        # (E3-08's boundary round, LO-M2): the column read below and every post
+        # after it spend the same credential. Built per student, each post was a
+        # round trip to the token endpoint carrying an assertion this tool signs,
+        # plus the platform's own fetch of this tool's key set to verify it.
+        caller = gradebook_caller(
             session, section.id, http=http, settings=settings, resolve=resolve
+        )
+        line_item = find_or_create_line_item(
+            session, section.id, http=http, settings=settings, resolve=resolve, caller=caller
         )
     except AgsError as refusal:
         # The gradebook column could not be resolved, so no delivery was composed
@@ -947,6 +974,22 @@ def _post_one_sections_scores(
             "it this run",
             section.id,
             type(refusal).__name__,
+        )
+        return 0, 0
+
+    if not _scoreable(line_item):
+        # ADR 0135's no-address shape, applied to a column nothing can be scored
+        # into (E3-08's boundary round, LO-H1). A maximum that is missing, zero or
+        # negative leaves no value that means anything — a percentage of nothing —
+        # so the section is walked past with a line an operator can act on, rather
+        # than every student in it collecting a refused `grade_sync` row every
+        # Monday for the rest of the term. Nothing was posted and nothing is
+        # recorded: the next run recomputes, and an instructor who re-points the
+        # column to a positive maximum is posted for again with no intervention.
+        logger.warning(
+            "%s: its participation column states a maximum that no score can be scaled into, so "
+            "nothing was posted for it this run",
+            section.id,
         )
         return 0, 0
 
@@ -973,6 +1016,7 @@ def _post_one_sections_scores(
             http=http,
             settings=settings,
             resolve=resolve,
+            caller=caller,
         )
         session.add(
             GradeSync(
@@ -992,6 +1036,23 @@ def _post_one_sections_scores(
             failed += 1
     logger.info("%s: %d score(s) reached the platform and %d did not", section.id, posted, failed)
     return posted, failed
+
+
+def _scoreable(line_item: Mapping[str, Any]) -> bool:
+    """Whether a percentage can be scaled into this column at all (LO-H1).
+
+    The rule lives in `app.lti.ags.line_item_maximum` and is asked here rather than
+    repeated: a maximum that is missing, zero or negative is one condition with one
+    answer, and a second copy of it in this module would be a second place for it to
+    drift (`docs/MISTAKES.md` entry 13). The refusal that reader raises is what this
+    turns into a walk-past — the client's job is one call, and which sections a
+    sweep visits is this module's.
+    """
+    try:
+        line_item_maximum(line_item)
+    except AgsError:
+        return False
+    return True
 
 
 def _delivery_for(
@@ -1073,6 +1134,7 @@ def _delivered(
     http: requests.Session | None,
     settings: Settings,
     resolve: Callable[[str], Sequence[str]] | None,
+    caller: GradebookCaller,
 ) -> tuple[GradeSyncOutcome, int | None]:
     """Post one score and say what became of it, for the row that records the attempt.
 
@@ -1109,6 +1171,7 @@ def _delivered(
             http=http,
             settings=settings,
             resolve=resolve,
+            caller=caller,
         )
     except AgsConflictError:
         logger.warning(
@@ -1157,7 +1220,7 @@ def _accepted_status(session: Session, section_id: UUID) -> int | None:
 
 
 def _live_enrollments(session: Session, section: Section, *, today: date) -> set[UUID]:
-    """The students holding a live enrollment in this section today.
+    """The **students** holding a live enrollment in this section today.
 
     SPEC §3.4's "Drops: scores stop updating; the LMS owns what happens to the
     column", and this is the one place that stop exists: ADR 0131 has
@@ -1165,14 +1228,42 @@ def _live_enrollments(session: Session, section: Section, *, today: date) -> set
     because the formula answers what the enrolled weeks add up to and is not the
     place that decides who is still enrolled.
 
-    The predicate is `app.services.authz`'s own — `started_on <= today AND (ended_on
-    IS NULL OR ended_on >= today)` — so a drop-and-re-add has two rows and the live
-    one wins, and a student whose enrollment ends *today* still posts, because they
-    were enrolled today. Nothing is posted on the way out: no final zero, no
-    blanking. What a gradebook does with the entry of a student who left is the
-    platform's decision.
+    The date predicate is `app.services.authz`'s own — `started_on <= today AND
+    (ended_on IS NULL OR ended_on >= today)` — so a drop-and-re-add has two rows and
+    the live one wins, and a student whose enrollment ends *today* still posts,
+    because they were enrolled today. Nothing is posted on the way out: no final
+    zero, no blanking. What a gradebook does with the entry of a student who left is
+    the platform's decision.
+
+    **And "students" is a filter now, not a manner of speaking** (E3-08's boundary
+    round, EE-M1). An NRPS container carries everybody the platform lists, and the
+    roster sync writes an `enrollment` row for each of them — instructors included,
+    because §7.3 has it record the teaching instructor from the same document. So
+    this used to answer with the people who teach the section beside the people
+    taking it, and the sweep posted a participation percentage into an instructor's
+    own gradebook column, computed from the weeks they did not fill in a student
+    survey. §3.4 makes the score a student's: "completed items ÷ total items across
+    the *student's* elapsed weeks".
+
+    **The test is an assignment scoped to this section, and it is asked in that
+    direction on purpose.** A student holds no `role_assignment` row at all (ADR
+    0028: a student is a `user` row and nothing else, and `STUDENT` is not a scope
+    §2.1 attaches to a node), so "has a student-shaped role here" is a predicate
+    nobody satisfies and a sweep written on it would deliver for nobody. What is
+    knowable is the other side: SPEC §2.1 scopes a role to a section for staff of
+    that section, so a member whose person holds one is not a student *here*.
+    Everything else about them is left alone — a person who teaches another section
+    is scored as a student in this one, which is the two-hat case §2's "people are
+    not roles" exists for, and a dean whose assignment names a college is a learner
+    in the course they enrolled in.
+
+    **Two statements, and the second only when the first found somebody.** The
+    section's staff is one query through the authorization chokepoint; the hop from
+    a member to their person is a definer call each (ADR 0024, ADR 0094), and it is
+    skipped entirely for the ordinary section whose staff nobody has entered in the
+    people graph.
     """
-    return set(
+    enrolled = set(
         session.scalars(
             select(Enrollment.user_id).where(
                 Enrollment.section_id == section.id,
@@ -1181,6 +1272,10 @@ def _live_enrollments(session: Session, section: Section, *, today: date) -> set
             )
         )
     )
+    staff = section_scoped_assignees(session, section_id=section.id)
+    if not staff:
+        return enrolled
+    return {user_id for user_id in enrolled if person_for_user(session, user_id) not in staff}
 
 
 def _lms_user_ids(session: Session, user_ids: Sequence[UUID]) -> dict[UUID, str]:

@@ -81,6 +81,20 @@ DEV_PASSBACK_PATH = "/dev/passback"
 PASSBACK_PATH_NAME = "DEV_PASSBACK_PATH"
 PASSBACK_RUN_TESTID = "passback-run"
 
+# E3-08's roster-sync trigger: the second `DevControlRoute`, on the same footing.
+# SPEC §7.3 pulls a roster on the hour and on a staff launch debounced by five
+# *real* minutes, so a developer standing the clock in October cannot make the tool
+# re-read a roster inside an afternoon; this control runs the walk now.
+#
+# Named here for the same reason the passback path is — one value addressed by the
+# console's own form, the CSRF sweep and the exposure suite — and pinned by
+# `declared_roster_sync_path` below, so a rename is a named failure rather than a
+# suite quietly probing a path nobody registered. The testid is the one
+# `tests/e2e/exit-grade-passback.spec.ts` already drives.
+DEV_ROSTER_SYNC_PATH = "/dev/roster-sync"
+ROSTER_SYNC_PATH_NAME = "DEV_ROSTER_SYNC_PATH"
+ROSTER_SYNC_RUN_TESTID = "roster-sync-run"
+
 # D2 again: what a cross-site `Origin` is answered with, inside development and
 # after the environment gate has let the request through.
 CROSS_SITE_REFUSED = 403
@@ -169,6 +183,82 @@ def declared_passback_path() -> str:
         "that one value, and a rename is a deliberate change in all of them."
     )
     return str(declared)
+
+
+ROSTER_SYNC_PATH_IS_OWED = (
+    f"E3-08's work order puts `{ROSTER_SYNC_PATH_NAME} = {DEV_ROSTER_SYNC_PATH!r}` in "
+    f"`{DEV_MODULE}` beside `{PASSBACK_PATH_NAME}`, and registers the roster-sync trigger there "
+    "on the same `DevControlRoute` footing: development-only, POST-only, same-origin-checked, "
+    "redirecting back to the console. The constant is named rather than the string being written "
+    "into the route, so the console's own form and every test that drives it address one value."
+)
+
+
+def declared_roster_sync_path() -> str:
+    """`app.api.dev.DEV_ROSTER_SYNC_PATH`, required to be the value E3-08 settles."""
+    declared = named_in(dev_api_module(), ROSTER_SYNC_PATH_NAME, ROSTER_SYNC_PATH_IS_OWED)
+    assert declared == DEV_ROSTER_SYNC_PATH, (
+        f"`{DEV_MODULE}.{ROSTER_SYNC_PATH_NAME}` is {declared!r} and E3-08's work order settles "
+        f"{DEV_ROSTER_SYNC_PATH!r}. The console's form and the exposure suite address that one "
+        "value, and a rename is a deliberate change in both."
+    )
+    return str(declared)
+
+
+# The two `DevControlRoute` paths, keyed by the id a parametrised test reports
+# under. **Resolvers rather than strings**, so the lookup that can `pytest.fail` on
+# an absent constant happens in the test body and a tree missing either control
+# reds as a FAILED naming it rather than erroring at collection
+# (`docs/MISTAKES.md` entry 44).
+#
+# It is a mapping rather than a list because the gate this pair guards is
+# per-route: E3-07's own security round found a route subclass's gate discarded at
+# dispatch (`docs/MISTAKES.md` entry 47), and a second control registered the same
+# way inherits that hazard whole. A suite that walked only the first would go on
+# saying the class is sound while the new door swung open.
+DEV_CONTROL_PATHS: dict[str, Callable[[], str]] = {
+    "passback": declared_passback_path,
+    "roster-sync": declared_roster_sync_path,
+}
+
+# The router the `/dev` controls are appended to, by the name `app.api.dev` gives
+# it. Needed because the reconciliation below cannot walk the *application*: on the
+# pinned FastAPI `include_router` rebuilds a plain route from the endpoint and the
+# methods, so the `DevControlRoute` instances survive only in the router's own list
+# (`docs/MISTAKES.md` entry 47, which is the incident that established this).
+DEV_ROUTER_NAME = "router"
+
+DEV_ROUTER_IS_OWED = (
+    f"`{DEV_MODULE}` defines no `{DEV_ROUTER_NAME}`. E0-18 ships the development console on an "
+    "`APIRouter` there and every `/dev` control is appended to it; without the router there is "
+    "nothing holding the route objects a `DevControlRoute` sweep reads."
+)
+
+
+def registered_dev_control_paths() -> set[str]:
+    """The path of every `DevControlRoute` the dev router actually holds.
+
+    **Walked on the router rather than on the application, and entry 47 is why.**
+    `include_router` does not serve the route objects a router holds: for a plain
+    route it rebuilds one from the endpoint, the methods, the name and
+    `include_in_schema` alone. So a sweep over `application.routes` finds no
+    subclass at all, and one that reported "no controls" would make the
+    reconciliation below vacuous in the direction that matters.
+
+    **`isinstance` against `DevControlRoute` and not its parent.** `AnyMethodRoute`
+    is what the two clock controls are; `DevControlRoute` extends it and adds the
+    origin check. Matching the parent would drag the clock controls into an
+    inventory they are not part of, and telling the two apart is a property the
+    CSRF sweep already asserts in its own module.
+    """
+    router = named_in(dev_api_module(), DEV_ROUTER_NAME, DEV_ROUTER_IS_OWED)
+    control = dev_control_route_class()
+    found: set[str] = set()
+    for route in getattr(router, "routes", ()) or ():
+        path = getattr(route, "path", None)
+        if isinstance(route, control) and isinstance(path, str):
+            found.add(path)
+    return found
 
 
 # ---------------------------------------------------------------------------
