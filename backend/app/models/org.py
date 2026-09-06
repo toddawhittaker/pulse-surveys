@@ -386,6 +386,14 @@ class Section(UuidPrimaryKey, Base):
         # belong to the same term. Dropping this drops that rule with it, and
         # `app/models/term.py`'s `SurveyWindow` is where it is written down.
         UniqueConstraint("id", "term_id"),
+        # **The term join the participation sweep makes on every run** (E3-08's
+        # boundary round, DM-M1). E3-06 visits a section only while its term is
+        # still open, so each sweep joins `section` to `term` on this column —
+        # and neither unique constraint above leads with it, so without this the
+        # walk scans every section in the deployment every time. A plain column
+        # list, which is what `alembic check` can compare (the reason
+        # `d2f6a913c47e` gives for reversing the `nrps_call` composite).
+        Index("ix_section_term_id", "term_id"),
     )
 
     # Reaching sections by course has to be indexed: `section` is the leaf table
@@ -421,10 +429,18 @@ class Section(UuidPrimaryKey, Base):
     )
     # A section belongs to exactly one term (SPEC §8), and the calendar is what
     # `lms_section_code` is read against: the same code means a different length
-    # and a different start date in a different term (SPEC §2.2). Not indexed on
-    # its own — it sits second in the unique constraint, and a lookup of every
-    # section in a term is a report-generation scan rather than a hot path. E2
-    # adds an index here if one turns out to be needed, with a measurement.
+    # and a different start date in a different term (SPEC §2.2).
+    #
+    # **Indexed since E3-08, and it was not before.** This comment used to say a
+    # lookup of every section in a term is "a report-generation scan rather than a
+    # hot path", and that E2 would add an index if one turned out to be needed.
+    # E3-06 made it a hot path: the participation sweep walks the sections whose
+    # term is still open — `term.end_date + TERM_SWEEP_GRACE_DAYS >= today` — which
+    # is a join from this column on every run, and Postgres indexes neither side of
+    # a foreign key on its own. The unique constraints above do not serve it: one
+    # leads with `course_id` and one with `id`, and Postgres 17 has no skip scan.
+    # E3-08's boundary round (DM-M1) is where that was found; the index is declared
+    # in `__table_args__` above.
     term_id: Mapped[UUID] = mapped_column(
         ForeignKey("term.id", ondelete="RESTRICT"), nullable=False
     )
