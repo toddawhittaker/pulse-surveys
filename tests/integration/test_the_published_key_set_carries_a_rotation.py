@@ -40,7 +40,7 @@ plants nothing and must not be stopped by a column it never touches.
 arithmetic, its base64url spelling and the absence of private members are
 `tests/integration/test_the_tool_publishes_its_key_set.py`'s, per key, and are not
 repeated. And the *signer's* choice among the published keys is
-`tests/integration/test_the_signer_selects_the_newest_live_key.py`'s: what a key
+`tests/integration/test_the_signer_selects_the_oldest_live_key.py`'s: what a key
 set carries and what signs with it are two properties, and a route can be right
 about one while the signer is wrong about the other.
 """

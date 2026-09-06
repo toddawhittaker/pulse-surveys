@@ -18,7 +18,7 @@ and one mistake away from publishing the private half instead.
     "the set carries one key" is now a statement about this module's own planted
     state and nothing more; how many keys the set may carry, and which of them
     signs, is `tests/integration/test_the_published_key_set_carries_a_rotation.py`
-    and `tests/integration/test_the_signer_selects_the_newest_live_key.py`. What
+    and `tests/integration/test_the_signer_selects_the_oldest_live_key.py`. What
     stands here unchanged is the shape of a key and the fact that a key set with
     none is a document that verifies nothing.
   - **Its `kid` is the key's RFC 7638 thumbprint.** A platform selects a

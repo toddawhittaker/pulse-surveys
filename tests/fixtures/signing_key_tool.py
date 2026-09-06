@@ -261,7 +261,9 @@ def require_rotation_columns(present: Iterable[str], where: str) -> None:
             f"E1-05's one-row rule: `{ONE_ROW_INDEX}` is dropped, `{CREATED_AT_COLUMN}` arrives "
             f"with a server default and `{RETIRED_AT_COLUMN}` arrives nullable, the published key "
             f"set becomes every row with `{RETIRED_AT_COLUMN} IS NULL`, and the signing key is the "
-            f"newest of those by `{CREATED_AT_COLUMN} DESC, id DESC`. Without the two columns "
+            f"oldest of those by `{CREATED_AT_COLUMN} ASC, id ASC` — ADR 0143, which supersedes "
+            "ADR 0127's newest-signs in part so that `generate` publishes a key and `retire` is "
+            "what switches the signer. Without the two columns "
             "there is nowhere to put a rotation's second key, which is the state ADR 0082 records "
             "and this ticket changes."
         )

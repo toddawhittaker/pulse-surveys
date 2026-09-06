@@ -1309,11 +1309,21 @@ def stored_signing_key(committed_rows: Any, metadata_tables: dict[str, Any]) -> 
     and it can be a retired one. The key a platform driver signs with has to be
     the key the *tool* signs with, or every ground-truth roster read in this suite
     fails at the mock's token check for a reason that has nothing to do with the
-    sync (`docs/MISTAKES.md` entry 22). So the choice is made by ADR 0127's own
-    rule — the newest row with `retired_at IS NULL`, ordered `created_at DESC, id
-    DESC` — written out here rather than read from the implementation, which is
-    what keeps `tests/integration/test_the_signer_selects_the_newest_live_key.py`
+    sync (`docs/MISTAKES.md` entry 22). So the choice is made by ADR 0143's own
+    rule — the **oldest** row with `retired_at IS NULL`, ordered `created_at ASC,
+    id ASC` — written out here rather than read from the implementation, which is
+    what keeps `tests/integration/test_the_signer_selects_the_oldest_live_key.py`
     from comparing the tool against a copy of itself (entry 19).
+
+    **The direction is ADR 0143's and it used to be the other way.** ADR 0127 made
+    the newest live key sign; ADR 0143 supersedes that paragraph, because under
+    newest-signs `generate` is the switch — the tool begins signing with a key no
+    platform has fetched, and every service call fails until each platform
+    re-reads the key set. Under the rule written out above `generate` publishes
+    and `retire` switches. A copy of the superseded rule here would hand the
+    platform driver the wrong key the moment a test plants a second one, and the
+    roster read would fail at the mock's token check rather than at an assertion
+    about signing.
     """
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
@@ -1333,8 +1343,8 @@ def stored_signing_key(committed_rows: Any, metadata_tables: dict[str, Any]) -> 
     ]
     usable = [row for row in existing if row.get("retired_at") is None]
     if usable:
-        newest = max(usable, key=lambda row: (row.get("created_at") or BEFORE_ANY_KEY, row["id"]))
-        return str(newest["private_key_pem"])
+        oldest = min(usable, key=lambda row: (row.get("created_at") or BEFORE_ANY_KEY, row["id"]))
+        return str(oldest["private_key_pem"])
     if existing:
         pytest.fail(
             f"`{table}` holds {len(existing)} row(s) and every one of them is retired, so the tool "

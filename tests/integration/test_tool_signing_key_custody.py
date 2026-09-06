@@ -19,7 +19,11 @@ Four properties, and each has its own test because each fails differently:
     rotation needs the retiring key and its replacement published at once, and
     the one-row rule leaves nowhere to put the second; the rule that replaces it
     is that the published set is every row with `retired_at IS NULL` and the
-    signer is the newest of those (ADR 0127, amending ADR 0082). The seed still
+    signer is the oldest of those — E3-01 shipped that rule as newest-signs (ADR
+    0127, amending ADR 0082) and ADR 0143 reversed the direction, so that
+    `generate` publishes a key and `retire` is what switches the signer. Neither
+    version of the rule changes what this bullet is about, which is the row count
+    the database permits. The seed still
     writes exactly one key, which is what the first bullet is about; what changed
     is what the *database* permits beside it.
   - **A second run keeps the key it finds.** A seed that rotated the key on every
@@ -293,8 +297,9 @@ def test_a_second_tool_signing_key_row_is_accepted(
     the signing code read *a* row and a platform held the public half of *one* of
     them, a second row was a coin toss on every client assertion. E3-01 replaces
     the read rather than relaxing the rule — the published set is every row with
-    `retired_at IS NULL` and the signer is the newest of those by `created_at
-    DESC, id DESC` (ADR 0127) — so two rows are two published keys rather than two
+    `retired_at IS NULL` and the signer is the oldest of those by `created_at
+    ASC, id ASC` (ADR 0143, superseding ADR 0127's newest-signs in part) — so two
+    rows are two published keys rather than two
     identities, which is precisely what a rotation is. The old assertion is not
     weakened here; it is removed because the fact it rested on is gone, and this
     sentence is the record of that (`docs/MISTAKES.md` entry 1).
