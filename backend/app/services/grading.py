@@ -340,9 +340,25 @@ def _first_sync_day(session: Session, section: Section, *, zone: ZoneInfo) -> da
     is in and which makes every member of it tier 2. ADR 0131 takes the earliest
     call rather than any student's own first-sighting date, because only the log
     can say what the section's *first* sync was.
+
+    **Only calls that read a roster count** (E3-08's boundary round, LO-M4).
+    `nrps_call` is SPEC §6.1's log at the grain of one HTTP call, so it holds the
+    attempts as well as the reads: a call the platform refused, one the token
+    endpoint refused before the roster was asked at all, and one this container
+    refused to make are all rows here, and `members_seen` is NULL on every one of
+    them (`app.services.roster_sync._record_call`). Counting those as "the
+    section's first sync" dates the tier-3 boundary from a sync that never
+    happened — and the ordinary way to get one is a new registration whose first
+    scheduled walk ran before its credentials were right, which then costs every
+    undated member of that section the weeks between, permanently. A read that
+    found an empty roster is a different thing and does count: `members_seen` is
+    `0` there, which is not NULL.
     """
     earliest: datetime | None = session.scalar(
-        select(func.min(NRPS_CALL.c.called_at)).where(NRPS_CALL.c.section_id == section.id)
+        select(func.min(NRPS_CALL.c.called_at)).where(
+            NRPS_CALL.c.section_id == section.id,
+            NRPS_CALL.c.members_seen.is_not(None),
+        )
     )
     return None if earliest is None else earliest.astimezone(zone).date()
 
