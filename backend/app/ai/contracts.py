@@ -187,9 +187,19 @@ class CommentTheme(ContractModel):
     Shared by the weekly summary and the draft check because both name themes
     and both count the comments behind them — §7.4 gives the draft check the
     output "Names themes the draft hasn't addressed, **with comment counts**",
-    and §5.1 requires a summary to "state the response count they draw from".
-    Composing one part into two contracts is what E0-12 means by "compose rather
-    than copy"; two near-identical theme models would be the copy.
+    and §5.1 has a summary preserve the week's themes rather than sand them off,
+    which a theme with no count cannot be read against. Composing one part into
+    two contracts is what E0-12 means by "compose rather than copy"; two
+    near-identical theme models would be the copy. E4-05 settled that the summary
+    carries the counts now rather than leaving E7's draft check to re-derive them
+    from the same text with a second model call (ADR 0148).
+
+    **This count is not §5.1's response count**, and the two are easy to read as
+    one. This is how many *comments* carry one theme, and a model produces it
+    from the comments in front of it. §5.1's "state the response count they draw
+    from" is a count of the week's *responses*, which is a different and larger
+    number (§3.2 makes a comment optional above the rating threshold) — the
+    caller injects it on `WeeklySummaryRecord` and no model is asked for it.
 
     This is not a confidentiality-critical read path, so the carve-out in
     `CLAUDE.md` for deliberate duplication does not apply — nothing here is an
@@ -355,7 +365,7 @@ class WeeklySummaryRecord(ContractModel):
         default=None,
         description=(
             "The type of a comment held for review, when §5.1 permits the summary to note "
-            "one: 'above small-N they may note \"one comment is held for review\" with type "
+            'one: \'above small-N they may note "one comment is held for review" with type '
             "only'. Absent by default and absent throughout E4 — E6 writes the moderation "
             "states that populate it, and a default of anything else would render a note "
             "with no moderation behind it. §5.2's threat and self-harm verdicts never appear "
