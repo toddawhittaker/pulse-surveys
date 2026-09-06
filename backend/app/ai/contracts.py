@@ -153,9 +153,13 @@ class AiTaskOutput(ContractModel):
     classifiers alone, and why the gateway rather than the model supplies the
     values.
 
-    Every task contract below inherits this. Nothing else should: a model that is
-    a *part* of a contract inherits `ContractModel` instead, because the audit
-    pair belongs to a call and a call produces one object.
+    Every task contract below inherits this. Nothing else should, and there are
+    two kinds of "nothing else": a model that is a *part* of a contract
+    (`CommentTheme`) and a model that composes one (`WeeklySummaryRecord`). Both
+    inherit `ContractModel` instead, because the audit pair belongs to a call and
+    a call produces one object — a part would carry four copies of one fact, and
+    a composition would carry a second copy that is free to disagree with the
+    answer's own.
     """
 
     prompt_version: str = Field(
@@ -211,7 +215,8 @@ class CommentTheme(ContractModel):
 
 
 # ---------------------------------------------------------------------------
-# The five task contracts, in §7.4's table order
+# The five task contracts, in §7.4's table order — and, beside the weekly
+# summary's, the one record a caller composes around a task's answer.
 # ---------------------------------------------------------------------------
 
 
@@ -264,9 +269,17 @@ class ModerationOutput(AiTaskOutput):
 class WeeklySummaryOutput(AiTaskOutput):
     """§7.4, "Weekly summary" — per-stream, per-node themed summaries under §5.1.
 
-    §5.1's requirements on a summary, and where each lands here: it belongs to
-    one of the two comment streams (`stream`); it states the response count it
-    draws from (`comment_count`); and it preserves clearly critical themes rather
+    **This is what a model is asked to produce, and nothing else.** §5.1 also
+    requires a summary to "state the response count they draw from", and that
+    number is not here: the caller injects it from data on `WeeklySummaryRecord`
+    below. A count a model reports is a count nobody checked — an instructor
+    reading "drawn from 12 responses" under a week of five has no way to tell —
+    and it is arithmetic the caller already has.
+    [ADR 0148](../../../docs/adr/0148-the-summary-contract-splits-what-the-model-produces-from-what-the-caller-injects.md)
+    draws that line and says why it is a line rather than a convention.
+
+    §5.1's other requirements land here: the summary belongs to one of the two
+    comment streams (`stream`), and it preserves clearly critical themes rather
     than sanding them off, which is what `themes` makes checkable — a summary
     whose prose drops a theme still lists it.
 
@@ -284,8 +297,9 @@ class WeeklySummaryOutput(AiTaskOutput):
     stream: CommentStream = Field(
         description=(
             "Which of §5.1's two comment groups this summary covers. Returned rather than "
-            "assumed, so a summary that answered for the wrong stream is refused by the "
-            "gateway instead of being filed under the stream that was asked for."
+            "assumed, so an answer about the stream nobody asked about is refused by "
+            "`app.ai.tasks.summarize_stream` — which is the half that knows what was asked "
+            "— instead of being filed under the stream that was."
         ),
     )
     summary: str = Field(
@@ -301,13 +315,55 @@ class WeeklySummaryOutput(AiTaskOutput):
             "share nothing; the summary is still written, per §5.1."
         ),
     )
-    comment_count: int = Field(
+
+
+class WeeklySummaryRecord(ContractModel):
+    """One week's summary as a caller holds it: the model's answer plus what data says.
+
+    **Not a task output, and it deliberately does not inherit `AiTaskOutput`.**
+    The audit pair belongs to a call, and this object composes one call's result
+    rather than being one — `summary.prompt_version` and `summary.model_id` are
+    where E4-06 reads them from, without re-deriving either from a constant
+    (E4-05's sixth acceptance criterion). Two fields sit outside the model's
+    answer because neither is something a model can be asked for: a count that
+    comes from the week's rows, and a note that comes from moderation.
+
+    E4-06 stores this. `app.ai.tasks.summarize_stream` is what builds it, and it
+    is built for an empty week as well as a full one — §5.1 has a summary
+    "generated even in small-N weeks", and a week with no comments still answers
+    the contract's stated empty shape rather than nothing at all.
+    """
+
+    summary: WeeklySummaryOutput = Field(
+        description=(
+            "The model's answer for one stream, with the prompt version and model ID the "
+            "gateway recorded on it."
+        ),
+    )
+    response_count: int = Field(
         ge=0,
         description=(
-            "How many comments this summary draws from — §5.1 requires a summary to state "
-            "it. Zero is legitimate: a week with ratings and no comments still gets a "
-            "summary, and its comment group shows a one-line notice rather than a hidden "
-            "heading. Flagged-held content is excluded upstream and is not counted here."
+            "How many responses this summary draws from — §5.1 requires a summary to state "
+            "it, and the caller counts it from the week's rows. It is not the number of "
+            "comments: §3.2 makes a comment optional above the rating threshold, so nine "
+            "responses can carry three comments. Zero is legitimate: a week with ratings and "
+            "no comments still gets a summary, and its comment group shows a one-line notice "
+            "rather than a hidden heading."
+        ),
+    )
+    held_note_type: str | None = Field(
+        default=None,
+        description=(
+            "The type of a comment held for review, when §5.1 permits the summary to note "
+            "one: 'above small-N they may note \"one comment is held for review\" with type "
+            "only'. Absent by default and absent throughout E4 — E6 writes the moderation "
+            "states that populate it, and a default of anything else would render a note "
+            "with no moderation behind it. §5.2's threat and self-harm verdicts never appear "
+            "here: they route to the Care queue (§6.2), suppressed from every instructor and "
+            "leadership view, and a summary is an instructor view. That exclusion is not "
+            "enforced by this type today — a free string cannot enforce it — and making the "
+            "type a closed set that excludes both is E6's, recorded in "
+            "`docs/tickets/e4/deferred.md`."
         ),
     )
 
