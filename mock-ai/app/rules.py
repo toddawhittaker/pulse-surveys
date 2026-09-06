@@ -210,15 +210,18 @@ def verdict_answer(verdict: str, *, stall_seconds: float = 0.0) -> Answer:
     )
 
 
-def classify(comment: str) -> Answer:
-    """Apply the three published rules to one extracted comment, in order.
+def failing_answer(text: str) -> Answer | None:
+    """The three markers that answer *instead of* the task, or `None` for neither.
 
-    The order is the module docstring's and is not an implementation detail: rule
-    1 before rule 2 is what lets a comment that also names a verdict still drive
-    a failure, and rule 2 before rule 3 is what lets a long comment be forced
-    `insufficient`.
+    Rule 1 minus the stall, and the split is what a second task made worth
+    making: these three are answers about the request — a status, or a body that
+    is not the contract — and none of them depends on what was being asked for,
+    so a task added later reaches ADR 0056's rows through this function rather
+    than through a copy of these three branches. The stall stays with each task,
+    because a stall is *the task's own correct answer, late*, and the two tasks
+    do not have the same correct answer.
     """
-    if UNAVAILABLE_MARKER in comment:
+    if UNAVAILABLE_MARKER in text:
         return Answer(
             status=UNAVAILABLE_STATUS,
             payload={
@@ -231,7 +234,7 @@ def classify(comment: str) -> Answer:
                 }
             },
         )
-    if REFUSED_MARKER in comment:
+    if REFUSED_MARKER in text:
         return Answer(
             status=REFUSED_STATUS,
             payload={
@@ -244,8 +247,22 @@ def classify(comment: str) -> Answer:
                 }
             },
         )
-    if MALFORMED_MARKER in comment:
+    if MALFORMED_MARKER in text:
         return Answer(status=200, payload=dict(MALFORMED_PAYLOAD))
+    return None
+
+
+def classify(comment: str) -> Answer:
+    """Apply the three published rules to one extracted comment, in order.
+
+    The order is the module docstring's and is not an implementation detail: rule
+    1 before rule 2 is what lets a comment that also names a verdict still drive
+    a failure, and rule 2 before rule 3 is what lets a long comment be forced
+    `insufficient`.
+    """
+    failing = failing_answer(comment)
+    if failing is not None:
+        return failing
     if STALL_MARKER in comment:
         # A correct answer that arrives late, which is what makes this a timeout
         # rather than a failure.
@@ -257,6 +274,20 @@ def classify(comment: str) -> Answer:
 
     long_enough = len(comment) >= SUBSTANTIVE_MINIMUM_CHARACTERS
     return verdict_answer(SUBSTANTIVE if long_enough else INSUFFICIENT)
+
+
+def answer_for(prompt: str) -> Answer:
+    """What this service answers to one whole rendered prompt.
+
+    The single entry point, so that "which part of this prompt is the input, and
+    which task is it for" is one question with one place to read rather than a
+    branch in the HTTP handler. `app.main` reads a request body, hands the text
+    over, and turns whatever comes back into a response; it decides nothing.
+
+    Raises `ExtractionError` for a prompt this service cannot read, which the
+    handler answers as a 500 naming the line it looked for.
+    """
+    return classify(extract_comment(prompt))
 
 
 def served_rules() -> dict[str, Any]:
