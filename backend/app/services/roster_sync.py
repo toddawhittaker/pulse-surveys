@@ -727,6 +727,19 @@ def request_section_sync(session: Session, section_id: UUID) -> bool:
     and `docs/tickets/e3/carried-from-e2.md` carried the repair to whichever epic
     next touched this door.
 
+    **A section with no stored roster address is enqueued like any other, and the
+    job is a no-op.** This trigger asks about the debounce and about nothing else —
+    `a_section_with_no_address` is a fixture in its own contract suite, which
+    asserts an enqueue for exactly that case — and `sync_section` is where SPEC
+    §7.3's never-synced state is honoured: it logs and returns without a call and
+    without a row. Until E3-08's boundary round the question never arrived here,
+    because `app.services.provisioning` answered no section id at all for a launch
+    that stored no address; that answer also fed the launch door's *gradebook*
+    trigger, so one missing service claim silenced the other service too (LO-M5).
+    Moving the gate off the shared answer means this path now sees a section it
+    used not to, and what it costs is a published job that wakes and does nothing,
+    for the launches of a platform that advertises AGS and not NRPS.
+
     The `try` stays here, because the one thing that must not happen is a person
     being unable to enter the product because a queue was unavailable. The failure
     is logged at error level, which is the visibility (`docs/MISTAKES.md` entry
