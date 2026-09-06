@@ -167,3 +167,38 @@ and are re-carried.
 Checked 2026-09-05: `typescript-eslint` latest is 8.69.0, peer range
 `typescript >=4.8.4 <6.1.0`. 7.x was not admitted during E3; the wait is
 re-carried dated.
+
+## The per-PR security review, and its round
+
+E3-08's own independent security review ran diff-first over the full PR
+(base named against the epic branch). One MEDIUM and three LOWs, all fixed
+tests-first in the PR under a declared stopping rule: the dev sync control's
+future-dated log rows sat in the launch debounce's memory (the probe gained
+an upper bound at real now, and ADR 0142's consequences were amended, dated,
+to record the interaction its first text denied); the standalone score post
+inherited the sweep's write-bearing scope set (now score-only); the maximum
+guard's advertised refusals were not all enforced (now isfinite, with the
+tests pinning WHICH layer refused after two rounds of the assertion being
+satisfiable by the wrong layer — the second of which reddened five tests
+against a correct tree and is recorded in MISTAKES entry 49's amended rule);
+and the new trigger had no dispatch-level exposure coverage (the module
+parametrizes over both controls, and its path inventory is now reconciled
+against the registered DevControlRoute set both directions — MISTAKES entry
+47's first counter bump records why the walk reads the router).
+
+The pass was re-run over the fixes. It found one LOW the round had itself
+introduced (the hand-written inventory, closed above), asked two docstring
+sentences (the maximum guard is the last control before the wire for the
+sign half, and the OverflowError escape it does not judge), and confirmed
+the battery's sharpest fact: with the guard deleted, a zero-maximum score
+reaches the platform's wire, and nothing in AGS obliges a platform to
+refuse it — the mock's 422 is the mock's choice, so the in-process guard is
+load-bearing.
+
+Verification of the round in kind: CI resolved by id on ece8d65
+(34010923419; invariant 237, pytest 2982, e2e 64) and a four-row targeted
+battery, every row killed, no survivors — with one mechanism divergence
+recorded rather than reconciled (the zero row's kill came from the message
+assertion, not the predicted exception, which is what proved the guard is
+the last thing before the wire). After the reconciliation test the isolated
+pass stands at 238 and the suite at 2983.
