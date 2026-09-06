@@ -538,6 +538,15 @@ standing ADR's, or an earlier boundary's, not re-owned here.
   stated: component-level regressions surface in a browser run instead of a unit
   run. Revisit when a screen's logic outgrows what the end-to-end suite pins
   cheaply; `../e2/README.md` carries the entry.
+  **Closed by E4-16.** The revisit trigger tripped structurally rather than
+  through one screen growing large: E4 scheduled four component tickets
+  (E4-08, E4-09 and E4-10 among them, three building in parallel) whose
+  acceptance criteria are component tests, and none could execute a test
+  before this ticket. E4-16 added vitest, jsdom and `@testing-library/react`
+  to the frontend workspace, wired `npm run test --workspace frontend` into
+  the `lint-frontend` CI job, and recorded the runner choice and the
+  component-test conventions the three tickets build to in
+  [ADR 0151](../../adr/0151-the-frontend-gains-a-unit-test-runner.md).
 - **Leadership landing views stay empty until E9.** The transitive purview walk
   raises by design (ADR 0003), so an assistant dean's roll-up is fail-closed
   rather than partial; ADR 0108 records why that is the honest state and names
