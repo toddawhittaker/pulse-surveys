@@ -116,8 +116,8 @@ from app.models.org import Section
 from app.models.survey import Answer, Response
 from app.models.term import Term, Week
 from app.services import clock
-from app.services.authz import WriteSanction, guard_write, sanction_for
-from app.services.identity import subject_for_user
+from app.services.authz import WriteSanction, guard_write, sanction_for, section_scoped_assignees
+from app.services.identity import person_for_user, subject_for_user
 from app.services.submissions import current_questions
 from app.services.survey_windows import DerivedWindow, windows_for_section
 from app.services.validity import REFUSED_VERDICT_TOKENS
@@ -1220,7 +1220,7 @@ def _accepted_status(session: Session, section_id: UUID) -> int | None:
 
 
 def _live_enrollments(session: Session, section: Section, *, today: date) -> set[UUID]:
-    """The students holding a live enrollment in this section today.
+    """The **students** holding a live enrollment in this section today.
 
     SPEC §3.4's "Drops: scores stop updating; the LMS owns what happens to the
     column", and this is the one place that stop exists: ADR 0131 has
@@ -1228,14 +1228,42 @@ def _live_enrollments(session: Session, section: Section, *, today: date) -> set
     because the formula answers what the enrolled weeks add up to and is not the
     place that decides who is still enrolled.
 
-    The predicate is `app.services.authz`'s own — `started_on <= today AND (ended_on
-    IS NULL OR ended_on >= today)` — so a drop-and-re-add has two rows and the live
-    one wins, and a student whose enrollment ends *today* still posts, because they
-    were enrolled today. Nothing is posted on the way out: no final zero, no
-    blanking. What a gradebook does with the entry of a student who left is the
-    platform's decision.
+    The date predicate is `app.services.authz`'s own — `started_on <= today AND
+    (ended_on IS NULL OR ended_on >= today)` — so a drop-and-re-add has two rows and
+    the live one wins, and a student whose enrollment ends *today* still posts,
+    because they were enrolled today. Nothing is posted on the way out: no final
+    zero, no blanking. What a gradebook does with the entry of a student who left is
+    the platform's decision.
+
+    **And "students" is a filter now, not a manner of speaking** (E3-08's boundary
+    round, EE-M1). An NRPS container carries everybody the platform lists, and the
+    roster sync writes an `enrollment` row for each of them — instructors included,
+    because §7.3 has it record the teaching instructor from the same document. So
+    this used to answer with the people who teach the section beside the people
+    taking it, and the sweep posted a participation percentage into an instructor's
+    own gradebook column, computed from the weeks they did not fill in a student
+    survey. §3.4 makes the score a student's: "completed items ÷ total items across
+    the *student's* elapsed weeks".
+
+    **The test is an assignment scoped to this section, and it is asked in that
+    direction on purpose.** A student holds no `role_assignment` row at all (ADR
+    0028: a student is a `user` row and nothing else, and `STUDENT` is not a scope
+    §2.1 attaches to a node), so "has a student-shaped role here" is a predicate
+    nobody satisfies and a sweep written on it would deliver for nobody. What is
+    knowable is the other side: SPEC §2.1 scopes a role to a section for staff of
+    that section, so a member whose person holds one is not a student *here*.
+    Everything else about them is left alone — a person who teaches another section
+    is scored as a student in this one, which is the two-hat case §2's "people are
+    not roles" exists for, and a dean whose assignment names a college is a learner
+    in the course they enrolled in.
+
+    **Two statements, and the second only when the first found somebody.** The
+    section's staff is one query through the authorization chokepoint; the hop from
+    a member to their person is a definer call each (ADR 0024, ADR 0094), and it is
+    skipped entirely for the ordinary section whose staff nobody has entered in the
+    people graph.
     """
-    return set(
+    enrolled = set(
         session.scalars(
             select(Enrollment.user_id).where(
                 Enrollment.section_id == section.id,
@@ -1244,6 +1272,10 @@ def _live_enrollments(session: Session, section: Section, *, today: date) -> set
             )
         )
     )
+    staff = section_scoped_assignees(session, section_id=section.id)
+    if not staff:
+        return enrolled
+    return {user_id for user_id in enrolled if person_for_user(session, user_id) not in staff}
 
 
 def _lms_user_ids(session: Session, user_ids: Sequence[UUID]) -> dict[UUID, str]:
