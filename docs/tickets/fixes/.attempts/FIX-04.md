@@ -53,3 +53,37 @@ The whole diff is two header lines, `Python 3.13` → `Python 3.14`, one per fil
 pre-ticket probe predicted: every pinned version already ships a wheel that 3.14
 accepts, so the resolve had nothing to force. Nothing to revert, and nothing to
 name in the PR body as a forced bump.
+
+## 2026-09-06 — the venv rebuilt on 3.14, and the one red the suite added
+
+`.venv` recreated with `uv venv --python 3.14 .venv --seed` (python 3.14.6),
+then `pip install --require-hashes -r requirements-dev.txt`, `pip install -e .
+--no-deps --no-build-isolation`, and the five pinned tools `Makefile`'s `tools`
+target installs (ruff 0.6.9, mypy 1.11.2, pip-audit 2.7.3, pip-licenses 5.5.5,
+pip-tools 7.6.1). Every step exited 0; the hash-checked install needed no sdist
+build, so every locked version really does ship a wheel 3.14 accepts.
+
+The ticket's own module then went **5 passed**, exit 0, on the same tree that
+gave 2 failed before the venv moved — so the two reds were the declarations and
+the interpreter, and nothing else.
+
+The unit and integration suites together, `-n 4`, were then **1 failed, 2989
+passed** in 4m47s. The single red was not a 3.14 behaviour change and not the
+new pins. It was
+`test_every_repository_wide_sweep_runs_in_a_job_the_filter_cannot_switch_off`,
+in the documentation-only-diff guard module, reporting that the ticket's new
+declarations module walks the repository from its root (an `rglob` to find every
+Dockerfile without a list of file names) and runs only in the job a
+documentation-only diff switches off.
+
+The repair that guard itself names is to run the module in `lint-python`, which
+is unconditional — never to reshape the sweep until the detector stops seeing
+it, and never to add it to the exemption set, which lives behind the test wall
+anyway. It is named there whole, because its five cases are the sweep plus the
+controls that prove each collector can see what it claims to; a sweep run
+without its controls is a silence nobody can read. The guard module went **27
+passed**, exit 0, after the edit.
+
+A note for whoever reads the shell history: the hook that protects `tests/**`
+matches the whole command text positionally, so writing this log through a
+heredoc that quotes a test path is refused. Append it with an editor.

@@ -535,6 +535,15 @@ jobs:
       # diff. Left in the conditional job it would run on every pull request
       # except the ones it exists for. A whole module rather than node ids,
       # because the module is that one sweep.
+      # The eighth entry is FIX-04's, and it arrived the way the sixth did:
+      # `test_every_repository_wide_sweep_runs_in_a_job_the_filter_cannot_switch_off`
+      # read its `REPO_ROOT`-rooted `rglob` — the walk that finds every
+      # Dockerfile without a list of file names — as a repository-wide sweep and
+      # named it here. Its subject is the four places that declare the Python
+      # runtime, and it is a whole module rather than node ids because all five
+      # of its tests are that one sweep plus the controls that prove the
+      # collectors can see each declaration: run without them, a green says
+      # nothing.
       - name: Repository-wide sweeps that a docs-only diff must not switch off
         run: |
           pytest -q \
@@ -545,7 +554,8 @@ jobs:
             "tests/unit/test_the_process_wide_authorization_endpoint_is_gone.py" \
             "tests/unit/test_types_node_tracks_runtime.py" \
             "tests/unit/test_survey_windows_have_one_assignment_site.py" \
-            "tests/unit/test_the_signing_key_custody_record_is_amended.py"
+            "tests/unit/test_the_signing_key_custody_record_is_amended.py" \
+            "tests/unit/test_the_python_runtime_declarations_agree.py"
 
   # The job keeps its id and its display name. Branch protection's required-check
   # list keys on the display name, and renaming it is a change to that list
