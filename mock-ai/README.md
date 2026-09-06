@@ -7,9 +7,11 @@ for the identity provider, and this stands in for the third external dependency.
 
 It runs as the Compose service `mock-ai`, on port 8000 inside the network, and
 the development override publishes it at <http://localhost:8082> so you can read
-its rules in a browser. `.env.example` points `AI_PROVIDER_BASE_URL` at
+its rules in a browser. `.env.example` points `MOCK_AI_PROVIDER_BASE_URL` at
 `http://mock-ai:8000/v1`, which is what makes `make up` produce a stack that
-classifies.
+classifies and summarizes. (That variable was `AI_PROVIDER_BASE_URL` until the
+configuration split of 2026-09-02 gave the real provider and the mock a triple
+each; ADR 0118 is the split.)
 
 **Nothing outside development may point at it.** `app.config.Settings` refuses an
 `AI_PROVIDER_BASE_URL` whose host is `mock-ai` anywhere `ENVIRONMENT` is not
@@ -35,23 +37,36 @@ disagree, the route is right — it is built from the constants
 
 ## What it does with a prompt
 
-The student's comment is **everything after the last occurrence of the line the
-validity prompt's instructions end with**, with surrounding whitespace removed.
-That line is copied into `mock-ai/app/rules.py` as `MARKER_LINE`, because this
-package cannot import `backend/app/` — both are called `app` — and a unit test
-holds the copy against `backend/app/ai/prompts/validity.v1.md` so that an edit to
-one goes red rather than quiet.
+**Two tasks, told apart by a line.** A prompt carrying the summary prompt's
+marker line is asking for SPEC §7.4's weekly summary; anything else is a
+comment-validity request, which is what this service answered to everything
+before E4-05.
 
-A prompt carrying no copy of that line is answered with **HTTP 500 naming the
-line it looked for**. Loudly, because every quiet answer to "which part of this is
-the comment" is wrong for every request and looks like a working stack.
+For **comment validity**, the student's comment is everything after the last
+occurrence of the line the validity prompt's instructions end with, with
+surrounding whitespace removed. For the **weekly summary**, the week is the
+blank-line-separated blocks after the last occurrence of the summary prompt's
+marker line, and the stream is the token following the last `Stream under
+review:` line before it — so no comment can move either boundary or choose which
+stream the answer is about.
+
+All three strings are copied into `mock-ai/app/rules.py`, because this package
+cannot import `backend/app/` — both are called `app` — and unit tests hold the
+two marker lines against whichever prompt version `app.ai.tasks` says it renders,
+so that an edit to one goes red rather than quiet.
+
+A prompt this service cannot read — no marker line, or a summary prompt naming no
+stream — is answered with **HTTP 500 naming what it looked for**. Loudly, because
+every quiet answer to "which part of this is the input" is wrong for every
+request and looks like a working stack.
 
 ## The rules, in the order they are applied
 
-**1. A wrong-answer marker anywhere in the comment.** First, so that a comment
-long enough to be classified normally can still drive a failure. Each reaches one
-row of [ADR 0056](../docs/adr/0056-only-a-timeout-fails-open.md)'s taxonomy from
-the tool side:
+**1. A wrong-answer marker anywhere in the input** — the comment, or any of the
+week's comments. First, so that input long enough to be classified normally can
+still drive a failure. Each reaches one row of
+[ADR 0056](../docs/adr/0056-only-a-timeout-fails-open.md)'s taxonomy from the
+tool side:
 
 | Marker | What this service answers | What the gateway raises |
 |---|---|---|
@@ -64,7 +79,10 @@ The first two are one status code apart on purpose: they are the near miss that
 separates ADR 0056's unavailable row from its refused row, which is why 503 and
 500 both exist here. The stall is six seconds because the validity task's
 per-task timeout is four; a stall inside that budget answers in time and drives
-nothing.
+nothing. The summary task's timeout is sixty, so the same stall drives a *late
+summary* there rather than a timeout — deliberately: a stall long enough to time
+a summary out would hold a test for a minute to reach a row this table already
+reaches through the validity task.
 
 **2. A forced verdict**, so an end-to-end run can drive a particular
 classification without patching the backend: `mock-ai:substantive`,
@@ -79,12 +97,23 @@ heuristic, reused so that the spec's example of a comment that must be bounced �
 three: deciding that a comment is keyboard mashing is a judgement about content,
 and this service makes none.
 
+**4. The summary.** Rules 2 and 3 are the validity task's — a summary has no
+closed set of answers to force and no length rule to apply — so a week carrying
+no wrong-answer marker is answered here. The payload names the stream the prompt
+asked about, its prose says how many comments arrived and how each one opened,
+and it carries one theme per comment up to three, each claiming exactly one
+comment. Two different weeks are answered differently and the same week twice is
+answered identically: the first is what makes a stack prove the week's text
+actually left the tool, and the second is what lets the gateway's one bounded
+re-ask reach the same answer twice.
+
 ## What it is not
 
-- **It is not a model.** It reads a character count. A stack pointed here is a
-  stack that is not classifying, which is why the eval suite (SPEC §9.3, E2-12)
-  measures the real one and never this — a mock that passed evals would be
-  measuring itself.
+- **It is not a model.** It reads a character count, and for a summary it reads
+  how many comments there are and how each one begins — never what any of them
+  says. A stack pointed here is a stack that is not classifying and not
+  summarizing, which is why the eval suite (SPEC §9.3, E2-12) measures the real
+  provider and never this — a mock that passed evals would be measuring itself.
 - **It authenticates nobody**, holds no credential, and takes no `env_file`.
 - **It has no configuration.** Every value it uses has one correct answer, so
   there is nothing to set and no `.env.example` entry to earn (ADR 0037, ADR
