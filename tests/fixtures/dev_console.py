@@ -221,6 +221,45 @@ DEV_CONTROL_PATHS: dict[str, Callable[[], str]] = {
     "roster-sync": declared_roster_sync_path,
 }
 
+# The router the `/dev` controls are appended to, by the name `app.api.dev` gives
+# it. Needed because the reconciliation below cannot walk the *application*: on the
+# pinned FastAPI `include_router` rebuilds a plain route from the endpoint and the
+# methods, so the `DevControlRoute` instances survive only in the router's own list
+# (`docs/MISTAKES.md` entry 47, which is the incident that established this).
+DEV_ROUTER_NAME = "router"
+
+DEV_ROUTER_IS_OWED = (
+    f"`{DEV_MODULE}` defines no `{DEV_ROUTER_NAME}`. E0-18 ships the development console on an "
+    "`APIRouter` there and every `/dev` control is appended to it; without the router there is "
+    "nothing holding the route objects a `DevControlRoute` sweep reads."
+)
+
+
+def registered_dev_control_paths() -> set[str]:
+    """The path of every `DevControlRoute` the dev router actually holds.
+
+    **Walked on the router rather than on the application, and entry 47 is why.**
+    `include_router` does not serve the route objects a router holds: for a plain
+    route it rebuilds one from the endpoint, the methods, the name and
+    `include_in_schema` alone. So a sweep over `application.routes` finds no
+    subclass at all, and one that reported "no controls" would make the
+    reconciliation below vacuous in the direction that matters.
+
+    **`isinstance` against `DevControlRoute` and not its parent.** `AnyMethodRoute`
+    is what the two clock controls are; `DevControlRoute` extends it and adds the
+    origin check. Matching the parent would drag the clock controls into an
+    inventory they are not part of, and telling the two apart is a property the
+    CSRF sweep already asserts in its own module.
+    """
+    router = named_in(dev_api_module(), DEV_ROUTER_NAME, DEV_ROUTER_IS_OWED)
+    control = dev_control_route_class()
+    found: set[str] = set()
+    for route in getattr(router, "routes", ()) or ():
+        path = getattr(route, "path", None)
+        if isinstance(route, control) and isinstance(path, str):
+            found.add(path)
+    return found
+
 
 # ---------------------------------------------------------------------------
 # Probing a route with every method, standard or not. Moved here by E3-07 from

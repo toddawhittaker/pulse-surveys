@@ -60,6 +60,24 @@ happened to be showing and from any deployment that ran with the router included
 beside it all said the check was in place. A guard that is present by inspection
 and absent at runtime is worse than no guard, because it ends the review.
 
+## Preventions
+
+*(E3-08's security round, on the test author. The round's last item asked for a
+reconciliation between `DEV_CONTROL_PATHS` — the hand-written list of `/dev`
+controls the exposure suite parametrises over — and the controls actually
+registered, so a third one added later could not get zero dispatch coverage in
+silence. The walk pattern it was pointed at is
+`test_every_mutating_route_carries_the_csrf_check.py`'s, which enumerates
+`every_route(application)`. Written that way the derived set would have been
+**empty**: `include_router` rebuilds a plain `Route`, so no `DevControlRoute`
+instance is on the application at all, and the check would have compared nothing
+against two — reddening for a reason that has nothing to do with the inventory, and
+inviting a "fix" that weakened it. This entry is why the walk reads
+`app.api.dev.router.routes` instead, and why the test asserts it **found** a
+control before comparing anything. Its own second half is quoted in that test's
+docstring, to keep the next reader from mistaking an inventory check for gate
+coverage.)*
+
 ## The rule
 
 **On this FastAPI, a route's behaviour must live in its endpoint. Anything a

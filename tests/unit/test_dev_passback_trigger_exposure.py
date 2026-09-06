@@ -70,6 +70,14 @@ route class while the new door swung open on exactly the regression entry 47
 records. So the paths come from `DEV_CONTROL_PATHS` and every dispatch-level case
 here runs once per control.
 
+**And the inventory itself is reconciled against the router**, because a
+hand-written list of what to cover is covered exactly as well as somebody's
+memory. `test_this_modules_control_inventory_is_every_dev_control_route_registered`
+walks the `DevControlRoute` instances `app.api.dev`'s router holds and requires
+that set to equal the one `DEV_CONTROL_PATHS` resolves to, both directions — so a
+third control added later cannot get zero dispatch coverage in silence. It is an
+inventory check and not a gate check; the gates are the tests below it.
+
 **The module keeps its name deliberately**, though it now covers both. Renaming it
 would move it out of `DENIAL_NAME_SHAPES`'s `_trigger_exposure` and through the
 `_control_exposure` shape instead, churning the sweep that exists to notice this
@@ -100,6 +108,7 @@ from fixtures.dev_console import (
     OPAQUE_ORIGIN,
     ORIGIN_HEADER,
     PROBED_METHODS,
+    registered_dev_control_paths,
 )
 from fixtures.routing import registered_paths
 
@@ -192,6 +201,80 @@ def baseline_is_404(client: Any, environment: str) -> None:
         f"set to {environment!r}. That path is chosen to collide with no router in this tree; if it "
         "answers something else, this application's not-found handling has changed under it and "
         "the assertions below are no longer measured against a clean baseline."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The inventory this module's parametrisation rests on, reconciled against the
+# routes that actually exist.
+# ---------------------------------------------------------------------------
+
+
+def test_this_modules_control_inventory_is_every_dev_control_route_registered(
+    configured_env: dict[str, str],
+) -> None:
+    """`DEV_CONTROL_PATHS` and the registered `DevControlRoute` set are the same set.
+
+    **Why a hand-written inventory needs this.** Every gate below is parametrised
+    over `DEV_CONTROL_PATHS`, a two-entry literal in
+    `tests/fixtures/dev_console.py`. Nothing reconciled it against the application
+    until now, so the coverage it drives was exactly as complete as somebody's
+    memory: a third control appended to the router with no entry beside it gets
+    **zero** dispatch-level coverage, silently, and this module goes on reporting
+    a full green over two of three doors. That is `docs/MISTAKES.md` entry 35's
+    shape — a guard that enumerates and is never made to find what it missed — and
+    it is the gap E3-08's own security round created by making the inventory two
+    entries long instead of one.
+
+    **The mutation this kills**: a third `DevControlRoute` registered in
+    `app.api.dev` without a `DEV_CONTROL_PATHS` entry. Before this test that is
+    invisible everywhere — the route serves, the console links it, every existing
+    test stays green, and the new control's environment gate and origin check are
+    asserted by nothing.
+
+    **Both directions, because they are different defects with different repairs.**
+    A registered control missing from the inventory is untested code. A listed path
+    that no `DevControlRoute` serves is a test suite probing a door that does not
+    exist, whose 404s read as a closed gate — which is the failure the route
+    existence control next door is about, arriving through the inventory instead.
+    The message names each difference separately.
+
+    **What this is not.** It answers "is the class on the route" and never "does
+    the gate run" — entry 47's own warning about sweeps over route tables. The
+    tests below are what drive the built application over HTTP and read the status
+    in both directions; this one only makes sure they are driven over everything.
+
+    **Non-vacuity comes first**: an empty derived set makes the equality true of an
+    empty inventory and false of nothing, so the walk is required to have found a
+    control before its answer is compared against anything.
+    """
+    registered = registered_dev_control_paths()
+    listed = {control: DEV_CONTROL_PATHS[control]() for control in DEV_CONTROLS}
+
+    assert registered, (
+        "Walking `app.api.dev`'s router found no `DevControlRoute` at all. Either no control is "
+        "registered — in which case every 404 this module asserts is the 404 of a route nobody "
+        "wrote — or the walk is reading the wrong thing: `include_router` rebuilds a plain route "
+        "from its endpoint, so the subclass instances live in the router's own `routes` list and "
+        "nowhere else (`docs/MISTAKES.md` entry 47). Either way the comparison below would be "
+        "between two sets neither of which describes this application."
+    )
+
+    unlisted = sorted(registered - set(listed.values()))
+    assert not unlisted, (
+        f"`app.api.dev` registers `DevControlRoute`s at {unlisted} that `DEV_CONTROL_PATHS` does "
+        f"not name (it names {listed}). Every gate in this module is parametrised over that "
+        "mapping, so those controls have no environment gate and no origin check asserted "
+        "anywhere — a development-only write control reachable in production, or cross-site, with "
+        "a full green suite over the ones somebody remembered. Add the path to "
+        "`tests/fixtures/dev_console.py` beside the others and the coverage follows."
+    )
+    unregistered = sorted(set(listed.values()) - registered)
+    assert not unregistered, (
+        f"`DEV_CONTROL_PATHS` names {unregistered}, which no `DevControlRoute` in `app.api.dev` "
+        f"serves (it serves {sorted(registered)}). Every refusal this module asserts against such "
+        "a path is satisfied by the path not existing, so the rows for it are green over nothing — "
+        "and a control that was renamed rather than removed is now untested under its new name too."
     )
 
 

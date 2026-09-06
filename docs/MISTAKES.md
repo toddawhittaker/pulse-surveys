@@ -455,7 +455,7 @@ grant-shaped failure passes review as a green suite.
 
 ## 47. A route subclass's gate was discarded at dispatch while the class stayed visible
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/47-a-route-subclasss-gate-was-discarded-at-dispatch.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/47-a-route-subclasss-gate-was-discarded-at-dispatch.md)
 
 **Rule.** On the pinned FastAPI, `include_router` does not serve the route objects
 a router holds: for a plain `starlette.routing.Route` it rebuilds one from the
