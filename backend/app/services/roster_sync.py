@@ -705,6 +705,11 @@ def request_section_sync(session: Session, section_id: UUID) -> bool:
     after any section synced — which, on an hourly schedule across a few hundred
     sections, is every launch trigger there is.
 
+    **And it is closed at both ends**, which it was not until PR #178's security
+    round: a row dated *after* real now is not memory of a call and does not
+    debounce anything. See the comment on the query for the case that made an open
+    top a live defect rather than a tidiness point.
+
     **A section nobody has ever called is enqueued.** "Skip if there is any call
     row at all" passes a debounce test and turns every section into one that syncs
     exactly once.
@@ -745,10 +750,23 @@ def request_section_sync(session: Session, section_id: UUID) -> bool:
     is logged at error level, which is the visibility (`docs/MISTAKES.md` entry
     26), and the caller is told `False`.
     """
-    since = datetime.now(UTC) - DEBOUNCE_WINDOW
+    # **The window is closed at both ends** (PR #178's security round). It was
+    # `called_at >= now - DEBOUNCE_WINDOW` and open at the top, which reads as
+    # harmless — a call cannot be made in the future — and stopped being true the
+    # moment E3-08 gave `POST /dev/roster-sync` the effective clock (ADR 0142): a
+    # developer standing the clock in October writes call rows dated in October,
+    # and every launch trigger for that section is then debounced by them until
+    # real time catches up, weeks later. The debounce is *memory*, and a row dated
+    # after now is not memory of anything. The bound also holds for a clock skew or
+    # a restored dump, neither of which is this feature's doing.
+    now = datetime.now(UTC)
     recent = session.scalars(
         select(NrpsCall.id)
-        .where(NrpsCall.section_id == section_id, NrpsCall.called_at >= since)
+        .where(
+            NrpsCall.section_id == section_id,
+            NrpsCall.called_at >= now - DEBOUNCE_WINDOW,
+            NrpsCall.called_at <= now,
+        )
         .limit(1)
     ).first()
     if recent is not None:

@@ -116,6 +116,24 @@ Biology leaves the people graph exactly as it was and keeps SPEC §2.1's
   real time. That is visible to anyone reading the log by hand on a stack whose
   clock has been moved, and it is the price of a deterministic drive; the handler
   and `_record_call` both say so.
+
+- **The two clocks were not independent, and this record said they were**
+  (amended 2026-09-05, PR #178's security round). The paragraph above was written
+  beside a claim that the debounce clock and the log clock are separate concerns.
+  They share a table. SPEC §7.3's launch trigger debounces against this section's
+  own recent `nrps_call` rows, and it read them as `called_at >= now -
+  DEBOUNCE_WINDOW` with **no upper bound** — so a row this control dated in
+  October, on a stack a developer had stood in October, sat in the debounce's
+  memory and silenced every launch-triggered sync for that section until real time
+  caught up with it, weeks later. Nothing in the drive noticed, because the drive
+  uses the control rather than the launch trigger.
+
+  The bound is the fix: the probe matches rows in `[now - DEBOUNCE_WINDOW, now]`,
+  because a row dated after real now is not memory of a call. It belongs to the
+  debounce rather than to this control — a clock skew or a restored dump produces
+  the same row without any help from `/dev/roster-sync` — but this feature is what
+  made the case reachable, and the record is amended rather than rewritten so that
+  the interaction is visible to whoever adds the next writer to that log.
 - **The exit spec must run after every other end-to-end spec**, because it moves
   the clock across six weeks and makes two roster amendments the stack cannot
   undo. `playwright.config.ts` splits it into a `grade-passback-exit` project
