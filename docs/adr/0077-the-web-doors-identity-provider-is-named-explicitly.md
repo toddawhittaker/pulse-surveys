@@ -223,8 +223,9 @@ and it is already named in every refusal message.
   it by a loopback address rather than by name. This is the cost that will be
   reported as a bug, so it is written down here as a decision.
 - `is_loopback` on an IPv4-mapped IPv6 address answers `True` on Python 3.13 and
-  did not on every earlier version, so the loopback check unwraps `ipv4_mapped`
-  itself rather than resting on that. Measured on the pinned interpreter; the
+  3.14, and did not on every earlier version, so the loopback check unwraps
+  `ipv4_mapped` itself rather than resting on that. Measured on the pinned
+  interpreter, and re-measured when FIX-04 moved that pin to 3.14; the
   test that would catch a regression is the `::ffff:127.0.0.1` row.
 - **These four rules guard against a mistake, not against whoever writes the
   configuration**, and the distinction is worth stating because the rules read

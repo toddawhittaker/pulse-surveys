@@ -75,7 +75,8 @@ with a known library answer.
 - `cryptography` ships compiled wheels. It is the first dependency in this
   project with a native component that is not the database driver, and a
   platform without a wheel would build it from source. The runtime image is
-  `python:3.13-slim` on the same architecture CI builds for, so this holds today
+  `python:3.14-slim` on the same architecture CI builds for (it was
+  `python:3.13-slim` when this was written; FIX-04 moved it), so this holds today
   and would be the first thing to check on a new architecture.
 - **`backend/app/lti/` exists with one module in it, not five.** §13 lists
   `registration.py`, `launch.py`, `nrps.py`, `ags.py` and `platforms/`; E0-18

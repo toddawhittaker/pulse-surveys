@@ -587,7 +587,10 @@ an address that resolves nowhere, so that nothing in this repository trusts
 
 ## Working on the backend without containers
 
-Python 3.13 or newer (SPEC §7.1), and a virtual environment of your own making.
+Python 3.14 or newer, and a virtual environment of your own making. SPEC §7.1
+says "Python 3.13+"; this repository's own floor is 3.14, which is what
+`requires-python` in `pyproject.toml` says and what the images run, so an
+older interpreter is refused by `make install` rather than by anything here.
 
 ```sh
 python3 -m venv .venv && source .venv/bin/activate

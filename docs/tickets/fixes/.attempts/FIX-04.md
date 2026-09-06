@@ -87,3 +87,44 @@ passed**, exit 0, after the edit.
 A note for whoever reads the shell history: the hook that protects `tests/**`
 matches the whole command text positionally, so writing this log through a
 heredoc that quotes a test path is refused. Append it with an editor.
+
+## 2026-09-06 — the records that asserted 3.13, swept by the fact
+
+`grep -rn "3\.13\|py313\|cp313\|python3\.13"` over the whole tree, not just the
+seven pinned places, found six records outside them. Three were amended, three
+were left alone deliberately, and one is on the other side of the test wall.
+
+Amended:
+
+- `README.md` — "Python 3.13 or newer (SPEC §7.1)" was the setup instruction for
+  working without containers, and `requires-python = ">=3.14"` now makes `make
+  install` refuse a 3.13 interpreter. It says 3.14, and says plainly that the
+  spec's floor and this repository's are different numbers.
+- `backend/app/config.py` (~line 433) and ADR 0077 (~line 225) both say
+  `ip_address("::ffff:127.0.0.1").is_loopback` was measured `True` "on 3.13", on
+  "the pinned interpreter" — and the pinned interpreter moved. Re-measured on
+  3.14.6: `is_loopback` is `True` and `ipv4_mapped.is_loopback` is `True`, so
+  the behaviour is unchanged and both records now name both versions. The module
+  that guards the rule is green on 3.14 (95 passed).
+- ADR 0073 (~line 78) said "the runtime image is `python:3.13-slim`" in the
+  present tense, as the reason `cryptography`'s wheels hold. Now names 3.14 and
+  says which ticket moved it.
+
+Left alone, each for a reason:
+
+- `docs/SPEC.md` §7.1 says "Python 3.13+", which 3.14 satisfies. The 2026-08-24
+  dependency triage already ruled this: moving to 3.14 is a construction
+  decision, not a spec change. No spec edit, and therefore no ADR either — the
+  spec is not silent here.
+- `docs/AGENTS_INTENT.md` ("Modern Python 3.13+") is a floor, still true.
+- `.claude/agents/implementer.md` says the same thing and is a process file:
+  CLAUDE.md routes `.claude/` through a `process/` branch, not this one.
+
+Not mine to edit: a comment in the OIDC provider configuration tests
+(~line 209) says the mapped-address behaviour was "measured on Python 3.13, this
+repository's floor". The behaviour is re-measured and unchanged, but the floor
+in that sentence is now wrong. The module is green on 3.14, so this is a record
+edit rather than a finding, and it is reported to the orchestrator to route to
+whoever owns `tests/**`.
+
+Also swept: the old base-image digest `00faa2de…` appears nowhere in the tree.

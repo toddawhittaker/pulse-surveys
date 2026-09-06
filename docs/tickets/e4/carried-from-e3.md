@@ -248,3 +248,19 @@ only by its own `--help`, and that a deployment runbook is owed by E13; no
 ledger entry carried that obligation forward.
 **Owner:** E13. **Done when:** a runbook documents supply and rotation,
 naming `scripts/signing_key.py`, ADR 0126, and ADR 0143's selection rule.
+
+## ruff still lints as though the runtime were Python 3.13
+
+Not an E3 item — added by FIX-04, which moved the runtime to Python 3.14.
+Every place that declares the version says 3.14 now except one:
+`[tool.ruff] target-version` in `pyproject.toml` stays `"py313"`, because the
+pinned ruff, 0.6.9, does not know `py314` and refuses the value outright.
+The consequence is small and worth knowing: ruff's version-gated rules and
+its formatter target a language one minor behind the interpreter, so a 3.14-only
+syntax or a rule that fires only from 3.14 is not seen. A comment beside the
+line says the same thing, and FIX-04's runtime-declaration guard deliberately
+does not read this key, so nothing goes red while it waits.
+**Owner:** whoever takes the next ruff version bump — Dependabot's `pip`
+ecosystem proposes it. **Done when:** `target-version` says `py314` and the
+pinned ruff accepts it, proven by a `ruff check` that exits 0 rather than by
+the version number alone.
