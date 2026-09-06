@@ -118,10 +118,14 @@ ticket may depart from only by saying so.
    re-derives differently as data changes and leaks through its own timing.
    E4-02 stores the batch state, E4-04 builds the crossing-and-release logic
    and its ADR, and timestamps are never exposed anywhere in the path.
-8. **The reveal-subject guard takes its subject from a Care case.** The
-   carried done-when offers "or an equivalent guard"; the case-derived
-   subject is the shape that removes the caller-supplied id entirely rather
-   than validating it, and E4-01 settles the details with its ADR. It merges
+8. **The reveal-subject guard takes its subject from the record Care is acting
+   on.** The carried done-when offers "or an equivalent guard"; the
+   record-derived subject is the shape that removes the caller-supplied id
+   entirely rather than validating it, and E4-01 settled the details in
+   [ADR 0144](../../adr/0144-the-reveal-derives-its-subject-from-the-record-care-is-acting-on.md).
+   The record is a **comment**, not a Care case: there is no case model until
+   E10, so the reveal names one comment and derives its author, and E10's case
+   model wraps that without another signature change. It merges
    before E4-11, the epic's first instructor-facing surface — the inherited
    deadline, enforced by build order rather than by a sentence.
 9. **E4 takes two candidate tickets no epic owned:** the stale Care-landing
@@ -149,7 +153,7 @@ ticket may depart from only by saying so.
 
 | # | Ticket | Branch | Lane | Depends on | Summary |
 |---|---|---|---|---|---|
-| 01 | [The reveal refuses a subject reached through a reporting scope](E4-01-reveal-subject-guard.md) | `e4/reveal-subject-guard` | heavy | none | The inherited deadline: `reveal_identity` takes its subject from a Care case, and the two-hat composition is refused, before any instructor surface ships. |
+| 01 | [The reveal refuses a subject reached through a reporting scope](E4-01-reveal-subject-guard.md) | `e4/reveal-subject-guard` | heavy | none | The inherited deadline: `reveal_identity` takes its subject from the comment Care is acting on rather than from its caller (ADR 0144 — there is no case model until E10), and the two-hat composition is refused, before any instructor surface ships. |
 | 02 | [The report schema](E4-02-report-schema.md) | `e4/report-schema` | heavy | none | Everything the epic writes, before anything writes it: the summary table, the moderation-status column, the release-batch state, and their grants. |
 | 03 | [The aggregate read views](E4-03-aggregate-read-views.md) | `e4/aggregate-read-views` | heavy | none | Distributions, workload mean and median, response rate and validity rate as identity-separated views over E2's tables, per section and course week. |
 | 04 | [Comment visibility under small-N](E4-04-comment-visibility.md) | `e4/comment-visibility` | heavy ⚠ | 02 | The suppression heart: below-threshold hiding, the cumulative batched release, flag concealment, randomized order, no timestamps. Line-by-line human review. |
@@ -191,11 +195,13 @@ strings 08–11 ship.)
 free-standing, and 08, 09 and 10 build beside them against fixtures, merging
 after 16. The standing rules for parallel builds govern: partition
 sequential identifiers up front, no two tickets touching the same file,
-migration chains re-pointed at merge. The three migration-adding
-tickets are 02, 03 and 14; they take chain slots in that order off head
-`c4a8e51db9f3`, and whichever merges later re-points, as E3-01 did. ADR
-numbers are assigned per wave at cut time, next free 0144; MISTAKES next
-entry is 50.
+migration chains re-pointed at merge. The migration-adding tickets are 02, 03,
+14 and — found while building it, because its guard needs a third `SECURITY
+DEFINER` function rather than a grant (ADR 0144) — **01**. They take chain slots
+in that order off head `c4a8e51db9f3`, and whichever merges later re-points, as
+E3-01 did. ADR numbers are assigned per wave at cut time, next free 0145 —
+**E4-01 took 0144**, so two branches proposing 0145 is a conflict to resolve
+rather than a number to share; MISTAKES next entry is 50.
 
 ## The payload sketch the frontend builds against
 
