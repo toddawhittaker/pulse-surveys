@@ -1169,6 +1169,26 @@ def line_item_maximum(line_item: Mapping[str, Any]) -> float:
     in the wrong place, naming the wrong thing, one guard too late. The message
     below named all three all along; now the code does.
 
+    **For a zero or a negative maximum this guard is the last control before the
+    wire**, and the two halves of the refusal are not equally defended: the
+    non-finite half has an in-process fallback in `_score_document`'s JSON-number
+    check, and the sign half has none. Measured by deleting the guard in PR #178's
+    battery — a score against a column out of zero then reaches the platform as
+    `scoreGiven` 0 beside `scoreMaximum` 0.0, and nothing in AGS 2.0 obliges a
+    platform to refuse it. This tool's own mock answers 422 because ADR 0051 had it
+    refuse a disagreeing maximum rather than rescale, which is the mock's decision
+    and not a property of the protocol; a platform that stored the pair would put
+    an undefined fraction in a student's gradebook.
+
+    **The enumeration above reaches every value this guard *judges*, and one it
+    does not.** `math.isfinite` raises `OverflowError` on an `int` too large to
+    convert to a float — a value a platform can legally send — and that escapes as
+    an unhandled error rather than as a refusal this function decided, so what
+    catches it is the sweep's per-section rollback. Fail-closed, and accepted on
+    that ground: nothing is posted either way, and the section is walked past with
+    a worse log line than the refusal below would have given. It is stated here so
+    the list is not read as wider than it is.
+
     Nothing is dialled before this answers. The refusal is raised rather than
     logged-and-skipped here because this module's job is one call: the sweep is what
     walks a section past, in `app.services.grading`, with the log line ADR 0135's
