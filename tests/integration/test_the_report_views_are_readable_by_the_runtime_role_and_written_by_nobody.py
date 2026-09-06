@@ -12,13 +12,19 @@ follow from that sentence and each has a test here.
     "a suite that drives a service through the migrating engine has not tested
     the grant at all" — so two of the three tests below open the application
     connection and one of them reads real rows through it.
-  - **Only the read works.** `SELECT` and nothing else means an `INSERT`, an
-    `UPDATE` and a `DELETE` are refused, and refused *for want of privilege*.
-    That distinction is the point of asserting the SQLSTATE rather than the
-    exception: an aggregate view is not auto-updatable, so Postgres would refuse
-    a write to it with `55000` even if the grant were `ALL` — a second defence
-    layer producing the same visible outcome, which is what turns a green guard
-    into a guard nobody has actually run.
+  - **Only the read works.** `SELECT` and nothing else means the role holds no
+    `INSERT`, `UPDATE` or `DELETE` on any of the three, and that is asked of the
+    **ACL** rather than of a statement. Attempting the write cannot answer it on
+    this platform: all three views are aggregates, and PostgreSQL refuses a write
+    to a view it cannot make auto-updatable during *rewriting*, before the
+    privilege check the executor would make — so the refusal is `55000` from a
+    role holding nothing and `55000` from a role holding `ALL PRIVILEGES` alike,
+    and a statement-level test cannot tell the two apart. That was measured on
+    the pinned server, in both directions and against a plain-view canary, in
+    `docs/disputes/E4-03-01.md`, which is also where the two ways of *making* the
+    statement observable — an `INSTEAD OF` trigger, a `DO INSTEAD NOTHING` rule —
+    are rejected: both remove the second line of defence in order to watch the
+    first, on a confidentiality-critical read path.
   - **Nothing wider than the read.** That half is asserted next door, in
     `tests/integration/test_identity_grants.py`, whose `SANCTIONED_VIEW_COLUMNS`
     now carries an entry per report view: the columns `pulse_app` may select are
@@ -42,7 +48,6 @@ from fixtures.report_views import (
     report_view_columns,
     require_report_view,
 )
-from fixtures.supervision import sqlstate_of
 from sqlalchemy import text
 from sqlalchemy.exc import DatabaseError
 
@@ -55,23 +60,28 @@ pytestmark = pytest.mark.integration
 # `tests/` on `sys.path`.
 APPLICATION_ROLE = "pulse_app"
 
-# `insufficient_privilege`. The class of refusal this ticket's grants are about,
-# and the one that has to be told apart from `55000` (`object_not_in_prerequisite
-# _state`), which is what Postgres answers for a write to a view it cannot make
-# auto-updatable — an aggregate view, which all three of these are.
-INSUFFICIENT_PRIVILEGE = "42501"
-NOT_UPDATABLE = "55000"
+# The ACL asked directly, with every name bound rather than interpolated. It is
+# the question `test_identity_grants.py` already asks of a base table, spelled the
+# same way, and `docs/disputes/E4-03-01.md` is why the difference between asking
+# the ACL and attempting the write decides this test.
+HAS_TABLE_PRIVILEGE = "SELECT has_table_privilege(:role, :relation, :privilege)"
 
-# The three verbs the grants file must not confer, each written so that the only
-# thing standing in its way is a privilege. No row is named and no value has to be
-# valid: the ACL is checked before any of that matters.
-WRITE_STATEMENTS = {
-    "insert": "INSERT INTO public.{view} ({column}) VALUES (NULL)",
-    "update": "UPDATE public.{view} SET {column} = {column}",
-    "delete": "DELETE FROM public.{view}",
-}
+# The privilege `report_read_grants_v001.sql` does confer, used as this probe's
+# control: the same role, the same relation, an answer that must be `true`.
+# Without it, a probe answering `false` to everything — a role that exists and is
+# not this one, a relation the function resolved somewhere else — would satisfy
+# every case below while reading nothing (`docs/MISTAKES.md` entry 35: require a
+# guard to *find* a privilege on a subject that certainly has one).
+READ_PRIVILEGE = "SELECT"
 
-WRITE_CASES = [(view, verb) for view in sorted(REPORT_VIEWS) for verb in sorted(WRITE_STATEMENTS)]
+# The three verbs the grants file must not confer. `TRUNCATE`, `REFERENCES` and
+# `TRIGGER` are the other table privileges Postgres knows and are deliberately not
+# probed: the ruling on E4-03-01 names these three, and each of them is a way to
+# change what a week's report says. `GRANT ALL` confers all six at once, so the
+# mutation this is written against is caught whichever three are asked.
+WRITE_PRIVILEGES = ("INSERT", "UPDATE", "DELETE")
+
+WRITE_CASES = [(view, privilege) for view in sorted(REPORT_VIEWS) for privilege in WRITE_PRIVILEGES]
 
 # The committed world the third test reads through the application connection.
 INSTRUCTOR_RATING = 1
@@ -130,59 +140,84 @@ def test_the_runtime_role_may_read_each_report_view(
 
 
 @pytest.mark.parametrize(
-    ("view", "verb"), WRITE_CASES, ids=[f"{view}-{verb}" for view, verb in WRITE_CASES]
+    ("view", "privilege"),
+    WRITE_CASES,
+    ids=[f"{view}-{privilege.lower()}" for view, privilege in WRITE_CASES],
 )
-def test_the_runtime_role_may_not_write_to_a_report_view(
-    migrated_engine: Any, application_engine: Any, view: str, verb: str
+def test_the_runtime_role_holds_no_write_privilege_on_a_report_view(
+    db_session: Any, view: str, privilege: str
 ) -> None:
-    """`SELECT` "and nothing else" — the other three verbs, refused for want of privilege.
+    """`SELECT` "and nothing else" — asked of the ACL, which is where the answer lives.
 
-    **The SQLSTATE is asserted rather than the exception**, and that is the whole
-    design of this test. Two layers refuse a write here: the ACL, because the
-    grants file confers only `SELECT`; and the rewriter, because a view with a
-    `GROUP BY` is not auto-updatable. The second answers `55000` and would produce
-    an identically green test against a grants file that had handed this role
-    `ALL PRIVILEGES` — so a test that merely required "something raised" would be
-    satisfied by the layer this ticket does not own, and a widened grant would
-    ship green.
+    **This asks the catalog rather than attempting the write, and that is a
+    ruling rather than a preference** (`docs/disputes/E4-03-01.md`). The first
+    version of this test ran an `INSERT`, an `UPDATE` and a `DELETE` as
+    `pulse_app` and required SQLSTATE `42501`, on the reasoning that a bare
+    "something raised" would also be satisfied by the rewriter refusing a
+    non-auto-updatable view. The measurement went the other way: PostgreSQL
+    rewrites before it executes, so the not-auto-updatable refusal — `55000` —
+    comes back *before* the privilege check, from a role holding nothing and from
+    a role holding `ALL PRIVILEGES` alike. `42501` was therefore not merely the
+    answer this grants file does not produce; it is an answer no grants file can
+    produce for an aggregate view, so the assertion could not pass and could not
+    discriminate. The two constructions that would make it observable — an
+    `INSTEAD OF` trigger, a `DO INSTEAD NOTHING` rule — were rejected in the same
+    ruling as machinery built to make a wrong assertion satisfiable, at the cost
+    of the very defence the wrong assertion was reaching past.
 
-    **The mutation it exists to survive**: `GRANT SELECT` widened to `GRANT ALL`
-    or to `GRANT SELECT, INSERT, UPDATE, DELETE` in
-    `report_read_grants_v001.sql`, which flips the SQLSTATE from `42501` to
-    `55000` — a difference nothing else in this suite reads.
+    `has_table_privilege` reads the grant itself, which is what the work order's
+    "SELECT on the three views and nothing else" is a sentence about, and what
+    `report_read_grants_v001.sql` is a file about.
+
+    **The control is the read.** The same probe, the same role and the same
+    relation must answer `true` for `SELECT`, so a case that passes because the
+    function was answering about something else — a role that exists and is not
+    this one, a relation resolved elsewhere on the search path — fails here
+    instead of passing silently.
+
+    **The mutation it exists to survive**: `GRANT ALL ON public.<view> TO
+    pulse_app` in `report_read_grants_v001.sql`. That flips this probe to `true`
+    for every write verb, so all three cases of the widened view go red —
+    `<view>-insert`, `<view>-update` and `<view>-delete` together — and nothing
+    else in the suite reads it: `test_identity_grants.py`'s column enumeration
+    filters on `privilege_type = 'SELECT'`, and its base-table equality is about
+    tables.
+    **The near miss it distinguishes**: `GRANT INSERT` alone. Only
+    `<view>-insert` goes red for that one; `<view>-update` and `<view>-delete`
+    stay green, and correctly — they are separate privileges and each case
+    asserts its own. That is what the parametrisation buys over one assertion
+    covering all three verbs at once, which would name neither the verb nor the
+    view in its failure.
     """
-    with migrated_engine.connect() as connection:
-        columns = require_report_view(connection, view)
+    require_report_view(db_session, view)
 
-    statement = WRITE_STATEMENTS[verb].format(view=view, column=columns[0])
-    refused: DatabaseError | None = None
-    with application_engine.connect() as connection:
-        role = connection.execute(text("SELECT current_user")).scalar_one()
-        assert (
-            role == APPLICATION_ROLE
-        ), f"This connection reports itself as {role!r} rather than as {APPLICATION_ROLE!r}."
-        try:
-            connection.execute(text(statement))
-        except DatabaseError as failure:
-            refused = failure
-        finally:
-            connection.rollback()
+    relation = f"public.{view}"
+    reads = db_session.execute(
+        text(HAS_TABLE_PRIVILEGE),
+        {"role": APPLICATION_ROLE, "relation": relation, "privilege": READ_PRIVILEGE},
+    ).scalar_one()
+    assert reads is True, (
+        f"`has_table_privilege` says `{APPLICATION_ROLE}` holds no `{READ_PRIVILEGE}` on "
+        f"`{relation}`, so this probe cannot see a privilege the role certainly has and its answer "
+        "about the write verbs says nothing (`docs/MISTAKES.md` entry 35). Either the grants file "
+        "is missing — `test_the_runtime_role_may_read_each_report_view` in this module is where "
+        "that is diagnosed — or this probe is asking about the wrong role or the wrong relation."
+    )
 
-    assert refused is not None, (
-        f"`{APPLICATION_ROLE}` was allowed to run `{statement}`. The work order settles this "
+    holds = db_session.execute(
+        text(HAS_TABLE_PRIVILEGE),
+        {"role": APPLICATION_ROLE, "relation": relation, "privilege": privilege},
+    ).scalar_one()
+    assert holds is False, (
+        f"`{APPLICATION_ROLE}` holds `{privilege}` on `{relation}`. E4-03's work order settles this "
         "ticket's grants as `SELECT` on the three views and nothing else, and these are read views "
         "over the responses students submitted: a runtime role that can write to one can rewrite a "
-        "week's report."
-    )
-    code = sqlstate_of(refused)
-    assert code == INSUFFICIENT_PRIVILEGE, (
-        f"`{statement}` was refused with SQLSTATE {code!r}, not {INSUFFICIENT_PRIVILEGE!r}: "
-        f"{refused}\n\n"
-        f"{NOT_UPDATABLE!r} is Postgres refusing a write to a view it cannot make "
-        "auto-updatable, which every aggregate view is — so it is the answer this statement gets "
-        "whatever the grants say, including from a role holding `ALL PRIVILEGES`. This test is "
-        "about the grant, so it requires the refusal to come from the ACL: that is the layer "
-        "E4-03 owns and the only one that would notice a widened `GRANT`."
+        "week's report.\n\n"
+        "The privilege is read from the ACL rather than inferred from a refused statement, because "
+        "an aggregate view refuses every write with `55000` during rewriting whatever the ACL says "
+        "— so the statement is refused either way and the grant is the only place the difference "
+        "is visible (`docs/disputes/E4-03-01.md` carries the measurement, at every point on the "
+        "ACL scale and with a plain-view canary)."
     )
 
 
