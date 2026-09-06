@@ -107,6 +107,11 @@ boundary: `metadata_tables` is asked for by both.
     the same-origin value a browser would send from that page. The shared home
     for a builder four modules already keep a copy of; those copies are not
     migrated yet, and the file says so.
+  - `fixtures/care_subject.py` — E4-01: the names that ticket's work order
+    settles, the comment a Care reveal derives its subject from (planted through
+    the model layer, since the moderation task that would write one is E6's), the
+    two-hat actor and a `user_id` off the roster of the section she teaches, and
+    the `audit_log` rows one actor left, read on a second connection.
 
 Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
@@ -168,6 +173,7 @@ pytest_plugins = (
     "fixtures.line_item_creation",
     "fixtures.grade_sweep",
     "fixtures.dev_console",
+    "fixtures.care_subject",
 )
 
 
