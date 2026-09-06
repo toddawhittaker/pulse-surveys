@@ -12,10 +12,14 @@ error: an institution running an LMS nobody has met should still get its grades
 posted, by the book, and find out that the book was wrong from a refused post
 rather than from a tool that would not try.
 
-**One profile is written and it is the mock's** (ADR 0132). Canvas, Moodle, D2L
-and Blackboard are named in SPEC §7.3 and are on E3's deliberately-not-done list,
-because a quirk file written from a vendor's documentation against a platform
-nobody here has posted a grade to is a guess recorded as a fact.
+**One profile is written and it is the mock's**, which is SPEC §14.3's own E3
+entry: "`PlatformProfile` ships as the mechanism plus the mock's profile only —
+the Canvas, Moodle, D2L and Blackboard adapters of §7.3 wait for a platform
+someone has actually launched from." A quirk file written from a vendor's
+documentation against a platform nobody here has posted a grade to is a guess
+recorded as a fact. (ADR 0132 puts this package *where* §13 does and decides
+nothing about how many profiles it holds; the citation here used to read as if it
+did.)
 
 `profile_for` is the only public callable here on purpose, and it is imported by
 name into `app.lti.ags` and called through that module's own global — so a test

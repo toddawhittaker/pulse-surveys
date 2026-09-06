@@ -8,11 +8,19 @@ An operator runs this against a deployment's database:
     python scripts/signing_key.py retire <kid>   # take one key out of the set
 
 `docs/adr/0126` records why the supply path is a command rather than a
-configuration variable or a key service, and `docs/adr/0127` records the rotation
-rule this spells: the published key set is every row of `tool_signing_key` with
-`retired_at IS NULL`, and the tool signs with the newest of those. So a rotation
-is `generate`, then a wait long enough for every platform to refetch the key set,
-then `retire` on the old key — and `list` is how the state in between is read.
+configuration variable or a key service. `docs/adr/0127` records the published
+set — every row of `tool_signing_key` with `retired_at IS NULL` — and
+`docs/adr/0143` records which of those signs: the **oldest**. So the two commands
+do one thing each. `generate` publishes a key beside the incumbent and switches
+nothing; then a wait long enough for every platform to re-fetch the key set; then
+`retire` on the old key, which is the switch. `list` is how the state in between
+is read.
+
+That order is the whole point of the rule, and it reversed at E3-08's boundary
+review: while the newest key signed, `generate` *was* the switch, so the tool
+began signing with a `kid` no platform had fetched and every service call failed
+until each platform happened to look again — an outage with no bound an operator
+could see, at the moment they were being careful.
 
 ## What it connects as, and why not the obvious thing
 

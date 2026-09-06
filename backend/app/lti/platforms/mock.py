@@ -9,7 +9,9 @@ than only by a test that substitutes one.
 **It is the only profile that ships.** Canvas, Moodle, D2L and Blackboard are on
 E3's deliberately-not-done list: a quirk file written from a vendor's
 documentation, against a platform nobody here has posted a grade to, is a guess
-recorded as a fact. ADR 0132 records the ruling.
+recorded as a fact. SPEC §14.3's E3 entry records the ruling — "the mechanism plus
+the mock's profile only" — and ADR 0132, which this sentence used to cite for it,
+decides where the package lives rather than what is in it.
 """
 
 from typing import Final
