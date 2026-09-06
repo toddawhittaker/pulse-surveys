@@ -78,7 +78,12 @@ from fixtures.doors import (
 )
 from fixtures.mock_ai import MOCK_AI_PROVIDER_BASE_URL_VARIABLE
 from fixtures.routing import every_route
-from fixtures.supervision import foreign_key_columns, require_table, single_primary_key
+from fixtures.supervision import (
+    STREAM_OF_POSITION,
+    foreign_key_columns,
+    require_table,
+    single_primary_key,
+)
 from fixtures.survey_windows import (
     COHORT_SECTION_MODALITY,
     COHORT_SECTION_ORDINAL,
@@ -280,23 +285,20 @@ SHAPE_OF_POSITION = {
 # §5.1 groups under nothing — the report has two comment groups, "About the
 # instructor" and "About the course", and no third.
 #
-# **Written here rather than left to the seeding walker**, which fills the column
-# with a stream that satisfies E4-02's `CHECK`s and means nothing (see
-# `fill_dependent_columns` in tests/fixtures/supervision.py). These five *are*
-# §3.2's five, so a world built here is one whose questions carry the stream they
-# really have — and every ticket from E4-03 on reads that column to decide which
-# group a comment appears in. Applied only where the column exists, so this stays
-# a no-op until E4-02's migration lands.
+# **The mapping itself is `STREAM_OF_POSITION`, imported from the shared seeding
+# walker rather than written again here**, which is the repair
+# `docs/disputes/E4-02-02.md` settled. The walker fills the column by that same
+# mapping now, so a question carries the stream E4-02's migration re-derives for
+# it whichever route seeded it, and a round trip that drops the column and
+# backfills it comes back byte-identical. A second copy of §3.2's numbering in
+# the same fixture package is the shape that record quotes — one guarantee held
+# in two places is a guarantee neither place holds.
+#
+# What is still this fixture's own is *naming* the column at all: these five are
+# §3.2's five, so their streams are the ones they really have rather than the
+# walker's fill, and the two now agree by construction. Applied only where the
+# column exists, so it stays a no-op until E4-02's migration lands.
 STREAM_COLUMN = "stream"
-INSTRUCTOR_STREAM = "INSTRUCTOR"
-COURSE_STREAM = "COURSE"
-STREAM_OF_POSITION: dict[int, str | None] = {
-    INSTRUCTOR_RATING_POSITION: INSTRUCTOR_STREAM,
-    INSTRUCTOR_COMMENT_POSITION: INSTRUCTOR_STREAM,
-    COURSE_RATING_POSITION: COURSE_STREAM,
-    COURSE_COMMENT_POSITION: COURSE_STREAM,
-    WORKLOAD_POSITION: None,
-}
 
 # ---------------------------------------------------------------------------
 # This suite's own values. None of them is a claim about anything the system

@@ -30,6 +30,12 @@ modules red inside their own fixtures. The planted half asks that question and
 asks nothing about which stream a sixth question gets, because the ticket does
 not settle it.
 
+**No walk here reaches `base`, and that is a ruling rather than an omission.**
+`docs/disputes/E4-02-01.md`: revision `e046c1b23e54` refuses a downgrade against
+a seeded database by its own documented design, identically with and without this
+ticket, so "a full downgrade" is read as the full downgrade *of this revision*.
+The first test below carries the whole argument and the measurement behind it.
+
 **Each test migrates a database of its own**, so a downgrade here cannot touch
 the session database every other integration test reads (`docs/MISTAKES.md`
 entry 12).
@@ -47,6 +53,7 @@ from fixtures.migration_journey import (
     MODEL_SCHEMA,
     columns_the_database_reports,
     migrate,
+    require_revision,
     session_on,
 )
 from fixtures.supervision import seed_row
@@ -104,6 +111,21 @@ AN_EIGHTH_POSITION = 8
 # and two other tickets take the slots beside it, so anything past this is a
 # downgrade that is not undoing what it is supposed to undo.
 MOST_STEPS_DOWN = 12
+
+# The revision E4-02's own chains from — the head this branch was cut from, named
+# by the work order. It is the floor of the seeded trip below, and
+# `docs/disputes/E4-02-01.md` is why the walk stops there rather than at `base`:
+# `e046c1b23e54`, twenty revisions further down, refuses a seeded downgrade by its
+# own design.
+#
+# **Resolved through `require_revision` rather than handed to Alembic**, so that a
+# merge which re-points this chain — E4-14 is expected to — fails with a message
+# naming what the revision is *for* instead of with `Can't locate revision`. This
+# constant is the one line that changes then.
+THE_REVISION_THIS_TICKET_CHAINS_FROM = "c4a8e51db9f3"
+THE_HEAD_THIS_BRANCH_WAS_CUT_FROM = (
+    "the head E4-02's revision chains from, and the floor of the seeded round trip"
+)
 
 SCHEMA_OF_ONE_TABLE = text(
     """
@@ -201,59 +223,122 @@ def questions_below_the_revision(database: Any) -> list[dict[str, Any]]:
         return [dict(row) for row in session.execute(QUESTIONS_BELOW_THE_REVISION).mappings()]
 
 
-def test_a_seeded_database_downgrades_all_the_way_to_base(
+def test_the_revision_runs_both_ways_against_a_database_with_rows_in_it(
     demo_databases: Any, alembic_config_pointed_at: Any
 ) -> None:
-    """Criterion 1: a full downgrade succeeds against a database with rows in it.
+    """Criterion 1: this ticket's revision applies and undoes against a seeded database.
 
-    "Full" is the word that makes this different from the round trip below: the
-    chain is run to `base`, so E4-02's downgrade runs against a populated database
-    and then every revision under it does too. What that catches is a downgrade
-    that cannot drop what it created while something references it — a foreign key
-    from the membership table to `answer`, or a constraint dropped in the wrong
-    order — none of which an empty database can show.
+    The whole trip is made over rows: a seeded database is walked from head down to
+    the revision this ticket's own chains from, and back up. What that catches is
+    everything an empty database cannot show — a `CHECK` created over rows that
+    contradict it, a column dropped from a populated table, a table dropped while
+    something still references it, and the ordering inside this ticket's own
+    `downgrade()` (`release_batch` before `release_batch_member` succeeds on an
+    empty database and is refused on a populated one).
+
+    **The walk stops one revision below this ticket's, and that bound is
+    deliberate rather than convenient.** `docs/disputes/E4-02-01.md` settles why:
+    revision `e046c1b23e54`, twenty below this one, refuses a downgrade against a
+    seeded database *by design* — it re-narrows the start-letter map's check to
+    `^[A-Z]$`, which SPEC §2.2's 3-week cohorts (numbered 2 through 7) contradict,
+    and its own docstring argues for that refusal as the loud direction. The
+    behaviour is byte-identical with and without E4-02, measured on a scratch
+    database standing at `c4a8e51db9f3` with none of this ticket's schema applied.
+    So a walk to `base` would assert the negation of a property another ticket
+    chose on purpose, and would go red against every implementation of this ticket
+    equally — a test that cannot tell a correct implementation from an incorrect
+    one (`docs/MISTAKES.md` entry 24). What a rollback should do with those six
+    numbered start positions is a data question, and the ticket that answers it is
+    where a walk to `base` belongs.
+
+    Criterion 1's "a full downgrade" is read here as the full downgrade *of this
+    revision*, as against a partial one — which is what every other round-trip
+    module in this repository measures.
 
     **The seed is the control**, and it is asserted rather than assumed: a seed run
     that failed would leave a database as empty as `test_alembic_baseline.py`'s,
-    and the downgrade would then prove nothing this repository did not already
-    know (`docs/MISTAKES.md` entry 3). `scripts/seed.py` writes SPEC §3.2's five
-    questions among the rest, which is also the population `question.stream`'s
-    backfill has to have handled for the upgrade to have got here at all.
+    and the trip would then prove nothing this repository did not already know
+    (`docs/MISTAKES.md` entry 3). `scripts/seed.py` writes SPEC §3.2's five
+    questions among the rest, which is the population `question.stream`'s two
+    `CHECK`s and its backfill have to have handled for the upgrade to have got here
+    at all.
 
-    **The mutation it kills:** `downgrade()` left as a `pass`, which is the single
-    most likely way this criterion is met without being satisfied — and, one step
-    subtler, a downgrade that drops `release_batch` before `release_batch_member`,
-    which succeeds on an empty database and refuses on a populated one.
+    **The middle of the trip is asserted too**, for the same reason: at the
+    revision below, the four tables and the column really are gone. A `downgrade()`
+    left as a `pass` round-trips perfectly and proves nothing.
+
+    **What this does not assert:** which stream each question came back carrying.
+    That is the next test's subject, and asserting it here as well would be one
+    rule held in two places (`docs/MISTAKES.md` entry 19). What is compared here is
+    that the instrument survived the trip — the same ordinals with the same kinds,
+    none lost and none invented.
+
+    **The mutation it kills:** a `downgrade()` that drops the four tables and
+    leaves `question.stream`, so the re-upgrade meets a column it is about to add;
+    and a downgrade that takes the question rows with it, which the comparison in
+    the middle is what sees.
     """
     demo = demo_databases()
     run = demo.run()
     assert run.succeeded, (
-        "The demo seed did not run, so what is downgraded below is an empty database and this "
-        f"test's subject — a *seeded* one — is not what was measured.\n\n{run.report()}"
+        "The demo seed did not run, so what is walked below is an empty database and this test's "
+        f"subject — a *seeded* one — is not what was measured.\n\n{run.report()}"
     )
     require_the_report_schema(demo.database)
 
-    seeded = questions_in(demo.database)
+    seeded = [(row[POSITION_COLUMN], row[KIND_COLUMN]) for row in questions_in(demo.database)]
     assert seeded, (
-        f"`{QUESTION}` holds no rows after the seed ran successfully, so the full downgrade below "
-        "would be over a database with nothing in the table this ticket alters. "
+        f"`{QUESTION}` holds no rows after the seed ran successfully, so the trip below would be "
+        "over a database with nothing in the table this ticket alters. "
         "`tests/integration/test_demo_seed_script.py` is where a seed that writes no question set "
         "is diagnosed."
     )
 
     config = alembic_config_pointed_at(demo.database)
-    migrate(config, "downgrade", "base", "taking a seeded database all the way down")
+    below = require_revision(
+        config, THE_REVISION_THIS_TICKET_CHAINS_FROM, THE_HEAD_THIS_BRANCH_WAS_CUT_FROM
+    )
+    migrate(config, "downgrade", below, "undoing this ticket's revision on a seeded database")
 
     standing = {
-        name: sorted(columns_the_database_reports(demo.database, name))
-        for name in (*REPORT_TABLES, QUESTION)
+        name: sorted(columns_the_database_reports(demo.database, name)) for name in REPORT_TABLES
     }
     left = {name: columns for name, columns in standing.items() if columns}
     assert not left, (
-        f"After `alembic downgrade base` the database still holds {left}. A full downgrade unwinds "
-        "the whole chain, so every table any revision created is gone — a table left behind is one "
-        "the next upgrade is about to try to create, and the operator who ran the downgrade is the "
-        "only person who has that database."
+        f"After downgrading a seeded database to {below} the tables {left} are still here. That "
+        "revision is the one this ticket's chains from, so everything E4-02 created is undone by "
+        "the time the database stands on it — a table left behind is one the re-upgrade is about "
+        "to try to create, and 'the trip completed' would then be true of a downgrade that did "
+        "nothing."
+    )
+    on_question = columns_the_database_reports(demo.database, QUESTION)
+    assert STREAM_COLUMN not in on_question, (
+        f"After downgrading to {below}, `{QUESTION}` still carries `{STREAM_COLUMN}`: it carries "
+        f"{sorted(on_question)}. The same revision adds the column and the four tables, so its "
+        "downgrade takes all five away; a column left behind is one the re-upgrade meets where it "
+        "is about to add one, which is the shape E2-16 was written to repair."
+    )
+
+    survived = [
+        (row[POSITION_COLUMN], row[KIND_COLUMN])
+        for row in questions_below_the_revision(demo.database)
+    ]
+    assert survived == seeded, (
+        f"Standing at {below} the question table holds {survived}; before the downgrade it held "
+        f"{seeded}. This ticket's downgrade drops a column, not rows — a downgrade that took the "
+        "seeded instrument with it would leave the re-upgrade nothing to backfill, and every "
+        "assertion after it satisfied by an empty table."
+    )
+
+    migrate(config, "upgrade", MODEL_SCHEMA, "re-applying it over the rows that were already there")
+    require_the_report_schema(demo.database)
+
+    back = [(row[POSITION_COLUMN], row[KIND_COLUMN]) for row in questions_in(demo.database)]
+    assert back == seeded, (
+        f"After the trip the question table holds {back}; before it, {seeded}. The upgrade adds a "
+        "column and fills it over rows that were already there — it neither writes a question nor "
+        "removes one, and a re-upgrade that changed the instrument would have changed what every "
+        "student is asked."
     )
 
 
@@ -405,12 +490,26 @@ def test_the_upgrade_gives_a_stream_to_every_question_it_finds(
 
     **The values planted at head are not the subject and are not compared.** The
     column is dropped on the way down, so nothing survives to preserve; what is
-    read afterwards is whatever the upgrade wrote.
+    read afterwards is whatever the upgrade wrote. Ordinal 6 is planted
+    `INSTRUCTOR` deliberately, which is *not* what a backfill ending in an `ELSE`
+    would give it — so a preserve-and-restore added to the migration is visible
+    here as a row that came back carrying what this module wrote. It is not
+    asserted on, because which stream an ordinal outside §3.2's five gets is the
+    migration's choice and pinning it here would decide something the ticket
+    leaves open.
 
     **The mutation it kills:** a backfill written as `WHERE position IN (1, 2, 3,
     4)`, which fills the shipped set and leaves every other question null — green
-    against the seeded set one test up, and an upgrade that aborts against any
-    database whose question set has ever changed.
+    against the seeded set one test up.
+
+    **How that mutation actually fails here, said exactly** (`docs/MISTAKES.md`
+    entry 14): not on the assertion below, but on the upgrade. The first `CHECK`
+    is created over rows that are already there, so a non-workload question the
+    backfill skipped makes `ALTER TABLE … ADD CONSTRAINT` refuse and the whole
+    revision roll back — `migrate()` reports the step that did not complete, and
+    everything after it is unreached. The assertion below is what catches the
+    narrower case where the backfill is partial *and* the `CHECK` is missing or
+    created before the fill, which is the same defect one step less visible.
     """
     config = alembic_config_pointed_at(empty_database)
     migrate(config, "upgrade", MODEL_SCHEMA, "putting an empty database into the models' shape")
