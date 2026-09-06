@@ -249,6 +249,37 @@ ledger entry carried that obligation forward.
 **Owner:** E13. **Done when:** a runbook documents supply and rotation,
 naming `scripts/signing_key.py`, ADR 0126, and ADR 0143's selection rule.
 
+## The daily purge of the launch replay ledger cannot run
+
+Not an E3 item — found by FIX-04's Celery drive on 2026-09-06, and live since
+E1-08 shipped the ledger on 2026-08-26. The beat entry
+`app.jobs.tasks.purge_launch_nonces` raises
+`psycopg.errors.InsufficientPrivilege: permission denied for table
+lti_launch_nonce` every run. The cause is not the runtime move and not the task:
+`backend/app/views_sql/lti_launch_nonce_grants_v001.sql` grants `pulse_app`
+`INSERT, DELETE` and withholds `SELECT` on purpose, and Postgres requires
+`SELECT` on the columns a `DELETE ... WHERE` reads — the purge deletes on
+`expires_at`. Measured as `pulse_app` on the dev database: `DELETE ... WHERE
+expires_at < now()` refused, the same `DELETE` with no `WHERE` permitted, the
+same `DELETE ... WHERE` on `lti_launch_state` permitted because that table's
+grant includes `SELECT`. The launch path itself is unaffected — `claim_nonce`'s
+`INSERT` is permitted — so what this costs is the ledger's expired tail, which
+ADR 0089 says the daily purge exists to reclaim: the table grows without bound.
+The half of the task that purges `lti_launch_state` never runs either, because
+the nonce half raises first.
+
+Nothing about this was fixable inside FIX-04: widening the grant means a
+`GRANT SELECT` (or a column-scoped one on `expires_at`), a decision about what a
+role that can enumerate spent nonces learns, and a matching entry in
+`RUNTIME_BASE_TABLE_PRIVILEGES` — which lives behind the test wall.
+
+**Owner:** whichever epic next touches launch validation or the runtime grants;
+a candidate for a standalone fix ticket, since it is small and currently silent.
+**Done when:** the purge completes as `pulse_app` against a table holding
+expired rows, proven by driving the task rather than by reading the grant, and
+the privilege record names whatever was added with the reason `SELECT` was
+withheld in the first place.
+
 ## ruff still lints as though the runtime were Python 3.13
 
 Not an E3 item — added by FIX-04, which moved the runtime to Python 3.14.

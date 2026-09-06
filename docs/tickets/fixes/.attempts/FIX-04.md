@@ -128,3 +128,91 @@ edit rather than a finding, and it is reported to the orchestrator to route to
 whoever owns `tests/**`.
 
 Also swept: the old base-image digest `00faa2de…` appears nowhere in the tree.
+
+## 2026-09-06 — the gates, on a frozen tree
+
+Every gate below ran with nothing uncommitted, each redirected to a file and
+each exit status read from `$?` rather than through a pipe (`docs/MISTAKES.md`
+entry 34). Logs are in the session scratchpad under the names given.
+
+| Gate | Exit | Result | Log |
+|---|---|---|---|
+| `ruff format --check .` | 0 | 398 files already formatted | `gate-ruff-format.txt` |
+| `ruff check .` | 0 | All checks passed | `gate-ruff-check.txt` |
+| `make typecheck` | 0 | mypy: 76 + 12 + 7 + 4 files, no issues; `tsc --noEmit` clean | `gate-typecheck.txt` |
+| unit + integration, `-n 4` | 0 | 2990 passed in 4m37s | `gate-pytest-final.txt` |
+| `make invariants` | 0 | 240 invariant tests ran, none skipped; 176 marked tests each assert something | `gate-invariants.txt` |
+| `make docker-build` | 0 | images built, contents checked, E0-02/E0-03 stack criteria all met | `gate-docker-build.txt` |
+
+The images were rebuilt before any of this: `docker compose up -d --build`, then
+`python -V` inside each of api, worker, mock-ai, mock-idp and mock-lms reports
+**3.14.7**, so no gate ran against a stale image (`docs/MISTAKES.md` entry 12).
+`make docker-build` built them again from scratch and its own health criteria
+passed, including beat keeping its schedule file and the worker going unhealthy
+when Redis stops.
+
+No migration moved, so `alembic check` was not part of this.
+
+## 2026-09-06 — Celery on 3.14, driven rather than argued
+
+The multiprocessing change the ticket flagged is real and visible in the
+container: `multiprocessing.get_start_method()` answers **`forkserver`** on
+3.14.7 where it answered `fork` before. Celery's prefork pool does not use it —
+it rides billiard, which forks itself — and the drive says so.
+
+```
+docker compose exec -T worker celery --app app.jobs.celery_app inspect ping
+->  celery@61df1d56ad95: OK
+        pong
+1 node online.
+```
+
+Three real tasks called, `celery --app app.jobs.celery_app call <name>`, and the
+worker log read afterwards:
+
+```
+Task app.jobs.tasks.ping[f653a5c9…] succeeded in 0.0037s: 'pong'
+Task app.jobs.tasks.purge_launch_nonces[3f232814…] raised unexpected:
+  ProgrammingError('(psycopg.errors.InsufficientPrivilege) permission denied
+  for table lti_launch_nonce')
+Task app.jobs.tasks.derive_survey_windows[68cf22d9…] succeeded in 0.0131s: None
+```
+
+Both successes ran in `ForkPoolWorker-32`, a pool child, so acceptance criterion
+4 is met: a worker on the rebuilt images accepts a task and completes it, and the
+one that reaches the database (`derive_survey_windows`) completes as well.
+
+### The middle line is a real defect, and it is not this ticket's
+
+`purge_launch_nonces` fails for a privilege reason that has nothing to do with
+the runtime. Postgres requires `SELECT` on the columns a `DELETE ... WHERE`
+reads; `lti_launch_nonce_grants_v001.sql` grants `pulse_app` `INSERT, DELETE`
+and withholds `SELECT` deliberately; the purge deletes on `expires_at`. Measured
+as `pulse_app` against the dev database, three probes:
+
+- `DELETE FROM lti_launch_nonce WHERE expires_at < now()` — **refused**, 42501.
+- `DELETE FROM lti_launch_nonce` with no `WHERE` — **permitted**.
+- the same `DELETE ... WHERE` against `lti_launch_state` — **permitted**, because
+  that table's grant includes `SELECT`.
+
+So it is the `WHERE`, not the `DELETE`, and it has been failing on every daily
+beat run since E1-08 shipped the ledger on 2026-08-26. The launch path is
+unaffected: `claim_nonce`'s `INSERT` is permitted, probed the same way. Nothing
+here was fixable inside FIX-04 — a grant widening needs a decision about what
+the role learns and an entry in the privilege record behind the test wall — so it
+is recorded in `docs/tickets/e4/carried-from-e3.md` with an owner and a
+done-when, and reported. `docs/MISTAKES.md` entry 48 is what put it in that file
+rather than only in the pull request body; its counter is bumped in the same
+commit.
+
+## 2026-09-06 — the two greps the ticket asks for
+
+- **PEP 649.** `grep -rn "__annotations__\|get_type_hints" backend/app
+  mock-lms/app mock-idp/app mock-ai/app scripts/` → no match, exit 1. No
+  application code reads annotations directly, so lazy annotations change
+  nothing here.
+- **Criterion 3.** `grep -rn "3\.13"` over the four Dockerfiles, `ci.yml`,
+  `pyproject.toml`, `docker-compose.yml` and both lockfiles → no match, exit 1.
+  The same search for `3\.14` over the same files finds 16 lines, so the search
+  is not blind. Widened to `py313\|cp313`, exactly two lines remain, both the
+  ruff exception: `target-version = "py313"` and the comment above it.

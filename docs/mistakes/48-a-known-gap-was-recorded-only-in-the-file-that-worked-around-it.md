@@ -72,3 +72,17 @@ a section and a roster serving members all say the *platform* holds it; whether
 the tool will provision it is a different question with a different answer, and
 the cheapest way to ask is to drive the launch and read the row rather than the
 screen.
+
+## Instances
+
+**2026-09-06, FIX-04 (Python 3.14).** The ticket's Celery drive — three real
+tasks called on the rebuilt images — found that `purge_launch_nonces` raises
+`InsufficientPrivilege` on every run, and has since E1-08 shipped it on
+2026-08-26: Postgres requires `SELECT` on the columns a `DELETE ... WHERE`
+reads, and `pulse_app` deliberately holds only `INSERT, DELETE` on
+`lti_launch_nonce`. That has nothing to do with the runtime move and nothing in
+FIX-04 could fix it — a grant widening carries a test-side record behind the
+test wall. The finding was on its way into the pull request body and the
+implementer's report and nowhere else, which is this entry's shape exactly. It
+went into `docs/tickets/e4/carried-from-e3.md` with an owner and a done-when
+instead, in the same change as the drive that found it.
