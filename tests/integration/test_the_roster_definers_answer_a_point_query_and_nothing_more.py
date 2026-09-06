@@ -310,13 +310,23 @@ def a_subject_row(committed_rows: Any, metadata_tables: dict[str, Any]) -> Any:
 def test_the_application_role_resolves_a_subject_it_holds_and_is_still_refused_the_column(
     committed_rows: Any, a_subject_row: Any, metadata_tables: dict[str, Any]
 ) -> None:
-    """The column refusal, and the half of ADR 0094's pair that ADR 0139 gave back.
+    """The column refusal, and the half of the v001 pair that ADR 0139 gave back.
 
-    ADR 0094 stated one sentence: "`pulse_app` can resolve a subject it already
-    holds from a verified token or a roster document, and can never enumerate
-    subjects it does not." The resolving half is asserted below and stands. **The
-    never-enumerate half stopped being true in E3-06**, so this docstring states
-    the position rather than repeating the claim. ADR 0139 adds
+    The pair this test was written to hold is the header comment of
+    `backend/app/views_sql/identity_resolution_v001.sql`, at its lines 16-18:
+    "`pulse_app` can resolve a subject it already holds from a verified token or a
+    roster document, and can never enumerate subjects it does not." It is that
+    file's claim about the functions that file ships, and **not** a line of ADR
+    0094 — which argues the scheme and states no such pair, so citing the record
+    for it would send a reader looking for a sentence that is not there. What it
+    records is the state before E3-06; the header itself carries a dated ADR 0139
+    qualification, added in the same change as this docstring.
+    `tests/integration/test_identity_grants.py` scopes the same quotation the same
+    way, at `RESOLVE_DEFINER_COLUMN_PRIVILEGES`.
+
+    The resolving half is asserted below and stands. **The never-enumerate half
+    stopped being true in E3-06**, so this docstring states the position rather
+    than repeating the claim. ADR 0139 adds
     `public.resolve_subject_for_user(uuid)` — shipped in
     `backend/app/views_sql/identity_resolution_v002.sql`, `EXECUTE` granted to
     `pulse_app` — and a scalar function is callable once per row: `SELECT
