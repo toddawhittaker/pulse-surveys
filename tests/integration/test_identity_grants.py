@@ -1661,6 +1661,83 @@ def test_the_subject_resolver_answers_a_seeded_user_and_null_for_an_id_that_name
 
 
 # ---------------------------------------------------------------------------
+# E4-14 — the nonce ledger's purge needs one column back, and only one.
+# ---------------------------------------------------------------------------
+#
+# The carried entry (`docs/tickets/e4/carried-from-e3.md`, "The daily purge of
+# the launch replay ledger cannot run") measured the refusal directly on the
+# dev database: as `pulse_app`, `DELETE ... WHERE expires_at < now()` on
+# `lti_launch_nonce` was refused, the same `DELETE` with no `WHERE` was
+# permitted, and the same shape of statement against `lti_launch_state` was
+# permitted because that table's grant already includes `SELECT`. This section
+# measures the fix the same way — a direct query as the role, both directions,
+# in one transaction — so a widening back to table-wide `SELECT` and a fix
+# that granted nothing are equally visible, and neither can hide behind the
+# other.
+
+SELECT_NONCE_VALUE = "SELECT nonce FROM public.lti_launch_nonce LIMIT 1"
+SELECT_NONCE_EXPIRY = "SELECT expires_at FROM public.lti_launch_nonce LIMIT 1"
+
+
+def test_the_application_role_may_read_the_nonce_ledgers_expiry_and_not_its_nonce(
+    db_session: Any,
+) -> None:
+    """Criterion 3: the widening the purge needed is exactly one column.
+
+    `purge_launch_nonces` deletes on `expires_at`, and Postgres requires
+    `SELECT` on every column a `DELETE ... WHERE` reads — so the column-scoped
+    grant this ticket adds has to make `SELECT expires_at` succeed. It must not
+    make `SELECT nonce` succeed too: the ledger's `nonce` column is a one-time
+    credential, and ADR 0089's whole argument for withholding `SELECT` in
+    E1-08 was that a connection able to enumerate it could tell which nonces a
+    platform has already spent. Both readings run in the same transaction as
+    the same role, so neither can be explained by a role that holds nothing at
+    all or a table that does not exist (`docs/MISTAKES.md` entry 3).
+
+    **Denial, never absence.** The refusal is asserted by its SQLSTATE rather
+    than by an empty result — an empty table satisfies a bare "no rows came
+    back" whether or not the column is readable, and only the server's own
+    42501 says the statement itself was refused.
+
+    **The mutation this kills**: `GRANT SELECT ON public.lti_launch_nonce TO
+    pulse_app` — table-wide rather than column-scoped, which is the shape
+    somebody reaches for when a narrower grant "doesn't seem worth the
+    trouble" and which makes the ledger's nonce values readable on the
+    connection every screen in the product runs on. It also kills the fix
+    landing with nothing granted at all: with no column-scoped `SELECT` on
+    `expires_at`, that read is refused too, and the assertion below that it is
+    *not* refused catches it.
+
+    **The near miss it tolerates**: a grant on some other column of this
+    table, or on a different table altogether. `RUNTIME_COLUMN_PRIVILEGES`'s
+    equality, exercised by
+    `test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_own`,
+    is what catches that — this test only asks whether the two columns named
+    here answer as the ticket requires, not whether some third one also does.
+    """
+    require_role(db_session, APPLICATION_ROLE)
+
+    with acting_as(db_session, APPLICATION_ROLE):
+        value_refusal = refused(db_session, SELECT_NONCE_VALUE)
+        expiry_refusal = refused(db_session, SELECT_NONCE_EXPIRY)
+
+    assert value_refusal is not None and sqlstate(value_refusal) == INSUFFICIENT_PRIVILEGE, (
+        f"`{APPLICATION_ROLE}` read `lti_launch_nonce.nonce` directly "
+        f"(the statement answered {value_refusal!r} rather than raising {INSUFFICIENT_PRIVILEGE}). "
+        "ADR 0089 withholds this on purpose: the column is a one-time credential, and a "
+        "connection able to read it back can enumerate every nonce a platform has ever spent on "
+        "this deployment. The purge needs `expires_at`, never this column."
+    )
+    assert expiry_refusal is None, (
+        f"`{APPLICATION_ROLE}` was refused `{SELECT_NONCE_EXPIRY}` ({expiry_refusal!r}). "
+        "`purge_launch_nonces` deletes on `expires_at`, and Postgres refuses a `DELETE` whose "
+        "`WHERE` reads a column the role holds no `SELECT` on — which is exactly the "
+        "`InsufficientPrivilege` the carried entry measured on every run since E1-08. Without "
+        "this column granted, the daily purge cannot run at all."
+    )
+
+
+# ---------------------------------------------------------------------------
 # The Care door: open, single, and audited.
 # ---------------------------------------------------------------------------
 
@@ -3387,23 +3464,39 @@ MEMBER_OF_ROLES = """
 #     confidentiality one — the application role can now read the tool's private
 #     signing key, which is the cost ADR 0082 accepts and records.
 #     Decided in ADR 0082 and spent in E1-06.
-#   - `pulse_app` **inserts and deletes** on `lti_launch_nonce`, and holds nothing
-#     else on it. E1-08's replay guard (`app.lti.replay_guard.claim_nonce`) spends
-#     a launch's nonce with `INSERT` on the application connection as the last
-#     step of every valid launch — SPEC §9.1's single-use replay requirement — and
-#     `purge_expired_nonces` reclaims the expired tail with `DELETE`, the
-#     Celery-beat housekeeping ADR 0089 gives the Postgres-backed ledger in place
-#     of a TTL Redis would have supplied for free.
-#     **`INSERT` and `DELETE` only, no `SELECT` and no `UPDATE`.** The claim
-#     reads single-use off a unique-constraint violation on the nonce column
-#     rather than a targeted read, and the primary key is generated in Python
-#     rather than read back with `RETURNING` — so nothing on this connection ever
-#     needs to select the table. A spent nonce is never rewritten, so `UPDATE`
-#     stays withheld too.
+#   - `pulse_app` **inserts and deletes** on `lti_launch_nonce`, and holds no
+#     table-wide `SELECT` and no `UPDATE`. E1-08's replay guard
+#     (`app.lti.replay_guard.claim_nonce`) spends a launch's nonce with `INSERT`
+#     on the application connection as the last step of every valid launch —
+#     SPEC §9.1's single-use replay requirement — and `purge_expired_nonces`
+#     reclaims the expired tail with `DELETE`, the Celery-beat housekeeping ADR
+#     0089 gives the Postgres-backed ledger in place of a TTL Redis would have
+#     supplied for free.
+#     **`INSERT` and `DELETE` at table grain, no table-wide `SELECT`, no
+#     `UPDATE`.** The claim reads single-use off a unique-constraint violation on
+#     the nonce column rather than a targeted read, and the primary key is
+#     generated in Python rather than read back with `RETURNING` — so nothing on
+#     this connection ever needs to select the table as a whole. A spent nonce is
+#     never rewritten, so `UPDATE` stays withheld too.
+#     **A column-scoped `SELECT (expires_at)` since E4-14, and it is the entry
+#     that most needs its sentence.** Postgres requires `SELECT` on every column a
+#     `DELETE ... WHERE` reads, and `purge_expired_nonces` deletes on
+#     `expires_at` — so from the day E1-08 shipped this table, the beat task
+#     raised `InsufficientPrivilege` on every run and the expired tail was never
+#     reclaimed (`docs/tickets/e4/carried-from-e3.md`, "The daily purge of the
+#     launch replay ledger cannot run"). The grant is column-scoped rather than
+#     table-wide for the reason the withholding above already gives: `nonce` is a
+#     one-time credential whose whole value is that nothing but the row that
+#     claimed it ever reads it back, and a connection able to `SELECT *` could
+#     enumerate every value this ledger has ever held. `expires_at` identifies
+#     nobody and names nothing a replay could use, so it is the one column that
+#     lets the purge's own `WHERE` clause run without widening what the
+#     connection can enumerate. Its own ADR records why `SELECT` was withheld in
+#     E1-08 and what this narrow grant concedes.
 #     **It carries no personal data.** The table holds a nonce, a consumed-at
 #     timestamp and an expiry — no subject, no name, no address — so SPEC §4.1's
 #     `PERSON_TABLES` does not change and no identity-separated view is owed.
-#     Decided and spent in E1-08.
+#     Decided and spent in E1-08; the column grant is decided and spent in E4-14.
 #   - `pulse_app` **reads, inserts and deletes** on `lti_launch_state`, and holds
 #     nothing else on it. This is the server-side handshake store dispute
 #     E1-08-01 resolved E1-08 onto: `app.lti.in_flight.remember_launch` records
@@ -3906,6 +3999,27 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
 # by the grading path. It is also more than the sanction catalog can express: that
 # catalog names tables, so `grade_passback → {section}` is as narrow as it can be
 # said there, and this row is what makes the real grain a column.
+#
+# **E4-14 spends one more, and it is a `SELECT` rather than an `UPDATE` — the
+# first column-scoped entry in this set that is not part of a writer's own
+# discovery.** `app.jobs.tasks.purge_launch_nonces` (ADR 0089's daily
+# housekeeping) reclaims `lti_launch_nonce`'s expired tail with
+# `DELETE ... WHERE expires_at < now()`, and Postgres refuses any `DELETE`
+# whose `WHERE` reads a column the role holds no `SELECT` on — so the task
+# raised `InsufficientPrivilege` on every run from the day E1-08 shipped it
+# (`docs/tickets/e4/carried-from-e3.md`, "The daily purge of the launch replay
+# ledger cannot run"). Table-wide `SELECT` was the alternative and is exactly
+# what the withheld half of `lti_launch_nonce`'s table-grant entry, above,
+# argues against: the ledger's `nonce` column is a one-time credential, and a
+# connection able to read it back could enumerate every value this
+# deployment's launches have ever spent.
+#
+#   - `lti_launch_nonce(expires_at)` — the one column the purge's own `WHERE`
+#     clause reads. It identifies nobody and names nothing usable as a replay,
+#     so granting it back gives the housekeeping task exactly the read it needs
+#     and nothing else — `nonce` itself stays refused, table-wide and at column
+#     grain alike, which is what the negative control beside this file's
+#     `user(id)` / `lms_user_id` pair measures for this table too.
 RUNTIME_COLUMN_PRIVILEGES = frozenset(
     {
         (APPLICATION_ROLE, "course", "lms_title", "UPDATE"),
@@ -3913,6 +4027,7 @@ RUNTIME_COLUMN_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "section", "lms_context_memberships_url", "UPDATE"),
         (APPLICATION_ROLE, "section", "lms_ags_line_items_url", "UPDATE"),
         (APPLICATION_ROLE, "section", "ags_line_item_url", "UPDATE"),
+        (APPLICATION_ROLE, "lti_launch_nonce", "expires_at", "SELECT"),
         (APPLICATION_ROLE, "user", "id", "SELECT"),
         (APPLICATION_ROLE, "enrollment", "ended_on", "UPDATE"),
         (APPLICATION_ROLE, "enrollment", "lms_window_start", "UPDATE"),
@@ -4479,8 +4594,9 @@ def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_
         "`…public.classification` — is a grant `has_table_privilege` does not report at all, so "
         "it is read out of `pg_attribute.attacl` instead. The expected set at column level is "
         "`RUNTIME_COLUMN_PRIVILEGES`, which held nothing until E1-10 and has grown by a named "
-        "ticket at a time since — E1-11's three on `enrollment`, E3-02's container address and "
-        "E3-05's line-item id — each entry carrying the sentence it comes from. A count is "
+        "ticket at a time since — E1-11's three on `enrollment`, E3-02's container address, "
+        "E3-05's line-item id and E4-14's `lti_launch_nonce` expiry read — each entry carrying "
+        "the sentence it comes from. A count is "
         "deliberately not given here: it went stale twice, and the constant is the inventory. "
         "Anything else at column grain is a "
         "widening by definition, and on an append-only table it is the whole of how append-only "
