@@ -7,10 +7,16 @@ wire, so they are asserted together against one platform.
 posted beside that same `scoreMaximum`. `grade_sync.score_text` stays the
 canonical percentage string, so the comparison E3-06 makes and the ledger §3.4
 puts in the comment are unchanged; only the wire body scales. A maximum that is
-missing, zero, negative **or not finite** means the section is walked past with a
-logged refusal (ADR 0135's no-address shape) — never a divide, and never a post.
-The last of those is E3-08's security round: `nan` and `inf` are not nonpositive,
-so a guard written `maximum <= 0` lets both through.
+missing, zero, negative **or not finite** is refused — never a divide, and never a
+post. The last of those is E3-08's security round: `nan` and `inf` are not
+nonpositive, so a guard written `maximum <= 0` lets both through.
+
+**Where the refusal shows, and it is not the same at both layers.** The client
+raises its own typed error, which is what this module asserts. `app.services.
+grading` catches that and walks the section past with a logged refusal — ADR 0135's
+no-address shape — which is E3-06's subject and is asserted there. The two are one
+rule seen from two heights, and a test that asserted the sweep's shape here would
+be satisfied by any layer that declined quietly.
 
 **Why this was a HIGH and not a rounding detail.** Every line item *this tool
 creates* is out of 100, so the identity holds and nothing is visibly wrong. The
@@ -517,20 +523,29 @@ def test_a_nonpositive_maximum_is_walked_past_rather_than_divided_by(
     """R1's refusal half: no divide, no post, for a maximum that cannot be scored into.
 
     A line item document carrying zero, a negative maximum, none at all, `NaN` or
-    `Infinity` is handed to the client's post path. R1 gives it ADR 0135's
-    no-address shape: the section is walked past with a logged refusal.
+    `Infinity` is handed to the client's post path. R1 has the client **refuse it,
+    by raising its own typed error**, and no score goes out.
 
-    **A second layer also refuses these values, and the first assertion exists to
-    tell the two apart.** This is the gap E3-08's security round found in the two
-    rows it had just added: with the guard reverted to `maximum <= 0`, `nan` and
-    `inf` flow past it into the scaling arithmetic and die a layer later on the
+    **The walk-past belongs to the layer above, and this docstring used to put it
+    here.** ADR 0135's no-address shape — "the section is walked past with a logged
+    refusal" — is what `app.services.grading` does when it *catches* this refusal,
+    and it is asserted in E3-06's own sweep modules. At the client the refusal is
+    the raise. Asserting `raised is None` here, as this module briefly did, checks
+    the sweep's shape one module up and is satisfied by any layer that declines
+    quietly.
+
+    **A second layer also refuses these values, and the first two assertions exist
+    to tell the layers apart.** This is the gap E3-08's security round found in the
+    two rows it had just added: with the guard reverted to `maximum <= 0`, `nan`
+    and `inf` flow past it into the scaling arithmetic and die a layer later on the
     JSON-number check — so **nothing is posted either way**, and an assertion that
     only reads the platform's log is satisfied by both. A battery mutation
     reverting the guard would have survived. What separates them is *how* the call
-    ended: R1's guard walks the section past and does not raise, while the
-    downstream check raises. `raised is None` is therefore the layer-pin, and it
-    is asserted before the post is looked at (`docs/MISTAKES.md` entry 3 — a guard
-    test whose outcome a second defence layer also produces).
+    ended, so the escape is asserted first: its **type** says the client's own
+    guard refused rather than a layer behind it, and its **message naming
+    `scoreMaximum`** says it refused for this reason rather than for one of the
+    client's other judged refusals (`docs/MISTAKES.md` entry 3 — a guard test whose
+    outcome a second defence layer also produces).
 
     **All five rows carry it, not just the two new ones**, because the ambiguity is
     not confined to them: with the guard gone entirely, the absent row reaches the
@@ -539,11 +554,12 @@ def test_a_nonpositive_maximum_is_walked_past_rather_than_divided_by(
 
     **The mutations these kill:**
       1. *The guard reverted to a sign comparison* — `maximum <= 0`, which `nan`
-         and `inf` both pass because neither is nonpositive. Killed by the
-         raise-shape assertion, not by the post assertion.
-      2. *A `ZeroDivisionError` reaching the caller* — the naive reading of R1's
-         formula, which turns one badly configured column into an exception on the
-         weekly beat. Also killed by the raise-shape assertion.
+         and `inf` both pass because neither is nonpositive. They then reach the
+         serialiser and come back as a `ValueError`, which is a refusal from the
+         wrong layer. Killed by the error's type, not by the post assertion.
+      2. *The guard deleted* — the zero row comes back as `ZeroDivisionError` and
+         the absent row as `TypeError`, both of which turn one badly configured
+         column into an untyped failure on the weekly beat. Killed the same way.
       3. *A post going out anyway* — `0`, `inf`, `nan` or the unscaled percentage
          against a column that cannot hold it. Asserted on the platform's own log.
       4. *The refusal treated as a reason to stop the sweep.* Nothing here asserts
@@ -603,17 +619,25 @@ def test_a_nonpositive_maximum_is_walked_past_rather_than_divided_by(
         timestamp=grade.timestamp,
     )
 
-    assert raised is None, (
-        f"Posting against a line item whose maximum is {maximum!r} raised {raised!r}. R1 gives this "
-        "case ADR 0135's no-address shape — the section is **walked past** with a logged refusal, "
-        "which does not raise — so what escaped names the layer that refused, and this is the "
-        "assertion that tells the two apart.\n\n"
-        "A `ZeroDivisionError` is the guard gone and the zero row dividing. A `ValueError` or a "
-        "typed serialisation refusal is the guard reverted to `maximum <= 0` and the value flowing "
-        "on to the JSON-number check a layer later, which is where `nan` and `inf` die if nothing "
-        "stops them first. A `TypeError` is the absent row reaching the arithmetic as `None`. In "
-        "every one of those the no-post assertion below still holds, which is exactly why it "
-        "cannot be the only thing asserted."
+    assert isinstance(raised, ags_contract.call_error()), (
+        f"Posting against a line item whose maximum is {maximum!r} ended as {raised!r}, and R1's "
+        f"guard refuses it by raising the client's own typed error. **The escape is the "
+        "assertion**: every layer behind this one also declines to post, so what the platform "
+        "holds cannot say which of them refused.\n\n"
+        "`ZeroDivisionError` is the guard gone and the zero row dividing. `ValueError` is the "
+        "guard narrowed to `maximum <= 0` and the value flowing on to the JSON-number check a "
+        "layer later — which is where `nan` and `inf` die if nothing stops them first, and is "
+        "exactly the mutation this row exists to kill. `TypeError` is the absent row reaching the "
+        "arithmetic as `None`. `None` — no raise at all — is this assertion pointed one module up: "
+        "the walk-past is `app.services.grading`'s treatment of this refusal, not the client's.\n\n"
+        "In every one of those the no-post assertion below still holds, which is why it cannot be "
+        "the only thing asserted."
+    )
+    assert ags_contract.score_maximum_member in str(raised), (
+        f"The refusal reads {str(raised)!r} and names no `{ags_contract.score_maximum_member}`. "
+        "The type above says the client refused; this says it refused *for this reason*. Without "
+        "it any other judged refusal the client makes — a hostile address, a missing line item — "
+        "satisfies the type check while the maximum flowed through unexamined."
     )
 
     after = ags_contract.scores_posted(section.platform, identifier)

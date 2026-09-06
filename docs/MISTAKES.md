@@ -480,7 +480,10 @@ observable, because the suite's own environment decides it. Assert the effect: t
 intercepted enqueue, the row, the call the platform recorded. And when a *pair* is
 built on such a value, both halves are compromised and only one of them looks it —
 so check the green one by deleting the condition it guards and requiring it to go
-red.
+red. **Establish which layer you are standing on first**: a ruling's sentence
+describes what a caller sees, not what the callee does — the sweep walks past where
+the client raises, and a test that borrows the wrong shape is satisfied by any
+layer that declines quietly, or reds against a correct tree.
 
 ## 48. A known gap was recorded only in a comment in the file that worked around it
 

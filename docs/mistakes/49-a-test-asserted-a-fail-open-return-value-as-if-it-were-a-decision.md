@@ -41,8 +41,28 @@ neither direction. Settled in `docs/disputes/E3-08-04.md`; repaired by moving bo
 onto the `creation_enqueues` interception, which records the enqueue instead of
 performing it.
 
+*(A second instance the same week, and the same author, in E3-08's security round —
+recorded rather than counted, because it is the mistake being made again and not
+the entry preventing it. R1's ruling says an unscoreable `scoreMaximum` means "the
+section is walked past with a logged refusal (ADR 0135's no-address shape)". That
+sentence is true, and it describes the **sweep**: `app.services.grading` catches
+the client's refusal and walks the section past. The test in question drives the
+**client**, one layer down, where the refusal is an `AgsCallError` raise. Asserting
+`raised is None` there — reading the ruling's sentence as a description of the
+observable in front of me — reddened all five rows against a correct tree, after
+replacing an assertion that had been too weak in the other direction. The three
+layers behind the guard, `ValueError` from the JSON serialiser, `ZeroDivisionError`
+from the divide and `TypeError` from an absent maximum, all leave the platform
+holding nothing, so only the escape's type separates them. The repair is the
+error's identity and its message; the lesson is that a rule stated once holds at
+several layers and takes a different shape at each.)*
+
 **Rule.** Before asserting a return value, read what the function returns on
-failure. Where a contract deliberately collapses "refused" and "the dependency was
+failure. **And before asserting a rule's shape, establish which layer you are
+standing on**: a ruling's sentence usually describes the behaviour a caller sees,
+which is not what the callee does — the sweep walks past, the client raises, and a
+test that borrows the wrong one is satisfied by any layer that declines quietly or
+red against a correct tree. Where a contract deliberately collapses "refused" and "the dependency was
 down" into one value — every fail-open publish, every `return False` in an `except`,
 anything entry 41 or ADR 0135 governs — that value cannot be a test's observable,
 because the suite's own environment decides it. Assert the effect instead: the

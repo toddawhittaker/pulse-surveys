@@ -208,6 +208,43 @@ def ags_module() -> ModuleType:
     )
 
 
+AGS_CALL_ERROR = "AgsCallError"
+
+
+def ags_call_error() -> type[BaseException]:
+    """`app.lti.ags.AgsCallError` — the client's own judged refusal, named not guessed.
+
+    The discriminator E3-08's security round needs, and it exists for the reason
+    `registration_address_error` below gives at length: a bare `Exception` is
+    satisfied by an `AttributeError` out of a renamed symbol, which is a broken
+    test reading as a refused call.
+
+    **What it tells apart.** The client refuses an unscoreable `scoreMaximum` by
+    raising this; the layers behind it fail differently — `ZeroDivisionError` if
+    the guard is gone and the maximum is zero, `ValueError` from the JSON-number
+    check if the guard was narrowed to a sign comparison and `nan` or `inf`
+    reached the serialiser, `TypeError` if an absent maximum reached the
+    arithmetic. All four leave the platform holding nothing, so the *type* is the
+    only thing that says which layer refused (`docs/MISTAKES.md` entry 3 — a guard
+    test whose outcome a second defence layer also produces).
+
+    **Not to be confused with the sweep's shape.** `app.services.grading` catches
+    this and walks the section past with a logged refusal (ADR 0135's no-address
+    shape); that is the *sweep's* treatment of the refusal and is asserted in
+    E3-06's own modules. At this layer the refusal is the raise.
+    """
+    found = getattr(ags_module(), AGS_CALL_ERROR, None)
+    if not isinstance(found, type) or not issubclass(found, BaseException):
+        pytest.fail(
+            f"`{AGS_MODULE}` exposes no exception class `{AGS_CALL_ERROR}` (it exposes "
+            f"{sorted(name for name in vars(ags_module()) if not name.startswith('_'))}). E3-04's "
+            "client raises a typed error a caller can branch on for every refusal it makes — the "
+            "unscoreable maximum among them — and a test that fell back to a bare `Exception` "
+            "could not tell that refusal from the serialiser's, the arithmetic's, or a bug."
+        )
+    return found
+
+
 def registration_address_error() -> type[BaseException]:
     """`app.models.lti.RegistrationAddressError`, named rather than caught as `Exception`.
 
@@ -1010,6 +1047,7 @@ def ags_contract() -> Any:
         a_newer_score = A_NEWER_SCORE
 
         address_error = staticmethod(registration_address_error)
+        call_error = staticmethod(ags_call_error)
         grade = staticmethod(a_grade)
         line_item_document = staticmethod(a_line_item_document)
         resource_id_for = staticmethod(a_resource_id)
