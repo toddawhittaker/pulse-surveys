@@ -96,7 +96,10 @@ from app.lti.ags import (
     AgsCallError,
     AgsConflictError,
     AgsError,
+    GradebookCaller,
     find_or_create_line_item,
+    gradebook_caller,
+    line_item_maximum,
     post_score,
 )
 from app.models.ai import Classification, ClassificationTask
@@ -932,8 +935,16 @@ def _post_one_sections_scores(
 
     subjects = _lms_user_ids(session, [delivery.user_id for delivery in deliveries])
     try:
-        line_item = find_or_create_line_item(
+        # One conversation for the whole section, and one token grant with it
+        # (E3-08's boundary round, LO-M2): the column read below and every post
+        # after it spend the same credential. Built per student, each post was a
+        # round trip to the token endpoint carrying an assertion this tool signs,
+        # plus the platform's own fetch of this tool's key set to verify it.
+        caller = gradebook_caller(
             session, section.id, http=http, settings=settings, resolve=resolve
+        )
+        line_item = find_or_create_line_item(
+            session, section.id, http=http, settings=settings, resolve=resolve, caller=caller
         )
     except AgsError as refusal:
         # The gradebook column could not be resolved, so no delivery was composed
@@ -947,6 +958,22 @@ def _post_one_sections_scores(
             "it this run",
             section.id,
             type(refusal).__name__,
+        )
+        return 0, 0
+
+    if not _scoreable(line_item):
+        # ADR 0135's no-address shape, applied to a column nothing can be scored
+        # into (E3-08's boundary round, LO-H1). A maximum that is missing, zero or
+        # negative leaves no value that means anything — a percentage of nothing —
+        # so the section is walked past with a line an operator can act on, rather
+        # than every student in it collecting a refused `grade_sync` row every
+        # Monday for the rest of the term. Nothing was posted and nothing is
+        # recorded: the next run recomputes, and an instructor who re-points the
+        # column to a positive maximum is posted for again with no intervention.
+        logger.warning(
+            "%s: its participation column states a maximum that no score can be scaled into, so "
+            "nothing was posted for it this run",
+            section.id,
         )
         return 0, 0
 
@@ -973,6 +1000,7 @@ def _post_one_sections_scores(
             http=http,
             settings=settings,
             resolve=resolve,
+            caller=caller,
         )
         session.add(
             GradeSync(
@@ -992,6 +1020,23 @@ def _post_one_sections_scores(
             failed += 1
     logger.info("%s: %d score(s) reached the platform and %d did not", section.id, posted, failed)
     return posted, failed
+
+
+def _scoreable(line_item: Mapping[str, Any]) -> bool:
+    """Whether a percentage can be scaled into this column at all (LO-H1).
+
+    The rule lives in `app.lti.ags.line_item_maximum` and is asked here rather than
+    repeated: a maximum that is missing, zero or negative is one condition with one
+    answer, and a second copy of it in this module would be a second place for it to
+    drift (`docs/MISTAKES.md` entry 13). The refusal that reader raises is what this
+    turns into a walk-past — the client's job is one call, and which sections a
+    sweep visits is this module's.
+    """
+    try:
+        line_item_maximum(line_item)
+    except AgsError:
+        return False
+    return True
 
 
 def _delivery_for(
@@ -1073,6 +1118,7 @@ def _delivered(
     http: requests.Session | None,
     settings: Settings,
     resolve: Callable[[str], Sequence[str]] | None,
+    caller: GradebookCaller,
 ) -> tuple[GradeSyncOutcome, int | None]:
     """Post one score and say what became of it, for the row that records the attempt.
 
@@ -1109,6 +1155,7 @@ def _delivered(
             http=http,
             settings=settings,
             resolve=resolve,
+            caller=caller,
         )
     except AgsConflictError:
         logger.warning(
