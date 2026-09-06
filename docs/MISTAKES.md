@@ -199,7 +199,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
+**Caught: 8** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
 
 **Rule.** When a guard enumerates mechanisms, require it to *find* each one on a
 subject that certainly has it, as a control. A guard that only ever reports
@@ -395,14 +395,16 @@ read its timing as well as its result.
 
 ## 42. A CI verdict was read off a stale check summary between two pushes
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/42-a-ci-verdict-was-read-off-a-stale-summary.md)
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/42-a-ci-verdict-was-read-off-a-stale-summary.md)
 
 **Rule.** The only CI verdict that exists is a **completed** run whose head SHA
 equals the final commit. A pull request's check rollup queried between two
 pushes can answer for the superseded run — an empty failure list is not a green.
 Before reporting green or marking anything ready, resolve the run by id, assert
-`status == completed`, and assert its `headSha` equals the commit being vouched
-for; a watch command's clean exit proves only that some run finished.
+`status == completed`, assert `conclusion == success`, and assert its `headSha`
+equals the commit being vouched for; a watch command's clean exit proves only
+that some run finished, and resolving a run by id is not itself the verdict —
+the `conclusion` field is, and a run can complete with a failing conclusion.
 
 ## 43. A broad guard's pattern matched ordinary prose, and named a file that runs no SQL
 
@@ -468,6 +470,18 @@ behavioural one: a sweep over the route table answers "is the class there", neve
 "does the gate run", so every gate needs one test that drives the built
 application over HTTP and reads the status in both directions.
 
+## 48. A known gap was recorded only in a comment in the file that worked around it
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/48-a-known-gap-was-recorded-only-in-the-file-that-worked-around-it.md)
+
+**Rule.** A limitation you work around goes in the deferral file the next epic
+reads — `carried-from-eN.md` or `deferred.md`, with an owner — in the same change
+as the workaround. A paragraph in the spec that dodged it records the fact for
+the one person who already knows. And when a plan names a seeded fixture, check
+that the fixture reaches the product's own database rather than only the mock's:
+a platform offering a launch says the platform holds the section, never that the
+tool will provision it.
+
 ## 49. A test asserted a fail-open return value as if it were a decision
 
 **Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/49-a-test-asserted-a-fail-open-return-value-as-if-it-were-a-decision.md)
@@ -484,15 +498,3 @@ red. **Establish which layer you are standing on first**: a ruling's sentence
 describes what a caller sees, not what the callee does — the sweep walks past where
 the client raises, and a test that borrows the wrong shape is satisfied by any
 layer that declines quietly, or reds against a correct tree.
-
-## 48. A known gap was recorded only in a comment in the file that worked around it
-
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/48-a-known-gap-was-recorded-only-in-the-file-that-worked-around-it.md)
-
-**Rule.** A limitation you work around goes in the deferral file the next epic
-reads — `carried-from-eN.md` or `deferred.md`, with an owner — in the same change
-as the workaround. A paragraph in the spec that dodged it records the fact for
-the one person who already knows. And when a plan names a seeded fixture, check
-that the fixture reaches the product's own database rather than only the mock's:
-a platform offering a launch says the platform holds the section, never that the
-tool will provision it.

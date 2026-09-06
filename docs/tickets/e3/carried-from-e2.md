@@ -71,6 +71,9 @@ the set immediately and its row stays as the record of what this deployment used
 to sign with. A deployment with no *live* key still answers 503, in a sentence
 that now names the command that fixes it.
 
+The rule was revised at the E3 boundary: [ADR 0143](../../adr/0143-the-oldest-live-key-signs-so-that-generate-is-not-the-switch.md)
+supersedes ADR 0127 in part, and the oldest live key signs.
+
 Three limits stated rather than left to be discovered. Nothing expires a key or
 bounds how many the published set carries: `retire` is a command somebody has to
 run, and `list` exists so the state a rotation is halfway through is visible. The

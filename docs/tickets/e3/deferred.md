@@ -44,3 +44,9 @@ owner (E8 for the student half, E4 for the instructor half) and its done-when
 unchanged. Nothing else was deferred through this file during the epic; the
 items E3's own reviews deferred are recorded in the carried file directly,
 per the boundary record.
+
+**The closing consistency pass, 2026-09-06, after the epic merge:** found six
+deferrals recorded only in PR bodies or ADR prose (PRs #171 and #172, and
+ADRs 0126, 0132 and 0141) and moved them into `../e4/carried-from-e3.md` with
+owners and done-whens, per `docs/MISTAKES.md` entry 48. The sentence above
+about this file remains true of this file: nothing here was left undeferred.

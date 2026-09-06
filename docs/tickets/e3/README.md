@@ -121,7 +121,7 @@ defaults a ticket may depart from only by saying so.
 | 05 | [The line item is created on the first staff launch](E3-05-line-item-on-first-launch.md) | `e3/line-item-on-first-launch` | 02, 04 | §3.4's "created by the tool on first launch" wired to the launch door on the bounded enqueue shape, with a student launch writing nothing. | #171 as 8831bd0, 2026-09-05 |
 | 06 | [The weekly recompute posts a score when it has changed](E3-06-weekly-recompute-and-post.md) | `e3/weekly-recompute-and-post` | 03, 04, 05 | The beat entry and the thin task: walk the sections, compute, compare against the latest recorded send, post, append, retry. Drops stop posting. | #172 as e44906f, 2026-09-05 |
 | 07 | [A development trigger for passback, and the CSRF route sweep](E3-07-dev-trigger-and-csrf-sweep.md) | `e3/dev-trigger-and-csrf-sweep` | 06 | The `/dev` control that makes the epic drivable in a browser on the dev clock, and the carried CSRF item whose red case this epic's first mutating route finally makes honest. | #177 as ba7b22a, 2026-09-05 |
-| 08 | [E3 exit](E3-08-e3-exit.md) | `e3/e3-exit` | all | §14.3's exit clause driven end to end across every enrollment edge case; boundary reviews; `../e4/carried-from-e3.md`. | |
+| 08 | [E3 exit](E3-08-e3-exit.md) | `e3/e3-exit` | all | §14.3's exit clause driven end to end across every enrollment edge case; boundary reviews; `../e4/carried-from-e3.md`. | #178 as 6239b85, 2026-09-06 |
 
 ## Dependency graph
 
