@@ -49,8 +49,10 @@ append-only record); the `PERSON_TABLES` entry in `carried-from-e3.md`.
   sentence assumed and should not have: §13 does not merely fail to support a
   reporting module, it places `summary` in `ai.py`, and §8's core-table list
   names `summary` and `moderation_action` where this ships four differently
-  named tables. That is a spec edit, raised in the pull request, and not an
-  ADR's to make.)*
+  named tables. That was a spec edit rather than an ADR's to make, so it was
+  raised — and ruled at E4-02, 2026-09-06: the spec follows the build, and this
+  pull request carries the edits to §8's core-table list, §8's moderation
+  sentence and §13's models block.)*
 - **No grants.** This bullet asked which grants each writer needs; the
   settled design issues none, because this ticket writes no row into any of
   the four tables it creates and a privilege lands in the change that spends
@@ -60,8 +62,27 @@ append-only record); the `PERSON_TABLES` entry in `carried-from-e3.md`.
 
 ## Acceptance criteria
 
-1. `alembic upgrade head` and a full downgrade both succeed against a seeded
-   database, and `alembic check` reports no drift.
+1. `alembic upgrade head` and the **full downgrade of this ticket's revision**
+   — as against a partial one — both succeed against a seeded database, and
+   `alembic check` reports no drift. The trip is head → `c4a8e51db9f3` → head,
+   made over rows.
+
+   *(Corrected while building, per the ruling in
+   [E4-02-01](../../disputes/E4-02-01.md). The criterion said "a full
+   downgrade", which the test module first read as a walk to `base`. No ticket
+   can satisfy that reading: revision `e046c1b23e54` refuses a downgrade against
+   a seeded database by a design its own docstring argues for — it re-narrows
+   the start-letter map's check to `^[A-Z]$`, which SPEC §2.2's 3-week cohorts,
+   numbered 2 through 7, contradict. Measured byte-identical on a scratch
+   database standing at `c4a8e51db9f3` with none of E4-02 applied, against a
+   control with `start_letter_map` empty that completes. So the walk is bounded
+   at the revision this one chains from, which keeps every defect the criterion
+   is reaching for in range — a `CHECK` created over rows that contradict it, a
+   column dropped from a populated table, and the
+   `release_batch_member`-before-`release_batch` ordering that only a populated
+   database can show. What a rollback should do with those six numbered start
+   positions is a data question, and the ticket that answers it is where a walk
+   to `base` belongs.)*
 2. The summary table cannot hold two rows for one section, course week and
    stream — a database constraint, proven by a refused insert, not an
    application promise.

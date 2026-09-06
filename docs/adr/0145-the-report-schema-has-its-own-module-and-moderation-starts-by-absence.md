@@ -39,15 +39,25 @@ aggregates, and splitting them across `ai.py` and a second module would separate
 tables that are only reviewable together — which is the whole reason E4-02
 exists as a ticket.
 
-**This is a departure from SPEC §13, not a gap in it, and the spec needs the
-edit.** Three sentences are now false: §13's `ai.py # classification, summary`,
-and §8's core-table list naming `summary` and `moderation_action`. This record
-does not authorise that edit — a decision that contradicts the spec is not an
-ADR's to make, and `docs/adr/README.md` says so in as many words. It is raised
-in E4-02's pull request as an item for the owner, and the pull request names the
-exact sentences. Until it lands, this file is the record of the divergence; the
-sentence in `app/models/__init__.py` that promised the summary to `ai.py` was
-corrected with the change rather than left standing.
+**This contradicted SPEC §13 rather than filling a gap in it, so it was raised
+rather than settled here — and ruled at E4-02, 2026-09-06: the spec follows the
+build, and this pull request carries the edit.** Three sentences were false the
+moment the tables were named, and all three are corrected here. §8's core-table
+list drops `summary` and `moderation_action` and names `weekly_summary`,
+`moderation_state`, `release_batch` and `release_batch_member`; §8's moderation
+sentence names the record as built and states the absence rule below; §13's
+`ai.py` line keeps `classification` alone, with a `report.py` line beside it.
+`loop.py`, which listed `moderation_action` as the transitions record, keeps
+`instructor_response` and `exclusion_log` — §5.2's accountability log is still
+E6's and nothing here decides it. The sentence in `app/models/__init__.py` that
+promised the summary to `ai.py` was corrected with the code.
+
+The direction the ruling sets is worth stating, because the alternative was live
+until it was made: a schema ticket does not get to leave the spec wrong and point
+at an ADR instead. `docs/adr/README.md` is explicit that a decision contradicting
+the spec is not an ADR's to make, so the real choice was between building to §13
+and changing §13 — and this record would have been dishonest written either way
+round without someone deciding which.
 
 **Two: moderation state is an append-only record, and the initial state is the
 absence of a row.** `moderation_state` holds one row per decision — the comment,
@@ -133,9 +143,11 @@ below this revision with no way forward.
 
 ## Consequences
 
-- **SPEC §13 and §8 are wrong until they are edited**, and this file is the only
-  place that says so. That is a record nobody re-reads carrying a fact somebody
-  will need, which is why the pull request raises it rather than leaving it here.
+- **SPEC §8 and §13 were edited to match**, which means the next reader of either
+  meets the built names and not this record's argument for them. That is the
+  intended outcome and it has a cost worth naming: the spec no longer carries the
+  older shape anywhere, so anyone reading a merged E1 or E2 record that mentions
+  `summary` or `moderation_action` has only this file to resolve it against.
 - **A reader of a comment's moderation state has to write a window function**, or
   its equivalent: "the latest `moderation_state` row for this answer, or
   published if there is none". That is E4-04's and E6's to write once, in
