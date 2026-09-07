@@ -1,0 +1,67 @@
+-- What the Monday summary job may read of a moderator's decisions — ticket E4-06,
+-- SPEC §5.1, §5.2, §4.1, ADR 0001, ADR 0009, ADR 0145.
+--
+-- SPEC §5.1: the per-stream AI summaries "exclude flagged-held content". The only
+-- record of what is held is public.moderation_state, E4-02 granted nothing on it,
+-- and the walk that builds those summaries runs in a Celery worker on the
+-- connection pulse_app holds — so the filter that sentence requires cannot be
+-- executed at all without this file. Postgres refuses the read with 42501, in a
+-- query the job makes twice per closed section-week.
+--
+-- **SELECT, and nothing else.**
+--
+--   - SELECT is the filter itself, and the whole of what this ticket spends. The
+--     walk reads the latest decision about each comment and drops the ones whose
+--     latest state is `FLAGGED_COLLAPSED` or `EXCLUDED` — nothing more.
+--
+-- **Every write verb stays withheld, and that is the load-bearing half.** E4
+-- writes no moderation state at all: ADR 0145 makes the absence of a row the
+-- initial state precisely so the E4 breakdown's "exactly one value ever written
+-- during E4" is a count of zero writes, and every writer belongs to E6. A
+-- connection holding INSERT here could publish a comment an instructor had
+-- excluded, or collapse one they had kept, with no trail distinguishing it from a
+-- decision somebody made — which is the anti-cherry-picking mechanism §5.2 is
+-- built around. UPDATE and DELETE would be worse: the record is append-only, and
+-- both directions of a moderation transition are logged under SPEC §8. So the
+-- verbs E6 will argue for are left for E6 to argue for.
+--
+-- **Reading a decision is not reading a comment, and it is not reading a person.**
+-- The three columns here are an answer's key, one of §5.2's four state tokens and
+-- when it was decided. No name, no subject, no comment text. The connection
+-- already holds SELECT on public.answer, which is where the text is, so this
+-- grant adds no reach toward a student — it adds the one fact that says whether a
+-- comment may be sent to a model at all.
+--
+-- **A base table rather than a read view**, the same exception every grants file
+-- before this one takes for a table holding no person, and for one more reason
+-- here: a view could only re-expose these same three columns, and the join that
+-- makes them useful — the latest row per comment — belongs beside the query that
+-- asks it rather than being frozen into an object E6 would immediately need a
+-- v002 of.
+--
+-- **pulse_care is granted nothing.** SPEC §6.2 isolates the Care role to the
+-- safety path. Moderation is the instructor's surface (§5.2), and a role gets no
+-- privilege it has no use for.
+--
+-- **USAGE ON SCHEMA public is not granted again here.** identity_grants_v001.sql
+-- grants it to pulse_app and identity_grants_v002.sql restates it; an ACL entry
+-- records no history, so a third grant would be indistinguishable from those and
+-- any matching revoke would remove all of them.
+--
+-- **This widens what pulse_app can reach, and it is meant to be visible — and the
+-- record that admits it is on the far side of the test wall.**
+-- `RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py`
+-- names weekly_summary's two verbs and not this one, and
+-- `tests/integration/test_the_summary_writer_is_granted_insert_and_select_and_nothing_wider.py`
+-- asserts that moderation_state stays ungranted — while the module beside it
+-- requires the filter those grants make executable. Both cannot hold. The
+-- objection is `docs/disputes/E4-06-01.md`, and the repair those two tests'
+-- own docstrings name — "if one of them is deliberate it belongs in the ticket
+-- that spends it, recorded in `RUNTIME_BASE_TABLE_PRIVILEGES` … with the sentence
+-- it comes from" — is the sentence above.
+--
+-- **The downgrade revokes rather than dropping anything.** public.moderation_state
+-- is a1e7c4b60d92's and outlives this revision, so the revision that executes this
+-- file writes the matching REVOKE by hand.
+
+GRANT SELECT ON public.moderation_state TO pulse_app;
