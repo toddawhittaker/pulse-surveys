@@ -92,6 +92,7 @@ each produces.
 — the latest row by its decision instant, or the initial state where there is
 none — and both the comment read path and the summary job's gather call it, with
 no second copy of the ordering or of the default anywhere under `backend/app/`.
+
 ## SPEC §6.2's threat and self-harm suppression is not enforced in the comment read path
 
 **What is not enforced.** SPEC §5.2 ends "threat/self-harm classifications bypass
@@ -130,3 +131,34 @@ such a verdict on a comment in a week at the threshold and asserts the forbidden
 state at the service's return value and at the batch's membership. That test can
 only be written once a verdict of that kind can exist, which is why the writer's
 ticket owns it.
+
+## The report's three copy modules sit outside the collector, so nothing sweeps their strings
+
+**What is not enforced.** SPEC §4.1 items 4 and 5 — the aggregate-language rule
+and the confidentiality-copy rule — are enforced by the invariant-marked
+inventory test over the strings `tests/fixtures/copy_inventory.py` collects, and
+that collector walks `frontend/src/copy/`. The report's three copy modules are not
+in it: `instructorReportTrendCopy.ts`, `instructorReportStatCopy.ts` and
+`instructorReportCommentCopy.ts` all ship in `frontend/src/components/` beside the
+components that read them. Every word an instructor reads on the trend, stat and
+comment surfaces is therefore held to items 4 and 5 by review and by a header
+paragraph in each file, which is weaker than the way the survey surface's strings
+are held.
+
+**Why it was left.** The inventory test reds on any key prefix its governance map
+does not list, and it is `invariant`-marked, so moving a file under
+`frontend/src/copy/` without growing that map reds a §4.1 gate. Growing the map is
+heavy-lane work over the whole report surface and belongs to one ticket rather than
+to three. E4-08, E4-09 and E4-10 are light tickets scheduled before it, and a light
+diff may not reach a heavy surface — so each of them put its copy module beside its
+components, said so in the file's own header, and left the move to the ticket that
+owns the map. This entry is that decision recorded where the epic can see it rather
+than only in the files that work around it, which is `docs/MISTAKES.md` entry 48.
+
+**Owner:** E4-12, which grows the inventory over the report surface.
+
+**Done when:** all three files are collected by
+`tests/fixtures/copy_inventory.py`'s own walk, their key prefixes are in the
+governance map, and the items-4-and-5 vocabulary gate has been seen running over
+their strings — E4-12's acceptance criterion 7 states it, and closing it closes
+this entry.
