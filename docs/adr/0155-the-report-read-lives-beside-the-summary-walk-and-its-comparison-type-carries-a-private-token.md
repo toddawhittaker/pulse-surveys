@@ -69,12 +69,36 @@ load-bearing rather than incidental: a leadership session answered 404 would mea
 the role gate had let it through and the scope query had refused it, which is E9's
 shape arriving three epics early.
 
-**Item 7's chokepoint is a module-private construction token.** The `comparison`
-member's type, `ComparisonFigure`, lives in `app/services/reporting.py` and its
-constructor demands a module-level object that nothing outside that file can
-reach. `app/schemas/report.py` types the member with it. So the only value of
-that type that can exist anywhere is one `comparison_after_suppression` produced,
-and that function reads *both* configured minimums —
+**A report is served only for a published course week, and the week is selected
+out of the published set.** SPEC §3.1 puts the report after the window closes and
+this ticket's Context asks for one published course week; a week still taking
+responses is refused with byte-for-byte the refusal a week the section never runs
+receives. The first version of this record rejected that rule and shipped the
+defect — see the reversed paragraph under *Alternatives rejected*, which is kept
+in full because its reasoning is the thing to recognise next time.
+
+**Item 7's chokepoint is a module-private construction token, checked again at the
+wire.** The `comparison` member's type, `ComparisonFigure`, lives in
+`app/services/reporting.py` and its constructor demands a module-level object that
+nothing outside that file can reach. `app/schemas/report.py` types the member with
+it.
+
+The constructor alone turned out not to be a chokepoint, and this record's own
+security round is what found it: pydantic produces instances two documented ways
+that never call `__init__` — `model_construct`, which runs neither validation nor
+initialisation, and `model_copy(update=...)`, which rewrites the fields of a value
+the helper had already suppressed. Both were demonstrated ending in a serialized
+payload carrying a figure §5.1 means to suppress. So **the boundary is the wire**:
+`ComparisonFigure` records a private seal over its own field values at the moment
+the token is accepted, and `InstructorReport`'s `mode="after"` validation of the
+`comparison` member refuses any value whose seal does not match its fields. The
+first door produces an instance with no seal at all; the second produces one whose
+seal is over the values it held *before* the update. A seal that merely recorded
+"a token was seen" would pass the second, because `model_copy` copies private
+attributes too — which is why the seal binds values rather than recording an event.
+
+The helper is still the only thing that can build one, and it reads *both*
+configured minimums —
 `benchmark_min_sections_default` and `benchmark_min_respondents_default`. The
 report itself goes through it: E4 has no comparison set, so it asks for a figure
 of nothing over no sections and no respondents and carries back the suppressed
@@ -141,11 +165,35 @@ is a false statement to an instructor: it says every response that week was
 invalid, in a week that had none, and §3.3's rate is one of the two numbers §5.1
 puts at the top of the page.
 
-**Refusing a report for a week whose window has not closed.** Tempting, since
-navigation lists only the closed weeks. Rejected as a rule nothing asks for: a
-report for an open week is a true report of what has arrived so far, and refusing
-it would be this module inventing a state the spec does not have. What is refused
-is a course week the section has no window for at all.
+**~~Refusing a report for a week whose window has not closed.~~ Reversed by this
+record's own security round; the original paragraph is kept because its reasoning
+is what shipped the defect.** It read:
+
+> Tempting, since navigation lists only the closed weeks. Rejected as a rule
+> nothing asks for: a report for an open week is a true report of what has arrived
+> so far, and refusing it would be this module inventing a state the spec does not
+> have. What is refused is a course week the section has no window for at all.
+
+**Every clause of that is wrong, and two of them were checkable against documents
+this record cites.** SPEC §3.1 makes the report available after the window closes,
+and E4-07's own Context asks for "one **published** course week" — so the rule was
+asked for, twice, and this paragraph rejected it as unasked. It is not this module
+inventing a state either: published-versus-open is E4's breakdown decision 6, and
+the same function already computed the set two lines above the place it then
+ignored it. And "a true report of what has arrived so far" is the substantive
+error: a report is true of an instant, and an instructor who reads one twice is
+subtracting rather than reading — the difference between two views of an open week
+is one student's submission, arriving in a week whose whole small-N apparatus
+exists to keep exactly that inference out. `docs/MISTAKES.md` entry 51 names the
+shape; this paragraph is a fresh instance of it, written by somebody who had read
+that entry.
+
+**What is decided now:** the report is served only for a course week in the
+published set, and the refusal for an open week is byte-for-byte the one a week
+the section never runs receives — same status, same body, selected out of the
+published list rather than tested against it, so there is one code path and
+nothing to tell "not yet" from "never". Telling those apart would hand back the
+section's calendar a week at a time.
 
 **Carrying the released list in every week's report.** Simpler, one branch fewer,
 and it re-attaches the week for free — the batch that was not there last Monday
@@ -168,9 +216,22 @@ not the denominator, and a response rate above 1 is a report nobody can read.
   deliberately for the token's privacy, and it is the one function-local import in
   the module. Anyone tempted to lift it to module scope will break the import.
 - **E5 cannot ship a comparison figure without going through the suppression
-  helper**, because there is no other way to construct the value. If E5 needs a
-  shape this type does not have, the change is to this type and its helper — which
-  is the review that ticket should get.
+  helper**, because there is no other way to build a value the payload boundary
+  admits. If E5 needs a shape this type does not have, the change is to this type
+  and its helper — which is the review that ticket should get.
+- **The seal costs every report one tuple comparison and costs a reader an
+  indirection.** `ComparisonFigure._sealed_over` is a private attribute nothing
+  serializes, `_the_seal_over` builds the tuple from `model_fields` so a field
+  added to the type is inside the seal by existing, and
+  `refuse_an_unsealed_comparison` is the only reader. The failure mode to know
+  about: anything that produces a `ComparisonFigure` without calling its
+  constructor now raises a `ValidationError` at the payload boundary rather than
+  serializing quietly, which is deliberate — reaching there at all is a defect in a
+  confidentiality path, not a state to render.
+- **The `comparison` member is re-checked on every report even though E4 computes
+  no comparison set.** That is the cost of putting the check at the wire instead of
+  at construction, and it is what makes the guard survive E5 being written by
+  somebody who never read this record.
 - **The report and the week list cannot disagree about which weeks are
   published**, because both derive it from `_section_weeks` and the clock service.
 - **The instructor report's two refusal sentences are outside `app.copy`.** E2-11's

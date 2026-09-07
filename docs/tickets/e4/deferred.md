@@ -93,15 +93,54 @@ each produces.
 none — and both the comment read path and the summary job's gather call it, with
 no second copy of the ordering or of the default anywhere under `backend/app/`.
 
-**Closed by E4-07.** `app.services.report_comments.reported_status_of` is public,
-the summary gather in `app.services.reporting` calls it, and no second statement
-of the ordering or of the default is left under `backend/app/` —
+**Closed by E4-07, and it opened the entry below.**
+`app.services.report_comments.reported_status_of` is public, the summary gather in
+`app.services.reporting` calls it, and no second statement of the ordering or of
+the default is left under `backend/app/` —
 `tests/unit/test_the_moderation_state_ordering_has_one_home_under_backend_app.py`
-counts the modules that name the relation in executable code and holds the tree
-to one. One difference is worth naming rather than leaving to be discovered: the
-summary job's copy broke a tie between two decisions sharing an instant on the
-row key, and the shared helper orders by the decision instant alone, which is what
-this done-when states. E4-06's tests are green unmodified.
+counts the modules that name the relation in executable code and holds the tree to
+one. E4-06's tests are green unmodified.
+
+Consolidating it is what made the ordering itself reviewable, and E4-07's security
+round then found that neither of the two orderings was right. That is the next
+entry, and it is a real gap rather than a note about this one.
+
+## `moderation_state` has no ordering a same-instant tie can be broken by
+
+**What is not enforced.** ADR 0145 makes the record append-only with "the latest
+row governing", and `reported_status_of` implements that as `ORDER BY decided_at
+DESC LIMIT 1`. `decided_at` is a `now()` server default, which in PostgreSQL is
+the **transaction** timestamp: every row written in one transaction carries the
+same instant to the microsecond. Two decisions about one comment in one
+transaction therefore tie, and `LIMIT 1` picks between them arbitrarily — so "the
+latest decision" can resolve to the earlier one, and a comment a moderator
+excluded can come back `published`. It is the same defect from either side: E4-06's
+copy broke the tie on `moderation_state.id`, which is `gen_random_uuid()` and
+therefore a coin flip rather than an order; E4-04's copy, which is now the one
+home, breaks it not at all.
+
+Nothing in E4 can reach the state, and that is why it is deferred rather than
+fixed here: E6 writes the first `moderation_state` row this system will ever hold,
+so today the subquery has nothing to order and every comment resolves to the
+initial state by absence. The consequence is a future one, and it is a
+confidentiality consequence — a held comment shown — rather than a cosmetic one.
+
+**Why it was left.** The fix is a schema change: an explicit monotonic column, a
+migration, a backfill rule for a table with no rows, and a writer that sets it.
+E4-07 is a read ticket that was told to expect no migration, and inventing the
+column here would settle the shape of E6's own write path from a ticket that
+writes nothing. What E4-07 could do it did: put the ordering in one place, so
+there is one function to change rather than two.
+
+**Owner:** E6, in the ticket that writes the first moderation decision — before it,
+not after. A writer landing on this ordering is a writer whose first same-transaction
+pair is already wrong.
+
+**Done when:** `moderation_state` carries an explicit monotonic sequence column
+that a same-transaction pair cannot tie on, `reported_status_of` orders by it, and
+a test plants two decisions about one comment inside a single transaction and
+requires the second to be the one reported — driven both ways round, since a tie
+broken arbitrarily passes half of such a test by luck.
 
 ## SPEC §6.2's threat and self-harm class is suppressed in neither the comment read path nor the summary gather
 

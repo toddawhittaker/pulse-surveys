@@ -485,6 +485,19 @@ def reported_status_of(answer_id: SQLColumnExpression[Any]) -> ColumnElement[str
     Two copies of "the latest row, or published" disagree the first time somebody
     changes one, and §5.2's whole lifecycle is about which decision is current.
 
+    **The ordering below cannot break a same-transaction tie, and that is a
+    recorded gap rather than an oversight.** `decided_at` defaults to `now()`,
+    which is PostgreSQL's *transaction* timestamp, so every row written in one
+    transaction carries the same instant and `LIMIT 1` chooses between them
+    arbitrarily — a comment a moderator excluded can resolve to `published`.
+    Nothing in E4 can reach it: E6 writes the first `moderation_state` row this
+    system will hold, so today this subquery orders nothing and every comment
+    resolves to `INITIAL_STATE` by absence. `docs/tickets/e4/deferred.md` carries
+    the entry, owned by E6 **before** its first writer lands, with the fix stated —
+    an explicit monotonic column, ordered by here. Breaking the tie on the row key
+    is not that fix and is worth naming as a wrong answer: `moderation_state.id` is
+    `gen_random_uuid()`, so it is a coin flip rather than an order.
+
     **`SQLColumnExpression` rather than `ColumnElement`**, because the two callers
     hold the answer key in the two forms SQLAlchemy has: this module reads it off a
     Core view (`report_comment.answer_id`, a `Column`) and the summary gather off
