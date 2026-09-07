@@ -431,29 +431,145 @@ const COMPONENT_SOURCES = [
   'instructorReportTrendCopy.ts',
 ] as const;
 
-const DATA_ACCESS = [
-  /\bfetch\s*\(/,
-  /XMLHttpRequest/,
-  /localStorage/,
-  /sessionStorage/,
-  /document\.cookie/,
-  /from '\.\.\/api/,
+/**
+ * Everything these components may not reach for, each with a line that reaches
+ * for it.
+ *
+ * Named entries rather than a bare list of patterns, so a failure says which
+ * rule was broken, and so every entry can be exercised against a line that uses
+ * it before the sources are read: a pattern that has gone blind reports a clean
+ * tree (`docs/MISTAKES.md` entry 3).
+ *
+ * **`Date` is matched by how it is used, not by its name.** This ticket's
+ * headline trap is a frontend that recomputes term weeks, so reaching the clock
+ * at all is the defect — but the subject says the word: `PulseTrendChart.tsx`
+ * documents that it constructs no `Date`, and a scan for the bare name would
+ * red on that sentence and drive the documentation off the file. Stripping
+ * comments before scanning was the alternative, and was rejected because a
+ * stripper is code that can be wrong — a `//` inside a string would take the
+ * rest of the line out of the scan rather than into it, which is a guard that
+ * hides things. So the three forms that reach the built-in are matched instead.
+ * What that does not see, said plainly: the clock reached through an alias
+ * (`const clock = Date;`) or through `globalThis`. Neither is a way anyone
+ * arrives here by accident, which is the arrival this guard is for.
+ */
+interface ForbiddenReach {
+  readonly what: string;
+  readonly pattern: RegExp;
+  /** A line that reaches that way, which the pattern must catch. */
+  readonly used: string;
+}
+
+const FORBIDDEN: readonly ForbiddenReach[] = [
+  {
+    what: 'a fetch',
+    pattern: /\bfetch\s*\(/,
+    used: "  const answer = await fetch('/api/instructor/report');",
+  },
+  {
+    what: 'an XMLHttpRequest',
+    pattern: /XMLHttpRequest/,
+    used: '  const request = new XMLHttpRequest();',
+  },
+  {
+    what: 'a server-sent event stream',
+    pattern: /\bEventSource\b/,
+    used: "  const stream = new EventSource('/api/instructor/report');",
+  },
+  {
+    what: 'a socket',
+    pattern: /\bWebSocket\b/,
+    used: "  const socket = new WebSocket('wss://example.test/report');",
+  },
+  { what: 'local storage', pattern: /localStorage/, used: "  localStorage.setItem('week', '4');" },
+  {
+    what: 'session storage',
+    pattern: /sessionStorage/,
+    used: "  const week = sessionStorage.getItem('week');",
+  },
+  { what: 'the cookie jar', pattern: /document\.cookie/, used: '  const jar = document.cookie;' },
+  {
+    what: 'the page location',
+    pattern: /window\.location/,
+    used: '  const asked = window.location.search;',
+  },
+  {
+    what: 'the navigator',
+    pattern: /\bnavigator\b/,
+    used: '  if (!navigator.onLine) return null;',
+  },
+  { what: 'a constructed clock', pattern: /\bnew Date\b/, used: '  const today = new Date();' },
+  { what: 'the clock read statically', pattern: /\bDate\./, used: '  const now = Date.now();' },
+  {
+    what: 'the clock called without new',
+    pattern: /\bDate\s*\(/,
+    used: '  const stamp = Date(0);',
+  },
+  {
+    what: 'a dynamic import',
+    pattern: /\bimport\s*\(/,
+    used: "  const client = await import('../api/instructor');",
+  },
+  {
+    what: 'the API client',
+    pattern: /from '\.\.\/api/,
+    used: "import { fetchReport } from '../api/instructor';",
+  },
+  {
+    // The same import written the other way. A guard that knew one spelling
+    // would be defeated by a formatter, not by an author.
+    what: 'the API client, double-quoted',
+    pattern: /from "\.\.\/api/,
+    used: 'import { fetchReport } from "../api/instructor";',
+  },
 ] as const;
 
+/**
+ * Lines that must stay allowed, copied whole out of the files they come from —
+ * the line each sentence starts on included, because a line retyped from where
+ * it seems to begin is the thing a control exists to disprove
+ * (`docs/MISTAKES.md` entry 3).
+ *
+ * The first is `PulseTrendChart.tsx`'s own sentence about the clock: the file
+ * says it constructs no `Date`, and a guard that refused that sentence would be
+ * refusing the documentation of the rule it enforces.
+ */
+const ALLOWED = [
+  ' * file, and no `Date` is constructed or read anywhere in it — which',
+  "import { copy, fillCopy } from './instructorReportTrendCopy';",
+  '  const weeks = [...publishedWeeks].sort((left, right) => left - right);',
+] as const;
+
+/** Every rule one line breaks, named. */
+function reachedBy(source: string): string[] {
+  return FORBIDDEN.filter((rule) => rule.pattern.test(source)).map((rule) => rule.what);
+}
+
 describe('the trend family', () => {
-  it('fetches nothing, imports no API client and reads no session state', () => {
-    const reaches = (source: string): boolean =>
-      DATA_ACCESS.some((pattern) => pattern.test(source));
+  it('catches every way of reaching for data, and allows the prose about them', () => {
+    // Each entry against a line that uses it. Without this, an entry that
+    // matches nothing joins the list and the sweep below goes on reporting a
+    // clean tree — one rule quieter than it was, and nothing says so.
+    for (const rule of FORBIDDEN) {
+      expect(rule.pattern.test(rule.used), `${rule.what} is not caught by its own pattern`).toBe(
+        true,
+      );
+      expect(reachedBy(rule.used), `${rule.what} is not reported`).toContain(rule.what);
+    }
 
-    // The readers, on both sides, before the sources are read.
-    expect(reaches("  const answer = await fetch('/api/instructor/report');")).toBe(true);
-    expect(reaches("import { copy } from './instructorReportTrendCopy';")).toBe(false);
-    expect(reaches('  const weeks = [...publishedWeeks].sort();')).toBe(false);
+    // And the other side: lines these components actually carry.
+    for (const line of ALLOWED) {
+      expect(reachedBy(line), `a line these components carry is refused: ${line}`).toEqual([]);
+    }
+  });
 
+  it('fetches nothing, reads no clock and reaches no API client or session state', () => {
     for (const name of COMPONENT_SOURCES) {
       const source = readFileSync(join(HERE, name), 'utf8');
       expect(source.length, `${name} was read as an empty file`).toBeGreaterThan(0);
-      expect(reaches(source), `${name} reaches for data a prop should have carried`).toBe(false);
+      expect(reachedBy(source), `${name} reaches for something a prop should have carried`).toEqual(
+        [],
+      );
     }
   });
 });

@@ -12,7 +12,8 @@ import './instructorReportTrend.css';
  * in the term's fourth week, or paused over a break week, breaks any offset a
  * chart might compute. E4-07's report payload carries both, so this component
  * renders both and calculates neither. There is no date arithmetic in this
- * file and no `Date` anywhere in it.
+ * file, and no `Date` is constructed or read anywhere in it — which
+ * `PulseTrendChart.test.tsx` holds this file to rather than taking on trust.
  *
  * `mean` is `null` for a week with no responses, which is not the same fact as
  * a week rated zero — see {@link PulseTrendChart} on how the two are drawn
