@@ -297,17 +297,59 @@ def test_the_unanswered_rating_still_costs_the_weeks_response_rate(
     the payload half of it is here: five responses, five in the numerator, whatever
     each of them left blank.
 
-    **The mutation this kills:** a response rate counted over *ratings* rather than
-    over responses, which is the mirror image of the mutation above and reads as a
-    section with worse participation than it has.
+    **The mutation this kills:** a response rate counted over the *ratings* a
+    stream received rather than over the week's responses — the mirror image of
+    the mean's mutation one test up, and one that reads as a section with worse
+    participation than it has. The full week is the only place the two numerators
+    differ: four instructor ratings against five responses.
+
+    **The docstring used to claim that kill and the body could not make it.** It
+    asserted `rates.responses` and never read `response_rate`, so a rate computed
+    over the ratings would have left this test green and been caught — if at all —
+    by the sibling three tests up. Both numbers are read now, and the near miss is
+    named rather than merely avoided: the value a ratings-denominated rate would
+    produce is computed from the payload's own distribution and required to be
+    absent. `docs/MISTAKES.md` entry 2's rule is to assert the forbidden state,
+    and this is what that looks like when the permitted one is a plausible
+    neighbour of it.
     """
     body, answered = report_door.payload(course_week=FULL_WEEK)
     rates = report_api_contract.member(body, report_api_contract.rates_member, answered=answered)
+    distribution = report_api_contract.stream_member(
+        body,
+        report_api_contract.instructor_stream,
+        report_api_contract.distribution_field,
+        answered=answered,
+    )
+    rated = sum(int(count) for count in distribution.values())
+    enrolled = rates[report_api_contract.enrolled_field]
+
+    assert 0 < rated < RESPONSES_IN_WEEK[FULL_WEEK], (
+        f"The instructor stream holds {rated} ratings and the week holds "
+        f"{RESPONSES_IN_WEEK[FULL_WEEK]} responses. The two have to differ, and neither may be "
+        "zero, or the wrong denominator and the right one produce the same rate and this test "
+        "cannot tell them apart."
+    )
     assert rates[report_api_contract.responses_field] == RESPONSES_IN_WEEK[FULL_WEEK], (
         f"`rates.{report_api_contract.responses_field}` is "
         f"{rates[report_api_contract.responses_field]} and the week holds "
         f"{RESPONSES_IN_WEEK[FULL_WEEK]} responses, one of which left the instructor rating "
         "unanswered. An absent answer costs the rate and not the average, so it is still a response."
+    )
+    assert rates[report_api_contract.response_rate_field] == pytest.approx(
+        RESPONSES_IN_WEEK[FULL_WEEK] / enrolled
+    ), (
+        f"`rates.{report_api_contract.response_rate_field}` is "
+        f"{rates[report_api_contract.response_rate_field]}; the week is "
+        f"{RESPONSES_IN_WEEK[FULL_WEEK]} responses over {enrolled} enrolled. Counted over the "
+        f"{rated} instructor ratings instead it would be {rated / enrolled}, which is the number "
+        "this test exists to refuse."
+    )
+    assert rates[report_api_contract.response_rate_field] != pytest.approx(rated / enrolled), (
+        f"`rates.{report_api_contract.response_rate_field}` is {rated / enrolled}, which is the "
+        f"{rated} ratings this stream received over {enrolled} enrolled rather than the week's "
+        f"{RESPONSES_IN_WEEK[FULL_WEEK]} responses. A student who answered and left one question "
+        "blank is a student who answered."
     )
 
 

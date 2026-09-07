@@ -47,7 +47,7 @@ deliverable rather than a collection error (`docs/MISTAKES.md` entry 44).
 
 import dataclasses
 import inspect
-from typing import Any
+from typing import Any, get_args, get_origin
 
 import pytest
 from fixtures.report_api import FULL_WEEK, ReportDoor
@@ -61,6 +61,19 @@ pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 # figure and not a coincidence (`docs/MISTAKES.md` entry 3 on a value a mutation
 # cannot change).
 A_COMPARISON_MEAN = 4.25
+
+# A token a caller can produce, for the construction test below. `object()` and
+# not `None`: `None` is what a constructor with a defaulted token parameter falls
+# back to, so refusing it could be the default being refused rather than this
+# value being compared. A fresh object is unmistakably something only this test
+# holds.
+A_CALLERS_TOKEN = object()
+
+# A string for whichever field carries the suppression reason. Its content is
+# never read; what matters is that it *is* a string, so the field's own
+# annotation has nothing to object to and the only layer left that can refuse the
+# call is the token check.
+A_REASON = "assembled by a caller that holds no token"
 
 # How far past a minimum the clearing side of each pair sits. One, because the
 # minimum itself is the first value that passes: SPEC §5.1 suppresses a figure
@@ -92,6 +105,52 @@ def serialized(value: Any) -> dict[str, Any]:
         f"{type(value).__name__}). It reads a Pydantic `model_dump`, a dataclass, or an object "
         "with a `__dict__`; a fourth spelling is taught in `serialized` in this module. The "
         "question it is asking is SPEC §4.1 item 7's: is the figure on the wire or is it not."
+    )
+
+
+def a_value_the_annotation_accepts(parameter: Any, owner: str) -> Any:
+    """One value for a constructor field that the field's own annotation cannot object to.
+
+    **This is half of the C4 repair, and it exists because the obvious version of
+    it hid a survivor.** The first version of the construction test put `object()`
+    into any annotation it did not recognise, which meant `str | None` and
+    `float | None` both got one — so pydantic refused the call on the field types
+    and the test never reached the token check at all. Filling each field with
+    something its annotation admits leaves the token as the only thing that can
+    say no.
+
+    An optional annotation is unwrapped rather than answered with `None`, and
+    `False` is chosen for a boolean rather than `True`, because the state this
+    call is trying to reach is the dangerous one: a comparison figure that is
+    **not** suppressed and carries a number. A refusal of a value that was
+    suppressed and empty would prove much less.
+
+    An annotation this cannot fill is a failure naming it rather than a guess —
+    the guess is what went wrong the first time.
+    """
+    annotation = parameter.annotation
+    optional = type(None) in get_args(annotation)
+    members = [member for member in get_args(annotation) if member is not type(None)]
+    base = members[0] if get_origin(annotation) is not None and len(members) == 1 else annotation
+
+    if base is bool:
+        return False
+    if base is int or base is float:
+        return A_COMPARISON_MEAN
+    if base is str:
+        return A_REASON
+    if optional:
+        return None
+    if parameter.default is not parameter.empty:
+        return parameter.default
+    pytest.fail(
+        f"`{owner}` declares a field `{parameter.name}: {annotation}`, and this test has no value "
+        "for it that the annotation certainly accepts. It fills a boolean, a number, a string and "
+        "anything optional; a field of some other kind is taught in "
+        "`a_value_the_annotation_accepts` in this module.\n\n"
+        "Guessing here is exactly what let the C4 mutation survive: a value the field rejects makes "
+        "pydantic refuse the construction before the token is consulted, and the test then passes "
+        "whether or not the chokepoint exists."
     )
 
 
@@ -235,35 +294,81 @@ def test_the_comparison_value_cannot_be_constructed_without_the_helpers_token(
     comparison value at all, and the suppression cannot be walked around by
     building the payload some other way.
 
-    This drives it: every parameter of the constructor is filled with a value a
-    caller could produce, and the construction must be refused. A class that
-    accepts them has a token that is either absent or unchecked, and
-    `docs/MISTAKES.md` entry 22 is the record of a closed-set guard defeated one
-    level out — which is exactly what a comparison value anybody can construct is.
+    **This test survived the mutation battery once, and how it survived is the
+    whole reason it is written the way it is now.** The first version filled every
+    parameter by annotation and put `object()` in anything it did not recognise —
+    which was `reason: str | None` and `figure: float | None` — and then accepted
+    *any* exception as the refusal. Pydantic objected to the field types long
+    before the token was ever consulted, so replacing the token check with
+    `if False:` left this test green: it was asserting that a value with two
+    nonsense fields is refused, which is true whether or not the chokepoint
+    exists. That is `docs/MISTAKES.md` entry 9's shape, and this repository's own
+    sharpest version of it — a guard test whose outcome a second defence layer
+    also produces.
+
+    **So the repair is a pair, and neither half works alone.** Every field is
+    given a value its own annotation accepts, so pydantic has no objection to
+    make; and the refusal is required to be a `TypeError` specifically, which is
+    the token check's and not pydantic's — a `ValidationError` is a `ValueError`.
+    Fill the fields correctly but accept any exception, and a later model
+    validator's complaint stands in for the token again; pin the exception type
+    but leave `object()` in a field, and pydantic raises first. Together they
+    leave exactly one layer that can refuse this call.
+
+    **The token is supplied rather than omitted, deliberately.** Leaving it out
+    would raise `TypeError` for a missing argument on a constructor whose check
+    had been deleted — the same exception from the signature rather than from the
+    guard, which is the near miss one level further out. This call hands over a
+    value a caller *can* produce and requires the check itself to refuse it.
+
+    **What this must do under mutation:** green on the shipped tree, red the
+    moment the token comparison stops being made.
     """
     comparison = report_api_contract.comparison_type()
-    filled = {}
-    for parameter in inspect.signature(comparison).parameters.values():
-        if parameter.kind in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD):
-            continue
-        annotation = parameter.annotation
-        if annotation is bool:
-            filled[parameter.name] = True
-        elif annotation in (int, float):
-            filled[parameter.name] = A_COMPARISON_MEAN
-        elif annotation is str:
-            filled[parameter.name] = "constructed by a caller that holds no token"
-        else:
-            filled[parameter.name] = object()
+    signature = inspect.signature(comparison)
+    positional = [
+        parameter
+        for parameter in signature.parameters.values()
+        if parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if len(positional) != 1:
+        pytest.fail(
+            f"`{comparison.__name__}{signature}` takes {len(positional)} positional parameters "
+            f"({[parameter.name for parameter in positional]}); this test hands the token over in "
+            "the one positional slot work-order decision 5 describes and fills the rest by keyword. "
+            "A token spelled some other way is taught here, in this test."
+        )
+    filled = {
+        parameter.name: a_value_the_annotation_accepts(parameter, comparison.__name__)
+        for parameter in signature.parameters.values()
+        if parameter.kind is parameter.KEYWORD_ONLY
+    }
 
-    with pytest.raises(Exception) as refused:
-        comparison(**filled)
-    assert refused.value is not None, (
-        f"`{comparison.__name__}({', '.join(sorted(filled))})` was constructed by this test, which "
-        "holds nothing private to `app.services.reporting`. Work-order decision 5 makes the "
+    built: Any = None
+    raised: BaseException | None = None
+    try:
+        built = comparison(A_CALLERS_TOKEN, **filled)
+    except Exception as refused:  # noqa: BLE001 - which exception this is *is* the assertion
+        raised = refused
+
+    assert raised is not None, (
+        f"`{comparison.__name__}` was constructed by this test — which holds nothing private to "
+        f"`{report_api_contract.reporting_module_name}` — as {built!r}. Every field was given a "
+        "value its annotation accepts, so nothing but the token stood between this call and a "
+        "comparison figure a caller assembled for itself. Work-order decision 5 makes the "
         "constructor demand a module-private token so that the suppression helper is the only way "
         "this member can be populated; a constructor anybody can call is a chokepoint with a door "
-        "beside it."
+        "beside it, and §4.1 item 7 is then enforced by whoever remembers it."
+    )
+    assert isinstance(raised, TypeError), (
+        f"The construction was refused by {type(raised).__name__}: {raised}. This test requires a "
+        "`TypeError`, which is the token check's own refusal, because it cannot otherwise tell the "
+        "chokepoint from the layer beside it — a pydantic `ValidationError` is a `ValueError`, and "
+        "a test that accepted one would stay green with the token check deleted. That is not a "
+        "hypothetical: it is how this test survived the C4 mutation on the first pass.\n\n"
+        f"If the token layer legitimately refuses with {type(raised).__name__}, this assertion is "
+        "the one line to change — but check first that the refusal is the token's and not a field "
+        f"validator's, because the values handed over were {filled!r}."
     )
 
 
