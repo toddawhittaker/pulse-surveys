@@ -101,6 +101,11 @@ boundary: `metadata_tables` is asked for by both.
     client can post to and a term's worth of answers the participation formula can
     score, the `grade_sync` rows a test plants and reads back newest-first, and the
     names that ticket's work order settles.
+  - `fixtures/report_views.py` — E4-03: the term, section, question sets carrying
+    E4-02's `stream`, and answered weeks the three report views aggregate; the one
+    reader for a row of each view, on `db_session` and on a committed world the
+    application role can reach; and the validity service's recompute, bound by
+    signature because no record settles it.
   - `fixtures/dev_console.py` — E3-07: the `/dev` console built with the mock
     identity provider mounted so its roster fetch resolves in process, the reader
     that says which `data-testid` a page carries and which form encloses it, and
@@ -174,6 +179,7 @@ pytest_plugins = (
     "fixtures.grade_sweep",
     "fixtures.dev_console",
     "fixtures.care_subject",
+    "fixtures.report_views",
 )
 
 

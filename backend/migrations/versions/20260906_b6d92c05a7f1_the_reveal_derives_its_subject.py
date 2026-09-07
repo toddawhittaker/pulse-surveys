@@ -1,7 +1,7 @@
 """the reveal derives its subject from the comment Care is acting on
 
 Revision ID: b6d92c05a7f1
-Revises: c4a8e51db9f3
+Revises: b2d9f0a7c341
 Create Date: 2026-09-06 00:00:00.000000
 
 E4-01's whole schema change, which is not a schema change: one `SECURITY
@@ -58,7 +58,7 @@ from app.views_sql import read_sql
 
 # revision identifiers, used by Alembic.
 revision: str = "b6d92c05a7f1"
-down_revision: str | Sequence[str] | None = "c4a8e51db9f3"
+down_revision: str | Sequence[str] | None = "b2d9f0a7c341"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

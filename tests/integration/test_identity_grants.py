@@ -3901,6 +3901,17 @@ MEMBER_OF_ROLES = """
 #     here. No view over either table exists yet — E11's console is where one would
 #     be — so nothing joins a score to a person on any connection.
 #     Decided and spent in E3-02.
+#   - **E4-02 adds four tables and spends nothing.** `weekly_summary`,
+#     `moderation_state`, `release_batch` and `release_batch_member` appear in no
+#     tuple below, and their absence is the record: that ticket
+#     creates the schema E4 shares and writes no row into any of it. The writers
+#     are elsewhere — the summary job is E4-06, the release is E4-04, and every
+#     moderation writer is E6 — and each grants what it spends, because a grant
+#     issued for a writer that does not exist widens the runtime role for nobody.
+#     The equality below is what makes that absence enforced rather than intended,
+#     and `tests/integration/test_report_schema.py` asks the same question of those
+#     four tables by name, at column grain as well as table grain, so that a
+#     widening arriving with a new entry here still has to be argued for twice.
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -5170,8 +5181,11 @@ APPLICATION_READERS = (APPLICATION_ROLE, "PUBLIC")
 #
 # **Per view, because the sanction is per view.** Each entry below carries the
 # sentence that admits it, and the sentences come from the ticket, SPEC and the
-# ADR rather than from the SQL: the five views are E0-10's two and ADR 0046's
-# three, and what each is *for* is written down in those records.
+# ADR rather than from the SQL: E0-10's two, ADR 0046's three, and E4-03's three
+# report views, and what each is *for* is written down in those records. No count
+# is written here — the set grows with every ticket that ships a read view, and a
+# number in a comment is a record with a scheduled expiry (`docs/MISTAKES.md`
+# entry 1).
 SANCTIONED_VIEW_COLUMNS: dict[str, tuple[str, ...]] = {
     # E0-10's scope, in its own words: "a section-roster view and an
     # enrollment-count view that expose section membership and counts with **no**
@@ -5284,6 +5298,29 @@ SANCTIONED_VIEW_COLUMNS: dict[str, tuple[str, ...]] = {
         "course_id",
         "section_id",
     ),
+    # E4-03's three, and the sentence that admits all of them at once: **not one
+    # of these views names a person in any currency**. Each is keyed by
+    # `(section_id, week_id)` — a section and a term week — and every other column
+    # is a count or a statistic over a week's submissions. There is deliberately
+    # no `user_id` here, and the contrast with `section_roster` above is the point
+    # rather than an inconsistency: a roster has to name the row it is about, and
+    # an aggregate does not. SPEC §4 keys responses to the LMS user id and §4.1
+    # forbids identity in any instructor-visible view; these are the first views
+    # in the schema built to be read by an instructor, so the absence is the
+    # design and a `user_id` added to one of them is the failure this enumeration
+    # exists to catch.
+    #
+    # SPEC §5.1 is what asks for each: "this-week rating distributions for both
+    # streams; workload mean/median for the section …; response rate and validity
+    # rate". `stream` is SPEC §3.2's instructor/course split, carried on the
+    # question rows rather than derived from a position; `rating` is a Likert
+    # value between 1 and 5; `responses`, `valid_responses` and the two workload
+    # statistics are figures about a week. The rates themselves are computed at
+    # E4-07's payload layer from these counts, which is why the counts and not the
+    # quotients are what a grant has to admit.
+    "report_rating_distribution": ("section_id", "week_id", "stream", "rating", "responses"),
+    "report_workload": ("section_id", "week_id", "workload_mean", "workload_median"),
+    "report_response_counts": ("section_id", "week_id", "responses", "valid_responses"),
 }
 
 EXPECTED_APPLICATION_READABLE_COLUMNS: frozenset[tuple[str, str]] = frozenset(
