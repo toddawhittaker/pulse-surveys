@@ -136,6 +136,14 @@ the opposite).
   is never rewritten). The entry belongs in `RUNTIME_BASE_TABLE_PRIVILEGES`;
   `docs/disputes/E1-08-02.md` records that it lives in a test file the implementer
   could not edit.
+
+  **Amended, 2026-09-06 (E4-14).** Withholding `SELECT` entirely turned out to
+  block more than the claim: the daily purge deletes on `expires_at`, and
+  Postgres refuses a `DELETE ... WHERE` whose column the role cannot read, so
+  `purge_expired_nonces` raised `InsufficientPrivilege` on every run from the
+  day this table shipped until E4-14's column-scoped `GRANT SELECT
+  (expires_at)`. `nonce` itself is still withheld; ADR 0150 records why the
+  original withholding was total and what this narrow widening concedes.
 - **`pulse_app` gains `SELECT`, `INSERT` and `DELETE` on `lti_launch_state`** — the
   handshake store's grant. `SELECT` because the launch reads the expected `nonce`
   back (a look-up, not a blind insert like the nonce ledger); `UPDATE` withheld (a

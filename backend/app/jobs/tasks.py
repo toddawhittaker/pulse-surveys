@@ -95,8 +95,15 @@ def purge_launch_nonces() -> int:
     (`lti_launch_state`) live in Postgres, so a daily beat entry
     (`app.jobs.schedules`) reclaims their expired tails rather than letting either
     grow without bound. Runs on the worker's `pulse_app` connection, which holds
-    `DELETE` on both for exactly this. One task rather than two beat entries — the
-    schedule holds a single launch-housekeeping entry.
+    `DELETE` on both, plus the column-scoped `SELECT (expires_at)` on
+    `lti_launch_nonce` that E4-14 added — Postgres refuses a `DELETE ... WHERE`
+    whose column the role cannot read, and this task's `WHERE` reads `expires_at`
+    on both tables (`lti_launch_state` has held table-wide `SELECT` since E1-08).
+    Before E4-14, the nonce half of this task raised `InsufficientPrivilege` on
+    every run and the state half never ran either, sharing this one
+    `SessionLocal` (`docs/tickets/e4/carried-from-e3.md`, "The daily purge of the
+    launch replay ledger cannot run"; ADR 0150). One task rather than two beat
+    entries — the schedule holds a single launch-housekeeping entry.
     """
     now = datetime.now(UTC)
     with SessionLocal() as session:
