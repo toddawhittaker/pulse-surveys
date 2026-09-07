@@ -44,7 +44,9 @@ denial-module closure sweep's inventory note (see also the new entry below —
 the E3 boundary widened the inventory and sharpened the disclosed limit); the
 bounced verdict rows' cap and aggregation halves; the unproven structural
 battery rows; the bounce that names no offending position; the week eyebrow's
-course length; the self-hosted font licences (E13); the resubmission that
+course length (taken as E4-17 after the owner's ruling of 2026-09-07 settled
+where the total sits, so it no longer passes through); the self-hosted font
+licences (E13); the resubmission that
 500s under a rewound clock; the model identifier in three untied places; the
 floor-headroom variance point (E10); the copy collector's symlinked-directory
 gap (E4); the bounced comment refused before harm screening (E10, with the

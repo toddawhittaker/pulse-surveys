@@ -1,6 +1,6 @@
 # E4 — Instructor Monday report: build order
 
-Sixteen tickets decomposing SPEC §14.3's E4 entry. Each is sized for a single
+Seventeen tickets decomposing SPEC §14.3's E4 entry. Each is sized for a single
 focused session and leaves the repository in a working state: CI green,
 Compose stack healthy, nothing half-wired at a boundary. E4 is **not** a ⚠
 epic, but its entry marks one path for line-by-line human review anyway: the
@@ -137,7 +137,11 @@ ticket may depart from only by saying so.
    and its FIX-01 note says the rendering half now waits on an owner ruling
    about where the total sits in the ruled `COURSE WK NN, TERM WK NN` string.
    It passes through with that fact; the ruling would let a later ticket take
-   it whole.
+   it whole. **Superseded in part, 2026-09-07:** the ruling arrived. The
+   payload gains the course length, the eyebrow renders the brief's "/ N" form
+   on the course-week half with the term-week label unchanged, and frontend
+   derivation is rejected. The entry is taken after all, as **E4-17** — a
+   heavy ticket, as this decision predicted its wire half would be.
 10. **The frontend test runner lands as E4-16, first.** E2 deliberately
    deferred a frontend unit-test runner, with the revisit trigger "when a
    screen's logic outgrows what the end-to-end suite pins cheaply" — and E4's
@@ -169,6 +173,7 @@ ticket may depart from only by saying so.
 | 14 | [The nonce purge can run](E4-14-nonce-purge-grant.md) | `e4/nonce-purge-grant` | heavy | none | The carried grant defect: `pulse_app` gets what a `DELETE ... WHERE` needs, the purge is driven to completion, and the privilege record says why `SELECT` was withheld. | #185 as 22598ea, 2026-09-06 |
 | 15 | [E4 exit](E4-15-e4-exit.md) | `e4/e4-exit` | heavy | all | §14.3's exit clause driven against a seeded diverging two-stream story; boundary reviews; the de-anonymization statement verified; `../e5/carried-from-e4.md`. | |
 | 16 | [The frontend test runner](E4-16-frontend-test-runner.md) | `e4/frontend-test-runner` | heavy | none | The carried E2 deferral, whose revisit trigger this epic trips: a component-test runner, one proof test, and the CI gate that makes red mean stop. | #184 as 38bbdcc, 2026-09-06 |
+| 17 | [The week eyebrow says how long the course runs](E4-17-eyebrow-course-length.md) | `e4/eyebrow-course-length` | heavy | none | The carried E2 entry, unblocked by the owner's ruling of 2026-09-07: `OpenSurvey` gains the section's week count, `survey_read` reads it off the section row, and the eyebrow renders `COURSE WK 04 / 12, TERM WK 07`. | |
 
 ## Dependency graph
 
@@ -182,6 +187,7 @@ ticket may depart from only by saying so.
     └─ 10 ────────┘
 13 ─────────────────────────────── (free-standing, any time)
 14 ─────────────────────────────── (free-standing, any time)
+17 ─────────────────────────────── (free-standing, any time)
 ```
 
 (07 needs 02, 03 and 04; 06 needs 02 and 05 and feeds nothing but the data
@@ -193,7 +199,8 @@ strings 08–11 ship.)
 
 **Ten tickets cut on day one:** 01, 02, 03, 05, 13, 14 and 16 are
 free-standing, and 08, 09 and 10 build beside them against fixtures, merging
-after 16. The standing rules for parallel builds govern: partition
+after 16. (17 joined later, when its owner ruling arrived; it is
+free-standing too and may be cut whenever there is a session for it.) The standing rules for parallel builds govern: partition
 sequential identifiers up front, no two tickets touching the same file,
 migration chains re-pointed at merge. The migration-adding tickets are 02, 03,
 14 and — found while building it, because its guard needs a third `SECURITY
@@ -264,7 +271,7 @@ it. The entries' own done-whens govern; the tickets point at them.
 | The credit-rule explanation, instructor half | E4-12, scoped to what the report actually shows |
 | The copy collector's symlinked-directory gap | E4-12 |
 | The rendered student surface's string convention | E4-12 |
-| The week eyebrow's course length | not taken — decision 9 says why (the wire half is heavy-lane work and the rendering half waits on an owner ruling); passes through with that fact |
+| The week eyebrow's course length | E4-17, once the owner's ruling of 2026-09-07 settled where the total sits in the eyebrow (decision 9 records the change) |
 | The frontend unit-test runner (E2's deferral, revisit trigger now tripped) | E4-16 |
 | The stale Care-landing docstring | E4-13 |
 | The daily purge of the launch replay ledger cannot run | E4-14 |
@@ -274,8 +281,7 @@ Everything else in `carried-from-e3.md` — the roster token dial, the
 test, `post_score`'s return, the provisioning docstring, the rehoming
 proposal, the clock-route origin check, the runbook, `PERSON_TABLES`, the
 TypeScript 7 wait, the session-read sweep's limits, the rewound-clock family,
-the ruff target version, the denial-module collection floor, and the week
-eyebrow's course length (re-carried with decision 9's fact) — is owned by
+the ruff target version and the denial-module collection floor — is owned by
 later epics, by paths E4 does not touch, or by a ruling not yet made, and
 passes through to
 `../e5/carried-from-e4.md` at E4-15 under the same completeness rule E3 used.
