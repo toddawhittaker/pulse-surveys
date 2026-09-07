@@ -222,7 +222,10 @@ export function PulseTrendChart({
         ))}
         {path !== '' && <path className="pulse-trend-line" d={path} pathLength={1} />}
         {terminal !== null && (
-          <circle className="pulse-trend-dot" cx={terminal.x} cy={terminal.y} r={4} />
+          // Rounded the way the path rounds, so the dot and the end of the line
+          // it terminates are the same point rather than two points a
+          // twentieth of a unit apart.
+          <circle className="pulse-trend-dot" cx={round(terminal.x)} cy={round(terminal.y)} r={4} />
         )}
         {showTicks &&
           points.map((point, index) => (

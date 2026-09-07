@@ -207,7 +207,14 @@ describe('PulseTrendChart', () => {
   it('keeps the 1 to 5 scale whatever the weeks happen to span', () => {
     // Nothing here reaches below 3.6 or above 4.4. A chart that scaled to its
     // own data would draw its gridlines somewhere else entirely.
-    const { container } = render(<PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} />);
+    //
+    // Drawn without the week axis, so that the whole viewBox is the plot: with
+    // the axis asked for, the drawing carries a band under the plot for the two
+    // week labels, and the assertion at the end of this test would be measuring
+    // that band rather than the scale.
+    const { container } = render(
+      <PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} showTicks={false} />,
+    );
 
     expect(textsOf(container, 'pulse-trend-grid-label')).toEqual([
       '1.0',
@@ -222,6 +229,18 @@ describe('PulseTrendChart', () => {
           point.y <= gridlineFor(container, '1.0') && point.y >= gridlineFor(container, '5.0'),
       ),
     ).toBe(true);
+
+    // And the scale's two ends are the drawing's two ends, give or take the
+    // breathing room a rounded cap needs. Without this the assertions above
+    // hold just as well for a chart drawn on a 0–5 scale, where a rating of 1
+    // sits a fifth of the way up and the bottom of every panel is space no
+    // rating can ever reach: the gridline labelled 1.0 and a week rated 1.0
+    // would agree with each other, because one function places both.
+    const view = required(plotOf(container).getAttribute('viewBox'), 'the viewBox').split(' ');
+    const height = Number(required(view[3], "the viewBox's height"));
+    expect(height).toBeGreaterThan(0);
+    expect(height - gridlineFor(container, '1.0')).toBeLessThanOrEqual(20);
+    expect(gridlineFor(container, '5.0')).toBeLessThanOrEqual(20);
   });
 
   it('takes the term week from the payload rather than counting from an offset', () => {
