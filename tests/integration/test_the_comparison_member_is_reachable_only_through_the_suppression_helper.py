@@ -348,7 +348,7 @@ def test_the_comparison_value_cannot_be_constructed_without_the_helpers_token(
     raised: BaseException | None = None
     try:
         built = comparison(A_CALLERS_TOKEN, **filled)
-    except Exception as refused:  # noqa: BLE001 - which exception this is *is* the assertion
+    except Exception as refused:
         raised = refused
 
     assert raised is not None, (
