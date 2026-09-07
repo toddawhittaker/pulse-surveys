@@ -382,6 +382,13 @@ one field on a schema and one read in the survey read service, which is what
 made it heavy.
 **Done when:** the deferred entry's, both halves, read together with that
 entry's note of 2026-09-07.
+**Closed by E4-17.** `OpenSurvey` carries `length_weeks`, read off the section
+the window belongs to, and the eyebrow renders `COURSE WK 04 / 12, TERM WK 07`
+from governed copy with the total padded like the week beside it. The count is
+asserted against the seeded start letter and the term's start-letter map rather
+than against the service that computed it, and a sweep over `frontend/src/`
+keeps the TypeScript copy of that map from arriving later. The closing record is
+in `../e2/deferred.md`, with this entry.
 
 ## The self-hosted faces: an unrecognized licence, a missing notice, and a second copy nobody fetches
 

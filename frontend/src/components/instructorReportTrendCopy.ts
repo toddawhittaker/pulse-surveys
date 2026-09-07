@@ -37,7 +37,8 @@
  * below names the section's own line and nothing else.
  *
  * **The week eyebrow's wording.** `student_survey.course_week_eyebrow`'s
- * `COURSE WK NN, TERM WK NN` is the owner's FIX-01 ruling of 2026-09-03 and
+ * `COURSE WK NN / NN, TERM WK NN` is the owner's FIX-01 ruling of 2026-09-03,
+ * with the course length added by the ruling of 2026-09-07 (E4-17), and it
  * governs the eyebrow only. The chart axis follows SPEC §2.2's chart wording —
  * "WK 01" with the quiet "TERM 07" sub-label — and the two are deliberately
  * different strings for two different places.

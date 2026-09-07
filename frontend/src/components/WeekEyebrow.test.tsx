@@ -7,9 +7,9 @@ describe('WeekEyebrow', () => {
   it('names both week axes in words and states the closing instant', () => {
     const closesAt = '2026-09-10T18:00:00Z';
 
-    render(<WeekEyebrow courseWeek={4} termWeek={7} closesAt={closesAt} />);
+    render(<WeekEyebrow courseWeek={4} termWeek={7} lengthWeeks={12} closesAt={closesAt} />);
 
-    expect(screen.getByText('COURSE WK 04,')).toBeTruthy();
+    expect(screen.getByText('COURSE WK 04 / 12,')).toBeTruthy();
     expect(screen.getByText('TERM WK 07')).toBeTruthy();
 
     const expectedClose = new Intl.DateTimeFormat(undefined, {
@@ -22,7 +22,7 @@ describe('WeekEyebrow', () => {
   });
 
   it('shows the closing instant as it arrived when it cannot be parsed', () => {
-    render(<WeekEyebrow courseWeek={1} termWeek={1} closesAt="not-a-date" />);
+    render(<WeekEyebrow courseWeek={1} termWeek={1} lengthWeeks={12} closesAt="not-a-date" />);
 
     expect(screen.getByText('closes not-a-date')).toBeTruthy();
   });
