@@ -98,11 +98,20 @@ const SECTION_BLOCK = `survey-section-${SECTION_CODE}`;
 // `week.number` is the *term* week — `tests/fixtures/survey_windows.py` seeds the
 // eighteen `week` rows of Fall 2026 by that number — so 7 is what a `response`
 // written in this window points at, and `TERM_WEEK` is the number the screen
-// prints beside the course week, as `COURSE WK 04, TERM WK 07` (FIX-01's owner
-// ruling of 2026-09-03; it read `WK 04 / TERM 07` before).
+// prints beside the course week, as `COURSE WK 04 / 12, TERM WK 07` (FIX-01's
+// owner ruling of 2026-09-03 named both axes in words, and the ruling of
+// 2026-09-07 added how long the course runs to the course-week half; it read
+// `WK 04 / TERM 07` before either).
 const INSIDE_THE_WINDOW = '2026-10-02T19:00';
 const COURSE_WEEK = '04';
 const TERM_WEEK = 7;
+
+// The twelve weeks the first bullet above reads off `START_LETTER_MAP` for `R`,
+// as the eyebrow pads it. Transcribed like every other number here and derived
+// from nothing: E4-17 puts this on the read answer precisely so that no client
+// computes it from the section code, and a spec that computed it would be
+// writing that derivation in order to check it does not exist.
+const SECTION_LENGTH = '12';
 
 // How long the learner's enrollment is waited for, and how often it is retried —
 // the same instrument and the same numbers as `student-survey.spec.ts` and
@@ -345,8 +354,16 @@ test('a valid submission leaves one response and a real classification for every
   //
   // **Respelled by FIX-01's owner ruling of 2026-09-03**, which names both of
   // §2.2's axes in words: `WK 04 / TERM 07` became `COURSE WK 04, TERM WK 07`.
-  // The numbers are unchanged and so is what this assertion is for.
-  await expect(block).toContainText(`COURSE WK ${COURSE_WEEK},`);
+  // **And grown by the ruling of 2026-09-07** (E4-17), which adds how long the
+  // course runs to the course-week half: `COURSE WK 04 / 12, TERM WK 07`. The
+  // week numbers are unchanged, the term-week half is unchanged, and what this
+  // assertion is for is unchanged — it now also says the section's own length
+  // reached the screen, which is a number no client on this stack may compute.
+  //
+  // The four numbers in play are distinct on purpose: course week 4, term week 7,
+  // section length 12, term length 18. Serving the term week in the course week's
+  // place fails; serving the term's length in the section's fails.
+  await expect(block).toContainText(`COURSE WK ${COURSE_WEEK} / ${SECTION_LENGTH},`);
   await expect(block).toContainText(`TERM WK 0${TERM_WEEK}`);
   await expectTheFormIsShowing(block);
 

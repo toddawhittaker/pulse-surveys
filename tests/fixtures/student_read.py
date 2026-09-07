@@ -343,6 +343,34 @@ DEFAULT_INSTITUTION_TIMEZONE = "America/New_York"
 A_NON_DEFAULT_INSTITUTION_TIMEZONE = "Pacific/Honolulu"
 
 # ---------------------------------------------------------------------------
+# E4-17 — how many weeks the section runs for.
+# ---------------------------------------------------------------------------
+
+# The member E4-17 adds to the read answer, so the week eyebrow can say
+# `COURSE WK 04 / 12` rather than deriving the total from the section code in
+# TypeScript (`docs/MISTAKES.md` entry 19, and the ticket's own argument).
+#
+# **This spelling is not settled by the ticket.** Its Scope says "one field on
+# `OpenSurvey` ... naming how many weeks this section runs for, described the way
+# its neighbours are" and never names it, the way E2-09's work order left
+# `course_week` and `term_week` unnamed until the ruling of 2026-09-01. It is
+# transcribed here for the same reason those two are: two modules read it, and a
+# name that turns out to be wrong is one line here rather than two edits that can
+# drift apart. `length_weeks` is what the column on `section` is called
+# (`tests/fixtures/survey_windows.py`) and what the instructor report's payload
+# sketch already calls the same quantity (`docs/tickets/e4/README.md`), so it is
+# a transcription of what this repository already says and not a new coinage —
+# but the gap is real and is reported in E4-17's manifest.
+LENGTH_WEEKS_FIELD = "length_weeks"
+
+# The schema the field sits on, and the module that defines it. E4-17's Scope
+# names both outright; they are here rather than in the one test module that
+# imports them so that every name this ticket's suites reach for is in the same
+# place as `course_week` and `course_label`.
+STUDENT_SCHEMAS_MODULE = "app.schemas.student"
+OPEN_SURVEY_CLASS = "OpenSurvey"
+
+# ---------------------------------------------------------------------------
 # What is written into the rows a test then looks for.
 # ---------------------------------------------------------------------------
 
