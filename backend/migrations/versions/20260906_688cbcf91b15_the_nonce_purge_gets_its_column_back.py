@@ -1,7 +1,7 @@
 """the nonce purge gets the one column it deletes on
 
 Revision ID: 688cbcf91b15
-Revises: c4a8e51db9f3
+Revises: b6d92c05a7f1
 Create Date: 2026-09-06 00:00:00.000000
 
 E4-14's whole schema change, which is not a schema change at all: one
@@ -27,11 +27,13 @@ models describe relations and this revision describes a privilege.
 equality against `RUNTIME_COLUMN_PRIVILEGES`, which E4-14 extends with this
 column, and as a direct-query negative control beside it.
 
-**Standing note for whoever merges this chain slot** (also on
-`lti_launch_state_grants_v001.sql`'s neighbours): E4-02 and E4-03 build in
-parallel off the same head, `c4a8e51db9f3`. Whoever merges last re-points
-`down_revision` here, this docstring's `Revises` line, and any test constant
-naming this revision, to the chain slot actually below it.
+**Re-pointed at merge, as anticipated.** E4-01, E4-02 and E4-03 built off the
+same head, `c4a8e51db9f3`, in parallel worktrees; E4-01/02/03 merged first,
+extending the chain to `c4a8e51db9f3 -> a1e7c4b60d92 -> b2d9f0a7c341 ->
+b6d92c05a7f1`. This revision's `down_revision` and this docstring's `Revises`
+line are re-pointed onto `b6d92c05a7f1`, the new head, in the same change as
+the merge that brought those three revisions in. No test constant names this
+revision as a parent, so nothing else needed the same edit.
 """
 
 from collections.abc import Sequence
@@ -42,7 +44,7 @@ from app.views_sql import read_sql
 
 # revision identifiers, used by Alembic.
 revision: str = "688cbcf91b15"
-down_revision: str | Sequence[str] | None = "c4a8e51db9f3"
+down_revision: str | Sequence[str] | None = "b6d92c05a7f1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
