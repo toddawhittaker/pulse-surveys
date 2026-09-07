@@ -201,19 +201,28 @@ def carries_the_figure(value: Any) -> bool:
     return the_figure_is_in(serialized(value))
 
 
-def smuggled_field_values(comparison: Any) -> dict[str, Any]:
-    """Every field of a comparison value, filled to make the figure visible and unsuppressed.
+def smuggled_field_values(comparison: Any, *, claiming_suppression: bool = False) -> dict[str, Any]:
+    """Every field of a comparison value, filled so the figure is visible.
 
     By field name rather than by constructor parameter, because that is the
     currency both side doors take: `model_construct` and `model_copy(update=...)`
     are given field names and never see `__init__` at all. The values come from
     the same annotation reader the direct-construction test uses, so a field
     renamed or retyped moves both doors at once.
+
+    `claiming_suppression` flips whichever field is a boolean, producing the one
+    shape the wire boundary's carve-out sits next to: a value that *says* it is
+    suppressed and carries the number anyway. The field is found by the value the
+    annotation reader produced rather than by name, so nothing here hard-codes
+    which member `suppressed` is.
     """
-    return {
-        name: a_value_the_annotation_accepts(name, field.annotation, comparison.__name__)
-        for name, field in comparison.model_fields.items()
-    }
+    values: dict[str, Any] = {}
+    for name, field in comparison.model_fields.items():
+        value = a_value_the_annotation_accepts(name, field.annotation, comparison.__name__)
+        if claiming_suppression and isinstance(value, bool):
+            value = True
+        values[name] = value
+    return values
 
 
 def report_payload_model(contract: Any) -> Any:
@@ -728,6 +737,75 @@ def test_a_report_carrying_a_smuggled_figure_does_not_reach_wire_form(
         "doors validates anything — so a route that returns such an object serves the figure. "
         "§4.1 item 7 is a rule about what is shown, so the last boundary before the wire is the one "
         "that has to hold it, whatever built the object crossing it."
+    )
+
+
+def test_a_figure_claiming_suppression_while_carrying_the_number_does_not_reach_wire_form(
+    report_door: ReportDoor, report_api_contract: Any
+) -> None:
+    """The carve-out's second conjunct, which nothing else in this module sits on.
+
+    The wire boundary lets an unsealed value through only when it is **both**
+    suppressed **and** carrying no figure — an empty placeholder is harmless, and
+    refusing it would make the member unrenderable before E5 fills it. Every other
+    smuggling test in this module drives an unsuppressed value, so all of them
+    turn on the first conjunct and none of them is anywhere near the second. The
+    verifier measured that directly: drop `figure is None` from the carve-out and
+    the whole suite stays green while a value that says "nothing to show here"
+    carries the number through in the response body.
+
+    **The mutation this kills:** widening the carve-out to admit any suppressed
+    value, however much it carries. That is the dangerous direction of the two —
+    a payload whose `suppressed` flag reads true is one a frontend draws as an
+    empty panel while the figure it is meant to be suppressing rides along beside
+    it, where anything reading the response body can see it. §4.1 item 7 is about
+    the figure, not about the flag: "no figure computed from a comparison set is
+    shown below the benchmark minimum — a mean, a median, or any other statistic,
+    not only a drawn line."
+
+    **The other conjunct is deliberately not pinned here, and that is a
+    disclosed limit** (`docs/MISTAKES.md` entry 14). An unsealed value that claims
+    *not* to be suppressed and carries no figure would need a different
+    observable — there is no number to look for, so the test would have to key on
+    the reason string, which means a second observable threaded through a reader
+    three tests already depend on. The verifier judged that direction materially
+    harmless, and the cost of pinning it is a change to the machinery the working
+    tests stand on. It is left, said out loud, rather than done badly.
+
+    **Green on the shipped tree** — the conjunct exists — and this test's whole
+    value is that it is the only one that goes red when it stops existing.
+    """
+    comparison = report_api_contract.comparison_type()
+    smuggled_figure = comparison.model_construct(
+        **smuggled_field_values(comparison, claiming_suppression=True)
+    )
+    written = serialized(smuggled_figure)
+
+    assert any(value is True for value in written.values()), (
+        f"The smuggled figure claims no suppression: {written}. This test is about the shape the "
+        "carve-out sits beside — a value that says it is suppressed and carries the number anyway "
+        "— and a value that admits it is unsuppressed is the shape three other tests already drive."
+    )
+    assert the_figure_is_in(written), (
+        f"The smuggled figure does not carry {A_COMPARISON_MEAN}: {written}. Both halves have to be "
+        "true at once or this is not the boundary case: suppression claimed, figure present."
+    )
+
+    body, _answered = report_door.payload(course_week=FULL_WEEK)
+    model = report_payload_model(report_api_contract)
+    validated = model.model_validate(body)
+    smuggled_report = a_report_built_with_model_construct(
+        model, validated, smuggled_figure, report_api_contract.comparison_member
+    )
+
+    survived, what_happened = survives_as_a_report(smuggled_report, report_api_contract)
+    assert not survived, (
+        f"A comparison value claiming suppression while carrying {A_COMPARISON_MEAN} reached wire "
+        f"form: {what_happened}.\n\n"
+        "The boundary admits an unsealed value only when it is suppressed *and* empty. A carve-out "
+        "that checks the flag alone hands the figure to every reader of the response body while "
+        "the screen above it draws an empty panel — which is worse than showing the number "
+        "outright, because nobody looking at the page would know it was there."
     )
 
 
