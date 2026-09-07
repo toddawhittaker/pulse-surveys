@@ -114,12 +114,17 @@ BEAT_SCHEDULE: dict[str, dict[str, Any]] = {
         "task": "app.jobs.tasks.post_participation_scores",
         "schedule": crontab(day_of_week="mon", hour="2", minute="20"),
     },
-    # E4-04's weekly release cut: for every section and term whose cumulative
-    # comment volume has crossed the n-threshold, one stored batch holding every
-    # comment held back from that section's under-threshold closed weeks (SPEC
-    # §4, ADR 0146, ADR 0152). The crossing is evaluated here rather than at read
-    # time because a release re-derived on each read changes as data changes, and
-    # the moment a comment first appears is itself a timing signal.
+    # E4-04's weekly release cut: for every section and term the release gate
+    # opens for, one stored batch holding every comment held back from that
+    # section's under-threshold closed weeks (SPEC §4, ADR 0146, ADR 0152). The
+    # gate is three conditions and all must hold — the term's cumulative
+    # comment-answer volume reaches the n-threshold, the distinct people behind
+    # the unreleased held comments reach it, and those comments span at least two
+    # under-threshold closed weeks — because §4's literal trigger counts sentences
+    # where the threshold counts people, and stays true once crossed. It is
+    # evaluated here rather than at read time because a release re-derived on each
+    # read changes as data changes, and the moment a comment first appears is
+    # itself a timing signal.
     #
     # **Monday** for the reason the entry above is on one: §3.1 closes every
     # window on Sunday at 23:59:59 in the institution's timezone, so Monday is the
@@ -136,9 +141,12 @@ BEAT_SCHEDULE: dict[str, dict[str, Any]] = {
     # Weekly rather than hourly because the pass walks every section in the
     # institution and the only thing that can change its answer is a week closing
     # or a comment arriving in one that already has — neither of which happens
-    # more than once a week for a given section. It is idempotent: a run whose
-    # sections have all been released writes nothing, because the held set is
-    # chosen by anti-join against the memberships already stored.
+    # more than once a week for a given section. It is idempotent, and in two
+    # senses since the security round: a run whose sections have all been released
+    # writes nothing, because the held set is chosen by anti-join against the
+    # memberships already stored; and a run that meets one newly closed quiet week
+    # writes nothing either, because a single week satisfies neither the
+    # respondent leg nor the two-week leg.
     #
     # **Provider-free**, unlike the summary job at 02:50: nothing here calls a
     # model, so a provider outage can never delay a release SPEC §4 has promised.

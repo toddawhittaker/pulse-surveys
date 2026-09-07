@@ -20,11 +20,32 @@ Three callables and one payload:
   reaches the configured threshold, and the empty tuple below it;
 * `released_comments` — every comment a release batch has surfaced for one
   section, term and stream, with no week attribution anywhere;
-* `cut_due_release_batches` — the weekly pass that evaluates the crossing and
+* `cut_due_release_batches` — the weekly pass that evaluates the release gate and
   writes the batch, run by `app.jobs.tasks.cut_release_batches` on Monday at
   02:40;
 * `ReportComment` — what a caller may be told about one comment: its text, its
   moderation status, and which of §5.1's two groups it belongs to. Nothing else.
+
+## The release gate is three conditions, not §4's one
+
+SPEC §4's literal trigger is "the section's cumulative comment volume for the term
+crosses the threshold", and E4-04's security round found that counting only that
+under-protects §4's own goal in two ways. A volume is denominated in comment
+*answers* while the threshold is a number of *responses*, and §3.2 gives every
+response two comment items — so a volume that reaches the threshold can come from
+three students, or from one across three quiet weeks. And a volume condition
+stays true once crossed, so every Monday afterwards the same section passes the
+same test and the cutter takes whatever is held: exactly the week that just
+closed, which is a per-week batch, which is the week attribution ADR 0153 removed
+arriving through the report's own delta.
+
+So a batch is cut only when the volume reaches the threshold **and** the distinct
+people behind the unreleased held comments reach it **and** those comments span at
+least `WEEKS_A_RELEASE_MUST_SPAN` under-threshold closed weeks. When any leg fails
+nothing is cut. ADR 0152 carries the argument, records that the respondent leg
+subsumes the other two, and states plainly that this is a reading of §4 rather
+than §4's own words — the spec question is open and the owner's to settle, and
+this build holds the conservative side meanwhile.
 
 ## What is deliberately not here
 
@@ -48,9 +69,21 @@ sweeps the four student-facing modules for an import of this one.
 E4-02 shipped; every writer of a moderation decision is E6's, and the runtime
 role holds no `INSERT` on that table (`report_comment_grants_v001.sql`).
 
+**And no §6.2 suppression, which is a gap rather than a decision.** SPEC §5.2
+ends "threat/self-harm classifications bypass this flow entirely (§6.2) and are
+never shown to the instructor", and nothing in this module implements that: a
+comment carrying such a verdict is returned by both reads and counted by the
+cutter like any other. It is not reachable today, because nothing in the product
+writes a safety verdict — E4's classification task has one member — so the gap is
+recorded rather than closed here, with an owner and a done-when in
+`docs/tickets/e4/deferred.md`. Whoever adds the first such verdict owns closing
+it, and the suppression belongs **below** this read path rather than in each
+caller.
+
 ## The three rules this module reads, and where each is decided
 
-**The threshold is a count of responses, and it is the institution's number.**
+**The threshold is a count of responses, and it is the institution's number.** It
+is what all three legs of the release gate compare against as well.
 `Settings.n_threshold_default` is read inside each call rather than at import, so
 an institution that changes it changes the rule rather than needing a restart —
 SPEC §4 makes the value configuration. The count itself is
@@ -97,8 +130,17 @@ prescribes is a pinned location exemption, which is an edit inside `tests/`.
 because SPEC §13 ships identity-separated views as migrations and never as an
 ORM convention. The declarations are also a statement worth reading on their own:
 between them this module can name a section, a week, a stream, an answer key, a
-comment's text and a response count, and there is no column here through which it
-could reach a person or an instant a comment was written at.
+comment's text and a response count, and no instant a comment was written at.
+
+**One place reaches a person, and it counts them rather than naming them.**
+`_held_comments` walks `answer.response_id` and then `response.user_id`, because
+the release gate's second leg is a number of distinct people and a gate that
+could not reach them could not enforce §4's threshold. What that column is used
+for is a `count(distinct …)` inside one query and a grouping inside one
+subquery; it is not selected by the membership read, it is not returned by
+anything, and no `ReportComment` has ever carried it. That is the whole of the
+identity surface in this file, and it is stated here so a reviewer can check the
+claim against three functions rather than against the module.
 """
 
 import random
@@ -108,11 +150,23 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Row, Select, column, func, insert, select, table
+from sqlalchemy import (
+    ColumnElement,
+    Row,
+    Select,
+    Subquery,
+    column,
+    distinct,
+    func,
+    insert,
+    select,
+    table,
+)
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.models.report import MODERATION_STATES, ModerationState, ReleaseBatch, ReleaseBatchMember
+from app.models.survey import Answer, Response
 from app.models.term import SurveyWindow, Week
 from app.services import clock
 
@@ -128,6 +182,14 @@ INITIAL_STATE = MODERATION_STATES[0]
 # here instead of arriving as a status nobody defined — the `CHECK` makes that
 # unwritable, and this is what says so if it ever stops being true.
 REPORTED_STATUS = {stored: stored.lower() for stored in MODERATION_STATES}
+
+# How many distinct under-threshold closed weeks a release must draw from before
+# it may be cut — the third leg of the gate. Two rather than one, and it is the
+# smallest number that does the job: a batch confined to a single week is the week
+# attribution ADR 0153 removed, arriving through the report's own week-to-week
+# delta instead of through a field. Named rather than written inline so the
+# reviewer meets the rule rather than a literal.
+WEEKS_A_RELEASE_MUST_SPAN = 2
 
 # `public.report_comment`, E4-04's view, declared as the relation it is.
 #
@@ -192,7 +254,6 @@ def visible_comments(
     section_id: UUID,
     week_id: UUID,
     stream: str,
-    rng: random.Random | None = None,
 ) -> tuple[ReportComment, ...]:
     """One section-week's comments in one stream, or nothing at all below the threshold.
 
@@ -242,7 +303,7 @@ def visible_comments(
         # by §5.2.
         COMMENT_VIEW.c.stream == stream,
     )
-    return _shuffled(session.execute(asked).all(), rng)
+    return _shuffled(session.execute(asked).all())
 
 
 def released_comments(
@@ -251,7 +312,6 @@ def released_comments(
     section_id: UUID,
     term_id: UUID,
     stream: str,
-    rng: random.Random | None = None,
 ) -> tuple[ReportComment, ...]:
     """Every comment a release batch has surfaced for one section, term and stream.
 
@@ -293,23 +353,34 @@ def released_comments(
             COMMENT_VIEW.c.stream == stream,
         )
     )
-    return _shuffled(session.execute(asked).all(), rng)
+    return _shuffled(session.execute(asked).all())
 
 
 def cut_due_release_batches(session: Session) -> int:
     """Cut one release batch for every section and term whose held comments are now due.
 
     SPEC §4's cumulative rule, evaluated and written once a week rather than at
-    read time (ADR 0152). For each `(section, term)`:
+    read time (ADR 0152). A comment is **held** when its week was below the
+    threshold, its window has closed, and it is in no batch yet; `_held_comments`
+    is the one definition and both the gate and the batch are built from it.
 
-    * the **volume** is every comment answer the section holds in that term —
-      every week, every moderation state, whether or not the comment has already
-      been released. That is what "the section's cumulative comment volume for the
-      term" says, and ADR 0152 argues the reading;
-    * a comment is **held** if its week is below the threshold, its window has
-      closed, and it is in no batch yet;
-    * where the volume reaches the threshold and at least one comment is held, one
-      batch is cut holding **all** of them.
+    **The gate is three legs and every one of them must open** (ADR 0152, after the
+    security round):
+
+    a. the section's cumulative comment-answer volume for the term reaches the
+       threshold — SPEC §4's literal trigger, counted over every comment the
+       section holds in the term whatever its moderation state and whether or not
+       it has already gone out;
+    b. the **distinct people** behind the unreleased held comments reach the
+       threshold;
+    c. those comments span at least `WEEKS_A_RELEASE_MUST_SPAN` distinct
+       under-threshold closed weeks.
+
+    Leg (b) is the effective floor — it cannot hold where (a) or (c) fails — and
+    all three are written out anyway, because they are the reading of §4 this build
+    stands on and each survives a change to another's denominator. **When any leg
+    fails nothing is cut**, which is the safe direction: a held comment still feeds
+    the summary and is released later, and a released one cannot be un-shown.
 
     **One batch per crossing, and all of the held set in it.** ADR 0146 puts the
     only time in the design on the batch's `cut_at`, so a release split across
@@ -342,17 +413,16 @@ def cut_due_release_batches(session: Session) -> int:
     # the weeks it has been walked past.
     now = clock.now(session, settings=settings)
 
-    volumes = _comment_volume_by_section_and_term(session)
-    held = _held_comments_by_section_and_term(session, threshold=threshold, now=now)
+    held = _held_comments(threshold=threshold, now=now)
+    due = _sections_whose_release_is_due(session, held, threshold=threshold)
+    answers = _held_answers_by_section_and_term(session, held)
 
     cut = 0
     # Sorted, so two runs over the same data visit the sections in the same order
     # and a failure part-way through a walk is reproducible. Nothing about the
     # order reaches a caller — this is which section is released first, not which
     # comment is shown first, which is `_shuffled`'s.
-    for key in sorted(held):
-        if volumes.get(key, 0) < threshold:
-            continue
+    for key in sorted(due):
         section_id, term_id = key
         batch_id = session.execute(
             insert(ReleaseBatch)
@@ -361,7 +431,7 @@ def cut_due_release_batches(session: Session) -> int:
         ).scalar_one()
         session.execute(
             insert(ReleaseBatchMember),
-            [{"batch_id": batch_id, "answer_id": answer_id} for answer_id in held[key]],
+            [{"batch_id": batch_id, "answer_id": answer_id} for answer_id in answers[key]],
         )
         # The batch and its whole membership, together. ADR 0146 puts the only
         # release time on the batch row, so a membership committed without its
@@ -418,9 +488,33 @@ def _comments_with_their_status() -> Select[tuple[str, str, str]]:
     )
 
 
-def _shuffled(
-    rows: Sequence[Row[tuple[str, str, str]]], rng: random.Random | None
-) -> tuple[ReportComment, ...]:
+def _make_rng() -> random.Random:
+    """The random source a display order is shuffled with — private, and deliberately so.
+
+    **Not a parameter, because a seed a caller can supply is a seed an attacker
+    can fix.** With the seed fixed, two reads of one week produce the same
+    permutation, so diffing a shuffled result against a second shuffle of a known
+    set re-derives the order the rows arrived in — and with no `ORDER BY`
+    underneath, that is heap order, which is insertion order, which is submission
+    order, which is who answered first. The same fixed seed a week apart also pins
+    a newly released comment by its position: everything that did not move is old.
+    SPEC §4 randomizes the display order precisely to remove both, so the source is
+    this module's and no caller's.
+
+    A hook rather than an inline `random.SystemRandom()` because the suite has to
+    be able to make "the order is random" a deterministic assertion, and replacing
+    one private name is the smallest seam that allows it. That is a seam for the
+    tests and not an interface for a caller, which is what the leading underscore
+    says.
+
+    `SystemRandom` rather than `random.Random`: this shuffle is a confidentiality
+    control rather than a convenience, so it draws from the operating system
+    instead of from a generator whose state a long-running worker keeps.
+    """
+    return random.SystemRandom()
+
+
+def _shuffled(rows: Sequence[Row[tuple[str, str, str]]]) -> tuple[ReportComment, ...]:
     """The rows as `ReportComment`s, in a random order.
 
     SPEC §4: "Comment display order is randomized; timestamps are never shown with
@@ -429,17 +523,14 @@ def _shuffled(
     in the gradebook (ADR 0125) the first responder is often nameable.
 
     The shuffle is in Python rather than in SQL so that there is one place it
-    happens and one seam a test can pin. `rng` defaults to a system source; a
-    caller passing a seeded `random.Random` gets a reproducible order, which is
-    what makes "the order is random" a deterministic assertion rather than a coin
-    toss.
+    happens; the source is `_make_rng`, looked up here on every call so that the
+    module's own hook is what decides it.
     """
-    generator = random.SystemRandom() if rng is None else rng
     comments = [
         ReportComment(text=text, status=REPORTED_STATUS[stored], stream=stream)
         for text, stored, stream in rows
     ]
-    generator.shuffle(comments)
+    _make_rng().shuffle(comments)
     return tuple(comments)
 
 
@@ -472,20 +563,35 @@ def _comment_volume_by_section_and_term(
     return {(row.section_id, row.term_id): row.volume for row in session.execute(counted).all()}
 
 
-def _held_comments_by_section_and_term(
-    session: Session, *, threshold: int, now: datetime
-) -> dict[tuple[UUID, UUID], list[UUID]]:
-    """The comments SPEC §4 has been holding back, grouped by section and term.
+def _held_comments(*, threshold: int, now: datetime) -> Subquery:
+    """The comments SPEC §4 has been holding back — the one definition of "held".
 
-    Three conditions, one per concern, and none of them is another's spare.
+    Three conditions, one per concern, and none of them is another's spare. This is
+    written once and selected from twice, because the gate below and the batch it
+    cuts must be about **the same set of comments**: two copies of this predicate
+    that drifted would gate on one set and release another, which is a release of
+    comments nobody checked.
+
+    A row carries the comment, the section and term it belongs to, the week it was
+    submitted in and **who wrote it**. The last two are what the gate counts and
+    what nothing here ever returns: `_release_gate` reduces them to two integers,
+    the membership read below selects the answer key alone, and no `ReportComment`
+    has ever carried either. The walk to a person is `answer.response_id` then
+    `response.user_id`, which is a walk the product may make to *count* people and
+    may never make to *name* one — SPEC §4's threshold is a number of people, so
+    a gate that could not reach them could not enforce it.
     """
-    asked = (
+    return (
         select(
-            COMMENT_VIEW.c.section_id,
-            Week.term_id,
-            COMMENT_VIEW.c.answer_id,
+            COMMENT_VIEW.c.section_id.label("section_id"),
+            Week.term_id.label("term_id"),
+            COMMENT_VIEW.c.answer_id.label("answer_id"),
+            COMMENT_VIEW.c.week_id.label("week_id"),
+            Response.user_id.label("respondent"),
         )
         .join_from(COMMENT_VIEW, Week, Week.id == COMMENT_VIEW.c.week_id)
+        .join(Answer, Answer.id == COMMENT_VIEW.c.answer_id)
+        .join(Response, Response.id == Answer.response_id)
         .join(
             RESPONSE_COUNTS_VIEW,
             (RESPONSE_COUNTS_VIEW.c.section_id == COMMENT_VIEW.c.section_id)
@@ -514,9 +620,75 @@ def _held_comments_by_section_and_term(
             .where(ReleaseBatchMember.answer_id == COMMENT_VIEW.c.answer_id)
             .exists(),
         )
+        .subquery()
     )
 
-    held: dict[tuple[UUID, UUID], list[UUID]] = {}
+
+def _sections_whose_release_is_due(
+    session: Session, held: Subquery, *, threshold: int
+) -> set[tuple[UUID, UUID]]:
+    """The `(section, term)` pairs every leg of the release gate opens for.
+
+    **Three legs, all of which must hold, and nothing is cut when any fails.**
+    Held is the safe direction: an under-threshold comment that stays held still
+    feeds the summary and is released later, while a comment released early cannot
+    be un-shown (ADR 0146 — nothing in this schema deletes a membership row). ADR
+    0152 argues each leg and records that leg (b) subsumes the other two, which is
+    why they are still written out: the legs are the reading of SPEC §4 that this
+    build stands on, and each survives a change to another's denominator.
+
+    Leg (b) is the effective floor and the one the security round added. §4's
+    threshold is "n < 5 **responses** in a reporting week" — a number of people —
+    while its release trigger names "comment volume", and §3.2 gives every response
+    two comment items. So a volume that reaches the threshold can come from three
+    students, or from one across three quiet weeks, and a release gated on the
+    volume alone goes out over an author set far below what the threshold was
+    chosen to protect.
+    """
+    volumes = _comment_volume_by_section_and_term(session)
+    counted = select(
+        held.c.section_id,
+        held.c.term_id,
+        # Distinct **people**, not distinct responses and not a row count: one
+        # student answering both of §3.2's comment questions is one person twice
+        # over, and the two numbers come apart in exactly the world this leg
+        # exists for.
+        func.count(distinct(held.c.respondent)).label("respondents"),
+        func.count(distinct(held.c.week_id)).label("weeks"),
+    ).group_by(held.c.section_id, held.c.term_id)
+
+    due: set[tuple[UUID, UUID]] = set()
+    for row in session.execute(counted).all():
+        key = (row.section_id, row.term_id)
+        # (a) SPEC §4's literal trigger: "the section's cumulative comment volume
+        #     for the term crosses the threshold".
+        volume_has_crossed = volumes.get(key, 0) >= threshold
+        # (b) The people behind the comments this release would carry. §4's
+        #     threshold counts responses, so the batch has to stand between a
+        #     comment and at least that many candidate authors.
+        enough_respondents = row.respondents >= threshold
+        # (c) The weeks it would draw from. A batch confined to one week is the
+        #     week attribution ADR 0153 removed, arriving through the report's own
+        #     week-to-week delta: the release that was not there last Monday came
+        #     from the week that closed in between.
+        spans_enough_weeks = row.weeks >= WEEKS_A_RELEASE_MUST_SPAN
+        if volume_has_crossed and enough_respondents and spans_enough_weeks:
+            due.add(key)
+    return due
+
+
+def _held_answers_by_section_and_term(
+    session: Session, held: Subquery
+) -> dict[tuple[UUID, UUID], list[UUID]]:
+    """Which comments each `(section, term)` is holding, by key and nothing else.
+
+    Selected from the same subquery the gate is counted over, so the set that was
+    checked is the set that goes out. The respondent column is deliberately not
+    selected here: this is the list a membership row is written from, and a
+    membership row carries a batch and a comment and nothing else (ADR 0146).
+    """
+    asked = select(held.c.section_id, held.c.term_id, held.c.answer_id)
+    found: dict[tuple[UUID, UUID], list[UUID]] = {}
     for row in session.execute(asked).all():
-        held.setdefault((row.section_id, row.term_id), []).append(row.answer_id)
-    return held
+        found.setdefault((row.section_id, row.term_id), []).append(row.answer_id)
+    return found
