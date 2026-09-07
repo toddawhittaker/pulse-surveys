@@ -302,6 +302,34 @@ def _comments_reaching_the_model(
     filter deferred to the epic that populates the table is a filter discovered
     missing after that has happened.
 
+    **What is *not* excluded here, stated because the asymmetry is deliberate.**
+    SPEC §5.2's last bullet routes one class of comment around the moderation
+    lifecycle altogether: "Threat/self-harm classifications bypass this flow
+    entirely (§6.2) and are never shown to the instructor." Bypassing the flow
+    means bypassing the record, so such a comment never acquires a
+    `moderation_state` row — and the rule above reads an absent row as published.
+    So the class §6.2 keeps furthest from an instructor is the class this gather
+    would send to a provider, and a paraphrase of it would sit in a summary nothing
+    regenerates. That is the honest shape of what this filter covers and what it
+    does not.
+
+    **No predicate for it is written today, and that is a decision rather than an
+    oversight.** There is nothing to select on. `ClassificationTask` has exactly one
+    member and no writer of a harm verdict exists anywhere in this system, so a
+    closed set written now would be a guess at a vocabulary E6 has not designed — a
+    set built before the thing it closes over, which reads as a guarantee and is
+    not one. The same argument keeps `WeeklySummaryRecord.held_note_type` a string
+    for the length of this epic.
+
+    **What is mechanical instead is the precondition.** While that vocabulary has
+    one member the gap is unreachable, so the run above is safe for the reason
+    stated rather than by luck. `docs/tickets/e4/deferred.md` carries the entry with
+    its owner (E6) and its done-when, and
+    `tests/integration/test_the_summary_job_feeds_no_moderation_held_comment_to_the_model.py::test_no_harm_classification_task_exists_yet_for_this_filter_to_have_missed`
+    is the alarm: it pins that enum's membership as an equality, so a second task
+    reds it *before* any classifier writes a verdict. The repair when it reds is
+    here, in this function, and never in that test's expected set.
+
     The order is the answer key's — arbitrary, stable, and carrying nothing. §4
     keeps submission times away from comments, and ordering a prompt by one would
     put the week's arrival sequence in front of a model for no reason.

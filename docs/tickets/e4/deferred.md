@@ -59,3 +59,45 @@ the first candidates).
 than were handed to the renderer — proven by a test that plants a comment
 containing a blank line and a block-label lookalike and asserts the model-facing
 boundary count equals the true count.
+
+## The summary gather excludes moderation-held comments and not §6.2's threat and self-harm class
+
+**What is not enforced.** `app.services.reporting`'s gather drops a comment whose
+latest `moderation_state` row is `FLAGGED_COLLAPSED` or `EXCLUDED`, and reads the
+absence of a row as published — ADR 0145's rule, and correct for every state that
+exists. SPEC §5.2's last bullet routes a different class of comment around that
+record entirely: "Threat/self-harm classifications bypass this flow entirely
+(§6.2) and are never shown to the instructor." Bypassing the flow means bypassing
+the record — nobody moderates such a comment, so it never acquires a row — and an
+absent row is exactly what this gather reads as feed. So the one class §6.2 keeps
+furthest from an instructor is the class that would reach a provider and be
+paraphrased into instructor-visible prose, and nothing regenerates a summary (the
+E4 breakdown's decision 2), so it would stay there for the term.
+
+**Why it was left.** It cannot fire today and a filter for it cannot be written
+today, which are two halves of one fact. `ClassificationTask` has exactly one
+member, `COMMENT_VALIDITY`, and nothing in the system writes a harm verdict of any
+kind; the vocabulary a predicate would select on does not exist. A closed set
+written now would be a guess at an enum E6 has not designed — the same reason the
+held-note type at the head of this file is still a string, and the same mistake in
+the same shape: a set built before the thing it closes over reads as a guarantee
+and is not one. What is mechanical instead is the *precondition*. While the
+vocabulary has one member the gap is unreachable; the moment it gains a second it
+is reachable, and that is a fact a test can hold.
+
+**The alarm, so this entry is not a note nobody reads.**
+`tests/integration/test_the_summary_job_feeds_no_moderation_held_comment_to_the_model.py::test_no_harm_classification_task_exists_yet_for_this_filter_to_have_missed`
+asserts `ClassificationTask`'s members as an equality against a set written out in
+that module rather than read off the enum, so a second task reds it. It is green
+today and required to be. Its failure message states the repair and refuses the
+cheap resolution by name: widening the expected set makes the test green and
+changes nothing about what crosses to a provider. **The red arrives before the
+classifier writes its first verdict rather than after**, which is why the alarm is
+on the vocabulary rather than on a verdict row.
+
+**Owner:** E6, in the ticket that adds the second classification task — before it
+merges, not in a follow-up.
+
+**Done when:** the summary gather excludes comments whose current classification
+is in the threat or self-harm set, asserted with a planted verdict of that class,
+before any writer of one exists.
