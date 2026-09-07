@@ -452,12 +452,49 @@ POST_PARTICIPATION_SCORES_TASK_NAME = f"{TASKS_MODULE}.post_participation_scores
 CUT_RELEASE_BATCHES_TASK_NAME = f"{TASKS_MODULE}.cut_release_batches"
 
 
-def test_the_beat_schedule_holds_exactly_the_six_entries_that_have_landed(
+# E4-06's entry: the Monday summary generation job, running
+# `app.jobs.tasks.generate_weekly_summaries` on `crontab(day_of_week="mon",
+# hour="2", minute="50")` — that ticket's settled slot. For every section and
+# course week whose survey window has closed and which has no stored summary, it
+# gathers the week's comments per stream and stores what E4-05's `summarize_stream`
+# answers, one row per stream (SPEC §5.1: each comment group is "led by its own AI
+# summary"). It is the second entry in this mapping to reach outside the
+# institution on its own cadence, and the first to send student text there: the
+# comments cross to the AI provider, de-identified, on the boundary SPEC §7.4
+# governs.
+#
+# Monday because §3.1 closes every window on Sunday at 23:59:59 institution time
+# and puts the report on Monday morning, and generation is once-and-done (E4's
+# breakdown decision 2) — a summary that arrives after the reader does never
+# arrives for that week at all. 02:50 because 02:20 is E3-06's participation
+# sweep, which walks the same sections without touching a provider, and two walks
+# over every section in an institution are better thirty minutes apart than on one
+# tick.
+#
+# **The key is not asserted here**, for E3-06's reason rather than E2-06's: the
+# ticket does settle one, `generate-weekly-summaries`, and
+# `tests/unit/test_the_summary_generation_job_is_scheduled_monday_morning.py` pins
+# the key, the task and the crontab together. This inventory is an equality over
+# the *tasks*, so what E4-06 adds to it is the task and nothing else; a second copy
+# of the key and the slot here would be one fact asserted in two files.
+GENERATE_WEEKLY_SUMMARIES_TASK_NAME = f"{TASKS_MODULE}.generate_weekly_summaries"
+
+
+def test_the_beat_schedule_holds_exactly_the_entries_that_have_landed(
     configured_env: dict[str, str],
     import_app_module: Callable[[str], ModuleType | None],
     celery_application_in: Callable[[ModuleType], Any],
 ) -> None:
-    """The six beat entries that have landed, one per ticket, and E4-04 owns the sixth.
+    """The beat entries that have landed, one per ticket, and E4 owns the newest two.
+
+    **The name carried a count until this wave and no longer does.** It said
+    "five", and before that "four" and "three", so every ticket adding an entry
+    renamed this function and repointed the one place that cites it by name
+    (`tests/integration/test_the_launch_replay_purge_runs_as_pulse_app.py`). The
+    rename was never what forced the conversation — the equality below is — and
+    two E4 tickets added entries from branches cut off one commit, which made a
+    count in the name two branches editing one identifier for no assertion's sake.
+    The count lives in the list, where changing it is the point.
 
     **Rewritten by E1-08, per this test's own instruction at E0-03.** The
     original docstring: "This test is a record with a shelf life, and that is
@@ -528,24 +565,39 @@ def test_the_beat_schedule_holds_exactly_the_six_entries_that_have_landed(
     passes and E3-06's 02:20 sweep have all run by then, and a cutter in front of
     them counts a comment volume that is still moving.
 
+    **E4-06 is the seventh, and it is the first entry in this mapping that sends
+    student text outside the institution.** `app.jobs.tasks.generate_weekly_summaries`
+    on `crontab(day_of_week="mon", hour="2", minute="50")`: for every section and
+    course week whose window has closed and which has no stored summary, the
+    week's comments go to the AI provider per stream and what comes back is
+    stored, one row per stream — SPEC §5.1's "each group led by its own AI
+    summary". E3-06's entry was the first to reach outside on its own cadence and
+    it sends a number about a student; this one sends what students wrote. Monday
+    because §3.1 puts the report on Monday morning and the summary is generated
+    once and never regenerated (E4's breakdown decision 2); 02:50 because 02:20 is
+    E3-06's provider-free walk over the same sections and 02:40 is E4-04's, which
+    reaches no provider either.
+
     **An equality rather than a superset, and E1-11 paid for that choice while
-    E2-06, E2-08, E3-06 and E4-04 have each paid for it since.** Widening it to
-    "contains these" would let a seventh entry land with no diff here, and an
+    E2-06, E2-08, E3-06, E4-04 and E4-06 have each paid for it since.** Widening it
+    to "contains these" would let an eighth entry land with no diff here, and an
     entry in this mapping is a job that runs against every section in the
     institution on a cadence nobody at the keyboard sees. Being made to edit this
     test is the whole point of the equality — and it is why the equality is over
     the *tasks* rather than over the keys: a task is what actually runs, and it is
-    what each of the six tickets settled.
+    what each of the seven tickets settled.
 
-    **The third, fourth, fifth and sixth entries are found by their tasks and not
-    by their keys**, for two different reasons. E2-06's work order and E2-08's each
-    settle the task name, the module and the cadence and settle no name for the
-    schedule key, so asserting one here would pin an identifier the ticket leaves
-    open. E3-06's D3 and E4-04's work order each do settle a key —
-    `post-participation-scores-weekly` and `cut-release-batches-weekly` — and each
-    has a module of its own that pins the key beside the task and the crontab
-    (`test_the_participation_sweep_is_scheduled_weekly_and_run_by_a_task.py` and
-    `test_the_release_cutter_is_scheduled_weekly_and_run_by_a_task.py`); repeating
+    **The third entry onward is found by its task and not by its key**, for two
+    different reasons. E2-06's work order and E2-08's each settle the task name,
+    the module and the cadence and settle no name for the schedule key, so
+    asserting one here would pin an identifier the ticket leaves open. E3-06's D3
+    does settle a key — `post-participation-scores-weekly` — and so do E4-04's work
+    order and E4-06 — `cut-release-batches-weekly` and `generate-weekly-summaries`
+    — and each is pinned with its task and its crontab in the unit module about
+    that ticket
+    (`test_the_participation_sweep_is_scheduled_weekly_and_run_by_a_task.py`,
+    `test_the_release_cutter_is_scheduled_weekly_and_run_by_a_task.py` and
+    `test_the_summary_generation_job_is_scheduled_monday_morning.py`); repeating
     either here would be one fact in two files.
 
     The name-and-task assertion is the strong half of the pair and is not
@@ -575,6 +627,7 @@ def test_the_beat_schedule_holds_exactly_the_six_entries_that_have_landed(
             RECLASSIFICATION_TASK_NAME,
             POST_PARTICIPATION_SCORES_TASK_NAME,
             CUT_RELEASE_BATCHES_TASK_NAME,
+            GENERATE_WEEKLY_SUMMARIES_TASK_NAME,
         }
     )
     assert tasks == expected_tasks, (
@@ -584,9 +637,10 @@ def test_the_beat_schedule_holds_exactly_the_six_entries_that_have_landed(
         "reconciler that reaches a section which appeared mid-term, E2-08 the hourly sweep of "
         "floored classifications that is SPEC §3.3's 'then classified async', E3-06 the weekly "
         "participation sweep that posts a score to a platform's gradebook when a recomputation "
-        "changes it (SPEC §3.4), and E4-04 the weekly release cutter that stores SPEC §4's "
-        "cumulative crossing as a batch. No other ticket has landed one: the Monday summary job is "
-        "E4-06 and retention is E13. "
+        "changes it (SPEC §3.4), E4-04 the weekly release cutter that stores SPEC §4's "
+        "cumulative crossing as a batch, and E4-06 the Monday summary generation job that sends a "
+        "closed week's comments to the AI provider per stream and stores what comes back "
+        "(SPEC §5.1). No other ticket has landed one: retention is E13. "
         "If one of those has now landed too, this test is again the record that has to change with "
         "it — say which ticket owns the new entry and assert what it is, rather than widening this "
         "equality to a superset check."

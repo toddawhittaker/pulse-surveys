@@ -93,44 +93,74 @@ each produces.
 none — and both the comment read path and the summary job's gather call it, with
 no second copy of the ordering or of the default anywhere under `backend/app/`.
 
-## SPEC §6.2's threat and self-harm suppression is not enforced in the comment read path
+## SPEC §6.2's threat and self-harm class is suppressed in neither the comment read path nor the summary gather
 
 **What is not enforced.** SPEC §5.2 ends "threat/self-harm classifications bypass
 this flow entirely (§6.2) and are never shown to the instructor", and §6.2 routes
-those comments to the Care queue instead. Nothing in
-`backend/app/services/report_comments.py` implements that. A comment carrying such
-a verdict is returned by `visible_comments` like any other above the threshold, is
-counted by `cut_due_release_batches` toward every leg of the release gate, and can
-be written into a release batch and surfaced with its week stripped — where it
-cannot be un-released (ADR 0146). The moderation record this module does read is
-§5.2's lifecycle (`published`, `flagged_collapsed`, `excluded`, `kept`), which is a
-different question from a safety classification and carries no token for one.
+those comments to the Care queue instead. Two modules in this epic read a comment's
+moderation state, and neither implements that exclusion. This is one gap seen from
+two places, and E4-04 and E4-06 recorded it separately while their branches were
+being built in parallel; the entries are merged here, at the merge that made one
+tree of them.
 
-**Why it was left.** It is not reachable in E4: nothing in the product writes a
-safety verdict, because `ClassificationTask` has a single member and E4 adds no
-second. Building the suppression now would mean inventing the verdict vocabulary
-it filters on, before the thing it closes over exists — a closed set guessed at
-early is worse than an absence, because it reads as a guarantee. E4-06's parallel
-branch carries the twin of this entry against its own summary gather for the same
-reason; the two are one gap seen from two modules and should be merged into a
-single entry when the branches meet.
+*The read path and the release cut* (`backend/app/services/report_comments.py`): a
+comment carrying such a verdict is returned by `visible_comments` like any other
+above the threshold, is counted by `cut_due_release_batches` toward every leg of
+the release gate, and can be written into a release batch and surfaced with its
+week stripped — where it cannot be un-released (ADR 0146). The moderation record
+this module reads is §5.2's lifecycle (`published`, `flagged_collapsed`,
+`excluded`, `kept`), which is a different question from a safety classification and
+carries no token for one.
 
-**The shared alarm.** `ClassificationTask` gaining a member is the tripwire for
-both entries. Whoever adds one is adding the first writer of a verdict these paths
-must not show, and both this module and the summary job's gather become live
-defects on that commit rather than on the commit that renders them.
+*The summary gather* (`app.services.reporting`): the gather drops a comment whose
+latest `moderation_state` row is `FLAGGED_COLLAPSED` or `EXCLUDED` and reads the
+absence of a row as published — ADR 0145's rule, and correct for every state that
+exists. Bypassing the flow means bypassing the record: nobody moderates such a
+comment, so it never acquires a row, and an absent row is exactly what this gather
+reads as feed. So the one class §6.2 keeps furthest from an instructor is the class
+that would reach a provider and be paraphrased into instructor-visible prose, and
+nothing regenerates a summary (the E4 breakdown's decision 2), so it would stay
+there for the term.
 
-**Owner:** E6, in the ticket that writes the moderation states and the safety
-routing §6.2 describes.
+**Why it was left.** It cannot fire today and a filter for it cannot be written
+today, which are two halves of one fact. `ClassificationTask` has exactly one
+member, `COMMENT_VALIDITY`, nothing in the system writes a harm verdict of any
+kind, and the vocabulary a predicate would select on does not exist. A closed set
+written now would be a guess at an enum E6 has not designed — the same reason the
+held-note type at the head of this file is still a string, and the same mistake in
+the same shape: a set built before the thing it closes over reads as a guarantee
+and is not one. What is mechanical instead is the *precondition*. While the
+vocabulary has one member the gap is unreachable; the moment it gains a second it
+is reachable, and that is a fact a test can hold.
+
+**The shared alarm, so this entry is not a note nobody reads.**
+`ClassificationTask` gaining a member is the tripwire for both halves, and it is a
+committed test rather than a hope:
+`tests/integration/test_the_summary_job_feeds_no_moderation_held_comment_to_the_model.py::test_no_harm_classification_task_exists_yet_for_this_filter_to_have_missed`
+asserts `ClassificationTask`'s members as an equality against a set written out in
+that module rather than read off the enum, so a second task reds it. It is green
+today and required to be. Its failure message states the repair and refuses the
+cheap resolution by name: widening the expected set makes the test green and
+changes nothing about what crosses to a provider. **The red arrives before the
+classifier writes its first verdict rather than after**, which is why the alarm is
+on the vocabulary rather than on a verdict row. Whoever adds that member is adding
+the first writer of a verdict these paths must not show, and both the read path and
+the summary job's gather become live defects on that commit rather than on the
+commit that renders them.
+
+**Owner:** E6, in the ticket that adds the second classification task and writes
+the moderation states and the safety routing §6.2 describes — before that ticket
+merges, not in a follow-up.
 
 **Done when:** a comment whose current classification is a threat or self-harm
-verdict is absent from what this module returns and from what its cutter releases,
-enforced **below** the read path rather than in each caller — so a later surface
-cannot reach the rows by writing its own query — and proven by a test that plants
-such a verdict on a comment in a week at the threshold and asserts the forbidden
-state at the service's return value and at the batch's membership. That test can
-only be written once a verdict of that kind can exist, which is why the writer's
-ticket owns it.
+verdict is absent from what the read path returns, from what its cutter releases,
+and from what the summary gather hands a provider — enforced **below** the read
+path rather than in each caller, so a later surface cannot reach the rows by
+writing its own query. Proven by a test that plants such a verdict on a comment in
+a week at the threshold and asserts the forbidden state at the service's return
+value, at the batch's membership, and at the gather's model-facing input. That test
+can only be written once a verdict of that kind can exist, which is why the
+writer's ticket owns it.
 
 ## The report's three copy modules sit outside the collector, so nothing sweeps their strings
 

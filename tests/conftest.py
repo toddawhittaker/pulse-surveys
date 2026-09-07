@@ -129,6 +129,12 @@ boundary: `metadata_tables` is asked for by both.
     the model layer, since the moderation task that would write one is E6's), the
     two-hat actor and a `user_id` off the roster of the section she teaches, and
     the `audit_log` rows one actor left, read on a second connection.
+  - `fixtures/summary_job.py` — E4-06: the Monday summary job's settled names, the
+    world it walks (`report_views.py`'s on a committed session, with the
+    development clock moved so a week is *closed*, which is the whole of what the
+    job selects on), a gateway double that answers about whichever stream's
+    comments it was sent and can be made to fail on one section, and
+    `weekly_summary` read back on a connection that sees the task's own commits.
 
 Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
@@ -194,6 +200,7 @@ pytest_plugins = (
     "fixtures.care_subject",
     "fixtures.report_views",
     "fixtures.report_comments",
+    "fixtures.summary_job",
 )
 
 

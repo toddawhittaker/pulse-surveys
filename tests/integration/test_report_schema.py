@@ -59,22 +59,21 @@ RELEASE_BATCH = "release_batch"
 RELEASE_BATCH_MEMBER = "release_batch_member"
 REPORT_TABLES = (WEEKLY_SUMMARY, MODERATION_STATE, RELEASE_BATCH, RELEASE_BATCH_MEMBER)
 
-# Of those four, the ones on which **no ticket has yet spent a privilege**.
-#
-# **This tuple shortened at E4-04, exactly as the test below predicted it would.**
-# That ticket's read path spends `SELECT` on `moderation_state` — it cannot
-# conceal a flag it cannot see — and its cutter spends `SELECT, INSERT` on the two
-# release tables, so the three of them moved into `RUNTIME_BASE_TABLE_PRIVILEGES`
-# in `tests/integration/test_identity_grants.py` with the sentence each comes
-# from, and `tests/integration/
-# test_the_comment_path_runs_over_the_connection_production_uses.py` asserts both
-# directions of every one of those grants at the ACL and drives the path over the
-# application connection.
-#
-# `weekly_summary` is what is left, and it is not an oversight: its writer is
-# E4-06's Monday job, which has not landed, and until it does a grant on that
-# table would widen the runtime role for a writer that does not exist.
-TABLES_NO_TICKET_HAS_SPENT_A_PRIVILEGE_ON = (WEEKLY_SUMMARY,)
+# **Every one of those four now has its grants, and the list of ungranted ones is
+# gone with the test that walked it.** E4-04 spent `SELECT` on `moderation_state`
+# and `SELECT, INSERT` on both release tables; E4-06 spent `SELECT, INSERT` on
+# `weekly_summary` and reads `moderation_state` through the same grant. Nothing is
+# left for a "no ticket has spent a privilege here" walk to iterate, and a walk
+# over an empty tuple passes against a database holding every privilege in it
+# (`docs/MISTAKES.md` entry 3). What replaced it was already carrying the weight:
+# `RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py` is
+# an equality, so a grant nobody argued for reds it, and each ticket's own module
+# asserts the verbs held and withheld and drives the path over the application
+# connection —
+# `tests/integration/test_the_summary_writer_is_granted_insert_and_select_and_nothing_wider.py`
+# for E4-06 and
+# `tests/integration/test_the_comment_path_runs_over_the_connection_production_uses.py`
+# for E4-04.
 
 # The tables E4-02 does not create and writes rows into to reach its own.
 ANSWER = "answer"
@@ -176,20 +175,6 @@ FEWER_THAN_NO_RESPONSES = -1
 # rather than that the rule is there.
 INTEGRITY_VIOLATION = "23"
 
-# The two connection roles ADR 0001 separates, and the privileges a role can hold
-# on a table. Both spellings of "hold" are asked, because a privilege reaches a
-# role by three mechanisms and a guard that enumerates them is the shape
-# `docs/MISTAKES.md` entry 35 is about: `has_table_privilege` sees a table grant
-# and a grant reaching the role through a membership, and is blind to a
-# column-scoped one, which `has_column_privilege` is what answers for.
-APPLICATION_ROLE = "pulse_app"
-CARE_ROLE = "pulse_care"
-RUNTIME_ROLES = (APPLICATION_ROLE, CARE_ROLE)
-TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
-COLUMN_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "REFERENCES")
-
-HAS_TABLE_PRIVILEGE = "SELECT has_table_privilege(:role, :relation, :privilege)"
-HAS_COLUMN_PRIVILEGE = "SELECT has_column_privilege(:role, :relation, :column, :privilege)"
 COLUMNS_OF = text(
     """
     SELECT column_name
@@ -198,14 +183,6 @@ COLUMNS_OF = text(
     ORDER BY column_name
     """
 )
-
-# The table and column a control probe is aimed at, and the privilege it must
-# find there. E0-13 granted `pulse_app` `SELECT, INSERT` on `classification` and
-# `tests/integration/test_identity_grants.py` records it; a probe that cannot
-# find that one is a probe reporting absence because it is blind, which is the
-# whole of entry 35's rule.
-A_TABLE_THE_ROLE_CERTAINLY_READS = "classification"
-A_COLUMN_THE_ROLE_CERTAINLY_READS = "verdict"
 
 
 def report_table(tables: dict[str, Any], name: str) -> Any:
@@ -1206,118 +1183,4 @@ def test_the_report_tables_the_person_walk_never_reaches_carry_only_their_declar
         "this repository looks at what they carry. A column that arrived here is either a "
         "reference to a person on a table nothing sweeps, or a deliberate addition whose pull "
         "request updates this list and says what it read."
-    )
-
-
-# ---------------------------------------------------------------------------
-# The grants this ticket does not spend.
-# ---------------------------------------------------------------------------
-
-
-def test_neither_runtime_role_holds_any_privilege_on_a_table_this_ticket_adds(
-    db_session: Any, metadata_tables: dict[str, Any]
-) -> None:
-    """The ticket's own boundary: a privilege lands in the change that uses it.
-
-    E4-02 creates four tables and writes to none of them. The writers are other
-    tickets — E4-06 for the summary, E4-04 for the release, E6 for the moderation
-    lifecycle — and each grants what it spends, which is the rule every grants
-    file in `backend/app/views_sql/` states and the ticket's own known trap: "a
-    grant added 'for later' is scope … granting it now widens the runtime role for
-    a writer that does not exist."
-
-    **Both currencies are asked, because a privilege reaches a role three ways.**
-    `has_table_privilege` answers for a table grant and for one arriving through a
-    role membership, and is blind to a column-scoped grant;
-    `has_column_privilege` is what sees that one. A guard that enumerated
-    mechanisms and missed the one the design uses is `docs/MISTAKES.md` entry 35,
-    and the reason both are here rather than the first alone.
-
-    **Two controls, and neither is ceremony.** Each probe has to *find* the
-    privilege `pulse_app` certainly holds on `classification` — `SELECT`, granted
-    by E0-13 and recorded in `tests/integration/test_identity_grants.py`. A probe
-    that cannot see a grant it is pointed straight at reports absence everywhere,
-    and this test would then be green against a database with every privilege in
-    it.
-
-    **This went red for a good reason at E4-04, exactly as it said it would**, and
-    the repair is the one this docstring prescribed: that ticket's read path spends
-    `SELECT` on `moderation_state` and its cutter spends `SELECT, INSERT` on
-    `release_batch` and `release_batch_member`, so those three moved into
-    `RUNTIME_BASE_TABLE_PRIVILEGES` in `test_identity_grants.py` with the sentence
-    each comes from, and their names came out of the list here. What this test now
-    asks is asked of `weekly_summary` alone, whose writer is E4-06's Monday job and
-    has not landed. When it does, the same move happens once more and this test
-    goes away with it.
-
-    **The mutation it kills:** `GRANT SELECT, INSERT ON public.weekly_summary TO
-    pulse_app` written into a migration because the writer will need it
-    eventually — which is the whole of what "a privilege lands in the change that
-    uses it" forbids.
-    """
-    for name in REPORT_TABLES:
-        report_table(metadata_tables, name)
-
-    control_table = db_session.execute(
-        text(HAS_TABLE_PRIVILEGE),
-        {
-            "role": APPLICATION_ROLE,
-            "relation": f"public.{A_TABLE_THE_ROLE_CERTAINLY_READS}",
-            "privilege": "SELECT",
-        },
-    ).scalar_one()
-    assert control_table, (
-        f"`{APPLICATION_ROLE}` does not hold `SELECT` on "
-        f"`{A_TABLE_THE_ROLE_CERTAINLY_READS}` according to `has_table_privilege`, and E0-13 "
-        "granted exactly that. So this reading reports absence whatever is granted, and everything "
-        "below is a fact about a blind probe rather than about the new tables."
-    )
-    control_column = db_session.execute(
-        text(HAS_COLUMN_PRIVILEGE),
-        {
-            "role": APPLICATION_ROLE,
-            "relation": f"public.{A_TABLE_THE_ROLE_CERTAINLY_READS}",
-            "column": A_COLUMN_THE_ROLE_CERTAINLY_READS,
-            "privilege": "SELECT",
-        },
-    ).scalar_one()
-    assert control_column, (
-        f"`{APPLICATION_ROLE}` does not hold `SELECT` on "
-        f"`{A_TABLE_THE_ROLE_CERTAINLY_READS}.{A_COLUMN_THE_ROLE_CERTAINLY_READS}` according to "
-        "`has_column_privilege`, and a table-wide grant covers every column of the table. The "
-        "column-grain half of this test is therefore blind, which is the half that sees the "
-        "grant `has_table_privilege` cannot report at all."
-    )
-
-    held = []
-    for role in RUNTIME_ROLES:
-        for name in TABLES_NO_TICKET_HAS_SPENT_A_PRIVILEGE_ON:
-            for privilege in TABLE_PRIVILEGES:
-                if db_session.execute(
-                    text(HAS_TABLE_PRIVILEGE),
-                    {"role": role, "relation": f"public.{name}", "privilege": privilege},
-                ).scalar_one():
-                    held.append(f"{role} holds {privilege} on public.{name}")
-            for column in columns_of(db_session, name):
-                for privilege in COLUMN_PRIVILEGES:
-                    if db_session.execute(
-                        text(HAS_COLUMN_PRIVILEGE),
-                        {
-                            "role": role,
-                            "relation": f"public.{name}",
-                            "column": column,
-                            "privilege": privilege,
-                        },
-                    ).scalar_one():
-                        held.append(f"{role} holds {privilege} on public.{name}.{column}")
-
-    assert not held, (
-        f"{sorted(held)}. Nothing has yet spent a privilege on "
-        f"{list(TABLES_NO_TICKET_HAS_SPENT_A_PRIVILEGE_ON)}: the summary's writer is E4-06's Monday "
-        "job, and a privilege lands in the change that uses it. An entry naming a column is a "
-        "grant `has_table_privilege` does not report at all. If one of these is a deliberate grant, "
-        "it belongs in the ticket that spends it, recorded in `RUNTIME_BASE_TABLE_PRIVILEGES` in "
-        "`tests/integration/test_identity_grants.py` with the sentence it comes from — and "
-        "`TABLES_NO_TICKET_HAS_SPENT_A_PRIVILEGE_ON` at the head of this file shortens in the same "
-        "pull request, as it did at E4-04."
     )

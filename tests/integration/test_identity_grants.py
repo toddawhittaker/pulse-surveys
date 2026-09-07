@@ -3994,30 +3994,23 @@ MEMBER_OF_ROLES = """
 #     here. No view over either table exists yet — E11's console is where one would
 #     be — so nothing joins a score to a person on any connection.
 #     Decided and spent in E3-02.
-#   - **E4-02 adds four tables and spends nothing.** `weekly_summary`,
-#     `moderation_state`, `release_batch` and `release_batch_member` appear in no
-#     tuple below, and their absence is the record: that ticket
-#     creates the schema E4 shares and writes no row into any of it. The writers
-#     are elsewhere — the summary job is E4-06, the release is E4-04, and every
-#     moderation writer is E6 — and each grants what it spends, because a grant
-#     issued for a writer that does not exist widens the runtime role for nobody.
-#     The equality below is what makes that absence enforced rather than intended,
+#   - **E4-02 adds four tables and spends nothing, and for a while that absence
+#     was the record.** `weekly_summary`, `moderation_state`, `release_batch` and
+#     `release_batch_member` appeared in no tuple below: that ticket creates the
+#     schema E4 shares and writes no row into any of it. The writers are elsewhere
+#     — the summary job is E4-06, the release is E4-04, and every moderation writer
+#     is E6 — and each ticket grants what it spends, because a grant issued for a
+#     writer that does not exist widens the runtime role for nobody.
+#     The equality below is what made that absence enforced rather than intended,
 #     and `tests/integration/test_report_schema.py` asks the same question of those
 #     four tables by name, at column grain as well as table grain, so that a
 #     widening arriving with a new entry here still has to be argued for twice.
-#   - **E4-04 spends three of those four**, and it is the first of E4's tickets to
-#     spend anything on the report schema. `weekly_summary` is still absent and
-#     still E4-06's.
-#       - `moderation_state`, `SELECT`. SPEC §5.2's small-N concealment is what
-#         needs it: "below the threshold, flagged comments are hidden from the
-#         instructor entirely — no chip, no count, no flag-type hint", and above it
-#         a comment "appears flagged-collapsed carrying any reviewer decision
-#         already made". A read path that cannot see the moderation record cannot
-#         conceal a flag and cannot show a chip; ADR 0145 makes the initial state
-#         the *absence* of a row, so every read of it is a `LEFT JOIN` with a
-#         default and none of them is a write. **No `INSERT` and no `UPDATE`**:
-#         every writer of a moderation decision is E6's, and a runtime role that
-#         could write one could publish a comment an instructor excluded.
+#     All four have since found their writer or their reader, at E4-04 and E4-06,
+#     and each of them is an entry below with its own argument — so the question
+#     that file now asks of them is that the grants are exactly these and no wider.
+#   - **E4-04 spends two of the four**, and it is the first of E4's tickets to
+#     spend anything on the report schema. It shares a third, `moderation_state`,
+#     with E4-06, which is the entry below rather than a second copy here.
 #       - `release_batch` and `release_batch_member`, `SELECT, INSERT`. SPEC §4:
 #         under-threshold comments "surface as raw text once the section's
 #         cumulative comment volume for the term crosses the threshold, batched so
@@ -4033,6 +4026,75 @@ MEMBER_OF_ROLES = """
 #     reaches one only through `answer.response_id` then `response.user_id`, which
 #     is what protects the person on `answer` itself
 #     (`tests/integration/test_identity_column_marker.py` records both).
+#   - `pulse_app` **reads and inserts** `weekly_summary`, and holds no other verb
+#     on it. **E4-06 is the writer E4-02's entry above was waiting for**, and this
+#     is the widening it argued for: SPEC §5.1 puts one AI summary at the head of
+#     each of a week's two comment groups, and the Monday job is the only writer
+#     §5.1 admits — [ADR 0145](../../docs/adr/0145-the-report-schema-has-its-own-module-and-moderation-starts-by-absence.md)'s
+#     third decision accepts a plain `week_id` on the table precisely because that
+#     is true.
+#     **What each verb is for.** `INSERT` is the row the walk writes, one per
+#     section, course week and stream. `SELECT` is the walk's own selection: its
+#     scope is "sections with closed weeks *lacking* summary rows", which cannot be
+#     asked without reading the table, and it is what makes a second run of the
+#     same walk write nothing rather than insert again until a constraint refuses
+#     it (E4-06's first criterion).
+#     **What is withheld is the assertion**, as on `classification` and
+#     `grade_sync`. No `UPDATE`: E4's breakdown decision 2 rules out regeneration
+#     in v1 — "a summary that silently changes under a reader is worse than one
+#     that is a week honest" — so a connection able to rewrite a stored summary is
+#     a connection able to change what an instructor already read, and no Python
+#     rule makes that structural. No `DELETE` and no `TRUNCATE`: §4's retention
+#     purge is E13's and runs under another identity.
+#     **What this table carries, for §4.1.** A section, a `week`, a stream,
+#     generated text, a count and SPEC §7.4's provenance pair. It references no
+#     person and the identity walk in
+#     `tests/integration/test_identity_column_marker.py` does not reach it at all,
+#     which is why its columns are pinned in
+#     `tests/integration/test_report_schema.py` instead. The text is a paraphrase
+#     of a week's comments rather than anybody's own words, and §4's small-N rule
+#     is what decides who may read it — enforced on the read path E4-07 builds,
+#     not by this grant.
+#     Decided and spent in E4-06.
+
+#   - `pulse_app` **reads** `moderation_state`, and holds no other verb on it.
+#     **Two tickets spend this one grant, for two readings of the same record.**
+#     SPEC §5.2's small-N concealment is E4-04's: "below the threshold, flagged
+#     comments are hidden from the instructor entirely — no chip, no count, no
+#     flag-type hint", and above it a comment "appears flagged-collapsed carrying
+#     any reviewer decision already made", so a read path that cannot see the
+#     moderation record can neither conceal a flag nor show a chip. E4-06's is the
+#     filter: SPEC §5.1 requires the weekly AI summaries to "**exclude flagged-held
+#     content**", and
+#     [ADR 0145](../../docs/adr/0145-the-report-schema-has-its-own-module-and-moderation-starts-by-absence.md)
+#     settles that a comment's moderation state lives here as an append-only record
+#     whose latest row governs and whose initial state is the absence of a row — so
+#     "is this content flagged-held" is a question with exactly one place to ask it,
+#     and E4-06's walk asks it on this connection before any comment crosses to the
+#     provider. E4-04's suppression reads spend the same `SELECT` from a parallel
+#     branch, so this entry is one grant that two tickets both require rather than
+#     one either of them widens.
+#     **What is withheld is the whole assertion here**, more so than on any other
+#     entry in this list: E4 writes *zero* moderation rows by design (ADR 0145
+#     makes the initial state an absence precisely so that stays true), every writer
+#     is E6's, and §5.2's exclusion log is the anti-cherry-picking mechanism the
+#     product's integrity rests on. A connection able to `INSERT` here could publish
+#     a comment an instructor excluded, or exclude one they kept, from a background
+#     job that has no business deciding anything about moderation. `UPDATE` and
+#     `DELETE` are refused for the same reason and because the record is
+#     append-only, which is a property no Python rule makes structural.
+#     **What this table carries, for §4.1.** An `answer` key, one of §5.2's four
+#     state tokens, and when the decision was made — no name, no subject, no comment
+#     text. `tests/integration/test_identity_column_marker.py` reaches it through
+#     `answer` and records that it carries nothing; the connection already holds
+#     `SELECT` on `answer`, where the comment text is, so this adds no reach toward
+#     a student. It adds only the fact that says whether a comment may be sent to a
+#     model at all.
+#     Decided at E4-06, in dispute E4-06-01, against a work-order sentence that had
+#     said "`weekly_summary` and nothing wider" — SPEC §5.1 overrode it, on the rule
+#     this list already states: a ticket grants what it **spends**, and a filter is
+#     a read.
+
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -4078,6 +4140,8 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "grade_sync", "INSERT"),
         (APPLICATION_ROLE, "ags_call", "SELECT"),
         (APPLICATION_ROLE, "ags_call", "INSERT"),
+        (APPLICATION_ROLE, "weekly_summary", "SELECT"),
+        (APPLICATION_ROLE, "weekly_summary", "INSERT"),
         (APPLICATION_ROLE, "moderation_state", "SELECT"),
         (APPLICATION_ROLE, "release_batch", "SELECT"),
         (APPLICATION_ROLE, "release_batch", "INSERT"),

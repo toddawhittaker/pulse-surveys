@@ -171,7 +171,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 18** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 19** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 16. A mutation harness reported kills it had not made
 
@@ -524,3 +524,21 @@ sequence: drive the surface the way the reader meets it — this Monday, then th
 next, then the one after — rather than once against a fixed world. A release rule
 that can fire again the moment anything new arrives turns each later firing into a
 difference small enough to attribute.
+
+## 52. A module-level engine was bound at import by whichever test imported it first
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/52-a-module-level-engine-was-bound-at-import-by-whichever-test-imported-it-first.md)
+
+**Rule.** A process-global built at import — an engine, a client, a Celery
+application, anything a module constructs at the top level from configuration — is
+bound by whoever imports it first, and `sys.modules` keeps that binding for the
+rest of the worker. Setting the environment in a fixture governs only if the module
+has not been imported yet, which by the time an integration test runs it almost
+always has. So a suite whose subject reaches such a global states the value **and
+takes the import step under it**, in its own fixture chain, the way the sibling
+suite that already solved it does. The failure this produces is the one that reads
+as a flake: green when the module runs alone, red under `-n 4` depending on which
+worker drew which file, and pointing at whichever ticket is newest. Read the
+connection out of the traceback before believing any of that — the database name in
+`psycopg`'s message names the test that did the binding, and a throwaway database
+that no longer exists names it exactly.
