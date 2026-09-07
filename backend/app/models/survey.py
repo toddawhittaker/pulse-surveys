@@ -87,6 +87,20 @@ QUESTION_NAME_MAX_LENGTH = 100
 VALUE_PRECISION = 4
 VALUE_SCALE = 1
 
+# The two groups SPEC §5.1 renders the instructor report in: "de-identified
+# comments grouped under 'About the instructor' / 'About the course'", over a
+# stacked pair of trend charts with one panel per stream. `Question.stream`
+# below is the only place in this schema that says which of the two a question
+# belongs to, and E4-02's `weekly_summary` groups by the same pair — so the
+# tuple lives here, beside the column that is the source of the fact, and
+# `app.models.report` imports it rather than spelling the tokens a second time
+# (`docs/MISTAKES.md` entry 13).
+#
+# Upper case, as `classification.verdict`'s tokens and `role_assignment.role`
+# are already spelled in this schema. Not a Postgres enum: see the note on the
+# `CHECK` constraints below, and `app/models/report.py`'s module docstring.
+REPORT_STREAMS = ("INSTRUCTOR", "COURSE")
+
 
 class QuestionKind(StrEnum):
     """Which of §3.2's three answer shapes a question has.
@@ -223,6 +237,27 @@ class Question(UuidPrimaryKey, Base):
             "maximum_value > minimum_value AND step > 0",
             name="bounds_are_ordered",
         ),
+        # E4-02's two rules about `stream`, and each is written so that exactly
+        # one of them can refuse any given row — which is what makes a refusal
+        # say which fact is wrong.
+        #
+        # The first is an equivalence rather than "a stream is required": the
+        # workload question belongs to neither of §5.1's groups, so a stream on
+        # it is as wrong as a missing stream on a rating. Written one-sided, it
+        # would permit a number of hours inside the instructor's comment group.
+        CheckConstraint(
+            f"(kind = '{QuestionKind.WORKLOAD}') = (stream IS NULL)",
+            name="stream_is_absent_exactly_for_the_workload_question",
+        ),
+        # The second closes the value set, and it is the entire enforcement:
+        # `stream` is `Text` rather than a Postgres enum, for the reason
+        # `app/models/report.py`'s module docstring gives. A `CHECK` passes on
+        # NULL, so this says nothing about the workload question — which is what
+        # the rule beside it is for.
+        CheckConstraint(
+            f"stream IN ({', '.join(repr(token) for token in REPORT_STREAMS)})",
+            name="stream_is_one_the_report_groups_by",
+        ),
     )
 
     # Not indexed on its own: it leads `uq_question_question_set_id_position`,
@@ -257,6 +292,22 @@ class Question(UuidPrimaryKey, Base):
     step: Mapped[Decimal | None] = mapped_column(
         Numeric(VALUE_PRECISION, VALUE_SCALE), nullable=True
     )
+    # Which of SPEC §5.1's two report groups this question asks about — "About
+    # the instructor" or "About the course" — and NULL for the workload figure,
+    # which belongs to neither. Added by E4-02.
+    #
+    # **Nothing else in this schema carries the fact.** §3.2 numbers the five and
+    # says in prose which is which; the ordinal was the only trace of it, and an
+    # ordinal is not the fact — `question_set` is versioned precisely so a later
+    # set can be a different size and a different order. Every ticket from E4-03
+    # on derives a comment's group and a rating's panel from this column, so it
+    # is the source rather than a convenience, and a row that leaves it null is a
+    # comment the report has no heading for.
+    #
+    # Nullable because the workload question's honest value is nothing at all,
+    # and held to the two rules in `__table_args__` above rather than to a
+    # `NOT NULL` that would have no value to hold for it.
+    stream: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Response(UuidPrimaryKey, Base):
