@@ -94,3 +94,22 @@ one does.
 Counted as a catch: the rule named a test that would otherwise not have been
 written, and it is the only test in the ticket that can see either of those two
 failures.
+
+## A catch: E4-04's comment path is read and written as `pulse_app` (2026-09-06)
+
+E4-04 widens the runtime role four ways — `SELECT` on the new `report_comment`
+view and on `moderation_state`, `SELECT, INSERT` on `release_batch` and
+`release_batch_member` — and every other test in the ticket drives the service
+through the migrating engine, which holds everything. This entry is why
+`tests/integration/test_the_comment_path_runs_over_the_connection_production_uses.py`
+exists, and why it has two behavioural halves rather than one. The read half
+commits a world and reads it back as `pulse_app`, which is the only test that can
+see a view left owned by a role holding nothing on `answer` or `response`
+underneath: the grant on the view can be perfectly in place and the read still
+refuse at execution time. The write half drives the cutter over the same
+connection, because `INSERT` is a privilege no read covers and a grants file
+copied from a read view's is exactly how a missing one arrives — a defect
+invisible to the whole suite and waiting for the first Monday of a term.
+
+Counted as a catch: two grant-shaped failures with no test between them and the
+scheduled job, both of them green under every other module in the ticket.

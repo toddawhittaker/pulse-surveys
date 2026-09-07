@@ -1,12 +1,14 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 17**
+**Caught: 18**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*20 instances recorded; the 3 most recent are below — the E3-04 one before the
-"What happened" section, and the E4-01 and E4-05 ones after it, each left where
-this file has always kept its instances. The other 17 are in this file's git
+*21 instances recorded; the 4 most recent are below — the E3-04 one before the
+"What happened" section, and the E4-01, E4-05 and E4-04 ones after it, each left
+where this file has always kept its instances. Four is one past what this file
+keeps, so the trim of the E3-04 paragraph is owed to whoever touches it next. The
+other 17 are in this file's git
 history and in the pull requests they cite. The overdue trim was taken on
 2026-09-06, and it took the E2-16 and E2-05 pair together as the note asked. The
 E0-18 PR 2 paragraph stays where it sits, beside the consequence it illustrates:
@@ -166,3 +168,26 @@ day: the test is right, the row lands test-side, and the digest was re-derived
 from the committed file before the ruling rather than pasted from the objection.
 Counted as a catch: without it the branch's route to green ran through the test
 wall, and the record would have been a quiet workaround instead of a ruling.
+
+**Instance, 2026-09-06 (E4-04, caught before the first line of the read path).**
+The obvious shape for the suppression queries is `sqlalchemy.text()` naming
+`public.report_comment` and `public.report_response_counts`, and the work order's
+ask for "comments in the SQL saying which rule each clause carries" invites it.
+`tests/unit/test_the_org_views_are_read_only_through_the_grant.py` parses
+`backend/app/views_sql/` at test time and refuses any module under `backend/app/`
+outside four pinned files that names a policed relation in a string it runs — and
+this ticket's own view adds `report_comment` to that inventory, so the ticket
+supplies the rule that would have refused it. Measured rather than predicted: the
+inventory was printed with the sweep's own `policed_relations()`, and a planted
+raw statement was run past its live predicates, which reported both relations.
+
+Of the two repairs the sweep itself prescribes, one is a location exemption inside
+`tests/`, which this lane may not write; the other is to move the read somewhere
+sanctioned, and neither sanctioned location answers §4's question. So the reads
+are SQLAlchemy Core over the mapped models and two `table()`/`column()`
+declarations — the house style for every service read path in this tree — decided
+before any implementation existed rather than after a red run. Counted as a catch:
+without it the ticket's first green run would have been a sweep failure whose only
+remedy is on the read-only side of the wall, and the fact that a Core query is
+invisible to that sweep is now written into the module docstring and the pull
+request for E4-07, which meets the same question next.

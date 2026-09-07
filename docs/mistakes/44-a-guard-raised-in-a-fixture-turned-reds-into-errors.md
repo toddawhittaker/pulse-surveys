@@ -1,6 +1,30 @@
 # 44. A guard raised in a fixture turned a module's reds into setup errors
 
-**Caught: 3**
+**Caught: 4**
+
+## A catch: E4-04's comment suite names every deliverable from a test body (2026-09-06)
+
+E4-04's tests-first suite is eleven modules over a service module, a view, two
+tables and a scheduled task, none of which exist while the reds are being
+written. Almost every one of those lookups has a natural home in a fixture, and
+the module import is the worst of them: `import app.services.report_comments` at
+a test module's top level is a collection error, which asserts nothing, survives
+the implementation landing, and reads to a hurried eye as a red suite.
+
+The shared fixture module says the rule out loud and then keeps it —
+`comment_service`, `visible_comments`, `released_comments`, `cut_batches`,
+`report_comment_class`, `cut_task` and `require_report_table` are all plain
+functions called as a test body's first statement, each turning an absence into a
+`pytest.fail` that names the missing file, symbol or table and says which ticket
+owes it. `comment_world` hands back an **unbuilt** world for the same reason, so
+its own guards — a missing `question.stream`, a week nobody dated — fire in the
+body too.
+
+Counted as a catch: the red run that the whole heavy lane is measured against came
+back 71 failed, every one of them a FAILED and none an ERROR, exactly matching the
+manifest. Written the obvious way it would have been most of those seventy-one as
+setup errors, with nothing to compare against the manifest and no way to tell a
+waiting implementation from a broken checkout.
 
 ## A catch: E4-03's report-view suite asks for the view inside each test (2026-09-06)
 
