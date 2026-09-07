@@ -232,6 +232,20 @@ not the denominator, and a response rate above 1 is a report nobody can read.
   no comparison set.** That is the cost of putting the check at the wire instead of
   at construction, and it is what makes the guard survive E5 being written by
   somebody who never read this record.
+- **SPEC §4's n-threshold is read through one function,
+  `app.services.report_comments.n_threshold`, rather than passed down as a
+  `Settings`.** The report *prints* the threshold in its `small_n` member beside
+  the comments the gate hid, and the security round found the two reading it
+  separately — the label from the application's startup configuration, the gate
+  from a fresh `Settings()` per call — which is a screen describing a rule the
+  query did not follow. Passing the report's own `Settings` into
+  `visible_comments` is the plainer fix and is not available: E4-04's work order
+  settles that read's signature at four parameters and an invariant-marked test
+  asserts it as an equality, so that no fifth parameter of any kind can be added
+  and later filled with something that names a person. That rule is worth more
+  than the ergonomics, so the single source is a function both sides call. The
+  cost is that a caller holding a `Settings` still may not use it for this one
+  number, which reads as inconsistent until you know why.
 - **The report and the week list cannot disagree about which weeks are
   published**, because both derive it from `_section_weeks` and the clock service.
 - **The instructor report's two refusal sentences are outside `app.copy`.** E2-11's

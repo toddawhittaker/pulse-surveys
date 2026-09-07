@@ -79,6 +79,7 @@ from app.services.authz import section_scoped_assignees, teaching_instructor_ass
 from app.services.identity import person_for_user
 from app.services.report_comments import (
     ReportComment,
+    n_threshold,
     released_comments,
     reported_status_of,
     visible_comments,
@@ -870,6 +871,14 @@ def _payload(
     )
     summaries = _stored_summaries(session, section_id=section.id, week_id=week.week_id)
     released = _released(session, section=section, week=week, published=published)
+    # **The number `visible_comments` applied, read from the one function that
+    # applies it, and printed unchanged.** Reading `settings.n_threshold_default`
+    # here instead would be a second source: the report would print the value the
+    # application started with while the gate applied whatever `Settings()` says
+    # when it is called, and the screen would describe a rule the query did not
+    # follow. E4-07's security round found exactly that, and
+    # `app.services.report_comments.n_threshold` carries the argument.
+    threshold = n_threshold()
 
     streams = {
         token: schema.StreamReport(
@@ -886,17 +895,7 @@ def _payload(
             },
             summary=summaries.get(token),
             comments=_comment_views(
-                # **The same `Settings` object the `small_n` member below prints
-                # from.** The threshold an instructor is shown and the threshold
-                # that decided what she is shown are one number, read once, so the
-                # label cannot describe a gate that applied a different one.
-                visible_comments(
-                    session,
-                    section_id=section.id,
-                    week_id=week.week_id,
-                    stream=token,
-                    settings=settings,
-                )
+                visible_comments(session, section_id=section.id, week_id=week.week_id, stream=token)
             ),
         )
         for token in REPORT_STREAMS
@@ -930,10 +929,7 @@ def _payload(
         # and it is asked for through the same helper E5 will use, because there is
         # no other way to build this member (SPEC §4.1 item 7).
         comparison=comparison_after_suppression(None, sections=0, respondents=0),
-        small_n=schema.SmallNView(
-            suppressed=responses < settings.n_threshold_default,
-            threshold=settings.n_threshold_default,
-        ),
+        small_n=schema.SmallNView(suppressed=responses < threshold, threshold=threshold),
         released_from_earlier_weeks=_comment_views(released),
     )
 

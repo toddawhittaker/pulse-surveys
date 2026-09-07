@@ -83,10 +83,12 @@ caller.
 ## The three rules this module reads, and where each is decided
 
 **The threshold is a count of responses, and it is the institution's number.** It
-is what all three legs of the release gate compare against as well.
-`Settings.n_threshold_default` is read inside each call rather than at import, so
-an institution that changes it changes the rule rather than needing a restart —
-SPEC §4 makes the value configuration. The count itself is
+is what all three legs of the release gate compare against as well. `n_threshold`
+below is the one place `Settings.n_threshold_default` is read for §4's rule — by
+this module's gate, by the release cut, and by E4-07's report, which *prints* the
+number beside the comments this gate hid. It is read inside each call rather than
+at import, so an institution that changes it changes the rule rather than needing
+a restart — SPEC §4 makes the value configuration. The count itself is
 `public.report_response_counts`, E4-03's view, which is `count(*)` of `response`
 rows per section-week. Counting them again here would be a second implementation
 of one number, which is the shape `docs/MISTAKES.md` entry 19 is about.
@@ -250,13 +252,46 @@ class ReportComment:
     stream: str
 
 
+def n_threshold() -> int:
+    """SPEC §4's configured n-threshold — the one place this number is read.
+
+    "Threshold value is configurable (default 5)", counted in responses per
+    reporting week. Every gate that applies it and every surface that *prints* it
+    calls this, and that second half is the reason the function exists rather than
+    each caller reaching for `Settings` itself.
+
+    **E4-07's security round is the incident.** The instructor's report printed a
+    threshold in its `small_n` member from the application's startup configuration
+    while `visible_comments` below built a fresh `Settings()` per call. The two
+    agree on every ordinary deployment and come apart the moment they are read at
+    different times — a screen telling an instructor that comments appear once five
+    students have answered, while the query that hid them applied some other
+    number. A promise about confidentiality printed from one source and enforced
+    from another is two promises, and the one a person acts on is the printed one.
+
+    **A function rather than a parameter, and that is not the shape it wanted.**
+    Handing the report's own `Settings` down to `visible_comments` is the plainer
+    answer and it is not available: E4-04's work order settles that read's
+    signature at four parameters and
+    `tests/unit/test_the_report_comment_service_names_nothing_a_student_path_can_reach.py`
+    asserts it as an equality, deliberately, so that no fifth parameter of any kind
+    can be added and later filled with something that names a person. That rule is
+    worth more than the ergonomics, so the single source is a function both sides
+    call instead of a value one side passes.
+
+    Read per call rather than at import, which is the property the module docstring
+    already claims: an institution that changes the number changes the rule rather
+    than needing a restart.
+    """
+    return Settings().n_threshold_default
+
+
 def visible_comments(
     session: Session,
     *,
     section_id: UUID,
     week_id: UUID,
     stream: str,
-    settings: Settings | None = None,
 ) -> tuple[ReportComment, ...]:
     """One section-week's comments in one stream, or nothing at all below the threshold.
 
@@ -279,24 +314,10 @@ def visible_comments(
     would remove the record of a decision from the report of the person who made
     it, which is what §5.2's anti-cherry-picking argument rests on.
 
-    **`settings` is the caller's, and a caller that shows the threshold must pass
-    the one it showed.** E4-07's security round found the reason: the instructor
-    report prints an n-threshold in its `small_n` member from the application's
-    startup configuration, and this gate was building a fresh `Settings()` per call.
-    They agree on every ordinary deployment and come apart the moment the two are
-    read at different times — a screen telling an instructor that comments appear
-    once five students have answered, while the query that hid them applied some
-    other number. A promise about confidentiality printed from one source and
-    enforced from another is two promises. So the report hands its own `Settings`
-    down, and the label and the gate cannot disagree.
-
-    The default is `None` rather than the parameter being required, and it is the
-    one place a second `Settings` can still be built: E4-04's own callers predate
-    this parameter and pass nothing. No caller that *shows* a threshold uses that
-    path.
+    **The threshold comes from `n_threshold` above, and every surface that prints
+    a threshold reads the same function.** E4-07's report prints one beside the
+    comments this gate hid; that record says why the two may not be separate reads.
     """
-    settings = Settings() if settings is None else settings
-
     # SPEC §4's rule is "n < 5 responses in a reporting week", and the boundary is
     # inclusive on the upper side: the threshold value itself is the first size at
     # which comments are shown. A week nobody answered has no row in the count
@@ -308,7 +329,7 @@ def visible_comments(
             RESPONSE_COUNTS_VIEW.c.week_id == week_id,
         )
     ).scalar_one_or_none()
-    if (responses or 0) < settings.n_threshold_default:
+    if (responses or 0) < n_threshold():
         return ()
 
     asked = _comments_with_their_status().where(
@@ -426,7 +447,10 @@ def cut_due_release_batches(session: Session) -> int:
     wants.
     """
     settings = Settings()
-    threshold = settings.n_threshold_default
+    # The same one reader the read gate uses. All three legs of the release gate
+    # compare against §4's threshold, so a second reading of it here would be the
+    # third source of one number.
+    threshold = n_threshold()
     # ADR 0109's convention: scheduling and visibility read the effective clock,
     # never the process clock, so a development stack walked forward by hand sees
     # the weeks it has been walked past.
