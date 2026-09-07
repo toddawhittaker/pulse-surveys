@@ -314,6 +314,98 @@ def test_a_below_threshold_week_carries_no_raw_comment_at_the_payload_boundary(
     )
 
 
+def test_the_threshold_the_payload_prints_is_the_threshold_the_gate_applied(
+    report_door: ReportDoor,
+    report_api_contract: Any,
+    comment_contract: Any,
+    monkeypatch: Any,
+) -> None:
+    """One settings source behind the label and the gate — the security round's LOW.
+
+    The report prints a threshold in its `small_n` member and E4-04's read path
+    applies one, and the two were reaching it by different routes: the label from
+    the application's startup `Settings`, the gate from a fresh `Settings()` built
+    per call. They agree on every ordinary deployment and come apart the moment
+    the two are built at different times — which is a screen telling an instructor
+    "comments appear once five students have answered" while the query that hid
+    them was applying some other number. A promise about confidentiality that is
+    printed from one source and enforced from another is two promises.
+
+    **What this drives, and why the environment is changed mid-process.** The
+    application's settings exist by the time the door has launched. Changing the
+    variable afterwards is the one manipulation that separates a value read at
+    startup from a value read per call, and it is exactly the manipulation
+    `docs/MISTAKES.md` entry 52 describes from the other end — a process-global
+    built at import is bound by whoever built it first, and everything built later
+    disagrees with it. Here the disagreement is the subject rather than the
+    hazard.
+
+    **It asserts agreement, not a number.** Whichever source the implementation
+    settles on, the label and the behaviour move together: this test computes what
+    the printed threshold implies for a week of known size and requires the
+    comments to match it. A test that pinned 5, or pinned the changed value, would
+    be choosing which of the two sources wins — and that is a decision the ruling
+    leaves to the implementer, who only has to make it once.
+
+    **The mutation this kills:** the label and the gate reading two `Settings`
+    objects. **The near miss it is written against:** a week whose response count
+    is outside both candidate thresholds, where the two sources agree by accident
+    — so the week is chosen with the count strictly between them, asserted before
+    anything is read.
+    """
+    week = FIRST_HELD_WEEK
+    responses = report_door.rows.responses_in(week)
+
+    body, answered = report_door.payload(course_week=week)
+    at_startup = report_api_contract.member(
+        body, report_api_contract.small_n_member, "threshold", answered=answered
+    )
+    assert isinstance(at_startup, int), (
+        f"`{report_api_contract.small_n_member}.threshold` came back as {at_startup!r}. The sketch "
+        "spells it the configured response count below which raw comments stay hidden, and this "
+        "test reasons about the week's size against it."
+    )
+
+    # A value on the other side of this week's response count from the one the
+    # application started with, so the two sources cannot agree by accident.
+    changed_to = responses - 1 if at_startup > responses else responses + 1
+    assert min(at_startup, changed_to) <= responses < max(at_startup, changed_to), (
+        f"Course week {week} holds {responses} responses, the application started with a threshold "
+        f"of {at_startup}, and this test would change it to {changed_to} — which does not straddle "
+        "the week's size, so both sources would suppress (or both show) and their disagreement "
+        "would be invisible."
+    )
+    monkeypatch.setenv(comment_contract.threshold_variable, str(changed_to))
+
+    body, answered = report_door.payload(course_week=week)
+    printed = report_api_contract.member(
+        body, report_api_contract.small_n_member, "threshold", answered=answered
+    )
+    shown = report_api_contract.stream_member(
+        body,
+        report_api_contract.instructor_stream,
+        report_api_contract.comments_field,
+        answered=answered,
+    )
+
+    assert bool(shown) == (responses >= printed), "\n".join(
+        [
+            f"The report prints a threshold of {printed} for a week holding {responses} responses, "
+            f"and {'shows' if shown else 'hides'} that week's comments.",
+            "",
+            f"A threshold of {printed} means comments appear from {printed} responses, so this week "
+            f"should be {'shown' if responses >= printed else 'hidden'} and it is not.",
+            "",
+            f"The application started with {at_startup} and `{comment_contract.threshold_variable}` "
+            f"was changed to {changed_to} afterwards. The label and the gate are reading two "
+            "different `Settings` objects — one built at startup, one built per call — and this "
+            "week's size sits between the two values, which is the only place the difference is "
+            "visible. Which of the two wins is the implementer's to settle; that they are the same "
+            "value is not.",
+        ]
+    )
+
+
 def test_the_released_list_carries_the_release_in_the_latest_published_week(
     report_door: ReportDoor, report_api_contract: Any, comment_contract: Any
 ) -> None:

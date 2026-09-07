@@ -35,6 +35,16 @@ hand it to the schema — the type refuses to exist. That is the half a test can
 prove without E5's data, and it is the half that has to survive E5 being written
 by somebody who never read this ticket.
 
+**Three doors, and the security round found the two that were open.** The
+constructor's token closes the direct one. `model_construct` never calls the
+constructor, and `model_copy(update=...)` rewrites the fields of a value the
+helper already suppressed — both confirmed by execution, both ending in a
+serialized payload carrying a figure §5.1 means to suppress. The ruled chokepoint
+is therefore the **wire**: however a comparison value was built, the payload
+boundary re-checks it. The three tests that drive those doors assert the outcome —
+the figure does not reach the serialized payload — and never the mechanism, because
+the ticket settles that the check exists and leaves its spelling open.
+
 **Marked `invariant` at the module level**, which puts it in the isolated §4.1
 pass CLAUDE.md says may never be skipped. It is named in the pull request body so
 the exit ticket's collection count has a baseline (E4-07's known traps).
@@ -108,7 +118,7 @@ def serialized(value: Any) -> dict[str, Any]:
     )
 
 
-def a_value_the_annotation_accepts(parameter: Any, owner: str) -> Any:
+def a_value_the_annotation_accepts(name: str, annotation: Any, owner: str) -> Any:
     """One value for a constructor field that the field's own annotation cannot object to.
 
     **This is half of the C4 repair, and it exists because the obvious version of
@@ -127,8 +137,12 @@ def a_value_the_annotation_accepts(parameter: Any, owner: str) -> Any:
 
     An annotation this cannot fill is a failure naming it rather than a guess —
     the guess is what went wrong the first time.
+
+    Takes an annotation rather than an `inspect.Parameter`, because the same
+    question is asked of a constructor's parameters and of a model's fields: the
+    side doors below smuggle values in by field name, and a second copy of this
+    reasoning for `FieldInfo` would be `docs/MISTAKES.md` entry 13.
     """
-    annotation = parameter.annotation
     optional = type(None) in get_args(annotation)
     members = [member for member in get_args(annotation) if member is not type(None)]
     base = members[0] if get_origin(annotation) is not None and len(members) == 1 else annotation
@@ -141,10 +155,8 @@ def a_value_the_annotation_accepts(parameter: Any, owner: str) -> Any:
         return A_REASON
     if optional:
         return None
-    if parameter.default is not parameter.empty:
-        return parameter.default
     pytest.fail(
-        f"`{owner}` declares a field `{parameter.name}: {annotation}`, and this test has no value "
+        f"`{owner}` declares a field `{name}: {annotation}`, and this test has no value "
         "for it that the annotation certainly accepts. It fills a boolean, a number, a string and "
         "anything optional; a field of some other kind is taught in "
         "`a_value_the_annotation_accepts` in this module.\n\n"
@@ -169,14 +181,92 @@ def figures_in(value: Any) -> list[Any]:
     return [value]
 
 
-def carries_the_figure(value: Any) -> bool:
-    """Whether the driven figure is anywhere in a comparison value's serialization."""
+def the_figure_is_in(node: Any) -> bool:
+    """Whether the driven figure is anywhere inside an already-serialized structure."""
     return any(
         isinstance(found, int | float)
         and not isinstance(found, bool)
         and float(found) == pytest.approx(A_COMPARISON_MEAN)
-        for found in figures_in(serialized(value))
+        for found in figures_in(node)
     )
+
+
+def carries_the_figure(value: Any) -> bool:
+    """Whether the driven figure is anywhere in a comparison value's serialization."""
+    return the_figure_is_in(serialized(value))
+
+
+def smuggled_field_values(comparison: Any) -> dict[str, Any]:
+    """Every field of a comparison value, filled to make the figure visible and unsuppressed.
+
+    By field name rather than by constructor parameter, because that is the
+    currency both side doors take: `model_construct` and `model_copy(update=...)`
+    are given field names and never see `__init__` at all. The values come from
+    the same annotation reader the direct-construction test uses, so a field
+    renamed or retyped moves both doors at once.
+    """
+    return {
+        name: a_value_the_annotation_accepts(name, field.annotation, comparison.__name__)
+        for name, field in comparison.model_fields.items()
+    }
+
+
+def report_payload_model(contract: Any) -> Any:
+    """The schema model the report payload is served as — the wire boundary itself.
+
+    Found by the member the sketch puts at the top of the payload, the same way
+    the contract finds the comparison type: one model in `app.schemas.report`
+    carrying a `comparison` member. Anything else is a failure naming the
+    ambiguity rather than a guess about which model is the payload.
+    """
+    schema = contract.schema()
+    models = [
+        value
+        for name, value in vars(schema).items()
+        if not name.startswith("_")
+        and isinstance(value, type)
+        and contract.comparison_member in (getattr(value, "model_fields", None) or {})
+    ]
+    if len(models) != 1:
+        pytest.fail(
+            f"`{contract.schema_module_name}` declares {len(models)} models carrying a "
+            f"`{contract.comparison_member}` member ({[model.__name__ for model in models]}). This "
+            "suite needs one to hand a smuggled figure to."
+        )
+    return models[0]
+
+
+def reaches_the_wire(smuggled: Any, door: Any, contract: Any) -> tuple[bool, str]:
+    """Whether a comparison value built outside the helper survives to a serialized payload.
+
+    **The question is the outcome and not the mechanism.** A boundary that refuses
+    the value, one that raises while serializing it, and one that serializes it
+    with the figure gone are three correct implementations and this reader accepts
+    all three; only a figure that comes out the other side is a failure. E4-07's
+    work order settles that the chokepoint exists and does not settle how it is
+    spelled, so a test that required a validator, or a particular exception, would
+    be choosing for the implementer.
+
+    A real payload is fetched first and its comparison member swapped, rather than
+    a payload being assembled here: every other member is then exactly what the
+    route serves, so nothing in this walk is a shape this test invented.
+    """
+    body, _answered = door.payload(course_week=FULL_WEEK)
+    handed = dict(body)
+    handed[contract.comparison_member] = smuggled
+
+    model = report_payload_model(contract)
+    try:
+        validated = model.model_validate(handed)
+    except Exception as refused:
+        return False, f"the payload boundary refused it ({type(refused).__name__}: {refused})"
+    try:
+        served = validated.model_dump(mode="json")
+    except Exception as refused:
+        return False, f"serializing it was refused ({type(refused).__name__}: {refused})"
+
+    carried = served.get(contract.comparison_member)
+    return the_figure_is_in(carried), f"it serialized as {carried!r}"
 
 
 def test_a_figure_over_fewer_sections_than_the_minimum_is_suppressed(
@@ -339,7 +429,9 @@ def test_the_comparison_value_cannot_be_constructed_without_the_helpers_token(
             "A token spelled some other way is taught here, in this test."
         )
     filled = {
-        parameter.name: a_value_the_annotation_accepts(parameter, comparison.__name__)
+        parameter.name: a_value_the_annotation_accepts(
+            parameter.name, parameter.annotation, comparison.__name__
+        )
         for parameter in signature.parameters.values()
         if parameter.kind is parameter.KEYWORD_ONLY
     }
@@ -369,6 +461,100 @@ def test_the_comparison_value_cannot_be_constructed_without_the_helpers_token(
         f"If the token layer legitimately refuses with {type(raised).__name__}, this assertion is "
         "the one line to change — but check first that the refusal is the token's and not a field "
         f"validator's, because the values handed over were {filled!r}."
+    )
+
+
+def test_a_figure_built_past_the_constructor_does_not_reach_the_serialized_payload(
+    report_door: ReportDoor, report_api_contract: Any
+) -> None:
+    """The first side door: `model_construct` never calls `__init__` at all.
+
+    The security round's MEDIUM. The token check lives in the constructor, and
+    pydantic offers a documented way of building a model without running it —
+    `model_construct` skips validation and initialisation both. Confirmed by
+    execution: it builds an unsuppressed figure carrying a number, and the report
+    schema then accepts and serializes it. So the chokepoint proven one test up is
+    a chokepoint with a documented bypass beside it, which is
+    `docs/MISTAKES.md` entry 22's shape exactly — a closed-set guard defeated one
+    level out.
+
+    **The ruled answer is the wire, not a second constructor.** However a
+    comparison value was built, the payload boundary re-checks it, so a smuggled
+    instance does not reach an instructor's screen. That is the property asserted
+    here: this test hands the boundary a real payload with the smuggled figure in
+    it and requires the figure not to come out the other side. A refusal at
+    validation, a refusal while serializing, and a serialization with the figure
+    gone are all correct — the ticket settles the property and not the mechanism.
+
+    **The mutation this kills:** deleting the payload-boundary check, which
+    restores exactly the state the reviewers demonstrated. **The canary:** the
+    smuggled value is required to carry the figure *before* the boundary sees it,
+    or "the figure did not reach the wire" is a statement about a smuggle that
+    never worked (`docs/MISTAKES.md` entry 3).
+    """
+    comparison = report_api_contract.comparison_type()
+    smuggled = comparison.model_construct(**smuggled_field_values(comparison))
+    assert carries_the_figure(smuggled), (
+        f"The smuggled value does not carry {A_COMPARISON_MEAN} before the boundary sees it: "
+        f"{serialized(smuggled)}. Until it does, this test asserts that a figure nobody planted is "
+        "absent."
+    )
+
+    reached, what_happened = reaches_the_wire(smuggled, report_door, report_api_contract)
+    assert not reached, (
+        f"A comparison figure built with `model_construct`, which never runs the constructor or "
+        f"its token check, reached the serialized payload: {what_happened}.\n\n"
+        "SPEC §4.1 item 7 is a rule about what is *shown*, so the boundary that has to hold it is "
+        "the one the payload crosses. A guard that only stands in `__init__` is walked past by "
+        "every pydantic entry point that does not call it."
+    )
+
+
+def test_a_suppressed_figure_cannot_be_unsuppressed_by_copying_it(
+    report_door: ReportDoor, report_api_contract: Any
+) -> None:
+    """The second side door: `model_copy(update=...)` rewrites the fields of a legitimate value.
+
+    Sharper than the first, because it starts from a value the helper itself
+    produced — a figure the two minimums suppressed, which is the ordinary state
+    of this member in E4 — and turns it into an unsuppressed one carrying the
+    number. No construction happens at all, so no constructor can object;
+    confirmed by execution in the security round.
+
+    That is the shape §4.1 item 7 exists to stop reached through a copy: the
+    suppression decision is made once, by the helper, over the two configured
+    minimums, and then rewritten by a caller who never saw them.
+
+    **The mutation this kills:** the same one — deleting the payload-boundary
+    check. **The two canaries:** the value the helper produced must genuinely be
+    suppressed and carry no figure, and the copy must genuinely carry it, or this
+    test is comparing two absences.
+    """
+    minimums = report_api_contract.minimums()
+    suppressed = report_api_contract.call_helper(
+        A_COMPARISON_MEAN,
+        sections=minimums[report_api_contract.minimum_sections] - ONE,
+        respondents=minimums[report_api_contract.minimum_respondents] - ONE,
+    )
+    assert not carries_the_figure(suppressed), (
+        f"The helper's own output already carries {A_COMPARISON_MEAN} below both minimums: "
+        f"{serialized(suppressed)}. This test starts from a suppressed value; if suppression is "
+        "broken, the pair at the top of this module is the red to read first."
+    )
+
+    smuggled = suppressed.model_copy(update=smuggled_field_values(type(suppressed)))
+    assert carries_the_figure(smuggled), (
+        f"Copying the suppressed value with the figure in the update did not put it there: "
+        f"{serialized(smuggled)}. Until it does, this test asserts nothing about the boundary."
+    )
+
+    reached, what_happened = reaches_the_wire(smuggled, report_door, report_api_contract)
+    assert not reached, (
+        f"A suppressed comparison figure was unsuppressed with `model_copy(update=...)` and reached "
+        f"the serialized payload: {what_happened}.\n\n"
+        "The helper decided this figure was over too few sections and too few respondents to show. "
+        "A copy that overwrites that decision, and a payload boundary that does not look again, "
+        "means the two configured minimums are enforced only against callers who ask politely."
     )
 
 
