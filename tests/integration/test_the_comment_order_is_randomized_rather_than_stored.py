@@ -145,7 +145,7 @@ def seeded(monkeypatch: pytest.MonkeyPatch, contract: Any, seed: int) -> None:
     indistinguishable if the second read drew from a moved state.
     """
     module = require_the_hook(contract)
-    monkeypatch.setattr(module, contract.rng_hook, lambda *args, **kwargs: random.Random(seed))
+    monkeypatch.setattr(module, contract.rng_hook, lambda *args, **kwargs: random.Random(seed))  # noqa: S311 — the rng seam under test wants determinism, not cryptography
 
 
 def plant_a_big_week(world: CommentWorld, contract: Any) -> int:
@@ -278,7 +278,7 @@ def test_neither_read_accepts_a_caller_supplied_random_source(
             section_id=world.section_id(),
             week_id=world.week_id(BIG_WEEK),
             stream=contract.instructor_stream,
-            rng=random.Random(A_SEED),
+            rng=random.Random(A_SEED),  # noqa: S311 — the rng seam under test wants determinism, not cryptography
         )
     with pytest.raises(TypeError):
         contract.released()(
@@ -286,7 +286,7 @@ def test_neither_read_accepts_a_caller_supplied_random_source(
             section_id=world.section_id(),
             term_id=world.term_id(),
             stream=contract.instructor_stream,
-            rng=random.Random(A_SEED),
+            rng=random.Random(A_SEED),  # noqa: S311 — the rng seam under test wants determinism, not cryptography
         )
 
 
