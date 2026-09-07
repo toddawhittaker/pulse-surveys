@@ -221,17 +221,38 @@ not the denominator, and a response rate above 1 is a report nobody can read.
   and its helper — which is the review that ticket should get.
 - **The seal costs every report one tuple comparison and costs a reader an
   indirection.** `ComparisonFigure._sealed_over` is a private attribute nothing
-  serializes, `_the_seal_over` builds the tuple from `model_fields` so a field
-  added to the type is inside the seal by existing, and
+  serializes, `_the_seal_over` builds the tuple from `model_fields`, and
   `refuse_an_unsealed_comparison` is the only reader. The failure mode to know
-  about: anything that produces a `ComparisonFigure` without calling its
-  constructor now raises a `ValidationError` at the payload boundary rather than
-  serializing quietly, which is deliberate — reaching there at all is a defect in a
-  confidentiality path, not a state to render.
+  about: anything that produces a `ComparisonFigure` carrying a figure without
+  going through the helper now raises a `ValidationError` at the payload boundary
+  rather than serializing quietly, which is deliberate — reaching there at all is a
+  defect in a confidentiality path, not a state to render.
+- **The seal enumerates fields automatically and holds them by reference, which
+  are two different guarantees.** A field added to the type is enumerated by the
+  seal by existing; it is only *bound* by it because every field this type has is
+  immutable, so a value cannot change without the tuple ceasing to match. A mutable
+  field added later — a list of contributing sections, say — would be the same
+  object after being mutated in place, so the seal would still compare equal and a
+  figure could be written into it after the token was accepted. Adding a mutable
+  field means `_the_seal_over` has to copy rather than reference, and nothing
+  enforces that today beyond this sentence and the one in that function.
 - **The `comparison` member is re-checked on every report even though E4 computes
-  no comparison set.** That is the cost of putting the check at the wire instead of
-  at construction, and it is what makes the guard survive E5 being written by
-  somebody who never read this record.
+  no comparison set, and `InstructorReport` re-validates itself on every response.**
+  `revalidate_instances="always"` is the outermost of the three layers and the last
+  one the review found: a field validator runs when a model is *validated*, and
+  `model_construct` and `model_copy(update=...)` build a report that no validator
+  sees, which the re-pass demonstrated serving an unsuppressed figure with a 200.
+  The cost is a second validation pass per report, paid on every request, and it is
+  what makes the guarantee about what is shown rather than about how somebody built
+  the thing shown.
+- **An unsealed comparison member is admitted in exactly one shape: suppressed,
+  with no figure.** That is what lets the payload be validated from its own
+  serialized JSON — pydantic builds a model with a custom `__init__` *through* that
+  `__init__`, so a round trip arrives with no token and therefore no seal, and
+  every E4 report's comparison member is that shape. It gives up nothing item 7
+  asks for: a member saying "no comparison here" discloses no figure whoever built
+  it. Anything carrying a figure, or claiming it was not suppressed, still has to
+  be sealed.
 - **SPEC §4's n-threshold is read through one function,
   `app.services.report_comments.n_threshold`, rather than passed down as a
   `Settings`.** The report *prints* the threshold in its `small_n` member beside
