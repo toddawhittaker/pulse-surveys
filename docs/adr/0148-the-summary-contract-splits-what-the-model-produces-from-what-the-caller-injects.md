@@ -59,6 +59,15 @@ Four consequences of that line, each settled here:
    from a genuinely empty week's. The budget is sixty seconds rather than §3.3's
    four for the same reason the floor is absent: the caller is a job, and a week of
    comments is a much longer prompt than one comment.
+5. **A theme claiming more comments than the week held is refused**, on the same
+   terms as the wrong-stream answer and for the same reason it has to happen here:
+   the task is the last place that knows how many comments it sent, §4 hides the
+   raw comments below the n-threshold, and a count is what an instructor is given
+   instead of them. Exactly the week's length is legitimate and is kept, and no
+   count is ever adjusted — a clamped figure is one nobody produced. Added by the
+   security round on this ticket, which found the bound living only in the offline
+   eval checks and the mock's own answers, neither of which is on the path a real
+   provider's answer takes.
 
 The comments render as numbered blocks separated by blank lines, substituted into
 the last placeholder in the prompt file, so the last comment ends the message and

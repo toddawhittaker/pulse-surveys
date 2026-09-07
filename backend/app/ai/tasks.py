@@ -518,10 +518,28 @@ def summarize_stream(
     so a reader of the job log is sent to the provider or to the prompt according
     to which one it was.
 
+    **A theme claiming more comments than the week held is refused too**, and
+    this is the last place that can. The count is a number the product shows and
+    acts on — E4-10 renders it beside the theme and §5.3's draft check reads it —
+    and §4 hides the raw comments below the n-threshold, so in exactly the weeks
+    where an instructor cannot check it themselves, an inflated count turns two
+    students into seven. The bound is the number of comments *this call sent*,
+    which nothing downstream still knows: the eval checks bound it offline and
+    the mock bounds its own answers, and neither is on the path a real provider's
+    answer takes. Exactly the week's length is legitimate and is kept — a small
+    section where every comment is about the same lab is the ordinary case.
+
+    Nothing here rewrites an answer. A count clamped to something plausible would
+    put a figure in front of an instructor that neither the model gave nor the
+    week supports, and it would do it silently; the answer is refused whole.
+
     **Nothing raised or logged from here carries a comment.** E3's decision 10
     keeps student content out of worker logs, SPEC §10 requires it, and E4-06
-    relies on it: the refusal below is built from the two stream tokens and
-    static text.
+    relies on it: the refusals below are built from the two stream tokens, the
+    counts, and static text. **A theme's label is deliberately not quoted**,
+    although naming the offending theme would read as more helpful — a label is
+    model output written after reading a week of comments, so it is the one part
+    of an answer that can carry a student's words back into a job log.
     """
     if not comments:
         return WeeklySummaryRecord(
@@ -548,5 +566,15 @@ def summarize_stream(
             f"{stream.value!r} stream was asked about. SPEC §5.1 groups comments under "
             "'About the instructor' / 'About the course', and a summary filed under the wrong "
             "heading reads as criticism of the wrong thing."
+        )
+    overclaimed = sorted(
+        theme.comment_count for theme in output.themes if theme.comment_count > len(comments)
+    )
+    if overclaimed:
+        raise AIResponseInvalidError(
+            f"The summary carries {len(overclaimed)} theme(s) claiming {overclaimed} comments "
+            f"out of the {len(comments)} this call sent. A theme cannot be carried by more "
+            "comments than the week holds, and the count is a figure the report shows and "
+            "§5.3's draft check reads."
         )
     return WeeklySummaryRecord(summary=output, response_count=response_count)
