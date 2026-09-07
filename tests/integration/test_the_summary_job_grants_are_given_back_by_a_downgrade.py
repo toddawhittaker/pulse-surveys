@@ -1,14 +1,21 @@
-"""The grants E4-06 spends come back off its downgrade — ticket E4-06.
+"""The grant E4-06 spends comes back off its downgrade — ticket E4-06.
 
-E4-06 grants `pulse_app` `SELECT, INSERT` on `weekly_summary` (the rows the Monday
-walk writes and the selection that finds the section-weeks still owed one) and
-`SELECT` on `moderation_state` (SPEC §5.1's "exclude flagged-held content", which
-ADR 0145 puts in no other table). Revision `c7f41a9d2b60` issues both, and its
-`downgrade()` issues the two `REVOKE`s that give them back.
+E4-06 grants `pulse_app` `SELECT, INSERT` on `weekly_summary` — the rows the Monday
+walk writes and the selection that finds the section-weeks still owed one. Revision
+`c7f41a9d2b60` issues it, and its `downgrade()` issues the `REVOKE` that gives it
+back.
+
+**The walk also reads `moderation_state`** (SPEC §5.1's "exclude flagged-held
+content", which ADR 0145 puts in no other table), and that read is granted one
+revision below by `d4c1a7e93f26`, E4-04's. Both branches granted it while they were
+built in parallel and both downgrades revoked it, which is a rollback of either
+taking a privilege the other still spends; at the merge the duplicate came out of
+this revision, so the table appears below in the set that has to **survive** this
+downgrade rather than in the set it takes back.
 
 **This module exists because the mutation battery found that nothing executed
-them.** Deleting both `REVOKE`s from `downgrade()` changed no test's result, while
-the revision's own docstring and both grants files under
+them.** Deleting the `REVOKE`s from `downgrade()` changed no test's result, while
+the revision's own docstring and the grants file under
 `backend/app/views_sql/` say the downgrade revokes. That is `docs/MISTAKES.md`
 entry 9 exactly — a guard cited as a guarantee and never run — and the citation is
 what makes it worse than an omission: a reviewer reading the revision sees a
@@ -94,17 +101,24 @@ WEEKLY_SUMMARY = "weekly_summary"
 MODERATION_STATE = "moderation_state"
 GRANTED = {
     WEEKLY_SUMMARY: ("SELECT", "INSERT"),
-    MODERATION_STATE: ("SELECT",),
 }
 
-# Two grants that belong to revisions below this one and must survive its
+# Three grants that belong to revisions below this one and must survive its
 # downgrade. `answer` is E2-08's and is the table the gather reads the comment
-# text from; `classification` is E0-13's. Both are held by `pulse_app` at head as
-# an equality in `test_identity_grants.py`, and both are on the path a blanket
-# revoke takes.
+# text from; `classification` is E0-13's; `moderation_state` is E4-04's, granted by
+# the revision directly below this one. All three are held by `pulse_app` at head
+# as an equality in `test_identity_grants.py`, and all three are on the path a
+# blanket revoke takes.
+#
+# **`moderation_state` moved into this set at the merge of the two branches.** Both
+# tickets' revisions granted that read while they were built in parallel, and both
+# downgrades revoked it — so rolling either one back took a privilege the other
+# still spent. `d4c1a7e93f26` is now the only grantor and the only revoker, and
+# what this module asserts about the table is the opposite of what it used to: the
+# read has to still be there after this revision goes away.
 ANSWER = "answer"
 CLASSIFICATION = "classification"
-SURVIVES = {ANSWER: "SELECT", CLASSIFICATION: "SELECT"}
+SURVIVES = {ANSWER: "SELECT", CLASSIFICATION: "SELECT", MODERATION_STATE: "SELECT"}
 
 # Every privilege a role can hold on a table, and on a column of one. The absence
 # assertion is over the whole set rather than over the verbs this revision
@@ -188,8 +202,9 @@ def test_the_summary_job_grants_are_revoked_by_the_downgrade_and_its_neighbours_
     """The two `REVOKE`s in `downgrade()`, executed rather than read.
 
     **The control comes first**, and it is `docs/MISTAKES.md` entry 35's rule as
-    much as entry 3's: each of the three privileges is required to be *found* at
-    head before its absence below means anything. A reading that answered false for
+    much as entry 3's: every privilege this test reasons about — the two granted
+    here and the three that must survive — is required to be *found* at head before
+    anything said about it below means anything. A reading that answered false for
     everything — a role name that does not exist in this cluster, a relation
     spelled wrong — would report a perfect rollback against a database where
     nothing had been revoked at all. The exact shape of the grants at head is an
@@ -220,13 +235,13 @@ def test_the_summary_job_grants_are_revoked_by_the_downgrade_and_its_neighbours_
     against a database that silently refuses its first insert.
 
     **The mutation this kills:** `downgrade()`'s body emptied — which is the state
-    the mutation battery found, because deleting both `REVOKE`s changed no test's
-    result while the revision's docstring and both grants files went on saying the
+    the mutation battery found, because deleting the `REVOKE`s changed no test's
+    result while the revision's docstring and its grants file went on saying the
     downgrade revokes. That is a guard cited and never executed
     (`docs/MISTAKES.md` entry 9), and it is why this module is one test rather than
     a sentence in a pull request.
 
-    **The near miss it must survive:** a revoke that names the two tables and
+    **The near miss it must survive:** a revoke that names the one table and
     nothing else. That is the shipped shape, and the two neighbour assertions are
     what tell it apart from the blanket one.
     """
@@ -239,10 +254,10 @@ def test_the_summary_job_grants_are_revoked_by_the_downgrade_and_its_neighbours_
             assert holds_on_table(empty_database, table, privilege), (
                 f"At head, `{APPLICATION_ROLE}` does not hold `{privilege}` on `public.{table}`. "
                 f"Revision {SUMMARY_GRANTS_REVISION} grants it — `INSERT` on `{WEEKLY_SUMMARY}` is "
-                "the row the Monday walk writes, `SELECT` there is how it finds the section-weeks "
-                f"still owed one, and `SELECT` on `{MODERATION_STATE}` is SPEC §5.1's 'exclude "
-                "flagged-held content'. Until the grant is there, there is nothing for a downgrade "
-                "to revoke and every assertion below is about a privilege that never existed."
+                "the row the Monday walk writes and `SELECT` there is how it finds the "
+                "section-weeks still owed one. Until the grant is there, there is nothing for a "
+                "downgrade to revoke and every assertion below is about a privilege that never "
+                "existed."
             )
     for table, privilege in SURVIVES.items():
         assert holds_on_table(empty_database, table, privilege), (
@@ -267,11 +282,10 @@ def test_the_summary_job_grants_are_revoked_by_the_downgrade_and_its_neighbours_
             f"Revision {SUMMARY_GRANTS_REVISION}'s `downgrade()` issues the `REVOKE`s that give "
             "these back, and its own docstring and the grants files under "
             "`backend/app/views_sql/` both say so — a claim a mutation battery found nothing "
-            "executed. An operator who rolls back below this revision has a database where the "
-            "walk does not exist in the code and the privilege is still on the connection: for "
-            f"`{MODERATION_STATE}` that is a read of SPEC §5.2's lifecycle, which §6.2 routes the "
-            "threat and self-harm cases away from the instructor through, held by a role no "
-            "record at that revision describes.\n\n"
+            "executed. An operator who rolls back below this revision would otherwise have a "
+            "database where the Monday walk does not exist in the code and the privilege to store "
+            "its rows is still on the connection, held by a role no record at that revision "
+            "describes.\n\n"
             "The reading covers both currencies, so an entry here can also be a column-scoped "
             "grant a table-grain `REVOKE` left behind."
         )
@@ -282,8 +296,9 @@ def test_the_summary_job_grants_are_revoked_by_the_downgrade_and_its_neighbours_
             "which belongs to a revision below this one. A revoke written about the role — or "
             "`ON ALL TABLES IN SCHEMA public` — takes every grant the application has, and the "
             "database it leaves cannot serve a request at all: every read path refuses at once, "
-            "naming nothing about this migration. Revoke the two tables this revision granted on, "
-            "by name."
+            f"naming nothing about this migration. For `{MODERATION_STATE}` the failure is "
+            "narrower and just as invisible — E4-04's suppression path loses the record it "
+            "conceals a flag with. Revoke the one table this revision granted on, by name."
         )
 
     migrate(config, "upgrade", MODEL_SCHEMA, "re-applying the revision the downgrade undid")

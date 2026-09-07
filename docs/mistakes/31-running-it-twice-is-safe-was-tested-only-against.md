@@ -1,6 +1,6 @@
 # Entry 31. "Running it twice is safe" was tested only against a database the loader itself had filled
 
-**Caught: 1**
+**Caught: 2**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -65,3 +65,27 @@ a development database's launches with it.
 
 Without this entry I would have reported the matched-row path verified having
 never exercised it, in a ticket whose whole upgrade story is that path.
+
+---
+
+**2026-09-06, E4-04 (`e4/comment-visibility`), the release cutter's second run.**
+The cutter runs every Monday of the term and writes release batches, so "running
+it twice is safe" is a claim it makes fifteen times a term rather than once. The
+tests-first suite therefore drives it twice in the same test and asserts the
+second run over the state the **first run itself wrote**, by row identity rather
+than by `(batch, comment)` pairs — a run that deleted every membership and wrote
+an equivalent one back would pass the weaker comparison while giving every
+released comment a new release time. The first run's result is asserted before the
+second is made, so the test cannot pass by comparing two empty sets.
+
+The mutation it kills is the "not already released" filter dropped from the
+held-comment query. On a database no cutter has touched that mutation is
+invisible — the first call behaves identically — and only a second call over the
+first's own rows can see it. The same discipline is what let the security round
+state its finding as a runnable scenario: the trickle defect, where a gate on a
+cumulative count stays crossed and cuts a batch every later Monday, is a
+three-consecutive-Mondays test, and it is the second and third runs that carry it.
+
+Counted as a catch: the entry is why a second-run test existed at all in a ticket
+whose obvious tests are all about one call, and it is the only shape in the module
+that can fail on a released-comment filter.

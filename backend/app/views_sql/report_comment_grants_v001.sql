@@ -1,0 +1,82 @@
+-- What the application may do with the small-N comment path — ticket E4-04,
+-- SPEC §4, §5.2, §6.2, ADR 0001, ADR 0009, ADR 0041, ADR 0145, ADR 0146.
+--
+-- E4-02 created the report schema and granted nothing on any of it, saying so in
+-- as many words: "a privilege lands in the change that spends it, and a GRANT
+-- written for a writer that does not exist yet widens the runtime role for
+-- nobody". E4-04 is the first ticket to spend anything there, and this file is
+-- the whole of what it spends. Without it every read and every write below is
+-- refused by Postgres with 42501 rather than by anything §4 is about — both the
+-- report read and the weekly cutter run on the connection `pulse_app` holds.
+--
+-- **Four grants, and each verb is here because one named thing needs it.**
+--
+--   - SELECT on `report_comment`, the view the report's comments are read
+--     through. Suppression is applied above it (SPEC §4's threshold, §5.2's
+--     concealment), in `app/services/report_comments.py`.
+--   - SELECT on `moderation_state`. §5.2's small-N concealment is what needs it:
+--     "below the threshold, flagged comments are hidden from the instructor
+--     entirely — no chip, no count, no flag-type hint", and above the threshold a
+--     comment "appears flagged-collapsed carrying any reviewer decision already
+--     made". A read path that cannot see the moderation record can neither
+--     conceal a flag nor show a chip. **INSERT and UPDATE stay withheld**: every
+--     writer of a moderation decision is E6's, and a runtime role that could
+--     write one could publish a comment an instructor excluded, or collapse one
+--     they kept.
+--   - SELECT, INSERT on `release_batch` and on `release_batch_member`. SPEC §4
+--     surfaces held comments "once the section's cumulative comment volume for
+--     the term crosses the threshold, batched so that timing cannot identify an
+--     author"; E4's breakdown decision 7 stores that crossing rather than
+--     re-deriving it, and the weekly cutter is its one writer. SELECT is how the
+--     cutter knows what has already gone out and how the report reads a release
+--     back; INSERT is the batch and its memberships.
+--
+-- **UPDATE and DELETE stay withheld on both release tables, and that is the
+-- load-bearing half.** ADR 0146 says outright that "a comment cannot be
+-- un-released, because a released comment is a row and nothing in this schema
+-- deletes one". A role that could move a membership into another batch would be
+-- giving that comment a second `cut_at` — the per-comment release time the
+-- batching exists to remove — and a role that could delete one could retract a
+-- comment from a report with no record that it had ever been there.
+--
+-- **pulse_care is granted nothing.** SPEC §6.2 scopes the Care role to the
+-- threat queue and the audited re-identification, and §4 puts traceability there
+-- "for safety, not oversight". A Care connection that could read this view would
+-- hold every comment in the institution outside the one audited channel §4
+-- admits, so the role gets no privilege it has no use for. The two roles are
+-- never named on one line here for that reason.
+--
+-- **USAGE ON SCHEMA public is not granted again here.** `identity_grants_v001.sql`
+-- grants it to pulse_app and `identity_grants_v002.sql` restates it; an ACL entry
+-- records no history, so a third grant would be indistinguishable from those and
+-- any matching revoke would remove all of them.
+--
+-- **A grant on a view does not make its rows reachable.** A view executes with
+-- its owner's privileges and `security_invoker` is off, so what stands behind
+-- `report_comment` is the migrating owner's read of `answer`, `question` and
+-- `response`, not this file. That is why E4-04's suite reads real rows through
+-- the application connection as well as asking the ACL: a view re-owned by a
+-- role holding nothing on those three leaves every grant here intact and every
+-- instructor's report empty.
+--
+-- **The downgrade has something to revoke, and it is not written here.** The
+-- view's own privilege goes when the view goes, but `moderation_state`,
+-- `release_batch` and `release_batch_member` are E4-02's tables and outlive this
+-- revision — so the revision's `downgrade()` writes those three REVOKEs by hand,
+-- as `survey_window_grants_v001.sql`'s revision does. ADR 0041 makes a versioned
+-- file the immutable record of what an upgrade applied, and an un-grant is not a
+-- record of anything.
+--
+-- **This widens what pulse_app can reach, and it is meant to be visible.**
+-- `RUNTIME_BASE_TABLE_PRIVILEGES` and `SANCTIONED_VIEW_COLUMNS` in
+-- `tests/integration/test_identity_grants.py` are the hand-written records every
+-- grant is compared against as an equality in both directions, deliberately not
+-- derived from these `.sql` files so that a widening cannot justify itself. All
+-- five entries carry the sentence that admits them, and the three tables came out
+-- of `test_report_schema.py`'s "no ticket has spent a privilege here" list in the
+-- same change.
+
+GRANT SELECT ON public.report_comment TO pulse_app;
+GRANT SELECT ON public.moderation_state TO pulse_app;
+GRANT SELECT, INSERT ON public.release_batch TO pulse_app;
+GRANT SELECT, INSERT ON public.release_batch_member TO pulse_app;

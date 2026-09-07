@@ -99,8 +99,12 @@ each other's files.
 
 ## Consequences
 
-- **The schedule now runs six entries**, and Monday morning holds two walks over
-  every section thirty minutes apart. An institution large enough for E3-06's
+- **The schedule now runs seven entries**, and Monday morning holds three passes
+  over every section: E3-06's participation sweep at 02:20, E4-04's release cut at
+  02:40 (ADR 0152, merged before this one) and this walk at 02:50. Only two of
+  them touch a provider — E3-06's sweep and this one — and the thirty minutes
+  between those two is the gap this decision argues for; the release cut sits
+  between them and calls no model at all. An institution large enough for E3-06's
   sweep to overrun 02:50 would have the two overlap again; nothing detects that,
   and the first symptom would be a slow Monday rather than a wrong one.
 - **A large backfill is unbounded by design.** The first run after a long outage,

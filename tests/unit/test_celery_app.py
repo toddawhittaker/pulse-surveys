@@ -421,6 +421,37 @@ RECLASSIFICATION_MINUTE = "45"
 # two files, which is how two records come to disagree.
 POST_PARTICIPATION_SCORES_TASK_NAME = f"{TASKS_MODULE}.post_participation_scores"
 
+# E4-04's entry: the weekly release cutter, running
+# `app.jobs.tasks.cut_release_batches` on `crontab(day_of_week="mon", hour="2",
+# minute="40")` — that ticket's work order. It walks each section's term, counts
+# the comment volume SPEC §4 makes the cumulative rule about, and where the
+# volume has crossed the n-threshold it writes one `release_batch` holding every
+# comment held back from that section's under-threshold closed weeks.
+#
+# It is on a beat rather than at read time because E4's breakdown decision 7 and
+# ADR 0146 settle the crossing as *stored*: "a release re-derived on each read
+# changes as data changes, so a comment can appear and disappear, and the moment
+# it first appears is itself a timing signal". One writer, and the read path
+# stays pure.
+#
+# Monday because SPEC §3.1 closes every window on Sunday at 23:59:59 in the
+# institution's timezone, so it is the first day a week's response count is final
+# — and that count is what decides whether the week's comments were held. 02:40
+# because the passes ahead of it settle the data this one counts: the 00:45 and
+# 01:45 reclassification sweeps decide which comments survive §3.3's validity
+# rule, and 02:20 is E3-06's participation sweep. A cutter in front of them counts
+# a volume that is still moving.
+#
+# **The key is asserted, and by one file only.** E4-04's work order settles it as
+# `cut-release-batches-weekly`, and
+# `tests/unit/test_the_release_cutter_is_scheduled_weekly_and_run_by_a_task.py`
+# pins the key, the task and the crontab together. This inventory is an equality
+# over the *tasks*, so what E4-04 adds to it is the task and nothing else — a
+# second copy of the key here would be one fact asserted in two files, which is
+# how two records come to disagree.
+CUT_RELEASE_BATCHES_TASK_NAME = f"{TASKS_MODULE}.cut_release_batches"
+
+
 # E4-06's entry: the Monday summary generation job, running
 # `app.jobs.tasks.generate_weekly_summaries` on `crontab(day_of_week="mon",
 # hour="2", minute="50")` — that ticket's settled slot. For every section and
@@ -454,15 +485,15 @@ def test_the_beat_schedule_holds_exactly_the_entries_that_have_landed(
     import_app_module: Callable[[str], ModuleType | None],
     celery_application_in: Callable[[ModuleType], Any],
 ) -> None:
-    """The beat entries that have landed, one per ticket, and E4-06 owns the newest.
+    """The beat entries that have landed, one per ticket, and E4 owns the newest two.
 
-    **The name carried a count until E4-06 and no longer does.** It said "five",
-    and before that "four" and "three", so every ticket adding an entry renamed
-    this function and repointed the one place that cites it by name
+    **The name carried a count until this wave and no longer does.** It said
+    "five", and before that "four" and "three", so every ticket adding an entry
+    renamed this function and repointed the one place that cites it by name
     (`tests/integration/test_the_launch_replay_purge_runs_as_pulse_app.py`). The
     rename was never what forced the conversation — the equality below is — and
-    with two E4 tickets adding entries from branches cut off one commit, a count
-    in the name is two branches editing one identifier for no assertion's sake.
+    two E4 tickets added entries from branches cut off one commit, which made a
+    count in the name two branches editing one identifier for no assertion's sake.
     The count lives in the list, where changing it is the point.
 
     **Rewritten by E1-08, per this test's own instruction at E0-03.** The
@@ -517,7 +548,24 @@ def test_the_beat_schedule_holds_exactly_the_entries_that_have_landed(
     `tests/` — so the entry stopped at a dispute until the test author made it,
     which is the conversation the equality exists to force.
 
-    **E4-06 is the sixth, and it is the first entry in this mapping that sends
+    **E4-04 is the sixth, and the instruction is being followed a fifth time.**
+    `app.jobs.tasks.cut_release_batches` on `crontab(day_of_week="mon", hour="2",
+    minute="40")`, the weekly pass that decides whether a section's cumulative
+    comment volume for the term has crossed the n-threshold and, where it has,
+    stores one release batch holding every comment held back from that section's
+    under-threshold closed weeks. SPEC §4: those comments "surface as raw text
+    once the section's cumulative comment volume for the term crosses the
+    threshold, batched so that timing cannot identify an author". It is on a beat
+    rather than at read time because ADR 0146 and E4's breakdown decision 7 settle
+    the crossing as *stored* — a release re-derived on each read appears and
+    disappears as data changes, and the moment it first appears is itself the
+    timing signal the batching exists to remove. Monday because §3.1 closes every
+    window on Sunday at 23:59:59 institution time, so it is the first day a week's
+    response count is final; 02:40 because the 00:45 and 01:45 reclassification
+    passes and E3-06's 02:20 sweep have all run by then, and a cutter in front of
+    them counts a comment volume that is still moving.
+
+    **E4-06 is the seventh, and it is the first entry in this mapping that sends
     student text outside the institution.** `app.jobs.tasks.generate_weekly_summaries`
     on `crontab(day_of_week="mon", hour="2", minute="50")`: for every section and
     course week whose window has closed and which has no stored summary, the
@@ -527,25 +575,28 @@ def test_the_beat_schedule_holds_exactly_the_entries_that_have_landed(
     it sends a number about a student; this one sends what students wrote. Monday
     because §3.1 puts the report on Monday morning and the summary is generated
     once and never regenerated (E4's breakdown decision 2); 02:50 because 02:20 is
-    E3-06's provider-free walk over the same sections.
+    E3-06's provider-free walk over the same sections and 02:40 is E4-04's, which
+    reaches no provider either.
 
     **An equality rather than a superset, and E1-11 paid for that choice while
-    E2-06, E2-08, E3-06 and E4-06 have each paid for it since.** Widening it to
-    "contains these" would let a seventh entry land with no diff here, and an entry
-    in this mapping is a job that runs against every section in the institution on
-    a cadence nobody at the keyboard sees. Being made to edit this test is the
-    whole point of the equality — and it is why the equality is over the *tasks*
-    rather than over the keys: a task is what actually runs, and it is what each
-    of the six tickets settled.
+    E2-06, E2-08, E3-06, E4-04 and E4-06 have each paid for it since.** Widening it
+    to "contains these" would let an eighth entry land with no diff here, and an
+    entry in this mapping is a job that runs against every section in the
+    institution on a cadence nobody at the keyboard sees. Being made to edit this
+    test is the whole point of the equality — and it is why the equality is over
+    the *tasks* rather than over the keys: a task is what actually runs, and it is
+    what each of the seven tickets settled.
 
     **The third entry onward is found by its task and not by its key**, for two
     different reasons. E2-06's work order and E2-08's each settle the task name,
     the module and the cadence and settle no name for the schedule key, so
     asserting one here would pin an identifier the ticket leaves open. E3-06's D3
-    does settle a key — `post-participation-scores-weekly` — and so does E4-06 —
-    `generate-weekly-summaries` — and each is pinned with its task and its crontab
-    in the unit module about that ticket
-    (`test_the_participation_sweep_is_scheduled_weekly_and_run_by_a_task.py` and
+    does settle a key — `post-participation-scores-weekly` — and so do E4-04's work
+    order and E4-06 — `cut-release-batches-weekly` and `generate-weekly-summaries`
+    — and each is pinned with its task and its crontab in the unit module about
+    that ticket
+    (`test_the_participation_sweep_is_scheduled_weekly_and_run_by_a_task.py`,
+    `test_the_release_cutter_is_scheduled_weekly_and_run_by_a_task.py` and
     `test_the_summary_generation_job_is_scheduled_monday_morning.py`); repeating
     either here would be one fact in two files.
 
@@ -575,6 +626,7 @@ def test_the_beat_schedule_holds_exactly_the_entries_that_have_landed(
             WINDOW_DERIVATION_TASK_NAME,
             RECLASSIFICATION_TASK_NAME,
             POST_PARTICIPATION_SCORES_TASK_NAME,
+            CUT_RELEASE_BATCHES_TASK_NAME,
             GENERATE_WEEKLY_SUMMARIES_TASK_NAME,
         }
     )
@@ -585,12 +637,13 @@ def test_the_beat_schedule_holds_exactly_the_entries_that_have_landed(
         "reconciler that reaches a section which appeared mid-term, E2-08 the hourly sweep of "
         "floored classifications that is SPEC §3.3's 'then classified async', E3-06 the weekly "
         "participation sweep that posts a score to a platform's gradebook when a recomputation "
-        "changes it (SPEC §3.4), and E4-06 the Monday summary generation job that sends a closed "
-        "week's comments to the AI provider per stream and stores what comes back (SPEC §5.1). No "
-        "other ticket has landed one: retention is E13, and E4-04's release cut is the next one "
-        "due. If one of those has now landed too, this test is again the record that has to change "
-        "with it — say which ticket owns the new entry and assert what it is, rather than widening "
-        "this equality to a superset check."
+        "changes it (SPEC §3.4), E4-04 the weekly release cutter that stores SPEC §4's "
+        "cumulative crossing as a batch, and E4-06 the Monday summary generation job that sends a "
+        "closed week's comments to the AI provider per stream and stores what comes back "
+        "(SPEC §5.1). No other ticket has landed one: retention is E13. "
+        "If one of those has now landed too, this test is again the record that has to change with "
+        "it — say which ticket owns the new entry and assert what it is, rather than widening this "
+        "equality to a superset check."
     )
 
     assert {PURGE_NONCES_SCHEDULE_KEY, ROSTER_SYNC_SCHEDULE_KEY} <= set(entries), (

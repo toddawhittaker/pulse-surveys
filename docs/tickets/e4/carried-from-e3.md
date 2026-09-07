@@ -49,7 +49,9 @@ course length; the self-hosted font licences (E13); the resubmission that
 floor-headroom variance point (E10); the copy collector's symlinked-directory
 gap (E4); the bounced comment refused before harm screening (E10, with the
 E6 hook); the rendered student surface's string convention (E4); and the Care
-landing's stale docstring (a light-lane candidate E3 could not take). The
+landing's stale docstring (recorded here as a light-lane candidate E3 could not
+take — closed by E4-13, whose section is at the end of this file, and the lane
+was heavy rather than light). The
 "Owned by the spec already" list passes through with one change: E3's own
 row — grade passback reading validity state — is superseded, not closed. The
 item-based formula E3 built counts completed items from the answer rows and
@@ -80,6 +82,22 @@ carries the same signal through its deltas.
 **Done when:** each states in writing that its suppression holds against a
 reader who also has the gradebook open, or changes what it suppresses.
 Nothing was owed inside E3.
+
+**E4's half is done, at E4-04, and it changed what it suppresses — twice.** ADR
+0153 is the statement. A released comment carries no week attribution anywhere,
+because a comment labelled with its week, read beside the per-week completion
+ledger the gradebook carries, narrows the author to about one person in a
+four-response week. And, after that ticket's security round, no batch may hold
+one week's worth of comments or fewer than a threshold's worth of distinct
+authors — ADR 0152's release gate — because the first version dropped the week
+from the payload and left the report's own week-to-week delta to say it instead.
+The residual that record names is a floor rather than a hole: a release is
+attributable no more closely than "one of at least two quiet weeks, one of at
+least a threshold's worth of people", which is the same size of candidate set §4
+already accepts for an ordinary week shown under its own heading. **E6 still owes
+the same statement for its moderation views**, which put comments beside a roster
+with reviewer decisions attached, and this entry stays open against that epic
+alone.
 
 ## The roster sync's token-acquisition dial is unbounded
 
@@ -307,3 +325,32 @@ does not read this key, so nothing goes red while it waits.
 ecosystem proposes it. **Done when:** `target-version` says `py314` and the
 pinned ruff accepts it, proven by a `ruff check` that exits 0 rather than by
 the version number alone.
+
+## The Care landing's stale docstring
+
+Carried through the ledger above from `../e3/carried-from-e2.md`'s "The Care
+landing still says there are five landing views", which holds the detail and now
+carries the same closure note.
+
+**Closed by E4-13**, both halves of the done-when:
+
+- The docstring in `frontend/src/routes/care/index.tsx` describes the tree as it
+  is. Where it said "none of the five landings has any" motion it now names the
+  four landing views — admin, care, instructor, leadership — says none of them
+  has any, and adds that the tree is not motionless: the route that stopped
+  being a landing in E2-10, the student weekly survey, is the one surface with
+  motion today. The census was read off each landing's own source rather than
+  off another record. All four landings render `components/LandingView.tsx`,
+  whose only styled classes are `.pulse-landing` and `.pulse-line`, and neither
+  rule in `frontend/src/styles.css` carries an `animation` or a `transition`;
+  the survey's classes carry nine such declarations in the same file, and
+  nothing in `frontend/src` animates in JavaScript.
+- The stylesheet's opening comment is dated in words, and marked as history
+  besides — the entry offered either. The paragraph is attributed to E1-04 and
+  dated 2026-08-25, its sentence kept rather than rewritten, with one line
+  recording where the utility-class question stands: no utility class is used
+  anywhere in `frontend/src`, checked 2026-09-06.
+
+The assertion the component makes was correct before the ticket and is unchanged
+by it. The diff is comment blocks only, which is what lets a reviewer see the
+no-behavior-change claim in the diff shape.

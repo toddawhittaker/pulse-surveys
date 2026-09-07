@@ -510,6 +510,12 @@ is the light lane.
 **Done when:** that docstring describes the tree as it is, and the stylesheet's
 opening comment is either left as dated history or dated in words.
 
+**Closed by E4-13**, which took both halves; `../e4/carried-from-e3.md` records
+the closure in full. The owner line above was one lane out: the next ticket
+covering `frontend/src/routes/care/` is a heavy one, because
+`.claude/heavy-lane-paths.md` makes any path matching `*care*` heavy wherever it
+lives.
+
 ## Owned by the spec already
 
 Listed so this file is a complete boundary record; each is SPEC §14.3's, a

@@ -1,15 +1,16 @@
 """The beat schedule (SPEC §13, §3.1).
 
 Wired to the application in `app.jobs.celery_app`. E0-03 gave it a runtime that
-already works while every scheduled job still belonged to a later ticket —
-retention is E13. Six entries have landed: E1-08's daily
+already works while every scheduled job still belonged to a later ticket — the
+Monday report is E4, retention is E13. Seven entries have landed: E1-08's daily
 purge of the launch replay ledger, which replaces the native TTL a Redis nonce
 store would have had (ADR 0089), E1-11's hourly roster pull (SPEC §7.3), E2-06's
 hourly survey-window reconciler, which derives the windows a section's calendar
 implies (SPEC §3.1, ADR 0111), E2-08's hourly sweep of the comments §3.3's
 fail-open floor stood in for, E3-06's weekly recompute of §3.4's participation
-score, and E4-06's Monday generation of §5.1's AI summaries — the first half of
-the Monday report to reach this file. Note that the window reconciler is
+score, E4-04's weekly cut of the release batches §4's cumulative rule produces,
+and E4-06's Monday generation of §5.1's AI summaries — the two halves of the
+Monday report that reach this file. Note that the window reconciler is
 scheduled on real time like every entry
 here: beat's own firing is outside the development clock override (ADR 0109),
 which is exactly why E2-06 materializes its rows in advance rather than at the
@@ -115,12 +116,52 @@ BEAT_SCHEDULE: dict[str, dict[str, Any]] = {
         "task": "app.jobs.tasks.post_participation_scores",
         "schedule": crontab(day_of_week="mon", hour="2", minute="20"),
     },
+    # E4-04's weekly release cut: for every section and term the release gate
+    # opens for, one stored batch holding every comment held back from that
+    # section's under-threshold closed weeks (SPEC §4, ADR 0146, ADR 0152). The
+    # gate is three conditions and all must hold — the term's cumulative
+    # comment-answer volume reaches the n-threshold, the distinct people behind
+    # the unreleased held comments reach it, and those comments span at least two
+    # under-threshold closed weeks — because §4's literal trigger counts sentences
+    # where the threshold counts people, and stays true once crossed. It is
+    # evaluated here rather than at read time because a release re-derived on each
+    # read changes as data changes, and the moment a comment first appears is
+    # itself a timing signal.
+    #
+    # **Monday** for the reason the entry above is on one: §3.1 closes every
+    # window on Sunday at 23:59:59 in the institution's timezone, so Monday is the
+    # first day the week that just ended has a final response count — and that
+    # count is exactly what decides whether the week's comments were held.
+    #
+    # **02:40** because the passes ahead of it settle the data this one counts:
+    # the reclassification entry runs at 00:45 and 01:45, so the floored comments
+    # of the week that just closed have had two attempts at a real verdict, and
+    # 02:20 is the participation sweep's. A cut in front of them counts a volume
+    # that is still moving. The minute is 40 rather than a rounder one because 0,
+    # 15, 20, 30 and 45 are already taken by the entries beside it.
+    #
+    # Weekly rather than hourly because the pass walks every section in the
+    # institution and the only thing that can change its answer is a week closing
+    # or a comment arriving in one that already has — neither of which happens
+    # more than once a week for a given section. It is idempotent, and in two
+    # senses since the security round: a run whose sections have all been released
+    # writes nothing, because the held set is chosen by anti-join against the
+    # memberships already stored; and a run that meets one newly closed quiet week
+    # writes nothing either, because a single week satisfies neither the
+    # respondent leg nor the two-week leg.
+    #
+    # **Provider-free**, unlike the summary job at 02:50: nothing here calls a
+    # model, so a provider outage can never delay a release SPEC §4 has promised.
+    "cut-release-batches-weekly": {
+        "task": "app.jobs.tasks.cut_release_batches",
+        "schedule": crontab(day_of_week="mon", hour="2", minute="40"),
+    },
     # E4-06's Monday generation of SPEC §5.1's AI summaries: for every section and
     # course week whose survey window has closed and which carries no summary yet,
     # two model calls — one per comment stream (ADR 0148) — and two stored rows.
     #
-    # **Monday** for the reason the entry above is on a Monday, arriving at it from
-    # the other side. §3.1 closes every window on Sunday at 23:59:59 in the
+    # **Monday** for the reason the participation sweep is on a Monday, arriving at
+    # it from the other side. §3.1 closes every window on Sunday at 23:59:59 in the
     # institution's timezone and makes the instructor's report available "Monday
     # morning", so Monday is both the first day the week that just ended can be
     # summarized at all and the last day it can be summarized before its reader
@@ -130,11 +171,14 @@ BEAT_SCHEDULE: dict[str, dict[str, Any]] = {
     # breakdown's decision 2), so a summary that arrives late never arrives for
     # that week's reader at all.
     #
-    # **02:50**, half an hour behind the participation sweep. That sweep walks
+    # **02:50**, half an hour behind the participation sweep and ten minutes behind
+    # the release cut above it. That sweep walks
     # every section in the institution without touching a provider; this one walks
     # the same sections and makes up to two model calls per closed section-week,
     # so the two contend for the same rows and the same worker pool for no reason
-    # if they share a tick. The reclassification entry above has already had its
+    # if they share a tick. The release cut is provider-free and says so in its own
+    # comment, so it is the one entry here a provider outage cannot delay, and it
+    # goes first. The reclassification entry above has already had its
     # 00:45 and 01:45 passes by then, which matters here for the reason it matters
     # to the sweep: the comments §3.3's floor stood in for have had two chances at
     # a real verdict before the week they belong to is summarized, and a summary is

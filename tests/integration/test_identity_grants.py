@@ -3994,19 +3994,38 @@ MEMBER_OF_ROLES = """
 #     here. No view over either table exists yet — E11's console is where one would
 #     be — so nothing joins a score to a person on any connection.
 #     Decided and spent in E3-02.
-#   - **E4-02 adds four tables and spends nothing.** `release_batch` and
-#     `release_batch_member` appear in no
-#     tuple below, and their absence is the record: that ticket
-#     creates the schema E4 shares and writes no row into any of it. Their writer
-#     is elsewhere — the release is E4-04 — and
-#     each ticket grants what it spends, because a grant
-#     issued for a writer that does not exist widens the runtime role for nobody.
-#     The equality below is what makes that absence enforced rather than intended,
+#   - **E4-02 adds four tables and spends nothing, and for a while that absence
+#     was the record.** `weekly_summary`, `moderation_state`, `release_batch` and
+#     `release_batch_member` appeared in no tuple below: that ticket creates the
+#     schema E4 shares and writes no row into any of it. The writers are elsewhere
+#     — the summary job is E4-06, the release is E4-04, and every moderation writer
+#     is E6 — and each ticket grants what it spends, because a grant issued for a
+#     writer that does not exist widens the runtime role for nobody.
+#     The equality below is what made that absence enforced rather than intended,
 #     and `tests/integration/test_report_schema.py` asks the same question of those
-#     two tables by name, at column grain as well as table grain, so that a
+#     four tables by name, at column grain as well as table grain, so that a
 #     widening arriving with a new entry here still has to be argued for twice.
-#     The other two of the four have since found their writer and their reader,
-#     both at E4-06, and both are entries below.
+#     All four have since found their writer or their reader, at E4-04 and E4-06,
+#     and each of them is an entry below with its own argument — so the question
+#     that file now asks of them is that the grants are exactly these and no wider.
+#   - **E4-04 spends two of the four**, and it is the first of E4's tickets to
+#     spend anything on the report schema. It shares a third, `moderation_state`,
+#     with E4-06, which is the entry below rather than a second copy here.
+#       - `release_batch` and `release_batch_member`, `SELECT, INSERT`. SPEC §4:
+#         under-threshold comments "surface as raw text once the section's
+#         cumulative comment volume for the term crosses the threshold, batched so
+#         that timing cannot identify an author", and E4's breakdown decision 7
+#         stores that crossing rather than re-deriving it. E4-04's weekly cutter is
+#         the one writer, and it appends: **no `UPDATE` and no `DELETE` on either**,
+#         because ADR 0146 states plainly that "a comment cannot be un-released,
+#         because a released comment is a row and nothing in this schema deletes
+#         one" — and a role that could move a membership into another batch would
+#         be giving that comment a second `cut_at`, which is the per-comment
+#         release time the batching exists to remove.
+#     Neither table names a person: a membership is a comment and its batch, and it
+#     reaches one only through `answer.response_id` then `response.user_id`, which
+#     is what protects the person on `answer` itself
+#     (`tests/integration/test_identity_column_marker.py` records both).
 #   - `pulse_app` **reads and inserts** `weekly_summary`, and holds no other verb
 #     on it. **E4-06 is the writer E4-02's entry above was waiting for**, and this
 #     is the widening it argued for: SPEC §5.1 puts one AI summary at the head of
@@ -4037,8 +4056,15 @@ MEMBER_OF_ROLES = """
 #     is what decides who may read it — enforced on the read path E4-07 builds,
 #     not by this grant.
 #     Decided and spent in E4-06.
+
 #   - `pulse_app` **reads** `moderation_state`, and holds no other verb on it.
-#     SPEC §5.1 requires the weekly AI summaries to "**exclude flagged-held
+#     **Two tickets spend this one grant, for two readings of the same record.**
+#     SPEC §5.2's small-N concealment is E4-04's: "below the threshold, flagged
+#     comments are hidden from the instructor entirely — no chip, no count, no
+#     flag-type hint", and above it a comment "appears flagged-collapsed carrying
+#     any reviewer decision already made", so a read path that cannot see the
+#     moderation record can neither conceal a flag nor show a chip. E4-06's is the
+#     filter: SPEC §5.1 requires the weekly AI summaries to "**exclude flagged-held
 #     content**", and
 #     [ADR 0145](../../docs/adr/0145-the-report-schema-has-its-own-module-and-moderation-starts-by-absence.md)
 #     settles that a comment's moderation state lives here as an append-only record
@@ -4068,6 +4094,7 @@ MEMBER_OF_ROLES = """
 #     said "`weekly_summary` and nothing wider" — SPEC §5.1 overrode it, on the rule
 #     this list already states: a ticket grants what it **spends**, and a filter is
 #     a read.
+
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -4116,6 +4143,10 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "weekly_summary", "SELECT"),
         (APPLICATION_ROLE, "weekly_summary", "INSERT"),
         (APPLICATION_ROLE, "moderation_state", "SELECT"),
+        (APPLICATION_ROLE, "release_batch", "SELECT"),
+        (APPLICATION_ROLE, "release_batch", "INSERT"),
+        (APPLICATION_ROLE, "release_batch_member", "SELECT"),
+        (APPLICATION_ROLE, "release_batch_member", "INSERT"),
     }
 )
 
@@ -5363,8 +5394,9 @@ APPLICATION_READERS = (APPLICATION_ROLE, "PUBLIC")
 #
 # **Per view, because the sanction is per view.** Each entry below carries the
 # sentence that admits it, and the sentences come from the ticket, SPEC and the
-# ADR rather than from the SQL: E0-10's two, ADR 0046's three, and E4-03's three
-# report views, and what each is *for* is written down in those records. No count
+# ADR rather than from the SQL: E0-10's two, ADR 0046's three, E4-03's three
+# report views and E4-04's comment view, and what each is *for* is written down in
+# those records. No count
 # is written here — the set grows with every ticket that ships a read view, and a
 # number in a comment is a record with a scheduled expiry (`docs/MISTAKES.md`
 # entry 1).
@@ -5503,6 +5535,33 @@ SANCTIONED_VIEW_COLUMNS: dict[str, tuple[str, ...]] = {
     "report_rating_distribution": ("section_id", "week_id", "stream", "rating", "responses"),
     "report_workload": ("section_id", "week_id", "workload_mean", "workload_median"),
     "report_response_counts": ("section_id", "week_id", "responses", "valid_responses"),
+    # E4-04's one view, and the first in this enumeration that returns a student's
+    # own words rather than a number about a week. The sentence that admits it is
+    # SPEC §5.1's — comments are shown "grouped under 'About the instructor' /
+    # 'About the course'" and "carry their moderation status (§5.2), subject to §4
+    # small-N rules" — so a view returning a section, a course week, a stream and
+    # the text is exactly what that sentence asks for, and the suppression is
+    # applied above it by `app.services.report_comments`.
+    #
+    # **`answer_id` is here and it is the design, not an oversight**, and it is
+    # worth stating outright because it looks like the thing this rule is against.
+    # A release is a `release_batch_member` row keyed on `answer_id` (ADR 0146), so
+    # the cutter has to be able to name the comment it released and the read has to
+    # be able to find it again; the key is what makes a de-identified comment
+    # addressable, which is the same argument `section_roster.user_id` carries
+    # above. It names an `answer` row and reaches a person only in two further hops
+    # — `answer.response_id`, then `response.user_id` — and both of those are
+    # deliberately absent here.
+    #
+    # **What is absent is the whole point.** No `user_id`, no `response_id`, and no
+    # instant of any spelling. SPEC §4: "timestamps are never shown with comments",
+    # and held comments surface "batched so that timing cannot identify an author".
+    # A `submitted_at` carried here would not only be renderable, it would be the
+    # order key — E4-04's known traps name that shape exactly: "wherever ordering
+    # happens, the timestamp must not be the order key in disguise". This is the
+    # first view in the schema whose rows are a person's writing, so the column
+    # that must never arrive is any column that would let a reader sort them.
+    "report_comment": ("section_id", "week_id", "stream", "answer_id", "comment_text"),
 }
 
 EXPECTED_APPLICATION_READABLE_COLUMNS: frozenset[tuple[str, str]] = frozenset(
