@@ -2707,6 +2707,50 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
         "A role token, the scope keys the role is held over, and two booleans about which doors "
         "it opens; the person is a foreign key.",
     ),
+    # E4-02's two, written before the tables exist as E2-05's and E3-02's were.
+    # Both reference `answer`, which `answer.response_id` and `response.user_id`
+    # put two hops from `user`, so the fixed-point walk reaches them the moment
+    # that ticket's migration runs — and neither carries a name any identity
+    # vocabulary knows, so without these entries the report would name them and
+    # the repair would be on the other side of the test wall from the ticket that
+    # caused it (`docs/MISTAKES.md` entry 22).
+    #
+    # **The standing `PERSON_TABLES` question, walked for both.**
+    # `release_batch_member` reaches a person: a member names an `answer`, which
+    # names a `response`, which carries `user_id`. `moderation_state` reaches one
+    # the same way. Neither *holds* one, and what holds the identity behind those
+    # hops is what holds it for `answer` and `response` — it sits on
+    # `user_identity`, which `pulse_app` is granted no `SELECT` on by any
+    # mechanism. The two tables E4-02 adds that this walk does **not** reach are
+    # `weekly_summary` and `release_batch`, which reference a section, a week and
+    # a term and no person at all; nothing here can record them, because an entry
+    # for a table the walk does not reach is a stale exemption and the test below
+    # says so. Their columns are pinned in
+    # `tests/integration/test_report_schema.py` instead, where the reason is
+    # written out.
+    "moderation_state": CarriesNothing(
+        ("answer_id", "decided_at", "id", "state"),
+        "One decision about one comment: which comment, which of SPEC §5.2's lifecycle states, and "
+        "when it was decided. The comment is a foreign key and the person behind it is two more "
+        "hops away through `answer.response_id` and `response.user_id`, which is the argument the "
+        "`classification` entry above makes about a verdict on the same row. The state token says "
+        "nothing about who wrote the comment or who decided — E4 writes no row at all, and the "
+        "decider is E6's to add with the log that names them. Marking anything here would put "
+        "every moderation state in the set the identity-separated views may not read, which is the "
+        "opposite of what §5.1's report needs, so an entry is the right record and a marker is "
+        "not.",
+    ),
+    "release_batch_member": CarriesNothing(
+        ("answer_id", "batch_id", "id"),
+        "One comment and the batch it was released in, and deliberately nothing else. SPEC §4 "
+        "surfaces held comments 'batched so that timing cannot identify an author', so the batch's "
+        "`cut_at` is the only release time in the design and this row carries none: a per-comment "
+        "timestamp here would be a signal about one author that the batching exists to remove. The "
+        "comment is a foreign key and the person is two hops behind it, exactly as on `answer`. "
+        "The column list is asserted from the other side as well, in "
+        "`tests/integration/test_report_schema.py`, because a column added here is a "
+        "confidentiality change rather than a schema tidy-up.",
+    ),
 }
 
 

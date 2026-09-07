@@ -36,8 +36,11 @@ import pytest
 # name — the ticket names the table and nothing names the class.
 CLASSIFICATION_TABLE = "classification"
 
-# SPEC §13 puts it here: "`models/ai.py` — classification, summary". The summary
-# table belongs to E4; only the classification half of that line is E0-13's.
+# SPEC §13 puts it here: "`models/ai.py` — classification", and that is the whole
+# of the line. It named a `summary` table beside it until E4-02, which gave the
+# stored summary a module of its own — "`models/report.py` — weekly_summary,
+# moderation_state, release_batch, release_batch_member" — and the spec followed
+# the build. Nothing in this module was ever about that table.
 AI_MODEL_MODULE = "app.models.ai"
 MODELS_PACKAGE = "app.models"
 BASE_MODULE = "app.models.base"
@@ -133,6 +136,6 @@ def test_importing_the_ai_models_needs_no_application_configuration(
 
     assert module is not None, (
         f"There is no `{AI_MODEL_MODULE}` module. SPEC §13 gives `models/ai.py` the "
-        "classification and summary tables, and E0-13's scope creates the first of them: 'A "
-        "minimal `classification` table storing the verdict with prompt version and model ID.'"
+        "`classification` table, and E0-13's scope creates it: 'A minimal `classification` table "
+        "storing the verdict with prompt version and model ID.'"
     )

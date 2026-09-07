@@ -477,6 +477,127 @@ def chain_row(session: Any, tables: dict[str, Any], name: str, chain: dict[str, 
     return seed_row(session, tables, name, chain)
 
 
+# The one column in this schema whose legal value depends on another column of the
+# same row: `question.stream`, which E4-02 adds. SPEC §3.2 gives the instrument
+# three answer shapes, and §5.1 groups what students write under "About the
+# instructor" and "About the course"; the column is what says which of those two a
+# question belongs to, under two `CHECK`s — a workload question carries no stream,
+# and every other kind carries one.
+#
+# **This helper fills nothing nullable**, so without the fill below every `question`
+# row it writes would be a non-workload question with a null stream, refused by the
+# first `CHECK` inside whichever fixture happened to seed one. That is the
+# late-schema-rule shape `docs/MISTAKES.md` entry 13 names — a new constraint on an
+# existing table failing dozens of tests inside their own seeding — and the tables
+# that reach `question` through a foreign key (`answer`, and `classification`
+# behind it) mean the rows are seeded by modules with nothing to do with E4.
+#
+# **A test whose subject is the stream passes its own value.** An override wins
+# here as it does everywhere else in this helper, including an override of `None`,
+# so nothing filled here is ever a value a test then reads back
+# (`docs/MISTAKES.md` entry 30): the module measuring the two `CHECK`s names both
+# columns on every insert it makes.
+#
+# **The value is the migration's own rule rather than a legal placeholder, and
+# that is what makes a round trip byte-stable.** `docs/disputes/E4-02-02.md` is
+# the occasion. This fill used to hand `INSTRUCTOR` to every non-workload question
+# whatever ordinal it sat at, and E2-16's round-trip module compares every column
+# of every `question` row across a downgrade and back: the column is dropped on
+# the way down and re-derived by E4-02's backfill on the way up, so a walker fill
+# that disagreed with the backfill turned those comparisons red — and turned them
+# red *by ordinal*, because `invented_value` draws `question.position` from a
+# counter that lives for the life of the worker process, so the same test passed
+# alone and failed with two siblings ahead of it. Filling by the rule the
+# migration backfills by removes the disagreement at its source, rather than
+# excusing a column from a comparison and leaving the next column unwatched.
+QUESTION_TABLE_NAME = "question"
+QUESTION_KIND_COLUMN = "kind"
+QUESTION_POSITION_COLUMN = "position"
+QUESTION_STREAM_COLUMN = "stream"
+WORKLOAD_QUESTION_KIND = "workload"
+
+# SPEC §3.2's numbering, and the one place this suite holds it: "1. Instructor
+# rating … 2. Instructor comment … 3. Course rating … 4. Course comment …
+# 5. Workload", against §5.1's two groups, "About the instructor" / "About the
+# course". `tests/fixtures/submit.py` seeds those five and imports this rather
+# than keeping a second copy — one guarantee held in two places is a guarantee
+# neither place holds.
+INSTRUCTOR_STREAM = "INSTRUCTOR"
+COURSE_STREAM = "COURSE"
+STREAM_OF_POSITION: dict[int, str | None] = {
+    1: INSTRUCTOR_STREAM,
+    2: INSTRUCTOR_STREAM,
+    3: COURSE_STREAM,
+    4: COURSE_STREAM,
+    5: None,
+}
+
+# What a non-workload question at any other ordinal gets. §3.2 fixes five and the
+# `question_set` table is versioned precisely so that a set can be a different
+# size, so E4-02's backfill ends in an `ELSE 'COURSE'` and every ordinal it does
+# not name lands there. This constant is that `ELSE`, and it is a placeholder in
+# both places for the same reason: nothing in the spec says which of the two
+# groups a sixth question belongs to.
+PLACEHOLDER_QUESTION_STREAM = COURSE_STREAM
+
+
+def enumerated_text(value: Any) -> str:
+    """The stored spelling of an enumerated value, whether it came as a member or a string.
+
+    `question.kind` is a SQLAlchemy `Enum`, so a caller may hand this helper either
+    a `QuestionKind` member or the lowercase string the database stores, and
+    `invented_value` above hands it the second. Dispatching on one spelling and
+    meeting the other is `docs/MISTAKES.md` entry 13's shape in miniature.
+    """
+    return str(getattr(value, "value", value))
+
+
+def question_stream_for(kind: Any, position: Any) -> str | None:
+    """The stream a question of this kind at this ordinal carries, by the migration's rule.
+
+    Three clauses, in the order E4-02's backfill writes them, so that a row seeded
+    here and the same row re-derived by that backfill cannot differ:
+
+      - a workload question carries no stream — SPEC §5.1 has two comment groups
+        and §3.2's fifth question belongs to neither, and E4-02's first `CHECK`
+        makes that null exact rather than optional;
+      - ordinals 1 to 4 carry what SPEC §3.2 numbers them;
+      - anything else carries the placeholder the backfill's `ELSE` gives it.
+
+    **The kind decides the null and the ordinal only chooses between the two
+    streams**, which is not a nicety: this suite seeds five questions at ordinals
+    1 to 5 without naming a kind at all (`tests/fixtures/student_read.py`), so
+    ordinal 5 is regularly a comment rather than the workload one, and reading the
+    null off the ordinal would write a row the first `CHECK` refuses.
+    """
+    if enumerated_text(kind).lower() == WORKLOAD_QUESTION_KIND:
+        return None
+    by_position = STREAM_OF_POSITION.get(position) if isinstance(position, int) else None
+    return by_position if by_position is not None else PLACEHOLDER_QUESTION_STREAM
+
+
+def fill_dependent_columns(table: Any, values: dict[str, Any]) -> None:
+    """Fill a nullable column whose legality depends on another column of the same row.
+
+    Called after the ordinary fill rather than inside it, so that `kind` and
+    `position` are already decided — by an override or by `invented_value` —
+    before the stream that has to agree with them is chosen. Column order in the
+    declared table therefore does not matter, which it would if this were a case
+    inside the loop.
+
+    Two situations leave the row exactly as it was: a caller who named the column
+    itself, and a database that does not have the column yet. The second is what
+    keeps this a no-op until E4-02's migration lands.
+    """
+    if table.name != QUESTION_TABLE_NAME or QUESTION_STREAM_COLUMN in values:
+        return
+    if QUESTION_STREAM_COLUMN not in table.c:
+        return
+    values[QUESTION_STREAM_COLUMN] = question_stream_for(
+        values.get(QUESTION_KIND_COLUMN), values.get(QUESTION_POSITION_COLUMN)
+    )
+
+
 def seed_row(
     session: Any,
     tables: dict[str, Any],
@@ -554,6 +675,8 @@ def seed_row(
         if column.nullable:
             continue
         values[column.name] = invented_value(table, column)
+
+    fill_dependent_columns(table, values)
 
     statement = table.insert().values(**values).returning(*table.columns)
     try:

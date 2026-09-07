@@ -78,7 +78,12 @@ from fixtures.doors import (
 )
 from fixtures.mock_ai import MOCK_AI_PROVIDER_BASE_URL_VARIABLE
 from fixtures.routing import every_route
-from fixtures.supervision import foreign_key_columns, require_table, single_primary_key
+from fixtures.supervision import (
+    STREAM_OF_POSITION,
+    foreign_key_columns,
+    require_table,
+    single_primary_key,
+)
 from fixtures.survey_windows import (
     COHORT_SECTION_MODALITY,
     COHORT_SECTION_ORDINAL,
@@ -273,6 +278,27 @@ SHAPE_OF_POSITION = {
     COURSE_COMMENT_POSITION: "comment",
     WORKLOAD_POSITION: "workload",
 }
+
+# Which of §5.1's two streams each of the five belongs to, and `None` for the one
+# that belongs to neither. SPEC §3.2 numbers them: Q1 and Q2 are about the
+# instructor, Q3 and Q4 about the course, and Q5 is the workload figure, which
+# §5.1 groups under nothing — the report has two comment groups, "About the
+# instructor" and "About the course", and no third.
+#
+# **The mapping itself is `STREAM_OF_POSITION`, imported from the shared seeding
+# walker rather than written again here**, which is the repair
+# `docs/disputes/E4-02-02.md` settled. The walker fills the column by that same
+# mapping now, so a question carries the stream E4-02's migration re-derives for
+# it whichever route seeded it, and a round trip that drops the column and
+# backfills it comes back byte-identical. A second copy of §3.2's numbering in
+# the same fixture package is the shape that record quotes — one guarantee held
+# in two places is a guarantee neither place holds.
+#
+# What is still this fixture's own is *naming* the column at all: these five are
+# §3.2's five, so their streams are the ones they really have rather than the
+# walker's fill, and the two now agree by construction. Applied only where the
+# column exists, so it stays a no-op until E4-02's migration lands.
+STREAM_COLUMN = "stream"
 
 # ---------------------------------------------------------------------------
 # This suite's own values. None of them is a claim about anything the system
@@ -629,6 +655,8 @@ class SubmitWorld:
             if conditional is not None:
                 values[REQUIRED_IF_POSITION_COLUMN] = conditional
                 values[REQUIRED_IF_AT_MOST_COLUMN] = REQUIRED_AT_MOST
+            if STREAM_COLUMN in table.c:
+                values[STREAM_COLUMN] = STREAM_OF_POSITION[position]
             self.questions[position] = self.rows.seed(QUESTION_TABLE, chain, **values)
 
     def close_the_window(self) -> None:

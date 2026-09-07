@@ -157,7 +157,7 @@ from app.models.lti import (
     refuse_invalid_registration_addresses,
 )
 from app.models.org import College, Course, Department, Institution, Prefix, Section
-from app.models.survey import Question, QuestionKind, QuestionSet
+from app.models.survey import REPORT_STREAMS, Question, QuestionKind, QuestionSet
 from app.models.term import StartLetterMap, Term, Week, week_rows_for_term
 from app.services.section_codes import apply_section_code
 from app.services.survey_windows import derive_windows_for_all_sections
@@ -1208,6 +1208,12 @@ QUESTION_SET_VERSION = 1
 LIKERT_BOUNDS = (Decimal("1"), Decimal("5"), Decimal("1"))
 WORKLOAD_BOUNDS = (Decimal("0"), Decimal("40"), Decimal("0.5"))
 
+# SPEC §5.1's two report groups, unpacked from the one declaration of them in
+# `app.models.survey` rather than spelled again here — a token renamed there
+# moves this file with it, where a second copy would be the one nobody updates
+# (`docs/MISTAKES.md` entry 13).
+INSTRUCTOR_STREAM, COURSE_STREAM = REPORT_STREAMS
+
 
 @dataclass(frozen=True)
 class SurveyQuestion:
@@ -1223,6 +1229,14 @@ class SurveyQuestion:
     and the threshold it applies at, and `bounds` is a minimum, a maximum and a
     step. Each is whole or absent, which is what the schema's two CHECK
     constraints hold.
+
+    `stream` is which of SPEC §5.1's two report groups the question asks about —
+    "About the instructor" or "About the course" — and `None` for the workload
+    figure, which §5.1 groups under neither. E4-02 added the column and holds it
+    to two CHECKs, so a question seeded without it is a refused insert rather
+    than a row with a gap: the values below are §3.2's own numbering read across
+    to §5.1's two headings, and they are the same values E4-02's migration
+    backfills the five rows this file already wrote.
     """
 
     position: int
@@ -1231,6 +1245,7 @@ class SurveyQuestion:
     kind: QuestionKind
     required_if: tuple[int, int] | None
     bounds: tuple[Decimal, Decimal, Decimal] | None
+    stream: str | None
 
 
 SPEC_3_2_QUESTIONS = (
@@ -1241,8 +1256,11 @@ SPEC_3_2_QUESTIONS = (
         QuestionKind.LIKERT,
         None,
         LIKERT_BOUNDS,
+        INSTRUCTOR_STREAM,
     ),
-    SurveyQuestion(2, "Instructor comment", None, QuestionKind.COMMENT, (1, 2), None),
+    SurveyQuestion(
+        2, "Instructor comment", None, QuestionKind.COMMENT, (1, 2), None, INSTRUCTOR_STREAM
+    ),
     SurveyQuestion(
         3,
         "Course rating",
@@ -1250,9 +1268,10 @@ SPEC_3_2_QUESTIONS = (
         QuestionKind.LIKERT,
         None,
         LIKERT_BOUNDS,
+        COURSE_STREAM,
     ),
-    SurveyQuestion(4, "Course comment", None, QuestionKind.COMMENT, (3, 2), None),
-    SurveyQuestion(5, "Workload", None, QuestionKind.WORKLOAD, None, WORKLOAD_BOUNDS),
+    SurveyQuestion(4, "Course comment", None, QuestionKind.COMMENT, (3, 2), None, COURSE_STREAM),
+    SurveyQuestion(5, "Workload", None, QuestionKind.WORKLOAD, None, WORKLOAD_BOUNDS, None),
 )
 
 
@@ -1286,6 +1305,7 @@ def seed_question_set(session: Session) -> QuestionSet:
             minimum_value=minimum_value,
             maximum_value=maximum_value,
             step=step,
+            stream=question.stream,
         )
 
     return question_set
