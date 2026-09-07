@@ -31,6 +31,13 @@ updates:
         update-types: [version-update:semver-major]
       - dependency-name: alembic
         update-types: [version-update:semver-major]
+      # pydantic pins its compiled core to an exact version, so pydantic-core
+      # can only move in lockstep with pydantic itself. A solo bump is
+      # unresolvable by construction: #198 proposed core 2.48.0 while the
+      # newest pydantic release (2.13.5) requires ==2.46.5, and pip failed the
+      # install on every gate. What this gives up: nothing. When pydantic
+      # moves, regenerating the lockfile brings the matching core with it.
+      - dependency-name: pydantic-core
 
   # ---- Node, at the repository root ---------------------------------------
   # `/`, not `/frontend`. This entry watched a directory that has never existed
