@@ -327,7 +327,7 @@ carries the same closure note.
   off another record. All four landings render `components/LandingView.tsx`,
   whose only styled classes are `.pulse-landing` and `.pulse-line`, and neither
   rule in `frontend/src/styles.css` carries an `animation` or a `transition`;
-  the survey's classes carry seven such declarations in the same file, and
+  the survey's classes carry nine such declarations in the same file, and
   nothing in `frontend/src` animates in JavaScript.
 - The stylesheet's opening comment is dated in words, and marked as history
   besides — the entry offered either. The paragraph is attributed to E1-04 and
