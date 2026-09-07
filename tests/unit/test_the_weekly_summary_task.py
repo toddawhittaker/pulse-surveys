@@ -76,19 +76,48 @@ NEEDLE_COMMENT = "Rb9NsWqvZm Xt4LdKj3Px E8mZt5UwGh Tf2YcRbVn8"
 NEEDLE_CHUNKS = tuple(NEEDLE_COMMENT.split())
 
 A_SUMMARY = "Most of the week's comments are about the pace of the Thursday class."
+A_THEME_LABEL = "Thursday class moved too quickly"
 
 
-def an_answer(api: SummaryApi, stream_token: str = INSTRUCTOR_STREAM) -> Any:
-    """One well-formed `WeeklySummaryOutput`, as a provider would have produced it."""
+def an_answer(
+    api: SummaryApi,
+    stream_token: str = INSTRUCTOR_STREAM,
+    theme_counts: tuple[int, ...] = (2,),
+) -> Any:
+    """One well-formed `WeeklySummaryOutput`, as a provider would have produced it.
+
+    `theme_counts` is how many comments each returned theme claims. It defaults to
+    a count comfortably inside `A_WEEK`, so every test that is not about the count
+    gets an answer nothing refuses on that ground; the two tests that are about it
+    pass the number they are asserting.
+    """
     output_model = api.contract(WEEKLY_SUMMARY_OUTPUT)
     theme_model = api.contract(COMMENT_THEME)
     return output_model(
         stream=api.stream(stream_token),
         summary=A_SUMMARY,
-        themes=(theme_model(label="Thursday class moved too quickly", comment_count=2),),
+        themes=tuple(
+            theme_model(label=A_THEME_LABEL, comment_count=count) for count in theme_counts
+        ),
         prompt_version=api.constant(SUMMARY_PROMPT_VERSION),
         model_id="e4-05-task-test-model",
     )
+
+
+def chain_text(failure: BaseException) -> str:
+    """Everything a raised failure and its causes said, as one string.
+
+    The whole chain rather than the outermost message, because a polite message
+    raised `from` one that quotes a week's comments leaks exactly as much. Read in
+    one place so the two refusal tests below cannot drift into checking different
+    amounts of the same chain (`docs/MISTAKES.md` entry 13).
+    """
+    chain: list[BaseException] = []
+    current: BaseException | None = failure
+    while current is not None and not any(link is current for link in chain):
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    return "\n".join(str(link) for link in chain)
 
 
 def test_a_week_with_no_comments_answers_the_empty_shape_without_reaching_a_model(
@@ -327,6 +356,108 @@ def test_an_answer_about_the_other_stream_is_refused(summary_api: SummaryApi) ->
         )
 
 
+def test_a_theme_claiming_more_comments_than_the_week_held_is_refused(
+    summary_api: SummaryApi,
+) -> None:
+    """An arithmetic no reading of the week supports, refused at the boundary that knows.
+
+    A theme's `comment_count` is a number the product shows and acts on: E4-10
+    renders it beside the theme, and §5.3's draft check names the themes a
+    response has not addressed "with its comment count". A model that answers
+    "seven comments raised this" over a week of three has stated something the
+    caller can check and nothing else can — the eval checks bound it offline and
+    the mock bounds its own answers, but neither is on the path a real provider's
+    answer takes.
+
+    **Why it matters more than a wrong number usually would.** §4 hides raw
+    comments below the n-threshold, so in exactly the weeks where the instructor
+    cannot see the comments, the theme counts are the only quantity they are given
+    — and an inflated one turns two students into seven. The task is the last
+    place that still knows how many comments it sent.
+
+    **The refusal is the gateway's own class, and its message quotes nothing.**
+    Same discipline as the cross-stream refusal: `AIResponseInvalidError`, so a
+    caller branching on ADR 0056's four sees an answer the contract refuses rather
+    than a provider fault; and no comment text in the chain, because a
+    Monday-report job writes whatever it catches to a log (SPEC §10, E3's decision
+    10). The needle is asserted to have reached the gateway first — a message
+    cannot leak text that was never sent.
+
+    **The mutation this kills:** the overclaim check deleted — a theme claiming
+    more comments than the week held is filed as-is. **Its pair is the test
+    below**, at exactly the week's length, which is what separates this from an
+    off-by-one and from a task that refuses every theme.
+    """
+    invalid = summary_api.error(RESPONSE_INVALID_ERROR)
+    comments = (NEEDLE_COMMENT, *A_WEEK)
+    gateway = ScriptedGateway(
+        an_answer(summary_api, theme_counts=(len(comments) + 1,)),
+    )
+
+    with pytest.raises(invalid) as raised:
+        call_summarize(
+            summary_api.task(),
+            comments,
+            stream=summary_api.stream(INSTRUCTOR_STREAM),
+            response_count=RESPONSES_THAT_WEEK,
+            gateway=gateway,
+        )
+
+    sent = str(gateway.calls[0].get("prompt", "")) if gateway.calls else ""
+    assert NEEDLE_COMMENT in sent, (
+        "the needle comment never reached the gateway, so the leak assertion below would pass "
+        "against a task that sent nothing."
+    )
+
+    leaked = sorted(chunk for chunk in NEEDLE_CHUNKS if chunk in chain_text(raised.value))
+    assert not leaked, (
+        f"the refusal's message chain carries {leaked} out of a student's comment. A theme "
+        "count is a number; saying which theme was wrong does not need the week's text."
+    )
+
+
+def test_a_theme_claiming_exactly_the_weeks_comments_is_kept(summary_api: SummaryApi) -> None:
+    """The near miss: every comment in one theme is a real week, not an overclaim.
+
+    A week where one thing happened is the ordinary case for a small section —
+    three comments, all about the same lab — and a bound written as "fewer than
+    the comments" would refuse it. The refusal above and this acceptance are one
+    rule with one boundary, and the boundary is at the week's own length.
+
+    **The theme reaches the record unchanged**, label and count both, because a
+    check that silently clamped the number to something it liked would satisfy an
+    assertion that merely says "no error" while still putting a figure in front of
+    an instructor that the model did not give and the week does not support.
+
+    **The mutation this kills:** `>=` written where `>` belongs, and a blanket
+    refusal of any answer carrying themes. **Alone it proves nothing** — a task
+    with no check at all passes it — which is why it is written as the pair to the
+    test above and named for the boundary rather than for the outcome.
+    """
+    gateway = ScriptedGateway(an_answer(summary_api, theme_counts=(len(A_WEEK),)))
+
+    record = call_summarize(
+        summary_api.task(),
+        A_WEEK,
+        stream=summary_api.stream(INSTRUCTOR_STREAM),
+        response_count=RESPONSES_THAT_WEEK,
+        gateway=gateway,
+    )
+
+    themes = tuple(record.summary.themes)
+    assert (
+        len(themes) == 1
+    ), f"the answer carried one theme and the record carries {len(themes)}: {themes!r}."
+    assert themes[0].comment_count == len(A_WEEK), (
+        f"the model said {len(A_WEEK)} comments carried the theme and the record says "
+        f"{themes[0].comment_count}. A count the task adjusted is a figure nobody produced."
+    )
+    assert themes[0].label == A_THEME_LABEL, (
+        f"the theme's label reached the record as {themes[0].label!r}. The task validates an "
+        "answer; it does not rewrite one."
+    )
+
+
 def test_a_provider_failure_is_raised_rather_than_summarized_away(
     summary_api: SummaryApi,
 ) -> None:
@@ -410,12 +541,7 @@ def test_a_refusal_does_not_quote_the_students_comments_back(summary_api: Summar
         "not carry it would pass against a task that sent nothing."
     )
 
-    chain: list[BaseException] = []
-    current: BaseException | None = raised.value
-    while current is not None and not any(link is current for link in chain):
-        chain.append(current)
-        current = current.__cause__ or current.__context__
-    said = "\n".join(str(link) for link in chain)
+    said = chain_text(raised.value)
 
     leaked = sorted(chunk for chunk in NEEDLE_CHUNKS if chunk in said)
     assert not leaked, (
