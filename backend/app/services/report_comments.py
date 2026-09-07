@@ -346,8 +346,10 @@ def cut_due_release_batches(session: Session) -> int:
     held = _held_comments_by_section_and_term(session, threshold=threshold, now=now)
 
     cut = 0
-    # Sorted so a run over several sections is reproducible and a failure names
-    # the same section twice.
+    # Sorted, so two runs over the same data visit the sections in the same order
+    # and a failure part-way through a walk is reproducible. Nothing about the
+    # order reaches a caller — this is which section is released first, not which
+    # comment is shown first, which is `_shuffled`'s.
     for key in sorted(held):
         if volumes.get(key, 0) < threshold:
             continue
