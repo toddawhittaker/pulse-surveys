@@ -75,6 +75,14 @@ RESPONSES_THAT_WEEK = 9
 NEEDLE_COMMENT = "Rb9NsWqvZm Xt4LdKj3Px E8mZt5UwGh Tf2YcRbVn8"
 NEEDLE_CHUNKS = tuple(NEEDLE_COMMENT.split())
 
+# The same device for a theme *label*, in tokens of its own so that a leak says
+# which of the two got out. A label is not something the caller sent: it is prose
+# the model wrote, and a model summarizing a week writes labels out of the words
+# the week used — "students called the handout [a quoted phrase]" is an ordinary
+# label and an ordinary way for a student's sentence to reach a job log.
+NEEDLE_LABEL = "Wq7ZmNbXt2 Ld9KjPx4Rb Uh5GwEt8Mz Yc3VnFbTr6"
+NEEDLE_LABEL_CHUNKS = tuple(NEEDLE_LABEL.split())
+
 A_SUMMARY = "Most of the week's comments are about the pace of the Thursday class."
 A_THEME_LABEL = "Thursday class moved too quickly"
 
@@ -83,22 +91,23 @@ def an_answer(
     api: SummaryApi,
     stream_token: str = INSTRUCTOR_STREAM,
     theme_counts: tuple[int, ...] = (2,),
+    label: str = A_THEME_LABEL,
 ) -> Any:
     """One well-formed `WeeklySummaryOutput`, as a provider would have produced it.
 
     `theme_counts` is how many comments each returned theme claims. It defaults to
     a count comfortably inside `A_WEEK`, so every test that is not about the count
     gets an answer nothing refuses on that ground; the two tests that are about it
-    pass the number they are asserting.
+    pass the number they are asserting. `label` is what the model called the theme,
+    which matters to exactly one test: labels are model prose and can carry a
+    student's words.
     """
     output_model = api.contract(WEEKLY_SUMMARY_OUTPUT)
     theme_model = api.contract(COMMENT_THEME)
     return output_model(
         stream=api.stream(stream_token),
         summary=A_SUMMARY,
-        themes=tuple(
-            theme_model(label=A_THEME_LABEL, comment_count=count) for count in theme_counts
-        ),
+        themes=tuple(theme_model(label=label, comment_count=count) for count in theme_counts),
         prompt_version=api.constant(SUMMARY_PROMPT_VERSION),
         model_id="e4-05-task-test-model",
     )
@@ -413,6 +422,69 @@ def test_a_theme_claiming_more_comments_than_the_week_held_is_refused(
     assert not leaked, (
         f"the refusal's message chain carries {leaked} out of a student's comment. A theme "
         "count is a number; saying which theme was wrong does not need the week's text."
+    )
+
+
+def test_the_overclaim_refusal_does_not_quote_the_offending_themes_label(
+    summary_api: SummaryApi,
+) -> None:
+    """The refusal names a number, never the model's prose about the week.
+
+    The obvious message for this refusal names the theme it refused — "the theme
+    'X' claims 7 of 3 comments" — and that label is the one part of the answer
+    written out of the week's own words. §5.1's themes summarize what students
+    said, so a model that met a blunt comment writes a blunt label, and a
+    Monday-report job that logs what it caught has then written a student's phrase
+    into an operator's log. SPEC §10 forbids exactly that, and E3's decision 10 and
+    E4-06 both rest on it.
+
+    **This is not covered by the other no-leak test, and a re-mutation proved
+    it.** That one plants its needle in a *comment* and drives the *stream*
+    refusal, so interpolating the offending theme's label into the overclaim
+    message left every test in this module green. Two refusal paths, two message
+    builders, and only one of them was watched — `docs/MISTAKES.md` entry 13's
+    shape, one hazard met at two call sites and worked around at one.
+
+    **The canary is what makes the silence mean discipline rather than
+    blindness.** The needle is asserted to be in the answer the task was handed,
+    and the task is asserted to have taken that answer, so "the chain does not
+    carry it" is a statement about the message rather than about a fixture that
+    never planted anything.
+
+    **The mutation this kills:** the offending theme's label interpolated into the
+    overclaim refusal message. **The near miss that must stay green:** a message
+    naming the counts, the stream, or the number of themes — none of which is
+    anybody's prose, and all of which a reader of the log actually needs.
+    """
+    invalid = summary_api.error(RESPONSE_INVALID_ERROR)
+    answer = an_answer(summary_api, theme_counts=(len(A_WEEK) + 1,), label=NEEDLE_LABEL)
+    gateway = ScriptedGateway(answer)
+
+    assert NEEDLE_LABEL in answer.themes[0].label, (
+        "the fixture did not plant the needle in the theme's label, so the assertion below "
+        "would report discipline about a message that had nothing to leak."
+    )
+
+    with pytest.raises(invalid) as raised:
+        call_summarize(
+            summary_api.task(),
+            A_WEEK,
+            stream=summary_api.stream(INSTRUCTOR_STREAM),
+            response_count=RESPONSES_THAT_WEEK,
+            gateway=gateway,
+        )
+
+    assert len(gateway.calls) == 1, (
+        f"the task made {len(gateway.calls)} gateway calls, so it may never have read the "
+        "answer this test planted the needle in."
+    )
+
+    said = chain_text(raised.value)
+    leaked = sorted(chunk for chunk in NEEDLE_LABEL_CHUNKS if chunk in said)
+    assert not leaked, (
+        f"the overclaim refusal's message chain carries {leaked} out of the offending theme's "
+        f"label. A label is prose the model wrote about the week's comments; the refusal is "
+        f"about two numbers and needs neither. The whole chain said: {said[:400]!r}"
     )
 
 
