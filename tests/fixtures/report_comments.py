@@ -27,13 +27,42 @@ answers any of them:
     no comments proves nothing. Fixtures plant real comments that would leak."
     Every below-threshold week in these suites carries text, and the text is
     distinctive enough that a leak of it is unmistakable in a failure message.
+    `comment_text_under_another_kind` is the deliberate exception to "everything
+    here goes in the way the product would write it": it plants the row E2-05's
+    `CHECK` permits and `app.services.submissions` never writes — comment text
+    under a question that asks for a number — because that row is the only thing
+    the comment view's kind predicate stands between, and a guard nothing has
+    been thrown at is a comment.
 
-  - **The names E4-04's work order settles.** They are spelled here rather than
-    discovered, because the work order settles every one of them. Discovery
-    would be inventing an interface the ticket has already fixed. The one name
-    the work order does *not* settle — the instant column on `moderation_state`
-    — is discovered, and `decided_at_column` fails naming the ambiguity rather
-    than picking.
+  - **The names E4-04's work order settles**, as the security round left them.
+    They are spelled here rather than discovered, because the work order settles
+    every one of them. Discovery would be inventing an interface the ticket has
+    already fixed. The one name the work order does *not* settle — the instant
+    column on `moderation_state` — is discovered, and `decided_at_column` fails
+    naming the ambiguity rather than picking.
+
+**What the security round changed here, so the next reader is not comparing this
+file against a superseded work order.** Two things, and both are in the constants
+above rather than in a comment somewhere:
+
+  - **The release gate is three conditions and not one.** A volume counted in
+    comment *answers* is denominated in the wrong unit — §3.2 gives every response
+    two comment items, so five comments can come from three students, or from one
+    student across three quiet weeks, and a release gated on that number alone
+    goes out over an author set far below what the threshold was chosen to
+    protect. And a volume condition that stays true once crossed cuts a batch
+    every Monday afterwards, each holding exactly the one week that just closed —
+    which re-attaches the week attribution ADR 0153 removed, through the report's
+    own delta. So `cut_due_release_batches` cuts only when the volume reaches the
+    threshold **and** the distinct respondents behind the unreleased held comments
+    reach it **and** those comments span at least two under-threshold closed
+    weeks. When any of the three fails, nothing is cut: held is the safe
+    direction, because a release cannot be un-shown.
+  - **`rng` left the public signatures.** It is `_make_rng`, a private module
+    hook, and these suites monkeypatch it. A seed a caller could supply is a seed
+    an attacker could fix, and a fixed seed turns two reads into a diff that
+    re-derives the order the database returns rows in — heap order, which is
+    insertion order, which is submission order.
 
 **Nothing here decides what the service should answer.** This file seeds rows
 and reads rows; every expectation is written out in the test module that makes
@@ -87,6 +116,7 @@ from fixtures.submit import (
     ANSWER_TABLE,
     COMMENT_TEXT_COLUMN,
     QUESTION_SET_TABLE,
+    QUESTION_TABLE,
     RATING_COLUMN,
     RESPONSE_TABLE,
     USER_TABLE,
@@ -121,6 +151,17 @@ COMMENT_CLASS = "ReportComment"
 VISIBLE_FUNCTION = "visible_comments"
 RELEASED_FUNCTION = "released_comments"
 CUT_FUNCTION = "cut_due_release_batches"
+
+# The private hook the display order's random source is made by. **Private, and
+# that is the security round's ruling rather than a style preference**: an `rng`
+# on the public signature is a caller-supplied seed, and a caller who can fix the
+# seed can run the same read twice, diff the orders, and re-derive the order the
+# database returns rows in — which, with no `ORDER BY` under it, is heap order and
+# so is insertion order and so is submission order. The same seed across two reads
+# a week apart also pins a newly released comment by its position. So the seam
+# these tests need is a module hook they replace, not a parameter the product
+# offers.
+RNG_HOOK = "_make_rng"
 
 # `ReportComment`'s whole field list, in order, and nothing else. **An equality
 # rather than a floor**, and it is the same rule `test_report_schema.py` applies
@@ -210,24 +251,38 @@ SERVICE_IS_OWED = (
 )
 
 VISIBLE_IS_OWED = (
-    f"`{VISIBLE_FUNCTION}(session, *, section_id, week_id, stream, rng=None) -> "
+    f"`{VISIBLE_FUNCTION}(session, *, section_id, week_id, stream) -> "
     f"tuple[{COMMENT_CLASS}, ...]` — the asked week's comments when that week's response count "
     "reaches the configured threshold, and the empty tuple below it. SPEC §4: below the "
-    "n-threshold instructors see distributions and the AI summary but no raw comments."
+    "n-threshold instructors see distributions and the AI summary but no raw comments. **No "
+    f"`rng` parameter**: the shuffle's source is the private `{RNG_HOOK}` hook on this module, "
+    "which the security round moved out of the public signature."
 )
 
 RELEASED_IS_OWED = (
-    f"`{RELEASED_FUNCTION}(session, *, section_id, term_id, stream, rng=None) -> "
+    f"`{RELEASED_FUNCTION}(session, *, section_id, term_id, stream) -> "
     f"tuple[{COMMENT_CLASS}, ...]` — every released batch member's comment for one section, "
     "term and stream, with no week attribution anywhere in the return. SPEC §4: held comments "
     "surface once the section's cumulative comment volume for the term crosses the threshold, "
-    "batched so that timing cannot identify an author."
+    f"batched so that timing cannot identify an author. **No `rng` parameter**; see `{RNG_HOOK}`."
 )
 
 CUT_IS_OWED = (
     f"`{CUT_FUNCTION}(session) -> int` — the number of batches cut. It evaluates the crossing "
     "and writes the batch (E4's breakdown decision 7: the crossing is stored rather than "
-    "re-derived at read time), one transaction per section and term."
+    "re-derived at read time), one transaction per section and term. The security round's "
+    "ruling makes the gate three conditions, all of which must hold before anything is cut: the "
+    "cumulative comment-answer volume for the term reaches the threshold; the number of "
+    "**distinct respondents** contributing unreleased held comments reaches it; and the "
+    "unreleased held set spans at least two distinct under-threshold closed weeks."
+)
+
+RNG_HOOK_IS_OWED = (
+    f"`{RNG_HOOK}()` at module level in `{COMMENT_SERVICE_MODULE}` — the one place the display "
+    "order's random source is made, and the seam these tests replace to make 'the order is "
+    "random' a deterministic assertion. It is private because it is not a caller's to supply: a "
+    "caller that could fix the seed could re-derive the stored order a shuffle exists to hide, "
+    "and could pin a new release by position across two reads."
 )
 
 COMMENT_CLASS_IS_OWED = (
@@ -501,6 +556,59 @@ class ReleaseRows:
         """The set of answer keys that are in some batch."""
         return {row[ANSWER_ID_COLUMN] for row in self.members()}
 
+    def members_by_batch(self) -> dict[Any, list[dict[str, Any]]]:
+        """Every membership, grouped by its batch, carrying its author and its week.
+
+        Walks `release_batch_member` -> `answer` -> `response`, which is the only
+        path there is: ADR 0146 puts nothing on the membership row but the batch
+        and the comment, so who wrote a released comment and which week it came
+        from are two hops away and are exactly what the *product* must never
+        report. **A test may make that walk and the product may not**, which is
+        the whole point of the security round's forbidden states: no batch may map
+        to a single week, and no batch's contributing-author set may be smaller
+        than the threshold.
+        """
+        members = require_report_table(self.tables, RELEASE_BATCH_MEMBER_TABLE)
+        answers = require_table(self.tables, ANSWER_TABLE)
+        responses = require_table(self.tables, RESPONSE_TABLE)
+        answer_key = single_primary_key(answers)
+        response_key = single_primary_key(responses)
+        answer_response = single_column_link(answers, RESPONSE_TABLE)
+        if answer_response is None:
+            pytest.fail(
+                f"No single-column foreign key on `{ANSWER_TABLE}` names a `{RESPONSE_TABLE}` row, "
+                "so a released comment cannot be walked back to who wrote it or which week it came "
+                "from, and the forbidden states the security round settled cannot be asserted."
+            )
+        statement = select(
+            members.c[BATCH_ID_COLUMN].label("batch_id"),
+            members.c[ANSWER_ID_COLUMN].label("answer_id"),
+            responses.c[RESPONSE_USER_COLUMN].label("author"),
+            responses.c[RESPONSE_WEEK_COLUMN].label("week"),
+        ).select_from(
+            members.join(answers, members.c[ANSWER_ID_COLUMN] == answers.c[answer_key]).join(
+                responses, answers.c[answer_response] == responses.c[response_key]
+            )
+        )
+        self.session.flush()
+        grouped: dict[Any, list[dict[str, Any]]] = {}
+        for row in self.session.execute(statement).mappings():
+            grouped.setdefault(row["batch_id"], []).append(dict(row))
+        return grouped
+
+    def authors_by_batch(self) -> dict[Any, set[Any]]:
+        """The distinct people whose comments each batch carries."""
+        return {
+            batch: {row["author"] for row in rows}
+            for batch, rows in self.members_by_batch().items()
+        }
+
+    def weeks_by_batch(self) -> dict[Any, set[Any]]:
+        """The distinct course weeks each batch's comments were submitted in."""
+        return {
+            batch: {row["week"] for row in rows} for batch, rows in self.members_by_batch().items()
+        }
+
     def identities(self) -> set[tuple[Any, Any, Any]]:
         """Every membership as `(its own key, its batch, its comment)`.
 
@@ -604,6 +712,17 @@ class CommentWorld(ReportWorld):
 
     # -- what a student submitted ---------------------------------------------
 
+    def respondent(self, *, cohort: str = DEFAULT_COHORT) -> Any:
+        """One enrolled student, addressable so a test can have them answer twice.
+
+        `submit` makes one of these per response unless it is handed one. A test
+        that needs the same person in two weeks — which is how HIGH-1's world is
+        built, a volume of comments whose author set is far smaller — asks for the
+        student here and passes them in.
+        """
+        self.subjects += 1
+        return self.student(f"e4-04-subject-{self.subjects}", cohorts=(cohort,))
+
     def submit(
         self,
         *,
@@ -612,6 +731,7 @@ class CommentWorld(ReportWorld):
         ratings: Mapping[int, Any] | None = None,
         cohort: str = DEFAULT_COHORT,
         version: int = FIRST_VERSION,
+        student: Mapping[str, Any] | None = None,
     ) -> tuple[Any, dict[str, Any]]:
         """One student's whole response for one week, answering the comments given.
 
@@ -621,10 +741,22 @@ class CommentWorld(ReportWorld):
         is the faithful record of a question nobody answered (E2-05 refuses an
         answer holding no value, and ADR 0115 deletes a withdrawn one).
 
-        Every response gets a student of its own, because SPEC §4's threshold
-        counts *responses* in a week and E2-05 holds one response per student per
-        section-week: two responses from one student is a row the schema refuses,
-        and this world's whole job is planting a chosen count.
+        A response with no `student` given gets one of its own, because SPEC §4's
+        threshold counts *responses* in a week and E2-05 holds one response per
+        student per section-week: two responses from one student in one week is a
+        row the schema refuses, and this world's ordinary job is planting a chosen
+        count of respondents.
+
+        **`student` is how a test plants the same person twice**, which the
+        security round made load-bearing. HIGH-1's finding is that a volume
+        counted in comment *answers* is denominated in the wrong unit: SPEC §3.2
+        gives each response two comment items, so one student can contribute two
+        comments in a week and a comment in each of three quiet weeks, and a
+        release gated on the answer count alone can go out to a section whose
+        contributing author set is one person. A test that could not re-use a
+        respondent could not plant that world at all. Passing a student who has
+        already answered *this* week is refused by E2-05's own uniqueness, which
+        is correct and is why every re-use here is across weeks.
 
         Answers back the `response` row and a mapping of stream to the `answer`
         row written for it, so a test can name the comment it planted when it
@@ -635,8 +767,8 @@ class CommentWorld(ReportWorld):
         window = self.window(term_week, cohort)
         opens_at, _closes_at = self.instants[term_week]
 
-        self.subjects += 1
-        student = self.student(f"e4-04-subject-{self.subjects}", cohorts=(cohort,))
+        if student is None:
+            student = self.respondent(cohort=cohort)
 
         values: dict[str, Any] = {
             RESPONSE_USER_COLUMN: student[self.key_of(USER_TABLE)],
@@ -685,6 +817,110 @@ class CommentWorld(ReportWorld):
             self.submit(term_week=term_week, comments={stream: body}, cohort=cohort)[1][stream]
             for body in texts
         ]
+
+    def comment_text_under_another_kind(
+        self,
+        response: Mapping[str, Any],
+        *,
+        term_week: int,
+        position: int,
+        body: str,
+        version: int = FIRST_VERSION,
+    ) -> Any:
+        """One `answer` row carrying comment text under a question that does not ask for one.
+
+        **This bypasses the write path on purpose, and that is the whole reason
+        it exists.** E2-05's `answer` carries a `CHECK` over
+        `num_nonnulls(rating, comment_text, workload_hours) = 1` — exactly one
+        value per row — and nothing in it says *which* value belongs under which
+        kind of question. So a row holding `comment_text` under a rating question
+        is a row the database accepts. What keeps it out of a real deployment is
+        `app.services.submissions`, which writes the column the question's kind
+        calls for; that is an application promise, and ADR 0110 puts value
+        validation on the write path deliberately.
+
+        Everything downstream of the view treats a row it returns as a student's
+        comment: it is read by `visible_comments`, it counts toward the cumulative
+        volume SPEC §4 releases on, and it can be written into a release batch and
+        surfaced with its week stripped. So the view's own kind predicate is the
+        guard, and a guard is only a guard once something has been thrown at it —
+        which the write path cannot do, because it is what the guard is standing
+        in for.
+
+        **It is classified like a real comment**, and that is what makes the test
+        using it name the right layer. A row with no `classification` beside it
+        would be excluded by any read path that joins one, and the test would then
+        be green for a reason that has nothing to do with the kind predicate —
+        which is `docs/MISTAKES.md`'s "a guard whose outcome a second defence layer
+        also produces". Planted this way, the only thing that distinguishes this
+        row from the comment beside it is the kind of question it answers.
+
+        Refuses to plant under a comment question, because the row would then not
+        be forbidden at all and the test using it would assert nothing. And it
+        refuses a response that has **already answered that question**, which is
+        the mistake this helper was first used with: E2-05 holds
+        `UNIQUE (response_id, question_id)`, so a submission that gave the rating
+        question a number has no room for a second row under it and the insert is
+        refused before any view predicate is reached. That refusal is a
+        `UniqueViolation` raised out of the seeding walker — a red about this
+        fixture wearing the clothes of a red about the view — so it is caught here
+        and said in words instead.
+        """
+        shape = self.shape_of[version][position]
+        if shape == "comment":
+            pytest.fail(
+                f"Position {position} is a comment question, so an `answer` carrying "
+                f"`{COMMENT_TEXT_COLUMN}` under it is an ordinary comment rather than the row the "
+                "view's kind predicate exists to refuse. Plant this under a rating or workload "
+                "question — SPEC §3.2 puts ratings at positions 1 and 3 and the workload figure at "
+                "5."
+            )
+        if term_week not in self.instants:
+            pytest.fail(
+                f"Term week {term_week} has no window instants, so this row cannot be given a "
+                "classification instant inside its own week. Plant the week with `close_week` or "
+                "`open_week` first."
+            )
+
+        answers = require_table(self.tables, ANSWER_TABLE)
+        response_column = self.link(ANSWER_TABLE, RESPONSE_TABLE)
+        question_column = self.link(ANSWER_TABLE, QUESTION_TABLE)
+        question_id = self.questions[version][position][self.key_of(QUESTION_TABLE)]
+        self.session.flush()
+        already = list(
+            self.session.execute(
+                select(answers).where(
+                    answers.c[response_column] == response[self.key_of(RESPONSE_TABLE)],
+                    answers.c[question_column] == question_id,
+                )
+            )
+        )
+        if already:
+            pytest.fail(
+                f"This response has already answered the question at position {position}, so a "
+                "second row under it is refused by E2-05's `UNIQUE (response_id, question_id)` "
+                "before the view is reached at all — a `UniqueViolation` out of the seeding "
+                "walker, which reads like a red about the view and is a red about the plant.\n\n"
+                "Plant the forbidden row on a response that **left that question unanswered**: "
+                "`submit` writes an `answer` only for the positions it is given, so a submission "
+                "whose `ratings` omit this position has room for it. Give that response a real "
+                "answer at some other position so it is not an empty submission, and remember it "
+                "counts toward the week's response count — the count-read-back guard in each test "
+                "is what keeps the threshold arithmetic honest afterwards."
+            )
+
+        planted = self.seed(
+            ANSWER_TABLE,
+            {},
+            **{
+                response_column: response[self.key_of(RESPONSE_TABLE)],
+                question_column: question_id,
+                COMMENT_TEXT_COLUMN: body,
+            },
+        )
+        opens_at, _closes_at = self.instants[term_week]
+        self.classify(planted, SUBSTANTIVE, classified_at=opens_at + CLASSIFIED_AFTER_OPEN)
+        return planted
 
     # -- moderation -----------------------------------------------------------
 
@@ -892,6 +1128,8 @@ def comment_contract() -> Any:
         released_name = RELEASED_FUNCTION
         cut_name = CUT_FUNCTION
         task_name = CUT_TASK
+        rng_hook = RNG_HOOK
+        rng_hook_is_owed = RNG_HOOK_IS_OWED
 
         beat_schedule_name = BEAT_SCHEDULE_NAME
         beat_entry_name = BEAT_ENTRY_NAME

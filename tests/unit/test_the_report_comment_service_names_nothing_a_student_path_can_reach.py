@@ -83,9 +83,19 @@ STUDENT_FACING_MODULES = (
 # What the two reads and the cutter take, from E4-04's work order. Spelled here
 # because the work order settles all three signatures; a test that discovered
 # them would be asserting that the code does what it does.
+#
+# **`rng` is gone from both reads, and its absence is part of the assertion now.**
+# It was a public parameter in the first draft and the security round removed it:
+# a seed a caller can supply is a seed an attacker can fix, and a fixed seed makes
+# two reads of one week produce the same permutation — so diffing them re-derives
+# the order the rows arrived in, which with no `ORDER BY` under it is heap order,
+# which is insertion order, which is who answered first. The source is `_make_rng`,
+# private to the module, and
+# `tests/integration/test_the_comment_order_is_randomized_rather_than_stored.py`
+# is where it is driven and where the refusal of an `rng=` argument is asserted.
 SETTLED_SIGNATURES = {
-    "visible": ("session", "section_id", "week_id", "stream", "rng"),
-    "released": ("session", "section_id", "term_id", "stream", "rng"),
+    "visible": ("session", "section_id", "week_id", "stream"),
+    "released": ("session", "section_id", "term_id", "stream"),
     "cut": ("session",),
 }
 
@@ -271,7 +281,16 @@ def test_the_comment_path_takes_no_parameter_that_could_name_a_person(
     **The mutation it kills:** `user_id: UUID | None = None` added to either read
     "so the student surface can share this code", which arrives as one optional
     keyword and is invisible to every behavioural test in this epic — the
-    instructor's cases all leave it `None`.
+    instructor's cases all leave it `None`. And, since the security round, `rng`
+    put back on either read: the equality names it, because a caller-supplied seed
+    is a caller-controlled permutation and two reads under one seed re-derive the
+    order the rows arrived in.
+
+    **What this equality cannot see** is a `**kwargs` on either signature, which
+    declares no parameter and accepts every one.
+    `tests/integration/test_the_comment_order_is_randomized_rather_than_stored.py`
+    calls both reads with `rng=` and requires `TypeError`, which is the half that
+    catches it; neither test implies the other.
 
     **A parameter *removed* is caught by the same equality, and that is
     deliberate**: E4-07's payload layer is written against this interface, and
