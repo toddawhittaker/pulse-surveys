@@ -207,8 +207,9 @@ rather than a number to share; MISTAKES next entry is 50.
 ## The payload sketch the frontend builds against
 
 Frozen enough to build fixtures from; E4-07's Pydantic schema is the
-authority once it merges (decision 5). One report, one section, one course
-week:
+authority once it merges (decision 5). **It has merged: read
+`backend/app/schemas/report.py` where this sketch and the schema disagree.**
+One report, one section, one course week:
 
 ```json
 {
@@ -233,6 +234,14 @@ week:
 Two rules the sketch carries on purpose: comments have no timestamp field and
 no author field at any depth, and the `comparison` member exists from day one
 so item 7's chokepoint has a place to stand before E5 fills it.
+
+Three deliberate divergences, in `backend/app/schemas/report.py` and listed in
+E4-07's pull request: `rates` gains `valid_responses`, because E4-09's
+components render the count beside the ratio; a top-level
+`released_from_earlier_weeks` list carries the release ADR 0152 places in this
+payload; and `section.course_label` is the governed label the student's own
+page carries ("MATH 140 E1FF — College Algebra, Fall 2026", FIX-01 item 2)
+rather than the bare `"ITEC 400"` sketched above.
 
 ## Exit criterion → the tickets that prove it
 
