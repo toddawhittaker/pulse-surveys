@@ -375,9 +375,13 @@ and requires the untouched one to carry no coaching.
 nothing that says how many weeks the section runs for; deriving it in the
 frontend would be a second copy of the start-letter map in TypeScript. Source:
 `../e2/deferred.md`.
-**Owner:** a candidate heavy-lane ticket — one field on a schema and one read in
-the survey read service.
-**Done when:** the deferred entry's.
+**Owner:** [E4-17](../e4/E4-17-eyebrow-course-length.md), heavy lane, taken
+after the owner's ruling of 2026-09-07 settled where the course length sits in
+the eyebrow string. It was a candidate rather than an owned item until then —
+one field on a schema and one read in the survey read service, which is what
+made it heavy.
+**Done when:** the deferred entry's, both halves, read together with that
+entry's note of 2026-09-07.
 
 ## The self-hosted faces: an unrecognized licence, a missing notice, and a second copy nobody fetches
 

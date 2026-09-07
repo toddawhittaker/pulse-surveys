@@ -386,6 +386,20 @@ closing it now needs an owner call on where the total sits in the ruled string
 (for example `COURSE WK 03 / 12, TERM WK 03`) before the done-when's rendering
 half can be built. The wire half of the done-when stands as written.
 
+**Note, 2026-09-07 (E4-17):** the ruling this entry was waiting on arrived, and
+the entry is scheduled as
+[E4-17](../e4/E4-17-eyebrow-course-length.md). The payload gains the section's
+week count, the total sits on the course-week half — `COURSE WK 04 / 12, TERM
+WK 07`, the shape this note's own example floated — and the quiet term-week
+label stays, because SPEC §2.2 and `design/Usage Rules.md` §1 both put both
+axes on a course-level surface and the ruling adds a total rather than removing
+an axis. Frontend derivation stays rejected for this entry's own reason. Both
+halves of the done-when govern the ticket, and this entry closes here when it
+merges. One correction the ticket carries: this entry's body describes the
+shipped eyebrow as "WK 07 · TERM 11", which is the form FIX-01 replaced;
+`frontend/src/components/WeekEyebrow.tsx` is the starting point, not this
+paragraph.
+
 ## The self-hosted faces: an unrecognized licence and a second copy nobody fetches — E2-10
 
 Deferred by E2-10, whose
