@@ -23,9 +23,10 @@ transactions so one failure does not poison the walk, a beat entry as the
 ordinary trigger rather than the definition of the work, and a re-run that
 converges (missing rows filled, existing rows untouched).
 
-If E4-04's ADR rules that the release batches are cut by this job (its
-recommendation), that half lands here too, on E4-04's logic — this job then
-does two writes per walk: summaries, then any due release batch.
+This job writes summaries and nothing else. The paragraph here used to say
+that E4-04's release batches might be cut by this walk as well, on E4-04's
+logic; that was settled the other way when the wave was ordered, and the
+decision below records it.
 
 Read first: SPEC §5.1, §3.1; breakdown decisions 2 and 6;
 `backend/app/jobs/tasks.py`, `celery_app.py` (the `publish_once` shape) and
@@ -77,17 +78,20 @@ contract.
   passback's provider-free walk. Recommendation: Monday 02:50, recorded in
   the ADR beside the beat inventory update, with the reasoning that summary
   generation is provider-bound and benefits from the passback having already
-  warmed nothing it shares.
-- **Whether this job cuts release batches** — inherited from E4-04's ADR;
-  if yes, the batch cut shares the per-section transaction with that
-  section's summaries and the ADR here records the joint failure semantics
-  (a batch is never cut on a walk that failed that section's summaries, or
-  is, and why).
+  warmed nothing it shares. Taken as recommended; ADR 0154 carries it.
+- **Whether this job cuts release batches — settled: it does not.** The
+  question was resolved when this wave's work was ordered, before either
+  ticket was built: the batch cut is a scheduled task of E4-04's own, recorded
+  in ADR 0152 and landing in that ticket's pull request. So there are no joint
+  failure semantics to describe, this walk makes one kind of write, and the
+  per-section-week transaction covers a week's two summaries and nothing else.
+  ADR 0154 records the resolved inheritance from this side.
 - **A cap on per-run provider calls** — a first term generates one
   section-week each Monday, but a backfill after downtime could be large.
   Recommendation: no cap, per-section transactions already bound the blast
   of a failure, and a cap invents a starvation mode; the ADR confirms or
-  replaces.
+  replaces. Confirmed as recommended, at the section-week grain the walk
+  actually commits at; ADR 0154 carries the argument.
 
 ## Known traps
 
