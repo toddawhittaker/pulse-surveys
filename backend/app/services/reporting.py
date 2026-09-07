@@ -467,15 +467,27 @@ BELOW_MINIMUM = "below-minimum"
 
 # **The token SPEC §4.1 item 7's chokepoint is made of.** A module-level object
 # with no name outside this file: importing `ComparisonFigure` gets a caller the
-# type and never this, and the constructor refuses anything else. So the only way
-# a comparison value exists anywhere in this system is `comparison_after_suppression`
-# below — not by convention, and not because a reviewer will notice.
+# type and never this. What holding it does is *seal* a value — see the seal below
+# — so `comparison_after_suppression` is the only thing in this system that can
+# produce a comparison figure the wire will carry.
 #
 # E4's breakdown decision 4 asks for exactly that, and `docs/MISTAKES.md` entry 22
 # is why it is structural rather than a rule: a closed-set guard is defeated one
 # level out, and "every caller remembers to call the helper" is a guard with a
 # door beside it.
 _COMPARISON_TOKEN = object()
+
+# What "no token was offered" looks like, told apart from "a token was offered and
+# it is not ours". The two are different events and only the second is a caller
+# trying to forge provenance.
+#
+# **The distinction exists because pydantic's own validation calls `__init__`.** A
+# model with a custom `__init__` is built through it whenever the model is
+# validated from a mapping, so a response schema validated from its own serialized
+# JSON — which is an ordinary thing to do to a response model, and which E4-07's
+# review does — arrives here with no token and must not be refused for it. The
+# seal is what such a value then lacks, and the wire is where that is answered.
+_NO_TOKEN_OFFERED = object()
 
 
 class ComparisonFigure(BaseModel):
@@ -490,21 +502,29 @@ class ComparisonFigure(BaseModel):
     guarantees it.** A value carrying both would be a suppressed figure on the
     wire, which is the exact thing item 7 forbids.
 
-    **Two checks, at two boundaries, because the constructor alone is not one.**
-    E4-07's security round found the reason: the token guards `__init__`, and
-    pydantic offers two documented ways of producing a model instance that never
-    calls it. `model_construct` skips validation and initialisation both, and
-    `model_copy(update=...)` rewrites the fields of a value the helper had already
-    suppressed. Both were demonstrated ending in a serialized payload carrying a
-    figure §5.1 means to suppress.
+    **The guarantee is about the value on the wire, not about how it was built,
+    and it took three rounds of review to get there.** Each round found the
+    previous guard defeated one level out, which is `docs/MISTAKES.md` entry 22 in
+    three instalments:
 
-      - **The constructor's token** is the front door and still closes it.
-      - **The seal below is the wire**, checked by the report schema's own
-        validation of its `comparison` member — see `refuse_an_unsealed_comparison`.
+      - the token in `__init__` was walked past by `model_construct` and by
+        `model_copy(update=...)`, which build a *figure* without calling it;
+      - the field validator that replaced it was walked past by the same two
+        methods used one level up, which build a *report* that no validator sees;
+      - so `app.schemas.report.InstructorReport` carries
+        `revalidate_instances="always"` and the response re-reads whatever object
+        the route hands it.
+
+    What is checked there is **the seal**, and it is checked on the value rather
+    than on its history: a figure on the wire has to carry a seal matching its own
+    fields, which only `comparison_after_suppression` can produce. A value that is
+    suppressed and carries no figure needs no seal, because it shows nothing — see
+    `refuse_an_unsealed_comparison`, which is where that line is drawn and why.
 
     §4.1 item 7 is a rule about what is *shown*, so the boundary that has to hold
-    it is the one the payload crosses, and a guard standing only in `__init__` is
-    walked past by every entry point that does not call `__init__`.
+    it is the one the payload crosses. A guard standing only in `__init__` is
+    walked past by every entry point that does not call `__init__`, and pydantic
+    has several.
 
     **E5 fills this, and it fills it through the same helper.** Until then every
     report carries a suppressed value with no number in it, which is what gives
@@ -518,8 +538,8 @@ class ComparisonFigure(BaseModel):
     figure: float | None = None
 
     # **The seal: the field values this instance was built with, recorded at the
-    # moment the token was accepted.** A private attribute, so it is not a field,
-    # is never serialized, and cannot be handed in by a caller.
+    # moment the module's own token was presented.** A private attribute, so it is
+    # not a field, is never serialized, and cannot be handed in by a caller.
     #
     # It binds the *values* rather than merely recording that a token was seen,
     # and that is the whole of why it survives both side doors. `model_construct`
@@ -530,28 +550,44 @@ class ComparisonFigure(BaseModel):
     # recording only "a token was seen" would not.
     _sealed_over: tuple[Any, ...] | None = PrivateAttr(default=None)
 
-    def __init__(self, token: object = None, **values: Any) -> None:
-        """Refuse any construction that does not come from this module, and seal the rest.
+    def __init__(self, token: object = _NO_TOKEN_OFFERED, **values: Any) -> None:
+        """Seal a value built with this module's token; refuse one built with somebody else's.
 
-        The token is positional and defaulted so that the ordinary mistake — a
-        caller elsewhere writing `ComparisonFigure(suppressed=False, figure=4.2)`
-        because the fields are right there in the schema — is refused rather than
-        silently accepted with a `None` token.
+        **Three cases, and the middle one is why this is not a flat refusal.**
+
+          - The helper presents `_COMPARISON_TOKEN`: the value is built and sealed,
+            and it is the only way a sealed value exists.
+          - A caller presents something else: refused with `TypeError`. Offering a
+            token is a claim about provenance and a false one is answered here
+            rather than three layers later.
+          - Nothing is presented at all: built, and left unsealed. That is what
+            pydantic itself does when a report is validated from a mapping — a
+            model with a custom `__init__` is constructed through it — and
+            re-validating a response model from its own serialized JSON is an
+            ordinary thing to do to one. Refusing that case would make the payload
+            unable to round-trip its own output, which is a property worth having
+            and is not the property item 7 asks for.
+
+        **An unsealed value is not a trusted value**, and nothing here pretends
+        otherwise: it reaches no wire unless it is suppressed and carries no
+        figure. `refuse_an_unsealed_comparison` is where that is decided, and it is
+        decided on the value rather than here on its history.
 
         `object.__setattr__` because the model is frozen: the seal is written once,
         here, after validation has settled what the fields are, and there is no
         supported way for anything else to write it.
         """
-        if token is not _COMPARISON_TOKEN:
+        if token is not _NO_TOKEN_OFFERED and token is not _COMPARISON_TOKEN:
             raise TypeError(
-                "A comparison figure can only be built by "
+                "A comparison figure carrying this module's provenance can only be built by "
                 "`app.services.reporting.comparison_after_suppression`, which holds the token this "
                 "constructor demands. SPEC §4.1 item 7 suppresses every figure computed from a "
-                "comparison set below the configured benchmark minimums, and that suppression is "
-                "this constructor rather than a rule callers are asked to remember."
+                "comparison set below the configured benchmark minimums, and a caller offering a "
+                "token of its own is claiming a suppression decision it did not make."
             )
         super().__init__(**values)
-        object.__setattr__(self, "_sealed_over", _the_seal_over(self))
+        if token is _COMPARISON_TOKEN:
+            object.__setattr__(self, "_sealed_over", _the_seal_over(self))
 
 
 def _the_seal_over(figure: ComparisonFigure) -> tuple[Any, ...]:
@@ -560,9 +596,20 @@ def _the_seal_over(figure: ComparisonFigure) -> tuple[Any, ...]:
     Written once rather than spelled at the constructor and again at the check: two
     tuples that fell out of step would make every legitimate value fail the wire
     boundary, or — the direction that matters — make every smuggled one pass it.
-    Derived from `model_fields` so a field added to the type is inside the seal by
-    existing, which is the difference between a seal and a list somebody has to
-    remember to extend (`docs/MISTAKES.md` entry 22).
+    Derived from `model_fields` so a field added to the type is *enumerated* by the
+    seal by existing, which is the difference between a seal and a list somebody has
+    to remember to extend (`docs/MISTAKES.md` entry 22).
+
+    **What "inside the seal" does and does not mean, because the two are not the
+    same and the first version of this docstring ran them together.** The tuple
+    holds the field values by reference. Every field this type has today is
+    immutable — a `bool`, an optional `str`, an optional `float` — so a value cannot
+    change without the tuple ceasing to match it, which is the whole mechanism. A
+    *mutable* field added later would break that silently: a list or a dict mutated
+    in place is the same object, so the seal would still compare equal and a figure
+    could be written into it after the token was accepted. Enumeration is
+    automatic; immutability is not, and a mutable field here needs this function to
+    take a copy of it rather than a reference.
     """
     return tuple(getattr(figure, name) for name in sorted(type(figure).model_fields))
 
@@ -571,10 +618,20 @@ def refuse_an_unsealed_comparison(figure: ComparisonFigure) -> None:
     """Refuse a comparison value the suppression helper did not produce — the wire boundary.
 
     Called by `app.schemas.report.InstructorReport`'s own validation of its
-    `comparison` member, which is the boundary a smuggled instance cannot skip:
-    whatever built the value, it becomes part of a report only by being validated
-    into that model, and a field validator runs there even for a value that is
-    already an instance of the field's type.
+    `comparison` member. A field validator runs there even for a value that is
+    already an instance of the field's type, so a smuggled *figure* put into a
+    report that gets validated is caught by this.
+
+    **What this does not close by itself, corrected from a claim that was false as
+    shipped.** This docstring said it was "the boundary a smuggled instance cannot
+    skip". It is not: a validator runs when a model is *validated*, and a caller can
+    build the report itself with `model_construct` or `model_copy(update=...)`
+    without validating anything — E4-07's review re-pass served an unsuppressed
+    figure through both. What makes this function unskippable is one line in that
+    schema, `revalidate_instances="always"`, which has the response re-validate
+    whatever object the route hands back. Two layers, and neither is sufficient
+    alone: this one decides *what* is refused, and the configuration decides *that
+    it is asked*.
 
     **What it compares, and why that and not the token.** The seal is over the
     field values as they stood when the token was accepted. So a value produced by
@@ -586,22 +643,38 @@ def refuse_an_unsealed_comparison(figure: ComparisonFigure) -> None:
     level out that `docs/MISTAKES.md` entry 22 records, and it was found here by a
     security review rather than by this module's own reasoning.
 
+    **A value that shows nothing needs no provenance, and that is the first line
+    below.** SPEC §4.1 item 7 is a rule about figures being *shown*: a member that
+    says it is suppressed and carries no figure discloses nothing whoever built it,
+    so it is admitted unsealed. That is what lets a report be validated from its own
+    serialized JSON — every E4 report's comparison member is exactly that shape —
+    and it gives up nothing, because the only thing an attacker gains by forging it
+    is a member that already says "no comparison here".
+
+    Anything else — a figure present, or a value claiming it was not suppressed —
+    has to carry the seal. That covers the two doors and E5's real figures alike:
+    a benchmark mean over enough sections and enough respondents is sealed by the
+    helper and passes; the same mean asserted by anybody else does not.
+
     **It raises rather than quietly emptying the member**, and that is deliberate.
-    Nothing in this system can reach here except code that built a comparison value
+    Reaching here with an unsealed figure means code built a comparison value
     outside the one helper, which is a defect in a confidentiality path rather than
     a state to render — so it fails loudly, at the boundary, before anything is
     serialized. `ValueError` because a pydantic validator turns it into a
     `ValidationError` on the field, which is what the payload boundary answers with.
     """
+    if figure.suppressed and figure.figure is None:
+        return
     if figure._sealed_over != _the_seal_over(figure):
         raise ValueError(
             "This comparison figure was not produced by "
             "`app.services.reporting.comparison_after_suppression`: it carries no seal, or a seal "
-            "over field values it no longer has. SPEC §4.1 item 7 suppresses every figure computed "
-            "from a comparison set below the configured benchmark minimums, and the suppression is "
-            "decided once, by that helper, over both minimums. A value built past it — with "
-            "`model_construct`, or by copying a suppressed one with the figure written back in — is "
-            "refused here rather than shown."
+            "over field values it no longer has, and it is not the one shape that needs none — a "
+            "suppressed member with no figure in it. SPEC §4.1 item 7 suppresses every figure "
+            "computed from a comparison set below the configured benchmark minimums, and the "
+            "suppression is decided once, by that helper, over both minimums. A value built past "
+            "it — with `model_construct`, by copying a suppressed one with the figure written back "
+            "in, or by assembling a report around it — is refused here rather than shown."
         )
 
 

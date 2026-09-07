@@ -43,12 +43,18 @@ it: `model_construct`, which runs neither validation nor `__init__`, and
 `model_copy(update=...)`, which rewrites the fields of a value the helper had
 already suppressed.
 
-So item 7's boundary is **the wire**, and it is `InstructorReport`'s own
-validation of the member below. However a comparison value was built, it becomes
-part of a report only by being validated into this model, and the validator there
-asks `app.services.reporting.refuse_an_unsealed_comparison` whether the helper
-produced it. Item 7 is a rule about what is *shown*, so the check belongs at the
-last boundary before showing rather than at the first before building.
+So item 7's boundary is **the wire**, and it took two parts to put it there. The
+inner part is `InstructorReport`'s validation of the member below, which asks
+`app.services.reporting.refuse_an_unsealed_comparison` whether the helper produced
+the value. The outer part is `revalidate_instances="always"` on that model, and
+the review's re-pass is why it exists: the same two methods build a *report*
+without validating it, so a field validator alone could be skipped one level out
+exactly as the constructor's token was. With the revalidation, the response
+re-reads whatever object the route hands it, whatever assembled it.
+
+Item 7 is a rule about what is *shown*, so the check belongs at the last boundary
+before showing rather than at the first before building — and "the last boundary"
+had to be found three times.
 
 **Rates that have no value are `None` and never zero.** A validity rate over
 zero responses is not "all invalid", and a response rate over an empty enrolment
@@ -230,7 +236,18 @@ class SmallNView(BaseModel):
 class InstructorReport(BaseModel):
     """One instructor's Monday report, for one of her own sections and one course week."""
 
-    model_config = ConfigDict(frozen=True)
+    # **`revalidate_instances="always"` is SPEC §4.1 item 7's outermost layer, and
+    # it is not a preference.** Without it a report *instance* handed to the
+    # response is taken as already valid, so the field validator below never runs
+    # over it — and `model_construct` and `model_copy(update=...)` build such an
+    # instance without validating anything. E4-07's review re-pass demonstrated
+    # both serving an unsuppressed figure with a 200. With it, whatever assembled
+    # the object, the response re-reads it before anything is written to the wire.
+    #
+    # The cost is a second validation pass per report, paid on every request. That
+    # is the price of the guarantee being about what is *shown* rather than about
+    # how somebody built the thing shown.
+    model_config = ConfigDict(frozen=True, revalidate_instances="always")
 
     section: SectionView
     week: WeekView
@@ -239,8 +256,11 @@ class InstructorReport(BaseModel):
     workload: WorkloadView
     # SPEC §4.1 item 7's chokepoint. The type is
     # `app.services.reporting.ComparisonFigure`, whose constructor demands a token
-    # private to that module — so this member can only ever hold what the
-    # suppression helper produced.
+    # private to that module — which closes the direct door and, on its own, only
+    # that one: a caller can produce an instance of any pydantic model without
+    # calling its constructor. What makes this member trustworthy is the pair of
+    # checks below it and above it — the validator on this field, and the
+    # revalidation that guarantees the validator runs.
     comparison: ComparisonFigure
     small_n: SmallNView
     # ADR 0152's release, placed here and nowhere else: a list in every report,
@@ -250,20 +270,31 @@ class InstructorReport(BaseModel):
     @field_validator("comparison")
     @classmethod
     def _the_comparison_is_the_helpers(cls, figure: ComparisonFigure) -> ComparisonFigure:
-        """SPEC §4.1 item 7 at the wire — the boundary a smuggled instance cannot skip.
+        """SPEC §4.1 item 7 at the wire — the inner half of a two-part boundary.
 
-        A `mode="after"` field validator, which is what makes it the right place:
-        it runs on the value the field ends up holding, including a value that was
-        already an instance of `ComparisonFigure` and therefore passed straight
-        through the field's own type check. Every route in this module serves a
+        A `mode="after"` field validator, which is what makes it the right place
+        for its half: it runs on the value the field ends up holding, including a
+        value that was already an instance of `ComparisonFigure` and therefore
+        passed straight through the field's own type check. So a smuggled *figure*
+        put into a report that is validated is caught here.
+
+        **What it does not do on its own, stated because the first version of this
+        docstring claimed otherwise.** It said "every route in this module serves a
         report by validating one of these models, so there is no way to a
-        serialized payload that does not come through here.
+        serialized payload that does not come through here", and that was false as
+        written: a validator runs when a model is *validated*, and
+        `InstructorReport.model_construct(...)` and
+        `report.model_copy(update=...)` produce a report that no validator has
+        seen. The review re-pass served an unsuppressed figure through both. What
+        closes that is `revalidate_instances="always"` above, which makes the
+        response re-validate whatever object it was handed — and that is what makes
+        the sentence true rather than this validator's own placement.
 
         See `app.services.reporting.refuse_an_unsealed_comparison` for what is
         compared and why it is the field values rather than the token. The check
         stays here rather than moving into `ComparisonFigure` as a model validator
         for one reason: a model validator does not run for `model_construct`
-        either, so it would be a second guard past the same two doors.
+        either, so it would be a second guard past the same doors.
         """
         refuse_an_unsealed_comparison(figure)
         return figure
