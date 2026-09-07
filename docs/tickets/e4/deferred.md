@@ -92,3 +92,41 @@ each produces.
 — the latest row by its decision instant, or the initial state where there is
 none — and both the comment read path and the summary job's gather call it, with
 no second copy of the ordering or of the default anywhere under `backend/app/`.
+## SPEC §6.2's threat and self-harm suppression is not enforced in the comment read path
+
+**What is not enforced.** SPEC §5.2 ends "threat/self-harm classifications bypass
+this flow entirely (§6.2) and are never shown to the instructor", and §6.2 routes
+those comments to the Care queue instead. Nothing in
+`backend/app/services/report_comments.py` implements that. A comment carrying such
+a verdict is returned by `visible_comments` like any other above the threshold, is
+counted by `cut_due_release_batches` toward every leg of the release gate, and can
+be written into a release batch and surfaced with its week stripped — where it
+cannot be un-released (ADR 0146). The moderation record this module does read is
+§5.2's lifecycle (`published`, `flagged_collapsed`, `excluded`, `kept`), which is a
+different question from a safety classification and carries no token for one.
+
+**Why it was left.** It is not reachable in E4: nothing in the product writes a
+safety verdict, because `ClassificationTask` has a single member and E4 adds no
+second. Building the suppression now would mean inventing the verdict vocabulary
+it filters on, before the thing it closes over exists — a closed set guessed at
+early is worse than an absence, because it reads as a guarantee. E4-06's parallel
+branch carries the twin of this entry against its own summary gather for the same
+reason; the two are one gap seen from two modules and should be merged into a
+single entry when the branches meet.
+
+**The shared alarm.** `ClassificationTask` gaining a member is the tripwire for
+both entries. Whoever adds one is adding the first writer of a verdict these paths
+must not show, and both this module and the summary job's gather become live
+defects on that commit rather than on the commit that renders them.
+
+**Owner:** E6, in the ticket that writes the moderation states and the safety
+routing §6.2 describes.
+
+**Done when:** a comment whose current classification is a threat or self-harm
+verdict is absent from what this module returns and from what its cutter releases,
+enforced **below** the read path rather than in each caller — so a later surface
+cannot reach the rows by writing its own query — and proven by a test that plants
+such a verdict on a comment in a week at the threshold and asserts the forbidden
+state at the service's return value and at the batch's membership. That test can
+only be written once a verdict of that kind can exist, which is why the writer's
+ticket owns it.

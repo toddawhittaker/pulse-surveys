@@ -31,6 +31,31 @@ comment the section holds, or only the comments that survived moderation. And
 **what a batch's membership is** — which comments go in, and what happens on a
 second run.
 
+**And a third question, which this record did not ask on its first writing and
+which E4-04's security review did.** §4 names one trigger — the cumulative
+volume — and the first build implemented exactly that. Two findings showed the
+sentence does not do what the paragraph it sits in is for:
+
+- **The volume is denominated in the wrong unit.** §4's threshold is "n < 5
+  **responses** in a reporting week" — a number of people — and its release
+  trigger is a comment volume. §3.2 gives every response two comment items, so
+  five comments can come from three students, or from one student across three
+  quiet weeks. A release gated on the volume alone goes out over an author set
+  far below the number the threshold was chosen to protect, and the batch is what
+  is supposed to stand between a released comment and its author.
+- **A volume condition stays true once crossed.** The term's cumulative count
+  only grows, so every Monday after the first release the same section passes the
+  same test and the cutter takes whatever is held — which, after the first sweep,
+  is exactly the one week that just closed. That is a per-week batch every week,
+  and the instructor's report re-attaches the week for free: the release that was
+  not there last Monday came from the week that closed in between. Single-comment
+  batches follow in any week where one person wrote something, and a batch of one
+  comment carries its own `cut_at`, which is the per-comment timing the batching
+  exists to remove.
+
+So the gate settled here is layered, and the departure from §4's literal words is
+stated rather than hidden — see the open spec question at the end of this record.
+
 ## Decision
 
 **A scheduled task of this ticket's own cuts the batches**, appended to
@@ -49,21 +74,57 @@ comments survive §3.3's validity rule, and 02:20 is E3-06's participation sweep
 02:50 is E4-06's summary job, which runs *after* this one and is the only entry
 on the schedule that calls a model.
 
-**Volume is every comment answer the section holds in the term** — every week,
-every moderation state, released or not — counted from `report_comment`, which
-is comment-kind answers carrying non-empty text. §4's phrase is "comment volume",
-which is a statement about how much a section has said rather than about how much
-survived review. A volume computed after moderation would also move backwards: an
-instructor excluding a comment could take a section back under the threshold
-after it had crossed, and a release cut on a number that then changed is a
-release nobody can explain.
-
 **A comment is held, and so eligible for a batch, when all three of these are
 true**: its week's response count is below the threshold, its window has closed,
 and it is in no batch already. The second is why an open week is never released
 from — a window still taking responses has no final count, so a comment released
 from it may belong to a week that reaches the threshold and would then be shown
 twice, once under its own week and once in a batch with the week stripped off.
+That definition is written once in `app.services.report_comments._held_comments`
+and selected from twice, so the set the gate is evaluated over is the set that
+goes out; two copies that drifted would gate on one set and release another.
+
+**The gate over that set is three legs, and every one must open.**
+
+- **(a) The cumulative comment-answer volume for the term reaches the
+  threshold** — §4's literal trigger, kept. Every comment answer the section
+  holds in the term, every week, every moderation state, released or not,
+  counted from `report_comment`. §4's phrase is "comment volume", which is a
+  statement about how much a section has said rather than about how much survived
+  review; a volume computed after moderation would move backwards, so an
+  instructor excluding a comment could take a section back under the threshold
+  after it had crossed.
+- **(b) The distinct people behind the unreleased held comments reach the
+  threshold.** This is what §4's threshold actually counts, and it is the leg the
+  security round added.
+- **(c) Those comments span at least two distinct under-threshold closed weeks.**
+  A batch confined to one week is the week attribution
+  [0153](0153-a-release-drops-its-week-because-the-gradebook-ledger-would-otherwise-name-the-author.md)
+  removes, arriving through the report's week-to-week delta rather than through a
+  field.
+
+**Leg (b) subsumes the other two, and all three are written out anyway.** The
+respondents behind a held set are at most the number of held comments, which is
+at most the cumulative volume, so (b) fails wherever (a) does; and an
+under-threshold week holds fewer than `threshold` responses by definition, so a
+held set inside one week has fewer than `threshold` respondents and (b) fails
+wherever (c) does. **(b) is therefore the effective floor.** Keeping (a) and (c)
+as their own named conditions is deliberate: each is a separate reading of §4 that
+this build stands on, each survives a change to another's denominator — the day
+somebody counts responses instead of respondents, (c) is what still refuses a
+one-week batch — and the reviewer this module is written for asked for the
+property rather than for an implementation of it. The cost is three conditions
+where one would compute the same answer today, and it is worth it.
+
+**When any leg fails, nothing is cut, and that is the stance.** Held is the safe
+direction: an under-threshold comment that stays held still feeds the summary
+(§4 says so in as many words) and can be released later, while a comment released
+early cannot be un-shown — nothing in this schema deletes a membership row
+(ADR 0146). The price is named rather than glossed: **a section whose quiet week
+never finds a companion keeps those comments held for the rest of the term**, and
+a term that ends there ends with them unreleased. That is a real loss to the
+students who wrote them, and it is accepted because the alternative loss is a
+disclosure that cannot be taken back.
 
 **One batch per crossing, holding the whole held set, in one transaction per
 section and term.** The service commits after each pair, so a walk over every
@@ -142,11 +203,49 @@ a section crosses and then un-crosses, which either releases comments that shoul
 not have been released or leaves a batch already cut against a volume that is now
 below the line. §4's sentence is about how much a section wrote.
 
-**Count responses rather than comments.** §4 says "comment volume" and the
-response count is already the *other* number in the same paragraph — the per-week
-threshold. Using one number for both rules would make a term of silent weeks
-release nothing however many students answered, and would make the cumulative
-rule a restatement of the weekly one.
+**Count responses rather than comments** *as leg (a)*. §4 says "comment volume"
+and the response count is already the *other* number in the same paragraph — the
+per-week threshold. Using one number for both rules would make a term of silent
+weeks release nothing however many students answered, and would make the
+cumulative rule a restatement of the weekly one. What the security round changed
+is not this: leg (a) still counts comments, and the count of *people* is a
+separate leg beside it rather than a replacement for it.
+
+**Keep §4's single volume trigger and change nothing.** The literal reading, and
+what shipped before the security review. It has the strongest claim of any
+alternative here — the spec names one trigger, an ADR does not get to overrule
+the spec, and every other test in this epic was green against it. It is rejected
+on the two findings above: §4's own stated purpose in the same sentence is that
+the release is "batched so that timing cannot identify an author", and a per-week
+batch of one person's comments satisfies the sentence while defeating the purpose
+written beside it. Where a spec sentence and the goal it states come apart, the
+conservative side is the one to hold while the owner rules, and this record says
+so out loud rather than quietly implementing a spec it is not following.
+
+**Count distinct responses rather than distinct respondents in leg (b).** One
+join shorter, and it never reaches `response.user_id` at all — genuinely
+attractive in a module whose whole subject is not naming people. Rejected because
+the two numbers come apart exactly where the finding lives: §3.2 gives one
+response two comment items, so one student answering both is two comments and one
+response — but a student who answers in three quiet weeks is three responses and
+one person, and a response count would release that as though three people had
+written. §4's threshold is a number of people, so the leg has to count people.
+What the module owes in exchange is that the column is used only to count: it is
+grouped and `count(distinct …)`-ed inside one query, is not selected by the
+membership read, and reaches no return value.
+
+**A larger span than two weeks for leg (c)** — three, or "half the term's quiet
+weeks". Strictly safer, and unbounded in cost: each extra week required is
+another stretch of term a section's comments spend held. Two is the smallest
+number that makes the report's week-to-week delta ambiguous, which is a floor
+with a reason; three would be a number with a feeling.
+
+**Cut the gate but bound the wait — release a lone quiet week after N Mondays.**
+It closes the withholding cost named in the decision, and it reintroduces the
+defect through the calendar: a batch that goes out because a timer expired is a
+batch whose `cut_at` dates the week it came from as precisely as a per-week batch
+does. If the wait is ever judged unacceptable, the thing to change is what the
+gate counts, not to add a bypass around it.
 
 **Catch the integrity error and treat a double release as a no-op.** It would
 make the cutter robust against its own held query being wrong, which is the
@@ -186,3 +285,44 @@ the same argument about a unique constraint over `batch_id`.
   of six beat tasks now leave the commit to the service they call, each for its
   own reason, and `app/jobs/tasks.py`'s module docstring names both rather than
   claiming one shape.
+- **A section's quiet comments can stay held to the end of a term**, and this is
+  the price of the fail-closed stance falling on the students who wrote them. A
+  section that crosses once and then has a single quiet week for the rest of the
+  term never releases that week, because one week satisfies neither leg (b) nor
+  leg (c). §4's "they surface as raw text" is not honoured for those comments.
+  They still feed the summary, which is the other half of §4's own sentence, so
+  the signal reaches the instructor even where the text does not.
+- **This module now reaches `response.user_id`, in exactly one place.** Leg (b) is
+  a count of people, so the held-comment definition walks `answer.response_id`
+  and then `response.user_id`. The column is grouped and counted and never
+  selected into anything a caller sees, and the service's own docstring points a
+  reviewer at the three functions that have to be checked rather than at the
+  whole file. It is a real widening of what this module can reach, recorded here
+  for that reason.
+- **A release can no longer be planted by planting comments alone.** Any world
+  that expects a batch now needs a threshold's worth of distinct respondents
+  across two closed under-threshold weeks, which is a larger world than the first
+  build's tests needed. A later ticket writing a release case meets that shape.
+
+## Open spec question — the owner's to settle
+
+**This gate is a reading of SPEC §4 rather than §4's own words, and the record
+says so plainly rather than letting an ADR stand in for a spec edit.** §4 names
+one trigger: "they surface as raw text once the section's cumulative comment
+volume for the term crosses the threshold". Legs (b) and (c) are not in it.
+
+The case for them is that §4's stated purpose in the same sentence — "batched so
+that timing cannot identify an author" — is not achieved by the trigger it names,
+for the two reasons in this record's context. The case against is that a spec
+sentence is a spec sentence, and `docs/adr/README.md` is explicit that a decision
+contradicting the spec is not an ADR's to make.
+
+**This build holds the conservative side while the question is open.** It
+releases strictly less than §4's literal trigger would and never more, so nothing
+here shows an instructor a comment the spec's own words would have withheld, and
+the cost is the withholding named above. **No spec edit rides in this pull
+request.** What the owner has to settle is whether §4's sentence is amended to say
+what the threshold protects — people, across more than one week — or whether the
+literal trigger stands and the withholding is the wrong trade. Either answer is a
+short change to §4 and a change to this record; neither is the implementer's to
+make.
