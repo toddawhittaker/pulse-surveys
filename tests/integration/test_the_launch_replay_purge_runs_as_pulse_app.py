@@ -62,7 +62,7 @@ TASK_IS_OWED = (
     "ADR 0089 gives `app.jobs.tasks.purge_launch_nonces` the daily beat entry that reclaims "
     "the expired tail of both `lti_launch_nonce` and `lti_launch_state` (E1-08). "
     "`tests/unit/test_celery_app.py`'s "
-    "`test_the_beat_schedule_holds_exactly_the_five_entries_that_have_landed` pins the "
+    "`test_the_beat_schedule_holds_exactly_the_six_entries_that_have_landed` pins the "
     "schedule and the task name; this module drives the task's own body."
 )
 
