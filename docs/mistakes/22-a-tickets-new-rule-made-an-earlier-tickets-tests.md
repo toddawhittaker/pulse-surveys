@@ -1,6 +1,6 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 15**
+**Caught: 16**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -308,3 +308,12 @@ author found the class before writing anything, changed the fixture to the
 newest unretired row, and added a `BEFORE_ANY_KEY` sentinel so the suite still
 runs on the unbuilt tree — 95 roster tests stayed green through the whole
 build. Counted as a catch: the entry's rule is what sent the author looking.
+
+**Instance, 2026-09-06 (E4-01, caught before any green).** The settled reveal
+design needed the Care session to read `answer` and `response`, and the
+privilege inventories pin that role to one base-table read and two definer
+functions — so any repair mechanism reds a pinned test. The test author
+surfaced the collision as the head-of-manifest finding, with the three
+candidate mechanisms and which inventory each one reds, instead of letting the
+first green run discover it. Counted as a catch: the inventories' pins are
+what made the gap a finding rather than a surprise.

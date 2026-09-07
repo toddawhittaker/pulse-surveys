@@ -171,7 +171,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 15** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 16** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 16. A mutation harness reported kills it had not made
 
@@ -422,7 +422,7 @@ edit puts the comma back.
 
 ## 44. A guard raised in a fixture turned a module's reds into setup errors
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/44-a-guard-raised-in-a-fixture-turned-reds-into-errors.md)
+**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/44-a-guard-raised-in-a-fixture-turned-reds-into-errors.md)
 
 **Rule.** A tests-first suite's red must be a FAILED, never an ERROR: an error at
 setup proves nothing about the assertion the test exists to make, survives the
@@ -445,7 +445,7 @@ identifier that starts with `-` rather than generating until one appears.
 
 ## 46. A privilege was attributed to the wrong role, and the ticket was built on it
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/46-a-privilege-was-attributed-to-the-wrong-role.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/46-a-privilege-was-attributed-to-the-wrong-role.md)
 
 **Rule.** A settled decision that rests on a privilege is a claim about a role,
 and the role is the half that gets mistyped: execute the read as that role before

@@ -118,10 +118,14 @@ ticket may depart from only by saying so.
    re-derives differently as data changes and leaks through its own timing.
    E4-02 stores the batch state, E4-04 builds the crossing-and-release logic
    and its ADR, and timestamps are never exposed anywhere in the path.
-8. **The reveal-subject guard takes its subject from a Care case.** The
-   carried done-when offers "or an equivalent guard"; the case-derived
-   subject is the shape that removes the caller-supplied id entirely rather
-   than validating it, and E4-01 settles the details with its ADR. It merges
+8. **The reveal-subject guard takes its subject from the record Care is acting
+   on.** The carried done-when offers "or an equivalent guard"; the
+   record-derived subject is the shape that removes the caller-supplied id
+   entirely rather than validating it, and E4-01 settled the details in
+   [ADR 0144](../../adr/0144-the-reveal-derives-its-subject-from-the-record-care-is-acting-on.md).
+   The record is a **comment**, not a Care case: there is no case model until
+   E10, so the reveal names one comment and derives its author, and E10's case
+   model wraps that without another signature change. It merges
    before E4-11, the epic's first instructor-facing surface — the inherited
    deadline, enforced by build order rather than by a sentence.
 9. **E4 takes two candidate tickets no epic owned:** the stale Care-landing
@@ -147,24 +151,24 @@ ticket may depart from only by saying so.
 
 ## Build order
 
-| # | Ticket | Branch | Lane | Depends on | Summary |
-|---|---|---|---|---|---|
-| 01 | [The reveal refuses a subject reached through a reporting scope](E4-01-reveal-subject-guard.md) | `e4/reveal-subject-guard` | heavy | none | The inherited deadline: `reveal_identity` takes its subject from a Care case, and the two-hat composition is refused, before any instructor surface ships. |
-| 02 | [The report schema](E4-02-report-schema.md) | `e4/report-schema` | heavy | none | Everything the epic writes, before anything writes it: the summary table, the moderation-status column, the release-batch state, and their grants. |
-| 03 | [The aggregate read views](E4-03-aggregate-read-views.md) | `e4/aggregate-read-views` | heavy | none | Distributions, workload mean and median, response rate and validity rate as identity-separated views over E2's tables, per section and course week. |
-| 04 | [Comment visibility under small-N](E4-04-comment-visibility.md) | `e4/comment-visibility` | heavy ⚠ | 02 | The suppression heart: below-threshold hiding, the cumulative batched release, flag concealment, randomized order, no timestamps. Line-by-line human review. |
-| 05 | [The weekly summary task](E4-05-weekly-summary-task.md) | `e4/weekly-summary-task` | heavy | none | The gateway's third task under §5.1's contracts: prompt, typed contract, eval cases, and the floors question settled with the gate that enforces it. |
-| 06 | [The summary generation job](E4-06-summary-generation-job.md) | `e4/summary-generation-job` | heavy | 02, 05 | The Monday beat entry: per section, per closed week, per stream, generate once and store, small-N weeks included. |
-| 07 | [The report API](E4-07-report-api.md) | `e4/report-api` | heavy | 02, 03, 04 | `api/instructor.py`: the report payload, the published-week list, and §4.1 item 7's chokepoint and invariant assertion. |
-| 08 | [The trend components](E4-08-trend-components.md) | `e4/trend-components` | light | 16 (merge order only) | PulseTrendChart and TrendPair against fixture data: stacked pair, shared 1–5 scale, one legend, course-week axis with the term-week sub-label. |
-| 09 | [The stat components](E4-09-stat-components.md) | `e4/stat-components` | light | 16 (merge order only) | RatingHistogram, StatPair and ResponseRateBar against fixture data: this-week distributions, workload mean and median, response and validity rates. |
-| 10 | [The comment components](E4-10-comment-components.md) | `e4/comment-components` | light | 16 (merge order only) | CommentCard, AiPanel and the instructor SmallNNotice against fixture data: grouped lists led by their summaries, empty-group notice, status chips. |
-| 11 | [The report page](E4-11-report-page.md) | `e4/report-page` | light | 01, 07, 08, 09, 10 | InstructorMondayReport assembled: route, data fetch, week navigation, loading and error and small-N states, and the in-slice e2e path. |
-| 12 | [The report's copy, and the inventory grows over it](E4-12-report-copy-and-inventory.md) | `e4/report-copy-and-inventory` | heavy | 08, 09, 10, 11 | Aggregate-language growth over the report surface, the two gradebook strings, the credit-rule instructor half, the string convention, and the collector's symlink gap. |
-| 13 | [The Care landing docstring](E4-13-care-landing-docstring.md) | `e4/care-landing-docstring` | heavy | none | The carried one-liner: the stale docstring in `frontend/src/routes/care/` says what the landing actually is. |
-| 14 | [The nonce purge can run](E4-14-nonce-purge-grant.md) | `e4/nonce-purge-grant` | heavy | none | The carried grant defect: `pulse_app` gets what a `DELETE ... WHERE` needs, the purge is driven to completion, and the privilege record says why `SELECT` was withheld. |
-| 15 | [E4 exit](E4-15-e4-exit.md) | `e4/e4-exit` | heavy | all | §14.3's exit clause driven against a seeded diverging two-stream story; boundary reviews; the de-anonymization statement verified; `../e5/carried-from-e4.md`. |
-| 16 | [The frontend test runner](E4-16-frontend-test-runner.md) | `e4/frontend-test-runner` | heavy | none | The carried E2 deferral, whose revisit trigger this epic trips: a component-test runner, one proof test, and the CI gate that makes red mean stop. |
+| # | Ticket | Branch | Lane | Depends on | Summary | Merged |
+|---|---|---|---|---|---|---|
+| 01 | [The reveal refuses a subject reached through a reporting scope](E4-01-reveal-subject-guard.md) | `e4/reveal-subject-guard` | heavy | none | The inherited deadline: `reveal_identity` takes its subject from the comment Care is acting on rather than from its caller (ADR 0144 — there is no case model until E10), and the two-hat composition is refused, before any instructor surface ships. | |
+| 02 | [The report schema](E4-02-report-schema.md) | `e4/report-schema` | heavy | none | Everything the epic writes, before anything writes it: the summary table, the moderation-status column, the release-batch state, and their grants. | #188 as 2d0d38e, 2026-09-06 |
+| 03 | [The aggregate read views](E4-03-aggregate-read-views.md) | `e4/aggregate-read-views` | heavy | none | Distributions, workload mean and median, response rate and validity rate as identity-separated views over E2's tables, per section and course week. | #189 as a21e62c, 2026-09-06 |
+| 04 | [Comment visibility under small-N](E4-04-comment-visibility.md) | `e4/comment-visibility` | heavy ⚠ | 02 | The suppression heart: below-threshold hiding, the cumulative batched release, flag concealment, randomized order, no timestamps. Line-by-line human review. | #188 as 2d0d38e, 2026-09-06 |
+| 05 | [The weekly summary task](E4-05-weekly-summary-task.md) | `e4/weekly-summary-task` | heavy | none | The gateway's third task under §5.1's contracts: prompt, typed contract, eval cases, and the floors question settled with the gate that enforces it. | |
+| 06 | [The summary generation job](E4-06-summary-generation-job.md) | `e4/summary-generation-job` | heavy | 02, 05 | The Monday beat entry: per section, per closed week, per stream, generate once and store, small-N weeks included. | |
+| 07 | [The report API](E4-07-report-api.md) | `e4/report-api` | heavy | 02, 03, 04 | `api/instructor.py`: the report payload, the published-week list, and §4.1 item 7's chokepoint and invariant assertion. | |
+| 08 | [The trend components](E4-08-trend-components.md) | `e4/trend-components` | light | 16 (merge order only) | PulseTrendChart and TrendPair against fixture data: stacked pair, shared 1–5 scale, one legend, course-week axis with the term-week sub-label. | |
+| 09 | [The stat components](E4-09-stat-components.md) | `e4/stat-components` | light | 16 (merge order only) | RatingHistogram, StatPair and ResponseRateBar against fixture data: this-week distributions, workload mean and median, response and validity rates. | |
+| 10 | [The comment components](E4-10-comment-components.md) | `e4/comment-components` | light | 16 (merge order only) | CommentCard, AiPanel and the instructor SmallNNotice against fixture data: grouped lists led by their summaries, empty-group notice, status chips. | |
+| 11 | [The report page](E4-11-report-page.md) | `e4/report-page` | light | 01, 07, 08, 09, 10 | InstructorMondayReport assembled: route, data fetch, week navigation, loading and error and small-N states, and the in-slice e2e path. | |
+| 12 | [The report's copy, and the inventory grows over it](E4-12-report-copy-and-inventory.md) | `e4/report-copy-and-inventory` | heavy | 08, 09, 10, 11 | Aggregate-language growth over the report surface, the two gradebook strings, the credit-rule instructor half, the string convention, and the collector's symlink gap. | |
+| 13 | [The Care landing docstring](E4-13-care-landing-docstring.md) | `e4/care-landing-docstring` | heavy | none | The carried one-liner: the stale docstring in `frontend/src/routes/care/` says what the landing actually is. | |
+| 14 | [The nonce purge can run](E4-14-nonce-purge-grant.md) | `e4/nonce-purge-grant` | heavy | none | The carried grant defect: `pulse_app` gets what a `DELETE ... WHERE` needs, the purge is driven to completion, and the privilege record says why `SELECT` was withheld. | |
+| 15 | [E4 exit](E4-15-e4-exit.md) | `e4/e4-exit` | heavy | all | §14.3's exit clause driven against a seeded diverging two-stream story; boundary reviews; the de-anonymization statement verified; `../e5/carried-from-e4.md`. | |
+| 16 | [The frontend test runner](E4-16-frontend-test-runner.md) | `e4/frontend-test-runner` | heavy | none | The carried E2 deferral, whose revisit trigger this epic trips: a component-test runner, one proof test, and the CI gate that makes red mean stop. | |
 
 ## Dependency graph
 
@@ -191,11 +195,14 @@ strings 08–11 ship.)
 free-standing, and 08, 09 and 10 build beside them against fixtures, merging
 after 16. The standing rules for parallel builds govern: partition
 sequential identifiers up front, no two tickets touching the same file,
-migration chains re-pointed at merge. The three migration-adding
-tickets are 02, 03 and 14; they take chain slots in that order off head
-`c4a8e51db9f3`, and whichever merges later re-points, as E3-01 did. ADR
-numbers are assigned per wave at cut time, next free 0144; MISTAKES next
-entry is 50.
+migration chains re-pointed at merge. The migration-adding tickets are 02, 03,
+14 and — found while building it, because its guard needs a third `SECURITY
+DEFINER` function rather than a grant (ADR 0144) — **01**. They take chain slots
+in that order off head `c4a8e51db9f3`, and whichever merges later re-points, as
+E3-01 did. ADR numbers are assigned per wave at cut time, next free 0152 (0144–0147
+went to the first wave's 01/02/03; 0148–0151 are assigned to 05/14/16) —
+**E4-01 took 0144**, so two branches proposing 0145 is a conflict to resolve
+rather than a number to share; MISTAKES next entry is 50.
 
 ## The payload sketch the frontend builds against
 

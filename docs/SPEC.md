@@ -304,7 +304,7 @@ The Claude Design prototype is the visual and interaction contract; the frontend
 
 ## 8. Data model (core tables)
 
-`institution, college, department, prefix, course, section, term, week, start_letter_map, lti_platform, lti_deployment, nrps_call, ags_call, user, user_identity, person, role_assignment, lead_faculty_mapping, enrollment, question_set, question, survey_window, response, answer, classification, summary, instructor_response, moderation_action, exclusion_log, comparison_set, grade_sync, threat_case, audit_log, notification`
+`institution, college, department, prefix, course, section, term, week, start_letter_map, lti_platform, lti_deployment, nrps_call, ags_call, user, user_identity, person, role_assignment, lead_faculty_mapping, enrollment, question_set, question, survey_window, response, answer, classification, weekly_summary, moderation_state, release_batch, release_batch_member, instructor_response, exclusion_log, comparison_set, grade_sync, threat_case, audit_log, notification`
 
 Selected constraints:
 
@@ -325,7 +325,9 @@ Selected constraints:
 - `lead_faculty_mapping` maps a person to the courses they lead (one lead per course); a course with no mapping resolves to its department chair.
 - `response` is unique per (student, section, week); `answer` rows link to versioned `question` rows; workload is stored as a decimal.
 - `grade_sync` is **append-only, at the grain of one row per post**: each row records the score as it was sent, the timestamp sent with it, the outcome, and the student and section it concerns, and a failed attempt is a row too. The latest row for a `(section_id, user_id)` pair is what identifies a retry and what the recompute compares against. The grain is append-only because the gradebook is a third-party system of record Pulse writes to and cannot reliably read back, and an already-posted score can be lowered later by an asynchronous re-classification (§3.3) — so a row updated in place would destroy the number a student was previously shown. The stored string matters as much as the number: an equal score timestamp is accepted by a platform as a retry of the same delivery, so a re-sent value has to be byte-identical to the one it retries, and a value the poster re-derives is not provably that. `ags_call` sits beside it at the grain of one HTTP call (§6.1), the AGS counterpart of the roster sync's `nrps_call`.
-- `classification` is append-only (re-runs create new rows) with prompt/model versioning; moderation state transitions (`flagged-collapsed` → `excluded`/`kept`, with undo) are recorded as `moderation_action` rows, both directions logged.
+- `classification` is append-only (re-runs create new rows) with prompt/model versioning; moderation state transitions (`flagged-collapsed` → `excluded`/`kept`, with undo) are recorded as `moderation_state` rows, both directions logged. That record is append-only too and the latest row for a comment governs, so a comment with no row is published — the initial state is an absence rather than a stored default, which is what keeps the trail intact through an undo in either direction.
+- `weekly_summary` holds one AI summary per section, course week and stream (§5.1), with the prompt version and model ID §7.4 requires of every model output; a summary states the response count it drew from, and zero is a count it may state.
+- The cumulative release §4 describes is stored, not recomputed: `release_batch` records the section, the term the threshold is counted over, and the time the batch was cut, and `release_batch_member` records which comments went out in it. The batch's cut time is the only release time in the schema — a comment carries none of its own, so that timing cannot identify an author.
 - `comparison_set` holds named leadership-defined sets; the default per section (same lead's courses, matched length+level, past-referencing) is computed, not stored.
 - `instructor_response` records the author and whether it was Lead-Faculty-on-behalf (§5.3), and whether it was AI-seeded.
 - `audit_log` is append-only and includes all re-identifications, exclusions and kept-decisions, policy changes, response-on-behalf actions, imports (with their dry-run diffs), and admin config edits.
@@ -408,8 +410,9 @@ pulse-surveys/
 │       │   ├── term.py             # term, week, start_letter_map, survey_window
 │       │   ├── identity.py         # user, user_identity, person, enrollment, role_assignment, lead_faculty_mapping
 │       │   ├── survey.py           # question_set, question, response, answer
-│       │   ├── ai.py               # classification, summary
-│       │   ├── loop.py             # instructor_response, moderation_action, exclusion_log
+│       │   ├── ai.py               # classification
+│       │   ├── report.py           # weekly_summary, moderation_state, release_batch, release_batch_member
+│       │   ├── loop.py             # instructor_response, exclusion_log
 │       │   ├── benchmark.py        # comparison_set
 │       │   ├── grades.py           # grade_sync
 │       │   ├── safety.py           # threat_case
