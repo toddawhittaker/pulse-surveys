@@ -26,10 +26,13 @@ import { copy } from './instructorReportCommentCopy';
  * about the class, and an instructor who is told the wrong one draws the wrong
  * conclusion about their students.
  *
- * **Suppression is fail-closed.** When the payload says the week is suppressed,
- * no card renders — whatever the comment array happens to hold. The array
- * should be empty (§4 hides the comments in the payload, not in the browser),
- * and if it ever is not, the concealment is still what happens.
+ * **Suppression is fail-closed, and it covers the summary's held note as well
+ * as the cards.** When the payload says the week is suppressed, no card renders
+ * — whatever the comment array happens to hold — and the summary goes out
+ * without its held note, which names a flag type §5.2 conceals below the
+ * threshold. The array should be empty and the note should be absent (§4 hides
+ * both in the payload, not in the browser); if either ever is not, the
+ * concealment is still what happens.
  *
  * **`smallN.withNotice` is not a style option.** SPEC §4.1 item 5 requires
  * confidentiality copy to appear exactly once per surface, and a suppressed
@@ -82,7 +85,14 @@ export function CommentGroup({
         )}
         text={summary.text}
         responseCount={summary.responseCount}
-        heldNote={summary.heldNote}
+        // The held note names a flag type, and §5.2 hides flagged comments from
+        // the instructor entirely below the threshold — "no chip, no count, no
+        // flag-type hint" — while §5.1 permits the note only above small-N. So
+        // a suppressed week's summary goes out without it. This is the same
+        // fail-closed move the card list makes below, applied to the one other
+        // thing on this panel that could carry a hint: it obeys the suppression
+        // the payload already declared, and decides no threshold of its own.
+        heldNote={smallN === undefined ? summary.heldNote : null}
       />
       {smallN === undefined ? (
         <GroupComments comments={comments} />

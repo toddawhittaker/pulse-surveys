@@ -17,6 +17,16 @@ afterEach(cleanup);
 
 const EMPTY_NOTICE = 'No comments this week.';
 const SMALL_N_TITLE = 'Comments are hidden this week';
+const HELD_NOTE = 'One comment is held for review (privacy).';
+
+/**
+ * A summary whose payload carries a held note — the sentence SPEC §5.1 allows a
+ * summary to add "above small-N", "with type only". No E4 path populates one
+ * (E6 writes the moderation states behind them), so it is written here rather
+ * than in the shared fixtures: what a week with a held note looks like is this
+ * pair of tests' concern.
+ */
+const SUMMARY_WITH_HELD_NOTE = { ...SMALL_N_SUMMARY, heldNote: 'privacy' };
 
 describe('CommentGroup', () => {
   it('leads with the stream summary and follows it with the comments, in the order given', () => {
@@ -74,6 +84,22 @@ describe('CommentGroup', () => {
       expect(screen.queryByText(SMALL_N_TITLE)).toBeNull();
       expect(screen.queryByText(/raw comments stay hidden/)).toBeNull();
     });
+  });
+
+  it('passes the summary’s held note through on a week above the threshold', () => {
+    render(
+      <CommentGroup
+        stream="instructor"
+        summary={SUMMARY_WITH_HELD_NOTE}
+        comments={INSTRUCTOR_COMMENTS}
+      />,
+    );
+
+    // The other direction of the assertion below, and the reason it means
+    // something: above small-N §5.1 lets the summary say a comment is held, so
+    // a group that never rendered the note would pass the concealment test for
+    // the wrong reason.
+    expect(screen.getByText(HELD_NOTE)).toBeTruthy();
   });
 
   describe('a week below the response threshold', () => {
@@ -145,6 +171,36 @@ describe('CommentGroup', () => {
       expect(
         attributes.filter((attribute) => attribute.includes(String(WITHHELD_COMMENT_COUNT))),
       ).toEqual([]);
+    });
+
+    it('withholds the summary’s held note, which names a flag type', () => {
+      const { container } = render(
+        <CommentGroup
+          stream="instructor"
+          summary={SUMMARY_WITH_HELD_NOTE}
+          comments={WITHHELD_COMMENTS}
+          smallN={{ threshold: SMALL_N_THRESHOLD, withNotice: true }}
+        />,
+      );
+
+      // §5.2's small-N concealment: below the threshold flagged comments are
+      // hidden from the instructor entirely — "no chip, no count, no flag-type
+      // hint" — and §5.1 permits the held note only above small-N. The note
+      // names the type, so a suppressed week rendering it would leak exactly
+      // what the concealment exists to withhold. Honouring the suppression the
+      // payload already declared is the same fail-closed move the cards make,
+      // not a threshold rule invented here.
+      //
+      // The summary and the notice are the positive controls: the group did
+      // render, so the note's absence is a fact about the concealment rather
+      // than about a group that rendered nothing.
+      expect(screen.getByText(SMALL_N_SUMMARY.text)).toBeTruthy();
+      expect(screen.getByRole('region', { name: SMALL_N_TITLE })).toBeTruthy();
+      expect(screen.queryByText(HELD_NOTE)).toBeNull();
+      expect(screen.queryByText(/held for review/)).toBeNull();
+      // The flag type itself, wherever it might have been written — the
+      // sentence is not the only shape a hint could take.
+      expect(container.innerHTML).not.toContain('privacy');
     });
 
     it('shows the summary without the notice when the surface states it elsewhere', () => {
