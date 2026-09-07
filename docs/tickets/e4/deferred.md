@@ -59,3 +59,36 @@ the first candidates).
 than were handed to the renderer — proven by a test that plants a comment
 containing a blank line and a block-label lookalike and asserts the model-facing
 boundary count equals the true count.
+
+## A comment's moderation state is resolved in two places once this wave lands
+
+**What is not enforced.** ADR 0145 makes `moderation_state` append-only with the
+latest row governing and the initial state the *absence* of a row, and names the
+consequence: "a reader of a comment's moderation state has to write a window
+function, or its equivalent … That is E4-04's and E6's to write once, in
+`app.services`, not per call site." E4-04 wrote it once, as
+`_reported_status_of` in `backend/app/services/report_comments.py`, and both of
+that module's reads go through it. E4-06's summary job gathers the same week's
+comments and resolves the same state for its own purposes, in a parallel branch
+built off the same head — so after this wave merges the resolution exists twice,
+in two modules neither of which imports the other. Two copies of "the latest row,
+or published" disagree the first time somebody changes one: an `ORDER BY` dropped
+on one side, or a default that is not published, is a defect visible in one
+surface and not the other, and §5.2's whole lifecycle is about which decision is
+current.
+
+**Why it was left.** Neither branch could import the other while both were being
+built. E4-04's copy is the one ADR 0145 asked for and it is shaped to be called
+from elsewhere — a helper over an answer key, returning a SQL expression rather
+than a row — but pointing E4-06 at it would have made that ticket unbuildable
+until this one landed, and pointing this one at E4-06 would have put SPEC §4's
+suppression behind a module about prompts. The duplication is the price of two
+parallel builds and is recorded rather than absorbed.
+
+**Owner:** E4-07, which is the first ticket downstream of both and reads what
+each produces.
+
+**Done when:** one helper in `app.services` resolves a comment's moderation state
+— the latest row by its decision instant, or the initial state where there is
+none — and both the comment read path and the summary job's gather call it, with
+no second copy of the ordering or of the default anywhere under `backend/app/`.

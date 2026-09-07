@@ -81,6 +81,16 @@ carries the same signal through its deltas.
 reader who also has the gradebook open, or changes what it suppresses.
 Nothing was owed inside E3.
 
+**E4's half is done, at E4-04, and it changed what it suppresses.** ADR 0153
+is the statement: a released comment carries no week attribution anywhere,
+because a comment labelled with its week, read beside the per-week completion
+ledger the gradebook carries, narrows the author to about one person in a
+four-response week. That record also names the residual it does not close — a
+term's first release can be attributable by elimination when only one held week
+exists — and says why that is accepted. **E6 still owes the same statement for
+its moderation views**, which put comments beside a roster with reviewer
+decisions attached, and this entry stays open against that epic alone.
+
 ## The roster sync's token-acquisition dial is unbounded
 
 E3-05's security round bounded the AGS client's token dial and named the
