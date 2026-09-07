@@ -400,6 +400,21 @@ shipped eyebrow as "WK 07 · TERM 11", which is the form FIX-01 replaced;
 `frontend/src/components/WeekEyebrow.tsx` is the starting point, not this
 paragraph.
 
+**Closed by E4-17.** Both halves of the done-when are built. `OpenSurvey`
+carries `length_weeks`, a required integer read in `app.services.survey_read`
+off the section the window belongs to — the column
+`app.services.section_codes` writes from the §2.2 section code, so the answer
+reads a stored fact and computes nothing. The eyebrow renders
+`COURSE WK 04 / 12, TERM WK 07`: the total fills a second hole in the governed
+copy entry, padded to two digits the way the week beside it is, and the quiet
+term-week label is unchanged. The read path's integration test asserts the count
+against the seeded start letter and the term's start-letter map rather than
+against `section_codes`, which is the currency this entry's done-when named, and
+a second test gives one reader two open sections of different lengths and
+requires each to be answered with its own. Frontend derivation stays refused by
+a standing sweep over `frontend/src/`, so the option this entry rejected cannot
+arrive later by accident.
+
 ## The self-hosted faces: an unrecognized licence and a second copy nobody fetches — E2-10
 
 Deferred by E2-10, whose
