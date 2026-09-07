@@ -48,10 +48,11 @@ from app.ai.contracts import CommentStream, WeeklySummaryRecord
 from app.ai.gateway import AIGateway, AIGatewayError
 from app.ai.tasks import summarize_stream
 from app.config import Settings
-from app.models.report import ModerationState, WeeklySummary
+from app.models.report import WeeklySummary
 from app.models.survey import REPORT_STREAMS, Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow
 from app.services import clock
+from app.services.report_comments import reported_status_of
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +65,6 @@ logger = logging.getLogger(__name__)
 STREAM_ASKED_ABOUT: dict[str, CommentStream] = {
     token: CommentStream[token] for token in REPORT_STREAMS
 }
-
-# The state a comment with no decision about it is in. E4-02 makes the moderation
-# record append-only with the latest row governing and **no default row at all**,
-# so absence is the initial state (ADR 0145) — and absence is the state every
-# comment in shipped E4 is in, since E6 writes the first `moderation_state` row
-# this system will ever hold.
-UNDECIDED_MODERATION_STATE = "PUBLISHED"
 
 # The two states a moderator is holding a comment in. SPEC §5.1: the summaries
 # "exclude flagged-held content". `FLAGGED_COLLAPSED` is where a comment waits for
@@ -334,17 +328,6 @@ def _comments_reaching_the_model(
     keeps submission times away from comments, and ordering a prompt by one would
     put the week's arrival sequence in front of a model for no reason.
     """
-    # The latest decision about this comment, or nothing where no moderator has
-    # touched it. `decided_at` is server-stamped so two decisions about one comment
-    # are orderable however they were written; the key breaks a tie between two
-    # rows written in the same statement.
-    latest_decision = (
-        select(ModerationState.state)
-        .where(ModerationState.answer_id == Answer.id)
-        .order_by(ModerationState.decided_at.desc(), ModerationState.id.desc())
-        .limit(1)
-        .scalar_subquery()
-    )
     return list(
         session.scalars(
             select(Answer.comment_text)
@@ -362,9 +345,11 @@ def _comments_reaching_the_model(
                 # of another kind, and a read is not the place to trust a write.
                 Answer.comment_text.is_not(None),
                 func.btrim(Answer.comment_text) != "",
-                func.coalesce(latest_decision, UNDECIDED_MODERATION_STATE).not_in(
-                    HELD_MODERATION_STATES
-                ),
+                # The one resolution of "which decision is current", called rather
+                # than written again: `app.services.report_comments` owns it
+                # (ADR 0145), and E4-07 closed the deferral that had this module
+                # carrying a second copy of the ordering and of the default.
+                reported_status_of(Answer.id).not_in(HELD_MODERATION_STATES),
             )
             .order_by(Answer.id)
         )

@@ -96,9 +96,10 @@ record append-only with the latest row governing and the initial state the
 *absence* of a row, and names the consequence: "a reader of a comment's
 moderation state has to write a window function, or its equivalent … That is
 E4-04's and E6's to write once, in `app.services`, not per call site."
-`_reported_status_of` below is that once. Both reads go through it, and it is
-shaped so E6 can call it. An inner join here would drop every comment nobody has
-decided about, which on today's database is all of them.
+`reported_status_of` below is that once. Both reads go through it, the summary
+gather in `app.services.reporting` calls it since E4-07, and it is shaped so E6
+can call it too. An inner join here would drop every comment nobody has decided
+about, which on today's database is all of them.
 
 **A week's comments are held only once the week has closed.** A window still
 taking responses has no final count, so a comment released from it may belong to
@@ -154,6 +155,7 @@ from sqlalchemy import (
     ColumnElement,
     Row,
     Select,
+    SQLColumnExpression,
     Subquery,
     column,
     distinct,
@@ -442,7 +444,7 @@ def cut_due_release_batches(session: Session) -> int:
     return cut
 
 
-def _reported_status_of(answer_id: ColumnElement[Any]) -> ColumnElement[str]:
+def reported_status_of(answer_id: SQLColumnExpression[Any]) -> ColumnElement[str]:
     """The status one comment carries: its latest moderation decision, or published.
 
     **ADR 0145's resolution, written once.** That record makes `moderation_state`
@@ -456,9 +458,22 @@ def _reported_status_of(answer_id: ColumnElement[Any]) -> ColumnElement[str]:
     deliberately published.
 
     Shaped as a helper over an answer key rather than inlined, so E6's moderation
-    surface calls this one resolution rather than writing a second — which is the
-    duplication `docs/tickets/e4/deferred.md` records against E4-07 for the
-    summary job's own copy.
+    surface calls this one resolution rather than writing a second.
+
+    **Public since E4-07, which is what closed that deferral.** E4-06's summary
+    gather in `app.services.reporting` had written the same resolution for itself
+    while both branches were being built in parallel; it now calls this, and
+    `tests/unit/test_the_moderation_state_ordering_has_one_home_under_backend_app.py`
+    holds the tree to exactly one module naming the relation in executable code.
+    Two copies of "the latest row, or published" disagree the first time somebody
+    changes one, and §5.2's whole lifecycle is about which decision is current.
+
+    **`SQLColumnExpression` rather than `ColumnElement`**, because the two callers
+    hold the answer key in the two forms SQLAlchemy has: this module reads it off a
+    Core view (`report_comment.answer_id`, a `Column`) and the summary gather off
+    the mapped class (`Answer.id`, an ORM attribute). Only the wider of the two
+    base classes covers both, and narrowing it again would push one caller into a
+    cast for no benefit.
     """
     latest = (
         select(ModerationState.state)
@@ -483,7 +498,7 @@ def _comments_with_their_status() -> Select[tuple[str, str, str]]:
     """
     return select(
         COMMENT_VIEW.c.comment_text,
-        _reported_status_of(COMMENT_VIEW.c.answer_id),
+        reported_status_of(COMMENT_VIEW.c.answer_id),
         COMMENT_VIEW.c.stream,
     )
 
