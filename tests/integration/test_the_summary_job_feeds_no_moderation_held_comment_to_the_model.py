@@ -27,10 +27,22 @@ anywhere" refuses it while passing every other assertion here. E4-02's record is
 append-only precisely so that history exists (ADR 0145), and reading only the
 latest row is the whole of what makes it usable.
 
+**And there is a third subject in here, which is not a filter but an alarm on the
+one this filter does not have.** SPEC §5.2's last bullet routes threat and
+self-harm classifications *around* the moderation lifecycle entirely — they go
+straight to Care (§6.2) and are "never shown to the instructor" — so a comment in
+that class never acquires a `moderation_state` row at all, and the filter above,
+which reads an absent row as published, would send it to the provider. That is not
+a defect today and cannot be: `ClassificationTask` has one member and nothing
+writes a harm verdict. It becomes one the moment E6's classifier does. The last
+test in this module is the tripwire that fires first, and its docstring carries the
+instruction.
+
 **Which failure a red here is.** Before E4-06 lands, expected red on
 `pytest.fail` naming `app.jobs.tasks` as a module with no
 `generate_weekly_summaries`; before E4-02, on the `moderation_state` table. Both
-are plain calls in a test body (`docs/MISTAKES.md` entry 44).
+are plain calls in a test body (`docs/MISTAKES.md` entry 44). The tripwire is
+green today and is required to be.
 """
 
 from datetime import timedelta
@@ -47,6 +59,15 @@ from fixtures.summary_job import (
 )
 
 pytestmark = pytest.mark.integration
+
+# The module the classification vocabulary lives in, and the one member it has
+# today. **Written out here rather than read off the enum** (`docs/MISTAKES.md`
+# entry 19): an expectation taken from the thing it checks agrees with it whatever
+# either says, and the whole point of the assertion below is to notice the enum
+# changing.
+CLASSIFICATION_MODELS_MODULE = "app.models.ai"
+CLASSIFICATION_TASK_ENUM = "ClassificationTask"
+CLASSIFICATION_TASKS_TODAY = frozenset({"COMMENT_VALIDITY"})
 
 # The five comments, by the nonce each carries. Tokens that appear nowhere else
 # in this repository, so finding one in a prompt is evidence and not a
@@ -227,4 +248,119 @@ def test_a_held_comment_does_not_change_the_response_count_the_summary_states(
         f"the week's responses; {responders - held_back} is the number of comments that fed the "
         "call, and a summary that states it tells the instructor their week was thinner than it "
         "was."
+    )
+
+
+def test_no_harm_classification_task_exists_yet_for_this_filter_to_have_missed(
+    summary_contracts: Any,
+) -> None:
+    """The tripwire on the exclusion this gather does **not** have. Green today, and required to be.
+
+    **What the gap is.** SPEC §5.2's last bullet: "Threat/self-harm classifications
+    bypass this flow entirely (§6.2) and are never shown to the instructor." Bypass
+    the flow means bypass the record: a comment routed to Care never acquires a
+    `moderation_state` row, because no moderator ever decided anything about it.
+    The filter this module's other tests measure reads an absent row as published —
+    ADR 0145's absence rule, and correct for every state that exists — so the day a
+    harm classifier writes its first verdict, the one class of comment §6.2 keeps
+    furthest from an instructor becomes the one class this walk sends to the
+    provider and paraphrases into instructor-visible prose. Generation is
+    once-and-done (E4's breakdown decision 2), so it stays there for the term.
+
+    **Why the answer is this test and not a filter.** There is no harm vocabulary
+    to filter on. `ClassificationTask` has exactly one member and nothing in the
+    system writes a harm verdict, so a predicate written now would be a guess at an
+    enum E6 has not designed — asserted against nothing, unfalsifiable, and
+    `docs/MISTAKES.md` entry 24's shape (a test asserting a property no
+    implementation can satisfy). What can be made mechanical is the *precondition*
+    of the deferral: while the vocabulary has one member the gap cannot fire, and
+    the moment it gains a second it can. So the deferral is recorded with an owner
+    in `docs/tickets/e4/deferred.md` (owner E6) and this is the alarm that goes off
+    before, rather than after, the thing it is about becomes reachable.
+
+    **This is a §6.2 confidentiality tripwire, not enum bookkeeping**, and the
+    difference is what the red means. A test that merely pinned an enum would be
+    satisfied by anyone editing the expected set to match reality — that is the
+    ordinary way an inventory test is resolved. Here that resolution is the defect:
+    widening `CLASSIFICATION_TASKS_TODAY` makes this green while leaving a
+    self-harm disclosure on the path to a model and to a paraphrase an instructor
+    reads. **When this reds, the repair is in the gather**, in
+    `docs/tickets/e4/deferred.md`'s terms, and it lands *before* the classifier
+    writes its first verdict — not in the same pull request as the classifier, and
+    not after it.
+
+    **The mutation it kills:** a second `ClassificationTask` member — a moderation
+    or harm task — added with no change to the summary gather. That is a diff no
+    other test in this repository has anything to say about: it adds a vocabulary,
+    breaks nothing, and silently widens what crosses to the provider.
+
+    **The near miss it must not be resolved by:** this test's own set widened to
+    match the enum. It is written as a literal at the top of this module rather
+    than derived from `ClassificationTask` for exactly that reason
+    (`docs/MISTAKES.md` entry 19) — a set read off the thing it checks agrees with
+    it whatever either says — and the failure message says so in as many words, so
+    the cheap fix cannot be made without reading why it is wrong.
+
+    **Not marked `invariant`, deliberately, and the reason is what the marker
+    means.** SPEC §4.1 is seven enumerated visibility rules and this is not one of
+    them; `tests/integration/test_application_role_privileges.py` draws the same
+    line for the same reason ("preconditions for the §4.1 invariants rather than
+    instances of them"). More decisively, every test in that pass asserts a
+    *denial* — a query refused, a column unreadable — and this asserts an
+    inventory. Marking it would put a claim in the isolated §4.1 pass that the §6.2
+    exclusion is enforced, and it is not: it is deferred, with this as the alarm.
+    What replaces the marker's protection is that the assertion is unconditional
+    and an equality — no skip path, no xfail, no floor — in a module CI runs on
+    every pull request.
+
+    **The token the schema stores is pinned elsewhere** and is not this test's
+    subject: `COMMENT_VALIDITY_TASK` in `tests/fixtures/grading.py` carries it,
+    held by ADR 0055's per-task `CHECK`. What is asserted here is how many kinds of
+    classification exist, which is the only fact the gap depends on.
+    """
+    module = summary_contracts.module(
+        CLASSIFICATION_MODELS_MODULE,
+        "SPEC §13 puts the classification rows there, and ADR 0055 gives them a `task` column "
+        "typed as an enum with one member today.",
+    )
+    tasks = summary_contracts.named(
+        module,
+        CLASSIFICATION_TASK_ENUM,
+        "ADR 0055 settles the classification vocabulary as an enum of tasks, with the verdict set "
+        "closed per task by a check constraint.",
+    )
+
+    try:
+        members = frozenset(member.name for member in tasks)
+    except TypeError:  # pragma: no cover - a red, not a branch
+        pytest.fail(
+            f"`{CLASSIFICATION_MODELS_MODULE}.{CLASSIFICATION_TASK_ENUM}` is {tasks!r}, which does "
+            "not enumerate its members. ADR 0055 settles the classification vocabulary as an enum; "
+            "if it has become something else, this tripwire has to be rewritten around whatever "
+            "now answers 'how many kinds of classification are there' — not deleted, because the "
+            "§6.2 gap it watches is unchanged."
+        )
+    assert members, (
+        f"`{CLASSIFICATION_MODELS_MODULE}.{CLASSIFICATION_TASK_ENUM}` has no members at all, so "
+        "the equality below holds of an empty enum and this tripwire is asserting nothing. "
+        "Something is being read that is not the classification vocabulary."
+    )
+    assert members == CLASSIFICATION_TASKS_TODAY, (
+        f"`{CLASSIFICATION_TASK_ENUM}` offers {sorted(members)} and this tripwire was written when "
+        f"it offered {sorted(CLASSIFICATION_TASKS_TODAY)}.\n\n"
+        "**Do not resolve this by editing the set above.** That is the near miss this test exists "
+        "to refuse. A second classification task means a moderation or harm classifier is "
+        "arriving, and SPEC §5.2's last bullet routes threat and self-harm classifications around "
+        "the moderation lifecycle entirely — they reach Care (§6.2) and never acquire a "
+        "`moderation_state` row. This walk's gather reads an absent row as published, so from the "
+        "moment that classifier writes its first verdict the comments §6.2 keeps furthest from an "
+        "instructor are the ones this job sends to a provider and paraphrases into a summary the "
+        "instructor reads — and nothing regenerates a summary (E4's breakdown decision 2), so it "
+        "stays there for the term.\n\n"
+        "**The repair is in the gather, and it lands before the classifier does.** "
+        "`docs/tickets/e4/deferred.md` carries the entry with its owner (E6) and its done-when: "
+        "the summary gather excludes comments whose current classification is in the threat or "
+        "self-harm set, asserted with a planted verdict of that class, before any writer of one "
+        "exists. Widening the set here makes this test green and changes nothing about what "
+        "crosses to the provider."
     )
