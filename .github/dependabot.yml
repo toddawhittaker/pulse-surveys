@@ -38,6 +38,15 @@ updates:
       # install on every gate. What this gives up: nothing. When pydantic
       # moves, regenerating the lockfile brings the matching core with it.
       - dependency-name: pydantic-core
+      # anyio 4.15.0 moved BlockingPortal out of anyio.abc and now warns on the
+      # old path. The newest starlette (1.6.0, pinned here) still imports it
+      # from there, and the suite treats DeprecationWarning as an error, so an
+      # anyio bump reds every test-client fixture (#200) while production
+      # behavior is unchanged. Held until a starlette release imports from
+      # anyio.from_thread; the PR that bumps starlette past that release
+      # removes this entry in the same change.
+      - dependency-name: anyio
+        versions: ['>=4.15.0']
 
   # ---- Node, at the repository root ---------------------------------------
   # `/`, not `/frontend`. This entry watched a directory that has never existed
