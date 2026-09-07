@@ -83,8 +83,12 @@ the service.
 **`test_identity_grants.py` has moved onto this interface, and where the line
 between the two modules runs is worth knowing before adding a test to either.**
 That module's helper became `the_care_door`, and the count of halves moved out of
-it into `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door` —
-a count is a fact about a revision, and two tests there inspect a downgraded one.
+it into `test_pulse_care_may_execute_exactly_the_functions_the_care_door_is_made_of`
+— a count is a fact about a revision, and two tests there inspect a downgraded
+one. That test asserts the door's names rather than its size since E4-01, which
+added a third function to it (`reveal_subject_for_answer`); **the two this module
+is about are unchanged**, in signature and in behaviour, because E4-01's ADR
+keeps the database function's own contract for E10 with the case model.
 Its four tests that go through the door now take a `pulse_care` login and
 record, commit and reveal, because none of them could be driven inside
 `db_session`; and `test_the_reveal_writes_its_audit_row_in_the_callers_own_

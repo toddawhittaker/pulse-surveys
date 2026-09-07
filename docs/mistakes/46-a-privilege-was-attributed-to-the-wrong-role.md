@@ -72,3 +72,25 @@ the privilege at all.** Where a ticket's behaviour depends on a grant, at least
 one test has to reach the code through the connection production uses; the
 grant-shaped failure is invisible to every other test in the module and will pass
 review as a green suite.
+
+## A catch: E4-03's report views are read once as the runtime role (2026-09-06)
+
+E4-03's three aggregate views are read by `pulse_app` and by nothing else, and
+every natural test of them reads through `db_session` — the migrating identity —
+because that is the only connection that can see rows inside a transaction the
+fixture rolls back. Written that way the whole suite would have proved the
+arithmetic and nothing about the grant, and two failures would have shipped
+green: a `GRANT SELECT` naming the wrong view, and a view left owned by a role
+that cannot read `answer` or `response` underneath, which refuses at execution
+time however correct the grant on the view is.
+
+So `tests/integration/test_the_report_views_are_readable_by_the_runtime_role_and_
+written_by_nobody.py` opens `application_engine` for all three of its tests,
+asserts `current_user` first as the control that the connection really is the
+restricted one, and one of them commits a world through `committed_rows` and
+compares the rows the application connection reads against the rows the migrating
+one does.
+
+Counted as a catch: the rule named a test that would otherwise not have been
+written, and it is the only test in the ticket that can see either of those two
+failures.

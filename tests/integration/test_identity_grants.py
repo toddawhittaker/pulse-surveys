@@ -9,15 +9,20 @@ the mechanism: three roles, no grant of any kind on `user_identity` for either
 runtime role, and a `SECURITY DEFINER` door that returns identity and leaves a
 record of having done so.
 
-**That door is two functions, not one, since E0-26 item 1.** E0-10 built one
+**That door is three functions, not one, and it grew twice.** E0-10 built one
 function that returned identity and wrote the audit row in the same transaction —
 the caller's — and its review measured what that leaves open: `BEGIN; SELECT …;
 ROLLBACK;` returned the name and left `audit_log` empty, because Postgres has
 already streamed the rows to the client by the time the caller decides. So the
 door became `record_identity_reveal`, which writes the record and returns its id
 and no identity on any path, and `reveal_student_identity`, which returns identity
-only against a record the caller has already committed. Where this file says "the
-door", it means both.
+only against a record the caller has already committed. **E4-01 added the third**,
+`reveal_subject_for_answer`, which answers the `user` row id behind one comment or
+NULL: the reveal derives its subject from the record Care is acting on instead of
+taking a `user_id` from its caller, because that id is exactly what an
+instructor-scoped view hands out (ADR 0144). Where this file says "the door", it
+means all three, and `THE_CARE_DOOR` below is the list with the sentence that
+admits each.
 
 **A fourth role exists and is not a runtime one**: the door's owner. A
 `SECURITY DEFINER` function executes as whoever owns it, so the owner *is* the
@@ -26,16 +31,16 @@ makes the door a superuser one — measured on this stack, such a function read
 `pg_catalog.pg_authid` for a `pulse_care` session that was refused that table
 directly one statement later. The two tests at the end of the Care section below
 hold the repair: no `SECURITY DEFINER` function in `public` is owned by a
-superuser, and the owner's grants are exactly the four its job needs. Neither
-names the role or the function, because E10 replaces the door and a rule
-spelled with its name would retire with it.
+superuser, and the owner's grants are the four its job needs plus the bounded
+pair E4-01's derivation reads. Neither names the role or the function, because
+E10 replaces the door and a rule spelled with its name would retire with it.
 
 **Since E1-12 there is a fifth role and a second kind of definer function**, and
 the two are not the same kind of thing. `pulse_resolve_definer` (ADR 0094) owns
 point-resolution functions that turn a subject the caller already holds into a row
 id: five column reads behind them, no identity column among those and no
 `user_identity` read at all. `pulse_app` may execute them and may execute the Care
-door's halves *not at all*, which is now two assertions rather than one — a door
+door's functions *not at all*, which is now two assertions rather than one — a door
 (`test_the_application_role_may_not_execute_the_reveal_function`) and an inventory
 (`test_the_application_role_may_execute_only_the_point_resolvers`). The second
 definer's grants are pinned exactly, like the first's, and for a sharper reason:
@@ -104,12 +109,15 @@ because its runtime interface is not named yet.
 reveal returns nothing until a separately committed record exists, so
 `record_identity_reveal` writes the record and the caller commits it before
 `reveal_student_identity` will spend it. Two consequences run through this file.
-The door is two functions rather than one, which
-`test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door` states — and
-states *alone*, because a count is a fact about a revision and the two downgrade
-tests inspect an earlier one, where E0-10's single three-argument door is right.
-`the_care_door` therefore asserts that the door exists and never how many halves it
-has. And a call through the door cannot be made inside `db_session`, whose
+The door is more than one function, which
+`test_pulse_care_may_execute_exactly_the_functions_the_care_door_is_made_of` states — and
+states *alone*, because what the door is made of is a fact about a revision and
+the two downgrade tests inspect an earlier one, where E0-10's single
+three-argument door is right. `the_care_door` therefore asserts that the door
+exists and never what it is made of. **E4-01 is the second ticket to move that
+number**, which is why the test now asserts the door's *names* rather than its
+size: three is satisfied by any third function, and the point of the rule is
+which third one was argued for. And a call through the door cannot be made inside `db_session`, whose
 transaction is never committed — so the four tests that go through it take a real
 `pulse_care` login from `care_connections` and seed through `committed_rows`,
 while every test that only reads the catalog still uses `db_session`.
@@ -255,6 +263,42 @@ REVEAL_DEFINER_PRIVILEGES = frozenset(
     }
 )
 
+# **E4-01's two, and they are a ceiling rather than a floor** — the one entry in
+# this file's inventories that is permitted without being required, which is
+# stated here because every other set in this file is an equality and a reader is
+# entitled to ask why this one is not.
+#
+# `reveal_subject_for_answer` walks `answer.response_id` to `response.user_id` so
+# that the reveal derives its subject from the comment Care is acting on instead
+# of taking a `user_id` from its caller (E4-01, ADR 0144). Its owner therefore has
+# to read those two tables. **The grain is the implementer's**: table-level
+# `SELECT` and a column-scoped `SELECT (id, response_id)` / `SELECT (id, user_id)`
+# both do the job, the ticket settles the function and not the grant, and
+# `has_table_privilege` reports the first and is blind to the second — so an
+# equality here would not test the choice, it would *make* it, and the repair
+# would be on the other side of the test wall from the ticket that provoked it
+# (`docs/MISTAKES.md` entry 22).
+#
+# So these two are admitted to the ceiling and left out of the floor: a fifth
+# *relation*, or any verb but `SELECT` on these two, is still caught exactly as
+# before, and a door that never received the grant fails behaviourally in
+# `tests/integration/test_the_reveal_derives_its_subject.py` rather than silently
+# here.
+#
+# **What this widens, stated rather than hidden.** At table grain the Care door's
+# owner can read every comment's text. That is not a §4.1 disclosure — §6.2 gives
+# Care the comment content, which is the queue's whole subject — and it reaches
+# nobody else: the owner is NOLOGIN, `pulse_care` holds no privilege on either
+# table, and what the door returns is fixed by the three function bodies. The
+# narrower grain is still the better one, and the implementer's ADR is where that
+# choice is argued.
+REVEAL_DEFINER_DERIVATION_READS = frozenset(
+    {
+        ("answer", "SELECT"),
+        ("response", "SELECT"),
+    }
+)
+
 # ---------------------------------------------------------------------------
 # E1-12 — the second definer, and the first `EXECUTE` the application role holds.
 # ---------------------------------------------------------------------------
@@ -345,7 +389,7 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 #     exactly five), and enumeration of subjects the caller holds no row id for is
 #     still refused. ADR 0139.
 #
-# What is *not* here is the point of the list: the two halves of the Care door.
+# What is *not* here is the point of the list: the functions of the Care door.
 # `pulse_app` is refused those by name in an `invariant`-marked test below, and a
 # **seventh** entry appearing here is a new door into identity that some later
 # ticket opened without arguing for it. The number moves only in a change that
@@ -532,7 +576,8 @@ TABLE_COLUMNS = """
 # relation is a failed assertion naming it rather than an error inside the query.
 RESOLVE_BOTH = text("SELECT to_regclass(:bare)::oid, to_regclass(:qualified)::oid")
 
-# The Care door, and the two halves E0-26 item 1 split it into. **Spelled here,
+# The Care door: the two halves E0-26 item 1 split it into, and the subject
+# resolver E4-01 added beside them. **Spelled here,
 # where E0-10 refused to spell it**, and the change of stance is worth stating.
 # E0-10 named neither the function nor its signature, so this file discovered both
 # and bound arguments by matching parameter names against a table of fragments —
@@ -559,7 +604,40 @@ RESOLVE_BOTH = text("SELECT to_regclass(:bare)::oid, to_regclass(:qualified)::oi
 # refusal follows it rather than retiring with these two constants.
 RECORD_FUNCTION = "record_identity_reveal"
 REVEAL_FUNCTION = "reveal_student_identity"
-CARE_DOOR_HALVES = 2
+
+# **E4-01 adds a third, and the count moves for the third time.** One in E0-10,
+# two when E0-26 item 1 split the record from the read, three now — and the rule
+# E0-10 wrote the number for is unchanged: "every additional door is a way to
+# obtain a name without leaving a record". `reveal_subject_for_answer(answer_id
+# uuid) RETURNS uuid` is not one, and the argument is the same one
+# `record_identity_reveal` already carries: it answers a `user` row id or NULL,
+# reads no identity column, and cannot return a name on any path. What it exists
+# for is E4-01's guard — the reveal derives its subject from the comment Care is
+# acting on rather than taking a `user_id` from whoever called it, because that
+# id is exactly what `section_roster` hands an instructor-scoped caller
+# (`docs/tickets/e1/carried-from-e0.md`, "The reveal's actor check and an
+# instructor's read scope compose").
+#
+# **Why a function rather than a grant**, ruled at build time and recorded in ADR
+# 0144: `pulse_care` reads no base table but `role_assignment` and no view at
+# all, and a column-scoped `SELECT` on `answer` and `response` would hand the
+# role a standing walk from any answer id to any user id *outside* the door. A
+# definer keeps the Care connection's own read surface at zero, which is what
+# every refusal in this file is written against, and it is the pattern the tree
+# already uses — E3-06's `resolve_subject_for_user` is the recent precedent.
+#
+# **It is owned by the same role as the other two**, which is not a preference:
+# `the_reveal_definer` below asserts the door has exactly one owner, because "two
+# owners are two privilege surfaces, only one of which any of those rules
+# measured". A new NOLOGIN role owning this one would fail there, and would also
+# be "a role to audit rather than a boundary" — E3-06's own reason for reusing an
+# owner rather than adding a fifth. What that owner gains for it is bounded in
+# `REVEAL_DEFINER_DERIVATION_READS` above.
+SUBJECT_RESOLVER_FUNCTION = "reveal_subject_for_answer"
+
+# The whole door, by name, at head. A count alone would be satisfied by any third
+# function; the set is what says which third one was argued for.
+THE_CARE_DOOR = (RECORD_FUNCTION, REVEAL_FUNCTION, SUBJECT_RESOLVER_FUNCTION)
 
 # The `EXECUTE` inventory for the application role is
 # `SANCTIONED_APPLICATION_EXECUTE` at the head of this file, and it is one list.
@@ -689,19 +767,21 @@ def security_definer_functions(session: Any, role: str) -> list[Any]:
 def the_care_door(session: Any) -> list[Any]:
     """Every `SECURITY DEFINER` function `pulse_care` may execute, whatever revision this is.
 
-    **It asserts that the door exists and deliberately not how many halves it has**,
+    **It asserts that the door exists and deliberately not what it is made of**,
     and that division is the repair for a real failure rather than a preference.
     An earlier version of this helper asserted the count — one before E0-26 item 1,
-    `CARE_DOOR_HALVES` after it — and both of the downgrade tests below broke on it:
+    two after it — and both of the downgrade tests below broke on it:
     they run against the schema *at* the identity revision, where E0-10's single
     three-argument door is exactly right, and were being told by a helper that
     describes head. A count is a fact about a revision, and only the caller knows
     which revision it is looking at.
 
-    So the count lives with the caller that knows: at head it is
-    `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door`, which
-    states E0-26's settled number once and carries the reason for it; the two
-    downgrade tests state none, because neither is about the door's shape.
+    So the inventory lives with the caller that knows: at head it is
+    `test_pulse_care_may_execute_exactly_the_functions_the_care_door_is_made_of`,
+    which states the door's names once and carries the reason for each; one
+    downgrade test states the count *at its own revision*, pinned beside that
+    revision rather than read off head's — E4-01 is the second ticket to move the
+    number, and the first one's lesson had already been paid for here.
 
     **What stays here is non-emptiness**, which is true at every revision that has a
     Care door at all and is what the callers below need before they can ask
@@ -850,9 +930,14 @@ def seed_identity(committed_rows: Any) -> dict[str, Any]:
     subject because E0-10 spelled no signature and the reveal might have taken
     either. `record_identity_reveal(in_actor_person_id uuid, in_subject_user_id
     uuid, in_case_id uuid)` takes the key, so `LMS_USER_ID_COLUMNS` has gone from
-    this module with the argument-guessing machinery that needed it. The copy in
-    `tests/integration/test_care_service_reveal.py` stays: the *service*'s
-    `reveal_identity` keeps its own signature, which E0-26 does not change.
+    this module with the argument-guessing machinery that needed it. **The copy in
+    `tests/integration/test_care_service_reveal.py` has gone too, in E4-01**: that
+    ticket settles the *service*'s signature — `reveal_identity(*,
+    actor_person_id, answer_id, case_id=None)`, with the subject derived from the
+    comment rather than named by the caller — so the guessing machinery there has
+    nothing left to guess at. **The database function's signature is unchanged by
+    E4-01**, deliberately: its narrowing belongs to E10 with the case model, and
+    this module still calls it exactly as E0-26 settled it.
 
     **The name is stated here since E1-11, and was borrowed before it.** The
     non-vacuity guard below asks the seeded row to carry a recognisable value, and
@@ -1233,7 +1318,8 @@ def test_the_application_role_may_not_execute_the_reveal_function(db_session: An
     functions = security_definer_functions(db_session, APPLICATION_ROLE)
     assert functions, (
         "This project defines no `SECURITY DEFINER` function in `public`, so this test swept "
-        "nothing. E0-10 ships the Care door and E0-26 item 1 made it two functions; "
+        "nothing. E0-10 ships the Care door, E0-26 item 1 made it two functions and E4-01 a "
+        "third; "
         "`test_the_care_roles_grants_are_enough_to_complete_a_reveal` diagnoses "
         "its absence."
     )
@@ -1703,7 +1789,7 @@ def test_neither_runtime_role_holds_any_privilege_on_user_identity(db_session: A
     `test_the_application_role_may_execute_only_the_point_resolvers` says which
     six `pulse_app` may call, `test_the_application_role_may_not_execute_the_
     reveal_function` says it may not open the Care door, and
-    `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door` says
+    `test_pulse_care_may_execute_exactly_the_functions_the_care_door_is_made_of` says
     `pulse_care` may call exactly those two. Asked about a role a runtime role can
     *become*, the same mechanism is dangerous and is not filtered.
 
@@ -1766,7 +1852,9 @@ def test_neither_runtime_role_holds_any_privilege_on_user_identity(db_session: A
     )
 
 
-def test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door(db_session: Any) -> None:
+def test_pulse_care_may_execute_exactly_the_functions_the_care_door_is_made_of(
+    db_session: Any,
+) -> None:
     """E0-10's central criterion, at the count E0-26 item 1 settled it to.
 
     "`pulse_care` gets `EXECUTE` on a **single** `SECURITY DEFINER` function that
@@ -1780,8 +1868,21 @@ def test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door(db_sessi
     record and the caller commits it; `reveal_student_identity` returns identity
     only against a record that is already committed. The first half returns a `uuid`
     and no identity on any path, so it is not a second way to obtain a name — it is
-    the turnstile in front of the one way, and two is the settled count. A **third**
-    is the thing E0-10's sentence was about.
+    the turnstile in front of the one way.
+
+    **E4-01 adds `reveal_subject_for_answer` and the assertion changed shape with
+    it.** This test used to say "two", and a count is exactly the wrong instrument
+    once the number can legitimately move: three is satisfied by *any* third
+    function, including the convenience wrapper this test was written to catch. So
+    the assertion is now the set of names — `THE_CARE_DOOR` at the head of this
+    file, where each entry carries the sentence that admits it — and the count is
+    a consequence of it rather than the thing asserted. The E0-10 rule is
+    unchanged and is what the third entry had to be argued against: it answers a
+    `user` row id or NULL for one comment id, reads no identity column, and cannot
+    return a name on any path, so it is not another way to obtain one. **The test
+    was renamed for the same reason it was renamed in E0-26** — a name that
+    asserts a count asserts it wrongly the moment the count moves, and the old
+    name said "two halves".
 
     **This was an assertion inside `the_care_door` until the two downgrade tests
     ran it against E0-10's schema and it reported a correct database as wrong.** A
@@ -1798,25 +1899,32 @@ def test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door(db_sessi
     the doors being the only doors rather than an instance of §4.1 itself. "How many
     doors are there" is an inventory. The doors themselves are marked next door.
 
-    **The mutation it exists to survive**: a later migration adding a third
+    **The mutation it exists to survive**: a later migration adding a **fourth**
     `SECURITY DEFINER` function and granting `EXECUTE` on it to `pulse_care` — a
     convenience wrapper, a bulk variant, an E10 replacement landed beside the old
-    one rather than instead of it. Nothing else in this file counts them: the
-    grantee sweeps ask *who* holds something, never *how many things*.
+    ones rather than instead of them. Also the mutation that would have slipped
+    past the old count: a third function that is *not* the one E4-01 argued for,
+    which "three" accepts and a set of names does not. Nothing else in this file
+    looks at this: the grantee sweeps ask *who* holds something, never *which
+    things*.
     """
     door = the_care_door(db_session)
+    opened = sorted(row["name"] for row in door)
 
-    assert len(door) == CARE_DOOR_HALVES, (
-        f"`{CARE_ROLE}` may execute {len(door)} `SECURITY DEFINER` functions: "
-        f"{[row['signature'] for row in door]}. E0-26 item 1 settles the count at "
-        f"{CARE_DOOR_HALVES} — `{RECORD_FUNCTION}`, which writes the record and returns its id "
-        f"and no identity on any path, and `{REVEAL_FUNCTION}`, which returns identity only "
-        "against a record the caller has already committed.\n\n"
-        "**More than two is the case E0-10's 'single' was written about**: every additional door "
-        "is a way to obtain a name without leaving a record, and the guarantee is that there is "
-        "exactly one way in. Fewer than two means one half of the split is missing, and "
-        "`tests/integration/test_the_reveal_commits_its_record.py` diagnoses which — its "
-        "`reveal_interface` fixture fails naming the absent function."
+    assert opened == sorted(THE_CARE_DOOR), (
+        f"`{CARE_ROLE}` may execute {opened}; the door is {sorted(THE_CARE_DOOR)}. In full: "
+        f"{[row['signature'] for row in door]}.\n\n"
+        f"`{RECORD_FUNCTION}` writes the record and returns its id and no identity on any path. "
+        f"`{REVEAL_FUNCTION}` returns identity, and only against a record the caller has already "
+        f"committed. `{SUBJECT_RESOLVER_FUNCTION}` answers the `user` row id behind one comment, "
+        "or NULL, so that the reveal derives its subject from the record Care is acting on rather "
+        "than from a `user_id` its caller supplied (E4-01, ADR 0144).\n\n"
+        "**Anything beyond those three is the case E0-10's 'single' was written about**: every "
+        "additional door is a way to obtain a name without leaving a record. **A name missing** "
+        "means a piece of the door is absent, and "
+        "`tests/integration/test_the_reveal_commits_its_record.py` and "
+        "`tests/integration/test_the_reveal_derives_its_subject.py` diagnose which — each fails "
+        "naming the function or the symbol it could not find."
     )
 
 
@@ -1869,7 +1977,7 @@ def test_the_care_roles_grants_are_enough_to_complete_a_reveal(
     stays green. It was renamed when E0-26 item 1 split the door in two: the old
     name ended "…through_the_one_function_it_may_execute", which asserted the count
     in its title and asserted it wrongly the moment there were two. The count is now
-    `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door`'s alone.
+    `test_pulse_care_may_execute_exactly_the_functions_the_care_door_is_made_of`'s alone.
 
     **The behavioural half is E0-26's**, in
     `tests/integration/test_the_reveal_commits_its_record.py`: what the reveal does
@@ -2123,12 +2231,20 @@ def test_a_shadowed_table_does_not_change_what_the_care_door_returns(
     turning this test green against the defect (`docs/MISTAKES.md` entry 3).
 
     **E0-26 item 1 doubled what this has to cover, and it is one call rather than
-    two.** The door is now `record_identity_reveal` and `reveal_student_identity`,
+    two.** The door is `record_identity_reveal` and `reveal_student_identity`,
     and both read `role_assignment`, so the shadow set is the union of what both
     bodies name. Driving the whole door once with the shadows standing exercises
     both halves: the record call's assignment check meets an empty
     `role_assignment` if it binds late, and the reveal meets an empty
     `user_identity` and an empty `audit_log` if it does.
+
+    **E4-01's third function is shadowed too, and by discovery rather than by
+    being named here.** The shadow set is whatever the door's bodies name, so
+    `reveal_subject_for_answer` brings `answer` and `response` into it as soon as
+    it exists. What this test drives is still the record-and-reveal pair, so the
+    new shadows are stood up and not spent: that function's own late-binding case
+    is worth a test and it is not this one's, which is stated here rather than
+    left for a reader to assume covered (`docs/MISTAKES.md` entry 14).
 
     **`audit_log` in the shadow set is why `user_identity` has to be in it too.**
     A vulnerable record call writes its row into `pg_temp.audit_log` and a
@@ -2166,7 +2282,7 @@ def test_a_shadowed_table_does_not_change_what_the_care_door_returns(
     tables = [row[0] for row in db_session.execute(text(PUBLIC_TABLES))]
     named = [table for table in tables if re.search(rf"\b{re.escape(table)}\b", bodies)]
     assert named, (
-        f"The two halves of the door name none of the {len(tables)} tables in `public` anywhere in "
+        f"The functions of the door name none of the {len(tables)} tables in `public` anywhere in "
         "their bodies, so there is nothing to shadow and this test would report success having "
         "attempted nothing. A door that reads no table cannot be returning identity from one."
     )
@@ -2274,8 +2390,9 @@ def test_no_security_definer_function_is_owned_by_a_superuser(db_session: Any) -
     functions = security_definer_functions(db_session, CARE_ROLE)
     assert functions, (
         "This project defines no `SECURITY DEFINER` function in `public`, so this test swept "
-        "nothing and would report success. E0-10 ships the Care door and E0-26 item 1 made it two "
-        "functions; `test_the_care_roles_grants_are_enough_to_complete_a_reveal` diagnoses "
+        "nothing and would report success. E0-10 ships the Care door, E0-26 item 1 made it two "
+        "functions and E4-01 a third; "
+        "`test_the_care_roles_grants_are_enough_to_complete_a_reveal` diagnoses "
         "its absence."
     )
 
@@ -2320,7 +2437,7 @@ def test_no_security_definer_function_is_owned_by_a_superuser(db_session: Any) -
 def test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs(
     db_session: Any,
 ) -> None:
-    """Exactly four, because a fifth is what there is to catch.
+    """Exactly four required, two more admitted, and a seventh relation is what there is to catch.
 
     The owner exists to be small. Once it is not a superuser
     (`test_no_security_definer_function_is_owned_by_a_superuser`), what the door
@@ -2349,6 +2466,19 @@ def test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs(
     assertion stays an equality, because the equality is the control: a fifth entry
     arriving to make some later migration convenient is what this exists to catch,
     and `>=` would wave it through.
+
+    **E4-01 is the first entry that is not an equality, and the reason is written
+    beside `REVEAL_DEFINER_DERIVATION_READS`.** The third function of the door
+    reads `answer` and `response` to derive a comment's author; the ticket settles
+    the *function* and leaves the grant's grain to the implementer, and
+    `has_table_privilege` reports a table-level grant while being blind to a
+    column-scoped one. So those two are admitted to the ceiling and left out of
+    the floor: demanding them would force table grain, and forbidding them would
+    forbid it, and neither is this test's decision to make. Everything the
+    equality was worth is intact — a *seventh* relation, or any verb but `SELECT`
+    on those two, still fails here — and the door failing to receive its grant at
+    all fails behaviourally in
+    `tests/integration/test_the_reveal_derives_its_subject.py` instead.
 
     **What this cannot see, stated rather than implied** (`docs/MISTAKES.md` entry
     14): a change *within* those four. The door may come to read a different
@@ -2381,14 +2511,13 @@ def test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs(
         ).scalar_one()
     }
 
-    unexpected = sorted(
-        f"{relation}:{privilege}" for relation, privilege in held - REVEAL_DEFINER_PRIVILEGES
-    )
+    permitted = REVEAL_DEFINER_PRIVILEGES | REVEAL_DEFINER_DERIVATION_READS
+    unexpected = sorted(f"{relation}:{privilege}" for relation, privilege in held - permitted)
     missing = sorted(
         f"{relation}:{privilege}" for relation, privilege in REVEAL_DEFINER_PRIVILEGES - held
     )
     assert not unexpected and not missing, (
-        f"`{owner}` owns both halves of the Care door, so what it holds is what that door can "
+        f"`{owner}` owns every function of the Care door, so what it holds is what that door can "
         f"reach. Beyond what its job needs: {unexpected}. Missing from what its job needs: "
         f"{missing}.\n\n"
         "The first list is the one to read first. A `SECURITY DEFINER` function spends its "
@@ -2579,7 +2708,7 @@ UNDEFINED_OBJECT = "42704"
 # below broke on it the day E0-26 landed: they run against the schema *at* the
 # identity revision, where E0-10's single three-argument door is exactly right, and
 # a helper describing head told them a correct database was wrong. The count now
-# lives in `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door`,
+# lives in `test_pulse_care_may_execute_exactly_the_functions_the_care_door_is_made_of`,
 # which knows which revision it is looking at. **Anything a helper asserts, it
 # asserts down here too** — so a helper used by a downgrade test may only state
 # what is true at every revision it will meet.
@@ -2602,6 +2731,18 @@ BELOW_THE_IDENTITY_REVISION = f"{IDENTITY_REVISION}-1"
 # PR #53, and the test below is the answer.
 THE_COMMITTED_RECORD_REVISION = "b336333a2805"
 BELOW_THE_COMMITTED_RECORD_REVISION = f"{THE_COMMITTED_RECORD_REVISION}-1"
+
+# How many functions the Care door has **at that revision**, which is two and is
+# not the same question as how many it has at head. The test below used to read
+# this off the head constant — `CARE_DOOR_HALVES`, which E4-01 replaced with the
+# named inventory `THE_CARE_DOOR` — and the two agreed for as long
+# as E0-26 was the last word on the door — E4-01 adds a third function at a later
+# revision, so a test standing here and reading head's number would have gone red
+# against a perfectly correct database. That is the failure `the_care_door`'s own
+# docstring describes ("a count is a fact about a revision") arriving a second
+# time, so the number a downgrade test needs is pinned beside the revision it is
+# a fact about.
+THE_DOOR_AT_THE_COMMITTED_RECORD_REVISION = 2
 
 # Which roles hold what on the `public` schema, and on the database, as the
 # catalog records it. `aclexplode` is what makes this readable without pinning an
@@ -4190,7 +4331,7 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     axis — who is named in an ACL anywhere — and the count and contents are
     `test_the_application_role_may_execute_only_the_point_resolvers`'s, one
     equality in one place. E0-10's count for `pulse_care` is likewise
-    `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door`'s.
+    `test_pulse_care_may_execute_exactly_the_functions_the_care_door_is_made_of`'s.
 
     **`PUBLIC` is in both sweeps and is the sharpest case, and it means different
     things on the two.** On a relation Postgres grants nothing to `PUBLIC` by
@@ -4280,8 +4421,9 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
         "the migration identity ADR 0009 "
         f"sanctions. On a `SECURITY DEFINER` function it is `{CARE_ROLE}`, the owner, and "
         f"`{APPLICATION_ROLE}` on the functions `SANCTIONED_APPLICATION_EXECUTE` names, and "
-        "nothing else: E0-10 gives the Care role `EXECUTE` on the door and E0-26 item 1 made that "
-        f"door two halves, and `{APPLICATION_ROLE}` is refused that door in an `invariant`-marked "
+        "nothing else: E0-10 gives the Care role `EXECUTE` on the door, E0-26 item 1 made that "
+        "door two functions and E4-01 made it three, and "
+        f"`{APPLICATION_ROLE}` is refused that door in an `invariant`-marked "
         "test above, with the six functions it *may* call pinned as an equality beside it. "
         "Anything else holds a privilege that no ticket in this epic granted and that nothing in "
         "this repository will ever revoke.\n\n"
@@ -4583,9 +4725,9 @@ def test_neither_runtime_role_can_become_a_role_that_may_read_identity(db_sessio
       - the predicate must **fire** on the reveal function's owner, by the grant
         mechanism. That role holds `SELECT` on `user_identity` by construction;
       - the predicate must **fire** on `pulse_care`, by the execute mechanism. That
-        role may call exactly the two halves of the Care door, which is E0-10's
-        central criterion as E0-26 item 1 amended it and is asserted by
-        `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door`.
+        role may call exactly the functions of the Care door, which is E0-10's
+        central criterion as E0-26 item 1 and E4-01 amended it and is asserted by
+        `test_pulse_care_may_execute_exactly_the_functions_the_care_door_is_made_of`.
 
     Three of the four are repairs for things a security review found rather than
     hygiene: each time, had the mechanism been probed for and *required to be
@@ -4665,7 +4807,9 @@ def test_neither_runtime_role_can_become_a_role_that_may_read_identity(db_sessio
     care_routes = ways_to_reach_identity(db_session, CARE_ROLE)
     assert any(mechanism == IDENTITY_BY_EXECUTE for mechanism, _ in care_routes), (
         f"The identity probe finds no *execute* route for `{CARE_ROLE}`, which may call exactly "
-        f"one `SECURITY DEFINER` function by E0-10's central criterion. It found {care_routes}. "
+        f"the functions of the Care door — {sorted(THE_CARE_DOOR)}, an inventory "
+        "`test_pulse_care_may_execute_exactly_the_functions_the_care_door_is_made_of` holds. It "
+        f"found {care_routes}. "
         "This control is the repair for the defect that made it necessary: the first version of "
         "this test asked only about table privileges, and `pulse_care` deliberately holds none — "
         "so the role designed to reach identity was the one role the sweep waved through, and a "
@@ -4906,10 +5050,15 @@ def test_downgrading_the_committed_record_revision_takes_back_the_definers_read_
         f"`public.{AUDIT_TABLE}`. That grant is E0-10's and this revision does not touch it, so "
         "its absence means the baseline is wrong rather than that this revision is."
     )
-    assert halves_at_the_revision == CARE_DOOR_HALVES, (
+    assert halves_at_the_revision == THE_DOOR_AT_THE_COMMITTED_RECORD_REVISION, (
         f"At revision {THE_COMMITTED_RECORD_REVISION} the Care door has {halves_at_the_revision} "
-        f"halves rather than {CARE_DOOR_HALVES}. The downgrade assertions below are about what "
-        "this revision takes away, and they cannot mean anything if it did not put it there."
+        f"halves rather than {THE_DOOR_AT_THE_COMMITTED_RECORD_REVISION}. The downgrade assertions "
+        "below are about what this revision takes away, and they cannot mean anything if it did "
+        "not put it there.\n\n"
+        "**This is a count at a revision and deliberately not the count at head**, which E4-01 "
+        "moved to three by adding `reveal_subject_for_answer` further up the chain. If this "
+        "failure says three, a later revision's function has been created by a revision at or "
+        "below this one, which is a chain error rather than a door that has grown."
     )
 
     command.downgrade(config, BELOW_THE_COMMITTED_RECORD_REVISION)

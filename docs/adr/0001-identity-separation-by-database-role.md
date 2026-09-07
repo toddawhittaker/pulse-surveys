@@ -23,10 +23,17 @@ separates them.
 > members of nothing, and E0-10 asserts all three.
 >
 > ADR 0043 adds one role this record does not name: `pulse_reveal_definer`, which
-> owns the `SECURITY DEFINER` function in point 4 below and holds the three
-> grants its body needs. It is not a fourth connection — it is `NOLOGIN` and has
-> no credential — and it exists so that "runs with its owner's privileges" names
-> a short list rather than a superuser.
+> owns the `SECURITY DEFINER` functions in point 4 below and holds exactly the
+> grants their bodies need. It is not a fourth connection — it is `NOLOGIN` and
+> has no credential — and it exists so that "runs with its owner's privileges"
+> names a short list rather than a superuser. That list has grown with the door
+> and is read in `identity_grants_v002.sql` and
+> `reveal_subject_for_answer_v001.sql`: three grants as E0-10 shipped it, a
+> fourth when E0-26 split the reveal
+> ([ADR 0071](0071-the-reveal-answers-only-a-committed-record.md)), and two
+> column-scoped reads on `answer` and `response` when E4-01 added the subject
+> derivation
+> ([ADR 0144](0144-the-reveal-derives-its-subject-from-the-record-care-is-acting-on.md)).
 
 ## Context
 
@@ -59,8 +66,14 @@ Four things together:
    the audit row in the same transaction. Since E0-26 it is two —
    `public.record_identity_reveal` writes the row and the caller commits it,
    and `public.reveal_student_identity` returns nothing until that record is
-   committed. Both are owned by `pulse_reveal_definer` and executable only by
-   `pulse_care`. See [ADR 0071](0071-the-reveal-answers-only-a-committed-record.md)
+   committed. **Since E4-01 it is three**: `public.reveal_subject_for_answer`
+   answers which student wrote one comment, so the service derives the subject
+   from the record Care is acting on rather than taking it from its caller. It
+   returns a `user` row id and never a name, which is why a third door is not a
+   third way to obtain one. All three are owned by `pulse_reveal_definer` and
+   executable only by `pulse_care`. See
+   [ADR 0071](0071-the-reveal-answers-only-a-committed-record.md),
+   [ADR 0144](0144-the-reveal-derives-its-subject-from-the-record-care-is-acting-on.md)
    and the amended consequence below.)*
 
 ## Alternatives rejected
