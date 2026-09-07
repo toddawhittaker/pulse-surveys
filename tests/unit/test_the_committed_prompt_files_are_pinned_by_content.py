@@ -116,6 +116,7 @@ NOT_A_PROMPT = frozenset({"README.md"})
 # only when the file it names should never have existed in its old form, and that
 # is a conversation rather than a command.
 RECORDED_SHA256: dict[str, str] = {
+    "summary.v1.md": "4be7d5ae35eaeb305bffaf96ff4a10803462bf060fc65809f65899ced8eb4912",
     "validity.v1.md": "206efdc537c84da2896776c8806a419e83f42e24afe2a13c2a9ede8a6c695989",
     "validity.v2.md": "f642eb02afb09803e1230e9fcf907acc18780cbc949a33320701ce27d22f451e",
 }

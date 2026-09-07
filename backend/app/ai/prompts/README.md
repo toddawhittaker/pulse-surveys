@@ -63,6 +63,7 @@ The reasoning, and the alternative that was rejected, are in
 |---|---|---|---|---|
 | `validity.v1.md` | Comment validity | substantive / insufficient / nonsense | E0-12 | no — superseded 2026-09-02 |
 | `validity.v2.md` | Comment validity | substantive / insufficient / nonsense | the 2026-09-02 trim | yes |
+| `summary.v1.md` | Weekly summary | Per-stream, per-node themed summaries under the §5.1 contracts | E4-05 | yes |
 
 **Two files for one task is what the rule above looks like when it is used**, and
 the last column is the only place that says which one the tool sends. That is
@@ -79,10 +80,18 @@ removed — a title, spec citations, a note about the draft, and a paragraph
 forbidding keys that the gateway's structured-output schema already makes
 impossible to return. ADR 0120 records the trim and its reason.
 
-The other four tasks — moderation, weekly summary, response draft, draft check —
-have contracts in `app/ai/contracts.py` and no prompt yet. Their prompt content
-belongs to E2, E4, E6 and E7 respectively, and each adds its `v1` here under the
-scheme above.
+The other three tasks — moderation, response draft, draft check — have contracts
+in `app/ai/contracts.py` and no prompt yet. Each adds its `v1` here under the
+scheme above, from the epic that owns it.
+
+**The summary prompt has two placeholders where every other prompt has one**, and
+the second is not student text: `[[COMMENT_STREAM]]` names which of §5.1's two
+comment groups the call is about, and it sits in the instructions rather than
+near the input. The rule below is unchanged by it — the student text marker is
+still the last thing in the file, and `[[STUDENT_COMMENTS]]` is still what
+nothing may follow. A summary renders a *week* of comments rather than one, as
+numbered blocks with a blank line between them, so "the input runs to the end of
+the message" means the last comment ends the prompt.
 
 ## Writing one
 

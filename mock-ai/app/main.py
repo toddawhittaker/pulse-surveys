@@ -45,7 +45,7 @@ from app.config import (
     SERVICE_NAME,
     SUMMARY,
 )
-from app.rules import ExtractionError, classify, extract_comment, served_rules
+from app.rules import ExtractionError, answer_for, served_rules
 
 # What a completion envelope reports as its identity and its creation time. Both
 # are fixed: a client reads neither for anything this service is used for, and a
@@ -241,14 +241,13 @@ def create_app() -> FastAPI:
             )
 
         try:
-            comment = extract_comment(prompt_text(body))
+            answer = answer_for(prompt_text(body))
         except ExtractionError as failure:
             return JSONResponse(
                 {"error": {"type": "extraction_failed", "message": str(failure)}},
                 status_code=500,
             )
 
-        answer = classify(comment)
         if answer.stall_seconds:
             # `asyncio.sleep`, never `time.sleep`: this handler runs on the event
             # loop, and blocking it would stall every other request as well —

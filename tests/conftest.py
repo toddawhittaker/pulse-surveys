@@ -101,6 +101,12 @@ boundary: `metadata_tables` is asked for by both.
     client can post to and a term's worth of answers the participation formula can
     score, the `grade_sync` rows a test plants and reads back newest-first, and the
     names that ticket's work order settles.
+  - `fixtures/summary_task.py` — E4-05: the weekly-summary task, its renderer, its
+    two contract classes and its six constants, each looked up inside the test
+    body so a deliverable that has not landed is a FAILED naming it rather than a
+    setup error; plus the two gateway doubles — one that fails on any use at all,
+    for the empty week that must reach no model, and one that answers a script and
+    counts what it was asked.
   - `fixtures/report_views.py` — E4-03: the term, section, question sets carrying
     E4-02's `stream`, and answered weeks the three report views aggregate; the one
     reader for a row of each view, on `db_session` and on a committed world the
@@ -178,6 +184,7 @@ pytest_plugins = (
     "fixtures.line_item_creation",
     "fixtures.grade_sweep",
     "fixtures.dev_console",
+    "fixtures.summary_task",
     "fixtures.care_subject",
     "fixtures.report_views",
 )

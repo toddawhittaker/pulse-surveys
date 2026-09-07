@@ -1,8 +1,13 @@
 """The §7.4 tasks, one function each (SPEC §7.4, §3.3, §8).
 
 SPEC §13 gives this module "validity / moderation / summary / draft / draft-check
-calls". E0-13 implements the first of them end to end; the other four have
-contracts in `contracts.py` and prompts that belong to E2, E4, E6 and E7.
+calls". E0-13 implements the first of them end to end and E4-05 the third; the
+other three have contracts in `contracts.py` and prompts that belong to their own
+epics. The two that are here differ in more than their prompts, and the
+differences are the interesting part of this module: the validity task judges one
+comment for a student who is waiting, under a four-second budget, with SPEC
+§3.3's floor underneath it; the summary task reads a week of them for a report
+job nobody is waiting on, under a minute, with no floor at all.
 
 A task here is the only thing that knows what its task *means*: which prompt file
 to render, how long a student may be kept waiting for it, what to do when the
@@ -49,13 +54,25 @@ place either way.
 """
 
 import threading
+from collections.abc import Sequence
 from importlib.resources import files
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.ai.contracts import CommentValidityOutput, ValidityVerdict
-from app.ai.gateway import NOT_A_MODEL, AIGateway, AIProviderUnavailableError
+from app.ai.contracts import (
+    CommentStream,
+    CommentValidityOutput,
+    ValidityVerdict,
+    WeeklySummaryOutput,
+    WeeklySummaryRecord,
+)
+from app.ai.gateway import (
+    NOT_A_MODEL,
+    AIGateway,
+    AIProviderUnavailableError,
+    AIResponseInvalidError,
+)
 from app.models.ai import Classification, ClassificationTask
 
 # The prompt this task renders, named as ADR 0031 spells a `prompt_version`: the
@@ -116,6 +133,55 @@ HEURISTIC_MINIMUM_CHARACTERS = 25
 # them.
 FLOOR_PROMPT_VERSION = "character-floor"
 FLOOR_MODEL_ID = NOT_A_MODEL
+
+# ---------------------------------------------------------------------------
+# §7.4's weekly summary (E4-05)
+# ---------------------------------------------------------------------------
+
+# The prompt this task renders, named the way `VALIDITY_PROMPT_VERSION` above is
+# and for the same reasons: the file's path stem under `app/ai/prompts/`, so a
+# stored version names exactly one immutable file (ADR 0031, ADR 0032).
+SUMMARY_PROMPT_VERSION = "summary.v1"
+
+# Where the week's comments go, and where the stream they belong to goes. Two
+# placeholders rather than one because they are substituted at opposite ends of
+# the file: the stream is named in the instructions, and the comments are the
+# last thing in the message. `prompts/README.md`'s rule about `str.replace`
+# rather than `str.format` applies to both — the file carries a JSON example, so
+# `.format` raises on the braces before it reaches either marker.
+SUMMARY_COMMENTS_PLACEHOLDER = "[[STUDENT_COMMENTS]]"
+SUMMARY_STREAM_PLACEHOLDER = "[[COMMENT_STREAM]]"
+
+# How long the summary call may take. **Deliberately not §3.3's four seconds**,
+# which is the validity task's budget and belongs to a student waiting on a
+# submit. Nobody waits on this one: §7.4 triggers it from the Monday report job,
+# and SPEC §10 budgets that whole job at "500 sections < 30 min" rather than any
+# per-call figure. A week of comments is also a much longer prompt than one
+# comment, so borrowing the submit path's budget would fail ordinary summaries on
+# a slow afternoon — and this path has no floor to fall onto when it does.
+#
+# Sixty seconds is a limit rather than an expectation: it is there so a provider
+# that stops answering cannot hold a report job open indefinitely, and it is far
+# enough above a normal answer that a merely slow one still lands. Not a
+# configuration knob, for the reason `VALIDITY_TIMEOUT_SECONDS` gives.
+SUMMARY_TIMEOUT_SECONDS = 60.0
+
+# What a week with no comments answers instead of calling a model.
+#
+# **The pair is ADR 0054's rule applied to the second place in this codebase
+# where a record exists without a call behind it.** The character floor names a
+# prompt version that is no prompt stem and a model id that is no model, so that
+# a reader resolving either finds nothing and knows none was asked; an empty week
+# is the same situation arrived at for a different reason — there was nothing to
+# summarize, so nothing was sent. A record naming `summary.v1` and a real model
+# would assert a call nobody made, and E4-06 stores these records.
+#
+# The summary text is stated here rather than at each surface because §5.1 makes
+# it product copy: "empty groups show a one-line notice, not a hidden heading".
+# One sentence, in one place, so the report and any later reader of a stored
+# summary read the same words.
+EMPTY_WEEK_PROMPT_VERSION = "empty-week"
+EMPTY_WEEK_SUMMARY = "No comments were submitted this week."
 
 # The gateway this process uses, built on first classification and kept.
 _GATEWAY_LOCK = threading.Lock()
@@ -329,3 +395,186 @@ def classify_comment_validity(
     output = verdict_for_comment(comment, gateway)
     record_classification(session, ClassificationTask.COMMENT_VALIDITY, output, answer_id=answer_id)
     return output
+
+
+# ---------------------------------------------------------------------------
+# §7.4's weekly summary (E4-05)
+# ---------------------------------------------------------------------------
+
+
+def render_comment_blocks(comments: Sequence[str]) -> str:
+    """One week's comments as numbered blocks, in the order they were given.
+
+    Numbered so that a model can count them and a theme's `comment_count` means
+    something; blank-line separated so that a comment ending mid-sentence does
+    not read as the beginning of the next one. Neither is decoration: a week is
+    several comments where the validity task has one, and "the input" has to stay
+    legible as a list without a closing marker to end it with.
+
+    Nothing is dropped, deduplicated, truncated or reordered. §4: "comments from
+    under-threshold weeks are not discarded — they feed the summary", so a
+    renderer that lost one would remove a student's week from the only signal
+    their instructor gets, and one that repeated a comment would inflate every
+    theme count a model produces.
+    """
+    return "\n\n".join(
+        f"Comment {number}:\n{comment}" for number, comment in enumerate(comments, start=1)
+    )
+
+
+def render_summary_prompt(
+    version: str,
+    *,
+    stream: CommentStream,
+    comments: Sequence[str],
+) -> str:
+    """One summary prompt: the stream in the instructions, the comments at the end.
+
+    **The signature is the identity boundary** (E4-05's second acceptance
+    criterion). It takes the stream and the comment texts and nothing else, so a
+    caller holding a session, a section and a student has nowhere to put any of
+    them — SPEC §4 keys responses to the LMS user id and lets identity out
+    through the audited Care reveal alone, and comment text going to a provider
+    is that boundary in a different door. Keeping identity out of a prompt is not
+    a thing each caller remembers; it is a thing this signature makes impossible.
+
+    **The comments are last and nothing follows them**, which is
+    `prompts/README.md`'s injection boundary — "'to the end of the message'
+    cannot be forged, and it means the gateway must append nothing after the
+    comment". `render_prompt` above keeps the same property for one comment; here
+    the placeholder is the last thing in the file, so replacing it in place is
+    what keeps the last student's last word from being followed by an
+    instruction it was written to defeat.
+
+    Both placeholders are required. A prompt missing either is refused rather
+    than half-rendered: a template with no stream marker asks a model to
+    summarize a stream it was never told, and one with no comments marker asks it
+    to summarize a week it was never shown. Neither failure is visible in the
+    answer, which comes back well-formed and about nothing.
+
+    The refusal names the version and the marker and quotes no comment. A
+    `PromptError` raised inside E4-06's Monday job is written to a job log by
+    whatever catches it, and SPEC §10 forbids student text there.
+    """
+    prompt = load_prompt(version)
+    for placeholder in (SUMMARY_STREAM_PLACEHOLDER, SUMMARY_COMMENTS_PLACEHOLDER):
+        if placeholder not in prompt:
+            raise PromptError(
+                f"The prompt `{version}.md` carries no {placeholder} marker, so a summary "
+                "cannot be rendered from it. `app/ai/prompts/README.md` states the scheme, and "
+                "the summary prompt names the stream in its instructions and ends with the "
+                "week's comments."
+            )
+    prompt = prompt.replace(SUMMARY_STREAM_PLACEHOLDER, stream.value)
+    return prompt.replace(SUMMARY_COMMENTS_PLACEHOLDER, render_comment_blocks(comments))
+
+
+def summarize_stream(
+    comments: Sequence[str],
+    *,
+    stream: CommentStream,
+    response_count: int,
+    gateway: AIGateway | None = None,
+) -> WeeklySummaryRecord:
+    """§7.4's weekly-summary task for one stream: one call in, one record out.
+
+    **One call per stream, and a week is two calls made by the caller.** §5.1
+    groups every comment under "About the instructor" / "About the course", and
+    the split is what stops a course complaint being summarized into the
+    instructor's stream: the two calls never see each other's comments, so the
+    bleed is prevented by the request rather than noticed in the answer. E4-06's
+    job is what makes the second call. ADR 0148 records the choice and its cost.
+
+    **An empty week reaches no model at all.** There is nothing to summarize, and
+    a request for a summary of nothing is the request most likely to come back
+    with something invented — while an empty stream is common enough (§5.1's
+    empty group "shows a one-line notice") that a request per empty stream per
+    section per week is a bill nobody chose. The record it answers with names
+    `EMPTY_WEEK_PROMPT_VERSION` and the gateway's `NOT_A_MODEL`, because no model
+    answered; see those constants for ADR 0054's rule. A *small* week is not this
+    case: two comments in, a summary out, because below the n-threshold that
+    summary is the only comment signal the instructor gets.
+
+    **The response count is the caller's and is never derived here.** §5.1 has a
+    summary state the count it draws from, and §3.2 makes a comment optional
+    above the rating threshold — so nine responses can carry three comments, and
+    `len(comments)` would put a smaller, plausible, wrong number under every
+    summary. The caller has the real number; the model is not asked for it.
+
+    **An answer about the other stream is refused.** It validates — it is a
+    well-formed `WeeklySummaryOutput` — so nothing else in the stack would stop
+    it, and E4-06 would store a course summary under §5.1's instructor heading.
+    `AIResponseInvalidError` is the class for it: §7.4 has the gateway surface a
+    persistent shape violation "rather than letting a malformed classification
+    propagate", and an answer to a question nobody asked is that.
+
+    **There is no fail-open here, and that is a decision.** SPEC §3.3 sanctions
+    the floor for the validity check alone, because a student must never be
+    blocked by an outage at submit time. Nobody is blocked by a Monday report,
+    there is no heuristic that could stand in for a summary, and a task that
+    answered the empty shape on an outage would produce a record identical to a
+    genuinely empty week's — turning "the only comment signal" week into a week
+    that reports no comments. Every gateway failure propagates as its own class,
+    so a reader of the job log is sent to the provider or to the prompt according
+    to which one it was.
+
+    **A theme claiming more comments than the week held is refused too**, and
+    this is the last place that can. The count is a number the product shows and
+    acts on — E4-10 renders it beside the theme and §5.3's draft check reads it —
+    and §4 hides the raw comments below the n-threshold, so in exactly the weeks
+    where an instructor cannot check it themselves, an inflated count turns two
+    students into seven. The bound is the number of comments *this call sent*,
+    which nothing downstream still knows: the eval checks bound it offline and
+    the mock bounds its own answers, and neither is on the path a real provider's
+    answer takes. Exactly the week's length is legitimate and is kept — a small
+    section where every comment is about the same lab is the ordinary case.
+
+    Nothing here rewrites an answer. A count clamped to something plausible would
+    put a figure in front of an instructor that neither the model gave nor the
+    week supports, and it would do it silently; the answer is refused whole.
+
+    **Nothing raised or logged from here carries a comment.** E3's decision 10
+    keeps student content out of worker logs, SPEC §10 requires it, and E4-06
+    relies on it: the refusals below are built from the two stream tokens, the
+    counts, and static text. **A theme's label is deliberately not quoted**,
+    although naming the offending theme would read as more helpful — a label is
+    model output written after reading a week of comments, so it is the one part
+    of an answer that can carry a student's words back into a job log.
+    """
+    if not comments:
+        return WeeklySummaryRecord(
+            summary=WeeklySummaryOutput(
+                stream=stream,
+                summary=EMPTY_WEEK_SUMMARY,
+                themes=(),
+                prompt_version=EMPTY_WEEK_PROMPT_VERSION,
+                model_id=NOT_A_MODEL,
+            ),
+            response_count=response_count,
+        )
+
+    gateway = gateway or process_gateway()
+    output = gateway.run_task(
+        prompt=render_summary_prompt(SUMMARY_PROMPT_VERSION, stream=stream, comments=comments),
+        prompt_version=SUMMARY_PROMPT_VERSION,
+        output_model=WeeklySummaryOutput,
+        timeout=SUMMARY_TIMEOUT_SECONDS,
+    )
+    if output.stream is not stream:
+        raise AIResponseInvalidError(
+            f"The summary came back about the {output.stream.value!r} stream and the "
+            f"{stream.value!r} stream was asked about. SPEC §5.1 groups comments under "
+            "'About the instructor' / 'About the course', and a summary filed under the wrong "
+            "heading reads as criticism of the wrong thing."
+        )
+    overclaimed = sorted(
+        theme.comment_count for theme in output.themes if theme.comment_count > len(comments)
+    )
+    if overclaimed:
+        raise AIResponseInvalidError(
+            f"The summary carries {len(overclaimed)} theme(s) claiming {overclaimed} comments "
+            f"out of the {len(comments)} this call sent. A theme cannot be carried by more "
+            "comments than the week holds, and the count is a figure the report shows and "
+            "§5.3's draft check reads."
+        )
+    return WeeklySummaryRecord(summary=output, response_count=response_count)

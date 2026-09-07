@@ -115,6 +115,20 @@ THRESHOLD_NAMES = (
 STALL_SECONDS_NAMES = ("stallseconds", "stall", "stallsecs", "delayseconds")
 MARKER_LINE_NAMES = ("markerline", "commentmarker", "commentmarkerline", "promptmarker")
 
+# E4-05 teaches the mock a second task, and a second task needs a second boundary:
+# the summary prompt renders a whole week of comments and ends with them, so the
+# mock cannot read it with the validity prompt's marker. Matched the same way as
+# everything else here — E2-07's third criterion makes the mock's rules served
+# rather than copied, and that rule does not stop applying because a task was
+# added.
+SUMMARY_MARKER_LINE_NAMES = (
+    "summarymarkerline",
+    "summarycommentsmarker",
+    "summarycommentsmarkerline",
+    "summarymarker",
+    "summarypromptmarker",
+)
+
 # §7.4's Output column for the comment-validity task: "substantive / insufficient
 # / nonsense". **Transcribed rather than derived**, and held here rather than in
 # either test module because both the mock and the tool speak this vocabulary and
@@ -327,6 +341,27 @@ class MockAiProvider:
             "the validity prompt ends its comment section with — whichever version "
             "`app.ai.tasks` renders — and the mock reads the student's comment as everything "
             "after its last occurrence."
+        )
+        return value
+
+    def summary_marker_line(self) -> str:
+        """The line E4-05's summary prompt puts before the week's comments.
+
+        Served rather than copied, exactly as the validity marker is. The mock
+        dispatches on it: a request whose prompt carries this line is asking for
+        SPEC §7.4's weekly summary rather than for a comment-validity verdict, and
+        a mock that could not tell them apart would answer a verdict to every
+        summary request — which validates against nothing and reads, from the tool
+        side, as a shape violation in the summary prompt.
+        """
+        value = served_member(
+            self.rules(), SUMMARY_MARKER_LINE_NAMES, "the summary prompt's comment marker line"
+        )
+        assert isinstance(value, str) and value.strip(), (
+            f"`GET {RULES_PATH}` publishes {value!r} as the summary marker line. It is the line "
+            "the summary prompt puts before the week's comments — whichever version "
+            "`app.ai.tasks` renders — and the mock reads the week as everything after its last "
+            "occurrence."
         )
         return value
 
