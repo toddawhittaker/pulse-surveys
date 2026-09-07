@@ -93,6 +93,55 @@ each produces.
 none — and both the comment read path and the summary job's gather call it, with
 no second copy of the ordering or of the default anywhere under `backend/app/`.
 
+**Closed by E4-07, and it opened the entry below.**
+`app.services.report_comments.reported_status_of` is public, the summary gather in
+`app.services.reporting` calls it, and no second statement of the ordering or of
+the default is left under `backend/app/` —
+`tests/unit/test_the_moderation_state_ordering_has_one_home_under_backend_app.py`
+counts the modules that name the relation in executable code and holds the tree to
+one. E4-06's tests are green unmodified.
+
+Consolidating it is what made the ordering itself reviewable, and E4-07's security
+round then found that neither of the two orderings was right. That is the next
+entry, and it is a real gap rather than a note about this one.
+
+## `moderation_state` has no ordering a same-instant tie can be broken by
+
+**What is not enforced.** ADR 0145 makes the record append-only with "the latest
+row governing", and `reported_status_of` implements that as `ORDER BY decided_at
+DESC LIMIT 1`. `decided_at` is a `now()` server default, which in PostgreSQL is
+the **transaction** timestamp: every row written in one transaction carries the
+same instant to the microsecond. Two decisions about one comment in one
+transaction therefore tie, and `LIMIT 1` picks between them arbitrarily — so "the
+latest decision" can resolve to the earlier one, and a comment a moderator
+excluded can come back `published`. It is the same defect from either side: E4-06's
+copy broke the tie on `moderation_state.id`, which is `gen_random_uuid()` and
+therefore a coin flip rather than an order; E4-04's copy, which is now the one
+home, breaks it not at all.
+
+Nothing in E4 can reach the state, and that is why it is deferred rather than
+fixed here: E6 writes the first `moderation_state` row this system will ever hold,
+so today the subquery has nothing to order and every comment resolves to the
+initial state by absence. The consequence is a future one, and it is a
+confidentiality consequence — a held comment shown — rather than a cosmetic one.
+
+**Why it was left.** The fix is a schema change: an explicit monotonic column, a
+migration, a backfill rule for a table with no rows, and a writer that sets it.
+E4-07 is a read ticket that was told to expect no migration, and inventing the
+column here would settle the shape of E6's own write path from a ticket that
+writes nothing. What E4-07 could do it did: put the ordering in one place, so
+there is one function to change rather than two.
+
+**Owner:** E6, in the ticket that writes the first moderation decision — before it,
+not after. A writer landing on this ordering is a writer whose first same-transaction
+pair is already wrong.
+
+**Done when:** `moderation_state` carries an explicit monotonic sequence column
+that a same-transaction pair cannot tie on, `reported_status_of` orders by it, and
+a test plants two decisions about one comment inside a single transaction and
+requires the second to be the one reported — driven both ways round, since a tie
+broken arbitrarily passes half of such a test by luck.
+
 ## SPEC §6.2's threat and self-harm class is suppressed in neither the comment read path nor the summary gather
 
 **What is not enforced.** SPEC §5.2 ends "threat/self-harm classifications bypass
@@ -192,3 +241,55 @@ than only in the files that work around it, which is `docs/MISTAKES.md` entry 48
 governance map, and the items-4-and-5 vocabulary gate has been seen running over
 their strings — E4-12's acceptance criterion 7 states it, and closing it closes
 this entry.
+
+## The report API's two refusal sentences sit outside the copy registry
+
+**What is not enforced.** SPEC §4.1 items 4 and 5 are checked over the inventory
+`app.copy.copy_modules()` publishes, and `app.api.instructor` serves two strings
+that inventory cannot see: the shared 404 a section outside the session's teaching
+set and a section that does not exist both get, and the 404 for a course week the
+section has no window for. Both are module constants in the router. They name
+nobody and nothing — a refusal answered to anybody who can make a request may
+describe only itself — and that is held by review and by the module's own header
+rather than by a sweep.
+
+**Why it was left.** The inventory governs a key by its surface prefix and reds on
+a prefix no surface claims, and it is `invariant`-marked. So a copy module for the
+report surface cannot land before the report is a governed surface, and making it
+one is work over the whole surface rather than over two strings — the same reason
+the entry above leaves three frontend copy modules beside their components, and the
+same position the gradebook's two instructor-visible strings are already in
+(`docs/tickets/e4/carried-from-e3.md`). Writing the sentences into the router and
+recording it here is the alternative to inventing a surface for the inventory to
+police.
+
+**Owner:** E4-12, with the rest of the report surface's copy and the governance map
+it grows.
+
+**Done when:** both sentences are entries in an `app.copy` module under a prefix the
+inventory's governance map claims for the report surface, `app.api.instructor` looks
+them up by key rather than holding them, and the items-4-and-5 vocabulary gate has
+been seen running over them.
+
+## The course label is composed in two modules
+
+**What is not enforced.** FIX-01 item 2's governed course label — "MATH 140 E1FF —
+College Algebra, Fall 2026", the owner's ruling of 2026-09-03 — is composed in
+`app.services.survey_read._course_label` for the student's own page and again in
+`app.services.reporting._course_label` for the instructor's report. The two strings
+agree today because one was copied from the other. Nothing holds them together, so
+an amendment applied to one names the same course differently on the two surfaces,
+and neither surface can see the other's version.
+
+**Why it was left.** E4-07 was scoped not to touch
+`backend/app/services/survey_read.py`, and promoting a private function to a shared
+one crosses a module boundary — which this repository's build rules have a ticket
+propose rather than do. E4-07's pull request carries the proposal. The alternative
+inside the ticket's scope was to import the private name across modules, which is a
+worse shape for the same guarantee.
+
+**Owner:** whichever ticket next changes the label's form, or accepts E4-07's
+proposal — E4-17 is the first candidate, since it is already in `schemas/student.py`.
+
+**Done when:** one function composes the label, both the student read path and the
+report read call it, and no second copy of the format is left under `backend/app/`.

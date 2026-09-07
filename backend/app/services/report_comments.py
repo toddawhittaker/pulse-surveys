@@ -83,10 +83,12 @@ caller.
 ## The three rules this module reads, and where each is decided
 
 **The threshold is a count of responses, and it is the institution's number.** It
-is what all three legs of the release gate compare against as well.
-`Settings.n_threshold_default` is read inside each call rather than at import, so
-an institution that changes it changes the rule rather than needing a restart —
-SPEC §4 makes the value configuration. The count itself is
+is what all three legs of the release gate compare against as well. `n_threshold`
+below is the one place `Settings.n_threshold_default` is read for §4's rule — by
+this module's gate, by the release cut, and by E4-07's report, which *prints* the
+number beside the comments this gate hid. It is read inside each call rather than
+at import, so an institution that changes it changes the rule rather than needing
+a restart — SPEC §4 makes the value configuration. The count itself is
 `public.report_response_counts`, E4-03's view, which is `count(*)` of `response`
 rows per section-week. Counting them again here would be a second implementation
 of one number, which is the shape `docs/MISTAKES.md` entry 19 is about.
@@ -96,9 +98,10 @@ record append-only with the latest row governing and the initial state the
 *absence* of a row, and names the consequence: "a reader of a comment's
 moderation state has to write a window function, or its equivalent … That is
 E4-04's and E6's to write once, in `app.services`, not per call site."
-`_reported_status_of` below is that once. Both reads go through it, and it is
-shaped so E6 can call it. An inner join here would drop every comment nobody has
-decided about, which on today's database is all of them.
+`reported_status_of` below is that once. Both reads go through it, the summary
+gather in `app.services.reporting` calls it since E4-07, and it is shaped so E6
+can call it too. An inner join here would drop every comment nobody has decided
+about, which on today's database is all of them.
 
 **A week's comments are held only once the week has closed.** A window still
 taking responses has no final count, so a comment released from it may belong to
@@ -154,6 +157,7 @@ from sqlalchemy import (
     ColumnElement,
     Row,
     Select,
+    SQLColumnExpression,
     Subquery,
     column,
     distinct,
@@ -248,6 +252,40 @@ class ReportComment:
     stream: str
 
 
+def n_threshold() -> int:
+    """SPEC §4's configured n-threshold — the one place this number is read.
+
+    "Threshold value is configurable (default 5)", counted in responses per
+    reporting week. Every gate that applies it and every surface that *prints* it
+    calls this, and that second half is the reason the function exists rather than
+    each caller reaching for `Settings` itself.
+
+    **E4-07's security round is the incident.** The instructor's report printed a
+    threshold in its `small_n` member from the application's startup configuration
+    while `visible_comments` below built a fresh `Settings()` per call. The two
+    agree on every ordinary deployment and come apart the moment they are read at
+    different times — a screen telling an instructor that comments appear once five
+    students have answered, while the query that hid them applied some other
+    number. A promise about confidentiality printed from one source and enforced
+    from another is two promises, and the one a person acts on is the printed one.
+
+    **A function rather than a parameter, and that is not the shape it wanted.**
+    Handing the report's own `Settings` down to `visible_comments` is the plainer
+    answer and it is not available: E4-04's work order settles that read's
+    signature at four parameters and
+    `tests/unit/test_the_report_comment_service_names_nothing_a_student_path_can_reach.py`
+    asserts it as an equality, deliberately, so that no fifth parameter of any kind
+    can be added and later filled with something that names a person. That rule is
+    worth more than the ergonomics, so the single source is a function both sides
+    call instead of a value one side passes.
+
+    Read per call rather than at import, which is the property the module docstring
+    already claims: an institution that changes the number changes the rule rather
+    than needing a restart.
+    """
+    return Settings().n_threshold_default
+
+
 def visible_comments(
     session: Session,
     *,
@@ -275,9 +313,11 @@ def visible_comments(
     exclusion notice"), and a kept one published. A read that filtered a state out
     would remove the record of a decision from the report of the person who made
     it, which is what §5.2's anti-cherry-picking argument rests on.
-    """
-    settings = Settings()
 
+    **The threshold comes from `n_threshold` above, and every surface that prints
+    a threshold reads the same function.** E4-07's report prints one beside the
+    comments this gate hid; that record says why the two may not be separate reads.
+    """
     # SPEC §4's rule is "n < 5 responses in a reporting week", and the boundary is
     # inclusive on the upper side: the threshold value itself is the first size at
     # which comments are shown. A week nobody answered has no row in the count
@@ -289,7 +329,7 @@ def visible_comments(
             RESPONSE_COUNTS_VIEW.c.week_id == week_id,
         )
     ).scalar_one_or_none()
-    if (responses or 0) < settings.n_threshold_default:
+    if (responses or 0) < n_threshold():
         return ()
 
     asked = _comments_with_their_status().where(
@@ -407,7 +447,10 @@ def cut_due_release_batches(session: Session) -> int:
     wants.
     """
     settings = Settings()
-    threshold = settings.n_threshold_default
+    # The same one reader the read gate uses. All three legs of the release gate
+    # compare against §4's threshold, so a second reading of it here would be the
+    # third source of one number.
+    threshold = n_threshold()
     # ADR 0109's convention: scheduling and visibility read the effective clock,
     # never the process clock, so a development stack walked forward by hand sees
     # the weeks it has been walked past.
@@ -442,7 +485,7 @@ def cut_due_release_batches(session: Session) -> int:
     return cut
 
 
-def _reported_status_of(answer_id: ColumnElement[Any]) -> ColumnElement[str]:
+def reported_status_of(answer_id: SQLColumnExpression[Any]) -> ColumnElement[str]:
     """The status one comment carries: its latest moderation decision, or published.
 
     **ADR 0145's resolution, written once.** That record makes `moderation_state`
@@ -456,9 +499,35 @@ def _reported_status_of(answer_id: ColumnElement[Any]) -> ColumnElement[str]:
     deliberately published.
 
     Shaped as a helper over an answer key rather than inlined, so E6's moderation
-    surface calls this one resolution rather than writing a second — which is the
-    duplication `docs/tickets/e4/deferred.md` records against E4-07 for the
-    summary job's own copy.
+    surface calls this one resolution rather than writing a second.
+
+    **Public since E4-07, which is what closed that deferral.** E4-06's summary
+    gather in `app.services.reporting` had written the same resolution for itself
+    while both branches were being built in parallel; it now calls this, and
+    `tests/unit/test_the_moderation_state_ordering_has_one_home_under_backend_app.py`
+    holds the tree to exactly one module naming the relation in executable code.
+    Two copies of "the latest row, or published" disagree the first time somebody
+    changes one, and §5.2's whole lifecycle is about which decision is current.
+
+    **The ordering below cannot break a same-transaction tie, and that is a
+    recorded gap rather than an oversight.** `decided_at` defaults to `now()`,
+    which is PostgreSQL's *transaction* timestamp, so every row written in one
+    transaction carries the same instant and `LIMIT 1` chooses between them
+    arbitrarily — a comment a moderator excluded can resolve to `published`.
+    Nothing in E4 can reach it: E6 writes the first `moderation_state` row this
+    system will hold, so today this subquery orders nothing and every comment
+    resolves to `INITIAL_STATE` by absence. `docs/tickets/e4/deferred.md` carries
+    the entry, owned by E6 **before** its first writer lands, with the fix stated —
+    an explicit monotonic column, ordered by here. Breaking the tie on the row key
+    is not that fix and is worth naming as a wrong answer: `moderation_state.id` is
+    `gen_random_uuid()`, so it is a coin flip rather than an order.
+
+    **`SQLColumnExpression` rather than `ColumnElement`**, because the two callers
+    hold the answer key in the two forms SQLAlchemy has: this module reads it off a
+    Core view (`report_comment.answer_id`, a `Column`) and the summary gather off
+    the mapped class (`Answer.id`, an ORM attribute). Only the wider of the two
+    base classes covers both, and narrowing it again would push one caller into a
+    cast for no benefit.
     """
     latest = (
         select(ModerationState.state)
@@ -483,7 +552,7 @@ def _comments_with_their_status() -> Select[tuple[str, str, str]]:
     """
     return select(
         COMMENT_VIEW.c.comment_text,
-        _reported_status_of(COMMENT_VIEW.c.answer_id),
+        reported_status_of(COMMENT_VIEW.c.answer_id),
         COMMENT_VIEW.c.stream,
     )
 
