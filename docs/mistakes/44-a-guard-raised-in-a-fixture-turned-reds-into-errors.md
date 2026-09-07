@@ -1,6 +1,34 @@
 # 44. A guard raised in a fixture turned a module's reds into setup errors
 
-**Caught: 4**
+**Caught: 5**
+
+*Six instances are recorded below and this file keeps three, so a trim is owed to
+whoever touches it next. It was not taken here: four of the six are dated
+2026-09-06 or later and their order within that day cannot be settled from the
+text, and trimming a file whose instances are not ordered by date is how the
+newest paragraph gets deleted (`docs/MISTAKES.md` entry on ordering — date them
+from git first).*
+
+## A catch: E4-18's section-list suite discovers nothing at setup (2026-09-07)
+
+E4-18's world is expensive — a launch, a session, three sections and three
+teaching grants — so it is a fixture, and the natural thing to put in it is the
+lookup that says whether the route exists yet. `tests/fixtures/report_api.py`
+next door does discover E4-07's routes through the module, and copying that shape
+would have meant every one of this ticket's eleven tests reporting ERROR at setup
+on the unbuilt tree, the must-be-green control among them — the one test whose
+whole job is to be green and to prove the fixtures plant the grant they claim.
+
+Instead the fixture seeds rows and writes grants and asks the application
+nothing. The route is reached over HTTP at the settled path, and the guard that
+names the missing deliverable is `entries_in`, a plain function each test body
+calls on the response it just read; the session-module lookups in `_minted` are
+in a method the test body calls too. Ten of the eleven reds are therefore
+assertions about a status, a list or a header, and the eleventh passes.
+
+Counted as a catch: without the entry the world fixture would have carried a
+route discovery, and the tests-first run would have been eleven setup errors with
+nothing to compare against the manifest.
 
 ## A catch: E4-04's comment suite names every deliverable from a test body (2026-09-06)
 

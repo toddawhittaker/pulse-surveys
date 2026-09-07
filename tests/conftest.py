@@ -142,6 +142,12 @@ boundary: `metadata_tables` is asked for by both.
     through with a session a real launch issued. The item-7 suppression helper and
     the type of the `comparison` member are found by annotation, because the work
     order settles the mechanism and no spelling.
+  - `fixtures/instructor_sections.py` — E4-18: the route that ticket settles, the
+    instructor who teaches two sections and the other instructor who teaches a
+    third, her second section under a second course so that the declared order is
+    neither the creation order nor the code order, and the two sessions criterion
+    3 is about — a person holding no grant, and a session naming no person —
+    which no launch can issue and which are therefore minted.
 
 Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
@@ -209,6 +215,7 @@ pytest_plugins = (
     "fixtures.report_comments",
     "fixtures.summary_job",
     "fixtures.report_api",
+    "fixtures.instructor_sections",
 )
 
 

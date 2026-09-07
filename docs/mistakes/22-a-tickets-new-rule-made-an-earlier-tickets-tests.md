@@ -1,6 +1,6 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 19**
+**Caught: 20**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -216,3 +216,20 @@ grep its own new test modules for closed sets naming the thing — the read-only
 is about who may edit a test, not about how old the test is, and a set written
 earlier in the same branch is as much on the other side of the wall as one written
 in E0.
+
+**Instance, 2026-09-07 (E4-18, and the named repair was not the whole repair).**
+E4-18's ticket names this entry itself: `tests/fixtures/report_api.py`'s
+`instructor_route_objects` fails every E4-07 suite unless the module has exactly
+two GET routes, and the prescribed repair is a test-side flip of that count to
+three. Reading the fixture whole showed the count is half of it. `instructor_routes`
+maps `_shape_of` over every GET route the module mounts, and `_shape_of` fails **by
+name** on a route declaring no section parameter — which is exactly what E4-18's
+parameterless `GET /instructor/sections` declares. So a count-only flip leaves all
+six E4-07 modules red against a correctly built route, in files the implementer may
+not edit, one step after the flip was supposed to have fixed them. The prepared diff
+therefore also adds a `_names_a_section` predicate and shapes only the two routes
+that take a section, and corrects the two "…'s two GET routes…" sentences the third
+route makes false (entry 1). Counted as a catch: the entry's rule is to go and look
+for what a new rule makes unrunnable rather than to trust the repair a ticket names,
+and here the named repair was incomplete in a way that would have surfaced as an
+implementer's red run.
