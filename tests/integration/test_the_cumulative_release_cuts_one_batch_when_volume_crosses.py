@@ -378,6 +378,214 @@ def test_the_same_volume_from_enough_respondents_is_released_as_one_batch(
     assert_no_batch_is_one_week_or_too_few_authors(release_rows, threshold)
 
 
+def test_one_respondent_short_of_the_threshold_cuts_nothing_and_one_more_cuts(
+    comment_world: CommentWorld, comment_contract: Any, release_rows: ReleaseRows
+) -> None:
+    """The respondent leg's own boundary, both sides, with the volume leg held clear.
+
+    `threshold - 1` people each answer **both** of SPEC §3.2's comment questions,
+    across two under-threshold closed weeks. Nothing may be cut. Then one more
+    person answers, and it may.
+
+    **Why the doubled comments are the point.** They put the volume at
+    `2 x (threshold - 1)`, which is past the threshold for any threshold above two,
+    so leg (a) is satisfied on both sides of this boundary and cannot be what
+    refuses the first half. Leg (c) is satisfied on both sides too — two weeks
+    throughout. The only thing that moves between the two halves is the number of
+    distinct respondents, from one below the threshold to exactly it.
+
+    **The mutation it kills:** the respondent comparison loosened by one —
+    `>= threshold - 1` where `>= threshold` was meant, or `>` written as `>=`
+    against a decremented bound. That is the off-by-one a boundary has, and it is
+    invisible to every other test in this module: the world in
+    `test_five_comments_from_three_respondents_cut_nothing` sits *two* or more
+    below the threshold, so a gate loosened by one still refuses it, and the
+    worlds that cut sit exactly on the threshold, where a loosened gate cuts too.
+    This is the only case that sits on the loosened bound itself.
+
+    **Why the volume leg cannot mask it here**, which is the correction the
+    re-mutation battery forced elsewhere in this module: with one comment per
+    respondent the volume and the respondent count are the same number, so a
+    volume-only gate refuses the first half for the volume reason and the test
+    proves nothing about the respondent leg. Doubling the comments separates them,
+    and the setup assertion below says so before the cutter is called.
+
+    **The pair is inside this test** rather than in a sibling, because the two
+    halves must be the same world one respondent apart: a pair built from two
+    separately planted worlds could differ in the week split or the volume, and
+    then the boundary would not be the only thing that moved.
+    """
+    contract = comment_contract
+    world = comment_world
+    threshold = contract.threshold()
+    assert threshold >= 4, (
+        f"The configured n-threshold is {threshold}. This world needs `threshold - 1` respondents "
+        "spread over two weeks that are each still under the threshold, which needs 4 or more."
+    )
+
+    world.build()
+    both = (contract.instructor_stream, contract.course_stream)
+    one_short = threshold - 1
+    first_size = one_short // 2
+    held_week(world, contract, term_week=HELD_WEEKS[0], respondents=first_size, streams=both)
+    held_week(
+        world, contract, term_week=HELD_WEEKS[1], respondents=one_short - first_size, streams=both
+    )
+
+    volume = len(both) * one_short
+    assert_volume(world, volume)
+    assert volume >= threshold, (
+        f"The planted volume is {volume} and the threshold is {threshold}, so leg (a) fails here "
+        "too and a volume-only gate would refuse the first half for the volume reason — which "
+        "would make this test say nothing about the respondent boundary. The doubled comments "
+        "exist to keep the two numbers apart."
+    )
+
+    refused = contract.cut()(world.session)
+    assert refused == 0, (
+        f"`{contract.cut_name}` cut {refused} batch(es) over a section holding {volume} comment "
+        f"answers from {one_short} distinct respondents — one short of the configured threshold of "
+        f"{threshold} — across two under-threshold closed weeks.\n\n"
+        "The volume leg is satisfied and so is the two-week leg, so the only thing that may refuse "
+        "this release is the respondent count, and it is one below. A gate that releases here is "
+        "comparing against `threshold - 1`, and the batch it writes carries one author fewer than "
+        "SPEC §4's threshold asks for — which is one candidate fewer for an instructor reading it "
+        "beside the gradebook's per-week completion ledger (ADR 0125)."
+    )
+    assert (
+        release_rows.members() == []
+    ), f"Comments were released into a batch anyway: {release_rows.members()}."
+
+    # The pair: one more person answers, in a week that is still under the
+    # threshold, and nothing else about the world changes.
+    held_week(world, contract, term_week=HELD_WEEKS[0], respondents=1, streams=both)
+    cut = contract.cut()(world.session)
+    assert cut == 1, (
+        f"With one more respondent — {threshold} of them now, exactly the configured threshold — "
+        f"`{contract.cut_name}` cut {cut} batch(es). A gate written with `>` where `>=` was meant "
+        "withholds a section's held comments for the whole term at exactly the size §4 says is "
+        "enough, and this half is what tells that from the refusal above."
+    )
+    assert_no_batch_is_one_week_or_too_few_authors(release_rows, threshold)
+
+
+def test_the_respondent_count_is_of_the_unreleased_held_set_and_not_of_the_term(
+    comment_world: CommentWorld, comment_contract: Any, release_rows: ReleaseRows
+) -> None:
+    """Which comments the respondent leg counts over — the unreleased ones, and only those.
+
+    A term with a release already in it. The first batch went out over a
+    threshold's worth of people across two weeks; two new quiet weeks then close,
+    carrying comments from **two** people. Nothing may be cut, even though the
+    section's term-wide distinct respondents are now well past the threshold and
+    its term-wide volume is too.
+
+    **This is what makes "every batch carries at least a threshold's worth of
+    authors" a claim a mutation can break.** A respondent count taken over the
+    section's whole term is the natural way to write leg (b) — it is the same
+    shape leg (a) has, and §4's own sentence says "the section's cumulative comment
+    volume for the term" — and it is monotonic: once the term has enough people in
+    it, the leg is satisfied for ever. The cutter then takes whatever is
+    unreleased, which after the first sweep is the last week or two, and writes a
+    batch whose authors are the two people who answered a quiet week. The floor
+    `assert_no_batch_is_one_week_or_too_few_authors` asserts is real only if the
+    denominator is the held set, and this is the test that says which denominator
+    it is.
+
+    **Every other test in this module has an empty release table when the cutter
+    runs**, so term-wide and unreleased-held are the same set in all of them and
+    the mutation is invisible. The first batch here is cut by the real cutter
+    rather than planted (`docs/MISTAKES.md` entry 30: nothing in the fixtures
+    writes a batch), which also makes it the second run's honest starting state
+    (entry 31).
+
+    **The two quiet weeks are two rather than one on purpose**, so leg (c) is
+    satisfied and cannot be what refuses: the held set spans two under-threshold
+    closed weeks, its volume is past the threshold term-wide, and the *only*
+    condition that fails is the number of distinct people behind the unreleased
+    comments.
+
+    **The mutation it kills:** the respondent leg's denominator widened from the
+    unreleased held set to the section's whole term — which is HIGH-2's shape
+    reached through leg (b) rather than through leg (a), and which produces a
+    second batch below ADR 0153's author floor on the very next Monday.
+    **The near miss it distinguishes:** a gate that correctly refuses here and
+    never releases the quiet weeks at all. That one is caught by
+    `test_one_quiet_week_closing_after_a_first_cut_releases_nothing_and_two_release_together`,
+    whose third Monday requires the release to happen once enough people are behind
+    it; this test is the refusal half and says so rather than asserting both.
+    """
+    contract = comment_contract
+    world = comment_world
+    threshold = contract.threshold()
+    assert threshold >= 4, (
+        f"The configured n-threshold is {threshold}. This world needs a first wave that crosses "
+        "and a quiet tail strictly under it, which needs 4 or more."
+    )
+
+    world.build()
+
+    # The first release, cut by the cutter itself.
+    first_size = threshold // 2
+    held_week(world, contract, term_week=HELD_WEEKS[0], respondents=first_size)
+    held_week(world, contract, term_week=HELD_WEEKS[1], respondents=threshold - first_size)
+    first = contract.cut()(world.session)
+    assert first == 1, (
+        f"The first run cut {first} batch(es) over a section holding {threshold} comments from "
+        f"{threshold} respondents across two under-threshold weeks. Until a release exists, the "
+        "term-wide and unreleased-held sets are the same and this test's whole subject — the "
+        "difference between them — does not exist yet."
+    )
+    after_the_first = release_rows.identities()
+    assert after_the_first, "The first run left no memberships, so there is no release to be after."
+    assert_no_batch_is_one_week_or_too_few_authors(release_rows, threshold)
+
+    # Two quiet weeks close. Two people between them, and they are new people, so
+    # the term's own respondent count grows past the threshold while the
+    # unreleased-held count is two.
+    quiet: list[Any] = []
+    for week in (FIRST_QUIET_WEEK, SECOND_QUIET_WEEK):
+        quiet.extend(
+            held_week(world, contract, term_week=week, respondents=1, body=A_QUIET_WEEKS_COMMENT)
+        )
+
+    unreleased_respondents = len(quiet)
+    term_wide_respondents = threshold + unreleased_respondents
+    assert unreleased_respondents < threshold <= term_wide_respondents, (
+        f"The unreleased held set has {unreleased_respondents} respondents behind it and the term "
+        f"has {term_wide_respondents}, against a threshold of {threshold}. This test needs the "
+        "first number below the threshold and the second at or above it — otherwise the two "
+        "denominators give the same answer and the mutation it exists for is invisible."
+    )
+    assert_volume(world, threshold + unreleased_respondents)
+
+    answered = contract.cut()(world.session)
+
+    assert answered == 0, (
+        f"`{contract.cut_name}` cut {answered} batch(es). The section's term-wide volume and its "
+        f"term-wide respondent count are both past the threshold of {threshold}, and the held set "
+        f"spans two under-threshold closed weeks — but only {unreleased_respondents} people wrote "
+        "the comments that are still unreleased.\n\n"
+        "A respondent leg counted over the section's whole term is monotonic: once enough people "
+        "have ever answered, it is satisfied for ever, and the cutter then takes whatever is "
+        f"unreleased — here, {unreleased_respondents} comments by {unreleased_respondents} people. "
+        "That batch is below the author floor SPEC §4's threshold sets, and no assertion about the "
+        "*first* batch would notice, because the first batch is fine. The denominator is the "
+        "unreleased held set."
+    )
+    assert release_rows.identities() == after_the_first, (
+        "The membership rows changed.\n\nAdded: "
+        f"{sorted(release_rows.identities() - after_the_first)}\nRemoved: "
+        f"{sorted(after_the_first - release_rows.identities())}\n\nThe return value and the rows "
+        "are asserted separately because a cutter that answered 0 and wrote memberships would leak "
+        "exactly as much as one that answered 1."
+    )
+    assert len(release_rows.batches()) == 1, (
+        f"The section holds {len(release_rows.batches())} batches: {release_rows.batches()}. An "
+        "empty second batch is still a `cut_at` about this section."
+    )
+
+
 def test_the_respondent_leg_follows_an_institutions_own_threshold(
     comment_world: CommentWorld,
     comment_contract: Any,
@@ -628,10 +836,23 @@ def test_a_terms_volume_one_below_the_threshold_cuts_no_batch(
     `test_the_same_volume_from_enough_respondents_is_released_as_one_batch`**,
     which plants one comment more and requires a cut.
 
-    **The mutation it kills:** the volume test dropped altogether, which releases a
-    section's held comments the moment enough people have written one — the
-    respondent leg alone would then be the whole gate, and §4's own sentence would
-    be enforced by nothing.
+    **This test kills no mutation, and the claim that it did was false.** An
+    earlier draft of this docstring said it killed "the volume test dropped
+    altogether"; the round's re-mutation battery deleted exactly that and the whole
+    suite stayed green, for the reason the paragraph above already gives — leg (b)
+    fails wherever leg (a) does, so the respondent leg refuses every world in which
+    the volume leg would have, and removing the volume leg changes no outcome any
+    test here can observe. The earlier paragraph is the true record and this one
+    replaces the claim rather than sitting beside it (`docs/MISTAKES.md` entry 1:
+    a record that went on asserting something a change had made false).
+
+    **So what is this test for?** It records SPEC §4's own sentence as a
+    behaviour — below the trigger, nothing goes out — at the value the spec states
+    it at. That is worth keeping even where it is subsumed: leg (a) is the
+    condition §4 actually writes down, and the day somebody changes leg (b)'s
+    denominator to something that is no longer bounded by the comment count, this
+    is the test that stops the volume condition disappearing with it. It is a
+    record, not a guard, and saying so is the honest version.
     """
     contract = comment_contract
     world = comment_world
