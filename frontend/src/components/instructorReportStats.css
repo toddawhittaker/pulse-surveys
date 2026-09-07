@@ -1,0 +1,181 @@
+/* The Monday report's stat components — ticket E4-09.
+ *
+ * A component-scoped stylesheet, imported by the three components it dresses,
+ * rather than more rules in `frontend/src/styles.css`: that file is the
+ * application's one stylesheet for the surfaces E1 and E2 shipped, and three
+ * report tickets are building beside each other in this wave. One file per
+ * component group keeps them out of each other's way, and E4-11 imports nothing
+ * new to assemble the page.
+ *
+ * Tokens only. `design/tokens.css` reaches every one of these rules through
+ * `styles.css`'s import of it (SPEC §7.6: one source for palette, type, spacing,
+ * radii, shadow, focus ring and the reduced-motion kill switch), so nothing here
+ * holds a colour, a face or a size of its own.
+ *
+ * Nothing here animates. `design/Usage Rules.md` §3 gives the report exactly one
+ * motion — the trend line drawing on, which is E4-08's — and these are the
+ * numbers beside it; a bar that grew on load would be a second signature moment
+ * on one screen. What motion the page does have is CSS, so the token file's
+ * reduced-motion rule removes it.
+ *
+ * Every measurement follows `design/RatingHistogram.dc.html`,
+ * `design/StatPair.dc.html` and `design/ResponseRateBar.dc.html`, which are the
+ * contract (SPEC §7.6). Where a prototype writes a bare pixel value that is not
+ * on the token ramp — the 96px bar area, the 6px track — it is kept as written.
+ */
+
+/* ---- RatingHistogram ---------------------------------------------------- */
+
+.pulse-stat-histogram {
+  font-family: var(--font-body);
+}
+
+.pulse-stat-histogram-title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-1);
+  font-weight: 500;
+  color: var(--spruce);
+}
+
+.pulse-stat-histogram-summary {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  color: var(--spruce-60);
+}
+
+.pulse-stat-histogram-buckets {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One bucket per rating value: its count above, its bar, its tick below. The
+   prototype draws the counts, the bars and the ticks as three rows; a column per
+   bucket lays out identically and keeps a bucket one thing rather than three. */
+.pulse-stat-histogram-bucket {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  height: 96px;
+}
+
+.pulse-stat-histogram-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--spruce-60);
+  text-align: center;
+}
+
+/* The bar's height is the datum and rides on the element. A zero-count bucket
+   keeps a 2px stub so that "no responses at this rating" is drawn as an empty
+   bar rather than as a missing one. */
+.pulse-stat-histogram-bar {
+  display: block;
+  background: var(--spruce);
+  border-radius: 2px 2px 0 0;
+}
+
+.pulse-stat-histogram-tick {
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--hairline);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--spruce-60);
+  text-align: center;
+}
+
+/* ---- StatPair ----------------------------------------------------------- */
+
+.pulse-stat-pair-figures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+  margin: 0;
+}
+
+.pulse-stat-figure-label {
+  margin-bottom: var(--space-1);
+  font-family: var(--font-body);
+  font-size: var(--text-1);
+  font-weight: 500;
+  color: var(--spruce-60);
+}
+
+.pulse-stat-figure-value {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-4);
+  font-weight: 500;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--spruce);
+}
+
+.pulse-stat-figure-unit {
+  font-size: var(--text-2);
+  color: var(--spruce-60);
+}
+
+/* The prototype's third line, under the value. It carries a comparison in the
+   prototype; comparisons are E5's, so on this surface it carries the one thing
+   an absent figure has to say. */
+.pulse-stat-note {
+  margin: var(--space-2) 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  color: var(--spruce-60);
+}
+
+/* ---- ResponseRateBar ---------------------------------------------------- */
+
+.pulse-stat-rates {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.pulse-stat-rate {
+  font-family: var(--font-body);
+}
+
+.pulse-stat-rate-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: 6px;
+}
+
+.pulse-stat-rate-label {
+  font-size: var(--text-1);
+  font-weight: 500;
+  color: var(--spruce-60);
+}
+
+.pulse-stat-rate-readout {
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  color: var(--spruce);
+}
+
+.pulse-stat-rate-track {
+  height: 6px;
+  background: var(--chalk);
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+/* Absent when there is no percent to draw, so an empty track is empty rather
+   than a zero-width fill pretending to be a measurement. */
+.pulse-stat-rate-fill {
+  height: 100%;
+  background: var(--spruce);
+  border-radius: 3px;
+}
