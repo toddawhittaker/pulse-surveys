@@ -171,7 +171,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 17** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 18** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 16. A mutation harness reported kills it had not made
 
@@ -199,7 +199,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 8** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
+**Caught: 9** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
 
 **Rule.** When a guard enumerates mechanisms, require it to *find* each one on a
 subject that certainly has it, as a control. A guard that only ever reports
@@ -272,7 +272,7 @@ file and check the status, or run the gate bare.
 
 ## 31. "Running it twice is safe" was tested only against a database the loader itself had filled
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/31-running-it-twice-is-safe-was-tested-only-against.md)
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/31-running-it-twice-is-safe-was-tested-only-against.md)
 
 ## 27. A guard that reads a command as text refused a command that was only reading
 
@@ -326,7 +326,7 @@ doing nothing.
 
 ## 39. A gate run was invalidated by edits that landed while it ran
 
-**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/39-a-gate-run-was-invalidated-by-edits-that.md)
+**Caught: 5** · [the incidents, the root cause, and the whole rule](mistakes/39-a-gate-run-was-invalidated-by-edits-that.md)
 
 **Rule.** While a gate runs, the tree it runs in is read-only — no edits, no
 checkouts, no restores. A verdict is valid only for the tree it started on; if
@@ -422,7 +422,7 @@ edit puts the comma back.
 
 ## 44. A guard raised in a fixture turned a module's reds into setup errors
 
-**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/44-a-guard-raised-in-a-fixture-turned-reds-into-errors.md)
+**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/44-a-guard-raised-in-a-fixture-turned-reds-into-errors.md)
 
 **Rule.** A tests-first suite's red must be a FAILED, never an ERROR: an error at
 setup proves nothing about the assertion the test exists to make, survives the
@@ -445,7 +445,7 @@ identifier that starts with `-` rather than generating until one appears.
 
 ## 46. A privilege was attributed to the wrong role, and the ticket was built on it
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/46-a-privilege-was-attributed-to-the-wrong-role.md)
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/46-a-privilege-was-attributed-to-the-wrong-role.md)
 
 **Rule.** A settled decision that rests on a privilege is a claim about a role,
 and the role is the half that gets mistyped: execute the read as that role before
@@ -498,3 +498,29 @@ red. **Establish which layer you are standing on first**: a ruling's sentence
 describes what a caller sees, not what the callee does — the sweep walks past where
 the client raises, and a test that borrows the wrong shape is satisfied by any
 layer that declines quietly, or reds against a correct tree.
+
+## 50. A threshold that exists to protect people was crossed by a count of something else
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/50-a-threshold-that-protects-people-was-crossed-by-a-count-of-something-else.md)
+
+**Rule.** A threshold is a promise about a candidate set — "whoever wrote this is
+one of at least *n* people" — so the number compared against it has to be a count
+of the things the promise is about. Before writing the comparison, say the unit of
+each side out loud: a count of answers, of rows, of events, is not a count of
+people, and a design that gives one person several of them makes the two diverge
+by a factor nobody states. Where the specification names the wrong unit, hold the
+conservative side, count what the promise is about, and record the departure as an
+open question for the owner rather than editing the promise in passing.
+
+## 51. A confidentiality property held in every payload and failed across the sequence of them
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/51-an-attribution-channel-lived-in-the-sequence-of-reports.md)
+
+**Rule.** A guarantee proven over one response, one report or one export is a
+guarantee about one payload, and a reader who keeps the previous one is subtracting
+rather than reading. For any surface a person sees repeatedly, ask what the
+difference between two consecutive views reveals, and assert the property over the
+sequence: drive the surface the way the reader meets it — this Monday, then the
+next, then the one after — rather than once against a fixed world. A release rule
+that can fire again the moment anything new arrives turns each later firing into a
+difference small enough to attribute.

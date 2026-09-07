@@ -118,6 +118,12 @@ boundary: `metadata_tables` is asked for by both.
     the same-origin value a browser would send from that page. The shared home
     for a builder four modules already keep a copy of; those copies are not
     migrated yet, and the file says so.
+  - `fixtures/report_comments.py` — E4-04: the names that ticket's work order
+    settles for the comment read path, the cutter, its beat entry and its view;
+    a world whose windows this suite dates rather than SPEC §3.1's calendar, so
+    that "this week has closed and that one has not" is the same answer on every
+    date CI runs; the comments and moderation states a test plants; and the two
+    release tables read back, never written, by anything but the cutter.
   - `fixtures/care_subject.py` — E4-01: the names that ticket's work order
     settles, the comment a Care reveal derives its subject from (planted through
     the model layer, since the moderation task that would write one is E6's), the
@@ -187,6 +193,7 @@ pytest_plugins = (
     "fixtures.summary_task",
     "fixtures.care_subject",
     "fixtures.report_views",
+    "fixtures.report_comments",
 )
 
 

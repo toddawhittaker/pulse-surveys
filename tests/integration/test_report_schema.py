@@ -59,6 +59,23 @@ RELEASE_BATCH = "release_batch"
 RELEASE_BATCH_MEMBER = "release_batch_member"
 REPORT_TABLES = (WEEKLY_SUMMARY, MODERATION_STATE, RELEASE_BATCH, RELEASE_BATCH_MEMBER)
 
+# Of those four, the ones on which **no ticket has yet spent a privilege**.
+#
+# **This tuple shortened at E4-04, exactly as the test below predicted it would.**
+# That ticket's read path spends `SELECT` on `moderation_state` — it cannot
+# conceal a flag it cannot see — and its cutter spends `SELECT, INSERT` on the two
+# release tables, so the three of them moved into `RUNTIME_BASE_TABLE_PRIVILEGES`
+# in `tests/integration/test_identity_grants.py` with the sentence each comes
+# from, and `tests/integration/
+# test_the_comment_path_runs_over_the_connection_production_uses.py` asserts both
+# directions of every one of those grants at the ACL and drives the path over the
+# application connection.
+#
+# `weekly_summary` is what is left, and it is not an oversight: its writer is
+# E4-06's Monday job, which has not landed, and until it does a grant on that
+# table would widen the runtime role for a writer that does not exist.
+TABLES_NO_TICKET_HAS_SPENT_A_PRIVILEGE_ON = (WEEKLY_SUMMARY,)
+
 # The tables E4-02 does not create and writes rows into to reach its own.
 ANSWER = "answer"
 RESPONSE = "response"
@@ -1223,16 +1240,20 @@ def test_neither_runtime_role_holds_any_privilege_on_a_table_this_ticket_adds(
     and this test would then be green against a database with every privilege in
     it.
 
-    **When this goes red for a good reason**, which will happen: E4-06 grants the
-    summary writer its `INSERT`, and E4-04 grants the release path what it needs.
-    That is a widening of the runtime role recorded deliberately, in the pull
-    request that makes it — the entry moves into
+    **This went red for a good reason at E4-04, exactly as it said it would**, and
+    the repair is the one this docstring prescribed: that ticket's read path spends
+    `SELECT` on `moderation_state` and its cutter spends `SELECT, INSERT` on
+    `release_batch` and `release_batch_member`, so those three moved into
     `RUNTIME_BASE_TABLE_PRIVILEGES` in `test_identity_grants.py` with the sentence
-    it comes from, and the table's name comes out of the list here.
+    each comes from, and their names came out of the list here. What this test now
+    asks is asked of `weekly_summary` alone, whose writer is E4-06's Monday job and
+    has not landed. When it does, the same move happens once more and this test
+    goes away with it.
 
     **The mutation it kills:** `GRANT SELECT, INSERT ON public.weekly_summary TO
-    pulse_app` written into this ticket's migration because the writer will need
-    it eventually.
+    pulse_app` written into a migration because the writer will need it
+    eventually — which is the whole of what "a privilege lands in the change that
+    uses it" forbids.
     """
     for name in REPORT_TABLES:
         report_table(metadata_tables, name)
@@ -1270,7 +1291,7 @@ def test_neither_runtime_role_holds_any_privilege_on_a_table_this_ticket_adds(
 
     held = []
     for role in RUNTIME_ROLES:
-        for name in REPORT_TABLES:
+        for name in TABLES_NO_TICKET_HAS_SPENT_A_PRIVILEGE_ON:
             for privilege in TABLE_PRIVILEGES:
                 if db_session.execute(
                     text(HAS_TABLE_PRIVILEGE),
@@ -1291,10 +1312,12 @@ def test_neither_runtime_role_holds_any_privilege_on_a_table_this_ticket_adds(
                         held.append(f"{role} holds {privilege} on public.{name}.{column}")
 
     assert not held, (
-        f"{sorted(held)}. E4-02 adds no grant: the summary's writer is E4-06, the release path is "
-        "E4-04 and every moderation writer is E6, and a privilege lands in the change that uses "
-        "it. An entry naming a column is a grant `has_table_privilege` does not report at all. If "
-        "one of these is a deliberate grant, it belongs in the ticket that spends it, recorded in "
-        "`RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py` with the "
-        "sentence it comes from — and this list shortens in the same pull request."
+        f"{sorted(held)}. Nothing has yet spent a privilege on "
+        f"{list(TABLES_NO_TICKET_HAS_SPENT_A_PRIVILEGE_ON)}: the summary's writer is E4-06's Monday "
+        "job, and a privilege lands in the change that uses it. An entry naming a column is a "
+        "grant `has_table_privilege` does not report at all. If one of these is a deliberate grant, "
+        "it belongs in the ticket that spends it, recorded in `RUNTIME_BASE_TABLE_PRIVILEGES` in "
+        "`tests/integration/test_identity_grants.py` with the sentence it comes from — and "
+        "`TABLES_NO_TICKET_HAS_SPENT_A_PRIVILEGE_ON` at the head of this file shortens in the same "
+        "pull request, as it did at E4-04."
     )

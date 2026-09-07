@@ -70,6 +70,17 @@ and `tests/fixtures/copy_inventory.py`; the four carried entries via
    collected; before the fix, the same plant was provably missed.
 6. The string-convention sweep exists per its carried done-when and passes
    over the shipped surfaces.
+7. The report's three component copy modules are named, not inferred:
+   `frontend/src/components/instructorReportTrendCopy.ts`,
+   `instructorReportStatCopy.ts` and `instructorReportCommentCopy.ts`. E4-08,
+   E4-09 and E4-10 each shipped one beside its components rather than under
+   `frontend/src/copy/`, because the collector walks that directory and the
+   invariant-marked inventory test reds on a key prefix its governance map does
+   not list — so a light ticket that moved the file would have reddened a §4.1
+   invariant it does not own. Done when the collector's own list names all three
+   files, the governance map covers their key prefixes, and the items-4-and-5
+   vocabulary gate has been seen running over their strings. Until then those
+   strings are held to §4.1 items 4 and 5 by review alone.
 
 ## Known traps
 

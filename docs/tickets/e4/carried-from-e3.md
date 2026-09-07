@@ -83,6 +83,22 @@ carries the same signal through its deltas.
 reader who also has the gradebook open, or changes what it suppresses.
 Nothing was owed inside E3.
 
+**E4's half is done, at E4-04, and it changed what it suppresses — twice.** ADR
+0153 is the statement. A released comment carries no week attribution anywhere,
+because a comment labelled with its week, read beside the per-week completion
+ledger the gradebook carries, narrows the author to about one person in a
+four-response week. And, after that ticket's security round, no batch may hold
+one week's worth of comments or fewer than a threshold's worth of distinct
+authors — ADR 0152's release gate — because the first version dropped the week
+from the payload and left the report's own week-to-week delta to say it instead.
+The residual that record names is a floor rather than a hole: a release is
+attributable no more closely than "one of at least two quiet weeks, one of at
+least a threshold's worth of people", which is the same size of candidate set §4
+already accepts for an ordinary week shown under its own heading. **E6 still owes
+the same statement for its moderation views**, which put comments beside a roster
+with reviewer decisions attached, and this entry stays open against that epic
+alone.
+
 ## The roster sync's token-acquisition dial is unbounded
 
 E3-05's security round bounded the AGS client's token dial and named the

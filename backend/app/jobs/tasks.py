@@ -6,20 +6,23 @@ E1-08's daily maintenance of the two launch tables, the two `sync_*` tasks are
 E1-11's roster pull, `derive_survey_windows` is E2-06's hourly reconciler over the
 weekly rhythm (§3.1), `reclassify_floored_comments` is E2-08's async half of
 §3.3's fail-open, `create_line_item` is E3-05's half of §3.4's line item "created
-by the tool on first launch", and `post_participation_scores` is E3-06's weekly
-recompute of §3.4's score. Summaries (§7.4) are E4's, and every one of these is a
-call into `app/services/` from here rather than domain logic written in this file
-— which is exactly the shape every task below takes: it opens a session and calls
-a service.
+by the tool on first launch", `post_participation_scores` is E3-06's weekly
+recompute of §3.4's score, and `cut_release_batches` is E4-04's weekly release of
+the comments §4's small-N rule has been holding. Summaries (§7.4) are E4's too,
+and every one of these is a call into `app/services/` from here rather than
+domain logic written in this file — which is exactly the shape every task below
+takes: it opens a session and calls a service.
 
-**Who commits is part of that shape, and one task departs from it on purpose.**
-Every task here opens the session and commits it, because the service decides and
+**Who commits is part of that shape, and two tasks depart from it on purpose.**
+Most tasks here open the session and commit it, because the service decides and
 writes while the caller owns the transaction. `post_participation_scores` does
 not: its service commits after each section, because the rows it writes are the
 record of scores that have already reached somebody else's gradebook and cannot be
-allowed to depend on a walk over the whole institution finishing. That task's
-docstring carries the argument, and it is the place to read before making this
-file consistent with itself.
+allowed to depend on a walk over the whole institution finishing.
+`cut_release_batches` does not either, for a weaker reason it states in its own
+words: nothing it writes leaves this system, and what a per-section commit buys is
+the walk's own progress. Both docstrings carry their argument, and they are the
+place to read before making this file consistent with itself.
 """
 
 import logging
@@ -34,6 +37,7 @@ from app.lti.in_flight import purge_expired_launch_states
 from app.lti.replay_guard import purge_expired_nonces
 from app.services import clock
 from app.services.grading import ensure_line_item, post_scores_for_all_sections
+from app.services.report_comments import cut_due_release_batches
 from app.services.roster_sync import sync_all_rosters, sync_section
 from app.services.survey_windows import derive_windows_for_all_sections
 from app.services.validity import (
@@ -332,3 +336,40 @@ def post_participation_scores() -> dict[str, int]:
             counts["failed"],
         )
         return counts
+
+
+@celery_app.task
+def cut_release_batches() -> int:
+    """Release the comments SPEC §4 has been holding, where a section has crossed (E4-04).
+
+    The weekly pass `app.jobs.schedules` runs on `crontab(day_of_week="mon",
+    hour="2", minute="40")`. SPEC §4: comments from under-threshold weeks "are not
+    discarded — they feed the summary, and they surface as raw text once the
+    section's cumulative comment volume for the term crosses the threshold,
+    batched so that timing cannot identify an author."
+
+    A thin wrapper, like every task above: the session is this task's, and every
+    decision — what counts as volume, which comments were held, what a batch holds
+    and whether one is due at all — is `app.services.report_comments`'s, which is
+    the one place SPEC §4's suppression is decided and the one writer of both
+    release tables.
+
+    **The commit is not this task's**, which is the second task here to say so and
+    the second to mean something slightly different by it. `post_participation_scores`
+    below does not commit because its rows record a score that has already reached
+    somebody else's gradebook. Nothing here leaves this system — what a per-section
+    commit buys is the walk's own progress, so a worker killed on the fifth section
+    keeps the four releases it has already cut instead of re-deriving them next
+    Monday. The service commits after each section and term for that reason, and a
+    trailing commit on this line would tell the next reader that durability is the
+    task's, which is the belief this paragraph exists to correct.
+    `SessionLocal()`'s context manager discards whatever open transaction a run
+    leaves behind.
+
+    Answers how many batches were cut, which is what a worker log line and an
+    operator asking "did anything surface this week" both want.
+    """
+    with SessionLocal() as session:
+        batches = cut_due_release_batches(session)
+        logger.info("the weekly release cut produced %d batch(es)", batches)
+        return batches

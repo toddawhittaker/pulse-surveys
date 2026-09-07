@@ -2,13 +2,14 @@
 
 Wired to the application in `app.jobs.celery_app`. E0-03 gave it a runtime that
 already works while every scheduled job still belonged to a later ticket — the
-Monday report is E4, retention is E13. Five entries have landed: E1-08's daily
+Monday report is E4, retention is E13. Six entries have landed: E1-08's daily
 purge of the launch replay ledger, which replaces the native TTL a Redis nonce
 store would have had (ADR 0089), E1-11's hourly roster pull (SPEC §7.3), E2-06's
 hourly survey-window reconciler, which derives the windows a section's calendar
 implies (SPEC §3.1, ADR 0111), E2-08's hourly sweep of the comments §3.3's
-fail-open floor stood in for, and E3-06's weekly recompute of §3.4's participation
-score. Note that the window reconciler is scheduled on real time like every entry
+fail-open floor stood in for, E3-06's weekly recompute of §3.4's participation
+score, and E4-04's weekly cut of the release batches §4's cumulative rule
+produces. Note that the window reconciler is scheduled on real time like every entry
 here: beat's own firing is outside the development clock override (ADR 0109),
 which is exactly why E2-06 materializes its rows in advance rather than at the
 moment a window opens — and why E3-06's Monday slot is a real Monday however far a
@@ -112,5 +113,45 @@ BEAT_SCHEDULE: dict[str, dict[str, Any]] = {
     "post-participation-scores-weekly": {
         "task": "app.jobs.tasks.post_participation_scores",
         "schedule": crontab(day_of_week="mon", hour="2", minute="20"),
+    },
+    # E4-04's weekly release cut: for every section and term the release gate
+    # opens for, one stored batch holding every comment held back from that
+    # section's under-threshold closed weeks (SPEC §4, ADR 0146, ADR 0152). The
+    # gate is three conditions and all must hold — the term's cumulative
+    # comment-answer volume reaches the n-threshold, the distinct people behind
+    # the unreleased held comments reach it, and those comments span at least two
+    # under-threshold closed weeks — because §4's literal trigger counts sentences
+    # where the threshold counts people, and stays true once crossed. It is
+    # evaluated here rather than at read time because a release re-derived on each
+    # read changes as data changes, and the moment a comment first appears is
+    # itself a timing signal.
+    #
+    # **Monday** for the reason the entry above is on one: §3.1 closes every
+    # window on Sunday at 23:59:59 in the institution's timezone, so Monday is the
+    # first day the week that just ended has a final response count — and that
+    # count is exactly what decides whether the week's comments were held.
+    #
+    # **02:40** because the passes ahead of it settle the data this one counts:
+    # the reclassification entry runs at 00:45 and 01:45, so the floored comments
+    # of the week that just closed have had two attempts at a real verdict, and
+    # 02:20 is the participation sweep's. A cut in front of them counts a volume
+    # that is still moving. The minute is 40 rather than a rounder one because 0,
+    # 15, 20, 30 and 45 are already taken by the entries beside it.
+    #
+    # Weekly rather than hourly because the pass walks every section in the
+    # institution and the only thing that can change its answer is a week closing
+    # or a comment arriving in one that already has — neither of which happens
+    # more than once a week for a given section. It is idempotent, and in two
+    # senses since the security round: a run whose sections have all been released
+    # writes nothing, because the held set is chosen by anti-join against the
+    # memberships already stored; and a run that meets one newly closed quiet week
+    # writes nothing either, because a single week satisfies neither the
+    # respondent leg nor the two-week leg.
+    #
+    # **Provider-free**, unlike the summary job at 02:50: nothing here calls a
+    # model, so a provider outage can never delay a release SPEC §4 has promised.
+    "cut-release-batches-weekly": {
+        "task": "app.jobs.tasks.cut_release_batches",
+        "schedule": crontab(day_of_week="mon", hour="2", minute="40"),
     },
 }
