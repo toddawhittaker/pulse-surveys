@@ -7,10 +7,15 @@
  * reaches outside this package, which is why `vite.config.ts` allows the dev
  * server to read it.
  *
- * Tailwind comes next, for its reset and for the palette namespace below. No
- * utility class is used in this ticket: the five landing views are a heading and
- * a line each, and choosing a utility vocabulary belongs with the first real
- * screen (E2's survey) where there is a layout to choose it against.
+ * Tailwind comes next, for its reset and for the palette namespace below.
+ *
+ * The rest of this paragraph is E1-04's note, written on 2026-08-25 and kept as
+ * history: no utility class was used in that ticket, because the five landing
+ * views it shipped were a heading and a line each, and choosing a utility
+ * vocabulary belonged with the first real screen (E2's survey) where there
+ * would be a layout to choose it against. That screen arrived in E2-10, written
+ * in the plain classes below, so as of 2026-09-06 no utility class is used
+ * anywhere in `src/`.
  */
 @import '../../design/tokens.css';
 @import 'tailwindcss';
