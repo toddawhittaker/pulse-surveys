@@ -135,6 +135,13 @@ boundary: `metadata_tables` is asked for by both.
     job selects on), a gateway double that answers about whichever stream's
     comments it was sent and can be made to fail on one section, and
     `weekly_summary` read back on a connection that sees the task's own commits.
+  - `fixtures/report_api.py` — E4-07: the names that ticket's work order settles for
+    the report API, the two routes *discovered* through the module it settles
+    (nothing names their URLs), the six-week world one instructor's report is read
+    over with a section she teaches and one she does not, and the door she reads it
+    through with a session a real launch issued. The item-7 suppression helper and
+    the type of the `comparison` member are found by annotation, because the work
+    order settles the mechanism and no spelling.
 
 Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
@@ -201,6 +208,7 @@ pytest_plugins = (
     "fixtures.report_views",
     "fixtures.report_comments",
     "fixtures.summary_job",
+    "fixtures.report_api",
 )
 
 
