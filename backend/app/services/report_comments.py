@@ -566,20 +566,47 @@ def _comment_volume_by_section_and_term(
 def _held_comments(*, threshold: int, now: datetime) -> Subquery:
     """The comments SPEC §4 has been holding back — the one definition of "held".
 
-    Three conditions, one per concern, and none of them is another's spare. This is
-    written once and selected from twice, because the gate below and the batch it
-    cuts must be about **the same set of comments**: two copies of this predicate
-    that drifted would gate on one set and release another, which is a release of
-    comments nobody checked.
+    Three conditions, one per concern, and none of them is another's spare. The
+    predicate is written once, as a subquery, and `cut_due_release_batches` selects
+    from it twice: `_sections_whose_release_is_due` counts it to decide which
+    `(section, term)` the gate opens for, and `_held_answers_by_section_and_term`
+    reads the answer keys a membership row is written from. One definition, so the
+    gate and the batch cannot be about different sets of comments — two copies of
+    this predicate that had drifted would gate on one set and release another.
+
+    **Those are two SQL statements, not one, and that is worth being honest about.**
+    They run in the same session's transaction under READ COMMITTED, so each takes
+    its own snapshot and a row that appeared between them could in principle be
+    counted by one and not the other. What makes that a non-event is that nothing in
+    the product writes into this set concurrently with the cutter:
+
+      - a comment enters the set only from a **closed** window, and E2-08's write
+        path refuses a submission to a window that has closed — so the set this
+        cutter reads cannot grow under it through the ordinary path;
+      - the two statements run back to back on one connection with no `await` and
+        no second writer between them, and the beat entry is a single scheduled job
+        per `(section, term)`;
+      - and if two statements ever did disagree — a batch counted as due whose
+        answers a concurrent cutter had already released — `release_batch_member`'s
+        `UNIQUE (answer_id)` (ADR 0146) refuses the second membership rather than
+        letting it through. That is the "a second release is a defect to see"
+        stance, reached here by the database rather than by a caught error.
+
+    The only way to make the two snapshots diverge is a second, hand-written cutter
+    running against the same rows at the same instant, which is a defect somebody
+    introduces rather than one this path opens. Collapsing the two reads into one
+    materialized statement would remove even that, and it is deliberately **not**
+    done here: it is a behaviour change to a reviewed release path for a hazard the
+    product cannot reach, and it belongs in the pull request that argues for it.
 
     A row carries the comment, the section and term it belongs to, the week it was
     submitted in and **who wrote it**. The last two are what the gate counts and
-    what nothing here ever returns: `_release_gate` reduces them to two integers,
-    the membership read below selects the answer key alone, and no `ReportComment`
-    has ever carried either. The walk to a person is `answer.response_id` then
-    `response.user_id`, which is a walk the product may make to *count* people and
-    may never make to *name* one — SPEC §4's threshold is a number of people, so
-    a gate that could not reach them could not enforce it.
+    what nothing here ever returns: `_sections_whose_release_is_due` reduces them to
+    two integers, the membership read selects the answer key alone, and no
+    `ReportComment` has ever carried either. The walk to a person is
+    `answer.response_id` then `response.user_id`, which is a walk the product may
+    make to *count* people and may never make to *name* one — SPEC §4's threshold is
+    a number of people, so a gate that could not reach them could not enforce it.
     """
     return (
         select(
@@ -682,9 +709,11 @@ def _held_answers_by_section_and_term(
 ) -> dict[tuple[UUID, UUID], list[UUID]]:
     """Which comments each `(section, term)` is holding, by key and nothing else.
 
-    Selected from the same subquery the gate is counted over, so the set that was
-    checked is the set that goes out. The respondent column is deliberately not
-    selected here: this is the list a membership row is written from, and a
+    Selected from the same `held` subquery `_sections_whose_release_is_due` counted,
+    so the batch is built from the one definition the gate was read from — subject
+    to the two-statement snapshot caveat and its backstops, which `_held_comments`
+    states in full rather than repeating here. The respondent column is deliberately
+    not selected: this is the list a membership row is written from, and a
     membership row carries a batch and a comment and nothing else (ADR 0146).
     """
     asked = select(held.c.section_id, held.c.term_id, held.c.answer_id)
