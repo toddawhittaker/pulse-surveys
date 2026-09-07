@@ -35,15 +35,20 @@ hand it to the schema — the type refuses to exist. That is the half a test can
 prove without E5's data, and it is the half that has to survive E5 being written
 by somebody who never read this ticket.
 
-**Three doors, and the security round found the two that were open.** The
-constructor's token closes the direct one. `model_construct` never calls the
-constructor, and `model_copy(update=...)` rewrites the fields of a value the
-helper already suppressed — both confirmed by execution, both ending in a
-serialized payload carrying a figure §5.1 means to suppress. The ruled chokepoint
-is therefore the **wire**: however a comparison value was built, the payload
-boundary re-checks it. The three tests that drive those doors assert the outcome —
-the figure does not reach the serialized payload — and never the mechanism, because
-the ticket settles that the check exists and leaves its spelling open.
+**Five doors, at three levels, and each level was found by looking one further
+out than the last.** The constructor's token closes the direct one.
+`model_construct` and `model_copy(update=...)` build a *figure* without calling
+it, so the ruled chokepoint moved to the payload boundary — and the same two
+methods build a *report* without running that boundary's own validator, so it
+moved once more, to a revalidation the response performs whatever handed it the
+object. Every step of that was found by execution rather than by argument, and
+the sequence is `docs/MISTAKES.md` entry 22's lesson in three instalments: a
+closed-set guard is defeated one level out, and the level you are looking at is
+never the last one.
+
+Every test that drives a door asserts the **outcome** — the figure does not reach
+wire form — and never the mechanism, because the ticket settles that the check
+exists and leaves its spelling to the implementer.
 
 **Marked `invariant` at the module level**, which puts it in the isolated §4.1
 pass CLAUDE.md says may never be skipped. It is named in the pull request body so
@@ -236,16 +241,65 @@ def report_payload_model(contract: Any) -> Any:
     return models[0]
 
 
+def a_refusal_about_the_comparison_member(refused: BaseException, member: str) -> bool:
+    """Whether a refusal is about the comparison member rather than about something else.
+
+    **The re-pass asked for this, and the reason is worth stating.** A reader that
+    counted *any* exception as a closed door has a second way to be green: a field
+    that could not re-validate from its own serialized form would raise here, and
+    the side-door tests would then pass with the boundary check deleted. That is
+    `docs/MISTAKES.md` entry 3 one level below where round four found it — a guard
+    test whose outcome a second layer also produces — and it is the third time
+    this one chokepoint has produced that shape.
+
+    Read off pydantic's own `loc`, which is the currency a field-level refusal is
+    held in. A refusal that carries no `errors()` is matched on its text instead,
+    so a boundary that refuses some other way still counts if it says what it
+    refused — `docs/MISTAKES.md` entry 35's rule about enumerating currencies
+    applies to this reader too, and the text is the second currency.
+    """
+    errors = getattr(refused, "errors", None)
+    if callable(errors):
+        try:
+            reported = list(errors())
+        except Exception:
+            reported = []
+        if reported:
+            return any(
+                member in tuple(str(part) for part in (error.get("loc") or ()))
+                for error in reported
+            )
+    return member in str(refused)
+
+
+def a_closed_door(refused: BaseException, member: str, what: str) -> tuple[bool, str]:
+    """One refusal, judged: the guard firing, or a red no conclusion can be drawn from."""
+    if a_refusal_about_the_comparison_member(refused, member):
+        return False, f"{what} ({type(refused).__name__}: {refused})"
+    pytest.fail(
+        f"{what}, and the refusal does not name `{member}`: {type(refused).__name__}: {refused}.\n\n"
+        "This test will not call that a pass, because it cannot tell a closed chokepoint from a "
+        "payload that does not round-trip through its own schema. Either the boundary is refusing "
+        "for a reason that has nothing to do with the comparison figure — in which case the "
+        "smuggled payload is malformed and this test is measuring the wrong thing — or the guard "
+        "names its field some other way, and `a_refusal_about_the_comparison_member` in this module "
+        "is where that spelling is taught."
+    )
+
+
 def reaches_the_wire(smuggled: Any, door: Any, contract: Any) -> tuple[bool, str]:
     """Whether a comparison value built outside the helper survives to a serialized payload.
 
     **The question is the outcome and not the mechanism.** A boundary that refuses
-    the value, one that raises while serializing it, and one that serializes it
-    with the figure gone are three correct implementations and this reader accepts
-    all three; only a figure that comes out the other side is a failure. E4-07's
-    work order settles that the chokepoint exists and does not settle how it is
-    spelled, so a test that required a validator, or a particular exception, would
-    be choosing for the implementer.
+    the value and one that serializes it with the figure gone are both correct and
+    this reader accepts either; only a figure that comes out the other side is a
+    failure. E4-07's work order settles that the chokepoint exists and does not
+    settle how it is spelled, so a test that required a validator, or a particular
+    exception type, would be choosing for the implementer.
+
+    **A refusal counts only if it is about the comparison member.** See
+    `a_refusal_about_the_comparison_member` for the near miss that rule closes:
+    a reader that counted any exception has a second way to be green.
 
     A real payload is fetched first and its comparison member swapped, rather than
     a payload being assembled here: every other member is then exactly what the
@@ -259,14 +313,63 @@ def reaches_the_wire(smuggled: Any, door: Any, contract: Any) -> tuple[bool, str
     try:
         validated = model.model_validate(handed)
     except Exception as refused:
-        return False, f"the payload boundary refused it ({type(refused).__name__}: {refused})"
+        return a_closed_door(refused, contract.comparison_member, "the payload boundary refused it")
     try:
         served = validated.model_dump(mode="json")
     except Exception as refused:
-        return False, f"serializing it was refused ({type(refused).__name__}: {refused})"
+        return a_closed_door(refused, contract.comparison_member, "serializing it was refused")
 
     carried = served.get(contract.comparison_member)
     return the_figure_is_in(carried), f"it serialized as {carried!r}"
+
+
+def survives_as_a_report(smuggled_report: Any, contract: Any) -> tuple[bool, str]:
+    """Whether a whole report carrying a smuggled figure survives to wire form.
+
+    The same outcome question one level up. The value under test is a report
+    instance that no validator has seen, and the boundary is the revalidation a
+    response model performs over whatever the route hands it — which is what
+    `model_validate` over an instance exercises and what `revalidate_instances`
+    governs.
+    """
+    model = type(smuggled_report)
+    try:
+        validated = model.model_validate(smuggled_report)
+    except Exception as refused:
+        return a_closed_door(
+            refused, contract.comparison_member, "the response boundary refused the report"
+        )
+    try:
+        served = validated.model_dump(mode="json")
+    except Exception as refused:
+        return a_closed_door(
+            refused, contract.comparison_member, "serializing the report was refused"
+        )
+    carried = served.get(contract.comparison_member)
+    return the_figure_is_in(carried), f"the report serialized its comparison member as {carried!r}"
+
+
+def a_report_built_with_model_construct(
+    model: Any, validated: Any, smuggled: Any, member: str
+) -> Any:
+    """A report assembled field by field, with no validation run over any of them."""
+    return model.model_construct(**{**dict(validated), member: smuggled})
+
+
+def a_report_built_with_model_copy(model: Any, validated: Any, smuggled: Any, member: str) -> Any:
+    """A validated report with its comparison member rewritten afterwards."""
+    del model
+    return validated.model_copy(update={member: smuggled})
+
+
+# The two doors into a *report*, beside the two into a figure. Each puts a
+# smuggled figure into a report without any validator seeing it, which is what
+# makes a field-level guard skippable one level out.
+SMUGGLED_REPORT_DOORS = (
+    ("model_construct", a_report_built_with_model_construct),
+    ("model_copy", a_report_built_with_model_copy),
+)
+REPORT_DOOR_IDS = [name for name, _build in SMUGGLED_REPORT_DOORS]
 
 
 def test_a_figure_over_fewer_sections_than_the_minimum_is_suppressed(
@@ -555,6 +658,76 @@ def test_a_suppressed_figure_cannot_be_unsuppressed_by_copying_it(
         "The helper decided this figure was over too few sections and too few respondents to show. "
         "A copy that overwrites that decision, and a payload boundary that does not look again, "
         "means the two configured minimums are enforced only against callers who ask politely."
+    )
+
+
+@pytest.mark.parametrize(("door", "build"), SMUGGLED_REPORT_DOORS, ids=REPORT_DOOR_IDS)
+def test_a_report_carrying_a_smuggled_figure_does_not_reach_wire_form(
+    report_door: ReportDoor, report_api_contract: Any, door: str, build: Any
+) -> None:
+    """The same class one level out: the field guard is itself skippable.
+
+    The re-pass found it, and the shape is by now familiar enough to name in
+    advance: `docs/MISTAKES.md` entry 22 is a closed-set guard defeated one level
+    out, and this chokepoint has now been defeated at three levels in a row — the
+    constructor, then the field, and now the report that holds the field. A
+    validator on `comparison` runs when a report is *validated*; neither
+    `model_construct` nor `model_copy(update=...)` validates anything, and the
+    reviewers proved by execution that a report built either way is served with an
+    unsuppressed figure and a 200.
+
+    **What is asserted is the wire, again, and only the wire.** However the report
+    was assembled, the response boundary re-checks it, so a figure §5.1 means to
+    suppress does not reach a screen. The ruled fix is one line of model
+    configuration; this test names neither the line nor pydantic's spelling of it,
+    because the property is what the ticket owes and the spelling is the
+    implementer's.
+
+    **The mutation this kills:** removing `revalidate_instances` from the report
+    model's configuration, which restores exactly the state the reviewers
+    demonstrated — a route that hands back an object nothing re-reads.
+
+    **Both doors are driven**, because they fail differently: `model_construct`
+    builds a report that never existed, and `model_copy(update=...)` rewrites one
+    that did. A guard that caught only unvalidated construction would leave the
+    second open, and the second is the one a caller reaches for when they have a
+    real report in hand.
+
+    **The canary:** the smuggled report has to carry the figure before any
+    boundary is asked about it, or this test asserts the absence of something
+    nobody planted (`docs/MISTAKES.md` entry 3).
+    """
+    comparison = report_api_contract.comparison_type()
+    smuggled_figure = comparison.model_construct(**smuggled_field_values(comparison))
+
+    body, _answered = report_door.payload(course_week=FULL_WEEK)
+    model = report_payload_model(report_api_contract)
+    validated = model.model_validate(body)
+    assert report_api_contract.comparison_member in dict(validated), (
+        f"A validated report exposes {sorted(dict(validated))} and none of them is "
+        f"`{report_api_contract.comparison_member}`, so neither door below can put a figure into "
+        "one."
+    )
+
+    smuggled_report = build(
+        model, validated, smuggled_figure, report_api_contract.comparison_member
+    )
+    before_any_boundary = smuggled_report.model_dump(mode="json")
+    assert the_figure_is_in(before_any_boundary), (
+        f"The report built with `{door}` does not carry {A_COMPARISON_MEAN} before any boundary "
+        "sees it; its comparison member is "
+        f"{before_any_boundary.get(report_api_contract.comparison_member)!r}. Until it does, this "
+        "test asserts that a figure nobody planted is absent."
+    )
+
+    survived, what_happened = survives_as_a_report(smuggled_report, report_api_contract)
+    assert not survived, (
+        f"A report assembled with `{door}`, carrying a comparison figure no validator ever saw, "
+        f"reached wire form: {what_happened}.\n\n"
+        "The guard on the comparison member runs when a report is validated, and neither of these "
+        "doors validates anything — so a route that returns such an object serves the figure. "
+        "§4.1 item 7 is a rule about what is shown, so the last boundary before the wire is the one "
+        "that has to hold it, whatever built the object crossing it."
     )
 
 
