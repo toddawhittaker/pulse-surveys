@@ -280,6 +280,18 @@ expired rows, proven by driving the task rather than by reading the grant, and
 the privilege record names whatever was added with the reason `SELECT` was
 withheld in the first place.
 
+**Closed by E4-14.** `lti_launch_nonce_grants_v002.sql` grants `pulse_app` the
+column-scoped `SELECT (expires_at)` the purge's own `DELETE ... WHERE` needs;
+`RUNTIME_COLUMN_PRIVILEGES` in `tests/integration/test_identity_grants.py`
+records it, beside a direct-query negative control proving `nonce` itself
+stays unreadable. `tests/integration/test_the_launch_replay_purge_runs_as_pulse_app.py`
+drives `purge_launch_nonces` as `pulse_app` against a table seeded with an
+expired and a live row in each of `lti_launch_nonce` and `lti_launch_state`:
+the task completes, the expired rows are gone, the live rows are intact, and
+the `lti_launch_state` half — the latent failure this entry names explicitly —
+now runs too. ADR 0150 records why `SELECT` was withheld in E1-08 and what
+this one-column widening concedes.
+
 ## ruff still lints as though the runtime were Python 3.13
 
 Not an E3 item — added by FIX-04, which moved the runtime to Python 3.14.

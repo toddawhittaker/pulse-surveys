@@ -1,0 +1,51 @@
+-- What the application may read of the launch replay ledger — ticket E4-14,
+-- SPEC §7.3, SPEC §9.1, ADR 0089, ADR 0150.
+--
+-- **This widens `lti_launch_nonce_grants_v001.sql` by one column and does not
+-- touch it.** That file is left exactly as it was applied, per ADR 0041 — a
+-- revision that reads a `.sql` file at upgrade time means the file is what
+-- ran, so a database already at that revision is entitled to it unedited.
+-- The widening is here, in the file that changes the grant, and v001's own
+-- comment carries a dated note pointing at this one.
+--
+-- **The defect this closes**: `docs/tickets/e4/carried-from-e3.md`, "The
+-- daily purge of the launch replay ledger cannot run." `pulse_app` held
+-- `INSERT, DELETE` and no `SELECT` at all on `lti_launch_nonce`, and Postgres
+-- requires `SELECT` on every column a `DELETE ... WHERE` reads. The daily
+-- beat task `app.jobs.tasks.purge_launch_nonces` deletes on `expires_at`
+-- (`app.lti.replay_guard.purge_expired_nonces`), so it has raised
+-- `InsufficientPrivilege` on every run since E1-08 shipped this table, and the
+-- ledger's expired tail has never been reclaimed. Because the task shares one
+-- `SessionLocal` across both launch tables, the `lti_launch_state` half of
+-- the same task never ran either — the nonce half always raised first.
+--
+-- **`GRANT SELECT (expires_at)`, and nothing wider.** ADR 0150 records the
+-- decision in full; the short version is that `nonce` is a one-time
+-- credential whose whole value is that nothing but the row that claimed it
+-- ever reads it back — a connection able to `SELECT *` (or even `SELECT
+-- nonce`) could enumerate every nonce this deployment has spent and learn
+-- which launches happened. `expires_at` identifies nobody and names nothing
+-- a replay could use, so granting exactly that one column is what lets the
+-- purge's own `WHERE` clause run without widening what `pulse_app` can
+-- enumerate. `INSERT` and `DELETE` stay as v001 granted them; `UPDATE` stays
+-- withheld, unchanged from v001's own reasoning.
+--
+-- **It carries no personal data.** The table holds a nonce, a consumed-at
+-- timestamp and an expiry — no subject, no name, no address — so SPEC
+-- §4.1's `PERSON_TABLES` does not change and no identity-separated view is
+-- owed by this widening.
+--
+-- **The downgrade REVOKEs the column grant and nothing else** — unlike
+-- `lti_launch_nonce_grants_v001.sql`, whose downgrade drops the table this
+-- widening's own migration does not create. `REVOKE SELECT (expires_at) ON
+-- public.lti_launch_nonce FROM pulse_app` is what takes this widening back
+-- while leaving the table, its rows, and v001's `INSERT, DELETE` untouched.
+--
+-- `RUNTIME_COLUMN_PRIVILEGES` in `tests/integration/test_identity_grants.py`
+-- is the hand-written record this widening is measured against, and the
+-- module's own negative control
+-- (`test_the_application_role_may_read_the_nonce_ledgers_expiry_and_not_its_nonce`)
+-- measures the narrow half directly: `expires_at` readable, `nonce` still
+-- refused.
+
+GRANT SELECT (expires_at) ON public.lti_launch_nonce TO pulse_app;

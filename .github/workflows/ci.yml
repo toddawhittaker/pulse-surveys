@@ -629,6 +629,15 @@ jobs:
         if: needs.changed.outputs.inert != 'true'
         run: npm run lint --workspace frontend
 
+      # The unit-test runner (E4-16): vitest, run once rather than in its
+      # watch mode, over the frontend workspace's own `test` script — the
+      # same script `frontend/package.json` declares, read through the
+      # workspace rather than invoked directly, exactly as `typecheck` and
+      # `lint` already are above.
+      - name: vitest (frontend workspace)
+        if: needs.changed.outputs.inert != 'true'
+        run: npm run test --workspace frontend
+
   # Enforcing since e0/db-session-alembic (E0-04): `backend/alembic.ini` and the
   # revision chain exist, so this job no longer tolerates their absence.
   #
