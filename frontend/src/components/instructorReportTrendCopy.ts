@@ -18,6 +18,15 @@
  * this file one directory over would red a §4.1 invariant test it does not own.
  * When E4-12 grows the map, this file moves and this paragraph goes with it.
  *
+ * **The cost of that, said plainly: nothing sweeps these strings today.** The
+ * collector reads `frontend/src/copy/` and this file is not in it, so the
+ * invariant-marked inventory checks on SPEC §4.1 items 4 and 5 — the
+ * aggregate-language rule and the confidentiality-copy rule — read none of the
+ * words below. They are held to those rules here by review and by this header,
+ * which is weaker than the way the survey surface's strings are held, and they
+ * stay uncollected and unswept until **E4-12** collects them. That ticket owns
+ * closing this gap.
+ *
  * ## What is deliberately not here
  *
  * **Every comparison word.** "Comparable courses", "university", and the
