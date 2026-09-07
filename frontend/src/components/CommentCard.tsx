@@ -10,7 +10,7 @@ import { copy, fillCopy } from './instructorReportCommentCopy';
  *
  * **What this component is given is all it can ever show.** SPEC §4 forbids
  * timestamps and identity with comments and forbids anything that reveals
- * submission order; the guarantee here is structural rather than a habit —
+ * submission order; the guarantee here is structural rather than careful —
  * there is no prop for a timestamp, an author, an id or a position, so no
  * caller can pass one and no future edit can start rendering one without
  * changing the type. Order is the order the array arrived in; the
