@@ -51,7 +51,11 @@ this one, `RUNTIME_BASE_TABLE_PRIVILEGES` in
 `tests/integration/test_identity_grants.py`, and `test_report_schema.py`'s
 narrowed walk. E4-04 grants the same `SELECT` for its own read path from a
 parallel branch, so one `SELECT` on that table is the merged end state rather
-than a widening either ticket introduces alone.
+than a widening either ticket introduces alone — and at the merge the duplicate
+came out of *this* revision rather than E4-04's, because two revisions issuing one
+grant is invisible while two `downgrade()`s revoking it are not. What this module
+asserts is unchanged: the role holds that read, and holds no verb beside it. Which
+revision executed the `GRANT` is deliberately not asked here.
 
 **Both currencies are asked, because a privilege reaches a role three ways.**
 `has_table_privilege` answers for a table grant and for one arriving through a
@@ -68,9 +72,10 @@ beside it. Every test in this ticket's other modules reaches the same connection
 through the task itself.
 
 **Which failure a red here is.** Before E4-06's migration lands, expected red on
-an assertion: `pulse_app` holds nothing on either table, so each equality below
+an assertion: `pulse_app` holds nothing on `weekly_summary`, so that equality
 reports its missing grants by name and the driven insert is refused with
-`permission denied`. Before E4-02's, expected red on `pytest.fail` naming the
+`permission denied`. The `moderation_state` and release-table equalities are
+E4-04's revision's to satisfy and are green from one revision lower. Before E4-02's, expected red on `pytest.fail` naming the
 absent table (`docs/MISTAKES.md` entry 44).
 """
 
@@ -113,10 +118,16 @@ GRANTED_ON_THE_SUMMARY = ("SELECT", "INSERT")
 # suite already transcribes it, rather than being written a second time here.
 GRANTED_ON_THE_MODERATION_RECORD = ("SELECT",)
 
-# The two tables E4-02 created that this ticket neither reads nor writes. Their
-# entry stays at nothing: a privilege lands in the change that spends it, and the
-# release path is E4-04's.
-STILL_UNGRANTED = ("release_batch", "release_batch_member")
+# The two tables E4-02 created that this ticket neither reads nor writes. **Their
+# entry was nothing until E4-04 merged, and it is that ticket's two verbs now.**
+# The rule is unchanged — a privilege lands in the change that spends it — and the
+# release path is what spends these: `d4c1a7e93f26` grants `pulse_app`
+# `SELECT, INSERT` on both, argued in `report_comment_grants_v001.sql` and pinned
+# as an equality in `RUNTIME_BASE_TABLE_PRIVILEGES`. What this module still has to
+# say about them is that **E4-06 adds nothing here**, so the assertion below is an
+# equality against E4-04's grant rather than against an empty set.
+GRANTED_BY_E4_04 = ("release_batch", "release_batch_member")
+GRANTED_ON_THE_RELEASE_TABLES = ("SELECT", "INSERT")
 
 HAS_TABLE_PRIVILEGE = "SELECT has_table_privilege(:role, :relation, :privilege)"
 HAS_COLUMN_PRIVILEGE = "SELECT has_column_privilege(:role, :relation, :column, :privilege)"
@@ -363,29 +374,39 @@ def test_the_application_role_may_read_a_moderation_state_and_never_write_one(
     )
 
 
-def test_the_two_tables_this_ticket_neither_reads_nor_writes_are_still_ungranted(
+def test_the_two_tables_this_ticket_neither_reads_nor_writes_carry_e4_04s_grants_alone(
     db_session: Any, metadata_tables: dict[str, Any], summary_job_contract: Any
 ) -> None:
     """The pair to the two tests above: the grant is exactly as wide as what is spent.
 
     E4-02 created four tables and spent nothing on any of them. This ticket writes
-    one and reads a second. If the grant that arrives with it also opens the
-    release batch, the rule "each ticket grants what it spends" has been replaced
-    with "somebody granted the report schema", and the ticket that was going to
-    argue for those privileges — E4-04 — never has to.
+    one and reads a second. The other two are the release path's, and E4-04 spends
+    them: `SELECT, INSERT` on each, because SPEC §4's weekly cutter writes a batch
+    and its membership rows and reads back what it has already released.
 
-    **This is the half that catches the plausible over-grant.** A migration
-    written as `GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA public TO pulse_app`
-    passes both tests above perfectly, gives the job exactly the verbs it needs on
-    the tables it needs them on, and quietly opens every other table in the
-    database.
+    **This test asserted "nothing at all" until the two branches merged**, and the
+    change is a repoint rather than a retreat. The question it exists to ask is
+    whether *this* ticket's migration widened a table it does not spend, and with
+    E4-04's grant now below it in the chain the true form of that question is an
+    equality against E4-04's two verbs. An empty-set assertion would be false, and a
+    dropped test would leave nothing here asking it at all.
 
-    **The mutation this kills:** `ON ALL TABLES IN SCHEMA public`, and a
-    copy-pasted grant block that names all four of E4-02's tables because they were
-    created together — which is the shape the moderation grant makes tempting, now
-    that two of the four are legitimately open.
+    **This is still the half that catches the plausible over-grant.** A migration
+    written as `GRANT ALL ON ALL TABLES IN SCHEMA public TO pulse_app` passes both
+    tests above perfectly, gives the job exactly the verbs it needs on the tables it
+    needs them on, and quietly opens every other table in the database — and it
+    fails here, on `UPDATE`, `DELETE` and `TRUNCATE` arriving on two tables whose
+    whole design is that a release cannot be taken back (ADR 0146). The narrower
+    `GRANT SELECT, INSERT ON ALL TABLES` is invisible to this module and is caught
+    where it has to be: `RUNTIME_BASE_TABLE_PRIVILEGES` in
+    `tests/integration/test_identity_grants.py` is an equality over every base table
+    in the schema, so a grant reaching a table nobody argued for reds it.
+
+    **Both currencies, as everywhere in this module.** A table-wide grant shows on
+    every column, so the expected column set is a product; anything outside it is a
+    column-scoped grant `has_table_privilege` does not report at all.
     """
-    for name in STILL_UNGRANTED:
+    for name in GRANTED_BY_E4_04:
         assert name in metadata_tables, (
             f"there is no `{name}` table (there are {sorted(metadata_tables)}). E4-02 creates all "
             "four of the report tables together, and this test is about the two of them this "
@@ -393,37 +414,37 @@ def test_the_two_tables_this_ticket_neither_reads_nor_writes_are_still_ungranted
         )
     probes_can_see_a_grant_they_are_pointed_at(db_session)
 
-    held: list[str] = []
-    for role in RUNTIME_ROLES:
-        for name in STILL_UNGRANTED:
-            for privilege in TABLE_PRIVILEGES:
-                if db_session.execute(
-                    text(HAS_TABLE_PRIVILEGE),
-                    {"role": role, "relation": f"public.{name}", "privilege": privilege},
-                ).scalar_one():
-                    held.append(f"{role} holds {privilege} on public.{name}")
-            for column in columns_of(db_session, name):
-                for privilege in COLUMN_PRIVILEGES:
-                    if db_session.execute(
-                        text(HAS_COLUMN_PRIVILEGE),
-                        {
-                            "role": role,
-                            "relation": f"public.{name}",
-                            "column": column,
-                            "privilege": privilege,
-                        },
-                    ).scalar_one():
-                        held.append(f"{role} holds {privilege} on public.{name}.{column}")
+    for name in GRANTED_BY_E4_04:
+        expected_at_table = {
+            (APPLICATION_ROLE, privilege) for privilege in GRANTED_ON_THE_RELEASE_TABLES
+        }
+        at_table = held_on_table(db_session, name)
+        assert at_table == expected_at_table, (
+            f"`{name}` carries {sorted(at_table)}, not {sorted(expected_at_table)}. E4-04's "
+            "revision `d4c1a7e93f26` grants `SELECT, INSERT` there and nothing else — a release "
+            "cannot be un-released (ADR 0146), so no `UPDATE` and no `DELETE` may reach either "
+            "table, and `pulse_care` holds nothing on them at all. E4-06 spends nothing here: it "
+            "writes `weekly_summary` and reads `moderation_state`. A verb arriving from this "
+            "ticket's migration is a widening for a writer that is not this one, and if it is "
+            "deliberate it belongs in the ticket that spends it, recorded in "
+            "`RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py` with "
+            "the sentence it comes from."
+        )
 
-    assert not held, (
-        f"{sorted(held)}. E4-06 writes `{WEEKLY_SUMMARY_TABLE}` and reads "
-        f"`{MODERATION_STATE_TABLE}`, and spends nothing anywhere else: the release path is "
-        "E4-04's, and each ticket grants what it spends. A grant reaching these two from this "
-        "ticket is a widening for a reader and a writer that do not exist yet — and if one of them "
-        "is deliberate it belongs in the ticket that spends it, recorded in "
-        "`RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py` with the "
-        "sentence it comes from."
-    )
+        expected_at_columns = {
+            (APPLICATION_ROLE, column, privilege)
+            for column in columns_of(db_session, name)
+            for privilege in GRANTED_ON_THE_RELEASE_TABLES
+        }
+        at_columns = held_on_columns(db_session, name)
+        assert at_columns == expected_at_columns, (
+            f"On `{name}`'s columns the roles hold "
+            f"{sorted(at_columns - expected_at_columns)} beyond E4-04's table-wide grant, and are "
+            f"missing {sorted(expected_at_columns - at_columns)}. A column-scoped grant is the "
+            "currency `has_table_privilege` is blind to (`docs/MISTAKES.md` entry 35), and a "
+            "column-scoped `UPDATE` on `release_batch_member.batch_id` is the narrowest way to "
+            "move a comment into another batch and give it a second release time."
+        )
 
 
 def test_the_write_lands_over_the_connection_the_job_actually_runs_on(
