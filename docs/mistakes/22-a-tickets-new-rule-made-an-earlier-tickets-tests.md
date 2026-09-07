@@ -1,14 +1,14 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 18**
+**Caught: 19**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*21 instances recorded; the 4 most recent are below — the E3-04 one before the
-"What happened" section, and the E4-01, E4-05 and E4-04 ones after it, each left
-where this file has always kept its instances. Four is one past what this file
-keeps, so the trim of the E3-04 paragraph is owed to whoever touches it next. The
-other 17 are in this file's git
+*22 instances recorded; the 5 most recent are below — the E3-04 one before the
+"What happened" section, and the E4-01, E4-05, E4-04 and E4-06 ones after it, each
+left where this file has always kept its instances. Five is two past what this file
+keeps, so the trim of the E3-04 and E4-01 paragraphs is owed to whoever touches it
+next. The other 17 are in this file's git
 history and in the pull requests they cite. The overdue trim was taken on
 2026-09-06, and it took the E2-16 and E2-05 pair together as the note asked. The
 E0-18 PR 2 paragraph stays where it sits, beside the consequence it illustrates:
@@ -191,3 +191,28 @@ without it the ticket's first green run would have been a sweep failure whose on
 remedy is on the read-only side of the wall, and the fact that a Core query is
 invisible to that sweep is now written into the module docstring and the pull
 request for E4-07, which meets the same question next.
+
+**Instance, 2026-09-06 (E4-06, PR #195, dispute E4-06-02's sibling E4-06-01).**
+SPEC §5.1 has the weekly summaries "exclude flagged-held content", ADR 0145 puts
+the record of what is held in `moderation_state` and nowhere else, and the Monday
+walk runs on the `pulse_app` connection — so the filter that sentence requires
+cannot execute without a `SELECT` the ticket's own work order had said it would not
+take ("`weekly_summary` and nothing wider"). Granting it reddened **three**
+inventories at once, all of them read-only to the implementer:
+`RUNTIME_BASE_TABLE_PRIVILEGES`'s equality in `test_identity_grants.py`, the
+narrowed walk in `test_report_schema.py`, and — the one that is the lesson here —
+`STILL_UNGRANTED`, a closed tuple inside a test module **this ticket had just
+written**. The first two are the familiar shape: an earlier ticket's rule, a later
+ticket's need. The third is the same collision arriving from the ticket's own
+tests-first commit, where nobody thinks to look for it, because the reflex is to
+grep the *existing* suite for what a new rule forbids and a module written an hour
+ago does not feel like the existing suite.
+
+Counted as a catch: the entry is why the grant became dispute E4-06-01 with all
+three assertions named and measured up front, rather than a green branch reached by
+quietly widening a tuple the same author had written. **The clause it adds:** when a
+ticket takes a privilege, a row or a state its own work order said it would not,
+grep its own new test modules for closed sets naming the thing — the read-only rule
+is about who may edit a test, not about how old the test is, and a set written
+earlier in the same branch is as much on the other side of the wall as one written
+in E0.
