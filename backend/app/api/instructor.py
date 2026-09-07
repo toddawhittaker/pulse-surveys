@@ -34,9 +34,14 @@ below and not two, why it interpolates nothing it was handed, and why the check
 that produces it is a single query in the service rather than an existence test
 followed by a scope test.
 
-**A course week the section has no window for is a different refusal**, and it is
-safe to be: it is only ever reached after the section has been established as this
-instructor's own, so it says nothing about anything she may not already see.
+**A course week with no published report is a different refusal**, and it is safe
+to be: it is only ever reached after the section has been established as this
+instructor's own, so it says nothing about anything she may not already see. Its
+own two cases — a window still taking responses, and a week the section never runs
+— share one status and one body, because telling them apart would hand back the
+section's calendar a week at a time. A mid-window report is refused rather than
+served at all: read twice, the difference between two views of an open week is one
+student's submission.
 
 **Both answers carry `Cache-Control: no-store`.** A report holds this week's raw
 student comments, and a stored copy outlives the reason it was shown — a browser
@@ -78,10 +83,13 @@ PUBLISHED_WEEKS_PATH = "/instructor/sections/{section_id}/published-weeks"
 SECTION_UNAVAILABLE_STATUS = 404
 SECTION_UNAVAILABLE = "There is no report here for you to read."
 
-# And the week that is not one this section runs. A separate sentence because it is
-# a different fact and the instructor can act on it, reached only after the section
-# has already been established as hers.
-COURSE_WEEK_UNAVAILABLE = "This section has no survey week with that number."
+# And the week there is no published report for — whether its window is still open
+# or the section never runs it. One sentence for both, for the same no-oracle reason
+# the section pair has one: the difference between "not yet" and "never" is a fact
+# about the section's calendar. A separate sentence from the refusal above because it
+# is a different fact and the instructor can act on it, and because it is reached only
+# after the section has already been established as hers.
+COURSE_WEEK_UNAVAILABLE = "There is no report for that week of this section."
 
 NO_STORE = "no-store"
 

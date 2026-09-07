@@ -61,7 +61,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, PrivateAttr
 from sqlalchemy import column, func, or_, select, table
 from sqlalchemy.orm import Session
 
@@ -483,13 +483,27 @@ class ComparisonFigure(BaseModel):
     SPEC §4.1 item 7: "No figure computed from a comparison set is shown below the
     benchmark minimum — a mean, a median, or any other statistic, not only a drawn
     line." This type is where that rule is enforced for the whole product, because
-    it is the only type the report schema's `comparison` member accepts and its
-    constructor demands `_COMPARISON_TOKEN`.
+    it is the only type the report schema's `comparison` member accepts.
 
     **`figure` is `None` whenever `suppressed` is true, and the helper is what
     guarantees it.** A value carrying both would be a suppressed figure on the
-    wire, which is the exact thing item 7 forbids; nothing else in this system can
-    build one, so there is no second place to check.
+    wire, which is the exact thing item 7 forbids.
+
+    **Two checks, at two boundaries, because the constructor alone is not one.**
+    E4-07's security round found the reason: the token guards `__init__`, and
+    pydantic offers two documented ways of producing a model instance that never
+    calls it. `model_construct` skips validation and initialisation both, and
+    `model_copy(update=...)` rewrites the fields of a value the helper had already
+    suppressed. Both were demonstrated ending in a serialized payload carrying a
+    figure §5.1 means to suppress.
+
+      - **The constructor's token** is the front door and still closes it.
+      - **The seal below is the wire**, checked by the report schema's own
+        validation of its `comparison` member — see `refuse_an_unsealed_comparison`.
+
+    §4.1 item 7 is a rule about what is *shown*, so the boundary that has to hold
+    it is the one the payload crosses, and a guard standing only in `__init__` is
+    walked past by every entry point that does not call `__init__`.
 
     **E5 fills this, and it fills it through the same helper.** Until then every
     report carries a suppressed value with no number in it, which is what gives
@@ -502,13 +516,30 @@ class ComparisonFigure(BaseModel):
     reason: str | None = None
     figure: float | None = None
 
+    # **The seal: the field values this instance was built with, recorded at the
+    # moment the token was accepted.** A private attribute, so it is not a field,
+    # is never serialized, and cannot be handed in by a caller.
+    #
+    # It binds the *values* rather than merely recording that a token was seen,
+    # and that is the whole of why it survives both side doors. `model_construct`
+    # sets no private attribute at all, so an instance it produces carries `None`
+    # and matches nothing. `model_copy(update=...)` copies the private attribute
+    # from the value it is copying and then rewrites the fields, so the seal is
+    # over the *old* values and disagrees with the new ones — which a seal
+    # recording only "a token was seen" would not.
+    _sealed_over: tuple[Any, ...] | None = PrivateAttr(default=None)
+
     def __init__(self, token: object = None, **values: Any) -> None:
-        """Refuse any construction that does not come from this module.
+        """Refuse any construction that does not come from this module, and seal the rest.
 
         The token is positional and defaulted so that the ordinary mistake — a
         caller elsewhere writing `ComparisonFigure(suppressed=False, figure=4.2)`
         because the fields are right there in the schema — is refused rather than
         silently accepted with a `None` token.
+
+        `object.__setattr__` because the model is frozen: the seal is written once,
+        here, after validation has settled what the fields are, and there is no
+        supported way for anything else to write it.
         """
         if token is not _COMPARISON_TOKEN:
             raise TypeError(
@@ -519,6 +550,58 @@ class ComparisonFigure(BaseModel):
                 "this constructor rather than a rule callers are asked to remember."
             )
         super().__init__(**values)
+        object.__setattr__(self, "_sealed_over", _the_seal_over(self))
+
+
+def _the_seal_over(figure: ComparisonFigure) -> tuple[Any, ...]:
+    """What a sealed comparison's fields are, in one order, for the two sites that compare them.
+
+    Written once rather than spelled at the constructor and again at the check: two
+    tuples that fell out of step would make every legitimate value fail the wire
+    boundary, or — the direction that matters — make every smuggled one pass it.
+    Derived from `model_fields` so a field added to the type is inside the seal by
+    existing, which is the difference between a seal and a list somebody has to
+    remember to extend (`docs/MISTAKES.md` entry 22).
+    """
+    return tuple(getattr(figure, name) for name in sorted(type(figure).model_fields))
+
+
+def refuse_an_unsealed_comparison(figure: ComparisonFigure) -> None:
+    """Refuse a comparison value the suppression helper did not produce — the wire boundary.
+
+    Called by `app.schemas.report.InstructorReport`'s own validation of its
+    `comparison` member, which is the boundary a smuggled instance cannot skip:
+    whatever built the value, it becomes part of a report only by being validated
+    into that model, and a field validator runs there even for a value that is
+    already an instance of the field's type.
+
+    **What it compares, and why that and not the token.** The seal is over the
+    field values as they stood when the token was accepted. So a value produced by
+    `comparison_after_suppression` matches; one produced by `model_construct`
+    carries no seal; and one produced by `model_copy(update=...)` carries a seal
+    over the values it had *before* the update. A check that only asked "was a
+    token ever seen" would pass the third, because `model_copy` copies private
+    attributes along with everything else — which is the closed-set defeat one
+    level out that `docs/MISTAKES.md` entry 22 records, and it was found here by a
+    security review rather than by this module's own reasoning.
+
+    **It raises rather than quietly emptying the member**, and that is deliberate.
+    Nothing in this system can reach here except code that built a comparison value
+    outside the one helper, which is a defect in a confidentiality path rather than
+    a state to render — so it fails loudly, at the boundary, before anything is
+    serialized. `ValueError` because a pydantic validator turns it into a
+    `ValidationError` on the field, which is what the payload boundary answers with.
+    """
+    if figure._sealed_over != _the_seal_over(figure):
+        raise ValueError(
+            "This comparison figure was not produced by "
+            "`app.services.reporting.comparison_after_suppression`: it carries no seal, or a seal "
+            "over field values it no longer has. SPEC §4.1 item 7 suppresses every figure computed "
+            "from a comparison set below the configured benchmark minimums, and the suppression is "
+            "decided once, by that helper, over both minimums. A value built past it — with "
+            "`model_construct`, or by copying a suppressed one with the figure written back in — is "
+            "refused here rather than shown."
+        )
 
 
 def comparison_after_suppression(
@@ -573,11 +656,28 @@ class SectionUnavailableError(Exception):
 
 
 class CourseWeekUnavailableError(Exception):
-    """That course week is not one this section has a survey window for.
+    """There is no report for that course week of this section — one refusal for two states.
 
-    Distinct from the refusal above and safe to be: it is only ever raised after
-    the section has been established as this instructor's own, so it says nothing
-    about anything she may not already see.
+    **A week whose survey window has not closed, and a week the section never runs,
+    raise this same exception from the same line, and that is the point.** E4-07's
+    security round found the first of those served: `instructor_report` answered any
+    course week with a `survey_window` row, so an instructor could poll a week that
+    was still taking responses and read the *difference* between two views of it —
+    which is one student's submission, a count that moved by one and a comment that
+    was not there an hour ago. SPEC §4 randomizes comment order so that position
+    says nothing; it cannot make a comment that has just appeared look like one that
+    was always there, and in an under-threshold week the set of people who could
+    have written it is small.
+
+    Telling the two states apart would be its own disclosure, one level down: the
+    difference between "not yet" and "never" is a fact about the section's calendar,
+    so a caller could walk the course weeks and learn how long the section runs and
+    where in the term it sits. Hence one exception, one sentence, one code path —
+    the rule the section pair already follows, applied to weeks.
+
+    Distinct from `SectionUnavailableError` and safe to be: this is only ever raised
+    after the section has been established as this instructor's own, so it says
+    nothing about anything she may not already see.
     """
 
 
@@ -613,25 +713,27 @@ def instructor_report(
     only its own authenticated subject's scope, so `section_id` is a thing to check
     rather than a thing to trust; see `_readable_section`.
 
-    **A published week is not a precondition here.** Week navigation lists the
-    closed weeks (E4's breakdown decision 6) and that is what a reader pages
-    across, but a report for a week whose window is still open is a true report of
-    what has arrived so far and refusing it would be this module inventing a rule
-    nothing asks for. What is refused is a course week the section has no window
-    for at all, which is a request about a week that does not exist.
+    **Being published is a precondition, and the asked week is selected out of the
+    published set rather than out of the calendar.** SPEC §3.1 puts the report after
+    the window closes and this ticket's own context is "one published course week";
+    serving a week still taking responses lets an instructor read the same report
+    twice and subtract, which is one student's submission each time
+    (`docs/MISTAKES.md` entry 51, and `CourseWeekUnavailableError` carries the
+    argument). Selecting from `published` rather than testing against it afterwards
+    is what makes an open week and a week the section never runs leave this function
+    by the same line, with nothing to tell them apart.
 
     Raises `SectionUnavailableError` and `CourseWeekUnavailableError`; the router
     is what turns each into an HTTP answer.
     """
     section = _readable_section(session, person_id=person_id, section_id=section_id)
-    weeks = _section_weeks(session, section)
     now = clock.now(session, settings=settings)
-    published = [week for week in weeks if week.closes_at < now]
+    published = [week for week in _section_weeks(session, section) if week.closes_at < now]
 
-    asked = next((week for week in weeks if week.course_week == course_week), None)
+    asked = next((week for week in published if week.course_week == course_week), None)
     if asked is None:
         raise CourseWeekUnavailableError(
-            f"This section has no survey window for course week {course_week}."
+            "This section has no published report for that course week."
         )
     return _payload(session, section=section, week=asked, published=published, settings=settings)
 
@@ -784,7 +886,17 @@ def _payload(
             },
             summary=summaries.get(token),
             comments=_comment_views(
-                visible_comments(session, section_id=section.id, week_id=week.week_id, stream=token)
+                # **The same `Settings` object the `small_n` member below prints
+                # from.** The threshold an instructor is shown and the threshold
+                # that decided what she is shown are one number, read once, so the
+                # label cannot describe a gate that applied a different one.
+                visible_comments(
+                    session,
+                    section_id=section.id,
+                    week_id=week.week_id,
+                    stream=token,
+                    settings=settings,
+                )
             ),
         )
         for token in REPORT_STREAMS

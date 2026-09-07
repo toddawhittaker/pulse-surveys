@@ -32,14 +32,23 @@ submission instant or a per-week count added here for a frontend's convenience
 would undo at the assembly layer what the module below was reviewed line by line
 to guarantee.
 
-**`comparison` is typed with a class this module cannot construct.** SPEC §4.1
-item 7 suppresses any figure computed from a comparison set below the configured
-minimums, and E4's breakdown decision 4 puts the member on the wire from day one
-so that chokepoint has somewhere to stand before E5 fills it.
-`app.services.reporting.ComparisonFigure`'s constructor demands a token private
-to that module, so the only way a value of this type exists is through the
-suppression helper beside it — a later caller cannot assemble a comparison figure
-and hand it to this schema, because the type refuses to be built.
+**`comparison` is typed with a class this module cannot construct, and it is
+re-checked here anyway.** SPEC §4.1 item 7 suppresses any figure computed from a
+comparison set below the configured minimums, and E4's breakdown decision 4 puts
+the member on the wire from day one so that chokepoint has somewhere to stand
+before E5 fills it. `app.services.reporting.ComparisonFigure`'s constructor
+demands a token private to that module — but a constructor is not the only way to
+produce a pydantic instance, and E4-07's security round demonstrated two that skip
+it: `model_construct`, which runs neither validation nor `__init__`, and
+`model_copy(update=...)`, which rewrites the fields of a value the helper had
+already suppressed.
+
+So item 7's boundary is **the wire**, and it is `InstructorReport`'s own
+validation of the member below. However a comparison value was built, it becomes
+part of a report only by being validated into this model, and the validator there
+asks `app.services.reporting.refuse_an_unsealed_comparison` whether the helper
+produced it. Item 7 is a rule about what is *shown*, so the check belongs at the
+last boundary before showing rather than at the first before building.
 
 **Rates that have no value are `None` and never zero.** A validity rate over
 zero responses is not "all invalid", and a response rate over an empty enrolment
@@ -48,9 +57,9 @@ absence. The rule is written once, in `app.services.reporting`, and this schema 
 what makes the absent state expressible.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.services.reporting import ComparisonFigure
+from app.services.reporting import ComparisonFigure, refuse_an_unsealed_comparison
 
 __all__ = [
     "CommentView",
@@ -237,6 +246,27 @@ class InstructorReport(BaseModel):
     # ADR 0152's release, placed here and nowhere else: a list in every report,
     # populated only in the latest published week's, and carrying no week.
     released_from_earlier_weeks: list[CommentView]
+
+    @field_validator("comparison")
+    @classmethod
+    def _the_comparison_is_the_helpers(cls, figure: ComparisonFigure) -> ComparisonFigure:
+        """SPEC §4.1 item 7 at the wire — the boundary a smuggled instance cannot skip.
+
+        A `mode="after"` field validator, which is what makes it the right place:
+        it runs on the value the field ends up holding, including a value that was
+        already an instance of `ComparisonFigure` and therefore passed straight
+        through the field's own type check. Every route in this module serves a
+        report by validating one of these models, so there is no way to a
+        serialized payload that does not come through here.
+
+        See `app.services.reporting.refuse_an_unsealed_comparison` for what is
+        compared and why it is the field values rather than the token. The check
+        stays here rather than moving into `ComparisonFigure` as a model validator
+        for one reason: a model validator does not run for `model_construct`
+        either, so it would be a second guard past the same two doors.
+        """
+        refuse_an_unsealed_comparison(figure)
+        return figure
 
 
 class PublishedWeeks(BaseModel):

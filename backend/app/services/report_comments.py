@@ -256,6 +256,7 @@ def visible_comments(
     section_id: UUID,
     week_id: UUID,
     stream: str,
+    settings: Settings | None = None,
 ) -> tuple[ReportComment, ...]:
     """One section-week's comments in one stream, or nothing at all below the threshold.
 
@@ -277,8 +278,24 @@ def visible_comments(
     exclusion notice"), and a kept one published. A read that filtered a state out
     would remove the record of a decision from the report of the person who made
     it, which is what §5.2's anti-cherry-picking argument rests on.
+
+    **`settings` is the caller's, and a caller that shows the threshold must pass
+    the one it showed.** E4-07's security round found the reason: the instructor
+    report prints an n-threshold in its `small_n` member from the application's
+    startup configuration, and this gate was building a fresh `Settings()` per call.
+    They agree on every ordinary deployment and come apart the moment the two are
+    read at different times — a screen telling an instructor that comments appear
+    once five students have answered, while the query that hid them applied some
+    other number. A promise about confidentiality printed from one source and
+    enforced from another is two promises. So the report hands its own `Settings`
+    down, and the label and the gate cannot disagree.
+
+    The default is `None` rather than the parameter being required, and it is the
+    one place a second `Settings` can still be built: E4-04's own callers predate
+    this parameter and pass nothing. No caller that *shows* a threshold uses that
+    path.
     """
-    settings = Settings()
+    settings = Settings() if settings is None else settings
 
     # SPEC §4's rule is "n < 5 responses in a reporting week", and the boundary is
     # inclusive on the upper side: the threshold value itself is the first size at
