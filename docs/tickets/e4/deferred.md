@@ -30,3 +30,32 @@ a test asserts that default, so nothing renders a held note during this epic.
 self-harm, enforced where the note is written rather than where it is rendered —
 so a caller cannot construct the excluded value at all, and §6.2's suppression
 does not depend on every reader remembering it.
+
+## A comment can forge block boundaries and inflate a theme's count within the week's total
+
+**What is not enforced.** The summary prompt renders a week's comments as
+numbered blocks separated by blank lines, and the only boundary between two
+comments is that convention. A comment that itself contains a blank line and a
+line reading like a block label reads, to the model, as two comments. The task
+refuses any theme claiming more comments than the week held (ADR 0148's fifth
+decision), so an inflated count is bounded by the true total; within that total,
+a forged boundary can still raise the count a theme is credited with. Nothing
+structural prevents it.
+
+**Why it was left.** The validity prompt already carries the same soft
+prompt-injection posture — a comment is data, instructed to count for nothing
+when it tries to instruct — and the bound above limits the consequence to a
+prevalence figure inside the week's own size, never a confidentiality or
+authorization boundary. Closing it needs an unforgeable per-comment delimiter,
+which is a change to the rendering scheme every prompt version shares rather
+than one task's fix, and E4-05's independent security review accepted the
+residual on that reasoning.
+
+**Owner:** whichever ticket next changes the multi-comment rendering scheme or
+adds a second task that renders several comments (E7's draft and draft check are
+the first candidates).
+
+**Done when:** a comment cannot make the rendered prompt read as more comments
+than were handed to the renderer — proven by a test that plants a comment
+containing a blank line and a block-label lookalike and asserts the model-facing
+boundary count equals the true count.
