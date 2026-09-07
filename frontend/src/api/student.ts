@@ -83,6 +83,15 @@ export interface OwnSubmission {
 export interface OpenSurvey {
   readonly window_id: string;
   readonly course_week: number;
+  /**
+   * How many weeks this section's own run lasts in total — the second half of
+   * the eyebrow's "WK 07 / 12".
+   *
+   * The server's number, read off the section the window belongs to. SPEC §2.2
+   * encodes the length in the start letter of the section code, and the
+   * letter-to-length map is the institution's, so nothing here derives it.
+   */
+  readonly length_weeks: number;
   readonly term_week: number;
   readonly opens_at: string;
   readonly closes_at: string;
