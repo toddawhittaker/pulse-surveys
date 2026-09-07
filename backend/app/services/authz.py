@@ -148,6 +148,7 @@ __all__ = [
     "resolve_scope",
     "sanction_for",
     "scoped_reader",
+    "taught_section_ids",
     "teaching_instructor_assigned",
     "transitive_purview",
 ]
@@ -441,6 +442,24 @@ _HOLDS_THE_TEACHING_INSTRUCTOR_GRANT = text(
     " AND granted.role = CAST(:role AS public.assignment_role)"
     " AND granted.section_id = :section_id"
     ")"
+)
+
+# Every section one person holds the teaching-instructor grant over — the set
+# question beside the single-section one above, and the same three conditions
+# written the same way, so the two cannot answer differently about one section.
+# `DISTINCT` because SPEC §2.1 puts no uniqueness rule on `role_assignment` and
+# two identical grants are a shape nothing refuses (E0-09); a section named twice
+# would be a section listed twice.
+#
+# The null test is the grain: a row scoped to a course or to a college carries a
+# null `section_id`, and without it such a row would put a null in the answer for
+# every leadership hat the same person holds.
+_TEACHING_INSTRUCTOR_SECTIONS = text(
+    "SELECT DISTINCT granted.section_id"
+    " FROM public.assignment_scope AS granted"
+    " WHERE granted.person_id = :person_id"
+    " AND granted.role = CAST(:role AS public.assignment_role)"
+    " AND granted.section_id IS NOT NULL"
 )
 
 # Everybody holding an assignment whose scope names one section — the staff of that
@@ -933,6 +952,50 @@ def teaching_instructor_assigned(session: Session, *, person_id: UUID, section_i
         },
     ).scalar_one()
     return bool(answer)
+
+
+def taught_section_ids(session: Session, *, person_id: UUID) -> set[UUID]:
+    """Which sections does this person hold the `INSTRUCTOR` grant over? (E4-18)
+
+    The set form of the question `teaching_instructor_assigned` above asks about
+    one section. E4-18's list route is the caller: every report route takes a
+    section id and nothing a client holds supplies one, so this is what an
+    instructor's page discovers her own sections from.
+
+    **It lives here because the view does.** E0-41's rule is that
+    `public.assignment_scope` is read through this module and nowhere else, and
+    `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` enforces it.
+    A join written in the reporting service would be a second answer to "whose
+    sections are these", and the first thing that diverges is a widening nobody can
+    see.
+
+    **This one *is* an authorization decision**, which is where it parts company
+    with both its neighbours. They answer questions a caller acts on and neither
+    opens anything; this answers what a reader is shown. A false *yes* names a
+    section she has no relationship with, on the page she reads every Monday, and a
+    false *no* hides a section she teaches and leaves her unable to open its report
+    at all. It is a plain predicate rather than a `ScopedReader` method for the
+    reason §2.1 gives: a teaching grant is the assignment's own `section_id` and
+    expands through no containment, so there is no purview to compute.
+
+    **Ids only, deliberately.** What a section is *called* — its code, and FIX-01
+    item 2's governed label — is composed in `app.services.reporting`, over rows
+    this module has no business reading. That keeps the scope decision one query
+    with three conditions, which is the thing a reviewer has to be able to read in
+    one sitting.
+
+    **Every section she holds the grant over, past terms included.** `role_assignment`
+    carries no validity dates (E0-09), so "live" reads as "exists" here exactly as
+    it does in `_HOLDS_A_LIVE_CARE_ASSIGNMENT` above, and this set is the same set
+    the report routes already serve one section at a time. Narrowing it here and not
+    there would let a reader page to a section the report then refuses.
+    """
+    return set(
+        session.execute(
+            _TEACHING_INSTRUCTOR_SECTIONS,
+            {"person_id": person_id, "role": LMS_OWNED_ASSIGNMENT_ROLE.value},
+        ).scalars()
+    )
 
 
 def section_scoped_assignees(session: Session, *, section_id: UUID) -> set[UUID]:

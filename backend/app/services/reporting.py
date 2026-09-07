@@ -75,7 +75,11 @@ from app.models.report import WeeklySummary
 from app.models.survey import REPORT_STREAMS, Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow, Term, Week
 from app.services import clock
-from app.services.authz import section_scoped_assignees, teaching_instructor_assigned
+from app.services.authz import (
+    section_scoped_assignees,
+    taught_section_ids,
+    teaching_instructor_assigned,
+)
 from app.services.identity import person_for_user
 from app.services.report_comments import (
     ReportComment,
@@ -89,10 +93,11 @@ from app.services.section_codes import week_of_the_term
 if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
     # `app.schemas.report` imports `ComparisonFigure` from this module, because
     # item 7's token has to be private to the module that holds the helper. So the
-    # dependency between the two runs schema → service at import time, and the one
+    # dependency between the two runs schema → service at import time, and every
     # place this module needs the schema back — `_payload`, which builds the
-    # response — imports it inside the function. See that function's docstring.
-    from app.schemas.report import CommentView, InstructorReport, SummaryView
+    # report, `_stored_summaries` under it, and `taught_sections` — imports it
+    # inside the function. See `_payload`'s docstring.
+    from app.schemas.report import CommentView, InstructorReport, SummaryView, TaughtSection
 
 logger = logging.getLogger(__name__)
 
@@ -832,6 +837,53 @@ def published_course_weeks(
     return [week.course_week for week in _section_weeks(session, section) if week.closes_at < now]
 
 
+def taught_sections(session: Session, *, person_id: UUID | None) -> list["TaughtSection"]:
+    """Every section this person teaches, named the way her page shows them (E4-18).
+
+    **The scope comes from the same chokepoint the report's does.** `_readable_section`
+    below asks `app.services.authz` whether one section is hers; this asks the same
+    module which sections those are. One rule, asked two ways, so the list and the
+    report cannot disagree about what she may read — a list built from a join here
+    would be a second answer to that question, and the first thing that diverges is
+    a widening nobody can see.
+
+    **A session naming no person reads nothing rather than everything**, exactly as
+    `_readable_section` refuses one: a `person_id` is absent for somebody the people
+    graph has no row for (ADR 0028), and a scope query with its subject left empty is
+    the failure this returns an empty list instead of. An empty list is also what a
+    person who teaches nothing gets, and both are ordinary states — this route takes
+    no parameter, so there is nothing in the request to refuse.
+
+    **The order is stated here rather than in the query**, and it is by the label
+    first, then the code, then the key. The label is composed row by row, so a
+    database sort could not produce it; and the reason to sort at all is that
+    anything else leaks something. Key order is creation order under ADR 0016's
+    random uuids only by accident, and any order derived from the assignments would
+    say when each grant was written.
+
+    The label is `_course_label`, which is the report's own composer and FIX-01 item
+    2's governed form. A second composition written for this list would be a second
+    answer to what a section is called (`docs/MISTAKES.md` entry 13).
+    """
+    from app.schemas.report import TaughtSection
+
+    if person_id is None:
+        return []
+    listed: list[TaughtSection] = []
+    for section_id in taught_section_ids(session, person_id=person_id):
+        section = session.get(Section, section_id)
+        if section is None:  # pragma: no cover - the assignment's foreign key holds this
+            continue
+        listed.append(
+            TaughtSection(
+                section_id=section.id,
+                code=section.lms_section_code,
+                course_label=_course_label(session, section),
+            )
+        )
+    return sorted(listed, key=lambda named: (named.course_label, named.code, str(named.section_id)))
+
+
 def _readable_section(session: Session, *, person_id: UUID | None, section_id: UUID) -> Section:
     """The section this person teaches, or one refusal for everything else.
 
@@ -916,7 +968,7 @@ def _payload(
 ) -> "InstructorReport":
     """Assemble one report out of the views, the comment service and the summary table.
 
-    **The one import this module makes inside a function, and why.**
+    **Why the schema is imported inside this function rather than at the top.**
     `app.schemas.report` types its `comparison` member with `ComparisonFigure`,
     which has to live here because the token that guards it is private to this
     module — so the schema imports the service. This is the one place the service
