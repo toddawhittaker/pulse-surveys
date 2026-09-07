@@ -49,7 +49,9 @@ course length; the self-hosted font licences (E13); the resubmission that
 floor-headroom variance point (E10); the copy collector's symlinked-directory
 gap (E4); the bounced comment refused before harm screening (E10, with the
 E6 hook); the rendered student surface's string convention (E4); and the Care
-landing's stale docstring (a light-lane candidate E3 could not take). The
+landing's stale docstring (recorded here as a light-lane candidate E3 could not
+take — closed by E4-13, whose section is at the end of this file, and the lane
+was heavy rather than light). The
 "Owned by the spec already" list passes through with one change: E3's own
 row — grade passback reading validity state — is superseded, not closed. The
 item-based formula E3 built counts completed items from the answer rows and
@@ -323,3 +325,32 @@ does not read this key, so nothing goes red while it waits.
 ecosystem proposes it. **Done when:** `target-version` says `py314` and the
 pinned ruff accepts it, proven by a `ruff check` that exits 0 rather than by
 the version number alone.
+
+## The Care landing's stale docstring
+
+Carried through the ledger above from `../e3/carried-from-e2.md`'s "The Care
+landing still says there are five landing views", which holds the detail and now
+carries the same closure note.
+
+**Closed by E4-13**, both halves of the done-when:
+
+- The docstring in `frontend/src/routes/care/index.tsx` describes the tree as it
+  is. Where it said "none of the five landings has any" motion it now names the
+  four landing views — admin, care, instructor, leadership — says none of them
+  has any, and adds that the tree is not motionless: the route that stopped
+  being a landing in E2-10, the student weekly survey, is the one surface with
+  motion today. The census was read off each landing's own source rather than
+  off another record. All four landings render `components/LandingView.tsx`,
+  whose only styled classes are `.pulse-landing` and `.pulse-line`, and neither
+  rule in `frontend/src/styles.css` carries an `animation` or a `transition`;
+  the survey's classes carry nine such declarations in the same file, and
+  nothing in `frontend/src` animates in JavaScript.
+- The stylesheet's opening comment is dated in words, and marked as history
+  besides — the entry offered either. The paragraph is attributed to E1-04 and
+  dated 2026-08-25, its sentence kept rather than rewritten, with one line
+  recording where the utility-class question stands: no utility class is used
+  anywhere in `frontend/src`, checked 2026-09-06.
+
+The assertion the component makes was correct before the ticket and is unchanged
+by it. The diff is comment blocks only, which is what lets a reviewer see the
+no-behavior-change claim in the diff shape.

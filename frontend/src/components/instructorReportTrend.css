@@ -1,0 +1,214 @@
+/* ==========================================================================
+   The instructor report's trend family — SPEC §7.6, ticket E4-08.
+   ==========================================================================
+
+   `PulseTrendChart`, the stacked `TrendPair` it composes, and the week
+   navigation control that pages across published weeks. A component-scoped
+   stylesheet rather than a block in `frontend/src/styles.css`: three frontend
+   tickets build this report in parallel, and a shared stylesheet edited by all
+   three is a merge nobody can review. The components import this file.
+
+   Every value here is a token from `design/tokens.css`. No raw hex, no
+   invented spacing, and no radius outside the two the brief allows (4px
+   inputs, 8px cards).
+
+   **Colour, in one paragraph.** Marigold is the single hero accent and it is
+   the section's own line and terminal dot — `design/Usage Rules.md` §2, and
+   the semantic mapping in `docs/DESIGN_BRIEF.md`: "section line = marigold,
+   solid, 2.5px, rounded caps, small dot on current week". Hairline draws the
+   gridlines, spruce-60 the axis text, mist the quiet term-week sub-label.
+   Nothing here is madder, which means "attend to this" and belongs to flags.
+   The mist that the prototype's benchmark and university lines are drawn in
+   appears nowhere below, because E4 has no comparison data to draw.
+
+   **Type, in one paragraph.** Axis labels are mono, which is the brief's rule
+   for every number ("tabular figures give charts and stats an instrument
+   feel"). The prototype sets the week label at 12px and the term-week
+   sub-label at 10px; the ramp in `design/tokens.css` has one step at or below
+   both (`--text-1`, 13px) and nothing smaller, so both take that step and the
+   sub-label is made quiet by colour — mist against the label's spruce-60 —
+   rather than by a size the token file does not publish. The type inside the
+   SVG scales with the chart's viewBox, so at the reading column the brief
+   gives report surfaces these render at about the size the prototype draws.
+
+   **Motion, in one paragraph.** The hero line draws on once, left to right,
+   600ms, and the terminal dot fades in behind it (150ms). In the stacked pair
+   the lower panel's draw waits for the upper one to finish — "TrendPair: top
+   panel then bottom", `design/Usage Rules.md` §3 — which is a delay rather
+   than a second signature moment. Everything else is the 150ms the week
+   navigation's buttons take to warm on hover. All of it is CSS, so
+   `design/tokens.css`'s global `prefers-reduced-motion` block removes every
+   piece of it; nothing here animates in JavaScript and nothing carries an
+   inline animation, either of which would escape that switch.
+ */
+
+@keyframes pulse-trend-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes pulse-trend-dot-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@layer components {
+  /* One panel: the mono stream label, the plot, the visually hidden table that
+   * carries the same numbers as text, and — on the panel that shows them — the
+   * legend. */
+  .pulse-trend {
+    margin: 0;
+  }
+
+  /* The mono panel label, in the eyebrow treatment `design/Usage Rules.md` §5
+   * gives every legend and panel label: uppercase Spline Sans Mono, 0.08em
+   * tracking, spruce-60. */
+  .pulse-trend-panel-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-1);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--spruce-60);
+    margin-bottom: var(--space-2);
+  }
+
+  .pulse-trend-plot {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+
+  .pulse-trend-grid {
+    stroke: var(--hairline);
+    stroke-width: 1;
+  }
+
+  .pulse-trend-grid-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-1);
+    fill: var(--spruce-60);
+  }
+
+  /* The hero. `pathLength` is 1 on the element, so the dash arithmetic below is
+   * in units of the whole stroke rather than of its pixel length, and the draw
+   * is the same 600ms whether a section is in week two or week twelve. With the
+   * animation removed — `prefers-reduced-motion` — the base
+   * `stroke-dashoffset: 0` leaves the line fully drawn. */
+  .pulse-trend-line {
+    fill: none;
+    stroke: var(--marigold);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 1;
+    stroke-dashoffset: 0;
+    animation: pulse-trend-draw 600ms ease-out;
+  }
+
+  /* The terminal dot on the most recent week that has a rating. */
+  .pulse-trend-dot {
+    fill: var(--marigold);
+    animation: pulse-trend-dot-in 150ms ease-out 560ms both;
+  }
+
+  /* The lower panel of a stacked pair draws after the upper one, so the two
+   * lines arrive in the order they are read rather than at once. A delay, not a
+   * second 600ms moment. */
+  .pulse-trend-plot-delayed .pulse-trend-line {
+    animation-delay: 600ms;
+  }
+
+  .pulse-trend-plot-delayed .pulse-trend-dot {
+    animation-delay: 1160ms;
+  }
+
+  .pulse-trend-tick-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-1);
+    fill: var(--spruce-60);
+  }
+
+  /* The quiet half of SPEC §2.2's two axes. */
+  .pulse-trend-tick-sub {
+    font-family: var(--font-mono);
+    font-size: var(--text-1);
+    fill: var(--mist);
+  }
+
+  .pulse-trend-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-5);
+    margin-top: var(--space-3);
+    font-size: var(--text-1);
+    color: var(--spruce-60);
+  }
+
+  .pulse-trend-legend-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .pulse-trend-legend-line {
+    stroke: var(--marigold);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+  }
+
+  .pulse-trend-legend-dot {
+    fill: var(--marigold);
+  }
+
+  /* The stacked pair: instructor stream above, course stream below, one x axis
+   * and one legend at the bottom (SPEC §5.1). */
+  .pulse-trend-pair {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  /* Week navigation, drawn as the prototype draws it: two small mono buttons on
+   * paper with a hairline border. */
+  .pulse-week-nav {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .pulse-week-nav-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-6);
+    height: var(--space-6);
+    font-family: var(--font-mono);
+    font-size: var(--text-2);
+    color: var(--spruce);
+    background: var(--paper);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-input);
+    cursor: pointer;
+    transition: background 150ms ease;
+  }
+
+  .pulse-week-nav-button:hover:not(:disabled) {
+    background: var(--chalk);
+  }
+
+  /* A week the report cannot page to. The control stays where it is and stops
+   * being operable, rather than moving under the reader's hand. */
+  .pulse-week-nav-button:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+}
