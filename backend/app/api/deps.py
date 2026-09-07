@@ -132,6 +132,8 @@ __all__ = [
     "FOUND",
     "LOGIN_COOKIE_LIFETIME_SECONDS",
     "LTI_LOGIN_COOKIE",
+    "NOT_AN_INSTRUCTOR_CHALLENGE",
+    "NOT_AN_INSTRUCTOR_STATUS",
     "NOT_A_STUDENT_CHALLENGE",
     "NOT_A_STUDENT_STATUS",
     "OIDC_LOGIN_COOKIE",
@@ -150,6 +152,7 @@ __all__ = [
     "no_account_page",
     "refusal_page",
     "refused",
+    "require_instructor",
     "require_student",
     "with_query",
 ]
@@ -321,6 +324,76 @@ def require_student(request: Request) -> SessionClaims:
             status_code=NOT_A_STUDENT_STATUS,
             detail=NOT_A_STUDENT.text,
             headers=NOT_A_STUDENT_CHALLENGE,
+        )
+    return session
+
+
+# What a request that is not an instructor's is answered with — the same 401 and
+# the same `Bearer` challenge `require_student` uses, for the same reasons the
+# comment above `NOT_A_STUDENT_STATUS` gives. Spelled as their own names rather
+# than aliased to the student pair, because they are two surfaces' answers that
+# happen to agree today; a role gate borrowing another role's constant is a gate
+# that moves when somebody changes the other one.
+#
+# **This 401 is deliberately a different answer from the report's own 404.** An
+# out-of-scope section is a 404 because the report may not say whether a section
+# exists; a session in the wrong role never reaches that question at all, and
+# answering it 404 would mean the role gate had let it through. E4-07's role
+# tests assert the 401 and name the 404 as the near miss for exactly that reason.
+NOT_AN_INSTRUCTOR_STATUS = 401
+NOT_AN_INSTRUCTOR_CHALLENGE = {"WWW-Authenticate": BEARER_SCHEME}
+
+# What such a request is told. **Not in `app.copy`, and that is a gap this ticket
+# records rather than closes.** E2-11's inventory governs a key by its surface
+# prefix, and the instructor report is not a governed surface yet — adding a copy
+# module under a prefix no surface claims reds that inventory. E4-12 owns the
+# report surface's copy, `docs/tickets/e4/deferred.md` carries the entry with its
+# done-when, and until then this sits beside the two gradebook strings already in
+# that position rather than inventing a surface for the inventory to police.
+#
+# It names nobody and nothing: no section, no role, no subject. A refusal answered
+# to anybody who can make a request is a refusal that may describe only itself.
+NOT_AN_INSTRUCTOR = (
+    "This is an instructor's report, and this request does not carry an instructor's session. "
+    "Open Pulse Surveys from inside your course in the LMS to read it."
+)
+
+
+def require_instructor(request: Request) -> SessionClaims:
+    """The verified session of an instructor, or one refusal for everybody else.
+
+    E4-07's two report routes depend on this, and the object is what makes them
+    **findable**: a route that resolved the session itself would be an instructor
+    route outside every sweep that asks the running application which routes carry
+    this dependency — the shape `require_student` already holds for SPEC §4.1
+    item 1's student inventory.
+
+    **The role comes from the session, which came from the person's own rows.**
+    `LandingRole.INSTRUCTOR` was decided at the door by `resolve_landing` out of
+    assignments (ADR 0098) and never out of what a launch claimed, and this only
+    reads it back. What it does *not* do is decide which sections that instructor
+    may read — that is `app.services.reporting._readable_section`, one layer in,
+    against the teaching grant.
+
+    **A leadership session is refused here, and that is E4's decision rather than
+    an omission.** SPEC §5.5 gives leadership a read-only render of this same
+    report, and E4's breakdown puts every leadership and purview read in E9. Until
+    that purview computation exists, a dean holding no instructor assignment is not
+    an instructor, and a route that admitted one "since they would see it in E9
+    anyway" would be widening who reads a section's raw comments by way of a
+    router.
+
+    **One refusal for absent, malformed, expired, wrongly signed, and a real
+    session in another role.** `session_from_request` already collapses the first
+    four into `None` so that a caller trying tokens cannot tell a real one from a
+    forgery by the answer, and the fifth joins them here for the same reason.
+    """
+    session = session_from_request(request, request.app.state.session_secret)
+    if session is None or session.role is not LandingRole.INSTRUCTOR:
+        raise HTTPException(
+            status_code=NOT_AN_INSTRUCTOR_STATUS,
+            detail=NOT_AN_INSTRUCTOR,
+            headers=NOT_AN_INSTRUCTOR_CHALLENGE,
         )
     return session
 
