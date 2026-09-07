@@ -1,32 +1,57 @@
-"""The privilege this ticket spends, and the ones it withholds — ticket E4-06.
+"""The privileges this ticket spends, and the ones it withholds — ticket E4-06.
 
-E4-02 created `weekly_summary` and granted nothing on it, deliberately: "the
-writers grant what they spend — E4-06 for the summary, E4-04 for the release,
-E6 for every moderation state", and
-`tests/integration/test_report_schema.py::test_neither_runtime_role_holds_any_privilege_on_a_table_this_ticket_adds`
-says in as many words when it expects to go red for a good reason — "E4-06 grants
-the summary writer its `INSERT` … the entry moves into
+E4-02 created the four report tables and granted nothing on any of them,
+deliberately: "the writers grant what they spend — E4-06 for the summary, E4-04
+for the release, E6 for every moderation state", and
+`tests/integration/test_report_schema.py`'s no-grant walk says in as many words
+when it expects to go red for a good reason — "the entry moves into
 `RUNTIME_BASE_TABLE_PRIVILEGES` in `test_identity_grants.py` with the sentence it
 comes from, and the table's name comes out of the list here". This is that
 change, asserted from this side.
 
-**Two verbs, and the sentence each comes from.**
+**Three verbs over two tables, and the sentence each comes from.**
 
-  - `INSERT` is the row the Monday walk writes: SPEC §5.1 puts one AI summary at
-    the head of each of a week's two comment groups, and this job is the only
-    writer §5.1 admits (ADR 0145's third decision rests on that being true).
-  - `SELECT` is the walk's own selection. Its scope is "sections with closed weeks
-    **lacking** summary rows", and there is no way to ask that question without
-    reading the table — which is also what makes the second run of a pair a no-op
-    (criterion 1) rather than a duplicate insert refused by a constraint.
+  - `INSERT` on `weekly_summary` is the row the Monday walk writes: SPEC §5.1 puts
+    one AI summary at the head of each of a week's two comment groups, and this job
+    is the only writer §5.1 admits (ADR 0145's third decision rests on that being
+    true).
+  - `SELECT` on `weekly_summary` is the walk's own selection. Its scope is
+    "sections with closed weeks **lacking** summary rows", and there is no way to
+    ask that question without reading the table — which is also what makes the
+    second run of a pair a no-op (criterion 1) rather than a duplicate insert
+    refused by a constraint.
+  - `SELECT` on `moderation_state` is SPEC §5.1's own sentence: the summaries
+    "exclude flagged-held content". ADR 0145 settles that a comment's moderation
+    state lives in `public.moderation_state` as an append-only record whose latest
+    row governs and whose initial state is the absence of a row, so that is the one
+    place the question can be asked, and the filter asks it inside this walk on
+    this connection.
 
 **What is withheld is the assertion**, exactly as it is on `classification`, on
-`grade_sync` and on `ags_call`. No `UPDATE`: breakdown decision 2 rules out
-regeneration in v1, so a connection able to rewrite a stored summary is a
-connection able to change what an instructor already read, with no Python rule
-making that structural. No `DELETE`, no `TRUNCATE`: a summary is the epic's only
-generated artifact and §4's retention purge is E13's, run under a different
-identity. No `REFERENCES`, no `TRIGGER`.
+`grade_sync` and on `ags_call`. On `weekly_summary`, no `UPDATE`: breakdown
+decision 2 rules out regeneration in v1, so a connection able to rewrite a stored
+summary is a connection able to change what an instructor already read, with no
+Python rule making that structural. No `DELETE`, no `TRUNCATE`: a summary is the
+epic's only generated artifact and §4's retention purge is E13's, run under a
+different identity. On `moderation_state`, **every** write verb: E4 writes zero
+moderation rows by design (ADR 0145) and every writer is E6's, and a connection
+able to write one could publish a comment an instructor excluded — which is the
+anti-cherry-picking mechanism §5.2 exists for. No `REFERENCES`, no `TRIGGER`, on
+either.
+
+**This module first asserted that `pulse_app` held nothing at all on
+`moderation_state`, and that assertion was wrong.** It was written from this
+ticket's work-order sentence — "`weekly_summary` and nothing wider" — which SPEC
+§5.1 overrides: a ticket that must execute the flagged-held filter *spends* a read
+there, and the rule the record states is "each ticket grants what it spends", not
+"what it writes". Dispute E4-06-01 measured both directions — with the grant, this
+module's inventory failed and the two moderation tests passed; without it, the walk
+raised `InsufficientPrivilege` — and the ruling moved three assertions together:
+this one, `RUNTIME_BASE_TABLE_PRIVILEGES` in
+`tests/integration/test_identity_grants.py`, and `test_report_schema.py`'s
+narrowed walk. E4-04 grants the same `SELECT` for its own read path from a
+parallel branch, so one `SELECT` on that table is the merged end state rather
+than a widening either ticket introduces alone.
 
 **Both currencies are asked, because a privilege reaches a role three ways.**
 `has_table_privilege` answers for a table grant and for one arriving through a
@@ -43,10 +68,10 @@ beside it. Every test in this ticket's other modules reaches the same connection
 through the task itself.
 
 **Which failure a red here is.** Before E4-06's migration lands, expected red on
-an assertion: `pulse_app` holds nothing on `weekly_summary`, so the equality
-below reports the two missing grants by name and the driven insert is refused
-with `permission denied`. Before E4-02's, expected red on `pytest.fail` naming
-the absent table (`docs/MISTAKES.md` entry 44).
+an assertion: `pulse_app` holds nothing on either table, so each equality below
+reports its missing grants by name and the driven insert is refused with
+`permission denied`. Before E4-02's, expected red on `pytest.fail` naming the
+absent table (`docs/MISTAKES.md` entry 44).
 """
 
 from typing import Any
@@ -54,6 +79,7 @@ from typing import Any
 import pytest
 from fixtures.summary_job import (
     A_CLOSED_TERM_WEEK,
+    MODERATION_STATE_TABLE,
     SUMMARY_GENERATED_AT_COLUMN,
     SUMMARY_MODEL_ID_COLUMN,
     SUMMARY_PROMPT_VERSION_COLUMN,
@@ -78,13 +104,19 @@ RUNTIME_ROLES = (APPLICATION_ROLE, CARE_ROLE)
 TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
 COLUMN_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "REFERENCES")
 
-# What this ticket spends, and the whole of it.
-GRANTED = ("SELECT", "INSERT")
+# What this ticket spends on the table it writes, and the whole of it.
+GRANTED_ON_THE_SUMMARY = ("SELECT", "INSERT")
 
-# The other three tables E4-02 created and this ticket does not write to. Their
+# What it spends on the table it only reads. One verb: SPEC §5.1's summaries
+# "exclude flagged-held content", and ADR 0145 puts that fact nowhere else. The
+# table's name comes from `tests/fixtures/summary_job.py`, where the moderation
+# suite already transcribes it, rather than being written a second time here.
+GRANTED_ON_THE_MODERATION_RECORD = ("SELECT",)
+
+# The two tables E4-02 created that this ticket neither reads nor writes. Their
 # entry stays at nothing: a privilege lands in the change that spends it, and the
-# release path is E4-04's while every moderation writer is E6's.
-STILL_UNGRANTED = ("moderation_state", "release_batch", "release_batch_member")
+# release path is E4-04's.
+STILL_UNGRANTED = ("release_batch", "release_batch_member")
 
 HAS_TABLE_PRIVILEGE = "SELECT has_table_privilege(:role, :relation, :privilege)"
 HAS_COLUMN_PRIVILEGE = "SELECT has_column_privilege(:role, :relation, :column, :privilege)"
@@ -159,6 +191,44 @@ def probes_can_see_a_grant_they_are_pointed_at(session: Any) -> None:
     )
 
 
+def held_on_table(session: Any, table: str) -> set[tuple[str, str]]:
+    """Every `(role, privilege)` either runtime role holds on one table.
+
+    One reader for the two tables this ticket grants on, rather than a copy per
+    test (`docs/MISTAKES.md` entry 13). It answers the whole set rather than the
+    verbs a caller had in mind, so the assertion built on it is an equality and a
+    verb nobody thought of shows up rather than going unasked.
+    """
+    return {
+        (role, privilege)
+        for role in RUNTIME_ROLES
+        for privilege in TABLE_PRIVILEGES
+        if session.execute(
+            text(HAS_TABLE_PRIVILEGE),
+            {"role": role, "relation": f"public.{table}", "privilege": privilege},
+        ).scalar_one()
+    }
+
+
+def held_on_columns(session: Any, table: str) -> set[tuple[str, str, str]]:
+    """Every `(role, column, privilege)` either runtime role holds on one table's columns.
+
+    The currency `has_table_privilege` is blind to. A table-wide grant shows here
+    on every column, so the expected set is a product — and anything outside it is
+    a column-scoped grant nothing else in this repository reports.
+    """
+    return {
+        (role, column, privilege)
+        for role in RUNTIME_ROLES
+        for column in columns_of(session, table)
+        for privilege in COLUMN_PRIVILEGES
+        if session.execute(
+            text(HAS_COLUMN_PRIVILEGE),
+            {"role": role, "relation": f"public.{table}", "column": column, "privilege": privilege},
+        ).scalar_one()
+    }
+
+
 def test_the_application_role_may_read_and_insert_a_summary_and_nothing_else(
     db_session: Any, metadata_tables: dict[str, Any], summary_job_contract: Any
 ) -> None:
@@ -186,22 +256,10 @@ def test_the_application_role_may_read_and_insert_a_summary_and_nothing_else(
     summary_job_contract.require_table(metadata_tables)
     probes_can_see_a_grant_they_are_pointed_at(db_session)
 
-    held_on_table = {
-        (role, privilege)
-        for role in RUNTIME_ROLES
-        for privilege in TABLE_PRIVILEGES
-        if db_session.execute(
-            text(HAS_TABLE_PRIVILEGE),
-            {
-                "role": role,
-                "relation": f"public.{WEEKLY_SUMMARY_TABLE}",
-                "privilege": privilege,
-            },
-        ).scalar_one()
-    }
-    assert held_on_table == {(APPLICATION_ROLE, privilege) for privilege in GRANTED}, (
-        f"`{WEEKLY_SUMMARY_TABLE}` is held as {sorted(held_on_table)} and this ticket spends "
-        f"exactly {[(APPLICATION_ROLE, privilege) for privilege in GRANTED]}. `INSERT` is the row "
+    at_table = held_on_table(db_session, WEEKLY_SUMMARY_TABLE)
+    assert at_table == {(APPLICATION_ROLE, privilege) for privilege in GRANTED_ON_THE_SUMMARY}, (
+        f"`{WEEKLY_SUMMARY_TABLE}` is held as {sorted(at_table)} and this ticket spends "
+        f"exactly {[(APPLICATION_ROLE, p) for p in GRANTED_ON_THE_SUMMARY]}. `INSERT` is the row "
         "the Monday walk writes and `SELECT` is how it finds the section-weeks that have none. "
         "`UPDATE` is refused because there is no regeneration in v1 (breakdown decision 2) — a "
         "connection that can rewrite a stored summary can change what an instructor already read. "
@@ -214,57 +272,124 @@ def test_the_application_role_may_read_and_insert_a_summary_and_nothing_else(
         f"the catalog reports no columns for `public.{WEEKLY_SUMMARY_TABLE}`, so the column-grain "
         "equality below is over an empty set and holds of anything."
     )
-    held_on_columns = {
-        (role, column, privilege)
-        for role in RUNTIME_ROLES
+    at_columns = held_on_columns(db_session, WEEKLY_SUMMARY_TABLE)
+    assert at_columns == {
+        (APPLICATION_ROLE, column, privilege)
         for column in columns
-        for privilege in COLUMN_PRIVILEGES
-        if db_session.execute(
-            text(HAS_COLUMN_PRIVILEGE),
-            {
-                "role": role,
-                "relation": f"public.{WEEKLY_SUMMARY_TABLE}",
-                "column": column,
-                "privilege": privilege,
-            },
-        ).scalar_one()
-    }
-    assert held_on_columns == {
-        (APPLICATION_ROLE, column, privilege) for column in columns for privilege in GRANTED
+        for privilege in GRANTED_ON_THE_SUMMARY
     }, (
-        f"at column grain `{WEEKLY_SUMMARY_TABLE}` is held as {sorted(held_on_columns)}. A "
+        f"at column grain `{WEEKLY_SUMMARY_TABLE}` is held as {sorted(at_columns)}. A "
         "table-wide grant of the two verbs covers every column and nothing more; an entry here "
         "that is not in that set is a column-scoped grant, which `has_table_privilege` does not "
         "report at all and which nothing else in this repository would find."
     )
 
 
-def test_the_three_tables_this_ticket_does_not_write_to_are_still_ungranted(
+def test_the_application_role_may_read_a_moderation_state_and_never_write_one(
     db_session: Any, metadata_tables: dict[str, Any], summary_job_contract: Any
 ) -> None:
-    """The pair to the test above: the grant is exactly as wide as the writer.
+    """The read SPEC §5.1's flagged-held filter spends, and the writes it must not.
+
+    "AI summaries per stream: … **exclude flagged-held content**." ADR 0145 makes
+    `moderation_state` an append-only record whose latest row governs and whose
+    initial state is the absence of a row, so a walk asking "may this comment be
+    sent to a provider" reads that table and there is nowhere else to ask. The walk
+    runs on `pulse_app`, so `pulse_app` reads it. Dispute E4-06-01 is the record of
+    that being settled, and the measurement behind it: without the grant, the
+    filter raises `InsufficientPrivilege` out of the walk and both tests in
+    `test_the_summary_job_feeds_no_moderation_held_comment_to_the_model.py` fail.
+
+    **One verb, and the withheld ones are the assertion.** E4 writes zero
+    moderation rows by design and every writer is E6's, so `INSERT`, `UPDATE` and
+    `DELETE` are all refused. That is not tidiness: §5.2's exclusion log is the
+    anti-cherry-picking mechanism, and a connection able to append a `KEPT` row
+    could publish a comment an instructor excluded — from the summary job, which
+    has no business deciding anything about moderation at all.
+
+    **The Care role holds nothing here either.** §6.2 isolates it to the safety
+    path; a comment's moderation state is the instructor's lifecycle, not Care's.
+
+    **Both currencies, and a control on each.** A column-scoped `UPDATE` on
+    `state` is invisible to `has_table_privilege` and is exactly the shape a "let
+    E6 start early" grant would take (`docs/MISTAKES.md` entry 35).
+
+    **The mutation this kills:** `GRANT SELECT, INSERT ON public.moderation_state`
+    — the copy-paste of the summary's own grant block onto the table beside it,
+    which makes every test in this ticket pass and hands the Monday job the ability
+    to overturn a moderator.
+
+    **What this does not assert** is which ticket issued the grant. E4-04 grants
+    the same `SELECT` for its own suppression read from a parallel branch, so after
+    the merge one `SELECT` here is the end state whichever revision executed it —
+    an equality over the privileges rather than over their provenance is what keeps
+    that from reading as a widening.
+    """
+    assert MODERATION_STATE_TABLE in metadata_tables, (
+        f"there is no `{MODERATION_STATE_TABLE}` table (there are {sorted(metadata_tables)}). "
+        "E4-02 creates it as SPEC §5.2's lifecycle in append-only form, and this ticket's "
+        "flagged-held filter reads it."
+    )
+    probes_can_see_a_grant_they_are_pointed_at(db_session)
+
+    at_table = held_on_table(db_session, MODERATION_STATE_TABLE)
+    assert at_table == {
+        (APPLICATION_ROLE, privilege) for privilege in GRANTED_ON_THE_MODERATION_RECORD
+    }, (
+        f"`{MODERATION_STATE_TABLE}` is held as {sorted(at_table)} and the summary job spends "
+        f"exactly {[(APPLICATION_ROLE, p) for p in GRANTED_ON_THE_MODERATION_RECORD]}. SPEC §5.1 "
+        "has the summaries exclude flagged-held content and ADR 0145 puts that fact nowhere but "
+        "this table, so the read is required; every write verb is refused because E4 writes no "
+        "moderation state at all and a connection that could append one could publish a comment "
+        f"an instructor excluded (§5.2's anti-cherry-picking mechanism). `{CARE_ROLE}` holds "
+        "nothing: §6.2 isolates it to the safety path."
+    )
+
+    columns = columns_of(db_session, MODERATION_STATE_TABLE)
+    assert columns, (
+        f"the catalog reports no columns for `public.{MODERATION_STATE_TABLE}`, so the column-grain "
+        "equality below is over an empty set and holds of anything."
+    )
+    at_columns = held_on_columns(db_session, MODERATION_STATE_TABLE)
+    assert at_columns == {
+        (APPLICATION_ROLE, column, privilege)
+        for column in columns
+        for privilege in GRANTED_ON_THE_MODERATION_RECORD
+    }, (
+        f"at column grain `{MODERATION_STATE_TABLE}` is held as {sorted(at_columns)}. A table-wide "
+        "`SELECT` covers every column and nothing more; an entry outside that set is a "
+        "column-scoped grant, which `has_table_privilege` does not report at all — and an "
+        "`UPDATE` on `state` alone is the narrowest way to give this connection the power §5.2 "
+        "reserves for an instructor."
+    )
+
+
+def test_the_two_tables_this_ticket_neither_reads_nor_writes_are_still_ungranted(
+    db_session: Any, metadata_tables: dict[str, Any], summary_job_contract: Any
+) -> None:
+    """The pair to the two tests above: the grant is exactly as wide as what is spent.
 
     E4-02 created four tables and spent nothing on any of them. This ticket writes
-    one of them. If the grant that arrives with it also opens the release batch or
-    the moderation record, the rule "each ticket grants what it spends" has been
-    replaced with "somebody granted the report schema", and the two tickets that
-    were going to argue for those privileges — E4-04 and E6 — never have to.
+    one and reads a second. If the grant that arrives with it also opens the
+    release batch, the rule "each ticket grants what it spends" has been replaced
+    with "somebody granted the report schema", and the ticket that was going to
+    argue for those privileges — E4-04 — never has to.
 
     **This is the half that catches the plausible over-grant.** A migration
     written as `GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA public TO pulse_app`
-    passes the test above perfectly, gives the job exactly the two verbs it needs
-    on the table it needs them on, and quietly opens every other table in the
+    passes both tests above perfectly, gives the job exactly the verbs it needs on
+    the tables it needs them on, and quietly opens every other table in the
     database.
 
     **The mutation this kills:** `ON ALL TABLES IN SCHEMA public`, and a
-    copy-pasted grant block that names all four of E4-02's tables because they
-    were created together.
+    copy-pasted grant block that names all four of E4-02's tables because they were
+    created together — which is the shape the moderation grant makes tempting, now
+    that two of the four are legitimately open.
     """
     for name in STILL_UNGRANTED:
         assert name in metadata_tables, (
             f"there is no `{name}` table (there are {sorted(metadata_tables)}). E4-02 creates all "
-            "four of the report tables together, and this test is about the three of them this "
-            "ticket does not write to."
+            "four of the report tables together, and this test is about the two of them this "
+            "ticket neither reads nor writes."
         )
     probes_can_see_a_grant_they_are_pointed_at(db_session)
 
@@ -291,10 +416,11 @@ def test_the_three_tables_this_ticket_does_not_write_to_are_still_ungranted(
                         held.append(f"{role} holds {privilege} on public.{name}.{column}")
 
     assert not held, (
-        f"{sorted(held)}. E4-06 writes `{WEEKLY_SUMMARY_TABLE}` and nothing else: the release path "
-        "is E4-04's and every moderation writer is E6's, and each grants what it spends. A grant "
-        "reaching these three from this ticket is a widening for a writer that does not exist — "
-        "and if one of them is deliberate it belongs in the ticket that spends it, recorded in "
+        f"{sorted(held)}. E4-06 writes `{WEEKLY_SUMMARY_TABLE}` and reads "
+        f"`{MODERATION_STATE_TABLE}`, and spends nothing anywhere else: the release path is "
+        "E4-04's, and each ticket grants what it spends. A grant reaching these two from this "
+        "ticket is a widening for a reader and a writer that do not exist yet — and if one of them "
+        "is deliberate it belongs in the ticket that spends it, recorded in "
         "`RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py` with the "
         "sentence it comes from."
     )

@@ -59,18 +59,29 @@ RELEASE_BATCH = "release_batch"
 RELEASE_BATCH_MEMBER = "release_batch_member"
 REPORT_TABLES = (WEEKLY_SUMMARY, MODERATION_STATE, RELEASE_BATCH, RELEASE_BATCH_MEMBER)
 
-# The subset of them that still has no writer, and therefore still holds no
-# privilege for either runtime role. **`weekly_summary` came out of this list at
-# E4-06**, which is the change the grant test below predicted in as many words:
-# that ticket's Monday job is the summary's writer, so it grants the `SELECT,
-# INSERT` it spends and records the sentence in
-# `RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py`.
-# The exact shape of that grant — the two verbs held, the five withheld, at table
+# The subset of them nothing has yet spent a privilege on, and which therefore
+# still holds none for either runtime role. **Two tables came out of this list at
+# E4-06**, which is the change the grant test below predicted in as many words.
+#
+#   - `weekly_summary`, because that ticket's Monday job writes it, so it grants
+#     the `SELECT, INSERT` it spends.
+#   - `moderation_state`, because the same job *reads* it. SPEC §5.1 requires the
+#     summaries to "exclude flagged-held content" and ADR 0145 puts that fact
+#     nowhere else, so the filter is a `SELECT` on the connection the walk runs on.
+#     The rule the test below states is "each ticket grants what it **spends**",
+#     and this list — narrowed at E4-06 to the three tables `weekly_summary` came
+#     out of — first read it as "what it writes". Dispute E4-06-01 settled it the
+#     other way. E4-04 spends the same read from a parallel branch, so one `SELECT`
+#     there is the merged end state rather than either ticket's widening.
+#
+# Both entries live in `RUNTIME_BASE_TABLE_PRIVILEGES` in
+# `tests/integration/test_identity_grants.py` with the sentence each comes from,
+# and the exact shape of each grant — the verbs held, the verbs withheld, at table
 # grain and at column grain — is asserted in
 # `tests/integration/test_the_summary_writer_is_granted_insert_and_select_and_nothing_wider.py`,
 # which also drives a write over the connection the job actually runs on
 # (`docs/MISTAKES.md` entry 46).
-TABLES_WITH_NO_WRITER_YET = (MODERATION_STATE, RELEASE_BATCH, RELEASE_BATCH_MEMBER)
+TABLES_WITH_NO_WRITER_YET = (RELEASE_BATCH, RELEASE_BATCH_MEMBER)
 
 # The tables E4-02 does not create and writes rows into to reach its own.
 ANSWER = "answer"
@@ -1222,13 +1233,18 @@ def test_neither_runtime_role_holds_any_privilege_on_a_table_with_no_writer_yet(
     grant added 'for later' is scope … granting it now widens the runtime role for
     a writer that does not exist."
 
-    **One of the four has since found its writer, exactly as the last paragraph
-    of this docstring predicted.** E4-06's Monday job writes `weekly_summary`, so
-    that table is no longer in the list this test walks; the two verbs it holds
-    and the five it does not are asserted in
+    **Two of the four have since been spent on, exactly as the last paragraph of
+    this docstring predicted, and the second one corrected a misreading of the rule
+    above.** E4-06's Monday job writes `weekly_summary` — and it *reads*
+    `moderation_state`, because SPEC §5.1 has the AI summaries "exclude
+    flagged-held content" and ADR 0145 puts that fact in no other table. Neither is
+    in the list this test walks any more. The verbs each holds and the verbs each
+    does not are asserted in
     `tests/integration/test_the_summary_writer_is_granted_insert_and_select_and_nothing_wider.py`
     and recorded in `RUNTIME_BASE_TABLE_PRIVILEGES` with the sentence they come
-    from. What is left here is the three tables nothing writes yet, and the
+    from. The rule is "grants what it **spends**", not "what it writes"; this list
+    briefly read it the second way, and dispute E4-06-01 is where that was settled.
+    What is left here is the two tables nothing has spent anything on, and the
     boundary is unchanged for them.
 
     **Both currencies are asked, because a privilege reaches a role three ways.**
@@ -1245,10 +1261,11 @@ def test_neither_runtime_role_holds_any_privilege_on_a_table_with_no_writer_yet(
     and this test would then be green against a database with every privilege in
     it.
 
-    **When this goes red for a good reason**, which has now happened once and will
-    happen again: E4-06 granted the summary writer its `SELECT, INSERT`, and E4-04
-    grants the release path what it needs. That is a widening of the runtime role
-    recorded deliberately, in the pull request that makes it — the entry moves into
+    **When this goes red for a good reason**, which has now happened twice and will
+    happen again: E4-06 granted the summary writer its `SELECT, INSERT` and its
+    read of `moderation_state`, and E4-04 grants the release path what it needs.
+    That is a widening of the runtime role recorded deliberately, in the pull
+    request that makes it — the entry moves into
     `RUNTIME_BASE_TABLE_PRIVILEGES` in `test_identity_grants.py` with the sentence
     it comes from, and the table's name comes out of the list here.
 
@@ -1313,11 +1330,11 @@ def test_neither_runtime_role_holds_any_privilege_on_a_table_with_no_writer_yet(
                         held.append(f"{role} holds {privilege} on public.{name}.{column}")
 
     assert not held, (
-        f"{sorted(held)}. E4-02 adds no grant, and these three tables still have no writer: the "
-        "release path is E4-04 and every moderation writer is E6, and a privilege lands in the "
-        "change that uses it — as `weekly_summary`'s did at E4-06, which is why that table is no "
-        "longer walked here. An entry naming a column is a grant `has_table_privilege` does not "
-        "report at all. If "
+        f"{sorted(held)}. E4-02 adds no grant, and nothing has yet spent a privilege on these two "
+        "tables: the release path is E4-04's, and a privilege lands in the change that uses it — "
+        "as `weekly_summary`'s write and `moderation_state`'s read both did at E4-06, which is why "
+        "neither is walked here any more. An entry naming a column is a grant "
+        "`has_table_privilege` does not report at all. If "
         "one of these is a deliberate grant, it belongs in the ticket that spends it, recorded in "
         "`RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py` with the "
         "sentence it comes from — and this list shortens in the same pull request."

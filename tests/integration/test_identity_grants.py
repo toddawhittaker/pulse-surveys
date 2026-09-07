@@ -3994,18 +3994,19 @@ MEMBER_OF_ROLES = """
 #     here. No view over either table exists yet — E11's console is where one would
 #     be — so nothing joins a score to a person on any connection.
 #     Decided and spent in E3-02.
-#   - **E4-02 adds four tables and spends nothing.** `moderation_state`,
-#     `release_batch` and `release_batch_member` appear in no
+#   - **E4-02 adds four tables and spends nothing.** `release_batch` and
+#     `release_batch_member` appear in no
 #     tuple below, and their absence is the record: that ticket
-#     creates the schema E4 shares and writes no row into any of it. The writers
-#     are elsewhere — the release is E4-04 and every
-#     moderation writer is E6 — and each grants what it spends, because a grant
+#     creates the schema E4 shares and writes no row into any of it. Their writer
+#     is elsewhere — the release is E4-04 — and
+#     each ticket grants what it spends, because a grant
 #     issued for a writer that does not exist widens the runtime role for nobody.
 #     The equality below is what makes that absence enforced rather than intended,
 #     and `tests/integration/test_report_schema.py` asks the same question of those
-#     three tables by name, at column grain as well as table grain, so that a
+#     two tables by name, at column grain as well as table grain, so that a
 #     widening arriving with a new entry here still has to be argued for twice.
-#     The fourth, `weekly_summary`, is the one that has since found its writer.
+#     The other two of the four have since found their writer and their reader,
+#     both at E4-06, and both are entries below.
 #   - `pulse_app` **reads and inserts** `weekly_summary`, and holds no other verb
 #     on it. **E4-06 is the writer E4-02's entry above was waiting for**, and this
 #     is the widening it argued for: SPEC §5.1 puts one AI summary at the head of
@@ -4036,6 +4037,37 @@ MEMBER_OF_ROLES = """
 #     is what decides who may read it — enforced on the read path E4-07 builds,
 #     not by this grant.
 #     Decided and spent in E4-06.
+#   - `pulse_app` **reads** `moderation_state`, and holds no other verb on it.
+#     SPEC §5.1 requires the weekly AI summaries to "**exclude flagged-held
+#     content**", and
+#     [ADR 0145](../../docs/adr/0145-the-report-schema-has-its-own-module-and-moderation-starts-by-absence.md)
+#     settles that a comment's moderation state lives here as an append-only record
+#     whose latest row governs and whose initial state is the absence of a row — so
+#     "is this content flagged-held" is a question with exactly one place to ask it,
+#     and E4-06's walk asks it on this connection before any comment crosses to the
+#     provider. E4-04's suppression reads spend the same `SELECT` from a parallel
+#     branch, so this entry is one grant that two tickets both require rather than
+#     one either of them widens.
+#     **What is withheld is the whole assertion here**, more so than on any other
+#     entry in this list: E4 writes *zero* moderation rows by design (ADR 0145
+#     makes the initial state an absence precisely so that stays true), every writer
+#     is E6's, and §5.2's exclusion log is the anti-cherry-picking mechanism the
+#     product's integrity rests on. A connection able to `INSERT` here could publish
+#     a comment an instructor excluded, or exclude one they kept, from a background
+#     job that has no business deciding anything about moderation. `UPDATE` and
+#     `DELETE` are refused for the same reason and because the record is
+#     append-only, which is a property no Python rule makes structural.
+#     **What this table carries, for §4.1.** An `answer` key, one of §5.2's four
+#     state tokens, and when the decision was made — no name, no subject, no comment
+#     text. `tests/integration/test_identity_column_marker.py` reaches it through
+#     `answer` and records that it carries nothing; the connection already holds
+#     `SELECT` on `answer`, where the comment text is, so this adds no reach toward
+#     a student. It adds only the fact that says whether a comment may be sent to a
+#     model at all.
+#     Decided at E4-06, in dispute E4-06-01, against a work-order sentence that had
+#     said "`weekly_summary` and nothing wider" — SPEC §5.1 overrode it, on the rule
+#     this list already states: a ticket grants what it **spends**, and a filter is
+#     a read.
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -4083,6 +4115,7 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "ags_call", "INSERT"),
         (APPLICATION_ROLE, "weekly_summary", "SELECT"),
         (APPLICATION_ROLE, "weekly_summary", "INSERT"),
+        (APPLICATION_ROLE, "moderation_state", "SELECT"),
     }
 )
 

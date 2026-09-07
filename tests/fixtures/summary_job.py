@@ -55,9 +55,11 @@ stated rather than inherited (`docs/MISTAKES.md` entry 40).
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime, timedelta
+from types import ModuleType
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -752,13 +754,16 @@ def _plain_import(name: str) -> Any:
     """Import one `app.*` module, answering `None` where it does not exist.
 
     The signature `SummaryApi` takes, supplied by plain import rather than by
-    `import_app_module`. That fixture drops every `app.*` module out of
-    `sys.modules` before importing, which is exactly right for a unit test that
-    has just set an environment variable and exactly wrong here: these suites hold
-    a committed world built through `Base.metadata` and a task that opens its own
-    session, and a re-import mid-test would give the process two model registries
-    and two engines — and the gateway double reaches for a contract class *while
-    the job is running*, which is the worst possible moment for it.
+    `import_app_module`, and the distinction is *when* rather than *whether*.
+    `import_app_module` drops every `app.*` module out of `sys.modules` before
+    importing, and `summary_job_environment` does exactly that once, at setup,
+    which is what binds `app.db` to this container (dispute E4-06-02). What must
+    not happen is a second drop **mid-test**: these suites hold a committed world
+    built through `Base.metadata` and a task that opens its own session, and the
+    gateway double reaches for a contract class *while the job is running* — so a
+    re-import at that moment would hand the double a `WeeklySummaryOutput` from a
+    registry the task under test is not validating against. This importer resolves
+    whatever the setup-time import left in `sys.modules` and disturbs nothing.
     """
     import importlib
 
@@ -781,9 +786,18 @@ def summary_contracts() -> SummaryApi:
     return SummaryApi(_plain_import)
 
 
+DATABASE_MODULE = "app.db"
+ENGINE_ATTRIBUTE = "engine"
+
+
 @pytest.fixture
-def summary_job_environment(care_service_environment: dict[str, str], window_settings: Any) -> Any:
-    """`Settings` in a development environment, with the database variables this container's.
+def summary_job_environment(
+    care_service_environment: dict[str, str],
+    window_settings: Any,
+    migrated_database: Any,
+    import_app_module: Callable[[str], ModuleType | None],
+) -> Any:
+    """`Settings` in a development environment, with `app.db` bound to this container.
 
     Three things this suite cannot do without, stated rather than inherited
     (`docs/MISTAKES.md` entry 40):
@@ -802,19 +816,68 @@ def summary_job_environment(care_service_environment: dict[str, str], window_set
       - **`INSTITUTION_TIMEZONE` is stated**, because SPEC §3.1 puts every window
         instant at a wall-clock time in it.
 
-    The order of the two fixtures is load-bearing: both rest on `configured_env`,
-    and `care_service_environment` is asked for first so its database values are
-    the ones standing when `window_settings` builds `Settings`.
+    **Stating the variable is not enough, and dispute E4-06-02 is what measured
+    that.** `app.db` builds its engine *at import time* from a `Settings()` of its
+    own (ADR 0013, ADR 0010), and `sys.modules` then keeps the result for the rest
+    of the worker — so this environment governs only if `app.db` has not already
+    been imported. `tests/integration/test_alembic_baseline.py` imports it while
+    `DATABASE_URL` points at a throwaway database that the same test then drops,
+    and under `-n 4` which worker gets that module relative to these is not
+    something any change here controls. Measured: every behavioural test in this
+    ticket failed on `database "e0_04_…" does not exist` when that module ran
+    first in the same process, and passed when it did not.
+
+    So the module is **imported through `import_app_module` after the environment
+    is laid down**, which drops `app.*` out of `sys.modules` and rebuilds the
+    engine against the value this fixture just set. That is the step
+    `tests/integration/test_the_launch_replay_purge_runs_as_pulse_app.py`'s
+    `tasks_on_the_application_role` already takes, for the same reason and against
+    the same module. The objection this file used to carry against
+    `import_app_module` — two model registries, and a re-import while the gateway
+    double is reaching for a contract class — was about re-importing *mid-test*;
+    here it happens at setup, before any world is committed, before the double
+    exists, and before `_plain_import` has cached anything.
+
+    **And the binding is asserted rather than assumed**, which is the half that
+    survives the next module to import `app.db` first. Without it a mis-binding
+    arrives as eighteen connection errors pointing at the walk; with it, it arrives
+    as one sentence naming the cause. That is `docs/MISTAKES.md` entry 44's rule
+    applied to a hazard rather than to a deliverable — and this is deliberately the
+    one guard in this file that does live in a fixture, because what it checks is
+    the state of the process this fixture has just configured, and a failure of it
+    *is* a setup failure rather than an assertion about the ticket.
+
+    The order of the fixtures above is load-bearing: `care_service_environment` is
+    asked for first so its database values are the ones standing when
+    `window_settings` builds `Settings` and when the import below runs.
     """
+    module = import_app_module(DATABASE_MODULE)
+    assert module is not None, (
+        f"`{DATABASE_MODULE}` does not exist, so nothing in this suite can reach the connection "
+        "the Monday task opens for itself. E0-04 ships it."
+    )
+    engine = getattr(module, ENGINE_ATTRIBUTE, None)
+    reached = getattr(getattr(engine, "url", None), "database", None)
+    expected = urlsplit(migrated_database.application_url).path.lstrip("/")
+    assert reached == expected, (
+        f"`{DATABASE_MODULE}.{ENGINE_ATTRIBUTE}` is bound to {reached!r} and this container's "
+        f"database is {expected!r}. `app.db` builds its engine at import time (ADR 0013) and "
+        "`sys.modules` keeps it, so a module imported earlier in this worker under some other "
+        "`DATABASE_URL` decides where every Celery task in this process connects — dispute "
+        "E4-06-02 measured exactly that, with `test_alembic_baseline.py`'s throwaway database "
+        "winning the race under `-n 4`. The re-import above is supposed to have undone it. If "
+        f"`{DATABASE_MODULE}` has renamed its engine, this reading answers `None` for every run "
+        "and that is a one-line change here rather than a fact about the job."
+    )
     return window_settings
 
 
 @pytest.fixture
 def summary_world(
+    summary_job_environment: Any,
     committed_report_world: ReportWorld,
     committed_rows: Any,
     committed_clock_overrides: Any,
-    summary_job_environment: Any,
 ) -> Iterator[SummaryWorld]:
     """The world E4-06's job walks, **unbuilt** — the caller decides what is in it.
 
@@ -822,6 +885,10 @@ def summary_world(
     which streams carry comments and how many students answered are the things
     each criterion is about, so a fixture that chose them would be answering the
     question rather than posing it.
+
+    **`summary_job_environment` is named first on purpose**: it drops and re-imports
+    `app.*` to bind `app.db` to this container (dispute E4-06-02), so it runs before
+    anything else here holds a reference into those modules. Bind, then build.
     """
     yield SummaryWorld(committed_report_world, committed_rows, committed_clock_overrides)
 
