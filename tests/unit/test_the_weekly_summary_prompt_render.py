@@ -122,6 +122,59 @@ def occurrences(text: str, needle: str) -> int:
     return text.count(needle)
 
 
+class _Template(str):
+    """A synthetic prompt template that answers as text *and* as a file.
+
+    A `str` subclass, so a loader whose caller treats the result as the prompt text
+    works; and it answers `read_text()` with itself, so a loader whose caller
+    treats the result as a path works too. Which of the two shapes
+    `render_summary_prompt` uses is not something E4-05 settles and not something a
+    test may decide, and a double that guessed wrong would fail in a way that reads
+    as a defect in the renderer.
+    """
+
+    def read_text(self, *_args: object, **_kwargs: object) -> str:
+        return str(self)
+
+
+def prompt_loader(tasks: object) -> str:
+    """The name of the function `app.ai.tasks` reads a prompt's text through.
+
+    Found rather than pinned. No ticket spells this helper — E0-12 shipped
+    `render_prompt` and E4-05 settles `render_summary_prompt`, and both are the
+    *callers* — so a name written into this file would make the implementer build
+    to the test. A module offering no such seam, or offering two, stops the test
+    with a message saying so, which is an interface question for the ticket rather
+    than something to guess at (the device `validity_task` in
+    `tests/fixtures/ai_tasks.py` uses, for the same reason).
+    """
+    candidates = sorted(
+        name
+        for name, value in vars(tasks).items()
+        # `callable` rather than `inspect.isfunction`, because a prompt reader is
+        # exactly the kind of thing somebody wraps in `functools.lru_cache` — and
+        # a wrapper is not a function, so the narrower test would report no seam
+        # at all over a module that has one. Classes are excluded so `PromptError`
+        # is not mistaken for a loader.
+        if callable(value)
+        and not inspect.isclass(value)
+        and getattr(value, "__module__", None) == getattr(tasks, "__name__", None)
+        and "prompt" in name.lower()
+        and not name.lstrip("_").startswith("render")
+    )
+    if len(candidates) != 1:
+        pytest.fail(
+            f"`app.ai.tasks` offers {candidates} as a function this test could feed a prompt "
+            "template through, and it needs exactly one. The direction being asserted — a "
+            "template that keeps the comments placeholder and loses the stream one — cannot "
+            "be driven from any committed file, because every prompt on disk that is missing "
+            "one summary placeholder is missing both. If the text is read some other way, the "
+            "seam is an interface question for the ticket and `prompt_loader` in this file is "
+            "the one place that changes."
+        )
+    return candidates[0]
+
+
 def identity_in(text: str) -> list[str]:
     """Every planted identity value `text` carries, as the one detector both ways.
 
@@ -366,6 +419,12 @@ def test_a_prompt_without_the_placeholders_is_refused_rather_than_rendered(
     **The mutation this kills:** a renderer that substitutes what it finds and
     returns the rest unchanged, which produces a well-formed request for a summary
     of nothing. **Its pair is every test above**, where the real version renders.
+
+    **What this one cannot tell apart, and the test below is why it exists.** The
+    validity prompt is missing *both* summary placeholders, so this reds whichever
+    of the two checks fires and stays green when only one of them is left standing.
+    A mutation battery measured exactly that: the stream check deleted, the
+    comments check kept, and the whole repository green.
     """
     render = summary_api.render()
     tasks = summary_api.tasks()
@@ -393,6 +452,87 @@ def test_a_prompt_without_the_placeholders_is_refused_rather_than_rendered(
     assert other_version in message or "placeholder" in message.lower(), (
         f"the refusal says {message!r}, which names neither the version it could not render "
         "nor the placeholder it looked for. Whoever meets this in a log needs one of the two."
+    )
+    for comment in PLANTED_COMMENTS:
+        assert comment not in message, (
+            "the refusal quotes a student's comment back into its message. E3's decision 10 "
+            "keeps student content out of worker logs and E4-06 relies on it."
+        )
+
+
+def test_a_template_keeping_the_comments_placeholder_and_losing_the_stream_one_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+    summary_api: SummaryApi,
+) -> None:
+    """The half of the placeholder rule no committed file can drive.
+
+    Every prompt on disk that lacks one summary placeholder lacks both, so the
+    test above reds whichever check fires and cannot say which. A mutation battery
+    measured the consequence: delete the stream-placeholder check, keep the
+    comments-placeholder check, and nothing in the repository goes red. The
+    implementation is right today; what was missing was anything that would notice
+    it stopping being right — which is `docs/MISTAKES.md` entry 2, and entry 49's
+    rule that a test must establish *which* layer refused.
+
+    **What it would cost.** A later `summary.v2.md` that dropped
+    `[[COMMENT_STREAM]]` would render prompts that never say which stream they are
+    about. The model would answer about whichever it inferred, the answer would
+    validate, and the task's stream check would refuse roughly half of them at
+    random while the other half were summaries of the wrong group of comments.
+
+    **The symmetric direction is already covered and is deliberately not repeated
+    here**: a template with the stream placeholder and no comments placeholder is
+    what the validity prompt is to the comments check, and the test above reds on
+    it.
+
+    **The template is fed through the module's own prompt loader**, found by name
+    inside this body rather than pinned, and no file is added under `backend/` —
+    ADR 0032 makes anything committed there an immutable version a classification
+    may cite, and a fixture is not one.
+
+    **The control runs first and a red on it means this test is broken, not the
+    renderer.** A template carrying *both* placeholders must render, or the seam
+    is wrong and the refusal below would prove nothing about placeholders.
+
+    **The mutation this kills:** the stream-placeholder-missing check deleted
+    while the comments-placeholder check stands.
+    """
+    render = summary_api.render()
+    tasks = summary_api.tasks()
+    prompt_error = summary_api.named(
+        tasks,
+        PROMPT_ERROR,
+        "E0-12's renderer refuses a prompt with no placeholder and E4-05's renderer inherits "
+        "the rule; the error class is where that refusal is named.",
+    )
+    loader = prompt_loader(tasks)
+    comments_placeholder = summary_api.constant(SUMMARY_COMMENTS_PLACEHOLDER)
+    stream_placeholder = summary_api.constant(SUMMARY_STREAM_PLACEHOLDER)
+    version = summary_api.constant(SUMMARY_PROMPT_VERSION)
+
+    both = _Template(f"Summarize the {stream_placeholder} stream's week.\n\n{comments_placeholder}")
+    monkeypatch.setattr(tasks, loader, lambda *_args, **_kwargs: both)
+    rendered = render(
+        version, stream=summary_api.stream(INSTRUCTOR_STREAM), comments=PLANTED_COMMENTS
+    )
+    assert PLANTED_COMMENTS[-1] in rendered, (
+        f"the control failed: a synthetic template carrying both placeholders did not render "
+        f"the week's comments. `{loader}` is this test's seam onto the prompt text, and a "
+        "renderer that reads the file some other way makes the refusal below prove nothing. "
+        "That is this test being wrong rather than the renderer."
+    )
+
+    without_stream = _Template(f"Summarize the week.\n\n{comments_placeholder}")
+    monkeypatch.setattr(tasks, loader, lambda *_args, **_kwargs: without_stream)
+
+    with pytest.raises(prompt_error) as raised:
+        render(version, stream=summary_api.stream(INSTRUCTOR_STREAM), comments=PLANTED_COMMENTS)
+
+    message = str(raised.value)
+    assert stream_placeholder in message or "placeholder" in message.lower(), (
+        f"the refusal says {message!r}, which names neither the placeholder it looked for nor "
+        "placeholders at all. Whoever meets this in a log needs to know which substitution "
+        "point the template lost."
     )
     for comment in PLANTED_COMMENTS:
         assert comment not in message, (
