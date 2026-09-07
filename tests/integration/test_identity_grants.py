@@ -3994,17 +3994,48 @@ MEMBER_OF_ROLES = """
 #     here. No view over either table exists yet — E11's console is where one would
 #     be — so nothing joins a score to a person on any connection.
 #     Decided and spent in E3-02.
-#   - **E4-02 adds four tables and spends nothing.** `weekly_summary`,
-#     `moderation_state`, `release_batch` and `release_batch_member` appear in no
+#   - **E4-02 adds four tables and spends nothing.** `moderation_state`,
+#     `release_batch` and `release_batch_member` appear in no
 #     tuple below, and their absence is the record: that ticket
 #     creates the schema E4 shares and writes no row into any of it. The writers
-#     are elsewhere — the summary job is E4-06, the release is E4-04, and every
+#     are elsewhere — the release is E4-04 and every
 #     moderation writer is E6 — and each grants what it spends, because a grant
 #     issued for a writer that does not exist widens the runtime role for nobody.
 #     The equality below is what makes that absence enforced rather than intended,
 #     and `tests/integration/test_report_schema.py` asks the same question of those
-#     four tables by name, at column grain as well as table grain, so that a
+#     three tables by name, at column grain as well as table grain, so that a
 #     widening arriving with a new entry here still has to be argued for twice.
+#     The fourth, `weekly_summary`, is the one that has since found its writer.
+#   - `pulse_app` **reads and inserts** `weekly_summary`, and holds no other verb
+#     on it. **E4-06 is the writer E4-02's entry above was waiting for**, and this
+#     is the widening it argued for: SPEC §5.1 puts one AI summary at the head of
+#     each of a week's two comment groups, and the Monday job is the only writer
+#     §5.1 admits — [ADR 0145](../../docs/adr/0145-the-report-schema-has-its-own-module-and-moderation-starts-by-absence.md)'s
+#     third decision accepts a plain `week_id` on the table precisely because that
+#     is true.
+#     **What each verb is for.** `INSERT` is the row the walk writes, one per
+#     section, course week and stream. `SELECT` is the walk's own selection: its
+#     scope is "sections with closed weeks *lacking* summary rows", which cannot be
+#     asked without reading the table, and it is what makes a second run of the
+#     same walk write nothing rather than insert again until a constraint refuses
+#     it (E4-06's first criterion).
+#     **What is withheld is the assertion**, as on `classification` and
+#     `grade_sync`. No `UPDATE`: E4's breakdown decision 2 rules out regeneration
+#     in v1 — "a summary that silently changes under a reader is worse than one
+#     that is a week honest" — so a connection able to rewrite a stored summary is
+#     a connection able to change what an instructor already read, and no Python
+#     rule makes that structural. No `DELETE` and no `TRUNCATE`: §4's retention
+#     purge is E13's and runs under another identity.
+#     **What this table carries, for §4.1.** A section, a `week`, a stream,
+#     generated text, a count and SPEC §7.4's provenance pair. It references no
+#     person and the identity walk in
+#     `tests/integration/test_identity_column_marker.py` does not reach it at all,
+#     which is why its columns are pinned in
+#     `tests/integration/test_report_schema.py` instead. The text is a paraphrase
+#     of a week's comments rather than anybody's own words, and §4's small-N rule
+#     is what decides who may read it — enforced on the read path E4-07 builds,
+#     not by this grant.
+#     Decided and spent in E4-06.
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -4050,6 +4081,8 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "grade_sync", "INSERT"),
         (APPLICATION_ROLE, "ags_call", "SELECT"),
         (APPLICATION_ROLE, "ags_call", "INSERT"),
+        (APPLICATION_ROLE, "weekly_summary", "SELECT"),
+        (APPLICATION_ROLE, "weekly_summary", "INSERT"),
     }
 )
 

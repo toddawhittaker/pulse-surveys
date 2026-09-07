@@ -59,6 +59,19 @@ RELEASE_BATCH = "release_batch"
 RELEASE_BATCH_MEMBER = "release_batch_member"
 REPORT_TABLES = (WEEKLY_SUMMARY, MODERATION_STATE, RELEASE_BATCH, RELEASE_BATCH_MEMBER)
 
+# The subset of them that still has no writer, and therefore still holds no
+# privilege for either runtime role. **`weekly_summary` came out of this list at
+# E4-06**, which is the change the grant test below predicted in as many words:
+# that ticket's Monday job is the summary's writer, so it grants the `SELECT,
+# INSERT` it spends and records the sentence in
+# `RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py`.
+# The exact shape of that grant — the two verbs held, the five withheld, at table
+# grain and at column grain — is asserted in
+# `tests/integration/test_the_summary_writer_is_granted_insert_and_select_and_nothing_wider.py`,
+# which also drives a write over the connection the job actually runs on
+# (`docs/MISTAKES.md` entry 46).
+TABLES_WITH_NO_WRITER_YET = (MODERATION_STATE, RELEASE_BATCH, RELEASE_BATCH_MEMBER)
+
 # The tables E4-02 does not create and writes rows into to reach its own.
 ANSWER = "answer"
 RESPONSE = "response"
@@ -1197,7 +1210,7 @@ def test_the_report_tables_the_person_walk_never_reaches_carry_only_their_declar
 # ---------------------------------------------------------------------------
 
 
-def test_neither_runtime_role_holds_any_privilege_on_a_table_this_ticket_adds(
+def test_neither_runtime_role_holds_any_privilege_on_a_table_with_no_writer_yet(
     db_session: Any, metadata_tables: dict[str, Any]
 ) -> None:
     """The ticket's own boundary: a privilege lands in the change that uses it.
@@ -1208,6 +1221,15 @@ def test_neither_runtime_role_holds_any_privilege_on_a_table_this_ticket_adds(
     file in `backend/app/views_sql/` states and the ticket's own known trap: "a
     grant added 'for later' is scope … granting it now widens the runtime role for
     a writer that does not exist."
+
+    **One of the four has since found its writer, exactly as the last paragraph
+    of this docstring predicted.** E4-06's Monday job writes `weekly_summary`, so
+    that table is no longer in the list this test walks; the two verbs it holds
+    and the five it does not are asserted in
+    `tests/integration/test_the_summary_writer_is_granted_insert_and_select_and_nothing_wider.py`
+    and recorded in `RUNTIME_BASE_TABLE_PRIVILEGES` with the sentence they come
+    from. What is left here is the three tables nothing writes yet, and the
+    boundary is unchanged for them.
 
     **Both currencies are asked, because a privilege reaches a role three ways.**
     `has_table_privilege` answers for a table grant and for one arriving through a
@@ -1223,18 +1245,18 @@ def test_neither_runtime_role_holds_any_privilege_on_a_table_this_ticket_adds(
     and this test would then be green against a database with every privilege in
     it.
 
-    **When this goes red for a good reason**, which will happen: E4-06 grants the
-    summary writer its `INSERT`, and E4-04 grants the release path what it needs.
-    That is a widening of the runtime role recorded deliberately, in the pull
-    request that makes it — the entry moves into
+    **When this goes red for a good reason**, which has now happened once and will
+    happen again: E4-06 granted the summary writer its `SELECT, INSERT`, and E4-04
+    grants the release path what it needs. That is a widening of the runtime role
+    recorded deliberately, in the pull request that makes it — the entry moves into
     `RUNTIME_BASE_TABLE_PRIVILEGES` in `test_identity_grants.py` with the sentence
     it comes from, and the table's name comes out of the list here.
 
-    **The mutation it kills:** `GRANT SELECT, INSERT ON public.weekly_summary TO
-    pulse_app` written into this ticket's migration because the writer will need
-    it eventually.
+    **The mutation it kills:** `GRANT SELECT, INSERT ON public.release_batch TO
+    pulse_app` written into a migration because the writer will need it
+    eventually.
     """
-    for name in REPORT_TABLES:
+    for name in TABLES_WITH_NO_WRITER_YET:
         report_table(metadata_tables, name)
 
     control_table = db_session.execute(
@@ -1270,7 +1292,7 @@ def test_neither_runtime_role_holds_any_privilege_on_a_table_this_ticket_adds(
 
     held = []
     for role in RUNTIME_ROLES:
-        for name in REPORT_TABLES:
+        for name in TABLES_WITH_NO_WRITER_YET:
             for privilege in TABLE_PRIVILEGES:
                 if db_session.execute(
                     text(HAS_TABLE_PRIVILEGE),
@@ -1291,9 +1313,11 @@ def test_neither_runtime_role_holds_any_privilege_on_a_table_this_ticket_adds(
                         held.append(f"{role} holds {privilege} on public.{name}.{column}")
 
     assert not held, (
-        f"{sorted(held)}. E4-02 adds no grant: the summary's writer is E4-06, the release path is "
-        "E4-04 and every moderation writer is E6, and a privilege lands in the change that uses "
-        "it. An entry naming a column is a grant `has_table_privilege` does not report at all. If "
+        f"{sorted(held)}. E4-02 adds no grant, and these three tables still have no writer: the "
+        "release path is E4-04 and every moderation writer is E6, and a privilege lands in the "
+        "change that uses it — as `weekly_summary`'s did at E4-06, which is why that table is no "
+        "longer walked here. An entry naming a column is a grant `has_table_privilege` does not "
+        "report at all. If "
         "one of these is a deliberate grant, it belongs in the ticket that spends it, recorded in "
         "`RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py` with the "
         "sentence it comes from — and this list shortens in the same pull request."

@@ -1,0 +1,394 @@
+"""The privilege this ticket spends, and the ones it withholds — ticket E4-06.
+
+E4-02 created `weekly_summary` and granted nothing on it, deliberately: "the
+writers grant what they spend — E4-06 for the summary, E4-04 for the release,
+E6 for every moderation state", and
+`tests/integration/test_report_schema.py::test_neither_runtime_role_holds_any_privilege_on_a_table_this_ticket_adds`
+says in as many words when it expects to go red for a good reason — "E4-06 grants
+the summary writer its `INSERT` … the entry moves into
+`RUNTIME_BASE_TABLE_PRIVILEGES` in `test_identity_grants.py` with the sentence it
+comes from, and the table's name comes out of the list here". This is that
+change, asserted from this side.
+
+**Two verbs, and the sentence each comes from.**
+
+  - `INSERT` is the row the Monday walk writes: SPEC §5.1 puts one AI summary at
+    the head of each of a week's two comment groups, and this job is the only
+    writer §5.1 admits (ADR 0145's third decision rests on that being true).
+  - `SELECT` is the walk's own selection. Its scope is "sections with closed weeks
+    **lacking** summary rows", and there is no way to ask that question without
+    reading the table — which is also what makes the second run of a pair a no-op
+    (criterion 1) rather than a duplicate insert refused by a constraint.
+
+**What is withheld is the assertion**, exactly as it is on `classification`, on
+`grade_sync` and on `ags_call`. No `UPDATE`: breakdown decision 2 rules out
+regeneration in v1, so a connection able to rewrite a stored summary is a
+connection able to change what an instructor already read, with no Python rule
+making that structural. No `DELETE`, no `TRUNCATE`: a summary is the epic's only
+generated artifact and §4's retention purge is E13's, run under a different
+identity. No `REFERENCES`, no `TRIGGER`.
+
+**Both currencies are asked, because a privilege reaches a role three ways.**
+`has_table_privilege` answers for a table grant and for one arriving through a
+role membership and is blind to a column-scoped grant; `has_column_privilege` is
+what sees that one. A guard that enumerated mechanisms and missed the one the
+design uses is `docs/MISTAKES.md` entry 35, and it is why both are here.
+
+**And the grant is driven, not only read out of the catalog.** A suite that
+proved the privilege from `pg_catalog` and then wrote every row through the
+migrating engine has not tested the grant at all (`docs/MISTAKES.md` entry 46).
+So one test here inserts a summary over `application_engine` — the connection
+`app.db` builds and the job therefore runs on — and requires the two refusals
+beside it. Every test in this ticket's other modules reaches the same connection
+through the task itself.
+
+**Which failure a red here is.** Before E4-06's migration lands, expected red on
+an assertion: `pulse_app` holds nothing on `weekly_summary`, so the equality
+below reports the two missing grants by name and the driven insert is refused
+with `permission denied`. Before E4-02's, expected red on `pytest.fail` naming
+the absent table (`docs/MISTAKES.md` entry 44).
+"""
+
+from typing import Any
+
+import pytest
+from fixtures.summary_job import (
+    A_CLOSED_TERM_WEEK,
+    SUMMARY_GENERATED_AT_COLUMN,
+    SUMMARY_MODEL_ID_COLUMN,
+    SUMMARY_PROMPT_VERSION_COLUMN,
+    SUMMARY_RESPONSE_COUNT_COLUMN,
+    SUMMARY_SECTION_COLUMN,
+    SUMMARY_STREAM_COLUMN,
+    SUMMARY_TEXT_COLUMN,
+    SUMMARY_WEEK_COLUMN,
+    WEEKLY_SUMMARY_TABLE,
+    SummaryWorld,
+)
+from sqlalchemy import text
+from sqlalchemy.exc import DatabaseError
+
+pytestmark = pytest.mark.integration
+
+# The two connection roles ADR 0001 separates, and every privilege a role can
+# hold on a table or on a column of one.
+APPLICATION_ROLE = "pulse_app"
+CARE_ROLE = "pulse_care"
+RUNTIME_ROLES = (APPLICATION_ROLE, CARE_ROLE)
+TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
+COLUMN_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "REFERENCES")
+
+# What this ticket spends, and the whole of it.
+GRANTED = ("SELECT", "INSERT")
+
+# The other three tables E4-02 created and this ticket does not write to. Their
+# entry stays at nothing: a privilege lands in the change that spends it, and the
+# release path is E4-04's while every moderation writer is E6's.
+STILL_UNGRANTED = ("moderation_state", "release_batch", "release_batch_member")
+
+HAS_TABLE_PRIVILEGE = "SELECT has_table_privilege(:role, :relation, :privilege)"
+HAS_COLUMN_PRIVILEGE = "SELECT has_column_privilege(:role, :relation, :column, :privilege)"
+COLUMNS_OF = text(
+    """
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = :table
+    ORDER BY column_name
+    """
+)
+
+# The table and column a control probe is aimed at, and the privilege it must
+# find there. E0-13 granted `pulse_app` `SELECT` on `classification` and
+# `tests/integration/test_identity_grants.py` records it; a probe that cannot see
+# that one reports absence because it is blind, which is entry 35's whole rule.
+A_TABLE_THE_ROLE_CERTAINLY_READS = "classification"
+A_COLUMN_THE_ROLE_CERTAINLY_READS = "verdict"
+
+# This test's own row. Nothing about it is a claim about anything the system
+# decides; it exists so a write can be attempted through the production
+# connection and refused or accepted.
+A_STREAM = "INSTRUCTOR"
+A_SUMMARY = "Written by the grant test over the application connection."
+ANOTHER_SUMMARY = "Rewritten by the grant test, which must not be possible."
+A_RESPONSE_COUNT = 4
+A_PROMPT_VERSION = "e4-06-grant-test-prompt"
+A_MODEL_ID = "e4-06-grant-test-model"
+
+
+def columns_of(session: Any, table: str) -> tuple[str, ...]:
+    """Every column the database reports on one table, sorted."""
+    return tuple(session.execute(COLUMNS_OF, {"table": table}).scalars())
+
+
+def probes_can_see_a_grant_they_are_pointed_at(session: Any) -> None:
+    """Both readings must find the privilege `pulse_app` certainly holds.
+
+    Called as the first statement of each test that reports an absence. A probe
+    that cannot see a grant it is aimed straight at reports absence everywhere,
+    and the assertions below would then be facts about a blind reading rather than
+    about this table (`docs/MISTAKES.md` entry 35).
+    """
+    at_table = session.execute(
+        text(HAS_TABLE_PRIVILEGE),
+        {
+            "role": APPLICATION_ROLE,
+            "relation": f"public.{A_TABLE_THE_ROLE_CERTAINLY_READS}",
+            "privilege": "SELECT",
+        },
+    ).scalar_one()
+    assert at_table, (
+        f"`{APPLICATION_ROLE}` does not hold `SELECT` on `{A_TABLE_THE_ROLE_CERTAINLY_READS}` "
+        "according to `has_table_privilege`, and E0-13 granted exactly that. So this reading "
+        "reports absence whatever is granted."
+    )
+    at_column = session.execute(
+        text(HAS_COLUMN_PRIVILEGE),
+        {
+            "role": APPLICATION_ROLE,
+            "relation": f"public.{A_TABLE_THE_ROLE_CERTAINLY_READS}",
+            "column": A_COLUMN_THE_ROLE_CERTAINLY_READS,
+            "privilege": "SELECT",
+        },
+    ).scalar_one()
+    assert at_column, (
+        f"`{APPLICATION_ROLE}` does not hold `SELECT` on "
+        f"`{A_TABLE_THE_ROLE_CERTAINLY_READS}.{A_COLUMN_THE_ROLE_CERTAINLY_READS}` according to "
+        "`has_column_privilege`, and a table-wide grant covers every column. The column-grain "
+        "half of these tests is therefore blind — and that is the half that sees a grant "
+        "`has_table_privilege` cannot report at all."
+    )
+
+
+def test_the_application_role_may_read_and_insert_a_summary_and_nothing_else(
+    db_session: Any, metadata_tables: dict[str, Any], summary_job_contract: Any
+) -> None:
+    """The grant this ticket adds, asserted as an equality in both currencies.
+
+    An equality rather than a floor, for the reason `RUNTIME_BASE_TABLE_PRIVILEGES`
+    in `tests/integration/test_identity_grants.py` gives: on a table whose whole
+    safety is which verbs are withheld, "at least these" is not a guarantee. Two
+    verbs in and five out, plus the Care role at nothing — it has no business on
+    an instructor's report at all (§6.2 isolates it to the safety path).
+
+    **`UPDATE` is the one worth naming.** Breakdown decision 2 rules out
+    regeneration in v1: "a summary that silently changes under a reader is worse
+    than one that is a week honest." A connection holding `UPDATE` here can change
+    what an instructor read this morning, and criterion 1's idempotence is then a
+    property of the walk's code rather than of what the database will permit. The
+    same argument E3-02 makes for `grade_sync` and E0-13 for `classification`.
+
+    **The mutation this kills:** `GRANT ALL ON public.weekly_summary TO pulse_app`
+    in this ticket's migration, which is the shortest line that makes the job work
+    and passes every other test in this ticket; and a column-scoped `UPDATE` added
+    to `summary_text` "so a correction is possible", which `has_table_privilege`
+    cannot report at all.
+    """
+    summary_job_contract.require_table(metadata_tables)
+    probes_can_see_a_grant_they_are_pointed_at(db_session)
+
+    held_on_table = {
+        (role, privilege)
+        for role in RUNTIME_ROLES
+        for privilege in TABLE_PRIVILEGES
+        if db_session.execute(
+            text(HAS_TABLE_PRIVILEGE),
+            {
+                "role": role,
+                "relation": f"public.{WEEKLY_SUMMARY_TABLE}",
+                "privilege": privilege,
+            },
+        ).scalar_one()
+    }
+    assert held_on_table == {(APPLICATION_ROLE, privilege) for privilege in GRANTED}, (
+        f"`{WEEKLY_SUMMARY_TABLE}` is held as {sorted(held_on_table)} and this ticket spends "
+        f"exactly {[(APPLICATION_ROLE, privilege) for privilege in GRANTED]}. `INSERT` is the row "
+        "the Monday walk writes and `SELECT` is how it finds the section-weeks that have none. "
+        "`UPDATE` is refused because there is no regeneration in v1 (breakdown decision 2) — a "
+        "connection that can rewrite a stored summary can change what an instructor already read. "
+        f"`{CARE_ROLE}` holds nothing here at all: §6.2 isolates it to the safety path, and an "
+        "instructor's report is not on it."
+    )
+
+    columns = columns_of(db_session, WEEKLY_SUMMARY_TABLE)
+    assert columns, (
+        f"the catalog reports no columns for `public.{WEEKLY_SUMMARY_TABLE}`, so the column-grain "
+        "equality below is over an empty set and holds of anything."
+    )
+    held_on_columns = {
+        (role, column, privilege)
+        for role in RUNTIME_ROLES
+        for column in columns
+        for privilege in COLUMN_PRIVILEGES
+        if db_session.execute(
+            text(HAS_COLUMN_PRIVILEGE),
+            {
+                "role": role,
+                "relation": f"public.{WEEKLY_SUMMARY_TABLE}",
+                "column": column,
+                "privilege": privilege,
+            },
+        ).scalar_one()
+    }
+    assert held_on_columns == {
+        (APPLICATION_ROLE, column, privilege) for column in columns for privilege in GRANTED
+    }, (
+        f"at column grain `{WEEKLY_SUMMARY_TABLE}` is held as {sorted(held_on_columns)}. A "
+        "table-wide grant of the two verbs covers every column and nothing more; an entry here "
+        "that is not in that set is a column-scoped grant, which `has_table_privilege` does not "
+        "report at all and which nothing else in this repository would find."
+    )
+
+
+def test_the_three_tables_this_ticket_does_not_write_to_are_still_ungranted(
+    db_session: Any, metadata_tables: dict[str, Any], summary_job_contract: Any
+) -> None:
+    """The pair to the test above: the grant is exactly as wide as the writer.
+
+    E4-02 created four tables and spent nothing on any of them. This ticket writes
+    one of them. If the grant that arrives with it also opens the release batch or
+    the moderation record, the rule "each ticket grants what it spends" has been
+    replaced with "somebody granted the report schema", and the two tickets that
+    were going to argue for those privileges — E4-04 and E6 — never have to.
+
+    **This is the half that catches the plausible over-grant.** A migration
+    written as `GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA public TO pulse_app`
+    passes the test above perfectly, gives the job exactly the two verbs it needs
+    on the table it needs them on, and quietly opens every other table in the
+    database.
+
+    **The mutation this kills:** `ON ALL TABLES IN SCHEMA public`, and a
+    copy-pasted grant block that names all four of E4-02's tables because they
+    were created together.
+    """
+    for name in STILL_UNGRANTED:
+        assert name in metadata_tables, (
+            f"there is no `{name}` table (there are {sorted(metadata_tables)}). E4-02 creates all "
+            "four of the report tables together, and this test is about the three of them this "
+            "ticket does not write to."
+        )
+    probes_can_see_a_grant_they_are_pointed_at(db_session)
+
+    held: list[str] = []
+    for role in RUNTIME_ROLES:
+        for name in STILL_UNGRANTED:
+            for privilege in TABLE_PRIVILEGES:
+                if db_session.execute(
+                    text(HAS_TABLE_PRIVILEGE),
+                    {"role": role, "relation": f"public.{name}", "privilege": privilege},
+                ).scalar_one():
+                    held.append(f"{role} holds {privilege} on public.{name}")
+            for column in columns_of(db_session, name):
+                for privilege in COLUMN_PRIVILEGES:
+                    if db_session.execute(
+                        text(HAS_COLUMN_PRIVILEGE),
+                        {
+                            "role": role,
+                            "relation": f"public.{name}",
+                            "column": column,
+                            "privilege": privilege,
+                        },
+                    ).scalar_one():
+                        held.append(f"{role} holds {privilege} on public.{name}.{column}")
+
+    assert not held, (
+        f"{sorted(held)}. E4-06 writes `{WEEKLY_SUMMARY_TABLE}` and nothing else: the release path "
+        "is E4-04's and every moderation writer is E6's, and each grants what it spends. A grant "
+        "reaching these three from this ticket is a widening for a writer that does not exist — "
+        "and if one of them is deliberate it belongs in the ticket that spends it, recorded in "
+        "`RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py` with the "
+        "sentence it comes from."
+    )
+
+
+def test_the_write_lands_over_the_connection_the_job_actually_runs_on(
+    summary_world: SummaryWorld,
+    summary_job_contract: Any,
+    application_engine: Any,
+) -> None:
+    """`docs/MISTAKES.md` entry 46's second half, driven rather than read.
+
+    "A suite that drives a service through the migrating engine has not tested the
+    grant at all — where behaviour depends on one, at least one test reaches the
+    code through the connection production uses." `app.db` builds its engine as
+    `pulse_app` (`tests/fixtures/database.py`), so this is the connection the
+    Monday task opens for itself, and this test writes over it directly.
+
+    **Three statements, and the two refusals are what make the acceptance mean
+    something.** An insert that lands says the grant is there. An update and a
+    delete refused with `permission denied` say it is no wider — and asserted as
+    *refusals* rather than as "the row is unchanged afterwards", because an
+    unchanged row is equally the result of a statement that was never sent, of a
+    `WHERE` that matched nothing, and of a database in recovery.
+
+    **The row is inserted as `pulse_app` and read back as `pulse_app`**, which
+    exercises the `SELECT` half over the same connection: the walk's own
+    "lacking summary rows" question is a read on this connection, and a grant of
+    `INSERT` alone would let a first run write and every later run insert again
+    until a unique constraint refused it.
+
+    **The mutation this kills:** the grant issued to the wrong role — the
+    bootstrap identity, or `pulse_care` — which reads identically in a migration
+    diff, passes anything that writes through `migrated_engine`, and fails only
+    when a worker runs. That is the incident entry 46 is about, and this is the
+    statement that would have caught it.
+    """
+    summaries = summary_job_contract.require_table(summary_world.world.tables)
+    # A section and the term's weeks, and no responses at all: what this test needs
+    # is two rows a foreign key can point at, and a week nobody answered is the
+    # cheapest world that has them.
+    summary_world.build(summary_job_contract.a_cohort)
+    summary_world.commit()
+
+    values = {
+        SUMMARY_SECTION_COLUMN: summary_world.section_id(summary_job_contract.a_cohort),
+        SUMMARY_WEEK_COLUMN: summary_world.week_id(A_CLOSED_TERM_WEEK),
+        SUMMARY_STREAM_COLUMN: A_STREAM,
+        SUMMARY_TEXT_COLUMN: A_SUMMARY,
+        SUMMARY_RESPONSE_COUNT_COLUMN: A_RESPONSE_COUNT,
+        SUMMARY_PROMPT_VERSION_COLUMN: A_PROMPT_VERSION,
+        SUMMARY_MODEL_ID_COLUMN: A_MODEL_ID,
+        SUMMARY_GENERATED_AT_COLUMN: summary_world.closes_at(A_CLOSED_TERM_WEEK),
+    }
+
+    with application_engine.begin() as connection:
+        connection.execute(summaries.insert().values(**values))
+
+    with application_engine.connect() as connection:
+        stored = [
+            dict(row)
+            for row in connection.execute(
+                summaries.select().where(
+                    summaries.c[SUMMARY_SECTION_COLUMN] == values[SUMMARY_SECTION_COLUMN]
+                )
+            ).mappings()
+        ]
+    assert len(stored) == 1 and stored[0][SUMMARY_TEXT_COLUMN] == A_SUMMARY, (
+        f"the application connection wrote a summary and read back {stored}. Both halves of the "
+        "grant are on this path: the walk inserts the row and reads the table to find which "
+        "section-weeks still need one."
+    )
+
+    with pytest.raises(DatabaseError) as refused_update, application_engine.begin() as connection:
+        connection.execute(
+            summaries.update()
+            .where(summaries.c[SUMMARY_SECTION_COLUMN] == values[SUMMARY_SECTION_COLUMN])
+            .values(**{SUMMARY_TEXT_COLUMN: ANOTHER_SUMMARY})
+        )
+    assert "permission denied" in str(refused_update.value).lower(), (
+        f"the update failed, but not for want of a privilege: {refused_update.value}. A syntax "
+        "error or a missing column would satisfy `raises` while saying nothing about what the role "
+        "may do — and what is being asserted is that this connection *cannot* rewrite a summary an "
+        "instructor has read, rather than that it happens not to."
+    )
+
+    with pytest.raises(DatabaseError) as refused_delete, application_engine.begin() as connection:
+        connection.execute(
+            summaries.delete().where(
+                summaries.c[SUMMARY_SECTION_COLUMN] == values[SUMMARY_SECTION_COLUMN]
+            )
+        )
+    assert "permission denied" in str(refused_delete.value).lower(), (
+        f"the delete failed, but not for want of a privilege: {refused_delete.value}. §4's "
+        "retention purge is E13's and runs under a different identity; nothing on the runtime "
+        "connection removes a generated summary."
+    )
