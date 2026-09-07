@@ -44,10 +44,13 @@ runs as the identity ADR 0001 called the third.
 *(Amended within the same ticket by
 [ADR 0043](0043-the-reveal-function-has-an-owner-of-its-own.md): the migration
 also creates `pulse_reveal_definer`, which owns the `SECURITY DEFINER` reveal
-function and holds exactly the grants that function's body spends — three as
+functions and holds exactly the grants their bodies spend — three as
 E0-10 shipped it, four since E0-26 split the reveal in two
-([ADR 0071](0071-the-reveal-answers-only-a-committed-record.md)). It is not a
-fourth answer to "who runs
+([ADR 0071](0071-the-reveal-answers-only-a-committed-record.md)), and four plus
+two column-scoped reads since E4-01 added the third function that derives a
+comment's author
+([ADR 0144](0144-the-reveal-derives-its-subject-from-the-record-care-is-acting-on.md)).
+It is not a fourth answer to "who runs
 migrations" and not a connection role — it is `NOLOGIN`, has no credential
 anywhere, and exists so that the reveal's body runs with a readable list of
 privileges instead of the superuser's. What this record decides is unchanged.)*

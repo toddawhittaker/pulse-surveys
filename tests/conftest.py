@@ -107,12 +107,22 @@ boundary: `metadata_tables` is asked for by both.
     setup error; plus the two gateway doubles — one that fails on any use at all,
     for the empty week that must reach no model, and one that answers a script and
     counts what it was asked.
+  - `fixtures/report_views.py` — E4-03: the term, section, question sets carrying
+    E4-02's `stream`, and answered weeks the three report views aggregate; the one
+    reader for a row of each view, on `db_session` and on a committed world the
+    application role can reach; and the validity service's recompute, bound by
+    signature because no record settles it.
   - `fixtures/dev_console.py` — E3-07: the `/dev` console built with the mock
     identity provider mounted so its roster fetch resolves in process, the reader
     that says which `data-testid` a page carries and which form encloses it, and
     the same-origin value a browser would send from that page. The shared home
     for a builder four modules already keep a copy of; those copies are not
     migrated yet, and the file says so.
+  - `fixtures/care_subject.py` — E4-01: the names that ticket's work order
+    settles, the comment a Care reveal derives its subject from (planted through
+    the model layer, since the moderation task that would write one is E6's), the
+    two-hat actor and a `user_id` off the roster of the section she teaches, and
+    the `audit_log` rows one actor left, read on a second connection.
 
 Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
@@ -175,6 +185,8 @@ pytest_plugins = (
     "fixtures.grade_sweep",
     "fixtures.dev_console",
     "fixtures.summary_task",
+    "fixtures.care_subject",
+    "fixtures.report_views",
 )
 
 

@@ -1,6 +1,28 @@
 # 44. A guard raised in a fixture turned a module's reds into setup errors
 
-**Caught: 1**
+**Caught: 3**
+
+## A catch: E4-03's report-view suite asks for the view inside each test (2026-09-06)
+
+Every test of E4-03's three aggregate read views has to read a view that does not
+exist yet, and a `SELECT` against a missing relation raises `UndefinedTable` from
+the driver. The obvious home for the check is a fixture — one `report_views`
+fixture that confirms all three and hands back a world — and that would have made
+the whole tests-first suite, four modules of it, a wall of setup ERRORs on the
+unbuilt tree: nothing asserted, nothing to compare against the manifest, and a
+red run that reads as a broken checkout rather than as a ticket waiting for its
+implementation.
+
+Instead `require_report_view` is a plain function called as the first statement
+of each test body, `report_world` hands back an **unbuilt** world so its
+`question.stream` guard fires in the body too, and the one read that could raise
+on a missing grant is wrapped and turned into a `pytest.fail` naming the other
+test that diagnoses grants. Every red the ticket ships with is a FAILED naming
+the missing view, the missing column or the missing grant.
+
+Counted as a catch: without the entry the suite would have been written with a
+fixture-level guard, and the coordinator's red run would have had thirty errors
+to sort through instead of thirty named failures.
 
 ## A catch: E3-04's enforcement module builds its gradebook in the test body (2026-09-04)
 
@@ -47,3 +69,11 @@ The root cause: a fixture is the natural place to share setup, and the guard
 fixture reports in the wrong phase. The distinction is invisible in green and
 only shows on the unbuilt tree, which is exactly the tree tests-first reds are
 measured on.
+
+**Instance, 2026-09-06 (E4-01, caught at authoring time).** The reveal-guard
+suite's interface check — is the new signature there yet — was written as a
+plain function, `require_the_reveal_interface`, called as each test body's
+first statement rather than as a fixture, precisely so the pre-implementation
+reds reported as FAILED naming the missing symbol instead of as fifteen setup
+ERRORs. Counted as a catch: the entry's rule shaped the suite before any red
+was run, and the red-run verification then confirmed every red behavioral.
