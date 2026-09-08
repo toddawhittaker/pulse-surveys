@@ -8,18 +8,22 @@
  * this is the copy that survived, and there is no second place to keep in
  * step.
  *
- * **Four rather than five since E2-10.** The student route is no longer an empty
- * landing: it renders the weekly survey (SPEC §7.6's `StudentWeeklySurvey`), and
- * that surface's strings — the same heading and the same nothing-open sentence,
- * moved verbatim — live with the rest of its copy in
- * `../copy/studentSurvey.ts`, which is the shape E2-11's inventory reads a
- * surface in. The `pulse-landing-student` testid did not move; it is on the
- * survey's own landmark, because five end-to-end specs address it to say a
- * student landed.
+ * **Three rather than five now, and each departure is a route that grew a
+ * surface.** E2-10 took the student entry: it renders the weekly survey (SPEC
+ * §7.6's `StudentWeeklySurvey`), and that surface's strings — the same heading
+ * and the same nothing-open sentence, moved verbatim — live with the rest of its
+ * copy in `../copy/studentSurvey.ts`, which is the shape E2-11's inventory reads
+ * a surface in. E4-11 took the instructor entry the same way: it renders SPEC
+ * §5.1's Monday report and the section menu in front of it, and its strings are
+ * in `../components/instructorReportPageCopy.ts` until E4-12 moves them under
+ * `../copy/`. Neither testid moved — `pulse-landing-student` sits on the
+ * survey's landmark and `pulse-landing-instructor` on both of the instructor
+ * area's — because a long row of end-to-end specs address them to say who
+ * landed.
  *
  * The strings are governed copy under SPEC §4.1 items 4 and 5 — calm, plain,
  * counting nothing and blaming nobody — enforced by review until E2's copy
- * inventory reaches these four surfaces. `tests/e2e/landing-views.spec.ts` holds
+ * inventory reaches these surfaces. `tests/e2e/landing-views.spec.ts` holds
  * its own copy of them deliberately, so that a spec cannot pass by asking the
  * page what its own heading is.
  *
@@ -37,12 +41,6 @@ export interface Landing {
 }
 
 export const LANDINGS = {
-  instructor: {
-    testid: 'pulse-landing-instructor',
-    heading: 'Your section report',
-    emptyState:
-      'There are no responses to report yet. Reports appear here once a week has closed.',
-  },
   leadership: {
     testid: 'pulse-landing-leadership',
     heading: 'Your roll-up',
