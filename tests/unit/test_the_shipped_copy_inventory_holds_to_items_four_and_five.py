@@ -32,10 +32,14 @@ survey, arriving as `student_survey` from the frontend and `submit` and `student
 from the backend — and there are four surfaces now:
 
   - `survey`, unchanged;
-  - `report`, the instructor Monday report, arriving under four prefixes because
-    E4 shipped four copy modules for one rendered screen: `instructor_report_page`,
-    `instructor_report_trend`, `instructor_report_stats` and
-    `instructor_report_comments`. Four files, one screen, one surface;
+  - `report`, the instructor Monday report, arriving under five prefixes for one
+    rendered screen. Four are frontend copy modules, one per region the epic
+    built: `instructor_report_page`, `instructor_report_trend`,
+    `instructor_report_stats` and `instructor_report_comments`. The fifth,
+    `instructor_report`, is the registry module holding the two refusals
+    `app.api.instructor` answers — the same relationship `submit` and `student`
+    have to `student_survey` on the survey, since item 5 counts the screen rather
+    than the source;
   - `gradebook`, the two strings Pulse ships into an LMS gradebook (SPEC §3.4's
     line item label and its per-week ledger line);
   - `unknown_address`, the fallback screen a wrong address lands on.
@@ -69,9 +73,12 @@ anything else.
 perfectly by a search that has gone blind, so each one is given a sentence that
 certainly trips it and a sentence that certainly does not, and neither is quoted
 from the registry — a canary copied out of the thing being swept goes blind with
-it. The collector is held to the same rule (entry 35): it must *find* four known
-keys, two through the backend import path and two through the frontend parse,
-before its silence about anything else counts.
+it. The collector is held to the same rule (entry 35): before its silence about
+anything else counts, it must *find* a pair of known keys on each half of every
+governed surface it can reach — through the backend import path and through the
+frontend parse both. The canaries are counted by reading them rather than stated
+here as a number, which is a number that was wrong twice while this file grew
+(`docs/MISTAKES.md` entry 1).
 
 **Honest limits, stated rather than discovered.** This reads files; it does not
 render a screen.
@@ -183,6 +190,16 @@ GOVERNED_SURFACES = {
     "instructor_report_trend": REPORT,
     "instructor_report_stats": REPORT,
     "instructor_report_comments": REPORT,
+    # The report surface's backend half. `app.api.instructor` answers two
+    # refusals — one for a section outside the session's teaching set or absent
+    # altogether, one for a course week the section has no window for — and they
+    # are the report screen's words as much as the four frontend prefixes are.
+    # The survey is the precedent: `student_survey` from the frontend and
+    # `submit` and `student` from the registry are siblings on one surface, and
+    # item 5 counts the screen rather than the source. `prefix_of` splits on the
+    # first dot, so this row and `instructor_report_page` are distinct prefixes
+    # rather than one shadowing the other.
+    "instructor_report": REPORT,
     "gradebook": GRADEBOOK,
     "unknown_address": UNKNOWN_ADDRESS,
 }
@@ -245,6 +262,33 @@ REPORT_SMALL_N_KEY = "instructor_report_comments.small_n.body"
 # here; what this module needs is that the inventory can *see* them.
 GRADEBOOK_LABEL_KEY = "gradebook.line_item_label"
 GRADEBOOK_LEDGER_KEY = "gradebook.ledger_line"
+
+# The report API's two refusals, which reach the inventory through the registry
+# the way the gradebook's strings do. `docs/tickets/e4/deferred.md`'s entry "The
+# report API's two refusal sentences sit outside the copy registry" is what
+# closes when they are collected under a prefix the governance map claims.
+#
+# The keys are named here and the sentences are not. The router's own tests, the
+# component tests and `tests/e2e/instructor-report.spec.ts` each hold a
+# transcription of the text — deliberately, as the proof that a refactor did not
+# change it — and this module holds none, so rewording a refusal is a change to
+# those files rather than to the inventory (`docs/MISTAKES.md` entry 19).
+REPORT_SECTION_UNAVAILABLE_KEY = "instructor_report.section_unavailable"
+REPORT_WEEK_UNAVAILABLE_KEY = "instructor_report.week_unavailable"
+
+# The two module constants in `app.api.instructor` that carry those sentences
+# today, at lines 108 and 116. Named rather than the sentences: what the rule
+# below compares is two live objects, and the names are the handle it needs to
+# reach one of them.
+REPORT_API_MODULE = "app.api.instructor"
+SECTION_UNAVAILABLE_CONSTANT = "SECTION_UNAVAILABLE"
+WEEK_UNAVAILABLE_CONSTANT = "COURSE_WEEK_UNAVAILABLE"
+
+# Which registry entry each of those constants must agree with.
+REPORT_API_REFUSALS = {
+    SECTION_UNAVAILABLE_CONSTANT: REPORT_SECTION_UNAVAILABLE_KEY,
+    WEEK_UNAVAILABLE_CONSTANT: REPORT_WEEK_UNAVAILABLE_KEY,
+}
 
 # The report's four copy modules, by filename. E4-08, E4-09 and E4-10 each shipped
 # one beside its components and E4-11 shipped the fourth, all outside the walked
@@ -1647,6 +1691,122 @@ def test_the_collector_finds_the_two_gradebook_keys_that_ship_into_the_lms() -> 
     )
     blank = [key for key in wanted if not collected[key].strip()]
     assert not blank, f"The collector read {blank} as empty strings."
+
+
+def test_the_collector_finds_the_two_refusals_the_report_api_answers() -> None:
+    """The report surface's backend half, through the registry's own reader.
+
+    `docs/tickets/e4/deferred.md`, "The report API's two refusal sentences sit
+    outside the copy registry": `app.api.instructor` answers a refusal to a
+    section outside the session's teaching set or absent altogether, and another
+    to a course week the section has no window for. Both were module constants,
+    which the inventory cannot see — so the aggregate-language rule never read
+    them, and neither did the confidentiality count. That entry's first clause is
+    the one this canary is about: both sentences are entries in an `app.copy`
+    module under a prefix the governance map claims for the report surface.
+
+    **The two keys are on the report surface and are not its confidentiality
+    line.** They say what is not there to read, not what happens to anybody's
+    identity, so the surface goes on carrying exactly one line and these two are
+    swept for item 4's vocabulary along with everything else.
+
+    Presence and non-emptiness only, never the sentences. The router's own tests,
+    the component tests and `tests/e2e/instructor-report.spec.ts` each transcribe
+    the text as the proof that a refactor did not change it; a fourth copy here
+    would be one more thing to reword (`docs/MISTAKES.md` entry 19).
+
+    **The mutation it kills:** the report's copy module left out of the registry
+    enumeration, or its entries spelled under a prefix no surface claims. **A red
+    here means the report API's refusals are not collected, which is the state
+    this ticket exists to end.**
+    """
+    collected = {string.key: string.text for string in collect_backend_copy()}
+    wanted = (REPORT_SECTION_UNAVAILABLE_KEY, REPORT_WEEK_UNAVAILABLE_KEY)
+    missing = [key for key in wanted if key not in collected]
+    assert not missing, (
+        f"The collector read no {missing} out of `{COPY_PACKAGE}`. It read {sorted(collected)}.\n"
+        "\n"
+        "Both sentences are answered to an instructor by `app.api.instructor`, and until they are "
+        "entries in the registry the vocabulary sweeps in this module pass over them entirely."
+    )
+    blank = [key for key in wanted if not collected[key].strip()]
+    assert not blank, (
+        f"The collector read {blank} as empty strings. A refusal with no words is a 404 that "
+        "explains nothing, and an empty text satisfies every vocabulary rule in this module."
+    )
+
+
+def test_the_report_apis_refusal_constants_say_what_the_registry_says() -> None:
+    """The deferred entry's second clause, as far as two live objects can carry it.
+
+    > **Done when:** both sentences are entries in an `app.copy` module under a
+    > prefix the inventory's governance map claims for the report surface,
+    > `app.api.instructor` looks them up by key rather than holding them, and the
+    > items-4-and-5 vocabulary gate has been seen running over them.
+
+    The canary above is the first clause. This is what stops the second from
+    arriving as two copies of one sentence: the router's constants and the
+    registry's entries are read as they are, at run time, and required to agree.
+    A registry entry the router does not use is a governed string nobody serves,
+    and a router constant the registry does not match is the ungoverned sentence
+    this entry was opened about, wearing a copy of the right words.
+
+    **Read, never transcribed.** Both sides of the comparison are live objects;
+    nothing here holds the sentences, so rewording a refusal is one edit in the
+    registry rather than an edit and a red (`docs/MISTAKES.md` entry 19).
+
+    **The import is inside the body on purpose.** Several tests in this module
+    are `invariant`-marked and run in CI's isolated §4.1 pass, which collects
+    this whole file with no database; importing a router at module scope would
+    put an application import into that pass for the sake of one unmarked test.
+    This test is not marked for the same reason — it is the deferral's clause,
+    not a §4.1 rule.
+
+    **What this cannot say, stated rather than implied.** Equal text does not
+    prove a lookup: a constant re-typed by hand is equal to the entry on the day
+    it is written. What it proves is that the two cannot drift apart afterwards,
+    which is the failure the entry describes. That the router reads the registry
+    rather than repeating it is the settled shape of the change (the constants
+    become reads of the entries, as `app/lti/ags.py` and `app/services/grading.py`
+    do for the gradebook), and it is held by the diff.
+
+    **The mutations it kills:** a registry entry added beside a router constant
+    that goes on holding its own sentence, which is the shape that closes the
+    entry on paper and changes nothing; and either sentence reworded on one side
+    only. **A red here means the router and the registry disagree about what an
+    instructor is told, or one of the two does not exist yet.**
+    """
+    collected = {string.key: string.text for string in collect_backend_copy()}
+    missing = [key for key in REPORT_API_REFUSALS.values() if key not in collected]
+    assert not missing, (
+        f"The registry publishes no {missing}, so there is nothing for the router's constants to "
+        f"agree with. `{REPORT_API_MODULE}` holds the sentences itself until those entries exist, "
+        "which is the state `docs/tickets/e4/deferred.md` records."
+    )
+
+    router = importlib.import_module(REPORT_API_MODULE)
+    absent = [name for name in REPORT_API_REFUSALS if not hasattr(router, name)]
+    assert not absent, (
+        f"`{REPORT_API_MODULE}` publishes no {absent}. Those constants are where the refusals live, "
+        "and the settled shape of this change is that each becomes a read of its registry entry "
+        "rather than disappearing. If the router now looks an entry up at the raise site instead, "
+        "that is a different shape from the one this was written against and the ruling needs "
+        "revisiting rather than this assertion being widened."
+    )
+
+    disagreeing = {
+        name: (getattr(router, name), collected[key])
+        for name, key in REPORT_API_REFUSALS.items()
+        if getattr(router, name) != collected[key]
+    }
+    assert not disagreeing, (
+        f"These constants in `{REPORT_API_MODULE}` do not say what their registry entries say: "
+        f"{disagreeing}.\n"
+        "\n"
+        "Two copies of one refusal is the state the deferred entry was opened about: the inventory "
+        "sweeps the entry, the instructor reads the constant, and nothing holds them together. The "
+        "repair is for the constant to read the entry, not for the second copy to be corrected."
+    )
 
 
 # ---------------------------------------------------------------------------
