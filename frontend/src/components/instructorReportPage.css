@@ -1,0 +1,141 @@
+/* The instructor's Monday report, as a page — ticket E4-11.
+ *
+ * The three stylesheets beside this one dress the components E4-08, E4-09 and
+ * E4-10 built; this one dresses what holds them together — the reading column,
+ * the page title, the region headings, the section menu and the released block.
+ * It sits here rather than in `frontend/src/styles.css` for the reason its three
+ * siblings give: that file is the application's stylesheet for the surfaces E1
+ * and E2 shipped, and the report's rules are a group of their own until E4-12
+ * decides whether the four fold in together.
+ *
+ * Tokens only, as SPEC §7.6 requires: every colour, face, size, space, radius
+ * and shadow below is a `var(--*)` reference into `design/tokens.css`, which
+ * `src/styles.css` imports once for the whole application. There is no raw hex
+ * here for `tests/unit/test_the_frontend_source_uses_tokens_only.py` to find.
+ *
+ * The measurements are `design/InstructorMondayReport.dc.html`'s and
+ * `docs/DESIGN_BRIEF.md`'s: a single reading column at 720px with the charts
+ * allowed to break out wider, no dashboard grid of cards, 8px card radius, and
+ * the one barely-there shadow.
+ *
+ * **Nothing here animates.** `design/Usage Rules.md` §3 gives this screen exactly
+ * one motion — the trend line drawing on, which is E4-08's — and the brief allows
+ * "one 600ms signature moment per screen, never more". What motion the page has
+ * is CSS in that component's own stylesheet, so `design/tokens.css`'s
+ * reduced-motion switch removes it.
+ */
+
+/* ---- The reading column ------------------------------------------------- */
+
+.pulse-report {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--space-7) var(--space-5);
+}
+
+.pulse-report-title {
+  margin: var(--space-3) 0 var(--space-1);
+  font-family: var(--font-display);
+  font-size: var(--text-4);
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--spruce);
+}
+
+/* The h1 takes focus when a week is chosen (SPEC §14.2 item 4), so it has to
+ * show a ring like anything else that can hold focus. `design/tokens.css` draws
+ * it; this only stops the browser's own outline suppression on a `tabindex=-1`
+ * element from being the whole story. */
+.pulse-report-title:focus-visible {
+  outline: 2px solid var(--marigold-deep);
+  outline-offset: 2px;
+}
+
+.pulse-report-heading {
+  margin: var(--space-7) 0 var(--space-4);
+  font-family: var(--font-display);
+  font-size: var(--text-3);
+  font-weight: 600;
+  color: var(--spruce);
+}
+
+/* The quiet lines under a heading: the comments note, the participation absence,
+ * the menu's one sentence, the released block's lead. */
+.pulse-report-note {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-1);
+  line-height: 1.55;
+  color: var(--spruce-60);
+}
+
+/* While a read is on its way. Announced politely rather than drawn: the brief's
+ * loading motif is the pulse dot, and this page already spends its one signature
+ * moment on the trend line. */
+.pulse-report-status {
+  margin: 0;
+  color: var(--spruce-60);
+}
+
+/* ---- The week's own region ---------------------------------------------- */
+
+/* The charts are the one thing the brief lets break out of the reading column.
+ * They are already full width inside it; the rule here is the negative one —
+ * nothing else does. */
+.pulse-report-week {
+  display: block;
+}
+
+.pulse-report-histograms {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+}
+
+/* One column inside the LMS iframe, which the brief puts at ~1000px or less and
+ * variable height. Two histograms side by side stop being readable well before
+ * the column itself does. */
+@media (max-width: 640px) {
+  .pulse-report-histograms {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- The section menu ---------------------------------------------------- */
+
+.pulse-report-sections {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.pulse-report-section-link {
+  display: block;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  background: var(--paper);
+  box-shadow: var(--shadow-card);
+  color: var(--spruce);
+  font-family: var(--font-display);
+  font-size: var(--text-2);
+  text-decoration: none;
+  transition: background 150ms ease;
+}
+
+.pulse-report-section-link:hover {
+  background: var(--chalk);
+}
+
+/* ---- Comments released from earlier weeks (ADR 0152) --------------------- */
+
+.pulse-report-released-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
