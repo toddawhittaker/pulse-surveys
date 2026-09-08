@@ -242,6 +242,17 @@ governance map, and the items-4-and-5 vocabulary gate has been seen running over
 their strings — E4-12's acceptance criterion 7 states it, and closing it closes
 this entry.
 
+**Closed by E4-12.** All four report copy modules — the three above and
+`instructorReportPageCopy.ts`, which E4-11 shipped after this entry was
+written — moved into `frontend/src/copy/`, their five prefixes govern one
+`report` surface, the collector's own list names every file, and the
+vocabulary gate was seen failing against a planted "underperforming" in
+report copy. The header paragraphs that recorded the workaround moved out
+with the files. The stat module's two number formatters, which name their own
+keys and so cannot sit below a copy literal the parser accepts, live in
+`frontend/src/components/instructorReportFigures.ts` — the one departure from
+"a move, not a rewrite", recorded in the ticket's attempt log.
+
 ## The report API's two refusal sentences sit outside the copy registry
 
 **What is not enforced.** SPEC §4.1 items 4 and 5 are checked over the inventory
@@ -270,6 +281,16 @@ it grows.
 inventory's governance map claims for the report surface, `app.api.instructor` looks
 them up by key rather than holding them, and the items-4-and-5 vocabulary gate has
 been seen running over them.
+
+**Closed by E4-12.** `backend/app/copy/instructor_report.py` publishes
+`instructor_report.section_unavailable` and `instructor_report.week_unavailable`
+under a prefix the governance map claims for the report surface; the router's
+two constants are reads of those entries, held to them by a live-object
+equality test (equal text proves no drift, and that the constants are reads is
+visible in the diff); and the vocabulary gate was seen failing against a
+planted "underperforming" in the week refusal. The refusal pair's one-body
+no-oracle property is unchanged and was re-checked by the ticket's security
+review.
 
 ## The course label is composed in two modules
 
@@ -317,3 +338,27 @@ stack.
 **Done when:** a test asserts the exact `no-store` value on both keyed
 instructor routes, the way the student-path pin and E4-18's own header test
 assert theirs.
+
+
+## The landing views' sentences sit outside the inventory and outside the sweep
+
+**What is not enforced.** The four landing views render their sentences from
+`frontend/src/lib/landings.ts`, which is outside `frontend/src/copy/` (so the
+inventory does not collect it) and outside `frontend/src/components/` and
+`frontend/src/routes/` (so E4-12's string sweep does not read it). SPEC §4.1
+items 4 and 5 are asserted over neither. Today's strings are pinned
+byte-for-byte by `tests/e2e/landing-views.spec.ts` as a drift proof, so they
+cannot change silently — but a string added there ships ungoverned.
+
+**Why it was left.** The carried done-when E4-12 built to names the component
+and route trees, and the landing sentences are neither report copy nor new;
+widening the sweep over `lib/` mid-ticket would have been scope the ticket's
+own boundary refuses. ADR 0159 discloses the limit.
+
+**Owner:** whichever epic next touches the landing views — E9, which renders
+the leadership shell, is the first candidate.
+
+**Done when:** the landing strings are collected under governed prefixes (a
+copy module per surface, rows in the governance map, the line-or-no-line
+decision made for each landing), or a recorded decision widens the sweep's
+scope over `frontend/src/lib/` instead.

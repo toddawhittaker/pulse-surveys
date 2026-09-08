@@ -455,6 +455,9 @@ directory symlink committed under the copy tree would ship strings with SPEC
 and cheap to take sooner.
 **Done when:** the deferred entry's, with a planted symlinked-directory control
 seen red.
+**Closed by E4-12** — `../e4/carried-from-e3.md` carries the closure note:
+both walks follow directory symlinks now, the control was seen red first, and
+the battery proved every mechanism.
 
 ## A bounced comment is refused before any harm screening exists — E10's floor takes the path into scope
 
@@ -500,6 +503,10 @@ inventory E4 grows anyway.
 user-visible string literal outside the copy modules, reusing the
 inventory's parser, with a planted offender and a near miss (a test id, a
 class name, a key literal) both proven.
+**Closed by E4-12** — `../e4/carried-from-e3.md` carries the closure note:
+the sweep exists with offender and near-miss controls, it caught two real
+ungoverned sentences on its first run, and its disclosed limits are ADR
+0159's.
 
 ## The Care landing still says there are five landing views
 

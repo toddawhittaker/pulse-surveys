@@ -49,8 +49,10 @@ where the total sits, so it no longer passes through); the self-hosted font
 licences (E13); the resubmission that
 500s under a rewound clock; the model identifier in three untied places; the
 floor-headroom variance point (E10); the copy collector's symlinked-directory
-gap (E4); the bounced comment refused before harm screening (E10, with the
-E6 hook); the rendered student surface's string convention (E4); and the Care
+gap (closed by E4-12, whose section is at the end of this file); the bounced
+comment refused before harm screening (E10, with the
+E6 hook); the rendered student surface's string convention (closed by E4-12,
+whose section is at the end of this file); and the Care
 landing's stale docstring (recorded here as a light-lane candidate E3 could not
 take — closed by E4-13, whose section is at the end of this file, and the lane
 was heavy rather than light). The
@@ -75,6 +77,16 @@ question with it. **Done when:** `../e3/deferred.md`'s — a student can read,
 on a Pulse surface, what a week's credit is made of, that a comment refused
 by §3.3 does not complete its item, what a blank optional comment costs, and
 that a posted score can move down on a later re-classification.
+
+**The instructor half closed by E4-12; the student half stays open against
+E8.** `instructor_report_page.participation_credit_note` renders in every
+week of the report's Participation region: what the validity rate counts,
+that credit is completed items out of total items with the week-by-week
+arithmetic in each posted score's gradebook comment, and that a later
+judgement can lower a posted score. The wording deliberately teaches that an
+unanswered item and a refused comment leave the same deficit — the
+privacy review of that ticket found a first draft stating the per-student
+join too plainly, and ADR 0153 carries the dated re-read.
 
 ## Comment de-anonymization by completion pattern
 
@@ -101,6 +113,11 @@ the same statement for its moderation views**, which put comments beside a roste
 with reviewer decisions attached, and this entry stays open against that epic
 alone.
 
+2026-09-08: E4-12's credit-rule note stated the completion-to-content link a
+first time too plainly, and ADR 0153's own "what would change the answer"
+clause fired — the record carries the dated re-read, the note was reworded,
+and the accepted residual is unchanged.
+
 ## The roster sync's token-acquisition dial is unbounded
 
 E3-05's security round bounded the AGS client's token dial and named the
@@ -125,6 +142,16 @@ items-4-and-5 vocabulary gate over them.
 **Owner:** E4, with the copy-inventory growth over report surfaces.
 **Done when:** both strings are collected by the inventory or the inventory
 records why the gradebook is not a governed surface.
+
+**Closed by E4-12, on the first branch of the done-when: collected.**
+`backend/app/copy/gradebook.py` publishes `gradebook.line_item_label` and
+`gradebook.ledger_line`; `app/lti/ags.py` and `app/services/grading.py` read
+them, texts byte-identical, and the grading suites' byte-for-byte pins were
+untouched. The items-4-and-5 vocabulary gate was seen failing against a
+reassurance planted on the label. The gradebook is governed for vocabulary
+while recorded as owing no §4.1-item-5 confidentiality line — it is rendered
+by the LMS, not by Pulse — with the reason held in the test module's no-line
+map and argued in ADR 0158.
 
 ## The launch door ignores `azp` and reads a multi-valued `aud` as its first element
 
@@ -356,3 +383,38 @@ carries the same closure note.
 The assertion the component makes was correct before the ticket and is unchanged
 by it. The diff is comment blocks only, which is what lets a reviewer see the
 no-behavior-change claim in the diff shape.
+
+## The rendered student surface's string convention
+
+Carried through the ledger above from `../e3/carried-from-e2.md`'s "The
+rendered student surface's strings rest on a convention nothing sweeps",
+which holds the detail and now carries the same closure note.
+
+**Closed by E4-12.** `tests/fixtures/component_strings.py` parses every
+TypeScript file under `frontend/src/components/` and `frontend/src/routes/`,
+reusing the inventory's string and escape readers, and the invariant-marked
+rule refuses a user-visible string literal outside the copy modules: JSX text
+carrying letters, a literal in a user-visible attribute, a sentence-shaped
+literal anywhere unclassified, and anything the classifier cannot classify —
+fail closed, naming the line. The planted offender and the near misses the
+done-when asks for (a test id, a class name, a key literal, and the arrow
+shape `(week) => week < currentWeek` verbatim) are committed controls, and
+the sweep found real prey on day one: `UnknownAddress.tsx` shipped two
+literal sentences, governed now under `unknown_address.*`. Disclosed limits
+are recorded in ADR 0159; the sentences in `frontend/src/lib/landings.ts`
+sit outside the swept trees and are a new entry in `deferred.md` with an
+owner.
+
+## The copy collector's symlinked-directory gap
+
+Carried through the ledger above from `../e3/carried-from-e2.md`, whose
+entry holds the detail and now carries the same closure note; the deeper
+source is `../e2/deferred.md`'s last entry.
+
+**Closed by E4-12, on the done-when's first branch.** Both walks in
+`tests/fixtures/copy_inventory.py` pass `recurse_symlinks=True`. The planted
+symlinked-directory control was seen red against the unfixed walks (the run
+is summarized in `.attempts/E4-12.md`), the symlinked-file behavior is
+pinned so the repair could not narrow it, and the mutation battery re-proved
+all three mechanisms plus the near miss — a walk narrowed to skip symlinked
+files outright is killed by its own control.
