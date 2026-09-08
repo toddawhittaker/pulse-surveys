@@ -63,6 +63,16 @@ only while a threshold is hiding something is that copy. The reading taken here 
 that it is not, because a promise present in some weeks is no standing promise —
 is argued rather than given, and it is raised rather than settled in this record.
 
+**Answered 2026-09-08.** The owner's ruling took this record's reading, and
+§4.1 item 5 now says it in the spec's own words: the item governs a surface's
+standing line, and a state notice is not the item's copy even where it promises
+unidentifiability. The named exemption is no longer an interim — it is the
+settled mechanism, because the alternative way to honor the ruling (taking the
+unidentifiability words back out of the vocabulary) is the rejected shape two
+sections down: a global hole nobody can see. What changed is the exemption's
+status, not its machinery; its reason text in the test file was updated to cite
+the ruling instead of raising the question.
+
 **A governed surface either carries item 5's line or is recorded as owing none.**
 Two maps, and a rule requiring every surface to sit in exactly one of them.
 `gradebook` — a course-activity label and an arithmetic ledger, rendered inside
