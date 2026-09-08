@@ -18,20 +18,32 @@ import { PulseTrendChart, type TrendPoint } from './PulseTrendChart';
  * other: a wrong y-mapping, an inverted axis or a rounding slip all move a 4.4
  * somewhere visibly different, while values clustered around 3.0 would land
  * within a pixel of where they belong however the arithmetic went.
+ *
+ * **Every fixture's two week axes sit at one constant offset**, and that is a
+ * property of the payload rather than a tidy-up. The server derives a section's
+ * term week from its course week with one per-section constant, so within a
+ * single report `termWeek - courseWeek` is the same for every trend point and
+ * for the week the report is about. These fixtures started life with a break
+ * week written into them — course week 3 at term week 10, the rest at +6 — and
+ * that is a payload `app.services.reporting` cannot emit; E4-19's security round
+ * found it, and E4-11 corrected it as part of reconciling the fixtures with the
+ * schema (E4's breakdown decision 5).
+ *
+ * The offset is **six** and not zero on purpose: a section that began in the
+ * term's seventh week is what makes the two axes distinguishable, so a component
+ * that rendered one in the other's place is visible here.
  */
 const THREE_WEEKS: readonly TrendPoint[] = [
   { courseWeek: 1, termWeek: 7, mean: 4.1 },
   { courseWeek: 2, termWeek: 8, mean: 3.6 },
-  // Course week 3 falls in term week 10 because term week 9 was the break. The
-  // gap is real and it is the server's: nothing here may reconstruct it.
-  { courseWeek: 3, termWeek: 10, mean: 4.4 },
+  { courseWeek: 3, termWeek: 9, mean: 4.4 },
 ];
 
 /** The same three weeks, with the middle one unanswered. */
 const A_SILENT_MIDDLE_WEEK: readonly TrendPoint[] = [
   { courseWeek: 1, termWeek: 7, mean: 4.1 },
   { courseWeek: 2, termWeek: 8, mean: null },
-  { courseWeek: 3, termWeek: 10, mean: 4.4 },
+  { courseWeek: 3, termWeek: 9, mean: 4.4 },
 ];
 
 /** A week at the bottom of the scale, and one well above it. */
@@ -138,7 +150,7 @@ describe('PulseTrendChart', () => {
       '4.1',
       'TERM 08',
       '3.6',
-      'TERM 10',
+      'TERM 09',
       '4.4',
     ]);
     expect(within(table).getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
@@ -157,7 +169,7 @@ describe('PulseTrendChart', () => {
     // week with no responses is not a week that was rated badly.
     const table = screen.getByRole('table', { name: 'Weekly ratings: Instructor' });
     const values = within(table).getAllByRole('cell').map((cell) => cell.textContent);
-    expect(values).toEqual(['TERM 07', '4.1', 'TERM 08', 'No responses that week', 'TERM 10', '4.4']);
+    expect(values).toEqual(['TERM 07', '4.1', 'TERM 08', 'No responses that week', 'TERM 09', '4.4']);
     expect(values).not.toContain('0.0');
     expect(values).not.toContain('0');
 
@@ -249,7 +261,7 @@ describe('PulseTrendChart', () => {
     const { container } = render(<PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} />);
 
     expect(textsOf(container, 'pulse-trend-tick-label')).toEqual(['WK 01', '02', '03']);
-    expect(textsOf(container, 'pulse-trend-tick-sub')).toEqual(['TERM 07', '08', '10']);
+    expect(textsOf(container, 'pulse-trend-tick-sub')).toEqual(['TERM 07', '08', '09']);
 
     // The same course weeks in a section that started earlier in the term. Only
     // the sub-labels move, because only the term weeks did.
@@ -288,7 +300,7 @@ describe('PulseTrendChart', () => {
         points={[
           { courseWeek: 1, termWeek: 7, mean: 4.1 },
           { courseWeek: 2, termWeek: 8, mean: 3.6 },
-          { courseWeek: 3, termWeek: 10, mean: null },
+          { courseWeek: 3, termWeek: 9, mean: null },
         ]}
         label={INSTRUCTOR}
       />,

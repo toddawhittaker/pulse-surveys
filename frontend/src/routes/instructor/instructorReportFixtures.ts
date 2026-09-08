@@ -25,6 +25,16 @@ import type { InstructorReportView, TaughtSectionView } from '../../api/instruct
  * whole number. Course week 4, term week 7 and a twelve-week section are three
  * different numbers, so serving one in another's place is visible.
  *
+ * **Every week pair sits at one constant offset**, three, and that is a property
+ * of the payload rather than a tidy-up: the server derives a section's term week
+ * from its course week with one per-section constant, so within a single report
+ * `term_week - course_week` is the same for every trend point and for the week
+ * the report is about. E4-19's security round found E4-08's component fixtures
+ * encoding a break week — a payload `app.services.reporting` cannot emit — and
+ * these hold the property from the start. Three rather than zero, so a section
+ * that began in the term's third week is what makes the two axes
+ * distinguishable.
+ *
  * **The published weeks have a hole in them on purpose.** `[2, 4, 7]` is a
  * section whose weeks 1, 3, 5 and 6 never published — a window that had not
  * closed, or a week the section does not run. A page that derived a range from
@@ -91,8 +101,9 @@ export const A_PUBLISHED_WEEK = {
     instructor: {
       trend: [
         { course_week: 2, term_week: 5, mean: 4.1 },
-        // Term week 6 was the break, so course week 4 falls in term week 7. The
-        // gap is the server's and nothing may reconstruct it.
+        // The published weeks have gaps; the two axes do not drift apart across
+        // them. Course week 3 never published, so the trend steps from 2 to 4 —
+        // and the term week steps with it, because the offset is constant.
         { course_week: 4, term_week: 7, mean: 3.6 },
       ],
       distribution: { '1': 0, '2': 1, '3': 4, '4': 5, '5': 3 },

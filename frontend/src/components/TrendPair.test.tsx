@@ -15,17 +15,27 @@ import type { TrendPoint } from './PulseTrendChart';
  * criterion in miniature — and they span different ranges, so a pair that
  * scaled each panel to its own data would draw two different y-axes and this
  * file's shared-scale assertion would red.
+ *
+ * **Both streams' week pairs sit at one constant offset**, six, and that is a
+ * property of the payload rather than a tidy-up: the server derives a section's
+ * term week from its course week with one per-section constant, so within one
+ * report `termWeek - courseWeek` is the same everywhere. These fixtures held a
+ * break week — course week 3 at term week 10 — which is a payload
+ * `app.services.reporting` cannot emit; E4-19's security round found it and
+ * E4-11 corrected it while reconciling the fixtures with the schema (E4's
+ * breakdown decision 5). Six rather than zero, so a component rendering one axis
+ * in the other's place is visible.
  */
 const INSTRUCTOR_WEEKS: readonly TrendPoint[] = [
   { courseWeek: 1, termWeek: 7, mean: 4.1 },
   { courseWeek: 2, termWeek: 8, mean: 4.4 },
-  { courseWeek: 3, termWeek: 10, mean: 4.2 },
+  { courseWeek: 3, termWeek: 9, mean: 4.2 },
 ];
 
 const COURSE_WEEKS: readonly TrendPoint[] = [
   { courseWeek: 1, termWeek: 7, mean: 3.4 },
   { courseWeek: 2, termWeek: 8, mean: 2.6 },
-  { courseWeek: 3, termWeek: 10, mean: 1.8 },
+  { courseWeek: 3, termWeek: 9, mean: 1.8 },
 ];
 
 afterEach(cleanup);
@@ -109,7 +119,7 @@ describe('TrendPair', () => {
       ['WK 01', '02', '03'],
     );
     expect([...container.querySelectorAll('.pulse-trend-tick-sub')].map((t) => t.textContent)).toEqual(
-      ['TERM 07', '08', '10'],
+      ['TERM 07', '08', '09'],
     );
   });
 
@@ -138,7 +148,7 @@ describe('TrendPair', () => {
       '4.1',
       'TERM 08',
       '4.4',
-      'TERM 10',
+      'TERM 09',
       '4.2',
     ]);
 
@@ -148,7 +158,7 @@ describe('TrendPair', () => {
       '3.4',
       'TERM 08',
       '2.6',
-      'TERM 10',
+      'TERM 09',
       '1.8',
     ]);
   });
