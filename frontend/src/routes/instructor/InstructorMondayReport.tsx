@@ -365,16 +365,34 @@ function ReportWeek({ report }: { readonly report: InstructorReportView }): JSX.
           }
         />
       )}
+      {/* The credit rule, in every week and not only the weeks with a rate to
+          read it against: it explains SPEC §3.3's validity and §3.4's items
+          rather than this week's figures, and a week nobody answered is a week
+          an instructor most wants the rule for. It renders no score — v1 has no
+          participation-score view anywhere — and E8 owes the student half. */}
+      <p className="pulse-report-note">
+        {copy('instructor_report_page.participation_credit_note')}
+      </p>
 
       <h2 className="pulse-report-heading">{copy('instructor_report_page.comments_heading')}</h2>
       <p className="pulse-report-note">{copy('instructor_report_page.comments_note')}</p>
-      {/* **SPEC §4.1 item 5's decision, and it is the page's alone.**
-          Confidentiality copy appears exactly once per surface; a suppressed
-          week suppresses both groups, so the first of them carries the notice
-          and the second does not. The instructor group is first everywhere in
-          this product (`design/Usage Rules.md` §1), so it is the one that
-          carries it. `CommentGroup` requires the field rather than defaulting
-          it, which is what makes this a choice made out loud. */}
+      {/* **One small-N notice for the week, and it is the page's decision.**
+          SPEC §4's threshold suppresses a week and not a group, so both groups
+          go quiet together and there is one fact to state: the first of them
+          carries the notice and the second does not, because a page saying it
+          twice would be reporting two suppressions where §5.2 has one. The
+          instructor group is first everywhere in this product
+          (`design/Usage Rules.md` §1), so it is the one that carries it.
+          `CommentGroup` requires the field rather than defaulting it, which is
+          what makes this a choice made out loud.
+
+          **This is not SPEC §4.1 item 5's line.** Item 5 counts confidentiality
+          copy once per surface, and this surface's one line is
+          `instructor_report_page.comments_note` under the heading above: a
+          standing promise about what an instructor is shown, where the small-N
+          notice is a statement about how many people answered this week. The
+          inventory recognises the first and deliberately not the second, so
+          item 5 cannot pass or fail by the response count (ADR 0158). */}
       <CommentGroup
         stream="instructor"
         summary={summaryOf(streams.instructor.summary)}

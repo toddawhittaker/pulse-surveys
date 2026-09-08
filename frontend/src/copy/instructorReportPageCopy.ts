@@ -96,6 +96,27 @@ export const INSTRUCTOR_REPORT_PAGE_COPY = {
   'instructor_report_page.participation_absent':
     'There is no response rate for this week: nobody is enrolled in this section yet.',
 
+  // The credit rule, explained where the rates are read — E4-12, closing the
+  // instructor half of an E3 carried entry. SPEC §3.3 makes a comment judged too
+  // brief or nonsense cost its response's validity, §3.4 makes a participation
+  // score completed items over total items with the per-week arithmetic visible
+  // only in the gradebook comment, and §3.3 lets a later re-classification lower
+  // a score that has already posted. None of that was said to an instructor
+  // anywhere, and the rate above is the number she reads it against.
+  //
+  // **It shows in every week, including one with no rate at all.** It explains a
+  // rule rather than a figure, and a rule that appeared only in the weeks
+  // somebody answered would be missing from the weeks it most needs explaining.
+  //
+  // Three things it deliberately does not do. It shows no score: v1 renders a
+  // participation score nowhere, and a number invented here would be a second
+  // arithmetic beside the gradebook's. It names no student and no count. And it
+  // carries no confidentiality promise — §4.1 item 5 allows this surface exactly
+  // one, `comments_note` above is it, and a reassurance added here would be the
+  // second (ADR 0158). The student half of this explanation is E8's.
+  'instructor_report_page.participation_credit_note':
+    'The validity rate is the share of responses that count as valid: a comment judged too brief or nonsense makes its response invalid, and costs that student one item of their participation credit. Credit is completed items out of total items across the weeks a student has been enrolled, and the week-by-week arithmetic behind each posted score sits in that score’s gradebook comment. A comment judged again later can lower a score that has already posted.',
+
   // ADR 0152's release. §4 requires under-threshold comments to surface "batched
   // so that timing cannot identify an author", and ADR 0153 strips the week from
   // every one of them — so this block names no week, no count and no timing, and
