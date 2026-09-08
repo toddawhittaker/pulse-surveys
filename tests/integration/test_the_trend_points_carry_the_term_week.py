@@ -4,8 +4,12 @@ SPEC §2.2 puts both axes on every course-level page, and §5.1 applies that to 
 report's trend charts: "the course week leads, the term week sits under it as a
 quiet sub-label." `PulseTrendChart` (E4-08) takes both numbers per point and
 computes neither — its copy file records why the client must not derive the term
-week from an offset, because a section that pauses over a break week would make
-the derived number disagree with the report. E4-07's shipped `TrendPoint` carries
+week from an offset. Today the offset is a per-section constant — `_section_weeks`
+computes each course week from the term number with one constant per section — so
+a client could derive it; the wire states it anyway so the server's own reading of
+the axis mapping, `week_of_the_term`, stays the only authority, rather than a
+client freezing today's arithmetic into a second copy that would diverge silently
+if the mapping ever stopped being affine. E4-07's shipped `TrendPoint` carries
 `course_week` and `mean` only, so the sub-label has no wire source; this ticket
 adds `term_week`, populated in `_payload`'s trend builder from the `_SectionWeek`
 row each point is built from.
