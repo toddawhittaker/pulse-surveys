@@ -71,8 +71,15 @@ fi
 repo_root="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 rel="${path#"$repo_root"/}"
 
+# Frontend component tests (`*.test.tsx` beside their components under
+# frontend/src/) are deliberately NOT matched. The test author may not enter
+# frontend/src/ (deny-impl-reads.sh), so blocking the implementer here left
+# those files with no permitted editor at all — E4-16's proof test was blocked
+# by exactly this (docs/tickets/e4/.attempts/E4-16.md). The wall is the one the
+# briefs describe: tests/**, *_test.py, conftest.py. Playwright specs live
+# under tests/e2e/ and stay covered by the tests/ patterns.
 case "$rel" in
-  tests/*|*/tests/*|*_test.py|*.test.ts|*.test.tsx|*.spec.ts|*.spec.tsx|conftest.py|*/conftest.py)
+  tests/*|*/tests/*|*_test.py|conftest.py|*/conftest.py)
     cat >&2 <<EOF
 BLOCKED: the implementer may not $tool test files.
 
