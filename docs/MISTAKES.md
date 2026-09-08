@@ -171,7 +171,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 20** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 21** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 16. A mutation harness reported kills it had not made
 
@@ -528,6 +528,17 @@ difference small enough to attribute.
 ## 52. A module-level engine was bound at import by whichever test imported it first
 
 **Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/52-a-module-level-engine-was-bound-at-import-by-whichever-test-imported-it-first.md)
+
+## 53. A closed-set guard is defeated one level out
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/53-a-closed-set-guard-is-defeated-one-level-out.md)
+
+**Rule.** When you build or review a closed-set or inventory guard, attack the
+whole class in the first pass: name what encloses the set — the directory above
+the glob, the link kind the walk skips, the caller above the constructor, the
+configuration that merges over the file — and bring each enclosure inside the
+guard or record it as a disclosed limit with an owner, in the same change. The
+coverage check must not be built from the guard's own enumeration.
 
 **Rule.** A process-global built at import — an engine, a client, a Celery
 application, anything a module constructs at the top level from configuration — is
