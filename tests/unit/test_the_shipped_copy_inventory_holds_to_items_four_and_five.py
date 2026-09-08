@@ -26,13 +26,35 @@ rewording the survey does not redden this module (`docs/MISTAKES.md` entry 19).
 The one exception is item 5's recognizer, whose subject *is* the sentence's
 vocabulary, and it is written from item 5 and §4 rather than from what shipped.
 
-**The surface model.** A surface is a governed rendered screen. There is one
-today, the survey, and its strings arrive under three key prefixes:
-`student_survey` from the frontend, `submit` and `student` from the backend. The
-map below is the whole of the governance, asserted in both directions: a key whose
-prefix no surface governs is red, and a governed prefix that collects nothing is
-red. E4's report surfaces arrive as a row in that map and a copy module beside the
-ones that exist — an addition, never a rebuild.
+**The surface model, as E4-12 leaves it.** A surface is a governed body of
+shipped strings. There were three prefixes and one surface until E4-12 — the
+survey, arriving as `student_survey` from the frontend and `submit` and `student`
+from the backend — and there are four surfaces now:
+
+  - `survey`, unchanged;
+  - `report`, the instructor Monday report, arriving under four prefixes because
+    E4 shipped four copy modules for one rendered screen: `instructor_report_page`,
+    `instructor_report_trend`, `instructor_report_stats` and
+    `instructor_report_comments`. Four files, one screen, one surface;
+  - `gradebook`, the two strings Pulse ships into an LMS gradebook (SPEC §3.4's
+    line item label and its per-week ledger line);
+  - `unknown_address`, the fallback screen a wrong address lands on.
+
+`GOVERNED_SURFACES` is the whole of that governance, asserted in both directions:
+a key whose prefix no surface governs is red, and a governed prefix that collects
+nothing is red.
+
+**And a surface either carries item 5's line or is named as owing none.** The
+survey and the report carry one, and `CONFIDENTIALITY_KEY_OF_SURFACE` says which
+entry it is. The gradebook is rendered by another product and says only what a
+score is made of; the unknown-address screen shows nobody's data at all. Neither
+promises a student anything about identity, so item 5's "exactly once" would be
+demanding a sentence with no subject — they sit in
+`SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with the reason written down, and the
+rules require **one** line on the first pair and **none** on the second. A
+surface in neither map, or in both, is red: the point of two explicit maps is
+that the next surface is placed deliberately rather than defaulting into whatever
+the code happens to do (ADR 0158).
 
 **Which tests carry the marker.** The rules over shipped copy are marked
 `invariant` and their docstrings name items 4 and 5. The instruments are not: the
@@ -57,11 +79,15 @@ render a screen.
   - A string assembled at runtime is invisible. Interpolation into one of these
     entries is visible (the text is collected whole); a sentence built by joining
     fragments in a component is not.
-  - A literal written into a component rather than into a copy file is invisible.
-    E2-10's convention is that components carry no strings of their own, and
-    nothing in this repository sweeps for a violation of it.
-  - An aria label built in a component is invisible for the same reason, and §4.1
-    item 1 names aria labels explicitly.
+  - A literal written into a component rather than into a copy file is invisible
+    **to this module**, and since E4-12 it is not invisible to the repository:
+    `tests/unit/test_the_component_and_route_trees_ship_no_ungoverned_string.py`
+    parses the component and route trees and refuses one, which is the carried
+    E2-boundary entry that convention rested on until then. What that sweep does
+    not reach is stated in its own docstring rather than summarised here.
+  - An aria label built in a component was invisible for the same reason, and
+    §4.1 item 1 names aria labels explicitly. The same sweep reads the visible
+    attributes now; a label assembled from variables at runtime is still nobody's.
   - **Where the confidentiality line sits on the screen is not asserted here,
     and neither is how often it is rendered.** What this can check is that
     exactly one collected *string* on the surface is confidentiality copy. One
@@ -131,14 +157,34 @@ from fixtures.submit import (
 # ---------------------------------------------------------------------------
 
 SURVEY = "survey"
+REPORT = "report"
+GRADEBOOK = "gradebook"
+UNKNOWN_ADDRESS = "unknown_address"
 
 # `student_survey` is E2-10's frontend copy module; `submit` and `student` are
 # E2-08's and E2-09's registry modules, whose strings are the refusals and the
 # bounce coaching the same screen shows. One surface, three prefixes.
+#
+# **The four `instructor_report_*` prefixes are one surface and not four.** E4
+# shipped one copy module per region of the Monday report — the page shell, the
+# trend pair, the statistics block, the comment groups — because four components
+# were built by four tickets, and a reader meets all of it as one screen. Item 5
+# counts per surface, so mapping them to four surfaces would demand four
+# confidentiality sentences on one page, which is the opposite of what the item
+# says. ADR 0158 records the reading.
+#
+# `gradebook` and `unknown_address` are governed for item 4's vocabulary and owe
+# no line; see `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` below for each reason.
 GOVERNED_SURFACES = {
     "student_survey": SURVEY,
     "submit": SURVEY,
     "student": SURVEY,
+    "instructor_report_page": REPORT,
+    "instructor_report_trend": REPORT,
+    "instructor_report_stats": REPORT,
+    "instructor_report_comments": REPORT,
+    "gradebook": GRADEBOOK,
+    "unknown_address": UNKNOWN_ADDRESS,
 }
 
 # Item 5: "Confidentiality copy appears exactly once per surface (survey: once
@@ -146,12 +192,72 @@ GOVERNED_SURFACES = {
 # renders it — E2-10 put it in `SubmitBar` and E2-17 lifted it to one placement
 # per screen, and the *key* is what this module counts, so that move is invisible
 # here by design.
-CONFIDENTIALITY_KEY_OF_SURFACE = {SURVEY: "student_survey.confidentiality"}
+#
+# **The report's line is `instructor_report_page.comments_note`**, the standing
+# sentence under the comment groups that says what an instructor is and is not
+# shown about who wrote what. The comment module's small-N entry is *not* the
+# report's line and is deliberately not recognised as one: it is suppression-state
+# copy, present only in the weeks where comments are withheld, and a surface whose
+# identity promise appears only in some weeks has no standing promise at all. That
+# ruling is ADR 0158's, and it is the reason the recogniser below is checked
+# against a sentence of each kind.
+CONFIDENTIALITY_KEY_OF_SURFACE = {
+    SURVEY: "student_survey.confidentiality",
+    REPORT: "instructor_report_page.comments_note",
+}
+
+# The other half of the surface model: a governed surface that owes item 5 no
+# line, with the reason it owes none. Written out as a map rather than inferred
+# from the absence of a row above, so that adding a surface is a decision about
+# which of the two maps it belongs in — an omission would otherwise read exactly
+# like a deliberate no-line surface, and the totality rule below is what makes
+# that impossible.
+SURFACES_WITH_NO_CONFIDENTIALITY_LINE = {
+    GRADEBOOK: (
+        "SPEC §3.4's line item label and per-week ledger, rendered by the LMS "
+        "gradebook rather than by Pulse. Two strings naming a course activity and "
+        "the arithmetic behind a score; neither tells a student what happens to "
+        "their identity, and item 5's sentence would have no subject here."
+    ),
+    UNKNOWN_ADDRESS: (
+        "The fallback screen for an address that resolves to nothing. It shows "
+        "nobody's data, so there is nothing about anybody's identity to promise."
+    ),
+}
 
 # The frontend canary keys. Two, because one of them is item 5's own subject and
 # would go missing in exactly the case the rule is about; the heading is an
 # ordinary entry whose absence means the parse, not the copy, has failed.
 SURVEY_HEADING_KEY = "student_survey.heading"
+
+# The same pair for the report surface, which E4-12 brings into the inventory.
+# `instructor_report_comments.small_n.body` is the ordinary entry — it belongs to
+# a different one of the report's four copy modules than the confidentiality line
+# does, so between the two of them the canary reaches two of the four files.
+# Presence and non-emptiness only, never the sentence (`docs/MISTAKES.md` entry
+# 19): the small-N body's wording is E4-10's to change.
+REPORT_SMALL_N_KEY = "instructor_report_comments.small_n.body"
+
+# The gradebook's two strings, which reach the inventory through the backend
+# registry rather than through a frontend file — SPEC §3.4's "Pulse Participation"
+# line item and the `Week 1: 4 of 5 items` ledger line. The texts are pinned
+# byte-for-byte by the grading and AGS suites and are deliberately not repeated
+# here; what this module needs is that the inventory can *see* them.
+GRADEBOOK_LABEL_KEY = "gradebook.line_item_label"
+GRADEBOOK_LEDGER_KEY = "gradebook.ledger_line"
+
+# The report's four copy modules, by filename. E4-08, E4-09 and E4-10 each shipped
+# one beside its components and E4-11 shipped the fourth, all outside the walked
+# copy directory; E4-12's criterion 7 is that the collector's own list names them.
+# Asserted through `frontend_copy_files` rather than through a second walk of the
+# copy directory, because the currency that matters is the one the collector
+# counts in (`docs/MISTAKES.md` entry 35).
+REPORT_COPY_FILENAMES = (
+    "instructorReportCommentCopy.ts",
+    "instructorReportPageCopy.ts",
+    "instructorReportStatCopy.ts",
+    "instructorReportTrendCopy.ts",
+)
 
 SYNTHETIC = "a synthetic inventory built in this module"
 
@@ -237,6 +343,20 @@ INSTRUCTORS_MEASURED = re.compile(
 # produces a red that names an absence, which reads as a missing line. If a
 # shipped confidentiality sentence carries none of these words, that is a dispute
 # about the recognizer, and the recognizer is what changes.
+#
+# **`no names` is E4-12's, and it is the instructor half of the same promise.**
+# The survey tells a student their name is not attached; the report tells an
+# instructor no name is there to read. The existing markers are all written from
+# the student's side — "your name", "identify you" — and none of them matches a
+# sentence addressed to the person doing the reading, which is why the report's
+# line was invisible to this recogniser until the marker was added.
+#
+# What it deliberately does not match is a sentence about *this week's*
+# suppression state. "To keep individual voices unidentifiable" is why comments
+# are withheld below the threshold, not a standing promise about the surface, and
+# recognising it would count a second line on the report in exactly the weeks the
+# small-N notice renders — item 5 failing by the calendar. ADR 0158 records the
+# ruling; the control below runs the marker against a sentence of each kind.
 CONFIDENTIALITY_MARKERS = (
     "confidential",
     "anonymous",
@@ -246,6 +366,7 @@ CONFIDENTIALITY_MARKERS = (
     "identify you",
     "identifies you",
     "de-identified",
+    "no names",
 )
 
 # "no shield or lock iconography", as far as a string can carry one: the lock,
@@ -282,6 +403,24 @@ THE_SURVEYS_OWN_QUESTION = "How was your instructor this week?"
 A_PLAIN_SENTENCE = "Answer the five questions below and press submit when you are ready."
 A_CONFIDENTIALITY_SENTENCE = "Your instructor sees what you wrote, never your name."
 A_SECOND_CONFIDENTIALITY_SENTENCE = "Your answers are anonymous to everyone in your course."
+
+# The `no names` marker's own pair, written here and not copied from the report
+# (`docs/MISTAKES.md` entry 3: a canary taken out of the thing being swept goes
+# blind with it). The first is a standing promise addressed to the reader of a
+# report; the second says the same thing in words the marker must not reach,
+# because it is about a threshold this week rather than about the surface.
+A_READER_FACING_CONFIDENTIALITY_SENTENCE = "Listed in a shuffled order, with no names attached."
+A_SUPPRESSION_STATE_SENTENCE = (
+    "Too few people answered this week, so individual voices stay unidentifiable."
+)
+
+# The credit-rule note's neighbourhood: an ordinary explanatory sentence about
+# how a score is worked out, which the recogniser must leave alone. If a marker
+# ever reaches a sentence of this shape, the report starts counting two lines the
+# day E4-12's participation note ships beside its confidentiality line.
+AN_EXPLANATORY_SENTENCE = (
+    "Each posted score counts the items a student completed against the items the weeks held."
+)
 A_LOCKED_SENTENCE = chr(0x1F512) + " Your answers are private."
 A_SHIELDED_SENTENCE = chr(0x1F6E1) + " Protected by design."
 
@@ -576,18 +715,48 @@ def offenders(
     }
 
 
+def surfaces_placed_in_neither_map(
+    governed: Mapping[str, str],
+    with_a_line: Mapping[str, str],
+    without_a_line: Mapping[str, str],
+) -> list[str]:
+    """Every governed surface that neither map claims, so nothing decides its item 5.
+
+    Takes the three maps as arguments rather than reading the module's own, so
+    that the control below can run it over planted maps and the rule can run it
+    over the real ones — one reader, both directions (`docs/MISTAKES.md` entry 13).
+    """
+    placed = set(with_a_line) | set(without_a_line)
+    return sorted({surface for surface in governed.values() if surface not in placed})
+
+
+def surfaces_placed_in_both_maps(
+    with_a_line: Mapping[str, str],
+    without_a_line: Mapping[str, str],
+) -> list[str]:
+    """Every surface claimed by both maps, which is two answers to one question."""
+    return sorted(set(with_a_line) & set(without_a_line))
+
+
 def a_governed_inventory(*extra: CopyString) -> tuple[CopyString, ...]:
     """A synthetic inventory that satisfies every rule here, plus whatever is added.
 
     Built from `GOVERNED_SURFACES` rather than written out, so a surface added to
     that map is covered by these controls on the same day it is added rather than
     leaving them exercising a map that no longer describes the tree.
+
+    **The confidentiality entries are built from
+    `CONFIDENTIALITY_KEY_OF_SURFACE` for the same reason.** It held one row until
+    E4-12 and a control written around that one row would have gone on proving
+    the survey's case only, while the report's rows landed with no synthetic
+    control under them at all.
     """
     entries = [
         CopyString(f"{prefix}.probe", A_PLAIN_SENTENCE, SYNTHETIC) for prefix in GOVERNED_SURFACES
     ]
-    entries.append(
-        CopyString(CONFIDENTIALITY_KEY_OF_SURFACE[SURVEY], A_CONFIDENTIALITY_SENTENCE, SYNTHETIC)
+    entries.extend(
+        CopyString(key, A_CONFIDENTIALITY_SENTENCE, SYNTHETIC)
+        for key in CONFIDENTIALITY_KEY_OF_SURFACE.values()
     )
     return (*entries, *extra)
 
@@ -765,6 +934,111 @@ def test_the_frontend_enumeration_finds_every_copy_file_at_every_depth(tmp_path:
     )
 
 
+def test_the_copy_file_walk_descends_a_symlinked_directory(tmp_path: Path) -> None:
+    """The E2-11 security re-pass's deferred LOW, closed by E4-12 and pinned here.
+
+    On the pinned Python, `Path.rglob` does not descend a symlinked directory
+    unless it is told to. A directory symlink under `frontend/src/copy/` pointing
+    at real copy files therefore shipped those strings with SPEC §4.1 items 4 and
+    5 asserted over nothing, and no rule in this module went red — the same
+    closed-set-defeated-one-level-out shape as the subdirectory and the `.tsx`
+    that came before it, one level further out again.
+
+    The plant is the deferral's own: a real directory outside the walked tree,
+    holding a copy file, reached only through a symlink inside it. The file's
+    entries are the sample module's, so a walk that finds the link and cannot
+    read what is behind it fails here rather than reporting a clean tree.
+
+    **The mutation it kills:** `recurse_symlinks=True` dropped from
+    `frontend_copy_files`, which is the state this repository was in until E4-12
+    and the state a future tidy-up would restore. **A red here means this module
+    is broken, not that the copy is.**
+    """
+    walked = tmp_path / "copy"
+    walked.mkdir()
+    (walked / "studentSurvey.ts").write_text(A_COPY_FILE, encoding="utf-8")
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "aggregate.ts").write_text(A_COPY_FILE, encoding="utf-8")
+    (walked / "reports").symlink_to(elsewhere, target_is_directory=True)
+
+    found = sorted(path.name for path in frontend_copy_files(walked))
+    assert found == ["aggregate.ts", "studentSurvey.ts"], (
+        f"The enumeration found {found} in a directory holding one copy file and a symlink to a "
+        "directory holding another. Strings behind that link ship to a reader exactly as the "
+        "others do, and a walk that stops at the link reports the surface clean over copy it "
+        "never opened."
+    )
+
+
+def test_the_coverage_walk_descends_a_symlinked_directory(tmp_path: Path) -> None:
+    """The same gap in the second enumeration, which is the half that made it silent.
+
+    The two walks are independent on purpose: one asks what to parse, the other
+    asks what was missed. Both used `rglob` without `recurse_symlinks`, so they
+    shared one blind spot and **agreed** about a directory neither could see —
+    which is the failure mode the coverage rule was built to prevent, arriving
+    through the mechanism rather than through the suffix list.
+
+    **The mutation it kills:** `recurse_symlinks=True` dropped from
+    `every_file_under_the_copy_directory` alone, which leaves the copy-file walk
+    reading a symlinked directory and the coverage rule unable to check it — the
+    two enumerations disagreeing in the direction nothing reports. **A red here
+    means this module is broken, not that the copy is.**
+    """
+    walked = tmp_path / "copy"
+    walked.mkdir()
+    (walked / "studentSurvey.ts").write_text(A_COPY_FILE, encoding="utf-8")
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "catalogue.json").write_text('{"student_survey.heading": "hi"}', encoding="utf-8")
+    (walked / "reports").symlink_to(elsewhere, target_is_directory=True)
+
+    seen = sorted(path.name for path in every_file_under_the_copy_directory(walked))
+    assert seen == ["catalogue.json", "studentSurvey.ts"], (
+        f"The coverage walk enumerated {seen} in a directory holding one copy file and a symlink "
+        "to a directory holding a JSON catalogue. A file the coverage walk cannot see is a file it "
+        "can never report as unread."
+    )
+
+    unread = files_the_collector_did_not_read(walked)
+    assert sorted(Path(name).name for name in unread) == ["catalogue.json"], (
+        f"The coverage rule reported {unread} over that tree. The JSON behind the symlink is "
+        "strings in the copy directory that the collector does not parse, and reaching it is the "
+        "whole point of walking the link."
+    )
+
+
+def test_the_copy_file_walk_still_follows_a_symlinked_file(tmp_path: Path) -> None:
+    """The near miss beside the fix: a symlinked *file* was never the gap.
+
+    `is_file()` resolves a link, so a copy file reached through a file symlink was
+    parsed before E4-12 and must go on being parsed after it. Pinned because the
+    other repair for the directory gap — refusing symlinks in the copy tree
+    outright, which the deferral offers as an alternative — would take this case
+    with it, and a repair that quietly drops a working case is a worse bug than
+    the one it fixes.
+
+    **The mutation it kills:** a walk narrowed to `path.is_file() and not
+    path.is_symlink()`, which is the obvious spelling of "refuse symlinks" and
+    would stop reading a file that ships today. **A red here means this module is
+    broken, not that the copy is.**
+    """
+    walked = tmp_path / "copy"
+    walked.mkdir()
+    real = tmp_path / "studentSurvey.ts"
+    real.write_text(A_COPY_FILE, encoding="utf-8")
+    (walked / "studentSurvey.ts").symlink_to(real)
+
+    found = sorted(path.name for path in frontend_copy_files(walked))
+    assert found == ["studentSurvey.ts"], (
+        f"The enumeration found {found} in a directory whose only entry is a symlink to a copy "
+        "file. That file's strings reach a reader, so they have to reach the inventory."
+    )
+
+
 def test_the_coverage_rule_accepts_a_directory_the_collector_read_whole(tmp_path: Path) -> None:
     """The accepted direction of the second enumeration.
 
@@ -926,6 +1200,45 @@ def test_the_confidentiality_recogniser_sees_the_line_and_leaves_its_neighbour()
     )
 
 
+def test_the_recogniser_reads_a_standing_promise_and_not_this_weeks_suppression() -> None:
+    """The `no names` marker's own pair, and the line ADR 0158 draws through it.
+
+    Every marker before E4-12 was written from the student's side of the promise
+    — "your name", "identify you" — and the report's line is addressed to the
+    person reading it instead. So the marker is added, and the discriminating
+    case is what it must *not* reach: a sentence explaining why a thin week's
+    comments are withheld. Recognising that one would count a second
+    confidentiality string on the report in exactly the weeks the small-N notice
+    ships, so item 5 would pass or fail by how many people answered — a
+    confidentiality rule decided by the calendar.
+
+    Both sentences are written here rather than taken from the report
+    (`docs/MISTAKES.md` entry 3), and neither is the shipped wording: what is
+    asserted is the vocabulary the recogniser reads, not what E4 chose to say.
+
+    **The mutations it kills:** `no names` dropped from the marker tuple, which
+    leaves the report's line uncounted and the surface reading zero; and the
+    tuple widened with `unidentifiable`, which counts two on the report in a
+    small-N week. **A red here means this module is broken, not that the copy
+    is.**
+    """
+    assert is_confidentiality_copy(A_READER_FACING_CONFIDENTIALITY_SENTENCE), (
+        f"The recognizer does not read {A_READER_FACING_CONFIDENTIALITY_SENTENCE!r} as "
+        "confidentiality copy. The report's standing line says no names are attached, and a "
+        "recogniser that cannot see it reports the surface as carrying none."
+    )
+    assert not is_confidentiality_copy(A_SUPPRESSION_STATE_SENTENCE), (
+        f"The recognizer reads {A_SUPPRESSION_STATE_SENTENCE!r} as confidentiality copy. That is a "
+        "sentence about how many people answered this week, not a standing promise about the "
+        "surface; counting it makes item 5 pass or fail by the response count (ADR 0158)."
+    )
+    assert not is_confidentiality_copy(AN_EXPLANATORY_SENTENCE), (
+        f"The recognizer reads {AN_EXPLANATORY_SENTENCE!r} as confidentiality copy. Explaining how "
+        "a participation score is worked out is not an identity promise, and a recogniser that "
+        "counts it reddens the report the day the credit-rule note ships beside its line."
+    )
+
+
 def test_the_iconography_sweep_sees_a_lock_and_a_shield_and_leaves_plain_words() -> None:
     """Item 5: "in plain words, no shield or lock iconography".
 
@@ -975,20 +1288,28 @@ def test_the_surface_check_accepts_an_inventory_whose_prefixes_are_all_governed(
 def test_the_surface_check_refuses_a_key_whose_prefix_no_surface_governs() -> None:
     """Acceptance criterion 3, in test: a surface that registered nowhere is red.
 
-    E4 adds report and aggregate surfaces. Until a row for one exists in
-    `GOVERNED_SURFACES`, its strings are swept by nothing and counted toward no
-    surface's confidentiality line — so the inventory has to say so rather than
-    quietly ignore them.
+    E4 added the report, the gradebook and the unknown-address screen; E9 adds
+    the leadership roll-ups. Until a row for one exists in `GOVERNED_SURFACES`,
+    its strings are swept by nothing and counted toward no surface's
+    confidentiality line — so the inventory has to say so rather than quietly
+    ignore them.
+
+    The planted prefix is a surface that does not exist yet, deliberately.
+    It was `report.` until E4-12, and the day the report became a governed
+    surface a control planting a report-shaped key would have been demonstrating
+    the opposite of what it says.
 
     **The mutation it kills:** an `ungoverned_keys` that filters unknown prefixes
     out instead of reporting them, which is exactly how an unregistered surface
     ships unnoticed. **A red here means this module is broken, not that the copy
     is.**
     """
-    inventory = a_governed_inventory(CopyString("report.heading", A_PLAIN_SENTENCE, SYNTHETIC))
-    assert ungoverned_keys(inventory) == ["report.heading"], (
+    inventory = a_governed_inventory(
+        CopyString("leadership_rollup.heading", A_PLAIN_SENTENCE, SYNTHETIC)
+    )
+    assert ungoverned_keys(inventory) == ["leadership_rollup.heading"], (
         f"The check reported {ungoverned_keys(inventory)} over an inventory carrying a "
-        "`report.`-prefixed key, which no row in the governance map claims."
+        "`leadership_rollup.`-prefixed key, which no row in the governance map claims."
     )
 
 
@@ -1012,32 +1333,158 @@ def test_the_surface_check_refuses_a_governed_prefix_that_collects_nothing() -> 
 
 
 def test_the_confidentiality_count_accepts_a_surface_with_exactly_one_line() -> None:
-    """The accepted direction of item 5's pair.
+    """The accepted direction of item 5's pair, on every surface that carries a line.
+
+    **Run over `CONFIDENTIALITY_KEY_OF_SURFACE` rather than over the survey**,
+    because that map held one row until E4-12 and a control written around the
+    one row proves the survey's case forever while a surface added later has
+    nothing under it. The day the report's row landed, this control covered it
+    without being edited.
 
     **The mutation it kills:** a counter that reads the whole inventory rather
-    than one surface's strings, which would count a second surface's line against
-    the first the day E4 adds one. **A red here means this module is broken, not
-    that the copy is.**
+    than one surface's strings, which counts the report's line against the survey
+    now that there are two. **A red here means this module is broken, not that
+    the copy is.**
     """
-    found = confidentiality_strings(a_governed_inventory(), SURVEY)
-    assert [string.key for string in found] == [CONFIDENTIALITY_KEY_OF_SURFACE[SURVEY]], (
-        f"The counter read {[string.key for string in found]} on a synthetic survey carrying one "
-        "confidentiality line."
+    assert CONFIDENTIALITY_KEY_OF_SURFACE, (
+        "No surface carries a confidentiality line, so this control ran over nothing and item 5 is "
+        "asserted of nobody."
     )
+    for surface, expected in CONFIDENTIALITY_KEY_OF_SURFACE.items():
+        found = [string.key for string in confidentiality_strings(a_governed_inventory(), surface)]
+        assert found == [expected], (
+            f"The counter read {found} on a synthetic {surface} surface carrying one "
+            f"confidentiality line, {expected!r}."
+        )
 
 
 def test_the_confidentiality_count_refuses_a_surface_with_no_line() -> None:
     """The zero direction: item 5 says "exactly once", and none is not once.
 
+    Each line-carrying surface in turn, for the reason the control above gives.
+
     **The mutation it kills:** an assertion written as "no more than one", which
-    is green on a surface that tells a student nothing about what happens to their
-    identity. **A red here means this module is broken, not that the copy is.**
+    is green on a surface that tells a reader nothing about what happens to a
+    student's identity. **A red here means this module is broken, not that the
+    copy is.**
     """
-    inventory = without_key(a_governed_inventory(), CONFIDENTIALITY_KEY_OF_SURFACE[SURVEY])
-    assert confidentiality_strings(inventory, SURVEY) == [], (
-        "With the confidentiality entry removed, the counter still read "
-        f"{confidentiality_strings(inventory, SURVEY)}. The rule below compares against one, so a "
-        "counter that cannot reach zero cannot fail in this direction."
+    assert (
+        CONFIDENTIALITY_KEY_OF_SURFACE
+    ), "No surface carries a confidentiality line, so this control ran over nothing."
+    for surface, key in CONFIDENTIALITY_KEY_OF_SURFACE.items():
+        inventory = without_key(a_governed_inventory(), key)
+        assert confidentiality_strings(inventory, surface) == [], (
+            f"With {key!r} removed, the counter still read "
+            f"{confidentiality_strings(inventory, surface)} on {surface}. The rule below compares "
+            "against one, so a counter that cannot reach zero cannot fail in this direction."
+        )
+
+
+def test_the_confidentiality_count_reads_zero_on_a_surface_that_owes_no_line() -> None:
+    """The accepted direction of D5's second map: a no-line surface carries none.
+
+    The gradebook is two strings rendered by another product's UI, and the
+    unknown-address screen shows nobody's data. Item 5's sentence has no subject
+    on either, so what the rule requires of them is zero — and a counter that
+    could not reach zero on a surface built out of plain strings would make that
+    rule unsatisfiable rather than satisfied.
+
+    **The mutation it kills:** a recogniser widened until it reads any sentence
+    as confidentiality copy, which reports a line on a surface that has none and
+    reddens the no-line rule against correct copy. **A red here means this module
+    is broken, not that the copy is.**
+    """
+    assert SURFACES_WITH_NO_CONFIDENTIALITY_LINE, (
+        "No surface is recorded as owing no confidentiality line, so this control ran over "
+        "nothing."
+    )
+    inventory = a_governed_inventory()
+    for surface in SURFACES_WITH_NO_CONFIDENTIALITY_LINE:
+        found = [string.key for string in confidentiality_strings(inventory, surface)]
+        assert found == [], (
+            f"The counter read {found} on a synthetic {surface} surface whose every string is the "
+            "plain sentence this module writes for the purpose."
+        )
+
+
+def test_the_confidentiality_count_reports_a_line_on_a_surface_that_owes_none() -> None:
+    """The refused direction of the same map, which is what makes the rule non-vacuous.
+
+    A rule of the form "these surfaces carry no confidentiality string" is
+    satisfied perfectly by a counter that finds nothing anywhere
+    (`docs/MISTAKES.md` entry 3). So one is planted on each no-line surface and
+    the counter is required to name it. This is also the shape the real defect
+    takes: a reassuring sentence added to a gradebook label or to the fallback
+    screen is a promise made where nothing keeps it, and a second copy of the
+    identity promise that no rule counts is how the promise starts to disagree
+    with itself.
+
+    **The mutation it kills:** the no-line rule written over a counter that reads
+    only the surfaces in `CONFIDENTIALITY_KEY_OF_SURFACE`, which cannot see these
+    surfaces at all. **A red here means this module is broken, not that the copy
+    is.**
+    """
+    prefixes = [
+        prefix
+        for prefix, surface in GOVERNED_SURFACES.items()
+        if surface in SURFACES_WITH_NO_CONFIDENTIALITY_LINE
+    ]
+    assert prefixes, (
+        "No prefix maps to a surface that owes no confidentiality line, so this control planted "
+        "nothing and proved nothing."
+    )
+    for prefix in prefixes:
+        surface = GOVERNED_SURFACES[prefix]
+        planted = f"{prefix}.reassurance"
+        inventory = a_governed_inventory(
+            CopyString(planted, A_SECOND_CONFIDENTIALITY_SENTENCE, SYNTHETIC)
+        )
+        found = [string.key for string in confidentiality_strings(inventory, surface)]
+        assert found == [planted], (
+            f"With a confidentiality sentence planted at {planted!r}, the counter read {found} on "
+            f"the {surface} surface."
+        )
+
+
+def test_the_surface_split_places_every_governed_surface_in_exactly_one_map() -> None:
+    """The instrument behind D5's totality rule, run over planted maps in both directions.
+
+    The rule below asks the real maps this question, and a green over the real
+    maps says nothing about whether the question can come back false — a reader
+    that answered "all placed" for every input would report the tree correct
+    whatever the maps held (`docs/MISTAKES.md` entry 3).
+
+    Three planted shapes, because there are three ways to get it wrong: a surface
+    in neither map, which is the one that arrives by omission when somebody adds
+    a governance row and stops; a surface in both, which is two answers to one
+    question; and a correct pair, which must come back clean or the rule is red
+    against a tree that is right.
+
+    **The mutation it kills:** a totality check that reads only one of the two
+    maps, which cannot see a surface placed twice; and one that treats an unknown
+    surface as no-line by default, which is the defaulting the two maps exist to
+    stop. **A red here means this module is broken, not that the copy is.**
+    """
+    governed = {"a_prefix": "placed", "b_prefix": "unplaced", "c_prefix": "twice"}
+    with_a_line = {"placed": "a_prefix.line", "twice": "c_prefix.line"}
+    without_a_line = {"twice": "a stated reason"}
+
+    assert surfaces_placed_in_neither_map(governed, with_a_line, without_a_line) == ["unplaced"], (
+        "The reader reported "
+        f"{surfaces_placed_in_neither_map(governed, with_a_line, without_a_line)} over planted maps "
+        "in which exactly one governed surface is claimed by neither."
+    )
+    assert surfaces_placed_in_both_maps(with_a_line, without_a_line) == ["twice"], (
+        f"The reader reported {surfaces_placed_in_both_maps(with_a_line, without_a_line)} over "
+        "planted maps in which exactly one surface is claimed by both."
+    )
+
+    clean_without = {"unplaced": "a stated reason"}
+    assert surfaces_placed_in_neither_map(governed, with_a_line, clean_without) == [], (
+        "The reader reported "
+        f"{surfaces_placed_in_neither_map(governed, with_a_line, clean_without)} over planted maps "
+        "that place every governed surface. A reader that cannot come back clean makes the rule "
+        "below unsatisfiable."
     )
 
 
@@ -1122,6 +1569,84 @@ def test_the_collector_finds_the_two_frontend_keys_the_survey_screen_ships() -> 
     )
     blank = [key for key in wanted if not collected[key].strip()]
     assert not blank, f"The parse read {blank} as empty strings."
+
+
+def test_the_collector_finds_the_two_report_keys_the_monday_screen_ships() -> None:
+    """The report's half of the same canary, and criterion 7 in its own currency.
+
+    Every rule this module states about the report surface is a statement about
+    strings this collector returned, and the four report copy modules shipped
+    outside the walked copy directory — beside their components, where the walk
+    does not look. A rule sweeping an inventory that holds none of the report's
+    strings is green over a whole screen (`docs/MISTAKES.md` entry 35: require
+    the guard to *find* the thing on a subject that certainly has it).
+
+    Two keys from two different report copy modules, so a single file arriving
+    while the other three stay outside is not enough to satisfy this. The
+    small-N body is an ordinary entry, so its absence means the parse or the
+    layout has failed; `comments_note` is item 5's own subject on this surface,
+    so its absence is the rule's business as well as the collector's.
+
+    Presence and non-emptiness only, never the sentence: E4-10 and E4-11 own
+    those wordings and rewording either must not redden the inventory
+    (`docs/MISTAKES.md` entry 19).
+
+    **The mutation it kills:** a report copy module left outside
+    `frontend/src/copy/`, or renamed out of the walk. **A red here means the
+    report's copy is not collected, which is the state E4-12 exists to end.**
+    """
+    collected = {
+        string.key: string.text for string in collect_frontend_copy(FRONTEND_COPY_DIRECTORY)
+    }
+    wanted = (REPORT_SMALL_N_KEY, CONFIDENTIALITY_KEY_OF_SURFACE[REPORT])
+    missing = [key for key in wanted if key not in collected]
+    assert not missing, (
+        f"The parse of {display(FRONTEND_COPY_DIRECTORY)} published no {missing}.\n"
+        "\n"
+        "The Monday report's strings live in four copy modules. Until they are inside the walked "
+        "copy directory, SPEC §4.1 items 4 and 5 are asserted over none of them and every rule "
+        "below passes over the largest user-facing surface this product has."
+    )
+    blank = [key for key in wanted if not collected[key].strip()]
+    assert not blank, (
+        f"The parse read {blank} as empty strings. An empty text satisfies every vocabulary rule "
+        "in this module, and an empty confidentiality line is a promise nobody makes."
+    )
+
+
+def test_the_collector_finds_the_two_gradebook_keys_that_ship_into_the_lms() -> None:
+    """The gradebook's half, through the backend import path rather than a file parse.
+
+    SPEC §3.4 ships two strings into somebody else's user interface: the AGS line
+    item's label and the per-week ledger line in each posted score's comment. They
+    are Pulse's words, written by this project, read by an instructor; that the
+    surface rendering them belongs to another product is a fact about rendering
+    rather than about authorship, and it is not a reason for items 4 and 5 to stop
+    applying. The carried entry from E3 is closed by their being collected.
+
+    Presence and non-emptiness only. The texts themselves are pinned byte-for-byte
+    by the grading and AGS suites — that is what stops them drifting — and
+    repeating either here would be a second copy of a sentence for the two to
+    disagree over (`docs/MISTAKES.md` entry 19).
+
+    **The mutation it kills:** the gradebook copy module dropped from the registry
+    enumeration, or its constants left as literals in `app/lti/ags.py` and
+    `app/services/grading.py` with a copy entry beside them that nothing reads.
+    **A red here means the gradebook's strings are not collected, which is the
+    state E4-12 exists to end.**
+    """
+    collected = {string.key: string.text for string in collect_backend_copy()}
+    wanted = (GRADEBOOK_LABEL_KEY, GRADEBOOK_LEDGER_KEY)
+    missing = [key for key in wanted if key not in collected]
+    assert not missing, (
+        f"The collector read no {missing} out of `{COPY_PACKAGE}`. It read {sorted(collected)}.\n"
+        "\n"
+        "SPEC §3.4's line item label and ledger line are strings this product writes and an "
+        "instructor reads. The E3 carried entry closes when the inventory collects them or records "
+        "why the gradebook is not a governed surface."
+    )
+    blank = [key for key in wanted if not collected[key].strip()]
+    assert not blank, f"The collector read {blank} as empty strings."
 
 
 # ---------------------------------------------------------------------------
@@ -1216,36 +1741,50 @@ def test_no_shipped_string_counts_instructors() -> None:
 
 
 @pytest.mark.invariant
-def test_each_governed_surface_carries_exactly_one_confidentiality_line() -> None:
+def test_each_line_carrying_surface_carries_exactly_one_confidentiality_line() -> None:
     """SPEC §4.1 item 5, asserted from E2 as that item's footnote says it is.
 
-    > 5. Confidentiality copy appears exactly once per surface (survey: in the
-    >    submit bar), in plain words, no shield or lock iconography. *(Asserted
-    >    from **E2** via the same copy-inventory test — the survey is the first
-    >    governed surface, and the inventory grows with each UI epic.)*
+    > 5. Confidentiality copy appears exactly once per surface (survey: once per
+    >    screen, in the submit area), in plain words, no shield or lock
+    >    iconography. *(Asserted from **E2** via the same copy-inventory test —
+    >    the survey is the first governed surface, and the inventory grows with
+    >    each UI epic.)*
 
-    Exactly once, in both directions: zero is a surface that never tells a student
-    what happens to their answers, and two is a surface that says it twice in two
+    Exactly once, in both directions: zero is a surface that never says what
+    happens to a student's answers, and two is a surface that says it twice in two
     different sets of words, which is how a promise starts to disagree with
     itself. The count is per surface and not per source — the survey's strings
-    arrive from the frontend copy file and from the copy registry both, and item 5
-    counts the screen.
+    arrive from the frontend copy file and from the copy registry both, and the
+    report's arrive from four copy modules that render as one screen.
+
+    **This rule iterates `CONFIDENTIALITY_KEY_OF_SURFACE`, not every governed
+    surface**, because E4-12 governs two surfaces that owe no line and the version
+    that iterated `GOVERNED_SURFACES.values()` would have demanded an identity
+    promise from an LMS gradebook. Those surfaces are held to zero by the rule
+    below rather than exempted; between the two, every governed surface has its
+    item-5 count asserted, and the totality rule requires every surface to be in
+    exactly one of the two maps so that neither rule can lose one.
 
     Placement is asserted as far as an inventory can carry it: the one match is
-    the key the submit bar renders. Where that string sits in the DOM is E2-10's
-    end-to-end spec.
+    the key the map names. Where that string sits in the DOM is the end-to-end
+    specs' — E2-10's for the survey, E4-11's for the report.
 
     **The mutations it kills:** a second confidentiality sentence added anywhere
-    on the surface, and the one line removed. **What makes it non-vacuous:** the
-    recognizer's control, the zero and two synthetic controls, and the frontend
-    canary that requires this very key to be collected at all.
+    on a surface, and the one line removed. **What makes it non-vacuous:** the
+    recognizer's controls in both directions, the zero and two synthetic
+    controls run over every line-carrying surface, and the collector canaries
+    that require each of these keys to be collected at all.
     """
     inventory = collect_shipped_copy()
     assert inventory, "The inventory is empty, so this rule passed over nothing."
+    assert CONFIDENTIALITY_KEY_OF_SURFACE, (
+        "No surface is recorded as carrying a confidentiality line, so item 5 is asserted of "
+        "nothing at all."
+    )
 
     counted = {
         surface: confidentiality_strings(inventory, surface)
-        for surface in sorted(set(GOVERNED_SURFACES.values()))
+        for surface in CONFIDENTIALITY_KEY_OF_SURFACE
     }
     wrong = {
         surface: sorted(string.key for string in found)
@@ -1266,10 +1805,140 @@ def test_each_governed_surface_carries_exactly_one_confidentiality_line() -> Non
         keys = [string.key for string in counted.get(surface, [])]
         assert keys == [expected], (
             f"The {surface} surface's confidentiality copy is {keys} rather than {[expected]}. "
-            "That entry is the survey's confidentiality line wherever the screen renders it — "
-            "`SubmitBar` from E2-10, one placement per screen since E2-17 — and this module "
-            "counts the string rather than the rendering."
+            "This module counts the string rather than the rendering, so the entry named in "
+            "`CONFIDENTIALITY_KEY_OF_SURFACE` is the one that has to be the match."
         )
+
+
+@pytest.mark.invariant
+def test_no_surface_recorded_as_owing_no_confidentiality_line_carries_one() -> None:
+    """SPEC §4.1 item 5 over the other half of the surface model.
+
+    Two governed surfaces owe no line, each for a reason written down beside it:
+    the gradebook is a label and an arithmetic ledger rendered inside another
+    product, and the unknown-address screen shows nobody's data. Item 5's sentence
+    would have no subject on either.
+
+    **Owing none and carrying none are the same requirement here, and that is
+    deliberate.** A confidentiality sentence on one of these surfaces is a promise
+    made where nothing keeps it — nothing about identity is being handled, so
+    there is nothing for the words to be true or false about — and it is a second
+    copy of the product's identity promise that the exactly-once rule above cannot
+    see, free to drift away from the one on the surface that matters. So it is
+    reported rather than tolerated. If a real sentence ever trips this, the answer
+    is the ruling in ADR 0158 or a dispute about it, never a quiet reword.
+
+    **The mutations it kills:** a reassuring sentence added to the gradebook's
+    label or to the fallback screen; and, more likely, a surface moved out of
+    `CONFIDENTIALITY_KEY_OF_SURFACE` into the no-line map to make a red go away,
+    which this rule turns back into a red rather than a pass. **What makes it
+    non-vacuous:** the planted-sentence control above, which requires the counter
+    to name one on each of these surfaces.
+    """
+    inventory = collect_shipped_copy()
+    assert inventory, "The inventory is empty, so this rule passed over nothing."
+    assert SURFACES_WITH_NO_CONFIDENTIALITY_LINE, (
+        "No surface is recorded as owing no confidentiality line, so this rule read nothing. "
+        "Either the map has been emptied or the surface model has changed shape without this rule "
+        "being told."
+    )
+
+    found = {
+        surface: sorted(string.key for string in confidentiality_strings(inventory, surface))
+        for surface in SURFACES_WITH_NO_CONFIDENTIALITY_LINE
+    }
+    carrying = {surface: keys for surface, keys in found.items() if keys}
+    assert not carrying, (
+        f"These surfaces owe no confidentiality line and carry one: {carrying}.\n"
+        "\n"
+        "Each is recorded as owing none, with the reason: "
+        f"{dict(SURFACES_WITH_NO_CONFIDENTIALITY_LINE)}"
+    )
+
+
+@pytest.mark.invariant
+def test_every_governed_surface_is_placed_in_exactly_one_of_the_two_line_maps() -> None:
+    """SPEC §4.1 item 5 reaches every governed surface, or it reaches none of it.
+
+    The two rules above divide item 5's work between them, and a surface in
+    neither map is asserted by neither: its strings are still swept for item 4's
+    vocabulary, so nothing looks wrong, while whether it says the confidentiality
+    sentence once, twice or never is checked by nothing. That is the state a new
+    surface arrives in by default — somebody adds a governance row and stops — and
+    it looks exactly like a surface deliberately excused.
+
+    So the placement is required to be explicit and singular. A surface in both
+    maps is the other failure: two answers to one question, and whichever rule
+    runs second decides.
+
+    **The mutations it kills:** a governance row added with no decision about its
+    confidentiality line, and a surface listed in both maps so that one rule
+    demands a line the other forbids. **What makes it non-vacuous:** the planted
+    three-surface control above, which requires the reader to report a surface in
+    neither map and a surface in both, and to come back clean on maps that place
+    everything.
+    """
+    assert GOVERNED_SURFACES, "The governance map is empty, so this rule read nothing."
+
+    unplaced = surfaces_placed_in_neither_map(
+        GOVERNED_SURFACES, CONFIDENTIALITY_KEY_OF_SURFACE, SURFACES_WITH_NO_CONFIDENTIALITY_LINE
+    )
+    assert not unplaced, (
+        f"These governed surfaces are in neither line map: {unplaced}.\n"
+        "\n"
+        "A surface carries item 5's line — name the entry in `CONFIDENTIALITY_KEY_OF_SURFACE` — or "
+        "it owes none, in which case `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` records why, in "
+        "words, in the same change that adds the surface. Silence is not the third option: it "
+        "reads exactly like the second one and asserts nothing."
+    )
+
+    twice = surfaces_placed_in_both_maps(
+        CONFIDENTIALITY_KEY_OF_SURFACE, SURFACES_WITH_NO_CONFIDENTIALITY_LINE
+    )
+    assert not twice, (
+        f"These surfaces are in both line maps: {twice}. One of them demands exactly one "
+        "confidentiality string and the other forbids any, so the surface cannot satisfy both and "
+        "the maps disagree about what was decided."
+    )
+
+
+@pytest.mark.invariant
+def test_the_collector_reads_every_report_copy_module_the_epic_shipped() -> None:
+    """E4-12's criterion 7, in the collector's own currency.
+
+    E4-08, E4-09 and E4-10 each shipped a copy module beside its components, and
+    E4-11 shipped a fourth. All four sat outside `frontend/src/copy/`, which is
+    the directory this inventory walks — so the report's strings shipped with
+    SPEC §4.1 items 4 and 5 held over them by review alone, which is the state
+    both items' footnotes describe as ending at E2.
+
+    **Asked of the collector rather than of a second walk** (`docs/MISTAKES.md`
+    entry 35): a parallel enumeration written here could answer this question
+    differently from the one the rules consume, and the answer that matters is
+    the one the rules consume. The filenames are named rather than inferred
+    because the ticket names them; what is *not* pinned here is where under the
+    copy directory they sit, which is the implementer's.
+
+    **The mutation it kills:** three of the four modules moved and the fourth
+    left behind — the shape this arrives in, since the fourth was shipped after
+    the ticket was written and is missing from the ticket's own list. **What
+    makes it non-vacuous:** the walk's refusal of an empty directory, and the
+    canary above that requires two report keys to be parsed out of what it finds.
+    """
+    read = frontend_copy_files(FRONTEND_COPY_DIRECTORY)
+    assert read, f"{display(FRONTEND_COPY_DIRECTORY)} holds no copy file at all."
+
+    names = {path.name for path in read}
+    missing = sorted(name for name in REPORT_COPY_FILENAMES if name not in names)
+    assert not missing, (
+        f"The collector's own list of copy files does not name {missing}. It names "
+        f"{sorted(names)}.\n"
+        "\n"
+        "A copy module outside the walked directory is a surface the inventory cannot see, and the "
+        "invariant-marked rules in this module then pass over it in green. Moving the file is the "
+        "repair; widening the walk to the component tree is not, because that directory holds "
+        "components and this parser reads copy."
+    )
 
 
 @pytest.mark.invariant
