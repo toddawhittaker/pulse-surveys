@@ -4,7 +4,7 @@
 **Branch:** `e4/report-page`
 **Depends on:** E4-01 (deadline — see below), E4-07, E4-08, E4-09, E4-10,
 E4-18 (the section list the page discovers its sections from — breakdown
-decision 11)
+decision 11), E4-19 (the trend points' term weeks — breakdown decision 12)
 **Lane:** light
 **Security-relevant:** this is the epic's first instructor-facing surface,
 which is why the inherited deadline attaches here: **this ticket's PR may
