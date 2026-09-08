@@ -161,10 +161,17 @@ class TrendPoint(BaseModel):
 
     `term_week` is the term week of the window row this point was built from —
     §2.2's second axis, stated here rather than left for the client to derive
-    (breakdown decision 12, ADR 0157). A section that pauses over a break week
-    would make a client's own offset arithmetic disagree with the report, so
-    the point states the number the report already holds instead of leaving a
-    chart to reconstruct it.
+    (breakdown decision 12, ADR 0157). Today the gap between the two axes is a
+    per-section constant (`_section_weeks`' `first_term_week`), so a client
+    could compute this member from the report week's own `course_week` /
+    `term_week` pair. It is on the wire anyway because `week_of_the_term` is
+    this codebase's one reading of the axis mapping (§2.2), and a client that
+    derived the pair would freeze today's arithmetic into a second copy of
+    that reading — one that would disagree silently the day the mapping
+    stops being affine, which is exactly the section-pausing-over-a-break
+    case E4-08's copy file anticipates. Stating the number here widens
+    nothing: it is what every reader of this payload could already compute
+    from `week` alone.
     """
 
     model_config = ConfigDict(frozen=True)

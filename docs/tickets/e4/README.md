@@ -253,7 +253,7 @@ One report, one section, one course week:
   "rates": {"response_rate": 0.62, "validity_rate": 0.91, "responses": 13, "enrolled": 21},
   "streams": {
     "instructor": {
-      "trend": [{"course_week": 1, "term_week": 7, "mean": 4.1}],
+      "trend": [{"course_week": 1, "term_week": 4, "mean": 4.1}],
       "distribution": {"1": 0, "2": 1, "3": 4, "4": 5, "5": 3},
       "summary": {"text": "…", "response_count": 13, "held_note": null},
       "comments": [{"text": "…", "status": "published"}]

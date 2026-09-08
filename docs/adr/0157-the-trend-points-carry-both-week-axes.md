@@ -6,7 +6,10 @@ SPEC §2.2 puts both week axes on every course-level page: the course week
 leads, and the term week sits under it as a quiet sub-label. §5.1 applies that
 rule to the report's trend charts. E4-08 built `PulseTrendChart` to it — the
 component takes both numbers per point and computes neither, and its copy file
-records why the client must never derive the term week from an offset.
+records why the client must never derive the term week from an offset, even
+though today's arithmetic would get it right: the offset is a per-section
+constant now, and E4-08's own rule anticipates the case where it stops being
+one.
 
 E4-07's shipped `TrendPoint` carries `course_week` and `mean` only. The gap
 between what the chart needs and what the wire states had no consequence until
@@ -36,25 +39,32 @@ does not look at `term_week` sees no other difference.
 
 ## Alternatives rejected
 
-**The client derives the term week from an offset.** This is what the report
-does today in its own arithmetic — the client would compute
-`term_week = week.term_week - week.course_week + point.course_week` — and it
-was rejected anyway, for the reason E4-08's copy file already gives: a section
-that pauses over a term break makes that arithmetic disagree with what the
-report actually holds for that window. The offset is a fact about the common
-case, not an invariant the schema can guarantee, and E4-08's shipped record
-already refuses to compute it client-side.
+**The client derives the term week from an offset.** `_section_weeks` builds
+`course_week` as `number - first_term_week + 1`, one `first_term_week`
+constant per section, so today `term_week - course_week` is invariant across
+every window a section has — the client could compute
+`term_week = week.term_week - week.course_week + point.course_week` and get
+it right for every payload this codebase can currently produce. It is
+rejected anyway because `week_of_the_term` is this codebase's one reading of
+§2.2's axis mapping, and a client doing that arithmetic is a second reading
+of the same mapping rather than a consumer of the server's one answer. The
+two readings agree only because the mapping happens to be affine today; the
+day it stops being one — a section pausing over a term break, which is
+exactly the case E4-08's copy file names — the client's copy would disagree
+with the report silently, because nothing would tell it its arithmetic had
+stopped matching the server's. Stating the member is cheaper than auditing
+every consumer for that day.
 
 **A section-level start-offset member**, such as a single
 `first_term_week: int` on `WeekView` that a client combines with each point's
-`course_week`. This is the same derivation moved one field over: it still
-asks the client to reconstruct a per-window fact from an assumed constant
-spacing, and it fails on exactly the same break-week section the first
-alternative fails on. It also does not match how the service already thinks
-about a window — `_section_weeks` has no single offset in hand, only the
-per-row `term_week` each window closed at — so this shape would need new
-service logic to produce a value the service does not otherwise compute,
-where the ruled shape needs none.
+`course_week`. This is the same second-authority problem moved one field
+over: `_section_weeks` does compute a `first_term_week` today, so shipping it
+is possible, but a client combining it with `course_week` is still deriving
+the mapping outside the one function that is supposed to own it, and still
+disagrees silently the day the mapping is no longer a single per-section
+constant. Stating `term_week` per point instead means the client never holds
+anything it has to combine — the number is already the answer, computed by
+`week_of_the_term` and read off the row `_payload` already has open.
 
 ## Consequences
 
