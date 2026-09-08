@@ -293,3 +293,27 @@ proposal — E4-17 is the first candidate, since it is already in `schemas/stude
 
 **Done when:** one function composes the label, both the student read path and the
 report read call it, and no second copy of the format is left under `backend/app/`.
+
+## E4-07's two keyed routes state `Cache-Control: no-store` and nothing asserts it
+
+**What is not enforced.** `app.api.instructor`'s report route and published-week
+list both set `Cache-Control: no-store`, and their module docstring says why —
+a stored copy of a report holds raw student comments and outlives the reason it
+was shown. No test reads the header off either route: E4-18's battery went
+looking for the existing routes' header tests to use as stay-green controls and
+found that the only instructor route with one is E4-18's own section list
+(`tests/integration/test_the_student_survey_paths_pin_cache_control_no_store.py`
+pins the student paths, nothing pins these two). A later edit could drop either
+header and the suite would stay green.
+
+**Why it was left.** Found during E4-18's verification, and E4-18's diff does
+not touch either route — adding their tests here would put an unrelated
+assertion into a ticket whose scope is the section list. The gap is E4-07
+coverage, not E4-18 behavior.
+
+**Owner:** E4-15, the exit ticket that drives these routes against the running
+stack.
+
+**Done when:** a test asserts the exact `no-store` value on both keyed
+instructor routes, the way the student-path pin and E4-18's own header test
+assert theirs.
