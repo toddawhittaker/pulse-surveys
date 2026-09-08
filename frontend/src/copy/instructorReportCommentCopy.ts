@@ -8,16 +8,9 @@
  * rules about words — have one file to be read over rather than a search
  * through JSX.
  *
- * **Why it sits beside the components rather than in `frontend/src/copy/`.**
- * `tests/fixtures/copy_inventory.py` collects every `.ts` and `.tsx` under
- * `frontend/src/copy/` recursively, and the invariant-marked inventory test
- * reds on any key prefix its governance map does not list. Growing that map
- * over the report's vocabulary is **E4-12**'s work, and it is heavy-lane work
- * scheduled after this wave. A copy file landing in the collected directory
- * before E4-12 runs would red the inventory for every other ticket in the
- * wave. So the strings are externalized here, in the collected shape, one
- * directory short of the collector — and E4-12 moves them under
- * `frontend/src/copy/` with the governance entry that lets them be read.
+ * E4-10 shipped this file beside its components; **E4-12 moved it into
+ * `frontend/src/copy/`**, the directory the inventory walks, so the strings
+ * below are collected and swept rather than held to items 4 and 5 by review.
  *
  * **The key is a name, not a sentence.** What a key *says* is the value; the
  * two are separated so that rewording is one edit here.

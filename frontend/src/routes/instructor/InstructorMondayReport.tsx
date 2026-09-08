@@ -22,7 +22,7 @@ import { TrendPair } from '../../components/TrendPair';
 import type { TrendPoint } from '../../components/PulseTrendChart';
 import { WeekEyebrow } from '../../components/WeekEyebrow';
 import { WeekNav } from '../../components/WeekNav';
-import { copy } from '../../components/instructorReportPageCopy';
+import { copy } from '../../copy/instructorReportPageCopy';
 import '../../components/instructorReportPage.css';
 
 /**

@@ -4,7 +4,7 @@ import { Link, useNavigate } from '@tanstack/react-router';
 
 import { readTaughtSections, type TaughtSectionView } from '../../api/instructor';
 import { StateNotice } from '../../components/StateNotice';
-import { copy } from '../../components/instructorReportPageCopy';
+import { copy } from '../../copy/instructorReportPageCopy';
 import '../../components/instructorReportPage.css';
 import { INSTRUCTOR_LANDING_TESTID, REPORT_ROUTE } from './InstructorMondayReport';
 

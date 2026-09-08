@@ -1,7 +1,8 @@
 import type { JSX } from 'react';
 
-import type { InstructorReportStatsCopyKey } from './instructorReportStatCopy';
-import { copy, fillCopy, formatRate } from './instructorReportStatCopy';
+import type { InstructorReportStatsCopyKey } from '../copy/instructorReportStatCopy';
+import { copy, fillCopy } from '../copy/instructorReportStatCopy';
+import { formatRate } from './instructorReportFigures';
 import './instructorReportStats.css';
 
 /**

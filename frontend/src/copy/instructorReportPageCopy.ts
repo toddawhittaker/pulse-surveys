@@ -9,23 +9,9 @@
  * person reads, so SPEC §4.1 items 4 and 5 — rules about words — have one file
  * to be read over rather than a search through JSX.
  *
- * **Why it sits beside the components rather than in `frontend/src/copy/`, and
- * what that costs.** `tests/fixtures/copy_inventory.py` collects every `.ts` and
- * `.tsx` under `frontend/src/copy/` recursively, and the invariant-marked
- * inventory test reds on any key prefix its governance map does not list.
- * Growing that map over the report surface is **E4-12**'s heavy-lane work, and a
- * copy file landing in the collected directory before it runs would red a §4.1
- * invariant this ticket does not own. So the strings are externalized here, in
- * the collected shape, one directory short of the collector — exactly as the
- * three siblings are.
- *
- * The cost, said plainly and in the same words those files use: **nothing sweeps
- * these strings today.** The invariant-marked checks on §4.1 item 4's
- * aggregate-language rule and item 5's confidentiality-copy rule read none of
- * the sentences below; they are held to those rules by review and by this
- * header, which is weaker than the way the survey surface's strings are held,
- * until E4-12 moves this file and collects it. That ticket owns closing the gap,
- * and `docs/tickets/e4/deferred.md` already carries the entry for it.
+ * E4-11 shipped this file beside its components; **E4-12 moved it into
+ * `frontend/src/copy/`**, the directory the inventory walks, so the strings
+ * below are collected and swept rather than held to items 4 and 5 by review.
  *
  * ## What is deliberately not here
  *

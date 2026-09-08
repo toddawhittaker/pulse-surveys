@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 
-import { copy, fillCopy, formatStatistic } from './instructorReportStatCopy';
+import { copy, fillCopy } from '../copy/instructorReportStatCopy';
+import { formatStatistic } from './instructorReportFigures';
 import './instructorReportStats.css';
 
 /** The two comment streams SPEC §5.1 reports each week under. */

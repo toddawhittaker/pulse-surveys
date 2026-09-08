@@ -1,24 +1,24 @@
 /**
- * Every word and every number-format rule the Monday report's stat components
- * ship — ticket E4-09.
+ * Every word the Monday report's stat components ship — ticket E4-09.
  *
- * The three components below it (`RatingHistogram`, `StatPair`,
+ * The three components that use it (`RatingHistogram`, `StatPair`,
  * `ResponseRateBar`) carry no string a person reads. Each one looks its words up
  * by key here, in the shape `frontend/src/copy/studentSurvey.ts` settles for a
  * surface's strings: **stable dotted keys, one entry per string, one mapping**,
  * with a `copy()` lookup and a `fillCopy()` that substitutes `{placeholder}`
  * holes.
  *
- * **Why this file sits beside the components rather than in
- * `frontend/src/copy/`.** `tests/fixtures/copy_inventory.py` collects every
- * TypeScript file under `frontend/src/copy/`, recursively, and the
- * invariant-marked inventory test reds on any key prefix its governance map does
- * not list. Growing that map over the report surface — and taking these strings
- * into the inventory with it — is **E4-12**'s heavy-lane work, scheduled after
- * this wave. Until E4-12 lands, this module keeps the strings collectable (one
- * literal, one prefix, no sentence assembled at runtime) without reddening a
- * §4.1 invariant that has not yet been taught about them. Moving the file is
- * then a move, not a rewrite.
+ * E4-09 shipped this file beside its components; **E4-12 moved it into
+ * `frontend/src/copy/`**, the directory the inventory walks, so the strings
+ * below are collected and swept rather than held to items 4 and 5 by review.
+ *
+ * **The number-format rules left with the move**, into
+ * `../components/instructorReportFigures.ts`. The copy parser refuses a
+ * quotation mark anywhere outside the object literal below, which is what stops
+ * a sentence shipping from among a copy file's helpers — and it refuses a
+ * helper naming its own key by the same rule. Rounding a percent and fixing a
+ * decimal place are presentation rather than words, so they are beside the
+ * components now and read these entries through `copy()` like everything else.
  *
  * **SPEC §4.1 item 4 governs every label here.** Aggregate language counts
  * sections and never instructors; "needs attention" and never
@@ -128,35 +128,4 @@ export function fillCopy(
   values: Readonly<Record<string, string>>,
 ): string {
   return copy(key).replace(/\{(\w+)\}/g, (whole, name: string) => values[name] ?? whole);
-}
-
-/**
- * A workload statistic as the report writes it: one decimal place, always.
- *
- * One rule in one place, for both figures and for the distribution's mean, so
- * that "8" and "8.04" and "8.0" are one number on the page. `toFixed` rounds
- * rather than truncating — 9.46 is "9.5" and not "9.4" — and a value that is
- * not a finite number gets the absent treatment rather than reaching the DOM as
- * `NaN`, which is the shape SPEC §5.1's zero-response week would otherwise
- * produce through a division by no responses.
- */
-export function formatStatistic(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) return copy('instructor_report_stats.absent_figure');
-  return value.toFixed(1);
-}
-
-/**
- * A rate as the report writes it: a whole percent, from the payload's 0–1
- * fraction.
- *
- * The report's rates arrive as fractions (`{"response_rate": 0.62}`), and a
- * fraction rendered straight is how "62.000000001%" reaches a page —
- * `0.83 * 100` is `83.00000000000001` in IEEE 754 and `0.29 * 100` is
- * `28.999999999999996`. Rounding to a whole percent is the one rule, applied
- * here and nowhere else; the counts beside it carry the precision anyone
- * actually needs.
- */
-export function formatRate(rate: number | null): string {
-  if (rate === null || !Number.isFinite(rate)) return copy('instructor_report_stats.absent_figure');
-  return fillCopy('instructor_report_stats.percent', { percent: String(Math.round(rate * 100)) });
 }

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { JSX } from 'react';
 
 import './instructorReportComments.css';
-import { copy, fillCopy } from './instructorReportCommentCopy';
+import { copy, fillCopy } from '../copy/instructorReportCommentCopy';
 
 /**
  * One de-identified comment, as the instructor's Monday report shows it —

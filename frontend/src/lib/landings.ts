@@ -15,8 +15,8 @@
  * copy in `../copy/studentSurvey.ts`, which is the shape E2-11's inventory reads
  * a surface in. E4-11 took the instructor entry the same way: it renders SPEC
  * §5.1's Monday report and the section menu in front of it, and its strings are
- * in `../components/instructorReportPageCopy.ts` until E4-12 moves them under
- * `../copy/`. Neither testid moved — `pulse-landing-student` sits on the
+ * in `../copy/instructorReportPageCopy.ts`, where E4-12 moved them. Neither
+ * testid moved — `pulse-landing-student` sits on the
  * survey's landmark and `pulse-landing-instructor` on both of the instructor
  * area's — because a long row of end-to-end specs address them to say who
  * landed.

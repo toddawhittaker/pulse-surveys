@@ -9,23 +9,9 @@
  * written into JSX is a sentence no inventory can read. So no component in this
  * ticket carries a literal a person reads; each one looks its words up by key.
  *
- * **Why this file sits beside the components rather than in
- * `frontend/src/copy/`.** `tests/fixtures/copy_inventory.py` collects every
- * `.ts`/`.tsx` under `frontend/src/copy/` recursively, and the
- * invariant-marked inventory test reds on any key prefix its governance map
- * does not list. Growing that map over the report surface is **E4-12**'s work,
- * which is heavy-lane and scheduled after this wave; a light ticket that moved
- * this file one directory over would red a §4.1 invariant test it does not own.
- * When E4-12 grows the map, this file moves and this paragraph goes with it.
- *
- * **The cost of that, said plainly: nothing sweeps these strings today.** The
- * collector reads `frontend/src/copy/` and this file is not in it, so the
- * invariant-marked inventory checks on SPEC §4.1 items 4 and 5 — the
- * aggregate-language rule and the confidentiality-copy rule — read none of the
- * words below. They are held to those rules here by review and by this header,
- * which is weaker than the way the survey surface's strings are held, and they
- * stay uncollected and unswept until **E4-12** collects them. That ticket owns
- * closing this gap.
+ * E4-08 shipped this file beside its components; **E4-12 moved it into
+ * `frontend/src/copy/`**, the directory the inventory walks, so the strings
+ * below are collected and swept rather than held to items 4 and 5 by review.
  *
  * ## What is deliberately not here
  *
