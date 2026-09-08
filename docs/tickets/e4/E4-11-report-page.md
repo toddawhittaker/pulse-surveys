@@ -81,6 +81,13 @@ gotchas memory the specs already encode.
   SameSite=None-without-Secure so the session rides Bearer, and Chromium's
   Local Network Access rules bit E1's e2e; read the memory-backed spec
   conventions before writing the launch flow.
+- **Two shipped component fixtures encode axis pairs no payload can hold.**
+  `PulseTrendChart.test.tsx` and `TrendPair.test.tsx` (E4-08) mix week pairs
+  whose offsets differ inside one fixture world, and the backend computes the
+  term week from the course week with one constant per section. Decision 5
+  makes this ticket the reconciliation point: give every fixture world one
+  constant offset (mid-term-starting is the better fixture), and hold any new
+  fixture to the same property.
 - **Empty is a design, not a fallback** — the no-published-weeks state will
   be most instructors' first sight of Pulse mid-week; the brief's tone
   rules apply to it as much as to data.

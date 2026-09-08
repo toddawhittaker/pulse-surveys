@@ -63,10 +63,11 @@ exactly those rows.
 - **The near-miss mutant is the point** (`docs/MISTAKES.md` entry 3): in a
   world whose section starts week one, `term_week = course_week` passes every
   test. The proving world must start mid-term.
-- **Existing tests that construct `TrendPoint` directly go red when the field
-  becomes required** (entry 22's shape). They are updated in the tests-first
-  commit, on the test side of the wall, not left for the implementer to trip
-  over.
+- **Any existing test constructing `TrendPoint` directly would go red when the
+  field becomes required** (entry 22's shape), and the repair would belong in
+  the tests-first commit, on the test side of the wall. The grep found none —
+  the only construction anywhere is `_payload`'s own — so the trap did not
+  fire; it stays recorded for the shape.
 - **Pydantic ignores unknown constructor keywords by default**, so a
   tests-first construction passing `term_week` today is silently green until
   the field exists. Reds must be assertions that read the field back, never
