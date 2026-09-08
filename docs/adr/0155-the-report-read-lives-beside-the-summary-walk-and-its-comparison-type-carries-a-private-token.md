@@ -273,7 +273,13 @@ not the denominator, and a response rate above 1 is a report nobody can read.
   inventory governs a key by its surface prefix and the report is not a governed
   surface yet, so a copy module under a new prefix would red that inventory.
   `docs/tickets/e4/deferred.md` carries the entry, owned by E4-12 with the rest of
-  the report surface's copy.
+  the report surface's copy. **Amended 2026-09-08 by E4-12**: the report is a
+  governed surface now ([0158](0158-the-copy-inventory-grows-over-four-surfaces-and-two-of-them-owe-no-confidentiality-line.md)),
+  so the reason above has expired — but the two sentences are still literals in
+  `app.api.instructor` and still collected by nothing, because placing them needs
+  a row in the inventory's governance map and that map is behind the test wall.
+  What stays true is the state, not the argument for it; the residue is open and
+  unowned rather than closed.
 - **The course label is composed twice** — here and in
   `app.services.survey_read._course_label`, which E4-07 was scoped not to touch.
   The pull request proposes promoting one shared helper; until that lands the two

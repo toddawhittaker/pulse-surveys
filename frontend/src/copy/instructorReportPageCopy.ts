@@ -17,11 +17,15 @@
  *
  * **The two refusal sentences the API writes.** `app.api.instructor` serves
  * "There is no report here for you to read." and "There is no report for that
- * week of this section." — governed copy that lives on the server, chosen by the
- * server for reasons about what a reader may learn from a refusal. The page
- * shows whichever one it was sent. `instructor_report_page.unavailable` below is
- * the fallback for the case where there is no sentence to show: a network
- * failure, or a gateway answering with no body at all.
+ * week of this section." — chosen by the server for reasons about what a reader
+ * may learn from a refusal, so the page shows whichever one it was sent and
+ * writes neither. They are literals in that module rather than entries in
+ * `app.copy`, so the inventory collects neither and §4.1 items 4 and 5 are held
+ * over them by review; that is E4-07's recorded residue (ADR 0155), and E4-12
+ * closed the rest of the report's copy without reaching it.
+ * `instructor_report_page.unavailable` below is the fallback for the case where
+ * there is no sentence to show: a network failure, or a gateway answering with
+ * no body at all.
  *
  * **Anything a summary says.** The model's prose is data, not copy.
  *

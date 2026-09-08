@@ -38,9 +38,10 @@ import '../../components/instructorReportPage.css';
  * 7's comparison chokepoint and §5.2's concealment all happen before this
  * request answers: a small-N week arrives with no comments in it, a comparison
  * figure arrives suppressed, and this page renders what it was given. The one
- * confidentiality decision that is genuinely this file's is §4.1 item 5's —
- * which of the two comment groups carries the confidentiality notice — and it is
- * made once, out loud, below.
+ * confidentiality decision that is genuinely this file's is which of the two
+ * comment groups carries the small-N notice, and it is made once, out loud,
+ * below. It is not §4.1 item 5's line: this surface's line is
+ * `instructor_report_page.comments_note` (ADR 0158).
  *
  * **No week arithmetic anywhere, and that is criterion 3.** Which weeks a reader
  * may page to is `published_weeks` from the API, handed straight to `WeekNav`;
@@ -274,10 +275,11 @@ function ReportBody({
     return (
       <div data-testid={INSTRUCTOR_REPORT_ERROR_TESTID}>
         {/* The server's own sentence where there is one — `app.api.instructor`
-            writes two, and both are governed copy chosen for what a reader may
-            learn from a refusal. This page's own line stands only where there
-            was no answer to carry a sentence: a network failure, or a gateway
-            in front of the tool. */}
+            writes two, each chosen for what a reader may learn from a refusal,
+            so this page shows what it was sent rather than deciding. Neither is
+            in `app.copy`, which is E4-07's recorded residue (ADR 0155). This
+            page's own line stands only where there was no answer to carry a
+            sentence: a network failure, or a gateway in front of the tool. */}
         <StateNotice
           variant="flat"
           body={load.detail ?? copy('instructor_report_page.unavailable')}
