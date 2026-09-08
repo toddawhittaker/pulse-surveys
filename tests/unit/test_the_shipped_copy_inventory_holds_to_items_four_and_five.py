@@ -444,8 +444,9 @@ CONFIDENTIALITY_EXEMPT_KEYS = {
     REPORT_SMALL_N_KEY: (
         "Suppression-state copy: it explains why SPEC §4's threshold is hiding this week's "
         "comments and renders only in that state, so it is not the surface's standing identity "
-        "promise — `instructor_report_page.comments_note` is. Argued in ADR 0158, and the item-5 "
-        "reading it rests on is raised to the owner rather than settled here."
+        "promise — `instructor_report_page.comments_note` is. Argued in ADR 0158 and settled by "
+        "the ruling of 2026-09-08, now in §4.1 item 5's own words: a state notice is not the "
+        "item's copy."
     ),
 }
 
