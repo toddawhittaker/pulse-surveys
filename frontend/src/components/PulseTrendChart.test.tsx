@@ -255,9 +255,12 @@ describe('PulseTrendChart', () => {
     expect(gridlineFor(container, '5.0')).toBeLessThanOrEqual(20);
   });
 
-  it('takes the term week from the payload rather than counting from an offset', () => {
-    // Course week 3 is term week 10 here: term week 9 was the break. A chart
-    // that added an offset to the course week would print 09.
+  it('takes the term week from the payload rather than counting from the first week', () => {
+    // A chart that numbered its sub-labels from the first one it was given —
+    // rather than reading each point's own — would print the same three
+    // whichever section it was drawing. The second render is what says
+    // otherwise: same course weeks, different term weeks, and only the
+    // sub-labels move.
     const { container } = render(<PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} />);
 
     expect(textsOf(container, 'pulse-trend-tick-label')).toEqual(['WK 01', '02', '03']);
@@ -273,6 +276,48 @@ describe('PulseTrendChart', () => {
     );
     expect(textsOf(earlier, 'pulse-trend-tick-label')).toEqual(['WK 01', '02', '03']);
     expect(textsOf(earlier, 'pulse-trend-tick-sub')).toEqual(['TERM 03', '04', '05']);
+  });
+
+  it('renders each point’s own term week, and not one derived from any offset', () => {
+    // **These two points are deliberately not a shape the wire can carry, and
+    // that is the whole reason they are here.** The backend derives a section's
+    // term week from its course week with one per-section constant, so within a
+    // real payload `termWeek - courseWeek` is the same for every point — which
+    // is exactly what every other fixture in this file now holds, and what
+    // `TrendPair.test.tsx`'s hold too.
+    //
+    // The cost of that correctness is a gap: a chart that **derived**
+    // `termWeek = courseWeek + k` would satisfy all of them, for the k each
+    // fixture happens to use. SPEC §2.2 forbids the client that derivation
+    // outright — "a section that began in the term's fourth week, or paused
+    // over a break week, breaks any offset a chart might compute" — and after
+    // the fixtures were made payload-shaped no test asserted the component
+    // renders the number it was handed rather than a number it worked out.
+    //
+    // So this is a **component-contract proof and not a payload fixture**: the
+    // offsets are 3 and 5, so there is no k at all, and the mutation it kills
+    // is `termWeek = courseWeek + k` for every k. It must not be "corrected"
+    // into a constant offset by the reasoning that corrected the fixtures —
+    // that rule governs fixtures standing in for a payload, and this pair
+    // stands in for nothing. Making it consistent would delete the only test
+    // that distinguishes rendering from deriving.
+    const { container } = render(
+      <PulseTrendChart
+        points={[
+          { courseWeek: 1, termWeek: 4, mean: 4.1 },
+          { courseWeek: 2, termWeek: 7, mean: 3.6 },
+        ]}
+        label={INSTRUCTOR}
+      />,
+    );
+
+    // The course weeks are the control: they are what a derivation would have
+    // been computed from, so a chart that got these wrong would fail the
+    // sub-label assertion for a reason that has nothing to do with deriving.
+    expect(textsOf(container, 'pulse-trend-tick-label')).toEqual(['WK 01', '02']);
+    // And each term tick is the number that point carried. The first is written
+    // in words and the rest are bare, which is the axis's own shape.
+    expect(textsOf(container, 'pulse-trend-tick-sub')).toEqual(['TERM 04', '07']);
   });
 
   it('writes the term week under the course week, at the same place on the axis', () => {
