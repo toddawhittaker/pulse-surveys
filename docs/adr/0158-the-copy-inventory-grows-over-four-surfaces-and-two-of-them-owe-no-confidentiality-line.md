@@ -41,11 +41,27 @@ about who wrote what. The recognizer gains the marker `no names` to see it: ever
 marker before this one was written from the student's side of the promise, and
 this sentence is addressed to the person reading it.
 
-**`instructor_report_comments.small_n.body` is deliberately not recognized.** It
-explains why a thin week's comments are withheld — suppression state, present
-only in the weeks it applies to. Recognizing it would count a second
-confidentiality string on the report in exactly those weeks, so item 5 would
-pass or fail by how many students answered.
+**`instructor_report_comments.small_n.body` is recognized and exempted by name.**
+It explains why a thin week's comments are withheld — suppression state, present
+only in the weeks it applies to — and counting it would make item 5 pass or fail
+by how many students answered. **Amended 2026-09-08, on this ticket's privacy
+round:** the first shape of this decision achieved the exemption by leaving
+unidentifiability language out of the recognizer's vocabulary altogether, and a
+vocabulary hole is global. It excused that one sentence and, with it, every
+other sentence anywhere that promises a reader nobody can be identified — a
+second identity promise phrased that way would have been counted by nothing, on
+any surface, forever. The words are in the vocabulary now and the one sentence
+sits in a named exempt-key map with its reason beside it, so what is excused is
+one string a reader of that file can weigh rather than a shape nobody can see.
+The exemption is by key and not by prefix or surface, so a second such sentence
+elsewhere on the report is still counted.
+
+**Whether a suppression notice is confidentiality copy at all is a question for
+the owner, and the exemption is the interim.** Item 5 says confidentiality copy
+appears exactly once per surface and does not say whether a sentence that exists
+only while a threshold is hiding something is that copy. The reading taken here —
+that it is not, because a promise present in some weeks is no standing promise —
+is argued rather than given, and it is raised rather than settled in this record.
 
 **A governed surface either carries item 5's line or is recorded as owing none.**
 Two maps, and a rule requiring every surface to sit in exactly one of them.
@@ -59,6 +75,19 @@ requirement: a second rule refuses a confidentiality sentence on those surfaces.
 those two strings belongs to another product is a fact about rendering, not
 about authorship.
 
+**What "counts the screen" does and does not mean, said plainly.** The tally is
+by key prefix, and a component is free to render a string from another surface's
+prefix: `WeekEyebrow` does, putting two `student_survey` entries — the course-week
+and term-week labels — at the top of the report. Item 4's vocabulary sweeps are
+global and reach those strings wherever they render, so nothing about the words
+escapes. Item 5's count does not follow them: they are on the survey's tally and
+not the report's. It costs nothing today, because neither carries an identity
+promise and neither could be a surface's line; what it would cost is a
+confidentiality sentence borrowed across prefixes, which would be counted against
+the surface it was written for rather than the one it appears on. A crossing is
+visible where it is made — in the importing component's own import line — and
+that is the whole of what makes it reviewable.
+
 ## Alternatives rejected
 
 **Four report surfaces, one per copy module.** Mechanically simplest and wrong
@@ -69,6 +98,11 @@ one page, which is the repetition item 5 exists to prevent.
 sentence on the page, which is exactly the trap. A promise that appears only in
 some weeks is not a standing promise, and it would make an invariant's verdict
 depend on a response count.
+
+**Keeping the exemption as a hole in the recognizer's vocabulary**, which is what
+the first version of this record chose. It reads as economical and is the
+opposite: one sentence is excused by making every sentence of that shape
+invisible, on every surface, with nothing naming what was given up.
 
 **Exempting the gradebook, and recording why it is not a governed surface.** The
 ticket allowed this. Rejected because the argument for it is about who draws the
