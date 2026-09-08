@@ -78,12 +78,15 @@ rel="${path#"$repo_root"/}"
 # by exactly this (docs/tickets/e4/.attempts/E4-16.md).
 #
 # The exemption is the one directory, not the file class: the suffix patterns
-# below still block a `*.test.ts` or `*.spec.ts` anywhere else (mock-lms/, a
-# future workspace), so a test landing outside frontend/src/ and tests/ is
-# refused by default rather than silently uncovered — the fail-closed shape
-# docs/mistakes/53 asks for. A path carrying `..` is not exempted: the
-# prefix strip above does not resolve dot-dot, and an unresolved spelling
-# falls through to the block patterns.
+# below still block a Write or Edit of a `*.test.ts` or `*.spec.ts` anywhere
+# else (mock-lms/, a future workspace), so on this tool path a test landing
+# outside frontend/src/ and tests/ is refused by default rather than silently
+# uncovered — the fail-closed shape docs/mistakes/53 asks for. The shell
+# branch above is narrower and always was: its patterns require a literal
+# `tests/` in the command line, so it has no suffix counterpart and never
+# covered these files. A path carrying `..` is not exempted: the prefix strip
+# above does not resolve dot-dot, and an unresolved spelling falls through to
+# the block patterns.
 case "$rel" in
   frontend/src/*.test.ts|frontend/src/*.test.tsx)
     case "$rel" in
