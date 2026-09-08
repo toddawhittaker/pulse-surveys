@@ -158,11 +158,19 @@ class TrendPoint(BaseModel):
     SPEC §3.2's scale runs 1 to 5 — so a zero here would draw a line to the floor
     of the chart for a week that has no line at all (ADR 0147's zero-filling: a
     stored zero and a missing week never arrive looking the same).
+
+    `term_week` is the term week of the window row this point was built from —
+    §2.2's second axis, stated here rather than left for the client to derive
+    (breakdown decision 12, ADR 0157). A section that pauses over a break week
+    would make a client's own offset arithmetic disagree with the report, so
+    the point states the number the report already holds instead of leaving a
+    chart to reconstruct it.
     """
 
     model_config = ConfigDict(frozen=True)
 
     course_week: int
+    term_week: int
     mean: float | None
 
 
