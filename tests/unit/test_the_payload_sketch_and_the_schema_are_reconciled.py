@@ -27,6 +27,14 @@ therefore a deliberate act with a sentence beside it, never a repair for a red.
 block are located by strings copied whole out of `docs/tickets/e4/README.md`, and
 a reader that finds neither says so rather than reporting a file with no
 divergences.
+
+**E4-19 adds a third reconciliation, one level further down than the second.**
+Breakdown decision 12 puts `term_week` inside each point of `streams.instructor
+.trend` and `streams.course.trend`, a list nested two members deep that neither
+the top-level test nor the rates test below it reads — so criterion 3's own
+claim, "the reconciliation test holds the two to each other in both directions,
+so neither may move alone," has nowhere to stand without a third test reaching
+that depth.
 """
 
 import json
@@ -158,6 +166,73 @@ def test_the_schemas_top_level_members_are_the_sketchs_plus_the_declared_diverge
             "Criterion 8: divergences are deliberate and listed in the pull request body. A member "
             "added here without a record is what the frontend fixtures will not describe; one "
             "dropped is what E4-08 through E4-11 have already built against.",
+        ]
+    )
+
+
+def sketched_trend_point(stream_key: str) -> dict[str, Any]:
+    """One trend point out of the sketch's own JSON, for the stream named."""
+    payload = sketched_payload()
+    trend = payload["streams"][stream_key]["trend"]
+    assert (
+        trend
+    ), f"The sketch's `streams.{stream_key}.trend` is empty; this test reads its first point."
+    return trend[0]
+
+
+def test_the_trend_points_term_week_is_named_on_both_sides_of_the_sketch_and_the_schema(
+    report_api_contract: Any,
+) -> None:
+    """E4-19 criterion 3, one level further down than the rates test below.
+
+    Neither equality test above reaches this: the top-level test compares the
+    payload's own members, and the rates test is one level down from those,
+    `rates` itself. E4-19's `term_week` (breakdown decision 12) lands inside
+    each point of `streams.instructor.trend` and `streams.course.trend` — a
+    list nested two members deep that neither of those tests reads. Criterion
+    3's own words are "the sketch-reconciliation test passes with the member
+    present on both sides, and reds if either side drops it" — which this test
+    is, or nothing in this module is.
+
+    **The mutation this kills:** the schema's `TrendPoint` gains `term_week`
+    and the sketch's fenced trend example is left exactly as it was, or the
+    reverse. Asserting membership on each side before comparing the two sets
+    is what pins a failure to the side that stood still, rather than reporting
+    the two sides equal because both still lack the member.
+    """
+    sketch_point = sketched_trend_point(
+        report_api_contract.payload_stream_key[report_api_contract.instructor_stream]
+    )
+    sketch_keys = set(sketch_point)
+
+    schema = report_api_contract.schema()
+    trend_point_model = getattr(schema, "TrendPoint", None)
+    assert trend_point_model is not None, (
+        f"`{report_api_contract.schema_module_name}` declares no `TrendPoint`. E4-19's ticket names "
+        "it directly: `term_week: int` lands on `app.schemas.report.TrendPoint`, populated in "
+        "`_payload`'s trend builder from the `_SectionWeek` row in hand."
+    )
+    schema_keys = set(getattr(trend_point_model, "model_fields", None) or {})
+
+    assert report_api_contract.term_week_field in schema_keys, (
+        f"`TrendPoint` declares {sorted(schema_keys)}, with no "
+        f"`{report_api_contract.term_week_field}`. Breakdown decision 12: the trend point gains the "
+        "term week of the window row it was built from, so the chart's §2.2 sub-label has a wire "
+        "source."
+    )
+    assert report_api_contract.term_week_field in sketch_keys, (
+        f"The sketch's trend example is {sorted(sketch_keys)}, with no "
+        f"`{report_api_contract.term_week_field}`. E4-19's scope is explicit: the sketch gains the "
+        "member in the same change as the schema — neither may move alone."
+    )
+    assert schema_keys == sketch_keys, "\n".join(
+        [
+            f"`TrendPoint` declares {sorted(schema_keys)}.",
+            f"The sketch's trend example describes {sorted(sketch_keys)}.",
+            "No divergence is recorded for this member, so the two are supposed to name exactly "
+            "the same fields.",
+            f"In the schema and not in the sketch: {sorted(schema_keys - sketch_keys)}",
+            f"In the sketch and not in the schema: {sorted(sketch_keys - schema_keys)}",
         ]
     )
 
