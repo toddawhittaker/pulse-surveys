@@ -44,6 +44,14 @@ const PARTICIPATION_ABSENT =
   'There is no response rate for this week: nobody is enrolled in this section yet.';
 const RELEASED_HEADING = 'Comments from earlier weeks';
 
+/**
+ * The credit-rule note (E4-12), transcribed as two meaning-bearing fragments
+ * rather than the whole three-sentence entry: what must survive a rewording is
+ * the arithmetic and the can-move-down promise, not the phrasing around them.
+ */
+const CREDIT_NOTE_ARITHMETIC = 'completed items out of total items';
+const CREDIT_NOTE_CAN_LOWER = 'lower a score that has already posted';
+
 /** Copy the components ship, transcribed the same way. */
 const ABSENT_SUMMARY = 'No summary was written for this week.';
 const SMALL_N_TITLE = 'Comments are hidden this week';
@@ -291,6 +299,30 @@ describe('a week nobody answered', () => {
     const shown = (container.textContent ?? '').replace(/\s+/g, ' ');
     expect(shown).not.toContain('Response rate');
     expect(shown).not.toContain('0 / 0');
+  });
+});
+
+describe('the credit-rule note', () => {
+  it('explains the rule in an ordinary week and in a week with nobody enrolled', async () => {
+    // E4-12's criterion 4: ambient explanatory copy in the Participation
+    // region, rendered in every week — it explains SPEC §3.3 and §3.4 rather
+    // than this week's figures, so an empty week keeps it too. The mutation it
+    // kills: the note made conditional on a rate being present, or its render
+    // removed while the copy entry stays collected and the inventory green.
+    servingWeeks({ 4: A_PUBLISHED_WEEK });
+    const ordinary = open(4);
+    await screen.findByRole('heading', { level: 2, name: 'Rating trend' });
+    const ordinaryText = (ordinary.container.textContent ?? '').replace(/\s+/g, ' ');
+    expect(ordinaryText).toContain(CREDIT_NOTE_ARITHMETIC);
+    expect(ordinaryText).toContain(CREDIT_NOTE_CAN_LOWER);
+    cleanup();
+
+    servingWeeks({ 2: A_WEEK_WITH_NOBODY_ENROLLED });
+    const empty = open(2);
+    await screen.findByText(PARTICIPATION_ABSENT);
+    const emptyText = (empty.container.textContent ?? '').replace(/\s+/g, ' ');
+    expect(emptyText).toContain(CREDIT_NOTE_ARITHMETIC);
+    expect(emptyText).toContain(CREDIT_NOTE_CAN_LOWER);
   });
 });
 
