@@ -1,6 +1,6 @@
 # E4 — Instructor Monday report: build order
 
-Seventeen tickets decomposing SPEC §14.3's E4 entry. Each is sized for a single
+Nineteen tickets decomposing SPEC §14.3's E4 entry. Each is sized for a single
 focused session and leaves the repository in a working state: CI green,
 Compose stack healthy, nothing half-wired at a boundary. E4 is **not** a ⚠
 epic, but its entry marks one path for line-by-line human review anyway: the
@@ -163,6 +163,19 @@ ticket may depart from only by saying so.
    door forwarding its launch context's section — would serve only the
    launched course, give the web door nothing, and widen the doors' surface;
    the ADR in E4-18's pull request records it.
+12. **The trend's term-week sub-label comes from the wire, and the client
+   derives nothing.** Found while E4-11 reconciled the component contracts
+   with the shipped schema (decision 5 makes E4-11 the reconciliation
+   point), ruled 2026-09-07: §2.2 puts both axes on the chart,
+   `PulseTrendChart` takes both numbers per point, and E4-07's `TrendPoint`
+   carried only the course week — so the point gains `term_week`, populated
+   from the window rows the report read already holds, as **E4-19**, which
+   E4-11 now also depends on. The rejected alternative — the page deriving
+   the term week from the report week's own pair as an offset — matches
+   today's backend arithmetic exactly and was rejected anyway, for the
+   reason E4-08's copy file already records: a section pausing over a break
+   week makes a derived number disagree with the report. The ADR in E4-19's
+   pull request records it.
 
 ## Build order
 
@@ -178,21 +191,22 @@ ticket may depart from only by saying so.
 | 08 | [The trend components](E4-08-trend-components.md) | `e4/trend-components` | light | 16 (merge order only) | PulseTrendChart and TrendPair against fixture data: stacked pair, shared 1–5 scale, one legend, course-week axis with the term-week sub-label. | |
 | 09 | [The stat components](E4-09-stat-components.md) | `e4/stat-components` | light | 16 (merge order only) | RatingHistogram, StatPair and ResponseRateBar against fixture data: this-week distributions, workload mean and median, response and validity rates. | |
 | 10 | [The comment components](E4-10-comment-components.md) | `e4/comment-components` | light | 16 (merge order only) | CommentCard, AiPanel and the instructor SmallNNotice against fixture data: grouped lists led by their summaries, empty-group notice, status chips. | |
-| 11 | [The report page](E4-11-report-page.md) | `e4/report-page` | light | 01, 07, 08, 09, 10, 18 | InstructorMondayReport assembled: route, data fetch, week navigation, loading and error and small-N states, and the in-slice e2e path. | |
+| 11 | [The report page](E4-11-report-page.md) | `e4/report-page` | light | 01, 07, 08, 09, 10, 18, 19 | InstructorMondayReport assembled: route, data fetch, week navigation, loading and error and small-N states, and the in-slice e2e path. | |
 | 12 | [The report's copy, and the inventory grows over it](E4-12-report-copy-and-inventory.md) | `e4/report-copy-and-inventory` | heavy | 08, 09, 10, 11 | Aggregate-language growth over the report surface, the two gradebook strings, the credit-rule instructor half, the string convention, and the collector's symlink gap. | |
 | 13 | [The Care landing docstring](E4-13-care-landing-docstring.md) | `e4/care-landing-docstring` | heavy | none | The carried one-liner: the stale docstring in `frontend/src/routes/care/` says what the landing actually is. | |
 | 14 | [The nonce purge can run](E4-14-nonce-purge-grant.md) | `e4/nonce-purge-grant` | heavy | none | The carried grant defect: `pulse_app` gets what a `DELETE ... WHERE` needs, the purge is driven to completion, and the privilege record says why `SELECT` was withheld. | #185 as 22598ea, 2026-09-06 |
 | 15 | [E4 exit](E4-15-e4-exit.md) | `e4/e4-exit` | heavy | all | §14.3's exit clause driven against a seeded diverging two-stream story; boundary reviews; the de-anonymization statement verified; `../e5/carried-from-e4.md`. | |
 | 16 | [The frontend test runner](E4-16-frontend-test-runner.md) | `e4/frontend-test-runner` | heavy | none | The carried E2 deferral, whose revisit trigger this epic trips: a component-test runner, one proof test, and the CI gate that makes red mean stop. | #184 as 38bbdcc, 2026-09-06 |
 | 17 | [The week eyebrow says how long the course runs](E4-17-eyebrow-course-length.md) | `e4/eyebrow-course-length` | heavy | none | The carried E2 entry, unblocked by the owner's ruling of 2026-09-07: `OpenSurvey` gains the section's week count, `survey_read` reads it off the section row, and the eyebrow renders `COURSE WK 04 / 12, TERM WK 07`. | #205 as 8360f3a, 2026-09-07 |
-| 18 | [The instructor's section list](E4-18-instructor-section-list.md) | `e4/instructor-sections` | heavy | 07 | The contract gap found starting 11, ruled 2026-09-07 (decision 11): `GET /instructor/sections` answers the session's own taught sections — id, code, governed label — the student pattern applied to the instructor surface. | |
+| 18 | [The instructor's section list](E4-18-instructor-section-list.md) | `e4/instructor-sections` | heavy | 07 | The contract gap found starting 11, ruled 2026-09-07 (decision 11): `GET /instructor/sections` answers the session's own taught sections — id, code, governed label — the student pattern applied to the instructor surface. | #207 as 932b231, 2026-09-08 |
+| 19 | [The trend points carry both week axes](E4-19-trend-term-weeks.md) | `e4/trend-term-weeks` | heavy | 07 | The contract gap found reconciling 08 with 07's schema, ruled 2026-09-07 (decision 12): `TrendPoint` gains `term_week` so the chart's §2.2 sub-label has a wire source, populated from the window rows the report read already holds. | |
 
 ## Dependency graph
 
 ```
 01 ──────────────────────────┐
 02 ─┬─ 04 ─┬─ 07 ─┬─ 18 ─┐   │
-03 ─┼──────┘      │      │   │
+03 ─┼──────┘      ├─ 19 ─┤   │
 05 ─┴─ 06         ├──────┴── 11 ── 12 ── 15
 16 ─┬─ 08 ────────┤
     ├─ 09 ────────┤
@@ -208,7 +222,8 @@ E4-11 renders — the page tolerates an absent summary row, so 06 is not on
 inherited deadline, not a code dependency. 16's edges into 08, 09 and 10 are
 merge order only — they build in parallel and their PRs wait. 12 reads the
 strings 08–11 ship. 18 needs 07 and feeds 11 — the section-discovery route
-of decision 11, added 2026-09-07.)
+of decision 11, added 2026-09-07. 19 needs 07 and feeds 11 the same way —
+the trend axis pair of decision 12, added 2026-09-07.)
 
 **Ten tickets cut on day one:** 01, 02, 03, 05, 13, 14 and 16 are
 free-standing, and 08, 09 and 10 build beside them against fixtures, merging
@@ -238,7 +253,7 @@ One report, one section, one course week:
   "rates": {"response_rate": 0.62, "validity_rate": 0.91, "responses": 13, "enrolled": 21},
   "streams": {
     "instructor": {
-      "trend": [{"course_week": 1, "mean": 4.1}],
+      "trend": [{"course_week": 1, "term_week": 4, "mean": 4.1}],
       "distribution": {"1": 0, "2": 1, "3": 4, "4": 5, "5": 3},
       "summary": {"text": "…", "response_count": 13, "held_note": null},
       "comments": [{"text": "…", "status": "published"}]

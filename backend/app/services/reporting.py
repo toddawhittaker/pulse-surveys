@@ -1010,6 +1010,7 @@ def _payload(
             trend=[
                 schema.TrendPoint(
                     course_week=other.course_week,
+                    term_week=other.term_week,
                     mean=_mean_of(ratings.get((other.week_id, token), {})),
                 )
                 for other in published
