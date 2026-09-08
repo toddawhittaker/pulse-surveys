@@ -19,9 +19,21 @@ import '@fontsource/schibsted-grotesk/latin-500.css';
 import '@fontsource/spline-sans-mono/latin-400.css';
 import '@fontsource/spline-sans-mono/latin-500.css';
 
+// **The application's stylesheet is imported before the router, and the order is
+// load-bearing.** It is the file that pulls in `design/tokens.css` and Tailwind,
+// and Tailwind's `@layer` names take their precedence from the order they first
+// appear in the emitted bundle — `theme`, `base`, `components`, `utilities`.
+// Vite emits stylesheets in module-graph order, so importing the router first
+// put the report surface's component stylesheets ahead of this one: the
+// application's own `@layer components` block was then declared *before*
+// Tailwind's `base`, which made preflight win over it, and every heading on the
+// student survey fell back to body size. Measured on the built bundle while
+// E4-11 was wiring the report in, which is the ticket that first imported a
+// component stylesheet from the route graph.
+import './styles.css';
+
 import { captureSessionFromFragment } from './lib/session';
 import { router } from './router';
-import './styles.css';
 
 /**
  * The entry point — SPEC §13's `main.tsx`.

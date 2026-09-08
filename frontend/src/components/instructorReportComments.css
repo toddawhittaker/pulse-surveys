@@ -46,6 +46,18 @@
   color: var(--spruce-60);
 }
 
+/* Where the AI panel would have been, on a week no summary was written for
+ * (E4-11). A quiet line in the flow rather than an empty inset panel: the panel
+ * is the brief's provenance treatment for generated prose, and an empty one
+ * would be that treatment applied to nothing. It sits above the cards, in the
+ * panel's place, so the group's order is the same whether a summary arrived. */
+.pulse-comment-group__absent-summary {
+  margin: 0;
+  font-size: var(--text-1);
+  line-height: 1.55;
+  color: var(--spruce-60);
+}
+
 .pulse-comment-group__cards {
   display: flex;
   flex-direction: column;

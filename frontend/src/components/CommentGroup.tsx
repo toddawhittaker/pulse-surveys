@@ -26,6 +26,16 @@ import { copy } from './instructorReportCommentCopy';
  * about the class, and an instructor who is told the wrong one draws the wrong
  * conclusion about their students.
  *
+ * **A group with no summary is a fourth state, and it is honest rather than
+ * empty** (E4-11). `summary` is nullable because `StreamReport.summary` is: a
+ * week the Monday job has not run over — or one it failed on — has no row, and
+ * §5.1 makes the summary the thing a group is led by. So the panel is replaced
+ * by one line saying no summary was written, and everything else about the group
+ * renders exactly as it would have. An empty `AiPanel` was the alternative and
+ * is worse: the brief's chalk inset with its mono "AI" label is a claim that
+ * generated prose is inside it, and a reader meeting an empty one concludes the
+ * model had nothing to say about their week rather than that nothing ran.
+ *
  * **Suppression is fail-closed, and it covers the summary's held note as well
  * as the cards.** When the payload says the week is suppressed, no card renders
  * — whatever the comment array happens to hold — and the summary goes out
@@ -52,11 +62,12 @@ export function CommentGroup({
   smallN,
 }: {
   readonly stream: 'instructor' | 'course';
+  /** The stream's generated summary, or `null` for a week none was written for. */
   readonly summary: {
     readonly text: string;
     readonly responseCount: number;
     readonly heldNote: string | null;
-  };
+  } | null;
   readonly comments: readonly ReportComment[];
   /** Present only on a week below the threshold, per the sketch's `small_n` member. */
   readonly smallN?: {
@@ -77,23 +88,30 @@ export function CommentGroup({
             : 'instructor_report_comments.group.course_heading',
         )}
       </h3>
-      <AiPanel
-        heading={copy(
-          instructorStream
-            ? 'instructor_report_comments.ai.instructor_heading'
-            : 'instructor_report_comments.ai.course_heading',
-        )}
-        text={summary.text}
-        responseCount={summary.responseCount}
-        // The held note names a flag type, and §5.2 hides flagged comments from
-        // the instructor entirely below the threshold — "no chip, no count, no
-        // flag-type hint" — while §5.1 permits the note only above small-N. So
-        // a suppressed week's summary goes out without it. This is the same
-        // fail-closed move the card list makes below, applied to the one other
-        // thing on this panel that could carry a hint: it obeys the suppression
-        // the payload already declared, and decides no threshold of its own.
-        heldNote={smallN === undefined ? summary.heldNote : null}
-      />
+      {summary === null ? (
+        <p className="pulse-comment-group__absent-summary">
+          {copy('instructor_report_comments.ai.absent')}
+        </p>
+      ) : (
+        <AiPanel
+          heading={copy(
+            instructorStream
+              ? 'instructor_report_comments.ai.instructor_heading'
+              : 'instructor_report_comments.ai.course_heading',
+          )}
+          text={summary.text}
+          responseCount={summary.responseCount}
+          // The held note names a flag type, and §5.2 hides flagged comments
+          // from the instructor entirely below the threshold — "no chip, no
+          // count, no flag-type hint" — while §5.1 permits the note only above
+          // small-N. So a suppressed week's summary goes out without it. This is
+          // the same fail-closed move the card list makes below, applied to the
+          // one other thing on this panel that could carry a hint: it obeys the
+          // suppression the payload already declared, and decides no threshold
+          // of its own.
+          heldNote={smallN === undefined ? summary.heldNote : null}
+        />
+      )}
       {smallN === undefined ? (
         <GroupComments comments={comments} />
       ) : smallN.withNotice ? (

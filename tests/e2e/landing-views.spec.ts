@@ -1,5 +1,6 @@
 // E1-04 — the five role routes, served by the application at their own
-// addresses. Four are still empty landing views; the fifth is E2-10's survey.
+// addresses. Three are still empty landing views; the other two are E2-10's
+// survey and E4-11's Monday report.
 //
 // What it proves: each of the five role routes under /app is served by the tool,
 // renders the view that route names, and renders it with the governed copy — the
@@ -8,9 +9,12 @@
 // asserts each landing view renders its role label from a served route (not a
 // fixture string)."
 //
-// **The student row's sentence changed with E2-10 and its security review**, and
-// the reason is written where that row is. Everything else about these five
-// cases is E1-04's and is untouched.
+// **Two rows' sentences have changed since**, and the reason is written where
+// each row is: the student's with E2-10 and its security review, and the
+// instructor's with E4-11, which replaced that landing with the Monday report.
+// Both changed the same way and for the same reason — a page that fetches
+// cannot say what is due when the fetch was refused. Everything else about these
+// five cases is E1-04's and is untouched.
 //
 // Why this is the instrument for that criterion and a unit test is not: the copy
 // has to come out of the built application, through the app factory's static
@@ -79,10 +83,31 @@ const VIEWS = [
       'This page is not signed in, so it cannot say what is due. Open Pulse Surveys from inside your course in the LMS, and this week’s questions will be here.',
   },
   {
+    // **The instructor route is no longer an empty landing view either** —
+    // E4-11 replaced it with SPEC §5.1's Monday report and the section menu in
+    // front of it — so this case's sentence changed with it, exactly as the
+    // student's did in E2-10, and for the same reason.
+    //
+    // The old assertion read "There are no responses to report yet. Reports
+    // appear here once a week has closed." That sentence was true of a route
+    // that fetched nothing. This case navigates directly, carrying **no
+    // session**; the page asks `GET /instructor/sections`, which answers 401,
+    // and telling an instructor that her sections have nothing to report is
+    // this page answering a question it had just been refused. A launch session
+    // lives an hour and a Monday report is very often opened from a tab left
+    // over from earlier in the day, so the ordinary way to meet this state is a
+    // session that ran out — and the honest thing to say then is which page can
+    // answer, which is what the new sentence says.
+    //
+    // The heading is unchanged and is still E1-04's governed wording. The
+    // testid is unchanged, because nine other specs address it to say an
+    // instructor landed — and it is on *both* instructor routes now, since an
+    // instructor who teaches one section is sent straight to her report.
     role: 'instructor',
     testid: 'pulse-landing-instructor',
     heading: 'Your section report',
-    empty: 'There are no responses to report yet. Reports appear here once a week has closed.',
+    empty:
+      'This page is not signed in, so it cannot show a report. Open Pulse Surveys from inside your course in the LMS, and this section’s week will be here.',
   },
   {
     role: 'leadership',
