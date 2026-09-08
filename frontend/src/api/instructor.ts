@@ -215,8 +215,8 @@ export interface InstructorReportView {
  * to answer for this section or this week, and it carries the server's own
  * sentence: `app.api.instructor` writes two of them, and a second wording here
  * would be a second statement of the same refusal for the two to drift apart in.
- * Neither is in `app.copy`, so neither is collected — E4-07's recorded residue
- * (ADR 0155). `unavailable` is
+ * Both are entries in `app.copy.instructor_report` since E4-12, so both are
+ * collected and swept where they are written. `unavailable` is
  * every other failure, including a network one, where there may be no sentence
  * at all and the page falls back to its own.
  *

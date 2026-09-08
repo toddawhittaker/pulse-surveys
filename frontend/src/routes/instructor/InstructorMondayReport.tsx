@@ -276,8 +276,8 @@ function ReportBody({
       <div data-testid={INSTRUCTOR_REPORT_ERROR_TESTID}>
         {/* The server's own sentence where there is one — `app.api.instructor`
             writes two, each chosen for what a reader may learn from a refusal,
-            so this page shows what it was sent rather than deciding. Neither is
-            in `app.copy`, which is E4-07's recorded residue (ADR 0155). This
+            so this page shows what it was sent rather than deciding. Both are
+            entries in `app.copy.instructor_report` and are swept there. This
             page's own line stands only where there was no answer to carry a
             sentence: a network failure, or a gateway in front of the tool. */}
         <StateNotice

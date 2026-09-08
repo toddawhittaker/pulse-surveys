@@ -24,12 +24,16 @@ tells nobody anything about identity?
 
 ## Decision
 
-**The four report prefixes are one surface.** `instructor_report_page`,
+**The report's five prefixes are one surface.** `instructor_report_page`,
 `instructor_report_trend`, `instructor_report_stats` and
-`instructor_report_comments` map to `report`. Four files exist because four
-tickets built four regions; a reader meets one screen. Item 5 counts per
-surface, so four surfaces would demand four confidentiality sentences on one
-page — the opposite of what the item says.
+`instructor_report_comments` from the frontend, and `instructor_report` from the
+registry, all map to `report`. Four frontend files exist because four tickets
+built four regions; a reader meets one screen. Item 5 counts per surface, so
+five surfaces would demand five confidentiality sentences on one page — the
+opposite of what the item says. The fifth prefix is the report API's two
+refusals, which are the screen's words as much as the other four are; the survey
+is the precedent, with `student_survey` from the frontend and `submit` and
+`student` from the registry siblings on one surface.
 
 **The report's line is `instructor_report_page.comments_note`**, the standing
 sentence under the comment groups saying what an instructor is and is not shown
@@ -83,7 +87,7 @@ be a second copy of the product's promise that no count could see.
 
 ## Consequences
 
-The inventory holds four surfaces and nine prefixes, and every collected string
+The inventory holds four surfaces and ten prefixes, and every collected string
 is swept for item 4's vocabulary — the report's included, which is what E4-12
 existed to achieve. The report's copy modules had to move into
 `frontend/src/copy/` for that, and moving them cost one thing the ticket did not
