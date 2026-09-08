@@ -19,6 +19,16 @@ import { copy, fillCopy } from '../copy/studentSurvey';
  * because the instant is absolute and the person reading it is the one who has
  * to be there before it.
  *
+ * **`closesAt` is optional, which is the variant rule rather than a
+ * convenience** (SPEC §7.6: one component per primitive, with variants rather
+ * than copies). The student's screen shows an open window and has a close to
+ * state; the instructor's Monday report shows a week whose window has already
+ * shut, and "closes Sun 11:59 PM" printed over a closed week is a sentence about
+ * a deadline that has passed. So the span is not rendered at all when there is
+ * no instant, rather than rendered empty or filled with a dash — E4-11 is the
+ * ticket that needed the variant, and the student surface passes the instant
+ * exactly as before.
+ *
  * **Each axis is named in words** — "COURSE WK 04 / 12, TERM WK 07" — which is
  * the owner's ruling of 2026-09-03 (FIX-01 item 1), made after "TERM 03" had to
  * be explained to them. Both labels are governed copy filled with the API's
@@ -45,7 +55,8 @@ export function WeekEyebrow({
   readonly courseWeek: number;
   readonly termWeek: number;
   readonly lengthWeeks: number;
-  readonly closesAt: string;
+  /** When this week's window shuts. Omitted on a surface whose week has closed. */
+  readonly closesAt?: string;
 }): JSX.Element {
   return (
     <p className="pulse-eyebrow">
@@ -58,9 +69,11 @@ export function WeekEyebrow({
       <span className="pulse-eyebrow-quiet">
         {fillCopy('student_survey.term_week_eyebrow', { week: padWeek(termWeek) })}
       </span>
-      <span className="pulse-eyebrow-quiet">
-        {copy('student_survey.closes_label')} {formatClosingInstant(closesAt)}
-      </span>
+      {closesAt === undefined ? null : (
+        <span className="pulse-eyebrow-quiet">
+          {copy('student_survey.closes_label')} {formatClosingInstant(closesAt)}
+        </span>
+      )}
     </p>
   );
 }
