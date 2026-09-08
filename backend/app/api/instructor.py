@@ -75,6 +75,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_instructor
 from app.config import Settings
+from app.copy.instructor_report import SECTION_UNAVAILABLE as SECTION_UNAVAILABLE_COPY
+from app.copy.instructor_report import WEEK_UNAVAILABLE as WEEK_UNAVAILABLE_COPY
 from app.db import get_session
 from app.schemas.report import InstructorReport, PublishedWeeks, TaughtSections
 from app.services.reporting import (
@@ -104,8 +106,15 @@ SECTIONS_PATH = "/instructor/sections"
 # rather than two: see this module's docstring. It names nothing — no section, no
 # course, no reason — because a body that echoed the id it was handed could not be
 # identical to the body for a different id, and the pair is the point.
+#
+# **Both sentences are copy entries since E4-12**, in `app.copy.instructor_report`
+# and read from there, so the inventory SPEC §4.1 items 4 and 5 are asserted over
+# collects them. They were literals here until the report became a governed
+# surface (ADR 0158), which is the state `docs/tickets/e4/deferred.md` recorded.
+# The constants keep their names because everything that serves and asserts these
+# refusals reaches them here.
 SECTION_UNAVAILABLE_STATUS = 404
-SECTION_UNAVAILABLE = "There is no report here for you to read."
+SECTION_UNAVAILABLE = SECTION_UNAVAILABLE_COPY.text
 
 # And the week there is no published report for — whether its window is still open
 # or the section never runs it. One sentence for both, for the same no-oracle reason
@@ -113,7 +122,7 @@ SECTION_UNAVAILABLE = "There is no report here for you to read."
 # about the section's calendar. A separate sentence from the refusal above because it
 # is a different fact and the instructor can act on it, and because it is reached only
 # after the section has already been established as hers.
-COURSE_WEEK_UNAVAILABLE = "There is no report for that week of this section."
+COURSE_WEEK_UNAVAILABLE = WEEK_UNAVAILABLE_COPY.text
 
 NO_STORE = "no-store"
 
