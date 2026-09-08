@@ -41,6 +41,13 @@ all asserted rather than assumed:
     carrying no credential at all — are asserted here as refusals, each with the
     control that the session refused is a session that reads what it may.
 
+**One test here was written after the code, and it says so.** The mutation battery
+of 2026-09-07 found that neutering the *role* condition in the taught-sections
+query leaves this whole suite green, because the schema permits no section-grain
+assignment of any other role — so the last test in this module pins that
+constraint rather than pretending to kill the mutation. Its docstring carries the
+whole reasoning, including what it does not cover.
+
 **Marked `invariant` at the module level**, which puts it in the isolated §4.1
 pass and satisfies
 `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`.
@@ -66,11 +73,32 @@ from fixtures.instructor_sections import (
     section_ids_in,
     surface_of,
 )
-from fixtures.report_api import TAUGHT_COHORT, UNTAUGHT_COHORT
+from fixtures.report_api import INSTRUCTOR_ROLE, TAUGHT_COHORT, UNTAUGHT_COHORT
 from fixtures.student_read import STUDENT_READ_PATH
-from fixtures.survey_windows import SECTION_CODE_COLUMN, SECTION_TABLE
+from fixtures.supervision import ROLE_SCOPE_GRAIN
+from fixtures.survey_windows import SECTION_CODE_COLUMN, SECTION_TABLE, SEEDED_COHORTS
 
 pytestmark = [pytest.mark.integration, pytest.mark.invariant]
+
+# SPEC §2.1's containment level an instructor is scoped to, and the cohort of the
+# one section this module seeds for itself.
+SECTION_GRAIN = "section"
+A_FOURTH_COHORT = "E"
+
+# Every role SPEC §2.1 attaches somewhere other than a section, read off the
+# fixture's own map rather than listed here: a role added to that map is covered
+# by the test below the day it is added, and a list of my own would be a closed
+# set defeated by the next role anybody defines.
+ROLES_WITH_ANOTHER_GRAIN = tuple(
+    role for role, grain in ROLE_SCOPE_GRAIN.items() if grain != SECTION_GRAIN
+)
+
+# The measured constraint that makes the section-grain set an instructor set, named
+# so a reader of a failure can find it: on the dev database at migration head
+# `c7f41a9d2b60` it is `num_nonnulls(institution_id, college_id, department_id,
+# course_id, section_id) = 1` beside a `CASE role WHEN … END` demanding each role's
+# own column.
+GRAIN_CONSTRAINT = "ck_role_assignment_scope_node_matches_the_role"
 
 
 def every_way_of_naming(world: Any) -> set[str]:
@@ -260,4 +288,105 @@ def test_a_request_carrying_no_session_is_refused_the_section_list(
     assert not named, (
         f"The refusal handed to an anonymous request names {named}. Surface begins "
         f"{surface[:400]!r}."
+    )
+
+
+def test_no_role_but_the_instructors_can_be_scoped_to_a_section(
+    instructor_sections: InstructorSections, committed_rows: Any
+) -> None:
+    """The layer that makes the list's role condition unobservable — written after the code.
+
+    **This test does not kill the mutation it exists because of, and saying so is
+    the point.** The mutation is the *role* condition neutered in the taught-
+    sections query in `app.services.authz` — the set-reader this route uses —
+    leaving the person and the section grain. The mutation battery of 2026-09-07
+    found it survives the whole E4-18 suite, and it survives it because in every
+    world this suite can seed the answer is the same set:
+    `ck_role_assignment_scope_node_matches_the_role` on `role_assignment` permits
+    **exactly one** scope column per row and demands, per role, that it be that
+    role's own — so the only section-grain assignment anybody can hold is an
+    instructor's, and "any role at section grain" and "`INSTRUCTOR` at section
+    grain" are one set by construction of the schema.
+
+    The mutant is therefore equivalent *today*, and the query's role condition is a
+    second defence standing behind that constraint. What is pinned here is the
+    first defence, for the person the section list is actually about. It is green
+    on the shipped tree and it stays green under the neutered role condition; the
+    day somebody relaxes the grain rule — a second section-grain role, a widened
+    `CASE`, a dropped `num_nonnulls` — this goes red, and that is precisely the day
+    the list's role condition starts to be observable and owes a behavioural test
+    of its own. A red here is that notice, not a defect in this route.
+
+    Why it matters at all, in the ticket's own terms: the per-section predicate the
+    report routes use *does* check the role, so a section-grain grant of another
+    role would put a section in the list that the report refuses — the
+    list-and-report divergence E4-18 says must be impossible.
+
+    **The control comes first** (`docs/MISTAKES.md` entry 35): an `INSTRUCTOR` row
+    at section grain, for this same person and this same section, has to be
+    *stored*. Without it a refusal proves nothing — a writer that refused every row
+    would satisfy the loop below — and it is also the strongest possible answer to
+    "can this schema even spell a section-grain assignment", which is the question
+    `SupervisionGraph.can_express` is asked in E0-09's own grain tests.
+
+    **Every role with another grain is tried, not one.** The set comes from
+    `ROLE_SCOPE_GRAIN`, so this closes the class rather than one member of it, and
+    a role added to that map arrives here with it.
+    """
+    assert A_FOURTH_COHORT in SEEDED_COHORTS, (
+        f"Cohort {A_FOURTH_COHORT!r} is not one of `SEEDED_COHORTS`' start letters "
+        f"({sorted(SEEDED_COHORTS)}), so this test cannot seed the section it writes its rows "
+        "over. `A_FOURTH_COHORT` at the head of this module is the one line that changes."
+    )
+
+    graph = committed_rows.graph
+    world = instructor_sections.door.rows.world
+    key = world.key_of(SECTION_TABLE)
+    a_fourth_section = world.section(A_FOURTH_COHORT)[key]
+    committed_rows.commit()
+
+    assert ROLES_WITH_ANOTHER_GRAIN, (
+        f"`ROLE_SCOPE_GRAIN` gives every role it names the `{SECTION_GRAIN}` grain, so the loop "
+        "below tries nothing and this test asserts nothing. SPEC §2.1 puts a lead on a course, a "
+        "chair on a department and Care on the institution."
+    )
+
+    stored: dict[str, Any] = {}
+
+    def write_the_instructors_row() -> None:
+        stored["row"] = graph.assign(
+            INSTRUCTOR_ROLE, scope=a_fourth_section, person=instructor_sections.her_person_id
+        )
+
+    control = graph.refusal(write_the_instructors_row)
+    assert control is None and stored.get("row") is not None, (
+        f"An `{INSTRUCTOR_ROLE}` assignment over a section, for the person whose section list this "
+        f"module is about, was refused: {control}. That row is the ordinary one this whole ticket "
+        "rests on, so until it is stored the refusals below say only that nothing can be written "
+        "here at all (`docs/MISTAKES.md` entry 35)."
+    )
+
+    stored_anyway = []
+    for role in ROLES_WITH_ANOTHER_GRAIN:
+        refused = graph.refusal(
+            lambda role=role: graph.assign(
+                role,
+                scope_kind=SECTION_GRAIN,
+                scope=a_fourth_section,
+                person=instructor_sections.her_person_id,
+            )
+        )
+        if refused is None:
+            stored_anyway.append(role)
+
+    assert not stored_anyway, (
+        f"These roles were stored scoped to a section: {stored_anyway}. SPEC §2.1 attaches each of "
+        f"them somewhere else — {dict(ROLE_SCOPE_GRAIN)} — and `{GRAIN_CONSTRAINT}` is what "
+        "refuses the pairing.\n\n"
+        "This is not a defect in E4-18's route, and the repair is not here. It is notice that the "
+        "section-grain set has stopped being an instructor set: the taught-sections query's role "
+        "condition, which nothing can observe while this constraint holds, is now the only thing "
+        "keeping a section out of one instructor's list that the report route would refuse her. "
+        "It needs a behavioural test of its own, planting exactly the row that has just become "
+        "storable and requiring the list not to name its section."
     )
