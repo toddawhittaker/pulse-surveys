@@ -100,6 +100,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import DEVELOPMENT_ENVIRONMENT, Settings, url_host
+from app.copy.gradebook import LINE_ITEM_LABEL
 from app.lti.platforms import profile_for
 from app.lti.platforms.base import PlatformProfile
 from app.lti.registration import NoSigningKeyError, OrmToolConf
@@ -167,9 +168,13 @@ SCORE_MEDIA_TYPE: Final[str] = "application/vnd.ims.lis.v1.score+json"
 # renaming a column is an ordinary thing to do and it must not produce a second
 # one on the next run; `resourceId` is the member AGS 2.0 provides for a tool's
 # own key, it is filterable on the container, and nothing in an LMS invites a
-# person to edit it. The label is what a person reads in their own gradebook.
+# person to edit it. The label is what a person reads in their own gradebook —
+# so since E4-12 the label is a copy entry rather than a literal here, collected
+# by the inventory SPEC §4.1 items 4 and 5 are asserted over. The `resourceId`
+# beside it stays a literal: nobody reads it, and a key an inventory governs is
+# a key somebody would be entitled to reword.
 PULSE_RESOURCE_ID: Final[str] = "pulse-participation"
-PULSE_LABEL: Final[str] = "Pulse Participation"
+PULSE_LABEL: Final[str] = LINE_ITEM_LABEL.text
 
 # What a "Pulse Participation" column this tool creates is scored out of. SPEC
 # §3.4 posts a percentage, so a hundred is the denominator that makes the number

@@ -485,7 +485,7 @@ const COMPONENT_SOURCES = [
   'PulseTrendChart.tsx',
   'TrendPair.tsx',
   'WeekNav.tsx',
-  'instructorReportTrendCopy.ts',
+  '../copy/instructorReportTrendCopy.ts',
 ] as const;
 
 /**
@@ -593,7 +593,7 @@ const FORBIDDEN: readonly ForbiddenReach[] = [
  */
 const ALLOWED = [
   ' * file, and no `Date` is constructed or read anywhere in it — which',
-  "import { copy, fillCopy } from './instructorReportTrendCopy';",
+  "import { copy, fillCopy } from '../copy/instructorReportTrendCopy';",
   '  const weeks = [...publishedWeeks].sort((left, right) => left - right);',
 ] as const;
 

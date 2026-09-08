@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 
-import { copy } from './instructorReportTrendCopy';
+import { copy } from '../copy/instructorReportTrendCopy';
 import './instructorReportTrend.css';
 
 /**

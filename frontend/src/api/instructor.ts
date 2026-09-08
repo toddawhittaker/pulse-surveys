@@ -213,8 +213,10 @@ export interface InstructorReportView {
  * — `student.ts` records why collapsing that into an empty state is the quiet
  * mistake, and the same argument holds here. `not-found` is the server refusing
  * to answer for this section or this week, and it carries the server's own
- * sentence: `app.api.instructor` writes two of them, governed copy, and a second
- * wording here would be a second statement of a §4.1 string. `unavailable` is
+ * sentence: `app.api.instructor` writes two of them, and a second wording here
+ * would be a second statement of the same refusal for the two to drift apart in.
+ * Both are entries in `app.copy.instructor_report` since E4-12, so both are
+ * collected and swept where they are written. `unavailable` is
  * every other failure, including a network one, where there may be no sentence
  * at all and the page falls back to its own.
  *

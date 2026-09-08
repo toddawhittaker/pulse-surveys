@@ -126,6 +126,21 @@ says of a ledger line that started naming a question. Lowering the gate is the
 same event: this record's floors are ADR 0152's legs, and weakening one weakens
 both records at once.
 
+**Re-read 2026-09-08, on E4-12's credit note.** That clause fired: the note E4-12
+first shipped in the report's Participation region said a comment judged too
+brief or nonsense "costs that student one item of their participation credit",
+which is a stated narrowing of the completion-pattern channel rather than an
+inferred one — the reader is the one this record is written about, holding the
+week's validity readout on one side and the per-week ledger on the other. The
+re-read's conclusion is that the channel itself is not this note's: the readout
+and the ledger both pre-date it, and their coexistence is the disclosure ADR 0125
+accepted. What the note owed was to stop sharpening it. Reworded, it names
+participation credit as a count separate from the validity rate and says that an
+unanswered item and a comment that did not count leave an item incomplete alike —
+so a ledger deficit no longer maps to a refused comment, and a reader who
+followed the note's arithmetic learns that the two are indistinguishable there.
+The residual is accepted on that ground and the suppression above is unchanged.
+
 ## Alternatives rejected
 
 **Keep the week and argue the ledger is acceptable**, which is criterion 5's other

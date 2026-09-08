@@ -22,7 +22,7 @@ import { TrendPair } from '../../components/TrendPair';
 import type { TrendPoint } from '../../components/PulseTrendChart';
 import { WeekEyebrow } from '../../components/WeekEyebrow';
 import { WeekNav } from '../../components/WeekNav';
-import { copy } from '../../components/instructorReportPageCopy';
+import { copy } from '../../copy/instructorReportPageCopy';
 import '../../components/instructorReportPage.css';
 
 /**
@@ -38,9 +38,10 @@ import '../../components/instructorReportPage.css';
  * 7's comparison chokepoint and §5.2's concealment all happen before this
  * request answers: a small-N week arrives with no comments in it, a comparison
  * figure arrives suppressed, and this page renders what it was given. The one
- * confidentiality decision that is genuinely this file's is §4.1 item 5's —
- * which of the two comment groups carries the confidentiality notice — and it is
- * made once, out loud, below.
+ * confidentiality decision that is genuinely this file's is which of the two
+ * comment groups carries the small-N notice, and it is made once, out loud,
+ * below. It is not §4.1 item 5's line: this surface's line is
+ * `instructor_report_page.comments_note` (ADR 0158).
  *
  * **No week arithmetic anywhere, and that is criterion 3.** Which weeks a reader
  * may page to is `published_weeks` from the API, handed straight to `WeekNav`;
@@ -274,10 +275,11 @@ function ReportBody({
     return (
       <div data-testid={INSTRUCTOR_REPORT_ERROR_TESTID}>
         {/* The server's own sentence where there is one — `app.api.instructor`
-            writes two, and both are governed copy chosen for what a reader may
-            learn from a refusal. This page's own line stands only where there
-            was no answer to carry a sentence: a network failure, or a gateway
-            in front of the tool. */}
+            writes two, each chosen for what a reader may learn from a refusal,
+            so this page shows what it was sent rather than deciding. Both are
+            entries in `app.copy.instructor_report` and are swept there. This
+            page's own line stands only where there was no answer to carry a
+            sentence: a network failure, or a gateway in front of the tool. */}
         <StateNotice
           variant="flat"
           body={load.detail ?? copy('instructor_report_page.unavailable')}
@@ -365,16 +367,34 @@ function ReportWeek({ report }: { readonly report: InstructorReportView }): JSX.
           }
         />
       )}
+      {/* The credit rule, in every week and not only the weeks with a rate to
+          read it against: it explains SPEC §3.3's validity and §3.4's items
+          rather than this week's figures, and a week nobody answered is a week
+          an instructor most wants the rule for. It renders no score — v1 has no
+          participation-score view anywhere — and E8 owes the student half. */}
+      <p className="pulse-report-note">
+        {copy('instructor_report_page.participation_credit_note')}
+      </p>
 
       <h2 className="pulse-report-heading">{copy('instructor_report_page.comments_heading')}</h2>
       <p className="pulse-report-note">{copy('instructor_report_page.comments_note')}</p>
-      {/* **SPEC §4.1 item 5's decision, and it is the page's alone.**
-          Confidentiality copy appears exactly once per surface; a suppressed
-          week suppresses both groups, so the first of them carries the notice
-          and the second does not. The instructor group is first everywhere in
-          this product (`design/Usage Rules.md` §1), so it is the one that
-          carries it. `CommentGroup` requires the field rather than defaulting
-          it, which is what makes this a choice made out loud. */}
+      {/* **One small-N notice for the week, and it is the page's decision.**
+          SPEC §4's threshold suppresses a week and not a group, so both groups
+          go quiet together and there is one fact to state: the first of them
+          carries the notice and the second does not, because a page saying it
+          twice would be reporting two suppressions where §5.2 has one. The
+          instructor group is first everywhere in this product
+          (`design/Usage Rules.md` §1), so it is the one that carries it.
+          `CommentGroup` requires the field rather than defaulting it, which is
+          what makes this a choice made out loud.
+
+          **This is not SPEC §4.1 item 5's line.** Item 5 counts confidentiality
+          copy once per surface, and this surface's one line is
+          `instructor_report_page.comments_note` under the heading above: a
+          standing promise about what an instructor is shown, where the small-N
+          notice is a statement about how many people answered this week. The
+          inventory recognises the first and deliberately not the second, so
+          item 5 cannot pass or fail by the response count (ADR 0158). */}
       <CommentGroup
         stream="instructor"
         summary={summaryOf(streams.instructor.summary)}

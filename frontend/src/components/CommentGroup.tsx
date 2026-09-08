@@ -6,7 +6,7 @@ import { CommentCard } from './CommentCard';
 import type { ReportComment } from './CommentCard';
 import { SmallNNotice } from './SmallNNotice';
 import './instructorReportComments.css';
-import { copy } from './instructorReportCommentCopy';
+import { copy } from '../copy/instructorReportCommentCopy';
 
 /**
  * One comment stream as SPEC §5.1 lays it out: comments "grouped under 'About

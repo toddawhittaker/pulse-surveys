@@ -1,41 +1,17 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 20**
+**Caught: 21**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*22 instances recorded; the 5 most recent are below — the E3-04 one before the
-"What happened" section, and the E4-01, E4-05, E4-04 and E4-06 ones after it, each
-left where this file has always kept its instances. Five is two past what this file
-keeps, so the trim of the E3-04 and E4-01 paragraphs is owed to whoever touches it
-next. The other 17 are in this file's git
-history and in the pull requests they cite. The overdue trim was taken on
-2026-09-06, and it took the E2-16 and E2-05 pair together as the note asked. The
-E0-18 PR 2 paragraph stays where it sits, beside the consequence it illustrates:
-it carries a rule sentence of its own — that any instruction to remove or rename
-a thing is a claim nothing asserts on it — rather than only an instance.*
-
-*(**2026-09-04, E3-04 (`e3/ags-client-and-mock-enforcement`), caught before
-anything was written.** The ticket turns on credential enforcement across the
-mock's whole AGS surface, which is the largest instance of this shape the
-repository has met: every line-item, score and result call in two merged E0-15
-suites is made without a credential and every one of them would answer 401, with
-the repair on the read-only side of the wall. The ticket's own known-traps
-section names the entry, so the sweep was the first thing done. Nearly all of the
-calls funnel through `MockPlatform`, so the repair is one fixture: an
-`ags_token(scope)` cache and an `ags_get`/`ags_post` pair that attach the scope
-each route takes. **The half a fixture-only repair would have missed is the nine
-direct call sites** — `mock_platform.service_get(...)` written out in
-`test_mock_lms_paging_and_service_urls.py` and
-`test_mock_lms_ags_line_items_and_scores.py`, found by grepping for the method
-rather than for the helpers — and one of them is worse than a red: the naive
-`/scores` concatenation test asserts `400 <= status < 500`, so a 401 would have
-kept it **green while measuring the credential instead of the URL**, which is
-entry 3 arriving through this one. Attaching tokens is inert until the
-enforcement lands, so the whole repair rides the tests-first commit. Counted as a
-catch: without it the implementer's first run would have been two walls of red
-E0-15 tests, one of them silently passing for the wrong reason, on modules they
-may not edit.)*
+*24 instances recorded; the 3 most recent are below (E4-06, E4-18, E4-17),
+each after the "What happened" section. The overdue trim the previous header
+owed was taken on 2026-09-08 with the E4-17 bump, removing the E3-04, E4-01,
+E4-05 and E4-04 paragraphs; they are in this file's git history and in the
+pull requests they cite. The E0-18 PR 2 paragraph stays where it sits, beside
+the consequence it illustrates: it carries a rule sentence of its own — that
+any instruction to remove or rename a thing is a claim nothing asserts on it —
+rather than only an instance.*
 
 **What happened.** Twice in E0-11, from two unrelated mechanisms, with the same
 consequence: the ticket cannot be finished green and the implementer cannot fix
@@ -142,56 +118,6 @@ agreement.
 
 ---
 
-**Instance, 2026-09-06 (E4-01, caught before any green).** The settled reveal
-design needed the Care session to read `answer` and `response`, and the
-privilege inventories pin that role to one base-table read and two definer
-functions — so any repair mechanism reds a pinned test. The test author
-surfaced the collision as the head-of-manifest finding, with the three
-candidate mechanisms and which inventory each one reds, instead of letting the
-first green run discover it. Counted as a catch: the inventories' pins are
-what made the gap a finding rather than a surprise.
-
-**Instance, 2026-09-06 (E4-05, PR #187, dispute E4-05-01).** E4-05's scope
-requires a new prompt file, `summary.v1.md`, and E2-18's pin
-(`tests/unit/test_the_committed_prompt_files_are_pinned_by_content.py`) refuses
-any prompt on disk with no row in `RECORDED_SHA256` — a mapping inside that test
-module. So the one action that turns the red green is an edit to `tests/`, which
-the implementer may not make: this entry's shape with the epics reversed, an
-earlier ticket's rule making a later ticket's file unpinnable from where the
-implementer stands. The entry is why that became dispute E4-05-01 rather than an
-attempt to satisfy the check another way. The objection names the three
-workarounds it declined and why each is worse than the red — adding the row
-directly (the gesture the pin exists to refuse, and the mapping cannot tell an
-added file from an edited one), naming the prompt something the inventory's walk
-does not see, and shipping the ticket without the prompt at all. Ruled the same
-day: the test is right, the row lands test-side, and the digest was re-derived
-from the committed file before the ruling rather than pasted from the objection.
-Counted as a catch: without it the branch's route to green ran through the test
-wall, and the record would have been a quiet workaround instead of a ruling.
-
-**Instance, 2026-09-06 (E4-04, caught before the first line of the read path).**
-The obvious shape for the suppression queries is `sqlalchemy.text()` naming
-`public.report_comment` and `public.report_response_counts`, and the work order's
-ask for "comments in the SQL saying which rule each clause carries" invites it.
-`tests/unit/test_the_org_views_are_read_only_through_the_grant.py` parses
-`backend/app/views_sql/` at test time and refuses any module under `backend/app/`
-outside four pinned files that names a policed relation in a string it runs — and
-this ticket's own view adds `report_comment` to that inventory, so the ticket
-supplies the rule that would have refused it. Measured rather than predicted: the
-inventory was printed with the sweep's own `policed_relations()`, and a planted
-raw statement was run past its live predicates, which reported both relations.
-
-Of the two repairs the sweep itself prescribes, one is a location exemption inside
-`tests/`, which this lane may not write; the other is to move the read somewhere
-sanctioned, and neither sanctioned location answers §4's question. So the reads
-are SQLAlchemy Core over the mapped models and two `table()`/`column()`
-declarations — the house style for every service read path in this tree — decided
-before any implementation existed rather than after a red run. Counted as a catch:
-without it the ticket's first green run would have been a sweep failure whose only
-remedy is on the read-only side of the wall, and the fact that a Core query is
-invisible to that sweep is now written into the module docstring and the pull
-request for E4-07, which meets the same question next.
-
 **Instance, 2026-09-06 (E4-06, PR #195, dispute E4-06-02's sibling E4-06-01).**
 SPEC §5.1 has the weekly summaries "exclude flagged-held content", ADR 0145 puts
 the record of what is held in `moderation_state` and nowhere else, and the Monday
@@ -233,3 +159,16 @@ route makes false (entry 1). Counted as a catch: the entry's rule is to go and l
 for what a new rule makes unrunnable rather than to trust the repair a ticket names,
 and here the named repair was incomplete in a way that would have surfaced as an
 implementer's red run.
+
+**Instance, 2026-09-07 (E4-17, PR #205, caught at planning).** The work plan
+assigned a component-test edit to "the implementer", and no agent the hooks
+permit could make it: the implementer's hook denies every `*.test.*` file and
+the test author's denies reading `frontend/src`, so component tests have no
+permitted agent editor at all. The operative fact was mechanical permission,
+not ownership — the same wall this entry is about, arriving from the harness
+configuration rather than from a test's content. Caught before any edit: the
+orchestrating session took the edit itself as scribe and recorded doing so in
+the pull request, and the standing fix is the owed process change to the hook
+pair. Counted as a catch per the pull request's own wording: without the
+entry, the round would have dispatched an agent into a denial and read the
+refusal as a defect.

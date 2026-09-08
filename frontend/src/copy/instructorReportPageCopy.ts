@@ -9,33 +9,22 @@
  * person reads, so SPEC §4.1 items 4 and 5 — rules about words — have one file
  * to be read over rather than a search through JSX.
  *
- * **Why it sits beside the components rather than in `frontend/src/copy/`, and
- * what that costs.** `tests/fixtures/copy_inventory.py` collects every `.ts` and
- * `.tsx` under `frontend/src/copy/` recursively, and the invariant-marked
- * inventory test reds on any key prefix its governance map does not list.
- * Growing that map over the report surface is **E4-12**'s heavy-lane work, and a
- * copy file landing in the collected directory before it runs would red a §4.1
- * invariant this ticket does not own. So the strings are externalized here, in
- * the collected shape, one directory short of the collector — exactly as the
- * three siblings are.
- *
- * The cost, said plainly and in the same words those files use: **nothing sweeps
- * these strings today.** The invariant-marked checks on §4.1 item 4's
- * aggregate-language rule and item 5's confidentiality-copy rule read none of
- * the sentences below; they are held to those rules by review and by this
- * header, which is weaker than the way the survey surface's strings are held,
- * until E4-12 moves this file and collects it. That ticket owns closing the gap,
- * and `docs/tickets/e4/deferred.md` already carries the entry for it.
+ * E4-11 shipped this file beside its components; **E4-12 moved it into
+ * `frontend/src/copy/`**, the directory the inventory walks, so the strings
+ * below are collected and swept rather than held to items 4 and 5 by review.
  *
  * ## What is deliberately not here
  *
  * **The two refusal sentences the API writes.** `app.api.instructor` serves
  * "There is no report here for you to read." and "There is no report for that
- * week of this section." — governed copy that lives on the server, chosen by the
- * server for reasons about what a reader may learn from a refusal. The page
- * shows whichever one it was sent. `instructor_report_page.unavailable` below is
- * the fallback for the case where there is no sentence to show: a network
- * failure, or a gateway answering with no body at all.
+ * week of this section." — chosen by the server for reasons about what a reader
+ * may learn from a refusal, so the page shows whichever one it was sent and
+ * writes neither. They are governed copy of their own since E4-12, in
+ * `app.copy.instructor_report` under the report surface's backend prefix, so
+ * §4.1 items 4 and 5 sweep them where they are written rather than here.
+ * `instructor_report_page.unavailable` below is the fallback for the case where
+ * there is no sentence to show: a network failure, or a gateway answering with
+ * no body at all.
  *
  * **Anything a summary says.** The model's prose is data, not copy.
  *
@@ -109,6 +98,39 @@ export const INSTRUCTOR_REPORT_PAGE_COPY = {
   // the page states the absence in words rather than drawing an empty bar.
   'instructor_report_page.participation_absent':
     'There is no response rate for this week: nobody is enrolled in this section yet.',
+
+  // The credit rule, explained where the rates are read — E4-12, closing the
+  // instructor half of an E3 carried entry. SPEC §3.3 makes a comment judged too
+  // brief or nonsense cost its response's validity, §3.4 makes a participation
+  // score completed items over total items with the per-week arithmetic visible
+  // only in the gradebook comment, and §3.3 lets a later re-classification lower
+  // a score that has already posted. None of that was said to an instructor
+  // anywhere, and the rate above is the number she reads it against.
+  //
+  // **It shows in every week, including one with no rate at all.** It explains a
+  // rule rather than a figure, and a rule that appeared only in the weeks
+  // somebody answered would be missing from the weeks it most needs explaining.
+  //
+  // **The two counts are named as separate, and that is E4-12's security round.**
+  // The first wording said a refused comment "costs that student one item", which
+  // stated in words the join ADR 0153 analyses: a reader with this page and the
+  // gradebook open has a week's validity deficit on one side and a per-week
+  // ledger on the other, and a sentence teaching the arithmetic between them
+  // narrows who a refused comment could have belonged to. The reworded note
+  // teaches the ambiguity instead — an unanswered optional item and a comment
+  // that did not count leave the same mark in the ledger, so a deficit does not
+  // say which happened. The data channel itself pre-dates this note and is ADR
+  // 0125's accepted disclosure; what changed is that the note no longer
+  // sharpens it.
+  //
+  // Three things it still deliberately does not do. It shows no score: v1 renders
+  // a participation score nowhere, and a number invented here would be a second
+  // arithmetic beside the gradebook's. It names no student and no count. And it
+  // carries no confidentiality promise — §4.1 item 5 allows this surface exactly
+  // one, `comments_note` above is it, and a reassurance added here would be the
+  // second (ADR 0158). The student half of this explanation is E8's.
+  'instructor_report_page.participation_credit_note':
+    'The validity rate counts this week’s responses that were complete and reasonable: a comment judged too brief or nonsense makes its response invalid. Participation credit is a separate count — completed items out of total items across each student’s enrolled weeks, shown week by week in each posted score’s gradebook comment — and an unanswered item and a comment that did not count both leave an item incomplete. A comment judged again later can lower a score that has already posted.',
 
   // ADR 0152's release. §4 requires under-threshold comments to surface "batched
   // so that timing cannot identify an author", and ADR 0153 strips the week from

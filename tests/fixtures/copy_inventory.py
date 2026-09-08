@@ -474,6 +474,15 @@ def frontend_copy_files(directory: Path) -> list[Path]:
     it. Recursive and over the whole TypeScript family, because a one-level
     `*.ts` glob reported a clean tree over a copy file in a subdirectory and a
     copy file spelled `.tsx`.
+
+    **`recurse_symlinks=True` is E4-12's, and it is the same finding one level
+    further out.** On the pinned Python, `rglob` does not descend a symlinked
+    directory by default, so a directory symlink under the copy tree pointing at
+    real copy files shipped those strings with SPEC §4.1 items 4 and 5 asserted
+    over nothing — and the coverage walk below missed the identical files, so the
+    two enumerations agreed about a hole neither could see. A symlinked *file*
+    was already followed, because `is_file()` resolves it; only the directory
+    case was blind.
     """
     if not directory.is_dir():
         raise CopyInventoryError(
@@ -483,7 +492,7 @@ def frontend_copy_files(directory: Path) -> list[Path]:
         )
     found = sorted(
         path
-        for path in directory.rglob("*")
+        for path in directory.rglob("*", recurse_symlinks=True)
         if path.is_file() and path.suffix.lower() in COPY_FILE_SUFFIXES
     )
     if not found:
@@ -503,13 +512,18 @@ def every_file_under_the_copy_directory(directory: Path) -> list[Path]:
     that is supposed to catch a copy file the collector missed cannot be built out
     of the collector's own answer — that version agreed with itself, and a
     subdirectory and a `.tsx` shipped invisibly under it.
+
+    **This walk descends symlinked directories too**, for the reason the walk
+    above gives. Independence is the point of this enumeration and it is only
+    independence if it can see files the other one cannot: two walks that share a
+    blind spot report a clean tree over whatever sits in it.
     """
     if not directory.is_dir():
         raise CopyInventoryError(
             f"{display(directory)} is not a directory, so this walk read nothing and every file "
             "it might have reported is a file it never saw."
         )
-    found = sorted(path for path in directory.rglob("*") if path.is_file())
+    found = sorted(path for path in directory.rglob("*", recurse_symlinks=True) if path.is_file())
     if not found:
         raise CopyInventoryError(
             f"{display(directory)} holds no files at all, so the coverage rule over it is a "

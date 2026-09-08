@@ -2,7 +2,7 @@ import { useId } from 'react';
 import type { JSX } from 'react';
 
 import './instructorReportComments.css';
-import { copy, fillCopy } from './instructorReportCommentCopy';
+import { copy, fillCopy } from '../copy/instructorReportCommentCopy';
 
 /**
  * The AI summary leading a comment group — SPEC §7.6's `AiPanel`.

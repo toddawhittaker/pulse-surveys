@@ -190,15 +190,30 @@ const OTHER_COMMENTS = [
 ];
 
 // Governed copy the report ships, transcribed from
-// `frontend/src/components/instructorReportPageCopy.ts` and its three siblings.
-// Written out here rather than imported: a spec that asked the page what its own
-// words were would pass against any words at all
+// `frontend/src/copy/instructorReportPageCopy.ts` and its three siblings — the
+// directory the copy inventory walks, which is where E4-12 moved all four out of
+// `frontend/src/components/`. Written out here rather than imported: a spec that
+// asked the page what its own words were would pass against any words at all
 // (`tests/e2e/landing-views.spec.ts` states the rule).
 const PICKER_HEADING = 'Your sections';
 const SMALL_N_TITLE = 'Comments are hidden this week';
 const NO_RESPONSES = 'No responses yet this week';
 const COMMENTS_NOTE = 'Shown in random order. No names, no timestamps.';
 const COURSE_WEEK_UNAVAILABLE = 'There is no report for that week of this section.';
+
+// **One clause of the credit-rule note, and deliberately not the paragraph.**
+// E4-12 ships `instructor_report_page.participation_credit_note` in the
+// Participation region: what the validity rate counts, what a week's credit is
+// made of, and that a later re-classification can lower a score that has already
+// posted (SPEC §3.3 and §3.4). The ticket's own trap note says to assert the
+// meaning-bearing part rather than the full sentence, and this is the part no
+// other copy on the report could produce — the downward adjustment §3.3 says v1
+// never announces, whose only trace is the re-posted score.
+//
+// The paragraph is a draft that will be refined; a spec holding all of it would
+// go red on an edit that changed nothing an instructor understands differently.
+// What the wording may not lose is this fact, and that is what is pinned.
+const CREDIT_NOTE_CLAUSE = 'can lower a score that has already posted';
 
 // The testids the report surface publishes (E4-11), and the landing every
 // instructor launch reaches.
@@ -411,9 +426,30 @@ test('an instructor launches, chooses a section, and reads its week', async ({ p
   // The two rates, with the counts they are ratios of. Five of the section's
   // students answered; the enrolment is the roster's and is not asserted as a
   // number here, because it is the platform's to change.
+  //
+  // **`exact` on the validity label, because the credit note says the phrase
+  // too.** Playwright's string `getByText` is a case-insensitive *substring*
+  // match, so once E4-12 put "The validity rate is the share of responses that
+  // count as valid…" under the rate bar, the loose locator resolved to the stat
+  // label and the note both and strict mode refused two elements. The assertion
+  // was under-specified rather than wrong: what it means is the stat's own
+  // label, whose text is exactly these two words, and `exact: true` is that
+  // sentence said properly. Its neighbour above needs nothing — the note nowhere
+  // says "response rate".
   await expect(report.getByText('Response rate')).toBeVisible();
-  await expect(report.getByText('Validity rate')).toBeVisible();
+  await expect(report.getByText('Validity rate', { exact: true })).toBeVisible();
   await expect(report.getByText(`${String(BIOL_STUDENTS.length)} /`).first()).toBeVisible();
+
+  // And the note itself, which is the only place on any Pulse surface that says
+  // what a participation score is made of or that one can go down afterwards.
+  // One clause rather than the paragraph — see `CREDIT_NOTE_CLAUSE`.
+  await expect(
+    report.getByText(CREDIT_NOTE_CLAUSE),
+    'The credit-rule note is not on the report. SPEC §3.3 says a comment judged again later ' +
+      'lowers the week it belongs to, including where that week’s score has already posted, and ' +
+      '§3.4 says the per-week arithmetic lives only in the gradebook comment — so this note is ' +
+      'the whole of what tells an instructor either thing.',
+  ).toBeVisible();
 
   // Nothing anywhere names a comparison: E5 has not run, and §4.1 item 7 governs
   // the figures rather than the words.
