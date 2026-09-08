@@ -18,6 +18,8 @@ afterEach(cleanup);
 const EMPTY_NOTICE = 'No comments this week.';
 const SMALL_N_TITLE = 'Comments are hidden this week';
 const HELD_NOTE = 'One comment is held for review (privacy).';
+/** The line that stands where the panel would have been (E4-11). */
+const ABSENT_SUMMARY = 'No summary was written for this week.';
 
 /**
  * A summary whose payload carries a held note — the sentence SPEC §5.1 allows a
@@ -83,6 +85,57 @@ describe('CommentGroup', () => {
       expect(screen.getByText(EMPTY_NOTICE)).toBeTruthy();
       expect(screen.queryByText(SMALL_N_TITLE)).toBeNull();
       expect(screen.queryByText(/raw comments stay hidden/)).toBeNull();
+    });
+  });
+
+  describe('a week no summary was written for', () => {
+    it('says so where the panel would have been, and renders the cards intact', () => {
+      // E4-11's fifth criterion: "the absent-summary state renders its honest
+      // treatment and the rest of the report intact." The comments are the
+      // "rest" this component owns, so they are asserted here rather than only
+      // on the page.
+      //
+      // **The mutations this kills.** An `AiPanel` rendered with an empty string
+      // in it, which is the brief's provenance treatment wrapped around nothing
+      // and reads as a model that had nothing to say. The whole group returning
+      // early, which would take the heading and the cards with it. And the
+      // empty-week notice standing in for the absence, which is a different fact
+      // about the class.
+      render(
+        <CommentGroup stream="instructor" summary={null} comments={INSTRUCTOR_COMMENTS} />,
+      );
+
+      expect(screen.getByText(ABSENT_SUMMARY)).toBeTruthy();
+      expect(screen.queryByRole('region', { name: 'AI summary — instructor comments' })).toBeNull();
+
+      // The heading and every card, unchanged.
+      expect(screen.getByRole('heading', { name: 'About the instructor' })).toBeTruthy();
+      expect(screen.getAllByRole('article').map((card) => card.textContent)).toEqual(
+        INSTRUCTOR_COMMENTS.map((comment) => comment.text),
+      );
+      expect(screen.queryByText(EMPTY_NOTICE)).toBeNull();
+    });
+
+    it('keeps the small-N notice and the concealment when the week is also suppressed', () => {
+      // The two absences are independent: E4-06 not having run is not the same
+      // fact as the week being under the threshold, and a week can be both. The
+      // concealment must survive the summary being gone — otherwise the branch
+      // that renders the absence line is a branch that skipped the suppression.
+      render(
+        <CommentGroup
+          stream="instructor"
+          summary={null}
+          comments={WITHHELD_COMMENTS}
+          smallN={{ threshold: SMALL_N_THRESHOLD, withNotice: true }}
+        />,
+      );
+
+      expect(screen.getByText(ABSENT_SUMMARY)).toBeTruthy();
+      expect(screen.getByRole('region', { name: SMALL_N_TITLE })).toBeTruthy();
+      expect(screen.queryAllByRole('article')).toHaveLength(0);
+      for (const comment of WITHHELD_COMMENTS) {
+        expect(screen.queryByText(comment.text)).toBeNull();
+      }
     });
   });
 

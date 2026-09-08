@@ -75,6 +75,14 @@ export const INSTRUCTOR_REPORT_COMMENT_COPY = {
   // with type only". Whether the note appears is the payload's decision and
   // never this component's; this is only what it says when it does.
   'instructor_report_comments.ai.held_note': 'One comment is held for review ({type}).',
+  // A week the summary job has not written a summary for — it has not run yet,
+  // or it failed (E4-11). §5.1 makes the summary the thing that leads a group,
+  // so its absence is a fact about the report and is stated as one: one plain
+  // line where the panel would have been, no apology and no promise about when
+  // one will arrive, because this page does not know. An empty panel would be
+  // the brief's provenance treatment wrapped around nothing, which reads as a
+  // summary that said nothing rather than as a summary that was not written.
+  'instructor_report_comments.ai.absent': 'No summary was written for this week.',
 
   // The small-N notice, in its instructor audience (the student audience is
   // E8's). SPEC §4 hides raw comments below the threshold; the brief asks for
