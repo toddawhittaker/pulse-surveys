@@ -60,6 +60,15 @@ surface in neither map, or in both, is red: the point of two explicit maps is
 that the next surface is placed deliberately rather than defaulting into whatever
 the code happens to do (ADR 0158).
 
+**And item 5's count has exactly one named exception, which is a string rather
+than a word.** `CONFIDENTIALITY_EXEMPT_KEYS` holds the report's small-N notice
+with the reason it is not that surface's standing line. It is spelled as a key
+because the first version of it was spelled as a gap in the recogniser's
+vocabulary — unidentifiability language simply left out — and a gap cannot be
+aimed at one sentence: it excused that notice and every other promise anywhere
+that nobody can be identified, on every surface, with nothing in this module able
+to go red for one. The words are read now and the one string is skipped by name.
+
 **Which tests carry the marker.** The rules over shipped copy are marked
 `invariant` and their docstrings name items 4 and 5. The instruments are not: the
 sweep canaries, the parser controls and the synthetic-inventory controls assert
@@ -213,11 +222,14 @@ GOVERNED_SURFACES = {
 # **The report's line is `instructor_report_page.comments_note`**, the standing
 # sentence under the comment groups that says what an instructor is and is not
 # shown about who wrote what. The comment module's small-N entry is *not* the
-# report's line and is deliberately not recognised as one: it is suppression-state
-# copy, present only in the weeks where comments are withheld, and a surface whose
-# identity promise appears only in some weeks has no standing promise at all. That
-# ruling is ADR 0158's, and it is the reason the recogniser below is checked
-# against a sentence of each kind.
+# report's line: it is suppression-state copy, present only in the weeks where
+# comments are withheld, and a surface whose identity promise appears only in some
+# weeks has no standing promise at all. That ruling is ADR 0158's.
+#
+# **It is recognised as confidentiality copy and exempted by name**, which is not
+# the same thing as being unreadable to the recogniser and is the correction the
+# security round made. `CONFIDENTIALITY_EXEMPT_KEYS` below carries the key and the
+# reason.
 CONFIDENTIALITY_KEY_OF_SURFACE = {
     SURVEY: "student_survey.confidentiality",
     REPORT: "instructor_report_page.comments_note",
@@ -395,12 +407,16 @@ INSTRUCTORS_MEASURED = re.compile(
 # sentence addressed to the person doing the reading, which is why the report's
 # line was invisible to this recogniser until the marker was added.
 #
-# What it deliberately does not match is a sentence about *this week's*
-# suppression state. "To keep individual voices unidentifiable" is why comments
-# are withheld below the threshold, not a standing promise about the surface, and
-# recognising it would count a second line on the report in exactly the weeks the
-# small-N notice renders — item 5 failing by the calendar. ADR 0158 records the
-# ruling; the control below runs the marker against a sentence of each kind.
+# **`unidentifiab` is E4-12's security round, and it replaces a blind spot with
+# an exemption.** The first version of this tuple left unidentifiability language
+# out of the vocabulary altogether, so that the report's small-N notice would not
+# be counted as a second line. A vocabulary hole is global: it excused that one
+# sentence and, with it, every other sentence anywhere that promises a reader
+# nobody can be identified — a second identity promise phrased that way would have
+# been counted by nothing, on any surface, forever. The words are in the
+# vocabulary now, and the one sentence that must not be counted is named by key
+# below. Spelled as a stem so that "unidentifiable", "unidentifiability" and
+# "unidentifiably" are all reached.
 CONFIDENTIALITY_MARKERS = (
     "confidential",
     "anonymous",
@@ -411,7 +427,27 @@ CONFIDENTIALITY_MARKERS = (
     "identifies you",
     "de-identified",
     "no names",
+    "unidentifiab",
 )
+
+# The keys item 5's count skips, each with the reason it is skipped. **One
+# sentence at a time, by key** — never by leaving words out of the vocabulary
+# above, which is the difference this round was opened about: an exemption is a
+# statement about one string that a reader of this file can weigh, and a missing
+# word is a hole in every rule the vocabulary feeds.
+#
+# The exemption is narrow in the other direction too: it is the key, not the
+# prefix and not the surface. A second sentence under a different key on the same
+# surface is counted, which is what makes the report's standing line still exactly
+# one.
+CONFIDENTIALITY_EXEMPT_KEYS = {
+    REPORT_SMALL_N_KEY: (
+        "Suppression-state copy: it explains why SPEC §4's threshold is hiding this week's "
+        "comments and renders only in that state, so it is not the surface's standing identity "
+        "promise — `instructor_report_page.comments_note` is. Argued in ADR 0158, and the item-5 "
+        "reading it rests on is raised to the owner rather than settled here."
+    ),
+}
 
 # "no shield or lock iconography", as far as a string can carry one: the lock,
 # shield and key code points, written as code points because ruff reads several
@@ -454,8 +490,18 @@ A_SECOND_CONFIDENTIALITY_SENTENCE = "Your answers are anonymous to everyone in y
 # report; the second says the same thing in words the marker must not reach,
 # because it is about a threshold this week rather than about the surface.
 A_READER_FACING_CONFIDENTIALITY_SENTENCE = "Listed in a shuffled order, with no names attached."
+
+# Unidentifiability language, in two places on purpose. The first stands for the
+# exempt key's own copy — suppression state, why a thin week withholds its
+# comments — and the second for the same promise made as a standing sentence
+# somewhere else. **The recogniser must read both**: they say the same thing, and
+# it is the key rather than the wording that decides which one item 5 counts.
+# Neither is quoted from the report (`docs/MISTAKES.md` entry 3).
 A_SUPPRESSION_STATE_SENTENCE = (
     "Too few people answered this week, so individual voices stay unidentifiable."
+)
+AN_UNIDENTIFIABILITY_PROMISE = (
+    "Everything below is grouped to keep an individual student unidentifiable."
 )
 
 # The credit-rule note's neighbourhood: an ordinary explanatory sentence about
@@ -739,12 +785,28 @@ def strings_on_surface(inventory: tuple[CopyString, ...], surface: str) -> list[
     return [string for string in inventory if surface_of(string.key) == surface]
 
 
-def confidentiality_strings(inventory: tuple[CopyString, ...], surface: str) -> list[CopyString]:
-    """Every string on one surface that the recognizer reads as confidentiality copy."""
+def confidentiality_strings(
+    inventory: tuple[CopyString, ...],
+    surface: str,
+    exempt: Mapping[str, str] | None = None,
+) -> list[CopyString]:
+    """Every string on one surface item 5 counts as confidentiality copy.
+
+    The recogniser reads the words; this decides what is counted, and the two are
+    separate on purpose. A sentence the recogniser could not read would be
+    invisible to every surface at once, which is the hole the security round
+    closed; a sentence the count skips is one named string with a reason beside
+    it in `CONFIDENTIALITY_EXEMPT_KEYS`.
+
+    The exemptions are a parameter with a default so the controls can run this
+    with none — which is how "removing an exemption row reds the exactly-once
+    rule" is demonstrated rather than asserted in prose.
+    """
+    skipped = CONFIDENTIALITY_EXEMPT_KEYS if exempt is None else exempt
     return [
         string
         for string in strings_on_surface(inventory, surface)
-        if is_confidentiality_copy(string.text)
+        if string.key not in skipped and is_confidentiality_copy(string.text)
     ]
 
 
@@ -1244,42 +1306,152 @@ def test_the_confidentiality_recogniser_sees_the_line_and_leaves_its_neighbour()
     )
 
 
-def test_the_recogniser_reads_a_standing_promise_and_not_this_weeks_suppression() -> None:
-    """The `no names` marker's own pair, and the line ADR 0158 draws through it.
+def test_the_recogniser_reads_every_way_an_identity_promise_is_worded() -> None:
+    """The words E4-12 adds, and the plain sentences that must stay outside them.
 
-    Every marker before E4-12 was written from the student's side of the promise
-    — "your name", "identify you" — and the report's line is addressed to the
-    person reading it instead. So the marker is added, and the discriminating
-    case is what it must *not* reach: a sentence explaining why a thin week's
-    comments are withheld. Recognising that one would count a second
-    confidentiality string on the report in exactly the weeks the small-N notice
-    ships, so item 5 would pass or fail by how many people answered — a
-    confidentiality rule decided by the calendar.
+    Every marker before this ticket was written from the student's side of the
+    promise — "your name", "identify you" — and the report's line is addressed to
+    the person doing the reading instead. So `no names` is here, and so is
+    `unidentifiab`.
 
-    Both sentences are written here rather than taken from the report
-    (`docs/MISTAKES.md` entry 3), and neither is the shipped wording: what is
-    asserted is the vocabulary the recogniser reads, not what E4 chose to say.
+    **The second one is the security round's correction, and this test is where
+    the correction shows.** The first version left unidentifiability language out
+    of the vocabulary so that the report's small-N notice would not be counted,
+    and this test asserted that absence — which made a blind spot into a rule.
+    A vocabulary hole cannot be aimed: it excused one sentence and, with it, any
+    other sentence on any surface promising a reader that nobody can be
+    identified. Such a sentence would have been a second identity promise counted
+    by nothing, anywhere, and no test in this module could have gone red for it.
+    The words are read now; the one string that must not be counted is named by
+    key in `CONFIDENTIALITY_EXEMPT_KEYS`, and the controls below are what prove
+    that exemption is doing the work this test used to.
 
-    **The mutations it kills:** `no names` dropped from the marker tuple, which
-    leaves the report's line uncounted and the surface reading zero; and the
-    tuple widened with `unidentifiable`, which counts two on the report in a
-    small-N week. **A red here means this module is broken, not that the copy
-    is.**
+    Both unidentifiability sentences are asserted to be *read*, deliberately: one
+    is phrased as suppression state and one as a standing promise, they say the
+    same thing, and a recogniser that told them apart by wording would be back to
+    deciding item 5 by how a sentence happens to be written. None is quoted from
+    the report (`docs/MISTAKES.md` entry 3).
+
+    **The mutations it kills:** `no names` dropped from the tuple, which leaves
+    the report's line uncounted and the surface reading zero; `unidentifiab`
+    dropped or shortened past the word, which restores the global blind spot; and
+    a recogniser widened until it reads an ordinary explanation as an identity
+    promise, which reddens the report the day the credit-rule note ships beside
+    its line. **A red here means this module is broken, not that the copy is.**
     """
-    assert is_confidentiality_copy(A_READER_FACING_CONFIDENTIALITY_SENTENCE), (
-        f"The recognizer does not read {A_READER_FACING_CONFIDENTIALITY_SENTENCE!r} as "
-        "confidentiality copy. The report's standing line says no names are attached, and a "
-        "recogniser that cannot see it reports the surface as carrying none."
+    read = (
+        A_READER_FACING_CONFIDENTIALITY_SENTENCE,
+        A_SUPPRESSION_STATE_SENTENCE,
+        AN_UNIDENTIFIABILITY_PROMISE,
     )
-    assert not is_confidentiality_copy(A_SUPPRESSION_STATE_SENTENCE), (
-        f"The recognizer reads {A_SUPPRESSION_STATE_SENTENCE!r} as confidentiality copy. That is a "
-        "sentence about how many people answered this week, not a standing promise about the "
-        "surface; counting it makes item 5 pass or fail by the response count (ADR 0158)."
+    unread = [sentence for sentence in read if not is_confidentiality_copy(sentence)]
+    assert not unread, (
+        f"The recognizer does not read {unread} as confidentiality copy. Each of them tells a "
+        "reader that nobody can be identified from what is shown, which is what item 5's sentence "
+        "is; a wording the recogniser cannot see is a second promise counted on no surface at all."
+    )
+    assert not is_confidentiality_copy(A_PLAIN_SENTENCE), (
+        f"The recognizer reads {A_PLAIN_SENTENCE!r} as confidentiality copy. A recognizer this "
+        "wide counts two on any surface that says anything at all."
     )
     assert not is_confidentiality_copy(AN_EXPLANATORY_SENTENCE), (
         f"The recognizer reads {AN_EXPLANATORY_SENTENCE!r} as confidentiality copy. Explaining how "
         "a participation score is worked out is not an identity promise, and a recogniser that "
         "counts it reddens the report the day the credit-rule note ships beside its line."
+    )
+
+
+def test_the_count_skips_the_named_exempt_key_and_counts_the_same_words_elsewhere() -> None:
+    """The exemption is one key, not a wording and not a surface — both directions.
+
+    This is what replaced the vocabulary hole, so this is where its reach is
+    pinned. The same unidentifiability promise is planted three times: under the
+    exempt key, under a second key on the same surface, and on a different surface
+    entirely. Only the first is skipped.
+
+    Without the second plant the exemption could be widened to the report surface
+    or to the prefix and nothing here would notice, which is the failure the
+    original design had one level up: an exemption that is broader than the string
+    it was written for excuses strings nobody weighed.
+
+    **The mutations it kills:** an exemption matched on the key's prefix or on its
+    surface rather than on the key; and the skip applied inside
+    `is_confidentiality_copy`, which would put the hole back into the recogniser
+    that every surface's count reads. **A red here means this module is broken,
+    not that the copy is.**
+    """
+    exempt_key = next(iter(CONFIDENTIALITY_EXEMPT_KEYS))
+    beside_it = f"{prefix_of(exempt_key)}.a_second_notice"
+    inventory = a_governed_inventory(
+        CopyString(exempt_key, A_SUPPRESSION_STATE_SENTENCE, SYNTHETIC),
+        CopyString(beside_it, AN_UNIDENTIFIABILITY_PROMISE, SYNTHETIC),
+        CopyString("student_survey.a_second_notice", AN_UNIDENTIFIABILITY_PROMISE, SYNTHETIC),
+    )
+
+    assert is_confidentiality_copy(A_SUPPRESSION_STATE_SENTENCE), (
+        "The recognizer does not read the exempt key's kind of sentence at all, so the exemption "
+        "below skips a string nothing was counting and this control proves nothing."
+    )
+
+    counted = sorted(string.key for string in confidentiality_strings(inventory, REPORT))
+    assert counted == sorted([beside_it, CONFIDENTIALITY_KEY_OF_SURFACE[REPORT]]), (
+        f"On a report surface carrying its standing line, the exempt key, and a second notice in "
+        f"the same words under a different key, the count read {counted}.\n"
+        "\n"
+        f"The exemption is {exempt_key!r} and nothing else: a second sentence beside it says the "
+        "same thing under a key nobody weighed, and item 5 counts it."
+    )
+
+    elsewhere = sorted(string.key for string in confidentiality_strings(inventory, SURVEY))
+    assert elsewhere == sorted(
+        ["student_survey.a_second_notice", CONFIDENTIALITY_KEY_OF_SURFACE[SURVEY]]
+    ), (
+        f"On the survey surface, the count read {elsewhere} with an unidentifiability promise "
+        "planted beside its line. The exemption belongs to one key on one surface; a promise "
+        "worded that way anywhere else is a second line."
+    )
+
+
+def test_removing_an_exemption_row_puts_its_key_back_in_the_count() -> None:
+    """The exemption is load-bearing, proven by taking it away rather than by saying so.
+
+    `confidentiality_strings` takes the exemption map as a parameter for exactly
+    this: run over the **shipped** inventory with no exemptions at all, the report
+    surface must count more than one, and the extra one must be the exempt key.
+
+    Two things follow, and both matter. The exemption is not decoration — remove
+    the row and the invariant-marked exactly-once rule goes red naming that key,
+    which is the mutation that rule's docstring now names. And the marker is not
+    blind: it finds a real shipped string rather than only the sentences this
+    module writes for itself (`docs/MISTAKES.md` entry 35, in the collector's own
+    currency rather than a parallel grep).
+
+    **If this reds because the exempt key is counted even without the exemption**,
+    the shipped small-N body no longer carries unidentifiability language, and the
+    answer is to delete the exemption row rather than to keep an excuse for a
+    string nothing was excusing (`docs/MISTAKES.md` entry 14). **A red here means
+    the exemption and the copy have come apart, not that the copy is wrong.**
+    """
+    inventory = collect_shipped_copy()
+    assert inventory, "The inventory is empty, so this control ran over nothing."
+
+    exempt_key = next(iter(CONFIDENTIALITY_EXEMPT_KEYS))
+    surface = surface_of(exempt_key)
+    assert surface is not None, (
+        f"{exempt_key!r} belongs to no governed surface, so exempting it from a per-surface count "
+        "exempts it from nothing."
+    )
+
+    with_the_exemption = [string.key for string in confidentiality_strings(inventory, surface)]
+    without_it = [string.key for string in confidentiality_strings(inventory, surface, exempt={})]
+    assert sorted(set(without_it) - set(with_the_exemption)) == [exempt_key], (
+        f"With every exemption removed, the {surface} surface counted {sorted(without_it)}; with "
+        f"them it counts {sorted(with_the_exemption)}. The difference should be exactly "
+        f"{[exempt_key]}.\n"
+        "\n"
+        "If the difference is empty, that shipped string no longer carries any word the recogniser "
+        "reads: the exemption is excusing nothing and belongs deleted rather than kept. If it "
+        "holds something else, a second string is being skipped by a row that does not name it."
     )
 
 
@@ -1929,11 +2101,26 @@ def test_each_line_carrying_surface_carries_exactly_one_confidentiality_line() -
     the key the map names. Where that string sits in the DOM is the end-to-end
     specs' — E2-10's for the survey, E4-11's for the report.
 
+    **One string is counted out, by key**: `CONFIDENTIALITY_EXEMPT_KEYS` names
+    the report's small-N notice with the reason it is not the surface's standing
+    line. The exemption is a named string with an argument beside it rather than
+    a word left out of the recogniser, and the difference is the whole of what
+    the security round changed: a missing word excuses every sentence anywhere
+    that happens to be phrased that way, and nothing in this module could have
+    gone red for one.
+
     **The mutations it kills:** a second confidentiality sentence added anywhere
-    on a surface, and the one line removed. **What makes it non-vacuous:** the
-    recognizer's controls in both directions, the zero and two synthetic
-    controls run over every line-carrying surface, and the collector canaries
-    that require each of these keys to be collected at all.
+    on a surface, including one phrased as unidentifiability, which the
+    recogniser reads now; the one line removed; and **an exemption row deleted
+    while the string it named still carries the words** — that key comes back
+    into the count and this rule reds naming it, which is the direction
+    `test_removing_an_exemption_row_puts_its_key_back_in_the_count` demonstrates
+    against the shipped inventory. The reverse, an exemption row added to silence
+    a red, is a visible line in a diff carrying a reason somebody has to write.
+    **What makes it non-vacuous:** the recognizer's controls in both directions,
+    the zero and two synthetic controls run over every line-carrying surface, the
+    exemption's own key-not-surface control, and the collector canaries that
+    require each of these keys to be collected at all.
     """
     inventory = collect_shipped_copy()
     assert inventory, "The inventory is empty, so this rule passed over nothing."
