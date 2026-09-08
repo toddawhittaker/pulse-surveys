@@ -781,13 +781,33 @@ def _shape_of(route: Any) -> RouteShape:
     )
 
 
+def _names_a_section(route: Any) -> bool:
+    """Whether one route declares a parameter naming a section.
+
+    **E4-18's list route declares none, and that is what this is for.** `GET
+    /instructor/sections` answers the session's own taught sections and is handed
+    nothing, so `_shape_of` — whose whole subject is which parameter carries what —
+    has no section parameter to classify and fails on it by name. The routes a
+    `RouteShape` describes are the two that take a section, so the list route is
+    left out of the shaping rather than turning six E4-07 modules red.
+    """
+    template = str(route.path)
+    every = (*PATH_PARAMETER.findall(template), *_query_parameter_names(route))
+    return any(SECTION_PARAMETER_MARK in name.lower() for name in every)
+
+
 def instructor_route_objects(application: Any) -> list[Any]:
-    """The two route objects themselves, for the sweep that reads their dependency graph.
+    """The three route objects themselves, for the sweep that reads their dependency graph.
 
     Beside `instructor_routes` rather than inside it because two questions are
     asked of the same discovery: what a request to each route looks like (the
     shapes), and what sits in each one's dependency graph (the objects). One walk
     answers both (`docs/MISTAKES.md` entry 13).
+
+    **Three since E4-18**, whose list route takes no parameters at all. This walk
+    answers with every GET route the module mounts, because the dependency sweep
+    is about all of them; `instructor_routes` shapes only the two that name a
+    section.
     """
     instructor_api_module()
     found = [
@@ -796,7 +816,7 @@ def instructor_route_objects(application: Any) -> list[Any]:
         if "GET" in (getattr(route, "methods", None) or set())
         and getattr(getattr(route, "endpoint", None), "__module__", None) == INSTRUCTOR_API_MODULE
     ]
-    if len(found) != 2:
+    if len(found) != 3:
         registered = sorted(
             f"{sorted(getattr(route, 'methods', None) or [])} {getattr(route, 'path', '?')} "
             f"({getattr(getattr(route, 'endpoint', None), '__module__', '?')})"
@@ -804,14 +824,15 @@ def instructor_route_objects(application: Any) -> list[Any]:
         )
         pytest.fail(
             f"`{INSTRUCTOR_API_MODULE}` defines {len(found)} GET routes on the built application; "
-            f"E4-07 ships exactly two — the report and the published-week list. The application "
-            f"registers: {registered}.\n\n{ROUTER_IS_OWED}"
+            "three are shipped — E4-07's report and published-week list, and E4-18's list of the "
+            "sections the session's person teaches, at `GET /instructor/sections`. The "
+            f"application registers: {registered}.\n\n{ROUTER_IS_OWED}"
         )
     return found
 
 
 def instructor_routes(application: Any) -> list[RouteShape]:
-    """Every GET route `app.api.instructor` defines on the built application.
+    """Every GET route `app.api.instructor` defines that names a section.
 
     **Discovered, not named.** E4-07's work order settles the module and settles
     no URL, so the module is the fact this reads and the paths are whatever the
@@ -827,7 +848,11 @@ def instructor_routes(application: Any) -> list[RouteShape]:
     whose routers were never registered appends no `_IncludedRouter` to recurse
     into, so a module that defines routes nothing registers still fails here.
     """
-    return [_shape_of(route) for route in instructor_route_objects(application)]
+    return [
+        _shape_of(route)
+        for route in instructor_route_objects(application)
+        if _names_a_section(route)
+    ]
 
 
 def report_route(application: Any) -> RouteShape:
@@ -835,10 +860,11 @@ def report_route(application: Any) -> RouteShape:
     named = [shape for shape in instructor_routes(application) if shape.week_parameter]
     if len(named) != 1:
         pytest.fail(
-            f"{len(named)} of `{INSTRUCTOR_API_MODULE}`'s two GET routes name a course week "
-            f"({[shape.template for shape in named]}). E4-07's report is 'the report for (section, "
-            "course week)' and the other route is the published-week list for a section, so "
-            "exactly one of the two takes a week and that is how they are told apart here."
+            f"{len(named)} of the `{INSTRUCTOR_API_MODULE}` routes naming a section name a course "
+            f"week ({[shape.template for shape in named]}). E4-07's report is 'the report for "
+            "(section, course week)' and the other is the published-week list for a section, so "
+            "exactly one of the two takes a week and that is how they are told apart here. "
+            "E4-18's list route names no section and is not among them."
         )
     return named[0]
 
@@ -848,7 +874,7 @@ def published_weeks_route(application: Any) -> RouteShape:
     named = [shape for shape in instructor_routes(application) if not shape.week_parameter]
     if len(named) != 1:
         pytest.fail(
-            f"{len(named)} of `{INSTRUCTOR_API_MODULE}`'s two GET routes name no course week "
+            f"{len(named)} of the `{INSTRUCTOR_API_MODULE}` routes naming a section name no week "
             f"({[shape.template for shape in named]}). See `report_route`."
         )
     return named[0]

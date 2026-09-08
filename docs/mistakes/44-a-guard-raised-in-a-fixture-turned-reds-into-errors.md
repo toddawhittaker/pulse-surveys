@@ -1,6 +1,33 @@
 # 44. A guard raised in a fixture turned a module's reds into setup errors
 
-**Caught: 4**
+**Caught: 5**
+
+*This file keeps the founding incident (it carries the root cause) and the
+three most recent catches. Two older catches were trimmed 2026-09-07 — E4-03's
+report-view suite (2026-09-06) and E3-04's AGS enforcement module (2026-09-04)
+— after dating the paragraphs from git per the ordering rule; both live in this
+file's history.*
+
+## A catch: E4-18's section-list suite discovers nothing at setup (2026-09-07)
+
+E4-18's world is expensive — a launch, a session, three sections and three
+teaching grants — so it is a fixture, and the natural thing to put in it is the
+lookup that says whether the route exists yet. `tests/fixtures/report_api.py`
+next door does discover E4-07's routes through the module, and copying that shape
+would have meant every one of this ticket's eleven tests reporting ERROR at setup
+on the unbuilt tree, the must-be-green control among them — the one test whose
+whole job is to be green and to prove the fixtures plant the grant they claim.
+
+Instead the fixture seeds rows and writes grants and asks the application
+nothing. The route is reached over HTTP at the settled path, and the guard that
+names the missing deliverable is `entries_in`, a plain function each test body
+calls on the response it just read; the session-module lookups in `_minted` are
+in a method the test body calls too. Ten of the eleven reds are therefore
+assertions about a status, a list or a header, and the eleventh passes.
+
+Counted as a catch: without the entry the world fixture would have carried a
+route discovery, and the tests-first run would have been eleven setup errors with
+nothing to compare against the manifest.
 
 ## A catch: E4-04's comment suite names every deliverable from a test body (2026-09-06)
 
@@ -25,49 +52,6 @@ back 71 failed, every one of them a FAILED and none an ERROR, exactly matching t
 manifest. Written the obvious way it would have been most of those seventy-one as
 setup errors, with nothing to compare against the manifest and no way to tell a
 waiting implementation from a broken checkout.
-
-## A catch: E4-03's report-view suite asks for the view inside each test (2026-09-06)
-
-Every test of E4-03's three aggregate read views has to read a view that does not
-exist yet, and a `SELECT` against a missing relation raises `UndefinedTable` from
-the driver. The obvious home for the check is a fixture — one `report_views`
-fixture that confirms all three and hands back a world — and that would have made
-the whole tests-first suite, four modules of it, a wall of setup ERRORs on the
-unbuilt tree: nothing asserted, nothing to compare against the manifest, and a
-red run that reads as a broken checkout rather than as a ticket waiting for its
-implementation.
-
-Instead `require_report_view` is a plain function called as the first statement
-of each test body, `report_world` hands back an **unbuilt** world so its
-`question.stream` guard fires in the body too, and the one read that could raise
-on a missing grant is wrapped and turned into a `pytest.fail` naming the other
-test that diagnoses grants. Every red the ticket ships with is a FAILED naming
-the missing view, the missing column or the missing grant.
-
-Counted as a catch: without the entry the suite would have been written with a
-fixture-level guard, and the coordinator's red run would have had thirty errors
-to sort through instead of thirty named failures.
-
-## A catch: E3-04's enforcement module builds its gradebook in the test body (2026-09-04)
-
-Every test in `tests/integration/test_mock_lms_ags_requires_a_token.py` needs the
-same six addressed AGS routes, and building them means *creating a line item and
-posting a score through the very enforcement under test*. A `@pytest.fixture`
-was the obvious home and is exactly this entry's mistake: an implementation that
-refused a call it should serve would have turned all forty-odd reds in the module
-into setup ERRORs, proving nothing about the refusals they exist to make and
-reading to a hurried eye as "the suite is red". It is a plain `gradebook(platform)`
-function called as each test body's first statement instead, so the same failure
-arrives as a FAILED naming the accepted call that did not work.
-
-The same rule shaped the client side, where the deliverable is a whole module:
-`tests/fixtures/ags_client.py` imports `app.lti.ags` inside the call rather than
-at fixture setup, so an unbuilt tree gives nineteen failed assertions naming the
-missing module rather than nineteen errors.
-
-Counted as a catch: without the entry the module would have shipped with its
-guard in a fixture, and the red-run verification would have had a wall of errors
-to sort through instead of a manifest to compare against.
 
 ## Instance: E3-01's rotation module errored at setup instead of failing (2026-09-04)
 

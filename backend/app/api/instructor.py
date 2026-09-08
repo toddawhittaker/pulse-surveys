@@ -1,4 +1,4 @@
-"""The instructor's Monday report: the two reads her page is built on (SPEC §5.1).
+"""The instructor's Monday report: the three reads her page is built on (SPEC §5.1).
 
 §13's tree gives the instructor-facing API this module, and §13's closing rule
 keeps it thin: a handler here resolves the session, hands the work to a service,
@@ -7,15 +7,23 @@ this session may read, which weeks are published, how a rate divides, what a
 comment may say — is in `app.services.reporting`, and the payload's shape is
 `app.schemas.report`.
 
-**Two routes and no others.** The report for one section and one course week, and
-the list of course weeks a reader may page to. E4-11 consumes both; E4-15 drives
-them against the running stack.
+**Three routes and no others.** The report for one section and one course week,
+the list of course weeks a reader may page to, and the list of sections she
+teaches. E4-11 consumes all three; E4-15 drives them against the running stack.
 
-**Both carry `app.api.deps.require_instructor` rather than a check of their own.**
-That is what makes them findable: a sweep asking the running application which
-routes carry that dependency gets this module's whole surface, and a route that
-resolved a session for itself would be an instructor route outside it — the shape
-`app.api.student` already holds for the student side.
+**The third one is what makes the other two askable** (E4-18, ADR 0156). Both of
+them take a section key in the path, and until it shipped nothing a client holds
+supplied one: a launch redirect carries the role and the session, and the session
+claims carry keys and never sections. So `read_taught_sections` is the menu and
+the other two are what a reader opens from it, which is the shape
+`app.api.student` already holds — a parameterless read of the reader's own scope,
+and then the pages behind it.
+
+**All three carry `app.api.deps.require_instructor` rather than a check of their
+own.** That is what makes them findable: a sweep asking the running application
+which routes carry that dependency gets this module's whole surface, and a route
+that resolved a session for itself would be an instructor route outside it — the
+shape `app.api.student` already holds for the student side.
 
 **Authorization is narrow on purpose: the session's own taught sections, nothing
 else.** SPEC §4.1's chokepoint rule is that a request resolves only its own
@@ -25,7 +33,7 @@ same report is E9's drill-down and is refused here by role (see
 `require_instructor`); E9 widens `app.services.reporting._readable_section` rather
 than adding a route beside these.
 
-**The refusal pair is the confidentiality property this module owns.** A section
+**The refusal pair is the confidentiality property the two keyed routes own.** A section
 this instructor does not teach and a section that does not exist are answered with
 the same status, the same body, and the same code path — because a reader who can
 tell the two apart can enumerate which sections the institution has by asking about
@@ -43,10 +51,21 @@ section's calendar a week at a time. A mid-window report is refused rather than
 served at all: read twice, the difference between two views of an open week is one
 student's submission.
 
-**Both answers carry `Cache-Control: no-store`.** A report holds this week's raw
+**The section list has no refusal of either kind, and that is not an omission.**
+It takes no parameter, so there is nothing in the request to refuse: a caller
+cannot ask it about somebody else's section, because a caller cannot ask it about
+any section at all. The two states that look like candidates — a person who
+teaches nothing, and a session naming nobody — are ordinary and are answered 200
+with an empty list, the way the student surface answers a reader who is between
+terms. A 404 invented here by analogy with the two routes above would refuse a new
+instructor on the day she is hired, and would say something about the institution
+to an anonymous caller that the 401 already says nothing about.
+
+**Every answer carries `Cache-Control: no-store`.** A report holds this week's raw
 student comments, and a stored copy outlives the reason it was shown — a browser
 back button, or the next person on a shared machine after she has signed out. The
-student read path sets the same header for the same reason.
+list names what she teaches, which outlives it the same way. The student read path
+sets the same header for the same reason.
 """
 
 from uuid import UUID
@@ -57,12 +76,13 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_instructor
 from app.config import Settings
 from app.db import get_session
-from app.schemas.report import InstructorReport, PublishedWeeks
+from app.schemas.report import InstructorReport, PublishedWeeks, TaughtSections
 from app.services.reporting import (
     CourseWeekUnavailableError,
     SectionUnavailableError,
     instructor_report,
     published_course_weeks,
+    taught_sections,
 )
 from app.services.session import SessionClaims
 
@@ -75,6 +95,10 @@ router = APIRouter(tags=["instructor"])
 # — the convention `app.api.student` settled.
 REPORT_PATH = "/instructor/sections/{section_id}/report/{course_week}"
 PUBLISHED_WEEKS_PATH = "/instructor/sections/{section_id}/published-weeks"
+
+# And where a reader finds out which sections those two may be asked about. The
+# same path without the key, written out in full like its two siblings.
+SECTIONS_PATH = "/instructor/sections"
 
 # The refusal both halves of the pair get. 404 rather than 403, and one sentence
 # rather than two: see this module's docstring. It names nothing — no section, no
@@ -165,6 +189,36 @@ def read_published_weeks(
     except SectionUnavailableError:
         raise _unavailable(SECTION_UNAVAILABLE) from None
     return PublishedWeeks(published_weeks=weeks)
+
+
+@router.get(SECTIONS_PATH, summary="The sections I teach, and may read a report for")
+def read_taught_sections(
+    response: Response,
+    claims: SessionClaims = Depends(require_instructor),
+    session: Session = Depends(get_session),
+) -> TaughtSections:
+    """The sections this session's person teaches — the menu the other two routes need.
+
+    **Why it exists.** Both routes above take a section key in the path and nothing
+    a client holds supplies one: the launch redirect carries the role and the
+    session, and the session claims carry keys and never sections. This answers that
+    question the way the student surface answers its own — a parameterless read of
+    the reader's own scope (ADR 0156).
+
+    **The reader comes from the session and from nowhere else**, exactly as above,
+    and there is nothing else in this request at all: no path parameter, no query
+    string, nothing a caller could substitute for whose sections these are.
+
+    **No refusal pair, because there is nothing here to refuse.** A person who
+    teaches nothing and a session naming nobody are both answered 200 with an empty
+    list — see the module docstring.
+
+    **Synchronous, and FastAPI runs it in a threadpool**, for the reason
+    `read_report` above gives: every statement behind this is a blocking read on a
+    synchronous session (ADR 0013).
+    """
+    response.headers["Cache-Control"] = NO_STORE
+    return TaughtSections(sections=taught_sections(session, person_id=_person_of(claims)))
 
 
 def _person_of(claims: SessionClaims) -> UUID | None:

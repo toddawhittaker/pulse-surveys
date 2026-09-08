@@ -362,7 +362,9 @@ NOT_AN_INSTRUCTOR = (
 def require_instructor(request: Request) -> SessionClaims:
     """The verified session of an instructor, or one refusal for everybody else.
 
-    E4-07's two report routes depend on this, and the object is what makes them
+    Every route in `app.api.instructor` depends on this — E4-07's two report reads
+    and E4-18's list of the sections the session's person teaches — and the object
+    is what makes them
     **findable**: a route that resolved the session itself would be an instructor
     route outside every sweep that asks the running application which routes carry
     this dependency — the shape `require_student` already holds for SPEC §4.1

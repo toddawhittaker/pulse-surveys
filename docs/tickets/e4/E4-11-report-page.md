@@ -2,7 +2,9 @@
 
 **ID:** E4-11
 **Branch:** `e4/report-page`
-**Depends on:** E4-01 (deadline — see below), E4-07, E4-08, E4-09, E4-10
+**Depends on:** E4-01 (deadline — see below), E4-07, E4-08, E4-09, E4-10,
+E4-18 (the section list the page discovers its sections from — breakdown
+decision 11)
 **Lane:** light
 **Security-relevant:** this is the epic's first instructor-facing surface,
 which is why the inherited deadline attaches here: **this ticket's PR may
@@ -13,8 +15,9 @@ The page itself adds no data access beyond calling E4-07's routes.
 ## Context
 
 **InstructorMondayReport** (§7.6's screen): the route under
-`frontend/src/routes/instructor/`, the API client for E4-07's two routes,
-and the assembly — rates and stats up top, the TrendPair, then the two
+`frontend/src/routes/instructor/`, the API client for E4-07's two report
+routes and E4-18's section list (how the page learns which sections are
+hers), and the assembly — rates and stats up top, the TrendPair, then the two
 comment groups each led by its summary, with week navigation across
 published weeks. The instructor lands here from her LTI launch; the landing
 view E1 shipped stops being empty.

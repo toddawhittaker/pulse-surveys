@@ -56,12 +56,23 @@ Item 7 is a rule about what is *shown*, so the check belongs at the last boundar
 before showing rather than at the first before building — and "the last boundary"
 had to be found three times.
 
+**The section list's own two models are here too** (E4-18: `TaughtSection` and
+`TaughtSections`, at the foot of this file). They are not part of the report
+payload and the sketch does not describe them — they are what the page reads
+before it can ask for a report at all, since every route the report is served from
+takes a section key and nothing the client holds supplies one. They sit beside the
+report rather than in a module of their own because they name a section in exactly
+the governed form `SectionView` below does, and two files naming one thing is two
+places for that form to drift.
+
 **Rates that have no value are `None` and never zero.** A validity rate over
 zero responses is not "all invalid", and a response rate over an empty enrolment
 is not "nobody answered" — both are the absence of a ratio, and E4-09 renders the
 absence. The rule is written once, in `app.services.reporting`, and this schema is
 what makes the absent state expressible.
 """
+
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -77,6 +88,8 @@ __all__ = [
     "StreamReport",
     "StreamsView",
     "SummaryView",
+    "TaughtSection",
+    "TaughtSections",
     "TrendPoint",
     "WeekView",
     "WorkloadView",
@@ -313,3 +326,41 @@ class PublishedWeeks(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     published_weeks: list[int]
+
+
+class TaughtSection(BaseModel):
+    """One of the sections this session's person teaches, as her page lists it (E4-18).
+
+    Three members and no fourth. The key is what every report route is asked with,
+    the code is what a reader knows the class by, and the label is the same
+    governed form `SectionView` above carries — composed by the one function in
+    `app.services.reporting` that composes it, so a section cannot be named one way
+    in the list and another way in the report the list opens.
+
+    Nothing here says anything about the section beyond its name: no roster size,
+    no rates, no week. This is a menu, and a figure on it would be a figure with no
+    §4 suppression rule applied to it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    section_id: UUID
+    code: str
+    course_label: str
+
+
+class TaughtSections(BaseModel):
+    """What the section-list route answers: the sections this reader may ask about.
+
+    An object with one member rather than a bare array, for the reason
+    `PublishedWeeks` above gives — a later addition is a member beside this one
+    rather than a change of the response's own type.
+
+    The list is empty for a person who teaches nothing and for a session that names
+    nobody, and both are ordinary states rather than refusals: this route takes no
+    parameter, so there is nothing in the request to refuse.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    sections: list[TaughtSection]
