@@ -57,6 +57,33 @@ export function deriveSurveyWindows(): void {
 }
 
 /**
+ * Write §5.1's per-stream summaries for every closed week that has none, now
+ * rather than on Monday at 02:50.
+ *
+ * The same shape and the same argument as `deriveSurveyWindows` above: E4-06's
+ * job runs on `app.jobs.schedules`'s weekly beat, and a spec that needed a
+ * summary before its report could not wait for Monday and must not write one.
+ * SPEC §5.1 makes a summary a model output with a prompt version and a model id
+ * behind it — a hand-written row would be a spec agreeing with its own fixture
+ * about the one thing on the report nothing else can produce.
+ *
+ * So the real task is called, in the `api` container, where the application, its
+ * configuration and its provider settings already are. On the development stack
+ * that provider is the mock model service, which is the same one the submit path
+ * classifies through.
+ */
+export function generateWeeklySummaries(): void {
+  compose([
+    'exec',
+    '-T',
+    'api',
+    'python',
+    '-c',
+    'from app.jobs.tasks import generate_weekly_summaries; print(generate_weekly_summaries())',
+  ]);
+}
+
+/**
  * Run one statement against the stack's database and answer its rows, unaligned.
  *
  * Inside the `db` container as its own superuser, so no credential from `.env`
