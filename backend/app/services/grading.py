@@ -91,6 +91,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.copy.gradebook import LEDGER_LINE as LEDGER_LINE_COPY
 from app.lti.ags import (
     LINE_ITEM_ID_MEMBER,
     AgsCallError,
@@ -141,7 +142,12 @@ logger = logging.getLogger(__name__)
 SANCTION: Final[WriteSanction] = sanction_for("grade_passback")
 
 # SPEC §3.4's ledger line and the character its lines are joined with.
-LEDGER_LINE = "Week {course_week}: {completed} of {total} items"
+#
+# The line is a copy entry since E4-12 — an instructor reads it in her gradebook,
+# so it is collected by the inventory SPEC §4.1 items 4 and 5 are asserted over.
+# The joiner is not: a newline is punctuation this module puts between lines, and
+# nothing about it is a word.
+LEDGER_LINE = LEDGER_LINE_COPY.text
 LEDGER_JOIN = "\n"
 
 # The canonical percentage: one decimal place, always, rounded half up. ADR 0052
