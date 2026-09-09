@@ -1,12 +1,37 @@
 # 44. A guard raised in a fixture turned a module's reds into setup errors
 
-**Caught: 5**
+**Caught: 6**
 
 *This file keeps the founding incident (it carries the root cause) and the
 three most recent catches. Two older catches were trimmed 2026-09-07 — E4-03's
 report-view suite (2026-09-06) and E3-04's AGS enforcement module (2026-09-04)
 — after dating the paragraphs from git per the ordering rule; both live in this
-file's history.*
+file's history. A third was trimmed 2026-09-08 when E4-15's catch was added —
+E4-04's comment suite (2026-09-06), which shared its date with the E4-01
+paragraph inside the founding incident and was the removable one of the two.*
+
+## A catch: E4-15's exit drive builds its world in a test rather than a hook (2026-09-08)
+
+The E4 exit drive is a browser suite, not a pytest one, and the shape is the
+same: its world costs a staff launch, a roster sync, a seeder run, two Monday
+jobs and several `docker compose` round trips, so the natural home is
+`test.beforeAll` — and the seeder the ticket owes does not exist while the reds
+are being written. Written that way, the drive's pre-implementation red is a
+**hook error**, every one of its eight cases is reported as not having run, and
+the wall reads as "the exit spec is broken" rather than as "one named deliverable
+is missing".
+
+Instead `beforeAll` discovers placements only — shipped machinery, nothing this
+ticket owes — and every write to the stack sits in the drive's first test, whose
+whole subject is that the world can be built. Playwright's serial mode then skips
+the remaining seven, which is the same protection a failing hook gives and a
+better report: one FAILED naming `scripts/seed_exit_story.py` and the contract it
+owes, seven skipped.
+
+Counted as a catch: without the entry the world-building would have gone in the
+hook, because that is where a browser suite's expensive setup belongs and every
+other spec in `tests/e2e/` puts it there. The entry is what made the cost of that
+choice visible on the one tree the reds are measured on.
 
 ## A catch: E4-18's section-list suite discovers nothing at setup (2026-09-07)
 
@@ -28,30 +53,6 @@ assertions about a status, a list or a header, and the eleventh passes.
 Counted as a catch: without the entry the world fixture would have carried a
 route discovery, and the tests-first run would have been eleven setup errors with
 nothing to compare against the manifest.
-
-## A catch: E4-04's comment suite names every deliverable from a test body (2026-09-06)
-
-E4-04's tests-first suite is eleven modules over a service module, a view, two
-tables and a scheduled task, none of which exist while the reds are being
-written. Almost every one of those lookups has a natural home in a fixture, and
-the module import is the worst of them: `import app.services.report_comments` at
-a test module's top level is a collection error, which asserts nothing, survives
-the implementation landing, and reads to a hurried eye as a red suite.
-
-The shared fixture module says the rule out loud and then keeps it —
-`comment_service`, `visible_comments`, `released_comments`, `cut_batches`,
-`report_comment_class`, `cut_task` and `require_report_table` are all plain
-functions called as a test body's first statement, each turning an absence into a
-`pytest.fail` that names the missing file, symbol or table and says which ticket
-owes it. `comment_world` hands back an **unbuilt** world for the same reason, so
-its own guards — a missing `question.stream`, a week nobody dated — fire in the
-body too.
-
-Counted as a catch: the red run that the whole heavy lane is measured against came
-back 71 failed, every one of them a FAILED and none an ERROR, exactly matching the
-manifest. Written the obvious way it would have been most of those seventy-one as
-setup errors, with nothing to compare against the manifest and no way to tell a
-waiting implementation from a broken checkout.
 
 ## Instance: E3-01's rotation module errored at setup instead of failing (2026-09-04)
 

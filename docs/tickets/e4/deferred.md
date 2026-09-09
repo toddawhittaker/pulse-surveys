@@ -310,7 +310,10 @@ inside the ticket's scope was to import the private name across modules, which i
 worse shape for the same guarantee.
 
 **Owner:** whichever ticket next changes the label's form, or accepts E4-07's
-proposal — E4-17 is the first candidate, since it is already in `schemas/student.py`.
+proposal. (E4-17 was the first candidate when this was written; it merged
+without touching either copy, so the candidacy lapsed — noted by the E4
+boundary's docs review. `app/services/enrollment_windows.py`, ADR 0161, is
+now the worked example of exactly this promotion done under review.)
 
 **Done when:** one function composes the label, both the student read path and the
 report read call it, and no second copy of the format is left under `backend/app/`.
@@ -338,6 +341,15 @@ stack.
 **Done when:** a test asserts the exact `no-store` value on both keyed
 instructor routes, the way the student-path pin and E4-18's own header test
 assert theirs.
+
+**Closed by E4-15.**
+`tests/integration/test_the_instructor_report_paths_pin_cache_control_no_store.py`
+pins both routes to the exact value with a status-200 premise guard first and
+the non-equivalents named; both header lines were each deleted in turn and
+each reddened exactly its own test, twice over (the build battery and an
+independent re-run). Deliberately not invariant-marked, with the reason in
+its docstring; the boundary's invariant-coverage review recorded a partial
+disagreement with that classification and accepted it as argued.
 
 
 ## The landing views' sentences sit outside the inventory and outside the sweep
