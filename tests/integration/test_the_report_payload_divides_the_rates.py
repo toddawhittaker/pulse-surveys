@@ -45,11 +45,15 @@ from fixtures.report_api import (
     IN_DENOMINATOR_WEEK,
     OUT_OF_DENOMINATOR_WEEK,
     RESPONSES_IN_WEEK,
+    SECOND_HELD_WEEK,
     SILENT_WEEK,
+    TAUGHT_COHORT,
     TERM_WEEK_OF_COURSE_WEEK,
     ReportDoor,
+    a_student_enrolled,
 )
 from fixtures.report_views import response_counts_row
+from fixtures.survey_windows import SEEDED_COHORTS, WINDOWS_BY_TERM_WEEK
 
 pytestmark = pytest.mark.integration
 
@@ -66,6 +70,26 @@ pytestmark = pytest.mark.integration
 # institution's wall clock lands a day inside the previous week in UTC.
 ENROLLED_WITH_THE_LEAVER = 6
 ENROLLED_WITHOUT_THE_LEAVER = 5
+
+# **The platform-dated late add this ticket's boundary review added**, and the two
+# weeks that tell a denominator reading `started_on` from one reading SPEC §3.4's
+# enrolment window.
+#
+# He is enrolled with `started_on` at the section's own start date — which is what
+# a roster sync writes when it first sights a member, and what a day-one student
+# carries — and with `lms_window_start` at the opening instant of course week 4's
+# survey window, which is the platform saying when his enrolment actually began.
+# E3-04's tier 1 is "the earliest course week whose `closes_at >= lms_window_start`",
+# so his first enrolled week is course week 4.
+#
+# So the denominators do not move for course weeks 1 to 3 and gain one from course
+# week 4 onwards. Course week 2 still holds the six the leaver is part of; course
+# week 5 holds the five that are left after she goes, plus him — six again, and the
+# equality of the two numbers is a coincidence of this world rather than the claim.
+# The claim is the pair: **week 2 must not count him and week 5 must.**
+LATE_ADD_FIRST_COURSE_WEEK = SECOND_HELD_WEEK
+ENROLLED_IN_WEEK_TWO_WITH_THE_LATE_ADD = ENROLLED_WITH_THE_LEAVER
+ENROLLED_IN_WEEK_FIVE_WITH_THE_LATE_ADD = ENROLLED_WITHOUT_THE_LEAVER + 1
 
 # The full week's instructor mean, written out. Four of the five respondents
 # answered the instructor rating, with 5, 4, 4 and 3; the fifth left it
@@ -465,4 +489,115 @@ def test_the_zero_response_week_is_still_in_the_week_navigation(
     assert TERM_WEEK_OF_COURSE_WEEK[SILENT_WEEK] not in published, (
         f"{published} carries this week's *term* number "
         f"{TERM_WEEK_OF_COURSE_WEEK[SILENT_WEEK]} rather than its course number {SILENT_WEEK}."
+    )
+
+
+def _enrol_the_platform_dated_late_add(door: ReportDoor) -> Any:
+    """One member the platform dated into course week 4, committed so the tool sees him.
+
+    `started_on` is the section's own start date — the value a roster sync writes
+    when it first sights a member, and the one a day-one student carries — while
+    `lms_window_start` is the platform's own statement of when his enrolment began.
+    The two disagree on purpose: that disagreement is the whole of what this pair
+    is about, and a late add whose `started_on` already pointed at course week 4
+    would be counted correctly by a denominator that reads nothing but `started_on`.
+    """
+    world = door.rows.world
+    _length, _first, section_starts = SEEDED_COHORTS[TAUGHT_COHORT]
+    opens_at, _closes_at = WINDOWS_BY_TERM_WEEK[
+        TERM_WEEK_OF_COURSE_WEEK[LATE_ADD_FIRST_COURSE_WEEK]
+    ]
+    late_add = a_student_enrolled(
+        world,
+        "e4-15-platform-dated-late-add",
+        started_on=section_starts,
+        ended_on=None,
+        lms_window_start=opens_at,
+    )
+    door.commit()
+    return late_add
+
+
+def _enrolled_in(door: ReportDoor, contract: Any, course_week: int) -> int:
+    """The enrolled denominator one course week's payload reports."""
+    body, answered = door.payload(course_week=course_week)
+    rates = contract.member(body, contract.rates_member, answered=answered)
+    return int(rates[contract.enrolled_field])
+
+
+def test_a_platform_dated_late_add_is_outside_the_denominator_of_the_weeks_before_him(
+    report_door: ReportDoor, report_api_contract: Any
+) -> None:
+    """SPEC §3.4's first enrolment tier, applied to the report's own denominator.
+
+    §3.4: "the denominator starts at the student's first enrolled week (from NRPS
+    enrollment data)", and E3-04 built that as three tiers with
+    `enrollment.lms_window_start` as the first of them — a member the platform
+    dated is credited from the week that date falls in. ADR 0147 says the report's
+    denominator is computed "on the clock and enrolment helpers
+    `app/services/grading.py` already uses, so §3.4's window rules are read once".
+    This is the test of that sentence.
+
+    The member here is dated by the platform into course week 4 and carries a
+    `started_on` at the section's start, so a denominator that reads `started_on`
+    and `ended_on` alone counts him in every week of the section — including the
+    three before he arrived.
+
+    **The pair is in this test rather than in a sibling**, because both halves must
+    be the same world one week apart: course week 2 must not count him and course
+    week 5 must. Two separately built worlds could differ in the leaver's dates and
+    the boundary would stop being the only thing that moved.
+
+    **The mutation this kills:** the denominator reading `started_on`/`ended_on`
+    only — which is what ships today, and which ADR 0147's own claim about reading
+    §3.4's rules once says it does not. A wrong denominator renders as a plausible
+    percentage: the response rate for the section's first three weeks is quietly
+    understated for the rest of the term.
+
+    **The near miss it must survive:** a denominator that reads `lms_window_start`
+    and stops reading `started_on`, which would count him from week 1 again for any
+    member the platform did *not* date. The three tests above this one are what hold
+    that half — the leaver and the day-one respondents carry no platform window at
+    all and their denominators are asserted there.
+
+    **What it does not reach** (`docs/MISTAKES.md` entry 14): E3-04's tier 3, the
+    member first seen in a later roster sync. That tier is decided by the
+    `nrps_call` log rather than by an enrolment column, and no world in this suite
+    writes one.
+    """
+    contract = report_api_contract
+    before = _enrolled_in(report_door, contract, IN_DENOMINATOR_WEEK)
+    assert before == ENROLLED_WITH_THE_LEAVER, (
+        f"Course week {IN_DENOMINATOR_WEEK} reports {before} enrolled before this test adds "
+        f"anybody, and the canonical world holds {ENROLLED_WITH_THE_LEAVER}. Every number below is "
+        "a comparison against that starting state."
+    )
+
+    _enrol_the_platform_dated_late_add(report_door)
+
+    after = _enrolled_in(report_door, contract, IN_DENOMINATOR_WEEK)
+    assert after == ENROLLED_IN_WEEK_TWO_WITH_THE_LATE_ADD, (
+        f"Course week {IN_DENOMINATOR_WEEK}'s denominator is {after} with a member the platform "
+        f"dated into course week {LATE_ADD_FIRST_COURSE_WEEK}. He was not enrolled that week: "
+        "`enrollment.lms_window_start` is the platform's own statement of when his enrolment "
+        "began, and SPEC §3.4 starts a denominator at the student's first enrolled week from that "
+        "data.\n\n"
+        f"{ENROLLED_IN_WEEK_TWO_WITH_THE_LATE_ADD + 1} here is a denominator reading `started_on` "
+        "and `ended_on` and nothing else. His `started_on` is the section's start date, because "
+        "that is what a roster sync writes when it first sights somebody — so on that reading he "
+        "is a day-one student, three weeks of this section's response rates are divided by one too "
+        "many, and every one of them renders as a plausible percentage. ADR 0147's own claim is "
+        "that this layer reads §3.4's window rules once rather than a second time in SQL."
+    )
+
+    later = _enrolled_in(report_door, contract, OUT_OF_DENOMINATOR_WEEK)
+    assert later == ENROLLED_IN_WEEK_FIVE_WITH_THE_LATE_ADD, (
+        f"Course week {OUT_OF_DENOMINATOR_WEEK}'s denominator is {later} and this world holds "
+        f"{ENROLLED_WITHOUT_THE_LEAVER} live enrolments there plus the late add — "
+        f"{ENROLLED_IN_WEEK_FIVE_WITH_THE_LATE_ADD}.\n\n"
+        "This is the half that stops the fix being 'exclude him everywhere': a member the platform "
+        "dated into course week "
+        f"{LATE_ADD_FIRST_COURSE_WEEK} is in the denominator of every week from that one onward, "
+        "and a denominator that dropped him for the whole term would understate the later weeks "
+        "exactly as reading `started_on` alone overstates the earlier ones."
     )

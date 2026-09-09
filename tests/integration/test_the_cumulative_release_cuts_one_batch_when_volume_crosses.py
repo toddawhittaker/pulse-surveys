@@ -94,7 +94,15 @@ from fixtures.report_comments import (
     configured_threshold,
 )
 
-pytestmark = pytest.mark.integration
+# **Marked `invariant`, which puts this module in CI's isolated §4.1 pass** where a
+# skip or an empty collection is a failure (`scripts/ci/check_invariants.py`).
+# §4.1 item 3, and ADR 0153's floors: every leg of this gate exists to keep a
+# released comment's candidate author set at or above SPEC §4's threshold and its
+# week set above one. A gate that opens too early releases held comments to an
+# instructor who can read the gradebook's per-week completion ledger beside them
+# (ADR 0125), which is the re-identification §4 exists to prevent. These are the
+# tests that stop that, so they run in the pass that may never be skipped.
+pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 
 # The term weeks this module uses, all inside cohort `F`'s run (term weeks 7 to
 # 12). Six is exactly what the after-the-first-cut sequence needs: four to cross

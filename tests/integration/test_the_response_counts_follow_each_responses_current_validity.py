@@ -67,6 +67,14 @@ A_COMPLETE_SUBMISSION = {
 RESPONDENTS = 3
 
 
+# **This test alone is `invariant`-marked, and the module is not** — the same call
+# and the same reason as its two sibling view modules. What the rest of this file
+# asserts is that the counts follow each response's current validity verdict, which
+# is §3.3 arithmetic. This one is the section-and-week boundary: §4.1 item 6, and
+# it is the count SPEC §4's threshold is compared against. A count that reaches
+# across sections or across weeks moves a week over the threshold on somebody
+# else's responses, and a week wrongly above it shows its raw comments.
+@pytest.mark.invariant
 def test_the_counts_are_this_sections_responses_for_this_week_and_no_others(
     report_world: ReportWorld,
 ) -> None:

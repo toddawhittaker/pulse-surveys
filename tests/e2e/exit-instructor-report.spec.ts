@@ -298,8 +298,22 @@ const WEEK_FIVE_REFUSED_COMMENT =
 // 05, 06, 08, 09 and 10 — ten people. Student 07 is never enrolled in Pulse at
 // all, because the platform reports him departed the first time the tool reads
 // the roster and ADR 0095 gives such a member no row. Student 04 is a late add
-// dated 2026-09-28, which is inside course week 4 and so well before course week
-// 6, and he is therefore in this week's denominator although he answers nothing.
+// the platform dates 2026-09-28, which falls inside course week 4 and so well
+// before course week 6, and he is therefore in this week's denominator although
+// he answers nothing.
+//
+// **Ten is this week's number and not the section's**, which is worth saying
+// because the constant's name is the only thing that says so. SPEC §3.4 starts a
+// denominator at the student's first enrolled week from the platform's own
+// enrolment data, so student 04 is *outside* the denominator of course weeks 1 to
+// 3 and inside it from course week 4 on: the early weeks hold nine. Nothing in
+// this file asserts a rate for those weeks — the response rate is read at course
+// week 6 and the validity rates at weeks 5 and 6, all of them after his date — so
+// no expectation here moves with that rule. A later assertion about an early
+// week's response rate divides by nine, and
+// `tests/integration/test_the_report_payload_divides_the_rates.py`'s
+// `test_a_platform_dated_late_add_is_outside_the_denominator_of_the_weeks_before_him`
+// is where the rule itself is held.
 const ENROLLED_IN_WEEK_SIX = 10;
 
 // Week 6's response rate: 8 of the section's 10 live members answered.

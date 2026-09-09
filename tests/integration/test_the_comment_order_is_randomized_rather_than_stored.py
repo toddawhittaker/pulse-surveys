@@ -68,7 +68,15 @@ from typing import Any
 import pytest
 from fixtures.report_comments import CommentWorld
 
-pytestmark = pytest.mark.integration
+# **Marked `invariant`, which puts this module in CI's isolated §4.1 pass** where a
+# skip or an empty collection is a failure (`scripts/ci/check_invariants.py`).
+# SPEC §4's "comment display order is randomized; timestamps are never shown with
+# comments", which §4.1 item 6 makes a rule no view may widen. A stored order *is*
+# a timestamp by another name — with no `ORDER BY` under it the database answers in
+# heap order, which is insertion order, which is submission order — so an ordering
+# that stops being randomized hands back the sequence in which one week's students
+# answered. ADR 0153 turns the same argument on a release.
+pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 
 # A week at or above the threshold, whose comments an instructor reads directly,
 # and three held weeks whose comments are released together. Both reads shuffle,
