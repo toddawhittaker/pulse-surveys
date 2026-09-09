@@ -539,26 +539,58 @@ function cardsOf(comments: readonly CommentView[]): ReportComment[] {
 }
 
 /**
- * A comment's moderation status, narrowed to the three states the card draws.
+ * A comment's moderation status, translated from the wire's vocabulary to the
+ * card's.
  *
- * The wire types this as a string because `app.schemas.report` does; the
- * vocabulary is SPEC §5.2's lifecycle and `app.services.report_comments`
- * produces no fourth value. **A value this build does not know renders as the
- * plain card** — the comment's own words, with no moderation treatment on them.
- * The alternatives are worse in both directions: drawing it flagged or excluded
- * puts a verdict on a student's words that nothing recorded, and dropping it
- * takes a comment off an instructor's report without saying so. Suppression is
- * unaffected either way — a below-threshold week reaches `CommentGroup` with the
- * suppression already declared, and no card renders whatever this answers.
+ * **They are two different vocabularies and this function is the whole of the
+ * translation.** The wire's is SPEC §5.2's stored lifecycle, lower-cased by
+ * `app.services.report_comments.REPORTED_STATUS` out of `MODERATION_STATES`:
+ * `published`, `flagged_collapsed`, `excluded`, `kept`. The card's is SPEC §7.6's
+ * three drawn variants — `published`, `flagged`, `excluded` — because collapsed
+ * and expanded are one variant plus a disclosure's own state, which is UI state
+ * and not a lifecycle event.
+ *
+ * `kept` maps to the plain card because that is exactly what §5.2's undo means:
+ * "Keep for students" *publishes* the comment. `flagged_collapsed` is the one the
+ * card draws with a chip and a disclosure.
+ *
+ * **This function used to compare against `'flagged'`**, a token nothing on the
+ * wire has ever carried, so every flagged-held comment fell through to the
+ * `published` branch below and was rendered as a plain card with its words on
+ * screen. The E4 boundary round found it. It was invisible because E6 writes the
+ * first `moderation_state` row this system will hold, so no payload in E4 carries
+ * a status other than `published` — the defect is real and unreachable, and it
+ * would have shipped as a hidden comment shown the day moderation arrived.
+ *
+ * **A value this build does not know renders as the plain card** — the comment's
+ * own words, with no moderation treatment on them. The alternatives are worse in
+ * both directions: drawing it flagged or excluded puts a verdict on a student's
+ * words that nothing recorded, and dropping it takes a comment off an
+ * instructor's report without saying so. Suppression is unaffected either way — a
+ * below-threshold week reaches `CommentGroup` with the suppression already
+ * declared, and no card renders whatever this answers.
  */
 function cardStatus(status: string): ReportComment['status'] {
-  if (status === 'flagged' || status === 'excluded') return status;
+  if (status === 'flagged_collapsed') return 'flagged';
+  if (status === 'excluded') return 'excluded';
   return 'published';
 }
 
-/** Which of §5.1's two questions a comment answered, where the chip is drawn. */
+/**
+ * Which of §5.1's two questions a comment answered, where the chip is drawn.
+ *
+ * **The wire's tokens are upper case** — `INSTRUCTOR` and `COURSE`, the tuple
+ * `app.models.survey.REPORT_STREAMS` publishes and the `CHECK` on
+ * `question.stream` holds — and the card's props are lower case, because they
+ * are prop values rather than stored tokens. This function is where the two
+ * meet, and it compared the lower-cased forms against the wire until the E4
+ * boundary round: every released comment answered `undefined` and the released
+ * list — the one list in the product that mixes both streams, and the only place
+ * §7.6's optional chip is turned on — rendered no chip at all.
+ */
 function cardStream(stream: string): 'instructor' | 'course' | undefined {
-  if (stream === 'instructor' || stream === 'course') return stream;
+  if (stream === 'INSTRUCTOR') return 'instructor';
+  if (stream === 'COURSE') return 'course';
   return undefined;
 }
 
