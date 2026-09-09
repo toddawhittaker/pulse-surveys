@@ -85,6 +85,27 @@ only writer is E4-04, which derives both keys from the section it is releasing
 for. Named here so that the two tables' identical shape is one decision rather
 than two coincidences.
 
+> **Reversed 2026-09-08 by E4-15's boundary round, and the key now exists**
+> (revision `e5a2b81c47d3`). The rejection above borrowed ADR 0145's argument
+> without re-reading what that argument was about. ADR 0145 declines the pairing
+> for `weekly_summary`, whose row carries **no `term_id`**, so a composite key
+> there means adding a column and backfilling it — a real cost weighed against a
+> writer that derives both keys correctly. `release_batch` carries `term_id`
+> already, by this record's own decision three paragraphs up, so the pairing costs
+> one constraint and no column and no backfill. The two tables' shapes were not
+> the same decision after all, and reading them as one is how the wrong half of
+> the trade got copied.
+>
+> What the plain keys permitted is a row naming a section of one term and the id
+> of another. `released_comments` reads by exactly that pair, so such a batch is a
+> release attached to a crossing nobody evaluated — invisible to its section's
+> real report, or attached to the wrong term's. "The only writer derives both
+> keys" is true and is not a constraint: nothing re-checks a pairing the service
+> computed itself, which is the shape of defect that survives every test written
+> against a service. The composite replaces the plain key to `section`; the plain
+> key to `term` stays, because dropping it is a separate decision nobody asked
+> for. ADR 0145's own reasoning about `weekly_summary` is untouched.
+
 ## Consequences
 
 - **Adding any column to `release_batch_member` is a confidentiality change**,
@@ -110,3 +131,11 @@ than two coincidences.
   a section's batches, and a batch's members — is served by no index today, and
   the ticket that measures that read is the one that adds it, as
   `c4a8e51db9f3` did for the passback.
+
+  > **Closed 2026-09-08.** E4-15's boundary round is that ticket. Revision
+  > `e5a2b81c47d3` adds `ix_release_batch_member_batch_id` for the membership walk
+  > and `ix_release_batch_section_id_term_id` for both of the reads keyed on that
+  > pair — `released_comments`, and the weekly cutter's anti-join over every
+  > section in the institution. The unique on `answer_id` is not a substitute for
+  > the first: it leads with the answer, and Postgres 17 has no skip scan, so an
+  > index that merely contains a column serves no lookup by it.

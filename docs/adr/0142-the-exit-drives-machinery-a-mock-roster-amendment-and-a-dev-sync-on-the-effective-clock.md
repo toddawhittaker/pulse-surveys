@@ -139,6 +139,19 @@ Biology leaves the people graph exactly as it was and keeps SPEC §2.1's
   undo. `playwright.config.ts` splits it into a `grade-passback-exit` project
   that `dependencies` orders after the main one, and the main project ignores the
   file. The ordering claim is only proven by a run of the whole suite.
+
+  > **Extended 2026-09-08 by E4-15**, which needed the same treatment for the same
+  > reason and one of its own. That epic's exit drive runs in a third project,
+  > `instructor-report-exit`, whose `dependencies` name **both** `chromium` and
+  > this project: after the main one because it rewrites everything
+  > `BIOL-215-R3WW` holds, and after this one because the roster amendments above
+  > must not be met half-applied. The main project's `testIgnore` names both exit
+  > specs — it matches by filename, and six other exit specs run in the main
+  > project quite deliberately, so nothing about the `exit-` prefix lifts a file
+  > out on its own.
+  > [0160](0160-the-exit-drive-is-a-piped-dev-seeder-a-reused-exec-and-a-third-playwright-project.md)
+  > records that drive's machinery, including why it needed no `/dev` control of
+  > its own where this one did.
 - **The mock platform can now be written to without a credential**, on a service
   that exists only in the development Compose stack and whose whole state is one
   process's seed. The blast radius is that seed; the route can create no course,

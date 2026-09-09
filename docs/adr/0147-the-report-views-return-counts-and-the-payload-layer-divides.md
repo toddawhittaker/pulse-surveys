@@ -60,6 +60,20 @@ out of a view.
 computed at the payload layer on the clock and enrolment helpers
 `app/services/grading.py` already uses, so §3.4's window rules are read once.
 
+> **Corrected 2026-09-08 by E4-15's boundary round: that sentence was a claim
+> before it was a fact.** The denominator was indeed computed at the payload
+> layer, and it did *not* use grading's enrolment helpers — it asked
+> `started_on <= closed_on` and nothing else. `started_on` is the column a roster
+> sync writes when it first sights a member, so a late add the platform dated
+> three weeks into a section carries the section's start date and was counted in
+> every week before he arrived, understating those weeks' response rates as
+> plausible percentages. §3.4's tiers now have one home,
+> [0161](0161-the-enrollment-window-has-one-home.md), which both this layer and
+> the participation formula read; the sentence above is true as of that record.
+> The half that is deliberately not shared is `ended_on`, which this layer reads
+> and grading does not, for the reason §3.4 gives — a drop stops a score updating
+> rather than taking away weeks already earned.
+
 **The key is the `week` row's id, and the course-week label is applied at the
 payload layer**, on the same Python that already derives it. §2.2's start-letter
 calendar exists in one place and stays there.
