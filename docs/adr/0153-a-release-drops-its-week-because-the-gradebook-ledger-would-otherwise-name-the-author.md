@@ -126,6 +126,22 @@ says of a ledger line that started naming a question. Lowering the gate is the
 same event: this record's floors are ADR 0152's legs, and weakening one weakens
 both records at once.
 
+**Extended 2026-09-09 with a third narrowing, from the same boundary review that
+produced the amendment below.** If a released comment's own **stream** were used
+to partition the release — a heading per stream over the released list, or two
+lists rather than one — the same reasoning fires. A release drawn from two quiet
+weeks of four and three respondents is a set of candidate authors; split by
+stream, it is two smaller sets, and each is a set of people who answered *that
+question* in one of two weeks. §5.1 groups the *week's own* comments by stream and
+that is unaffected, because those are a week's comments shown under their own
+week; what this narrowing covers is the from-earlier-weeks list, where the
+container is the whole of the de-identification. `_released` returns one flat
+tuple across both streams today (`app.services.reporting`) and `ReportComment`
+carries `stream` because the ordinary per-week grouping needs it — so nothing has
+to change, and what is written here is that using that field to partition the
+*release* is the event that reopens this record rather than a presentation choice.
+Recorded as a LOW from the E4 boundary review.
+
 **Re-read 2026-09-08, on E4-12's credit note.** That clause fired: the note E4-12
 first shipped in the report's Participation region said a comment judged too
 brief or nonsense "costs that student one item of their participation credit",
@@ -140,6 +156,47 @@ unanswered item and a comment that did not count leave an item incomplete alike 
 so a ledger deficit no longer maps to a refused comment, and a reader who
 followed the note's arithmetic learns that the two are indistinguishable there.
 The residual is accepted on that ground and the suppression above is unchanged.
+
+**Amended 2026-09-09: the quiet week's own summary was a channel this record did
+not cover, and the floor claim is restated to what is now true.** The E4 boundary
+review found it. Everything above is about the *release* — what a comment carries
+when it surfaces later, and how few candidate authors stand behind it. A quiet
+week also has a **summary**, generated in the same week the comments were held
+(SPEC §5.1: "there, the summary is the only comment signal"), and a summary is
+prose. A summary that reused a commenter's own words disclosed that comment
+immediately, under its own week, to the reader this record is written about — the
+one holding the per-week completion ledger — and in a four-response week the
+intersection of "wrote a comment this week" and "completed this week's comment
+item" is frequently one person. It also disclosed it *twice*: once in the quiet
+week's summary and again, verbatim and unattributed, when the release was cut, so
+a reader who kept both pages could re-attach a released comment to its week by
+matching the phrase. That is the sequence channel this record's last rejected
+alternative already names, arriving through a surface nobody had looked at.
+
+**The ruling of 2026-09-09 is that below the n-threshold a summary names themes
+only** and may not reuse the commenters' word strings, in its prose or in a theme
+label. It is enforced twice, because a prompt instruction is soft: `summary.v2`
+asks for it, and `app.services.reporting` refuses to store a small-N summary
+sharing a twenty-character normalized run with a comment it was fed, rolling that
+section-week back so the week is generated again next run.
+[ADR 0162](0162-the-small-n-summary-is-a-second-live-prompt-version-and-a-store-time-guard.md)
+records the guard's construction.
+
+**The honest residual, which is not zero.** The guard bounds *verbatim* reuse and
+nothing else. A summary that says a week's theme in its own words still narrows an
+author the same way any true statement about a four-person week does: an
+instructor who knows the section can often tell who raised a point from the point
+itself, and no threshold, no bound and no prompt can prevent that. What this
+amendment buys is that a *string* an instructor could match — against the release
+weeks later, or against a student's own writing elsewhere — no longer crosses.
+Theme-level correlation remains, and it remains as it was before this record was
+written. So the floor sentence above is restated: it was "no fewer than a
+threshold's worth of candidate authors, from no fewer than two quiet weeks", which
+was true of the release and was silently read as a statement about the whole
+surface. It is a statement about the release. The quiet week's summary has always
+been a per-week signal about a set smaller than the threshold, that is what §5.1
+asks for, and what changed on 2026-09-09 is only that the signal may no longer be
+a quotation.
 
 ## Alternatives rejected
 
