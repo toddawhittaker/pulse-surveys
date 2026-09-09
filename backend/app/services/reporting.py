@@ -74,7 +74,7 @@ from app.models.org import Course, Prefix, Section
 from app.models.report import WeeklySummary
 from app.models.survey import REPORT_STREAMS, Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow, Term, Week
-from app.services import clock
+from app.services import clock, enrollment_windows
 from app.services.authz import (
     section_scoped_assignees,
     taught_section_ids,
@@ -1226,12 +1226,29 @@ def _enrolled_students(
     enrolments that are live *now* would answer both with the same wrong number.
 
     **The test is overlap, and the reason is arithmetic.** An enrolment counts if it
-    had begun by the day the window closed and had not ended before the day it
+    had begun by the time the window closed and had not ended before the day it
     opened. A narrower rule — enrolled on the day it closed, say — would put a
     student who answered on the Monday and dropped on the Tuesday in the numerator
     and not the denominator, and a response rate above 1 is a report nobody can
     read. The days are the institution's own, which is the zone every window's wall
     clock is stated in (SPEC §3.1).
+
+    **"Had begun" is `app.services.enrollment_windows`' question and not this
+    function's**, since the E4 boundary round (ADR 0161). It used to be
+    `started_on <= closed_on` here, and that column is what a roster sync writes
+    when it *first sights* a member — so a late add the platform dated into course
+    week 4 carries the section's start date in it and was counted in the three weeks
+    before he arrived. §3.4's tiers read `lms_window_start` first, and
+    `app.services.grading` has read them since E3-04; this is the sentence ADR 0147
+    already claimed and did not have. The half that is **not** shared is `ended_on`:
+    a drop takes no week away from a participation score and does take a student out
+    of a later week's denominator, so the end of the window is tested here and
+    nowhere else.
+
+    **The begin test moved out of SQL and the end test did not**, which is ADR
+    0147's own direction — the enrolment rules are read "in one language" — and it
+    costs one section's enrollment rows loaded per report rather than counted in the
+    database. The row set is one section's roster.
 
     **Staff are not students** (§3.4: "completed items ÷ total items across the
     *student's* elapsed weeks"). A roster container lists the instructor too and
@@ -1243,16 +1260,20 @@ def _enrolled_students(
     """
     zone = ZoneInfo(settings.institution_timezone)
     opened_on = week.opens_at.astimezone(zone).date()
-    closed_on = week.closes_at.astimezone(zone).date()
-    enrolled = set(
-        session.scalars(
-            select(Enrollment.user_id).where(
+    synced_on = enrollment_windows.first_sync_day(session, section_id=section.id, zone=zone)
+    enrolled = {
+        enrollment.user_id
+        for enrollment in session.scalars(
+            select(Enrollment).where(
                 Enrollment.section_id == section.id,
-                Enrollment.started_on <= closed_on,
                 or_(Enrollment.ended_on.is_(None), Enrollment.ended_on >= opened_on),
             )
         )
-    )
+        if enrollment_windows.began_by(
+            enrollment_windows.enrolled_from(enrollment, first_sync_day=synced_on, zone=zone),
+            closes_at=week.closes_at,
+        )
+    }
     staff = section_scoped_assignees(session, section_id=section.id)
     if not staff:
         return len(enrolled)
