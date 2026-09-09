@@ -7,14 +7,17 @@ import {
   A_PUBLISHED_WEEK,
   A_SMALL_N_WEEK,
   A_WEEK_NOBODY_ANSWERED,
+  A_WEEK_WITH_A_HELD_COMMENT,
   A_WEEK_WITH_A_RELEASE,
   A_WEEK_WITH_NOBODY_ENROLLED,
   COURSE_COMMENT,
   COURSE_LABEL,
+  HELD_COMMENT,
   INSTRUCTOR_COMMENT,
   ONE_TAUGHT_SECTION,
   PUBLISHED_WEEKS,
   RELEASED_COMMENT,
+  RELEASED_INSTRUCTOR_COMMENT,
   SECTION_ID,
   SMALL_N_THRESHOLD,
 } from './instructorReportFixtures';
@@ -386,9 +389,17 @@ describe('comments released from earlier weeks', () => {
     expect(screen.getByText(RELEASED_COMMENT)).toBeTruthy();
     // The chip §7.6 keeps off by default: this is the one list on the surface
     // holding both streams, so a chip names the question rather than repeating
-    // a heading. The released comment answered the course question.
+    // a heading. Both directions, because the wire spells streams 'COURSE' and
+    // 'INSTRUCTOR' and a mapping that answered one constant for every value
+    // would satisfy a single-sided assertion — the mutation this pair kills is
+    // the page comparing against a spelling the wire never sends, which is how
+    // the chip was dead until the E4 boundary round.
     const released = screen.getByText(RELEASED_COMMENT).closest('article');
     expect(released?.textContent).toContain('Course');
+    expect(released?.textContent).not.toContain('Instructor');
+    const releasedInstructor = screen.getByText(RELEASED_INSTRUCTOR_COMMENT).closest('article');
+    expect(releasedInstructor?.textContent).toContain('Instructor');
+    expect(releasedInstructor?.textContent).not.toContain('Course');
 
     // Nothing in the block names a week or counts anything.
     const block = container.querySelector('.pulse-report-released');
@@ -402,6 +413,32 @@ describe('comments released from earlier weeks', () => {
 
     expect(A_PUBLISHED_WEEK.released_from_earlier_weeks).toEqual([]);
     expect(screen.queryByRole('heading', { name: RELEASED_HEADING })).toBeNull();
+  });
+});
+
+describe('a comment a moderator is holding', () => {
+  // §5.2's flagged-collapsed treatment, on the wire's own spelling. The page
+  // maps `flagged_collapsed` onto the card's collapsed variant; the mutation
+  // this kills is the mapping comparing against a value the wire never sends
+  // ('flagged'), under which the held comment renders as a plain published
+  // card — its words in the DOM, no chip, no disclosure. That is exactly the
+  // defect the E4 boundary round found, so this is its regression pin.
+  it('collapses it: chip and disclosure shown, the words out of the DOM until reviewed', async () => {
+    servingWeeks({ 4: A_WEEK_WITH_A_HELD_COMMENT });
+    const { container } = open(4);
+    // Canary first: a published comment is on the page, so the held one's
+    // absence below is about one comment, not about a page with no comments.
+    await screen.findByText(INSTRUCTOR_COMMENT);
+
+    expect(screen.getByText('Hidden from students pending your review')).toBeTruthy();
+    const disclosure = screen.getByRole('button', { name: 'Review comment' });
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false');
+    expect(container.textContent).not.toContain(HELD_COMMENT);
+
+    // Opening the disclosure is what proves the absence was a collapse rather
+    // than a dropped comment — the near miss a bare absence assertion passes.
+    fireEvent.click(disclosure);
+    await screen.findByText(HELD_COMMENT);
   });
 });
 
