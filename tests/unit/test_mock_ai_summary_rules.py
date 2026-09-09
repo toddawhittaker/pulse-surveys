@@ -181,6 +181,96 @@ def test_the_published_summary_marker_is_a_line_of_the_summary_prompt(
     )
 
 
+def test_every_summary_prompt_carries_the_marker_line_exactly_once(
+    configured_env: dict[str, str],
+    summary_api: SummaryApi,
+    mock_ai: MockAiProvider,
+) -> None:
+    """One marker per prompt file, over every summary version on disk — the `find` residual.
+
+    The security re-pass of 2026-09-09 accepted the boundary moving from the
+    marker's last occurrence to its first, and named what that leaves resting on
+    the prompts: **`find` is only the right split while the marker appears exactly
+    once.** A second copy inside a template truncates the head at the first one,
+    and everything between the two copies — the stream declaration, the small-N
+    mode instruction, whatever a later version puts there — falls out of the head
+    and into what the mock reads as the week's comments. That is the same
+    disclosure the `rfind` defect had, reached from the template's side instead of
+    the student's.
+
+    **Membership was all the sibling test asserted, and over one file.**
+    `test_the_published_summary_marker_is_a_line_of_the_summary_prompt` asks
+    whether the marker is *in* the prompt the application currently renders. Both
+    halves of that are too narrow now: "in" does not say "once", and the current
+    constant is one version while the tool has two live prompts and the mock
+    dispatches the same way for both.
+
+    **Every `summary.v*.md` on disk, not the two this file could have named.** The
+    directory is the one the application resolves its own prompt in, and the family
+    is globbed rather than listed — a `summary.v3.md` added tomorrow is a live
+    prompt the moment something renders it, and a test enumerating v1 and v2 would
+    go on passing over it. ADR 0032 keeps retired versions on disk too; asserting
+    the property of those costs nothing, because a retired prompt is immutable and
+    already satisfies it.
+
+    **The count is asserted over stripped lines**, the same reading the sibling
+    test compares membership under, so a marker that gained trailing whitespace in
+    one place is still one marker rather than two different strings.
+
+    **The mutation this kills:** a template edit that quotes the marker line a
+    second time — in an example, a repetition of the instruction, a heading reused
+    at the foot of the file. **The near miss it must survive:** a line that merely
+    *contains* the marker as a substring inside a longer sentence, which is not a
+    second boundary and must not be counted as one; the comparison is over whole
+    stripped lines for that reason.
+
+    **The canary comes first.** A glob that matched nothing, or one file, would
+    make this assertion vacuous or would quietly stop covering the version the tool
+    is about to move to.
+    """
+    marker = mock_ai.summary_marker_line().strip()
+    current = summary_api.prompt_path()
+    assert current.is_file(), (
+        f"{current} does not exist, so this test has no directory to look in. The path comes "
+        "from `app.ai.tasks.SUMMARY_PROMPT_VERSION`, which is the prompt the tool renders."
+    )
+
+    versions = sorted(current.parent.glob("summary.v*.md"))
+    assert len(versions) >= 2, (
+        f"the summary prompt family in {current.parent} is {[path.name for path in versions]}. "
+        "Two versions are live — E4-05's original and the one the owner's ruling of 2026-09-09 "
+        "added for the themes-only mode — so a glob finding fewer than two is looking in the "
+        "wrong place or matching the wrong name, and this test would be asserting the property "
+        "of whichever files it happened to find."
+    )
+    assert current in versions, (
+        f"the prompt the application renders ({current.name}) is not among "
+        f"{[path.name for path in versions]}, so this test covers every version except the one "
+        "that is actually being sent."
+    )
+
+    counted = {
+        path.name: [line.strip() for line in path.read_text(encoding="utf-8").splitlines()].count(
+            marker
+        )
+        for path in versions
+    }
+    wrong = {name: count for name, count in counted.items() if count != 1}
+    assert not wrong, (
+        f"these summary prompts do not carry {marker!r} exactly once: {wrong} "
+        f"(all of them: {counted}).\n\n"
+        "The mock splits a summary prompt at that line's **first** occurrence — moved there by "
+        "the security round of 2026-09-09, so that a student's comment carrying a copy could not "
+        "move the boundary. That fix rests on the template carrying one copy: with two, the head "
+        "ends at the first, and everything between them — the stream declaration, the small-N "
+        "mode instruction, anything a later version adds there — leaves the head and is read as "
+        "part of the week's comments. A prompt with no copy at all is worse: the mock cannot tell "
+        "the request from a validity one and answers a verdict.\n\n"
+        "Zero here is a reworded template; two is an edit that quoted the line again, which is "
+        "the likelier of the two and the one nothing else would notice."
+    )
+
+
 def test_a_summary_prompt_is_answered_with_the_summary_contract(
     configured_env: dict[str, str],
     summary_api: SummaryApi,

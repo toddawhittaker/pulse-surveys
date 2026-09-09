@@ -282,5 +282,57 @@ re-carries dated. Installed pins unchanged (6.0.3 / 8.68.0).
 
 ## The per-PR security review
 
-Recorded in a closing commit after the review ran; see the section
-appended below and the pull request body.
+Ran fresh-context and diff-first against the epic base (named explicitly —
+the tool's default scoping diffs against `main` and would have handed the
+reviewer the whole epic), with the ticket's nine recorded decisions listed
+so a decision could be told from an oversight, and with standing to
+challenge any of them. Both passes ran: the generic checklist, rescoped,
+and the project-specific pass; they converged.
+
+**No HIGH, no MEDIUM. Three LOWs, all closed inside the PR:**
+
+- The development provider's small-N mode dispatch read the prompt's head
+  from its *last* marker occurrence, so a student comment carrying the
+  literal marker line could move the boundary and put student text where
+  the mode and stream are read (deny-direction only, development only).
+  Fixed with `find` — the first copy is always the template's own — plus a
+  regression pin that plants a real wrong-stream head inside a comment,
+  and corrections to the four records that carried the false
+  cannot-be-moved claim.
+- A launch-site comment written by the epic's own fix round overclaimed in
+  the dangerous direction (calling `exp` unenforced and the token
+  indefinitely valid, when the skew check bounds a captured token to
+  `exp` plus the tolerance and the in-flight state dies at its own
+  expiry). Rewritten to the three true layers; the ordering test stays.
+- The themes-only store-time guard's permanent-refusal residual is
+  input-controlled as well as provider-controlled — one commenter in a
+  quiet week can arrange the refusal, deterministically on the
+  development stack. Resolved by record: ADR 0162's dated amendment names
+  the trigger, and the hand-off carries the entry with the job
+  observability surface as owner.
+
+**The re-pass over the fixes** confirmed all three resolved, judged the
+posture strictly better, accepted the deliberately-unchanged validity-path
+boundary (a read-after boundary wants the opposite end of the string, the
+hazard is self-inflicted and mock-only) while challenging two remaining
+sentences that still overclaimed — corrected — and found the one residual
+the fix itself created: `find` depends on the marker appearing exactly
+once per live prompt, which nothing pinned and which now is
+(`test_every_summary_prompt_carries_the_marker_line_exactly_once`, over
+every version file the application's own directory holds, mutation-proven
+against a planted second marker). The rounds stopped there, deliberately:
+nothing red, nothing above LOW, and the declared stopping rule forbids
+re-polish of accepted work.
+
+**Checked and reported clean by the pass, explicitly:** the seeder against
+`guard_write` and the grants (writes only unguarded tables, through the
+product's own services, refuses before opening a session outside
+development); the real prompt path against marker injection (version never
+parsed from a prompt, stream substituted before comments, the mode from a
+database count); the guard's refusal path leaking nothing (lengths and
+enum tokens only, rollback before storage); the enrollment-window
+promotion changing no caller but the report denominator; the new tests
+weakening nothing; the migration's downgrade a true reversal; the eval
+additions moving no floor; no dependency, workflow, or secret surface in
+range; the sanctioned §3.3 fail-open untouched, and the one new failure
+path failing closed beside it.
