@@ -65,9 +65,12 @@ from uuid import UUID
 from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
+    ForeignKeyConstraint,
+    Index,
     Integer,
     Text,
     UniqueConstraint,
+    Uuid,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -255,21 +258,47 @@ class ReleaseBatch(UuidPrimaryKey, Base):
     of comments rather than about any one of them, which is exactly what makes
     the batching work: the membership rows beside it carry nothing.
 
-    **The term is referenced plainly beside the section**, for the reason
-    `weekly_summary` takes a plain `week_id`: the writer is E4-04, which derives
-    both from the section it is releasing for. ADR 0145 names the accepted risk.
+    **The section and the term have to agree, and since the E4 boundary round the
+    database is what says so.** This paragraph used to read that the term is
+    "referenced plainly beside the section … ADR 0145 names the accepted risk", and
+    the boundary review wrote the row that permitted: a batch naming a section of
+    one term and the id of another. Two single-column keys accept it, and it is a
+    release attached to a crossing nobody evaluated — `released_comments` reads by
+    exactly that pair, so such a batch is either invisible to its section's real
+    report or attached to the wrong term's. The mechanism is `response`'s and
+    `survey_window`'s, for ADR 0018's reason: a composite foreign key, because a
+    `CHECK` cannot read another table. ADR 0146 carries the dated correction —
+    that record's cost argument for keeping the keys plain was ADR 0145's, and it
+    does not apply here, because `term_id` is already on the row.
     """
 
     __tablename__ = "release_batch"
-
-    # Not indexed. The read E4-04 will make is this section's batches for this
-    # term, and no measurement in this repository says how that query is shaped
-    # yet — `app/models/survey.py` makes the same call about `answer.question_id`,
-    # and `c4a8e51db9f3` is the worked example of an index arriving in the ticket
-    # that measured the read rather than in the ticket that guessed at it.
-    section_id: Mapped[UUID] = mapped_column(
-        ForeignKey("section.id", ondelete="RESTRICT"), nullable=False
+    __table_args__ = (
+        # The pairing, replacing the plain key to `section` rather than sitting
+        # beside it: one check per reference, and the composite one is strictly the
+        # stronger. It references `uq_section_id_term_id`, which `section` has
+        # carried since `3f6907349751` gave `survey_window` the same rule.
+        ForeignKeyConstraint(
+            ["section_id", "term_id"],
+            ["section.id", "section.term_id"],
+            ondelete="RESTRICT",
+        ),
+        # Both of E4-04's release reads are keyed on this pair: `released_comments`
+        # asks what this section has released this term, and `cut_due_release_batches`
+        # asks it of every section in the institution once a week. The measurement
+        # the original note asked for is the boundary review's, and this is the
+        # index arriving in the ticket that made it.
+        Index("ix_release_batch_section_id_term_id", "section_id", "term_id"),
     )
+
+    # Referenced by the composite key above rather than by a `ForeignKey` here,
+    # exactly as `response.section_id` and `survey_window.section_id` are. It leads
+    # the index above, so a lookup by section alone is served too.
+    section_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    # The plain key to `term` stays. The composite above implies it — a section's
+    # own `term_id` is a foreign key into `term` — and it is kept because dropping
+    # it is a separate decision about what a batch's term means, which no finding
+    # asked for.
     term_id: Mapped[UUID] = mapped_column(
         ForeignKey("term.id", ondelete="RESTRICT"), nullable=False
     )
@@ -302,11 +331,14 @@ class ReleaseBatchMember(UuidPrimaryKey, Base):
     __tablename__ = "release_batch_member"
     __table_args__ = (UniqueConstraint("answer_id"),)
 
-    # Not indexed on its own. The read is a batch's members, which E4-04 builds;
-    # see the note on `release_batch.section_id` for why the index waits for the
-    # ticket that measures it.
+    # Indexed since the E4 boundary round, which is the ticket that measured the
+    # read the original note here was waiting for. `released_comments` walks a
+    # section's batches and then each batch's memberships, on every report of a
+    # section with a release in it; without this the lookup scans every membership
+    # row this institution has ever written. The unique on `answer_id` below cannot
+    # serve it — it leads with the answer.
     batch_id: Mapped[UUID] = mapped_column(
-        ForeignKey("release_batch.id", ondelete="RESTRICT"), nullable=False
+        ForeignKey("release_batch.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     # Not indexed either: it is the whole of `uq_release_batch_member_answer_id`,
     # which serves the lookup every reader makes — has this comment been released.
