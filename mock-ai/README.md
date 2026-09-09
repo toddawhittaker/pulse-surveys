@@ -45,7 +45,7 @@ before E4-05.
 For **comment validity**, the student's comment is everything after the last
 occurrence of the line the validity prompt's instructions end with, with
 surrounding whitespace removed. For the **weekly summary**, the week is the
-blank-line-separated blocks after the last occurrence of the summary prompt's
+blank-line-separated blocks after the *first* occurrence of the summary prompt's
 marker line, and the stream is the token following the last `Stream under
 review:` line before it — so no comment can move either boundary or choose which
 stream the answer is about.

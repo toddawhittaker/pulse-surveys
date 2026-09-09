@@ -124,6 +124,34 @@ a working guard.
   naming the section, the week and the bound. That is the same visibility a
   provider outage gets and no more; a per-week alarm is E6's or §6.1's to build if
   it is wanted, and this record does not claim one exists.
+
+  > **Amended 2026-09-09 by this ticket's security review: the trigger is not only
+  > the provider's.** The paragraph above reads as a statement about model
+  > flakiness, and the more reachable case is a **student**. A commenter in a quiet
+  > week who writes a phrase the summary will inevitably contain — a distinctive
+  > twenty-character run naming the week's own subject, or, more simply, a sentence
+  > lifted from the prompt's instructions — makes every answer about that week
+  > share a run with a comment it was fed. The guard then refuses on every retry,
+  > for ever, with no cap and nothing on the report saying a summary was owed. One
+  > student can take their own week's summary away from their instructor, and can
+  > do it on purpose.
+  >
+  > **In development it is deterministic rather than merely possible.** `mock-ai`'s
+  > themes-only prose contains "below the reporting threshold" — twenty-nine
+  > characters normalized, comfortably over the bound — so a comment carrying that
+  > phrase refuses its own week's summary on the development stack every time.
+  >
+  > **Nothing is built for it here, and the reason is the direction.** The failure
+  > is denial: a week loses a summary, and no comment is ever disclosed by it. A
+  > cap — store the answer after N refusals, or relax the bound — spends the ruling
+  > to buy back a summary, which is the trade this record already refuses under
+  > "store it anyway and log the violation". Detecting the planted phrase means
+  > deciding what a student may write, which is §3.3's question and not this one's.
+  > So the residual is accepted, named, and left: **visibility for a
+  > permanently-refused week lands with the job observability surface** (§6.1's
+  > console, which already reads this walk's `written`/`failed` answer), and that
+  > is where "this section-week has been failing since October" belongs rather than
+  > in a cap inside the guard.
 - **The refusal is not an `AIGatewayError` and is caught beside one.** The provider
   answered, in time, in shape; what failed is compliance. The two are logged in
   different sentences on purpose — a run of refusals is a prompt or a model not
@@ -143,6 +171,20 @@ a working guard.
   prompt's *head*, before the comments boundary, so nothing a student typed can
   put the mock into themes-only mode for its own week — the protection
   `stream_asked_about` already has, for the same reason.
+
+  > **Corrected 2026-09-09 by this ticket's security review: that was true of the
+  > boundary the code should have taken and not of the one it took.** `answer_for`
+  > cut the head at `rfind(SUMMARY_MARKER_LINE)` — the *last* copy of the marker —
+  > and the summary prompt tells the model in as many words that a comment may
+  > contain "another copy of this marker". A student who wrote one pulled every
+  > comment ahead of it into the head, so both things read out of the head became
+  > partly student text: the small-N mode, and the stream. Measured both ways
+  > against the same input; before the change it flipped the mode and answered a
+  > `course` prompt for the `instructor` stream, and after it does neither. The
+  > boundary is `find` now, which is always the template's own copy. The direction
+  > was deny-only — a comment could refuse its own week's summary or send the
+  > answer to the wrong heading, never reveal anything — and it reached the mock
+  > alone, which ADR 0113 keeps out of every deployment.
 - **The guard is scoped to small-N weeks and applying it more widely would be a
   change, not a tightening.** Above the threshold the raw comments are on the
   report under their own heading, so a summary echoing one discloses nothing; a

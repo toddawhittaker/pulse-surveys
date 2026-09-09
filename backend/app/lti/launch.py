@@ -160,21 +160,42 @@ CLOCK_SKEW_TOLERANCE_SECONDS = 300
 # two are one rule rather than two numbers.** A nonce forgotten by this ledger
 # while its in-flight record is still live is a captured `id_token` that finds a
 # record to match against and no memory of having been spent — a second successful
-# launch on one token, and a session issued to whoever held it. Nothing else
-# closes that window: this tool does not enforce the launch token's own `exp`
-# (`verify_exp` is off, deliberately, because platform clock skew is the commonest
-# cause of a launch that should have worked and did not), so the token stays
-# cryptographically valid indefinitely and the ordering of these two lifetimes is
-# the whole of the bound. An hour against five minutes leaves it 3300 seconds
-# wide in the safe direction.
+# launch on one token, and a session issued to whoever held it. That ordering is
+# the guarantee: a nonce this ledger has purged is always a nonce whose in-flight
+# state is already dead. An hour against five minutes leaves it 3300 seconds wide
+# in the safe direction, and
 # `tests/unit/test_the_nonce_ledger_outlives_the_in_flight_state_it_guards.py`
-# holds the ordering; this comment is why it is at the site.
+# holds it — this comment is why it is at the site.
+#
+# **What bounds a captured token is three layers, and an earlier version of this
+# comment claimed there was only one.** It said `exp` is unenforced and the token
+# "stays cryptographically valid indefinitely", and both halves are false;
+# E4-15's security review found them. What is actually true:
+#
+#   - `_refuse_clock_skew` below reads the token's own `exp` and refuses one that
+#     expired more than `CLOCK_SKEW_TOLERANCE_SECONDS` ago, so a captured launch
+#     is honourable until `exp + 300` and no longer. `verify_exp` is off in the
+#     library because this tool judges the claim itself, with the tolerance
+#     platform clock skew needs — not because nothing judges it.
+#   - the in-flight record is dead at its own `expires_at`, hard: `look_up_launch`
+#     filters on `expires_at > now`, so the state is unusable after five minutes
+#     whether or not the daily purge has reclaimed the row yet.
+#   - and these two lifetimes' ordering, above, which is what makes the second
+#     layer's death and this ledger's forgetting never overlap the wrong way.
+#
+# The first two are what bound the window; this ordering is what keeps it from
+# being reopened by the expiry of the memory that closes it.
 NONCE_LEDGER_LIFETIME_SECONDS = 3600
 
-# How long an in-flight launch handshake is remembered before the daily purge may
-# reclaim it. Five minutes, the same bound the retired login cookie had (ADR
-# 0078): a login a browser follows completes at once, and a launch that has not
-# come back in five minutes is not coming back.
+# How long an in-flight launch handshake stays usable. Five minutes, the same
+# bound the retired login cookie had (ADR 0078): a login a browser follows
+# completes at once, and a launch that has not come back in five minutes is not
+# coming back.
+#
+# **It is enforced by the read, not by the purge.** `app.lti.in_flight.look_up_launch`
+# requires `expires_at > now`, so the state is dead on the dot;
+# `purge_expired_launch_states` on the daily beat reclaims the rows afterwards and
+# is housekeeping rather than the bound.
 #
 # **This is the shorter half of the replay window `NONCE_LEDGER_LIFETIME_SECONDS`
 # above states.** Raising it past that constant, or lowering that constant to

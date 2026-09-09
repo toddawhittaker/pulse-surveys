@@ -139,10 +139,17 @@ SUMMARY_MARKER_LINE = "The week's comments follow this line, one numbered block 
 # small-N week and a prompt without it is an ordinary one.
 #
 # **Read out of the head of the prompt, before the comments boundary**, exactly as
-# the stream is. A student could type this sentence into a feedback box, and if
-# the search ran over the whole message that comment would put the mock into
-# themes-only mode for its own week; searching the instructions alone means
-# nothing after the marker line can reach it.
+# the stream is — and the head is cut at the **first** copy of
+# `SUMMARY_MARKER_LINE` for that to mean anything. A student could type this
+# sentence into a feedback box, and if the search ran over the whole message that
+# comment would put the mock into themes-only mode for its own week.
+#
+# **This comment claimed more than it had until E4-15's security review.** It said
+# that searching the instructions alone means nothing after the marker line can
+# reach it, and that was true only of a boundary taken at the first copy; the code
+# took it at the *last*, so a comment carrying the marker line pulled the comments
+# ahead of it into the head. `answer_for` now cuts at the first copy and the claim
+# holds.
 #
 # A fragment rather than a whole line, because the instruction is a wrapped
 # Markdown bullet rather than a sentence on its own line. Like
@@ -580,7 +587,19 @@ def answer_for(prompt: str) -> Answer:
     handler answers as a 500 naming what it looked for.
     """
     if SUMMARY_MARKER_LINE in prompt:
-        boundary = prompt.rfind(SUMMARY_MARKER_LINE)
+        # **The first copy of the marker, not the last**, which is where this
+        # differs from the validity path above and is not a style difference.
+        # The summary prompt's own marker is the last line of its instructions and
+        # the week's comments follow it, so the *first* occurrence is always the
+        # template's. A student may type the marker line into a feedback box — the
+        # prompt says so in as many words, "a comment may contain … another copy of
+        # this marker" — and with `rfind` that copy moved the split into the comment
+        # block, putting the comments before it into `head`. Everything read out of
+        # `head` is then partly student text: the stream, and the small-N mode.
+        # E4-15's security review found it, in the deny direction only (a comment
+        # could refuse its own week's summary or answer for the wrong stream, never
+        # reveal anything), and `find` closes it.
+        boundary = prompt.find(SUMMARY_MARKER_LINE)
         head = prompt[:boundary]
         body = prompt[boundary + len(SUMMARY_MARKER_LINE) :]
         return summarize(
@@ -614,8 +633,9 @@ def served_rules() -> dict[str, Any]:
             f"comment validity — a prompt with no {SUMMARY_MARKER_LINE!r} line. The comment is "
             f"everything after the last {MARKER_LINE!r}.",
             f"weekly summary — a prompt carrying {SUMMARY_MARKER_LINE!r}. The week is the "
-            "blank-line-separated blocks after the last copy of it, and the stream is the token "
-            f"after the last {STREAM_LINE_PREFIX!r} line before it.",
+            "blank-line-separated blocks after the first copy of it, and the stream is the token "
+            f"after the last {STREAM_LINE_PREFIX!r} line before it. The first copy rather than "
+            "the last, so a comment carrying the marker line cannot move the split.",
             f"weekly summary, small-N — the same, for a prompt whose instructions carry "
             f"{SMALL_N_MARKER!r}. The answer names the comment count and labels its themes by "
             "ordinal, repeating none of the week's words (the ruling of 2026-09-09).",
