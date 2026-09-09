@@ -151,10 +151,26 @@
 }
 
 /* §5.2's excluded state: the text stays visible to the instructor, muted, above
- * the exclusion notice. Mist is the de-emphasis token and names excluded
- * comment text by hand in `design/tokens.css`. */
+ * the exclusion notice.
+ *
+ * **Spruce-60 rather than mist, and the E4 boundary round measured why.** Mist
+ * against paper is 2.58:1 — below WCAG AA's 4.5:1 for body text and below even
+ * the 3:1 graphical floor — so an excluded comment's own words and the sentence
+ * explaining them were the least readable text on the report, which is the wrong
+ * direction for a passage an instructor is being asked to make a decision about.
+ * Spruce-60 is 5.18:1 on paper and 4.85:1 on chalk, and `design/tokens.css`
+ * already names it "secondary ink: labels, helpers, meta", which is what these
+ * two are.
+ *
+ * `design/tokens.css` still names mist for excluded comment text and this file
+ * departs from it deliberately: that line predates the measurement, the token's
+ * own published role is de-emphasis for *lines* in a chart, and the file's focus
+ * ring already carries the same correction in the other colour — it moved to
+ * marigold-deep because "the accent measures 2.1:1 against chalk and 2.2:1
+ * against paper". De-emphasis here is carried by weight, size and the notice
+ * beside it rather than by a contrast a reader cannot resolve. */
 .pulse-comment-card__text--muted {
-  color: var(--mist);
+  color: var(--spruce-60);
 }
 
 .pulse-comment-card__notice {
@@ -162,7 +178,7 @@
   margin-top: var(--space-3);
   font-size: var(--text-1);
   line-height: 1.5;
-  color: var(--mist);
+  color: var(--spruce-60);
 }
 
 .pulse-comment-card__flag-row {
