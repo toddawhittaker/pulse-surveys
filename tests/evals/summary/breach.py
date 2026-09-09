@@ -51,6 +51,7 @@ from tests.evals.summary.cases import (
     EMPTY_WEEK_CASE,
     MIXED_WEEK_CASE,
     SMALL_N_CASE,
+    SMALL_N_THEMES_ONLY_CASE,
     build_answer,
 )
 
@@ -108,6 +109,28 @@ def sanded_answers(contracts: Any) -> dict[str, Any]:
             "Two students wrote in this week. They talked about the reading list and about the "
             "lab materials, and both are clearly working through the course carefully.",
             (("course materials", 2),),
+        ),
+        # **The themes-only case's breach, and it fails in two ways at once.** Both
+        # criticisms are sanded — each topic is named and no judgement is said
+        # about it, which is what `sanded_signals` is looking for — *and* the first
+        # sentence lifts "the Wednesday laboratory demonstration" whole out of a
+        # commenter's words, thirty-eight characters against a bound of twenty.
+        #
+        # The quotation is deliberately of a fragment that carries the **topic and
+        # not the judgement**. A breach that quoted the whole sentence would carry
+        # the criticism with it, the criticism would survive, and
+        # `test_a_sanded_summary_fails_the_case_whose_criticism_it_sanded` would
+        # red on a variant that had not sanded anything. Lifting the noun phrase
+        # alone is what makes this answer fluent, warm, quoting, and empty of what
+        # the week actually said — which is the shape the owner's ruling of
+        # 2026-09-09 exists to refuse.
+        SMALL_N_THEMES_ONLY_CASE.case_id: build_answer(
+            contracts,
+            SMALL_N_THEMES_ONLY_CASE,
+            "Two students wrote in this week. The Wednesday laboratory demonstration drew "
+            "comment, and so did the acoustics of the lecture theatre. Both are engaged with "
+            "the course.",
+            (("the week's two comments", 2),),
         ),
         EMPTY_WEEK_CASE.case_id: build_answer(
             contracts,

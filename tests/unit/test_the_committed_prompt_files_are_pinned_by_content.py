@@ -117,6 +117,13 @@ NOT_A_PROMPT = frozenset({"README.md"})
 # is a conversation rather than a command.
 RECORDED_SHA256: dict[str, str] = {
     "summary.v1.md": "4be7d5ae35eaeb305bffaf96ff4a10803462bf060fc65809f65899ced8eb4912",
+    # E4-15's new file, added under the owner's ruling of 2026-09-09: below the
+    # n-threshold a week's summary names themes only and may not reuse the
+    # commenters' own word strings. It is a **new version beside** `summary.v1.md`
+    # and not an edit to it, which is the move ADR 0032 requires and the one this
+    # module exists to make visible — `summary.v1.md`'s row above is unchanged,
+    # because the file it pins is unchanged.
+    "summary.v2.md": "2e65779c601bd2fc6956bb8e61c6cc4f9f5a5d66e21a957e04f6fb7ec12141cf",
     "validity.v1.md": "206efdc537c84da2896776c8806a419e83f42e24afe2a13c2a9ede8a6c695989",
     "validity.v2.md": "f642eb02afb09803e1230e9fcf907acc18780cbc949a33320701ce27d22f451e",
 }

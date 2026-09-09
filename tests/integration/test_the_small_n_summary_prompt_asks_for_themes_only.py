@@ -47,6 +47,7 @@ from fixtures.summary_job import (
     A_CLOSED_TERM_WEEK,
     A_COHORT,
     ANOTHER_COHORT,
+    COURSE_MARK,
     INSTRUCTOR_MARK,
     StreamAwareGateway,
     SummaryWorld,
@@ -71,6 +72,11 @@ A_COMMENT_BODY = "the seminar spent its whole hour on one worked example"
 # identical except for its numbers is not evidence of a mode.
 A_NUMBER = re.compile(r"\d+")
 
+# Every token that marks a line as one of the week's comments rather than part of
+# the template. Both stream markers and both routing nonces, because a comment
+# line carries one of each and a line carrying either is the section's own words.
+THE_COMMENTS_OWN_TOKENS = (INSTRUCTOR_MARK, COURSE_MARK, QUIET_SECTION, BUSY_SECTION)
+
 
 def a_comment_from(nonce: str) -> str:
     """One instructor-stream comment carrying its stream marker and a routing nonce."""
@@ -78,17 +84,38 @@ def a_comment_from(nonce: str) -> str:
 
 
 def _lines_of(prompt: str) -> list[str]:
-    """One prompt as comparable lines: whitespace collapsed, numbers blanked, blanks dropped.
+    """One prompt as comparable lines: the comments dropped, then the numbers blanked.
 
-    Numbers go because the response count is in the prompt and differs between the
-    two weeks whatever the mode does. Whitespace collapses because a template that
-    wraps differently at two lengths would otherwise read as a difference.
+    **The order of those two steps is the whole of dispute E4-15-01**, and it is
+    written out here because the first version of this module got it wrong in a way
+    that read as working. It blanked every run of digits *first* and then filtered
+    the blanked lines against the raw nonce and the raw marker — and every marker
+    and every nonce in this suite contains digits, so `Kq7ZvNb2Xt` had already
+    become `Kq#ZvNb#Xt` by the time the filter looked for it. The filter matched
+    nothing, ever. Both of this module's comparisons then ran with the comment lines
+    still in them: the control was red for a reason no implementation could fix,
+    and the subject was green before the mode existed, satisfied by the one thing
+    both prompts are guaranteed to contain.
+
+    So the filter and the lines it filters share one normalization, which is the
+    ruling: whitespace is collapsed, the comment lines are removed **while their
+    tokens are still readable**, and only what is left is blanked. Numbers go last
+    and go only from the template, where the response count lives.
+
+    **What this drops that it does not mean to**, said rather than left to be
+    found: a template that put an instruction on the same physical line as a
+    comment would lose that instruction too, and the subject test would red with
+    the instruction sitting in the prompt. No template does that today; if one
+    starts to, this function is the repair and not the assertion.
     """
     lines = []
     for raw in prompt.splitlines():
         collapsed = " ".join(raw.split())
-        if collapsed:
-            lines.append(A_NUMBER.sub("#", collapsed))
+        if not collapsed:
+            continue
+        if any(token in collapsed for token in THE_COMMENTS_OWN_TOKENS):
+            continue
+        lines.append(A_NUMBER.sub("#", collapsed))
     return lines
 
 
@@ -120,14 +147,24 @@ def test_the_prompt_for_a_week_below_the_threshold_says_something_the_other_does
     the comments and the numbers are set aside. That line is the themes-only
     instruction, whatever the implementer words it as.
 
-    **The mutations this kills:** the mode flag computed and never passed to the
-    task, and the task taking it and never putting it in the prompt — which are two
-    different defects with one symptom, and both leave the store-time guard
-    refusing summaries the model was never asked to write differently. **The near
-    miss it must survive:** a prompt that differs only in the week's response count,
-    which every build produces whether or not a mode exists; the numbers are blanked
-    before the comparison for exactly that reason, and the control test below proves
-    the blanking is not so aggressive that it would hide a real difference.
+    **The mutation this kills, and the one the dispute's ruling names:** both
+    prompts rendered in the same mode. However that arrives — the flag computed and
+    never passed to the task, the task taking it and never rendering it, or the
+    template ignoring it — the two prompts become identical once the comments and
+    the numbers are set aside, `said_only_to_the_quiet_week` is empty, and this
+    reds. Both of those defects leave the store-time guard refusing summaries the
+    model was never asked to write differently, which is the failure a green here
+    would hide.
+
+    **The near miss it must survive:** a prompt that differs only in the week's
+    response count, which every build produces whether or not a mode exists; the
+    numbers are blanked for exactly that reason.
+
+    **Expected green on the built tree**, where the mode and `summary.v2.md` exist.
+    It was green *before* they existed too, and that was the defect dispute
+    E4-15-01 reported rather than a property of this test: the comparator's filters
+    could not match, so the quiet section's own comment line satisfied the
+    assertion. `_lines_of` carries what changed.
 
     **What it does not reach** (`docs/MISTAKES.md` entry 14): whether the
     instruction says anything sensible. That is SPEC §9.3's question and
@@ -170,12 +207,9 @@ def test_the_prompt_for_a_week_below_the_threshold_says_something_the_other_does
     quiet = _lines_of(_the_prompt_carrying(gateway, QUIET_SECTION))
     busy = _lines_of(_the_prompt_carrying(gateway, BUSY_SECTION))
 
-    # The comments themselves are in both prompts and are not the mode.
-    said_only_to_the_quiet_week = [
-        line
-        for line in quiet
-        if line not in busy and QUIET_SECTION not in line and INSTRUCTOR_MARK not in line
-    ]
+    # The comments are already gone — `_lines_of` drops them while their tokens are
+    # still readable, which is dispute E4-15-01's ruling. What is left is template.
+    said_only_to_the_quiet_week = [line for line in quiet if line not in busy]
 
     assert said_only_to_the_quiet_week, (
         "The prompt for a week of two responses says nothing the prompt for a week at the "
@@ -213,6 +247,15 @@ def test_the_prompts_are_otherwise_the_same_so_the_difference_is_the_mode(
     **The mutation it kills:** a prompt that embeds the section's own name, code or
     key — which would make every pair of prompts differ and the mode assertion
     vacuous.
+
+    **Expected green on the built tree, and it was red before dispute E4-15-01.**
+    That red was unreachable by any implementation: its two sections are both below
+    the threshold and hold the same comment body and the same response count, so
+    every input differs only in the routing nonce inside each section's comments —
+    which the comparator was written to remove and, blanking the digits inside the
+    nonce first, did not. The lines it reported as "the template varying on the
+    section itself" were the two comment lines. A red here now is what that message
+    says it is.
     """
     summary_job_contract.require_table(summary_world.world.tables)
     threshold = configured_threshold()
@@ -236,11 +279,7 @@ def test_the_prompts_are_otherwise_the_same_so_the_difference_is_the_mode(
 
     first = _lines_of(_the_prompt_carrying(gateway, QUIET_SECTION))
     second = _lines_of(_the_prompt_carrying(gateway, BUSY_SECTION))
-    differing = [
-        line
-        for line in first
-        if line not in second and QUIET_SECTION not in line and INSTRUCTOR_MARK not in line
-    ]
+    differing = [line for line in first if line not in second]
 
     assert not differing, (
         f"Two sections, both below the threshold, both holding two responses and the same comment "

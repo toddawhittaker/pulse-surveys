@@ -668,6 +668,22 @@ def faithful_answers(contracts: Any) -> dict[str, Any]:
             "notation for the same quantity.",
             (("assigned chapter unavailable", 1), ("handout and slides use different notation", 1)),
         ),
+        # **The themes-only case's control, and the one place in this dict where
+        # the paraphrase is the subject rather than the style.** Every answer here
+        # is written paraphrased, for the reason the docstring gives; this one has
+        # to be, because `quoted_a_commenters_words` runs over it. Both criticisms
+        # survive — a session that overran, questions that could not be heard —
+        # and neither sentence shares twenty characters with the comment it is
+        # about: the longest run either way is eleven (" scheduled " against the
+        # first comment, " questions " against the second), counted by hand.
+        SMALL_N_THEMES_ONLY_CASE.case_id: build_answer(
+            contracts,
+            SMALL_N_THEMES_ONLY_CASE,
+            "Two students commented. One reports that a practical session overran, finishing "
+            "well past its scheduled end. The other says questions from the rear of the room "
+            "could not be heard.",
+            (("a practical session overran", 1), ("questions were not audible at the back", 1)),
+        ),
         EMPTY_WEEK_CASE.case_id: build_answer(
             contracts,
             EMPTY_WEEK_CASE,
