@@ -360,8 +360,12 @@ class MockAiProvider:
         assert isinstance(value, str) and value.strip(), (
             f"`GET {RULES_PATH}` publishes {value!r} as the summary marker line. It is the line "
             "the summary prompt puts before the week's comments — whichever version "
-            "`app.ai.tasks` renders — and the mock reads the week as everything after its last "
-            "occurrence."
+            "`app.ai.tasks` renders — and the mock reads the week as everything after its "
+            "**first** occurrence.\n\n"
+            "First rather than last since the security round of 2026-09-09: a student comment "
+            "containing a copy of this line could otherwise move the split, putting student text "
+            "into the head the mock reads the stream and the mode from. The validity marker above "
+            "still takes the last occurrence, which is its own path's rule."
         )
         return value
 

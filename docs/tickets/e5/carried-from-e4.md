@@ -155,6 +155,23 @@ small-N mode. **Owner:** the epic that runs the first real-provider
 floor-setting pass (E10 at the latest, with the threat-recall floor work).
 **Done when:** the slot holds numbers set from a recorded run.
 
+## A quiet week's summary can be refused for ever, and a commenter can arrange it
+
+From the exit ticket's security round: the themes-only store-time guard
+(ADR 0162) refuses and retries with no cap and no alarm, and the trigger is
+input-controlled as well as provider-controlled — a student in a
+below-threshold week who plants a phrase the summary will inevitably
+contain takes that week's summary away permanently, and §5.1 makes the
+summary that week's only comment signal. Deterministic on the development
+stack (the record names why). The direction is denial, never disclosure,
+which is why nothing was built; ADR 0162's dated amendment holds the full
+reasoning. **Owner:** E11's job observability surface, which already reads
+the walk's written/failed answer — a permanently-refused section-week must
+be visible to an operator. **Done when:** an operator can see, without
+shell access, that a week's summary was refused and why-shaped (count and
+week, never content), proven by driving a refusing week against the dev
+stack.
+
 ## The `PERSON_TABLES` standing question, re-asked and re-carried
 
 E4's answers are in `../e4/boundary-review.md`: the four report tables
