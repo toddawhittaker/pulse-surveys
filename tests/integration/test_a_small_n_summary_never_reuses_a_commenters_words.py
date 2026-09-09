@@ -23,12 +23,27 @@ section-week. The week retries on the next run and the absence in between is
 honest. `test_the_small_n_summary_prompt_asks_for_themes_only.py` is the prompt
 half.
 
-**Twenty characters, and the boundary is driven from both sides.** D9 states the
-bound and says it is tunable in the ADR that records the guard; the pair below
-plants an overlap of exactly twenty and one of exactly nineteen, one character
-apart in the same world, so an implementation comparing `> 20` or `>= 21` reds and
-one comparing `>= 20` passes. A bound asserted from one side only is a bound
-nothing pins.
+**Twenty characters, driven at three points and not two.** D9 states the bound and
+says it is tunable in the ADR that records the guard. Three overlaps are planted in
+the same world, one character apart: **nineteen stores, twenty is refused,
+twenty-one is refused** — so the bound sits *at* twenty rather than above it, and
+an implementation comparing `> 20` or `>= 21` reds where one comparing `>= 20`
+passes.
+
+**The middle point was missing and the re-verification battery is what found it.**
+The first version of this module planted nineteen and twenty-one, which straddles
+the bound without standing on it: raising the guard's bound to twenty-one — the
+permissive direction, which lets a twenty-character lift through — left the whole
+suite green. A boundary tested at 19 and 21 is a boundary tested at neither, and
+`test_a_run_of_exactly_the_bound_is_refused` is the repair.
+
+**Both legs of the guard, not just the prose.** A summary is a paragraph *and* its
+theme labels, stored in one row (E4-02), and a label is short, sits beside the
+prose on the report, and is the likelier place for a phrase a model lifted. The
+battery found that leg unasserted too — deleting the label check survived
+everything, because the mock's themes-only branch labels by ordinal and no drive
+could ever meet a fragment in a label —
+so `test_a_clean_summary_with_a_quoting_theme_label_is_refused` drives it.
 
 **Why the fed comments are written here rather than taken from
 `comment_text`.** The overlaps have to be exact, and an overlap is a fact about two
@@ -60,6 +75,7 @@ from fixtures.summary_job import (
     A_COHORT,
     ANOTHER_COHORT,
     INSTRUCTOR_MARK,
+    STREAM_MARKS,
     SUMMARY_STREAM_COLUMN,
     SUMMARY_TEXT_COLUMN,
     StreamAwareGateway,
@@ -108,14 +124,38 @@ def a_comment_from(nonce: str, tail: str = A_FED_TAIL) -> str:
 # fragment, so no space to its left is in the match, and each is followed by a
 # character the comment does not have there, so nothing extends it to the right.
 #
-#   A_QUOTING_SUMMARY      "greenhouse rotations" (20) then " were" against the
-#                          comment's " clash" — the space matches, `w` and `c` do
-#                          not, so the run is 21. Twenty or more: refused.
+# **Three points, not two, and the bound is the middle one.** The first version of
+# this block straddled the bound at 19 and 21 and never stood on it, which the
+# re-verification battery caught: raising the guard's bound to 21 — the permissive
+# direction — left the whole suite green. So the set below is nineteen, exactly
+# twenty, and twenty-one, and the guard refuses **at** twenty:
+#
 #   A_COMPLIANT_SUMMARY    "greenhouse rotation" (19) then " clashes" against the
 #                          comment's "s clash" — `s` and ` ` differ, so the run
-#                          stops at 19. Under the bound: stored.
+#                          stops at 19. Under the bound: **stored**.
+#   A_SUMMARY_AT_THE_BOUND "greenhouse rotations" (20) then "," against the
+#                          comment's " clash" — `,` and ` ` differ, so the run is
+#                          exactly 20. At the bound: **refused**. This is the case
+#                          a bound of 21 lets through and the reason it exists.
+#   A_QUOTING_SUMMARY      "greenhouse rotations" (20) then " were" against the
+#                          comment's " clash" — the space matches, `w` and `c` do
+#                          not, so the run is 21. Over the bound: **refused**.
+#
+# The comma in the middle one is doing real work: a space there would match the
+# comment's space and carry the run to 21, which is the same case as the last one.
 A_QUOTING_SUMMARY = "Greenhouse rotations were the theme students raised this week."
+A_SUMMARY_AT_THE_BOUND = "Greenhouse rotations, and the timetable, came up in both comments."
 A_COMPLIANT_SUMMARY = "Greenhouse rotation clashes were the theme students raised this week."
+
+# A theme label that quotes while the prose beside it does not. The guard's second
+# leg is about the labels, and nothing in this repository exercised it: the mock's
+# themes-only branch labels by ordinal ("theme 1"), so the exit drive can never
+# meet a fragment in a label, and every other test in this module answers prose.
+# The run here is "greenhouse rotations clash" — 26 characters, comfortably over
+# the bound, with the comment's own next word included so a reader can see it is a
+# lift rather than a coincidence.
+A_THEME_LABEL_THAT_QUOTES = "greenhouse rotations clash"
+A_THEME_COUNT_WITHIN_THE_WEEK = 1
 
 # The same violation, reachable only after normalizing case and runs of
 # whitespace. Raw, it shares no twenty-character run with anything; normalized, it
@@ -186,10 +226,23 @@ class SummaryChosenByPrompt(StreamAwareGateway):
     (`docs/MISTAKES.md` entry 13).
     """
 
-    def __init__(self, api: Any, *, by_nonce: dict[str, str], otherwise: str) -> None:
+    def __init__(
+        self,
+        api: Any,
+        *,
+        by_nonce: dict[str, str],
+        otherwise: str,
+        themes_by_nonce: dict[str, tuple[tuple[str, int], ...]] | None = None,
+    ) -> None:
         super().__init__(api)
         self.__dict__["by_nonce"] = dict(by_nonce)
         self.__dict__["otherwise"] = otherwise
+        # **Themes are routed the same way the summary is**, because the guard has
+        # two legs and only one of them is about prose. A caller that names no
+        # themes for a nonce gets the base class's default, which is one label that
+        # quotes nothing — so every test that is about the prose stays about the
+        # prose.
+        self.__dict__["themes_by_nonce"] = dict(themes_by_nonce or {})
 
     def _answer(self, kwargs: dict[str, Any]) -> Any:
         prompt = str(kwargs.get("prompt", ""))
@@ -201,6 +254,9 @@ class SummaryChosenByPrompt(StreamAwareGateway):
                 "section-week."
             )
         self.__dict__["summary"] = chosen[0] if chosen else self.otherwise
+        labelled = [themes for nonce, themes in self.themes_by_nonce.items() if nonce in prompt]
+        if labelled:
+            self.__dict__["themes"] = {stream: labelled[0] for stream in STREAM_MARKS}
         return super()._answer(kwargs)
 
 
@@ -238,6 +294,8 @@ def test_the_arithmetic_this_module_rests_on_is_what_it_says_it_is() -> None:
 
     fed = a_comment_from(QUIET_SECTION)
     quoting = _longest_shared_run(A_QUOTING_SUMMARY, fed)
+    at_the_bound = _longest_shared_run(A_SUMMARY_AT_THE_BOUND, fed)
+    labelled = _longest_shared_run(A_THEME_LABEL_THAT_QUOTES, fed)
     compliant = _longest_shared_run(A_COMPLIANT_SUMMARY, fed)
     normalized_only = _longest_shared_run(A_QUOTING_SUMMARY_IN_ANOTHER_CASE, fed)
     unrelated = _longest_shared_run(AN_UNRELATED_SUMMARY, fed)
@@ -246,6 +304,22 @@ def test_the_arithmetic_this_module_rests_on_is_what_it_says_it_is() -> None:
         f"The quoting summary shares a run of {quoting} characters with the comment it was fed, "
         f"and the guard's bound is {THE_GUARD_BOUND}. Below it, every refusal this module asserts "
         "would be a refusal of something the guard is not about."
+    )
+    assert at_the_bound == THE_GUARD_BOUND, (
+        f"The at-the-bound summary shares a run of {at_the_bound} characters and this module's "
+        f"whole reason for it is that the run is exactly {THE_GUARD_BOUND} — the one length that "
+        "tells a guard refusing at the bound from one refusing above it. At 21 it is a second copy "
+        f"of the quoting case; at {THE_GUARD_BOUND - 1} it is a second copy of the compliant one. "
+        "The comma after the fragment is what holds it there: a space would match the comment's "
+        "space and carry the run to 21."
+    )
+    assert labelled >= THE_GUARD_BOUND, (
+        f"The quoting theme label shares only {labelled} characters with the comment it was fed, "
+        "so the theme-label test would be asserting a refusal nothing was owed."
+    )
+    assert _longest_shared_run(AN_UNRELATED_SUMMARY, fed) < THE_GUARD_BOUND, (
+        "The prose the theme-label test pairs with that label is itself a violation, so a refusal "
+        "there would not be evidence about the labels at all."
     )
     assert compliant == THE_GUARD_BOUND - 1, (
         f"The compliant summary shares a run of {compliant} characters, and this module's whole "
@@ -408,6 +482,131 @@ def test_a_small_n_summary_one_character_short_of_the_bound_is_stored(
         "A guard that refuses here refuses more than the ruling asks for, and what it costs is the "
         "summary itself: SPEC §5.1 makes it the only comment signal a small-N week has, so a bound "
         "set too low turns every quiet week's summary region into an empty one."
+    )
+
+
+def test_a_run_of_exactly_the_bound_is_refused(
+    summary_world: SummaryWorld,
+    summary_job_contract: Any,
+    summary_contracts: Any,
+) -> None:
+    """The bound itself, stood on rather than straddled.
+
+    A summary sharing a run of **exactly** twenty normalized characters with a
+    comment it was fed. It must be refused: D9's rule is "any twenty-character
+    substring", so twenty is inside the refusal and not outside it.
+
+    **This test exists because the re-verification battery found its absence.** The
+    pair that was here compared nineteen and twenty-one, which straddles the bound
+    without ever standing on it — and a guard whose bound had drifted to
+    twenty-one, the permissive direction, left the whole suite green. A boundary
+    tested at 19 and 21 is a boundary tested at neither.
+
+    **The mutation this kills:** the comparison written `> THE_GUARD_BOUND` or
+    `>= THE_GUARD_BOUND + 1` — the bound moved one character in the direction that
+    lets a quotation through. It is the drift nothing else in this repository
+    notices, and it lets out exactly the twenty-character lift the ruling names.
+
+    **The near miss it must survive:** the nineteen-character case above, which is
+    one character shorter in the same world and must still be stored. The two
+    together are what pin the bound rather than a range around it.
+
+    **Expected green on the built tree.** The guard exists and refuses at the
+    bound; the proof of this test is the mutation, not the run.
+    """
+    summary_job_contract.require_table(summary_world.world.tables)
+    summary_world.build(A_COHORT)
+    _a_quiet_week(summary_world, cohort=A_COHORT, nonce=QUIET_SECTION, respondents=2)
+    summary_world.clock_after(A_CLOSED_TERM_WEEK)
+    summary_world.commit()
+
+    gateway = SummaryChosenByPrompt(
+        summary_contracts,
+        by_nonce={QUIET_SECTION: A_SUMMARY_AT_THE_BOUND},
+        otherwise=AN_UNRELATED_SUMMARY,
+    )
+    summary_job_contract.run(gateway=gateway)
+
+    stored = [row[SUMMARY_TEXT_COLUMN] for row in _summaries_for(summary_world, A_COHORT)]
+    assert stored == [], (
+        f"The stored summaries are {stored!r}. The answer shares a run of exactly "
+        f"{_longest_shared_run(A_SUMMARY_AT_THE_BOUND, a_comment_from(QUIET_SECTION))} normalized "
+        f"characters with a comment it was fed, and the bound is {THE_GUARD_BOUND}.\n\n"
+        "The owner's ruling of 2026-09-09 refuses *any* twenty-character substring, so twenty is "
+        "inside the refusal. A guard comparing `> 20` stores this — and nothing else in this "
+        "repository notices, which is what the re-verification battery measured before this test "
+        "existed."
+    )
+
+
+def test_a_clean_summary_with_a_quoting_theme_label_is_refused(
+    summary_world: SummaryWorld,
+    summary_job_contract: Any,
+    summary_contracts: Any,
+) -> None:
+    """The other leg: a label quotes while the prose does not.
+
+    §5.1 makes themes part of what a summary answers, and E4-02 stores them beside
+    the text in the same row. A theme label is short, sits on the report next to the
+    prose, and is the most natural place for a model to put a phrase it lifted —
+    "greenhouse rotations clash" reads as a theme and is a commenter's own words.
+
+    So the answer here is clean prose with a quoting label. It must be refused for
+    the label alone.
+
+    **This test exists because the battery found the leg had no killer.** Deleting
+    the label check — comparing the prose and nothing else — survived: the mock's
+    themes-only branch labels by ordinal ("theme 1", "theme 2"), so the exit drive's
+    body-wide search can never meet a fragment in a label, and every other test in
+    this module answers prose. The leg was built, reviewed and unasserted.
+
+    **The mutation this kills:** the label leg deleted — the guard reading
+    `answer.summary` and not walking `answer.themes`. Its symptom is exactly this
+    world: a report whose prose says nothing and whose theme line says what a
+    student wrote, in a week where §4 withheld the comment.
+
+    **The near miss it must survive:** a refusal that came from the prose after
+    all. The prose is `AN_UNRELATED_SUMMARY`, whose longest run with the fed comment
+    is asserted under the bound in this module's control before any test uses it, so
+    a refusal here can only be the label's.
+
+    **What it does not reach** (`docs/MISTAKES.md` entry 14): whether the label leg
+    respects the small-N scope. That scope is shared with the prose leg and is
+    driven both ways by
+    `test_the_guard_is_not_applied_to_a_week_at_or_above_the_threshold`; a build
+    that scoped one leg and not the other would pass everything here. It is named
+    rather than claimed.
+
+    **Expected green on the built tree.** The guard covers both legs; the proof is
+    the mutation.
+    """
+    summary_job_contract.require_table(summary_world.world.tables)
+    summary_world.build(A_COHORT)
+    _a_quiet_week(summary_world, cohort=A_COHORT, nonce=QUIET_SECTION, respondents=2)
+    summary_world.clock_after(A_CLOSED_TERM_WEEK)
+    summary_world.commit()
+
+    gateway = SummaryChosenByPrompt(
+        summary_contracts,
+        by_nonce={QUIET_SECTION: AN_UNRELATED_SUMMARY},
+        otherwise=AN_UNRELATED_SUMMARY,
+        themes_by_nonce={
+            QUIET_SECTION: ((A_THEME_LABEL_THAT_QUOTES, A_THEME_COUNT_WITHIN_THE_WEEK),)
+        },
+    )
+    summary_job_contract.run(gateway=gateway)
+
+    stored = [row[SUMMARY_TEXT_COLUMN] for row in _summaries_for(summary_world, A_COHORT)]
+    assert stored == [], (
+        f"The stored summaries are {stored!r}, and the answer that produced them carried the theme "
+        f"label {A_THEME_LABEL_THAT_QUOTES!r} — "
+        f"{_longest_shared_run(A_THEME_LABEL_THAT_QUOTES, a_comment_from(QUIET_SECTION))} "
+        f"normalized characters of a comment it was fed, against a bound of {THE_GUARD_BOUND}.\n\n"
+        "The prose beside it quotes nothing, so a guard reading `summary` and not walking `themes` "
+        "stores this row whole: a report whose paragraph says nothing and whose theme line says "
+        "what a student wrote, in a week where SPEC §4 withheld that student's comment. A theme is "
+        "shorter than a sentence and sits next to the prose, which makes it the likelier place for "
+        "a lift, not the safer one."
     )
 
 
