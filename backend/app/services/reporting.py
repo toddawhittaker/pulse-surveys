@@ -210,6 +210,24 @@ def generate_missing_summaries(
             )
             failed += 1
             continue
+        except SmallNSummaryReuseError as refused:
+            # **The same rollback and the same counter, and a different sentence.**
+            # The provider answered and the answer was refused here, so an operator
+            # reading a failed Monday has to be able to tell the two apart — a run
+            # of these is a prompt or a model that is not honouring the ruling,
+            # which is a different thing to do something about than a provider that
+            # is down. The refusal's own message names the stream, the bound and
+            # how much of the answer was refused, and no student's words: it is
+            # built for exactly this line (SPEC §10).
+            session.rollback()
+            logger.warning(
+                "the summary walk left %s alone for its %s course week: %s",
+                section_id,
+                week_id,
+                refused,
+            )
+            failed += 1
+            continue
         written += len(REPORT_STREAMS)
 
     logger.info(
@@ -243,6 +261,123 @@ def _section_weeks_awaiting_a_summary(
     return [(row[0], row[1]) for row in walked]
 
 
+# ---------------------------------------------------------------------------
+# The small-N summary guard — the owner's ruling of 2026-09-09.
+# ---------------------------------------------------------------------------
+
+# How long a shared run of characters has to be before it is a quotation rather
+# than a coincidence.
+#
+# **Twenty, and both directions cost something**, which is why the number is
+# stated here and argued in
+# [ADR 0162](../../../docs/adr/0162-the-small-n-summary-is-a-second-live-prompt-version-and-a-store-time-guard.md)
+# rather than left as a literal. Too high and a lifted phrase goes out under the
+# threshold's own promise. Too low and ordinary paraphrase trips it — a summary of
+# a week about a laboratory session will contain "the laboratory session" whatever
+# it does, and a bound that refused that would take the summary away from every
+# quiet week, which SPEC §5.1 makes the one comment signal such a week has.
+# Twenty characters is about three or four ordinary words: long enough that
+# reproducing it is a quotation rather than a shared subject.
+SUMMARY_REUSE_BOUND = 20
+
+
+class SmallNSummaryReuseError(Exception):
+    """A below-threshold summary reused a run of a comment it was fed, and was refused.
+
+    Not an `AIGatewayError`: the provider answered, in time, in shape. What failed
+    is the answer's compliance with the owner's ruling of 2026-09-09, which the
+    prompt asks for and cannot enforce. The walk catches it beside the gateway's
+    own classes and treats it the same way — roll back this section-week, count it
+    as left for the next run — because the outcome a reader needs is identical:
+    this week has no summary yet, and the schedule is the retry.
+    """
+
+
+def _normalized_for_reuse(text: str) -> str:
+    """One string as the guard compares it: lower case, runs of whitespace collapsed.
+
+    The ruling's own currency. A model asked for themes and given a comment
+    returns the phrase capitalized at the head of a sentence, or re-wrapped across
+    a line break, far more often than it returns it byte for byte — so a guard
+    comparing raw text catches the one spelling nobody writes and misses every
+    spelling somebody does, while looking exactly like a working guard.
+    """
+    return " ".join(text.lower().split())
+
+
+def _reused_run(candidate: str, sources: Sequence[str]) -> int:
+    """The length of the first over-long run `candidate` shares with a source, or 0.
+
+    A window walk rather than a longest-common-substring: the question is "is
+    there a run of at least `SUMMARY_REUSE_BOUND`", and any longer run contains a
+    window of exactly that length, so testing the windows answers it exactly and
+    costs one pass. What comes back is a *length* and never the text, because the
+    caller puts it in a log line and SPEC §10 keeps student words out of logs.
+    """
+    text = _normalized_for_reuse(candidate)
+    if len(text) < SUMMARY_REUSE_BOUND:
+        return 0
+    normalized = [_normalized_for_reuse(source) for source in sources]
+    for start in range(len(text) - SUMMARY_REUSE_BOUND + 1):
+        window = text[start : start + SUMMARY_REUSE_BOUND]
+        if any(window in source for source in normalized):
+            return SUMMARY_REUSE_BOUND
+    return 0
+
+
+def refuse_a_summary_reusing_a_comment(
+    record: WeeklySummaryRecord, *, comments: Sequence[str]
+) -> None:
+    """Refuse a below-threshold summary that carries a commenter's own words.
+
+    **The ruling, and the reason there is a guard as well as a prompt.** SPEC §4
+    hides raw comments below the n-threshold and §5.1 generates the summary anyway,
+    because there "the summary is the only comment signal". The E4 boundary review
+    found the gap between those two sentences: a summary is prose the instructor
+    reads, and prose reusing a commenter's own words hands back the comment the
+    threshold was withholding — to a reader who can set it beside §3.4's per-week
+    completion ledger and narrow the author to whoever completed that week's
+    comment item. The owner ruled on 2026-09-09 that below the threshold a summary
+    names themes only. The prompt asks; a prompt instruction is soft; this is the
+    half that does not depend on the model obeying.
+
+    **The theme labels are checked as well as the summary text, and that is not
+    belt-and-braces.** Both cross the wire to the instructor — `_payload` puts the
+    summary in `streams.<token>.summary` and E4-10 renders each theme's label
+    beside its count — so a model that obeyed the instruction in its prose and
+    lifted a phrase into a label would satisfy a text-only guard and disclose
+    exactly what the ruling forbids, in the shortest and most quotable form the
+    answer has.
+
+    **Nothing raised here carries a comment, a summary or a label**, which is the
+    rule this module's header already states and the reason `_reused_run` answers a
+    length. What the message names is the stream, the bound, and how many of the
+    answer's parts were refused — enough for an operator, and no student's words in
+    a job log (SPEC §10).
+
+    Raises `SmallNSummaryReuseError`; answers `None` when the summary is clean.
+    """
+    if not comments:
+        return
+    offending = []
+    if _reused_run(record.summary.summary, comments):
+        offending.append("its summary text")
+    labels = sum(1 for theme in record.summary.themes if _reused_run(theme.label, comments))
+    if labels:
+        offending.append(f"{labels} of its {len(record.summary.themes)} theme label(s)")
+    if not offending:
+        return
+    raise SmallNSummaryReuseError(
+        f"The {record.summary.stream.value} summary for a week below SPEC §4's n-threshold "
+        f"reuses a run of at least {SUMMARY_REUSE_BOUND} characters of a comment it was fed, in "
+        f"{' and '.join(offending)}. The owner's ruling of 2026-09-09 is that such a week's "
+        "summary names themes only and may not reuse the commenters' word strings, because the "
+        "threshold is withholding those comments and the summary is the surface that can hand "
+        "them back. The write is refused for this section-week and the week is generated again on "
+        "the next run."
+    )
+
+
 def _summary_row(
     session: Session,
     *,
@@ -268,14 +403,34 @@ def _summary_row(
     that only the instructor could notice and cannot check. Counted before the
     moderation filter for the same reason: a moderator holding two comments has
     not made two students disappear.
+
+    **The comments are gathered here rather than one level down**, since the
+    ruling of 2026-09-09: the store-time guard has to compare the answer against
+    the comments *this call sent*, and this is the level that both makes the call
+    and builds the row. `_summary_of` below takes them rather than fetching them.
+
+    Raises `SmallNSummaryReuseError` when the guard refuses, which the walk turns
+    into a rolled-back section-week and a retry next run.
     """
+    comments = _comments_reaching_the_model(
+        session, section_id=section_id, week_id=week_id, token=token
+    )
+    responses = _responses_that_week(session, section_id=section_id, week_id=week_id)
+    # SPEC §4's threshold, read through the one function that reads it
+    # (`app.services.report_comments.n_threshold`) — the same number
+    # `visible_comments` applies and `_payload` prints, so the mode a summary is
+    # written under and the rule that hid the comments cannot come apart.
+    small_n = responses < n_threshold()
+
     record = _summary_of(
-        session,
-        section_id=section_id,
-        week_id=week_id,
+        comments=comments,
         token=token,
+        response_count=responses,
+        small_n=small_n,
         gateway=gateway,
     )
+    if small_n:
+        refuse_a_summary_reusing_a_comment(record, comments=comments)
     return WeeklySummary(
         section_id=section_id,
         week_id=week_id,
@@ -296,11 +451,11 @@ def _summary_row(
 
 
 def _summary_of(
-    session: Session,
     *,
-    section_id: UUID,
-    week_id: UUID,
+    comments: Sequence[str],
     token: str,
+    response_count: int,
+    small_n: bool,
     gateway: AIGateway | None,
 ) -> WeeklySummaryRecord:
     """Ask E4-05's task about one stream of one section-week.
@@ -309,11 +464,15 @@ def _summary_of(
     neither prompt carries the other stream's comments, so a course complaint
     cannot be summarized under §5.1's instructor heading in a way no shape check
     could catch. An empty stream still gets its record and reaches no model.
+
+    `small_n` chooses which prompt the task renders — the themes-only one below
+    SPEC §4's threshold — and the stored row names whichever it was.
     """
     return summarize_stream(
-        _comments_reaching_the_model(session, section_id=section_id, week_id=week_id, token=token),
+        comments,
         stream=STREAM_ASKED_ABOUT[token],
-        response_count=_responses_that_week(session, section_id=section_id, week_id=week_id),
+        response_count=response_count,
+        small_n=small_n,
         gateway=gateway,
     )
 

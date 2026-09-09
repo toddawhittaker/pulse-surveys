@@ -57,6 +57,16 @@ for — the student's comment, or the week's.
    comment up to `SUMMARY_THEME_LIMIT`, each claiming exactly one. It reads how
    many comments there are and never what any of them says.
 
+5. **The small-N summary**, which is rule 4 with the openings taken out. A prompt
+   carrying `SMALL_N_MARKER` in its instructions is asking about a week below
+   SPEC §4's n-threshold, and the owner's ruling of 2026-09-09 is that such a
+   week's summary names themes only and reuses none of the commenters' word
+   strings. Rule 4's answer is built out of how each comment *opened*, which is
+   precisely what the ruling forbids there — so this rule answers prose naming
+   the count alone and themes labelled by their ordinal. Everything else about
+   rule 4 holds: the stream, the theme bound, the counts, and the wrong-answer
+   markers ahead of all of it.
+
 **`nonsense` is reachable only by its marker.** Rule 3 has two outcomes and not
 three. Deciding that a comment is keyboard mashing is a judgement about content
 and this service makes none; a heuristic invented here would make every
@@ -120,6 +130,26 @@ MARKER_LINE = "answer you ever give is the JSON object specified above."
 # `app.ai.tasks` renders. A reworded prompt goes red there rather than turning
 # every summary in a development stack into an extraction failure.
 SUMMARY_MARKER_LINE = "The week's comments follow this line, one numbered block each."
+
+# The small-N mode's own marker, and the line this service reads it off — the
+# owner's ruling of 2026-09-09, which is that a week below SPEC §4's n-threshold
+# has its summary name themes only and reuse none of the commenters' word
+# strings. `summary.v2` is the prompt that carries the instruction and
+# `summary.v1` is the one that does not, so a prompt holding this fragment is a
+# small-N week and a prompt without it is an ordinary one.
+#
+# **Read out of the head of the prompt, before the comments boundary**, exactly as
+# the stream is. A student could type this sentence into a feedback box, and if
+# the search ran over the whole message that comment would put the mock into
+# themes-only mode for its own week; searching the instructions alone means
+# nothing after the marker line can reach it.
+#
+# A fragment rather than a whole line, because the instruction is a wrapped
+# Markdown bullet rather than a sentence on its own line. Like
+# `SUMMARY_MARKER_LINE` above it is a second copy of a string that lives in the
+# backend, and it is guarded the same way rather than imported (SPEC §13, ADR
+# 0039).
+SMALL_N_MARKER = "below the reporting threshold, so name themes"
 
 # How the summary prompt names the stream it is asking about, and how this
 # service reads it back. The prompt substitutes the stream token after this
@@ -426,7 +456,7 @@ def opening_words(comment: str) -> str:
     return " ".join(comment.split()[:SUMMARY_LABEL_WORDS])
 
 
-def summarize(stream: str, comments: tuple[str, ...]) -> Answer:
+def summarize(stream: str, comments: tuple[str, ...], *, themes_only: bool = False) -> Answer:
     """A weekly-summary payload derived from the week it was sent.
 
     **Derived rather than canned, and that is the whole of what it is for.** A
@@ -436,6 +466,15 @@ def summarize(stream: str, comments: tuple[str, ...]) -> Answer:
     is one comment's opening words — two different weeks are answered
     differently, and the same week twice is answered identically, which is what
     the gateway's one bounded re-ask needs to reach the same wrong answer twice.
+
+    **`themes_only` takes the openings out, and takes nothing else with them.**
+    Below SPEC §4's n-threshold the owner's ruling of 2026-09-09 is that a
+    summary names themes only and reuses none of the commenters' word strings,
+    and an opening *is* a commenter's words. So that branch derives its answer
+    from the comment **count** instead — still derived, still different for two
+    different weeks, still identical for the same week twice — and labels its
+    themes by ordinal. The caller sets the flag from the prompt's own marker;
+    nothing here reads a threshold.
 
     **It is not a summary.** Nothing here reads what a comment says, and ADR 0113
     is why nothing outside development may point at this service. The count is
@@ -454,6 +493,44 @@ def summarize(stream: str, comments: tuple[str, ...]) -> Answer:
     if failing is not None:
         return failing
     stall_seconds = STALL_SECONDS if STALL_MARKER in week else 0.0
+
+    if themes_only:
+        # **The small-N answer repeats nothing.** The ordinary answer below is
+        # built out of how each comment opened, which is exactly the shape the
+        # ruling of 2026-09-09 forbids below the threshold: those openings are the
+        # commenters' own words, and in a quiet week a phrase carried over
+        # identifies the person who wrote it. So this branch derives its labels
+        # from the *count* and from nothing a student typed.
+        #
+        # It stays a derived answer rather than a constant one, for the reason the
+        # ordinary branch gives: two different weeks are answered differently, and
+        # the same week twice is answered identically. What it derives from is the
+        # number of comments rather than their text.
+        numbered = [f"theme {index + 1}" for index in range(len(comments))]
+        summary = (
+            (
+                f"The {stream} stream carried {len(comments)} comment(s) this week, and the week is "
+                "below the reporting threshold. This is the mock provider rather than a model, so "
+                "there is no description here — and nothing above repeats what any comment said."
+            )
+            if comments
+            else (
+                f"No comments reached the mock provider for the {stream} stream, so there is "
+                "nothing here to describe."
+            )
+        )
+        return Answer(
+            status=200,
+            payload={
+                STREAM_KEY: stream,
+                SUMMARY_KEY: summary,
+                THEMES_KEY: [
+                    {THEME_LABEL_KEY: label, THEME_COUNT_KEY: 1}
+                    for label in numbered[:SUMMARY_THEME_LIMIT]
+                ],
+            },
+            stall_seconds=stall_seconds,
+        )
 
     openings = [opening_words(comment) for comment in comments]
     if openings:
@@ -506,7 +583,11 @@ def answer_for(prompt: str) -> Answer:
         boundary = prompt.rfind(SUMMARY_MARKER_LINE)
         head = prompt[:boundary]
         body = prompt[boundary + len(SUMMARY_MARKER_LINE) :]
-        return summarize(stream_asked_about(head), week_comments(body))
+        return summarize(
+            stream_asked_about(head),
+            week_comments(body),
+            themes_only=SMALL_N_MARKER in head,
+        )
     return classify(extract_comment(prompt))
 
 
@@ -525,6 +606,7 @@ def served_rules() -> dict[str, Any]:
         "stall_seconds": STALL_SECONDS,
         "comment_marker_line": MARKER_LINE,
         "summary_marker_line": SUMMARY_MARKER_LINE,
+        "summary_small_n_marker": SMALL_N_MARKER,
         "summary_stream_line_prefix": STREAM_LINE_PREFIX,
         "verdicts": [SUBSTANTIVE, INSUFFICIENT, NONSENSE],
         "streams": list(SUMMARY_STREAMS),
@@ -534,6 +616,9 @@ def served_rules() -> dict[str, Any]:
             f"weekly summary — a prompt carrying {SUMMARY_MARKER_LINE!r}. The week is the "
             "blank-line-separated blocks after the last copy of it, and the stream is the token "
             f"after the last {STREAM_LINE_PREFIX!r} line before it.",
+            f"weekly summary, small-N — the same, for a prompt whose instructions carry "
+            f"{SMALL_N_MARKER!r}. The answer names the comment count and labels its themes by "
+            "ordinal, repeating none of the week's words (the ruling of 2026-09-09).",
         ],
         "rule_order": [
             "1. A wrong-answer marker anywhere in the input decides the answer, for either "
