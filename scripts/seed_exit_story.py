@@ -677,8 +677,40 @@ def one_answer(
     return answer
 
 
+def refuse_an_inconsistent_plan() -> None:
+    """Refuse if `STORY` above is not internally consistent, before anything is read.
+
+    First, so that an edit to the literal in this file is reported as an edit to
+    this file rather than as something about the database — the four lists per week
+    are positional, and a week whose lists are different lengths would otherwise
+    surface as an `IndexError` mid-write.
+    """
+    for plan in STORY:
+        lengths = (
+            len(plan.respondents),
+            len(plan.instructor_ratings),
+            len(plan.course_ratings),
+            len(plan.workload_hours),
+        )
+        if len(set(lengths)) != 1:
+            raise StoryRefusedError(
+                f"The plan for course week {plan.course_week} in this file lists "
+                f"{lengths[0]} respondents against {lengths[1]} instructor ratings, "
+                f"{lengths[2]} course ratings and {lengths[3]} workload values. The four "
+                "are positional."
+            )
+        for seat in (*plan.instructor_comments, *plan.course_comments):
+            if not 0 <= seat < lengths[0]:
+                raise StoryRefusedError(
+                    f"The plan for course week {plan.course_week} in this file puts a comment on "
+                    f"respondent {seat}, and the week has {lengths[0]}. A comment is keyed by a "
+                    "respondent's position in that week's own list."
+                )
+
+
 def write_the_story(session: Session) -> Written:
     """Write the plan into `BIOL-215-R3WW`, and answer what was written."""
+    refuse_an_inconsistent_plan()
     section = the_section(session)
     weeks = the_weeks(session, section)
     questions = the_instrument(session)
@@ -687,19 +719,6 @@ def write_the_story(session: Session) -> Written:
 
     written = Written()
     for week, plan in zip(weeks, STORY, strict=True):
-        if not (
-            len(plan.respondents)
-            == len(plan.instructor_ratings)
-            == len(plan.course_ratings)
-            == len(plan.workload_hours)
-        ):
-            raise StoryRefusedError(
-                f"The plan for course week {plan.course_week} in this file lists "
-                f"{len(plan.respondents)} respondents against "
-                f"{len(plan.instructor_ratings)} instructor ratings, "
-                f"{len(plan.course_ratings)} course ratings and "
-                f"{len(plan.workload_hours)} workload values. The four are positional."
-            )
         for seat, subject in enumerate(plan.respondents):
             response = one_response(
                 session,
@@ -759,6 +778,15 @@ def write_the_story(session: Session) -> Written:
             # Every answer of this response the plan does not describe, removed. The
             # one `DELETE` this connection holds, and what makes a re-run over an
             # edited plan a re-seed rather than a merge.
+            #
+            # **It reaches a rating or a workload figure and not a comment that has
+            # already been judged or released**, which is a limit rather than a bug
+            # to fix here: `classification.answer_id`, `moderation_state.answer_id`
+            # and `release_batch_member.answer_id` all reference `answer` with
+            # `RESTRICT`, and this connection may delete none of those three rows. So
+            # a plan edited to withdraw a comment somebody has a verdict for is a
+            # foreign-key refusal naming the table that holds it, which is the honest
+            # answer: the ground under such a comment is the database's to clear.
             planned_questions = {
                 questions[INSTRUCTOR_RATING],
                 questions[COURSE_RATING],
