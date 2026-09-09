@@ -1,6 +1,6 @@
 # 44. A guard raised in a fixture turned a module's reds into setup errors
 
-**Caught: 6**
+**Caught: 7**
 
 *This file keeps the founding incident (it carries the root cause) and the
 three most recent catches. Two older catches were trimmed 2026-09-07 — E4-03's
@@ -9,6 +9,31 @@ report-view suite (2026-09-06) and E3-04's AGS enforcement module (2026-09-04)
 file's history. A third was trimmed 2026-09-08 when E4-15's catch was added —
 E4-04's comment suite (2026-09-06), which shared its date with the E4-01
 paragraph inside the founding incident and was the removable one of the two.*
+
+## A catch: E4-20's seeder reds name the missing script instead of missing it (2026-09-09)
+
+E4-20's two red tests run `scripts/seed_demo_story.py` as a process, and the
+machinery they follow — `DemoSeed` in `tests/fixtures/seed.py` — already answers
+the fixture half of this entry: when the script is absent it hands back a
+*synthetic* run, exit 127 with the reason on stderr, rather than failing from
+inside setup. Copying that alone would have avoided the ERROR wall and still
+produced the wrong red. The refusal assertions read what the run printed, so on
+the unbuilt tree each test would have failed on "the run refused and did not say
+the environment was why", with the sentence that actually explains the tree —
+the script does not exist — folded into a tailed stream underneath it.
+
+Acting on the entry's rule as written, the guard is `require_the_story_seeder`, a
+plain function called as the first statement of both bodies, naming the script
+and the ticket that owes it. Today's red is therefore a FAILED whose message is
+the deliverable, and the assertions about what a refusal says only ever run
+against a refusal that exists.
+
+Counted as a catch: without the entry the module would have inherited the shared
+runner's fallback and reported two reds about the *content* of a refusal on a
+tree with no script in it, which is a red that reads as a wrong assertion rather
+than as a missing deliverable. The lesson the earlier catches did not carry: a
+fixture that avoids raising is not the same as a body guard that names the thing,
+and shared machinery which softens the absence can hide it just as well.
 
 ## A catch: E4-15's exit drive builds its world in a test rather than a hook (2026-09-08)
 

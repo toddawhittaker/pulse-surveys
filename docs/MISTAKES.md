@@ -422,7 +422,7 @@ edit puts the comma back.
 
 ## 44. A guard raised in a fixture turned a module's reds into setup errors
 
-**Caught: 6** · [the incidents, the root cause, and the whole rule](mistakes/44-a-guard-raised-in-a-fixture-turned-reds-into-errors.md)
+**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/44-a-guard-raised-in-a-fixture-turned-reds-into-errors.md)
 
 **Rule.** A tests-first suite's red must be a FAILED, never an ERROR: an error at
 setup proves nothing about the assertion the test exists to make, survives the
