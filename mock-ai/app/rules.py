@@ -283,11 +283,30 @@ def extract_comment(prompt: str) -> str:
     Everything after the **last** occurrence of `MARKER_LINE`, with the
     whitespace the prompt's own layout puts there removed.
 
-    Last rather than first, and that is the boundary
-    `backend/app/ai/prompts/README.md` rests the whole injection defence on: a
-    prompt may quote its own marker earlier — in an instruction, in an example —
-    and a comment may contain a copy of it, so "everything after the final
-    marker" is the only reading that cannot be moved by what a student typed.
+    **Last rather than first, and the trade is worth stating plainly, because an
+    earlier version of this paragraph got it backwards.** It claimed "everything
+    after the final marker" was the only reading a student could not move. For a
+    boundary the comment is read *after*, that is the wrong way round: `rfind`
+    defends the case where the prompt quotes its own marker earlier — in an
+    instruction, in an example — where `find` would return the quotation and the
+    extracted comment would be the rest of the instructions. What it does not
+    defend is a student writing a copy of the marker into the comment box, which
+    moves this boundary to the right.
+
+    **It stays, because the direction of that move is self-inflicted and the blast
+    radius is this container.** A student who plants the marker line truncates
+    their *own* comment before their *own* verdict — the text after their copy is
+    what gets classified — so what they can reach is a wrong answer about
+    themselves, and nothing about anybody else. Against the template-quote case,
+    which is the one this service actually meets on every rendered prompt,
+    `rfind` is right. E4-15's security review weighed both and accepted it.
+
+    **The summary path in `answer_for` takes the opposite boundary and is not an
+    inconsistency.** That one cuts the *head* off before the marker and reads the
+    stream and the small-N mode out of it, so a student who moves it to the right
+    pulls their own text into the instructions — which is somebody else's answer,
+    not their own. A read-before boundary and a read-after boundary want different
+    ends of the same string.
 
     Stripped, because the newline between the marker and the comment is the
     prompt's punctuation rather than a character the student wrote. Without it a
