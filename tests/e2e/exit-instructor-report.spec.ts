@@ -792,11 +792,33 @@ test('a quiet week hides its comments in the payload and not only on the page', 
   // **The mutations this kills:** a suppression applied in the browser rather
   // than in the payload; a suppression that empties the comment list and leaves
   // the words in some other member (the search is over the raw body text at any
-  // depth, under any name); a threshold read as "fewer than four" or "five or
-  // fewer", either of which would show this week's four; and a quiet week whose
-  // own payload serves the release. **The near miss it must survive:** a report
-  // that suppresses by returning nothing at all, which the four positive
-  // assertions ahead of the absences refuse.
+  // depth, under any name); a threshold read as "fewer than four", which shows
+  // this week's four; and a quiet week whose own payload serves the release.
+  // **The near miss it must survive:** a report that suppresses by returning
+  // nothing at all, which the four positive assertions ahead of the absences
+  // refuse.
+  //
+  // **The absence bound is twenty normalized characters, not a forty-character
+  // prefix, since the owner's ruling of 2026-09-09.** The earlier check compared
+  // the first forty characters of each held sentence and would have passed a
+  // response whose summary lifted a clause out of the middle of one — which is
+  // precisely the channel the ruling closes, and precisely what a model
+  // summarizing two comments does by default. What is asserted now is what the
+  // ruling says: **no twenty-character run of any held sentence, case and
+  // whitespace normalized, appears anywhere in either quiet week's response
+  // body** — the comment members, the summary, the theme labels and any member a
+  // later ticket adds, because the search is over the whole body text.
+  //
+  // **What that does and does not cover, stated rather than implied.** It catches
+  // a quotation. It does not catch a faithful paraphrase, and it is not meant to:
+  // the ruling permits themes, and a theme is a paraphrase. Theme-level
+  // correlation between a summary and a quiet week's comments remains, and ADR
+  // 0153's amendment is where that residual is recorded. Twenty is the guard's own
+  // bound (work-order D9), so this drive and the store-time guard refuse the same
+  // thing — and the boundary at nineteen against twenty is driven where an exact
+  // comparison is possible, in
+  // `tests/integration/test_a_small_n_summary_never_reuses_a_commenters_words.py`,
+  // not here.
   test.setTimeout(CASE_TIMEOUT_MS);
 
   const report = await openTheReport(page, QUIET_WEEK);
@@ -852,15 +874,17 @@ test('a quiet week hides its comments in the payload and not only on the page', 
       'through a field.',
   ).toEqual([]);
 
-  for (const withheld of EVERY_HELD_COMMENT) {
-    expect(
-      raw,
-      'A comment held from a week below the threshold reached the wire. SPEC §4 hides it in the ' +
-        'payload rather than in the browser, and a page that hid it on screen over a response ' +
-        `that carried it would leak every word to anybody who opened a network tab. The sentence ` +
-        `is ${JSON.stringify(withheld.slice(0, 40))}…`,
-    ).not.toContain(withheld.slice(0, 40));
-  }
+  assertNoHeldWordsAnywhereIn(raw, QUIET_WEEK);
+
+  // **And the other quiet week, read the same way.** The release draws from both,
+  // so a read path that leaked one week's held sentences into its own report would
+  // be caught here and not there, or the other way round, depending on which of the
+  // two the seeder wrote first. Two weeks, one assertion each.
+  const { raw: theOtherQuietWeek } = await readTheReportWithItsBody(
+    page,
+    THE_OTHER_QUIET_WEEK,
+  );
+  assertNoHeldWordsAnywhereIn(theOtherQuietWeek, THE_OTHER_QUIET_WEEK);
 });
 
 test('an above-threshold week of the same section shows its raw comments', async ({
@@ -1416,4 +1440,55 @@ function weekOnScreen(page: Page): number {
 /** One string as a SQL literal. */
 function quoted(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
+}
+
+// The bound the owner's ruling of 2026-09-09 is enforced at, and work-order D9
+// gives the store-time guard: a run of this many characters shared between a
+// small-N week's summary and a comment it was fed is a quotation rather than a
+// coincidence. Written out here rather than imported from the implementation, so
+// this drive is not agreeing with the guard about what the guard does
+// (`docs/MISTAKES.md` entry 19).
+const A_QUOTATION = 20;
+
+/** Case and whitespace normalized, as the ruling's comparison is specified. */
+function normalizedFor(text: string): string {
+  return text
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((piece) => piece !== '')
+    .join(' ');
+}
+
+/**
+ * Assert that no held sentence's words appear in one week's response body.
+ *
+ * Every twenty-character window of every held sentence is looked for in the
+ * normalized body, which is the direct form of "no run of twenty or more
+ * characters is shared": a longer run contains a twenty-character window, so
+ * checking the windows catches every violation and reports the first one whole.
+ *
+ * The failure names the window it found and the sentence it came from, because
+ * "something leaked" and "this clause of this student's comment leaked" are
+ * different messages to the person reading a red at four in the morning.
+ */
+function assertNoHeldWordsAnywhereIn(body: string, courseWeek: number): void {
+  const haystack = normalizedFor(body);
+  for (const withheld of EVERY_HELD_COMMENT) {
+    const sentence = normalizedFor(withheld);
+    for (let start = 0; start + A_QUOTATION <= sentence.length; start += 1) {
+      const window = sentence.slice(start, start + A_QUOTATION);
+      expect(
+        haystack.includes(window),
+        `The response for course week ${String(courseWeek)} carries ` +
+          `${JSON.stringify(window)}, which is ${String(A_QUOTATION)} characters of a comment ` +
+          `held from a week below the threshold: ${JSON.stringify(withheld)}.\n\n` +
+          'SPEC §4 withholds that week’s raw comments, and the owner’s ruling of ' +
+          '2026-09-09 closes the way back: below the threshold a summary names themes only and ' +
+          'may not reuse the commenters’ own word strings. The words can arrive in the ' +
+          'comment lists, in the summary text, in a theme label or in a member added later — the ' +
+          'search is over the whole body, because the field a leak arrives in is the one nobody ' +
+          'has thought of yet.',
+      ).toBe(false);
+    }
+  }
 }
