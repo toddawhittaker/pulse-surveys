@@ -42,7 +42,14 @@ from fixtures.report_comments import (
     configured_threshold,
 )
 
-pytestmark = pytest.mark.integration
+# **Marked `invariant`, which puts this module in CI's isolated §4.1 pass** where a
+# skip or an empty collection is a failure (`scripts/ci/check_invariants.py`).
+# §4.1 item 3 in its literal form: "below the n-threshold, raw comments are hidden
+# from instructors and students alike". A read that compares against a literal
+# rather than against the configured threshold obeys SPEC §4's default and stops
+# obeying the institution the day they raise it — and the failure direction is
+# disclosure, not refusal.
+pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 
 # Two term weeks inside cohort `F`'s run (term weeks 7 to 12).
 BELOW_WEEK = 7

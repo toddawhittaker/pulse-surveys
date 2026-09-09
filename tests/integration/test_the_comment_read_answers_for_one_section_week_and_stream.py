@@ -31,7 +31,14 @@ from typing import Any
 import pytest
 from fixtures.report_comments import CommentWorld
 
-pytestmark = pytest.mark.integration
+# **Marked `invariant`, which puts this module in CI's isolated §4.1 pass** where a
+# skip or an empty collection is a failure (`scripts/ci/check_invariants.py`).
+# §4.1 item 3 and item 6: what this module asserts is the *keying* of the comment
+# read — one section, one week, one stream — and a read whose section predicate is
+# dropped or widened hands one instructor another section's students' words. That
+# is a confidentiality boundary rather than a query-shape preference, so it belongs
+# where a silent skip cannot hide it.
+pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 
 # Cohort `F` runs term weeks 7 to 12; cohort `Q` runs 7 to 18, so the two sections
 # share these weeks and a leak across them is about the section and nothing else.

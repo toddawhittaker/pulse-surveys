@@ -55,7 +55,8 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
 
-  // Two projects, and the second one exists to run last (E3-08).
+  // Three projects, and the last two exist to run last, in that order (E3-08,
+  // then E4-15).
   //
   // `tests/e2e/exit-grade-passback.spec.ts` drives SPEC §14.3's exit proof for E3
   // across six weeks of pretended time and amends two of the mock platform's
@@ -66,16 +67,30 @@ export default defineConfig({
   // main project, which ignores it, and into one that `dependencies` orders after
   // every other spec has finished.
   //
+  // `tests/e2e/exit-instructor-report.spec.ts` drives §14.3's exit proof for E4
+  // and is lifted out for the same reason and one more of its own: it writes a
+  // whole term of responses into `BIOL-215-R3WW`, having first put that section's
+  // own ground back, so `instructor-report.spec.ts` reading the same section
+  // afterwards would read this file's story instead of its own. It goes last of
+  // all — after `grade-passback-exit`, because the E3 exit amends two rosters this
+  // one must not meet half-applied.
+  //
+  // **`testIgnore` on the main project is by filename and has to name both**, which
+  // is why it is a list rather than one pattern: six other `exit-*.spec.ts` files
+  // run in the main project quite deliberately, so nothing about the `exit-` prefix
+  // lifts a file out on its own. A file left off this list is collected into
+  // `chromium` as well and runs twice — once in the wrong order.
+  //
   // `dependencies` is a project-level ordering and not a fixture: Playwright runs
-  // `chromium` to completion first, and skips this project if it failed. That is
-  // the wanted behaviour — a drive over a stack whose earlier specs did not pass
-  // is measuring something else — and it is also why the ordering claim is only
-  // proven by running the whole suite rather than this file alone.
+  // `chromium` to completion first, and skips a project whose dependency failed.
+  // That is the wanted behaviour — a drive over a stack whose earlier specs did
+  // not pass is measuring something else — and it is also why the ordering claim
+  // is only proven by running the whole suite rather than one file alone.
   projects: [
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
-      testIgnore: /exit-grade-passback\.spec\.ts$/,
+      testIgnore: [/exit-grade-passback\.spec\.ts$/, /exit-instructor-report\.spec\.ts$/],
     },
     {
       name: 'grade-passback-exit',
@@ -87,6 +102,20 @@ export default defineConfig({
       // section's AGS line item after a staff launch, and the participation sweep
       // being re-triggered until it has one to post to. The file sets its own
       // per-case budget on top of this; this is what covers the hooks.
+      timeout: 60_000,
+    },
+    {
+      name: 'instructor-report-exit',
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: /exit-instructor-report\.spec\.ts$/,
+      // Both, and the second one is the ordering that matters: `chromium` alone
+      // would let this project start beside `grade-passback-exit`, which moves the
+      // one shared clock this stack has.
+      dependencies: ['chromium', 'grade-passback-exit'],
+      // The same 60s and the same kind of reason: this file's hooks and cases wait
+      // on a roster sync, a seeder run and the two Monday jobs, each a
+      // `docker compose` round trip. The file sets its own, larger, per-case
+      // budgets on top of this; this is what covers the hooks.
       timeout: 60_000,
     },
   ],

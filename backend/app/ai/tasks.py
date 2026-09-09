@@ -143,6 +143,26 @@ FLOOR_MODEL_ID = NOT_A_MODEL
 # stored version names exactly one immutable file (ADR 0031, ADR 0032).
 SUMMARY_PROMPT_VERSION = "summary.v1"
 
+# The prompt a week **below SPEC §4's n-threshold** renders instead — the owner's
+# ruling of 2026-09-09, which is that such a week's summary names themes only and
+# may not reuse the commenters' own word strings.
+#
+# **Two live versions rather than one file with a switch**, and the reason is the
+# renderer's settled signature: `render_summary_prompt(version, *, stream,
+# comments)` takes three parameters and no fourth, deliberately, so that a caller
+# holding identity has nowhere to put it (E4-05's second criterion, asserted as an
+# equality). The version is the one dial a caller may turn, so the mode rides on
+# it — which is also what `prompts/README.md` asks of a content change: add the
+# next version beside the old one and leave the old one alone.
+#
+# What is unusual, and what
+# [ADR 0162](../../../docs/adr/0162-the-small-n-summary-is-a-second-live-prompt-version-and-a-store-time-guard.md)
+# records, is that **both stay live**: v1 is what an at-or-above-threshold week
+# renders and v2 is what a small-N week renders, rather than v2 superseding v1.
+# The gain is that a stored `prompt_version` then says which mode produced the
+# row, with no second column and no inference.
+SMALL_N_SUMMARY_PROMPT_VERSION = "summary.v2"
+
 # Where the week's comments go, and where the stream they belong to goes. Two
 # placeholders rather than one because they are substituted at opposite ends of
 # the file: the stream is named in the instructions, and the comments are the
@@ -474,6 +494,7 @@ def summarize_stream(
     *,
     stream: CommentStream,
     response_count: int,
+    small_n: bool = False,
     gateway: AIGateway | None = None,
 ) -> WeeklySummaryRecord:
     """§7.4's weekly-summary task for one stream: one call in, one record out.
@@ -500,6 +521,24 @@ def summarize_stream(
     above the rating threshold — so nine responses can carry three comments, and
     `len(comments)` would put a smaller, plausible, wrong number under every
     summary. The caller has the real number; the model is not asked for it.
+
+    **`small_n` is the same kind of value and arrives the same way.** The owner's
+    ruling of 2026-09-09 is that a week below SPEC §4's n-threshold has its
+    summary name themes only, reusing none of the commenters' word strings, and
+    this function's whole part in that is to render the prompt that says so —
+    `SMALL_N_SUMMARY_PROMPT_VERSION` rather than `SUMMARY_PROMPT_VERSION`, which
+    the stored row then names. It is not derived here for the reason the count is
+    not: the threshold is configuration read through one function in the service
+    layer, and a second reading of it inside the AI layer is a second source for
+    the number a confidentiality promise is made on. It defaults to `False`, which
+    is the unchanged contract.
+
+    **The instruction is soft and this function does not pretend otherwise.** A
+    model may ignore it and a provider swap changes what ignoring means, so the
+    ruling is also enforced structurally where the row is written —
+    `app.services.reporting` refuses a small-N summary that reuses a run of a
+    comment it was fed. This half is what makes the model *asked*; that half is
+    what makes the answer *checked*.
 
     **An answer about the other stream is refused.** It validates — it is a
     well-formed `WeeklySummaryOutput` — so nothing else in the stack would stop
@@ -554,9 +593,16 @@ def summarize_stream(
         )
 
     gateway = gateway or process_gateway()
+    # Which prompt this week renders, and the only thing `small_n` decides here.
+    # The caller knows the week's response count and SPEC §4's threshold; this
+    # function is told the answer rather than working it out, for the reason
+    # `response_count` is the caller's — the threshold is configurable and read
+    # through `app.services.report_comments.n_threshold`, and a second reading of
+    # it in the AI layer is a second source for the number a promise is made on.
+    version = SMALL_N_SUMMARY_PROMPT_VERSION if small_n else SUMMARY_PROMPT_VERSION
     output = gateway.run_task(
-        prompt=render_summary_prompt(SUMMARY_PROMPT_VERSION, stream=stream, comments=comments),
-        prompt_version=SUMMARY_PROMPT_VERSION,
+        prompt=render_summary_prompt(version, stream=stream, comments=comments),
+        prompt_version=version,
         output_model=WeeklySummaryOutput,
         timeout=SUMMARY_TIMEOUT_SECONDS,
     )

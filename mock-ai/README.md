@@ -44,11 +44,20 @@ before E4-05.
 
 For **comment validity**, the student's comment is everything after the last
 occurrence of the line the validity prompt's instructions end with, with
-surrounding whitespace removed. For the **weekly summary**, the week is the
-blank-line-separated blocks after the last occurrence of the summary prompt's
-marker line, and the stream is the token following the last `Stream under
-review:` line before it — so no comment can move either boundary or choose which
-stream the answer is about.
+surrounding whitespace removed. A comment carrying a copy of that line moves this
+boundary to the right, and it stays that way deliberately: the move truncates the
+student's own comment before their own verdict, so what it reaches is a wrong
+answer about themselves, while taking the *first* occurrence would hand back the
+prompt's own instructions whenever the template quoted its marker.
+`extract_comment` in `mock-ai/app/rules.py` carries the trade in full.
+
+For the **weekly summary**, the week is the blank-line-separated blocks after the
+*first* occurrence of the summary prompt's marker line, and the stream is the
+token following the last `Stream under review:` line before it — so no comment can
+move that boundary or choose which stream the answer is about. This one is read
+*before* the marker rather than after it, which is why it wants the opposite end:
+a comment that moved it would put its own text into the instructions the service
+reads the stream and the small-N mode out of.
 
 All three strings are copied into `mock-ai/app/rules.py`, because this package
 cannot import `backend/app/` — both are called `app` — and unit tests hold the

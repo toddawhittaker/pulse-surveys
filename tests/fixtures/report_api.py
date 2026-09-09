@@ -84,7 +84,7 @@ development name, laid down before the application is imported, which is what AD
 """
 
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -98,6 +98,8 @@ from fixtures.clock import DEVELOPMENT
 from fixtures.grading import (
     ENDED_ON_COLUMN,
     ENROLLMENT_TABLE,
+    LMS_WINDOW_END_COLUMN,
+    LMS_WINDOW_START_COLUMN,
     RESPONSE_SECTION_COLUMN,
     STARTED_ON_COLUMN,
 )
@@ -267,6 +269,32 @@ TAUGHT_COHORT = "F"
 # in its own row and in nothing above it — which is the shape a scope query that
 # joined on the course, the term or the week answers with both.
 UNTAUGHT_COHORT = SECOND_COHORT
+
+# **A second section the launching instructor also teaches**, planted only by
+# `plant_a_second_taught_section` and never by `build_report_world` — see that
+# function for why it is opt-in.
+#
+# Cohort `X` runs eight weeks from term week 1, so its course weeks and the taught
+# cohort's are two different numbers for the same term week: term week 7 is course
+# week 7 here and course week 1 there. A payload that answered the wrong section's
+# rows would therefore also be answering under the wrong course-week number, and
+# the two facts fail separately.
+#
+# `X` rather than one of the cohorts starting at term week 7: those give the same
+# course week as the taught cohort for the same term week, and a discriminator that
+# agrees with what it is discriminating from is not one.
+SECOND_TAUGHT_COHORT = "X"
+SECOND_TAUGHT_LENGTH_WEEKS = 8
+SECOND_TAUGHT_FIRST_TERM_WEEK = 1
+
+# The one week this second section is given, on both axes. Term week 7 because
+# `build_report_world` has already written window instants for term weeks 7 to 12
+# and this section's window has to close before the clock the door stands at; course
+# week 7 because that is `7 - 1 + 1` on a cohort that starts at term week 1 —
+# hand-written here and checked by `assert_the_second_cohort_is_what_this_file_says`
+# rather than derived (`docs/MISTAKES.md` entry 19).
+SECOND_TAUGHT_TERM_WEEK = 7
+SECOND_TAUGHT_COURSE_WEEK = 7
 
 # **Written out by hand, and checked against the cohort facts rather than derived
 # from them** (`docs/MISTAKES.md` entry 19). The report computes this mapping;
@@ -1115,7 +1143,12 @@ class ReportWorldRows:
 
 
 def a_student_enrolled(
-    world: CommentWorld, subject: str, *, started_on: date, ended_on: date | None
+    world: CommentWorld,
+    subject: str,
+    *,
+    started_on: date,
+    ended_on: date | None,
+    lms_window_start: datetime | None = None,
 ) -> Any:
     """One `user` enrolled in the taught section over the window the caller chose.
 
@@ -1126,16 +1159,30 @@ def a_student_enrolled(
     it the caller's and for the same reason (`docs/MISTAKES.md` entry 30).
     """
     user = world.seed(USER_TABLE, world.people_chain, lms_user_id=subject)
-    world.seed(
-        ENROLLMENT_TABLE,
-        {},
-        **{
-            world.link(ENROLLMENT_TABLE, USER_TABLE): user[world.key_of(USER_TABLE)],
-            world.link(ENROLLMENT_TABLE, SECTION_TABLE): world.section_id(TAUGHT_COHORT),
-            STARTED_ON_COLUMN: started_on,
-            ENDED_ON_COLUMN: ended_on,
-        },
-    )
+    values: dict[str, Any] = {
+        world.link(ENROLLMENT_TABLE, USER_TABLE): user[world.key_of(USER_TABLE)],
+        world.link(ENROLLMENT_TABLE, SECTION_TABLE): world.section_id(TAUGHT_COHORT),
+        STARTED_ON_COLUMN: started_on,
+        ENDED_ON_COLUMN: ended_on,
+    }
+    # **The platform's own enrolment window, where the caller supplies one.**
+    # SPEC §3.4's denominator "starts at the student's first enrolled week (from
+    # NRPS enrollment data)", and E3-04's three tiers make `lms_window_start` the
+    # first of them: a member the platform dated is credited from the week that
+    # date falls in, whatever `started_on` says about when Pulse first saw them.
+    # The two columns are written together because E3-04 added them together, and
+    # only where the schema carries them — the same guard
+    # `tests/fixtures/grading.py::student` makes, for the same reason.
+    if lms_window_start is not None:
+        if not world.has_column(ENROLLMENT_TABLE, LMS_WINDOW_START_COLUMN):
+            pytest.fail(
+                f"`{ENROLLMENT_TABLE}` declares no `{LMS_WINDOW_START_COLUMN}`, so a "
+                "platform-dated late add cannot be seeded and SPEC §3.4's first enrolment tier "
+                "cannot be posed at all. E3-04 adds the pair as nullable `AwareDateTime` columns."
+            )
+        values[LMS_WINDOW_START_COLUMN] = lms_window_start
+        values[LMS_WINDOW_END_COLUMN] = None
+    world.seed(ENROLLMENT_TABLE, {}, **values)
     return user
 
 
@@ -1231,13 +1278,29 @@ class ReportDoor:
     (`docs/MISTAKES.md` entry 13).
     """
 
-    def __init__(self, driver: Any, rows: ReportWorldRows, overrides: Any, token: str) -> None:
+    def __init__(
+        self,
+        driver: Any,
+        rows: ReportWorldRows,
+        overrides: Any,
+        token: str,
+        *,
+        person_id: Any = None,
+        graph: Any = None,
+    ) -> None:
         self.driver = driver
         self.tool = driver.tool
         self.rows = rows
         self.world = rows.world
         self.overrides = overrides
         self.token = token
+        # **Who the launching person is, and what can write a grant for them.**
+        # Both are `None` for the student role, which holds no assignment at all.
+        # They exist for `plant_a_second_taught_section`, which is the one caller
+        # that has to widen this session's scope *after* the launch — see that
+        # function for why that is sound rather than a shortcut.
+        self.person_id = person_id
+        self.graph = graph
 
     @property
     def application(self) -> Any:
@@ -1402,12 +1465,13 @@ def _build_report_door(
     overrides = committed_clock_overrides
     overrides.set(pretend_now=AFTER_THE_LAST_WINDOW, anchored_at=datetime.now(UTC))
 
+    seeded: dict[str, Any] = {}
     if role == STUDENT_ROLE:
         landing_ground().a_student(
             platform_id=platform_id, subject=subject, on=a_day_the_student_is_already_enrolled_on()
         )
     else:
-        _seed_the_launching_person(
+        seeded = _seed_the_launching_person(
             role=role,
             rows=rows,
             platform_id=platform_id,
@@ -1419,7 +1483,14 @@ def _build_report_door(
 
     landed, _ = launch_driver.launch(offer)
     token = session_token_at(landed, LANDING_FOR[role], f"The seeded {role} launch")
-    return ReportDoor(launch_driver, rows, overrides, token)
+    return ReportDoor(
+        launch_driver,
+        rows,
+        overrides,
+        token,
+        person_id=seeded.get("person_id"),
+        graph=committed_rows.graph,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1538,6 +1609,105 @@ def report_api_contract() -> Any:
         strings_in = staticmethod(strings_in)
 
     return ReportApiContract()
+
+
+def assert_the_second_cohort_is_what_this_file_says() -> None:
+    """`SECOND_TAUGHT_COURSE_WEEK` against the transcribed seed, before anything reads it.
+
+    The same device `assert_the_cohort_is_what_this_file_says` applies to the taught
+    cohort, and for the same reason: the course-week number above is written out by
+    hand precisely so that it is not the arithmetic the payload does, and this is
+    what keeps it honest if `scripts/seed.py`'s start-letter map moves under it.
+    """
+    length, first_term_week, _start = SEEDED_COHORTS[SECOND_TAUGHT_COHORT]
+    assert (length, first_term_week) == (
+        SECOND_TAUGHT_LENGTH_WEEKS,
+        SECOND_TAUGHT_FIRST_TERM_WEEK,
+    ), (
+        f"Cohort {SECOND_TAUGHT_COHORT!r} runs {length} weeks from term week {first_term_week} in "
+        f"`SEEDED_COHORTS`, and this file says {SECOND_TAUGHT_LENGTH_WEEKS} weeks from term week "
+        f"{SECOND_TAUGHT_FIRST_TERM_WEEK}."
+    )
+    expected = SECOND_TAUGHT_TERM_WEEK - first_term_week + 1
+    assert expected == SECOND_TAUGHT_COURSE_WEEK, (
+        f"Term week {SECOND_TAUGHT_TERM_WEEK} is course week {expected} of cohort "
+        f"{SECOND_TAUGHT_COHORT!r}, and this file's hand-written constant says "
+        f"{SECOND_TAUGHT_COURSE_WEEK}."
+    )
+    assert SECOND_TAUGHT_TERM_WEEK in TAUGHT_TERM_WEEKS, (
+        f"Term week {SECOND_TAUGHT_TERM_WEEK} is outside {list(TAUGHT_TERM_WEEKS)}, which are the "
+        "only weeks `build_report_world` writes window instants for — so this section's window "
+        "would be planted at instants nobody chose, and whether it has closed would depend on the "
+        "day CI runs."
+    )
+
+
+class SecondTaughtSection(NamedTuple):
+    """The keys and the week of a second section the launching instructor teaches."""
+
+    section_id: Any
+    course_week: int
+    term_week: int
+
+
+def plant_a_second_taught_section(
+    door: ReportDoor, *, comments: Sequence[str], stream: str
+) -> SecondTaughtSection:
+    """A second section this session's instructor teaches, holding its own comments.
+
+    **Opt-in rather than part of `build_report_world`, deliberately.** Six modules
+    read that world and several of them assert what a session may and may not
+    reach; giving every one of them a second taught section would change the
+    premise of tests written against one. So this is a function a module calls,
+    and the default world is exactly what it was.
+
+    One week — `SECOND_TAUGHT_TERM_WEEK`, closed at the hand-written calendar's own
+    instants — with one respondent per comment, so the week sits at or above the
+    n-threshold when the caller passes a threshold's worth of comments and its raw
+    comments are the instructor's to read. The caller supplies the texts, because
+    what they are for is being found or not found in a payload and a fixture that
+    invented them would be choosing this test's evidence.
+
+    **The grant is written after the launch, and that is sound rather than a
+    shortcut.** E4-07 resolves a request's section scope from the
+    `teaching_instructor` view on every read — the session token carries a role and
+    a person, never a section list — so a `role_assignment` row committed after the
+    launch is in scope for the next request. What it must not be relied on to do is
+    prove itself: the caller asserts that this section's *own* report answers 200
+    and carries its own comment before it asserts anything about what another
+    section's report does not carry. Without that canary, a grant that never landed
+    and a leak that never happened look identical.
+    """
+    assert door.person_id is not None and door.graph is not None, (
+        "This door was built for a role that holds no assignment, so there is nobody to grant a "
+        "second teaching scope to. `plant_a_second_taught_section` is for the instructor door."
+    )
+    assert_the_second_cohort_is_what_this_file_says()
+
+    world = door.world
+    world.section(SECOND_TAUGHT_COHORT)
+    world.window(SECOND_TAUGHT_TERM_WEEK, SECOND_TAUGHT_COHORT)
+
+    for index, text in enumerate(comments):
+        student = world.student(
+            f"e4-15-second-section-respondent-{index}", cohorts=(SECOND_TAUGHT_COHORT,)
+        )
+        world.submit(
+            term_week=SECOND_TAUGHT_TERM_WEEK,
+            comments={stream: text},
+            ratings={RATING_POSITION[stream]: 4},
+            cohort=SECOND_TAUGHT_COHORT,
+            student=student,
+        )
+
+    section_id = world.section_id(SECOND_TAUGHT_COHORT)
+    door.graph.assign(INSTRUCTOR_ROLE, scope=section_id, person=door.person_id)
+    door.commit()
+    return SecondTaughtSection(
+        section_id=section_id,
+        course_week=SECOND_TAUGHT_COURSE_WEEK,
+        term_week=SECOND_TAUGHT_TERM_WEEK,
+    )
 
 
 def a_section_that_does_not_exist() -> Any:

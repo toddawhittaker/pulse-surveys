@@ -244,6 +244,15 @@ def test_a_week_whose_responses_carry_no_workload_answer_has_no_workload_row(
     )
 
 
+# **This test alone is `invariant`-marked, and the module is not** — the same call
+# and the same reason as its two sibling view modules. The rest of this file is
+# §3.2's "true means and medians rather than band midpoints", which is a statistics
+# claim. This one is the section boundary: §4.1 item 6. A mean or a median computed
+# over more than this section's own responses is a figure about people the reader
+# is not entitled to, and §4.1 item 7 says in as many words that a statistic over a
+# comparison set is governed exactly as a drawn line is — a figure silently drawn
+# from two sections is that rule defeated before E5 has built anything.
+@pytest.mark.invariant
 def test_a_sections_workload_figures_are_computed_over_its_own_responses(
     report_world: ReportWorld,
 ) -> None:

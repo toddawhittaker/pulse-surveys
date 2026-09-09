@@ -47,6 +47,18 @@ from pathlib import Path
 import pytest
 from fixtures.care_subject import DELETED_SUBJECT_PARAMETER
 
+# **Marked `invariant`, which puts this module in CI's isolated §4.1 pass** where a
+# skip or an empty collection is a failure (`scripts/ci/check_invariants.py`).
+# SPEC §4's traceability rule — "re-identification is possible only through the
+# Care queue (§6.2), only by the Care role" — and §4.1 item 6, which forbids any
+# view widening a student's visibility. This sweep is what stops a caller reaching
+# the reveal with a subject it chose rather than one the case supplied, which is
+# the composition finding E1 carried into E4 with a deadline: the guard must refuse
+# a subject reached through a reporting scope before any instructor-facing surface
+# renders roster-derived rows. A sweep that is skipped is a deadline nobody is
+# holding.
+pytestmark = pytest.mark.invariant
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = REPO_ROOT / "backend"
 

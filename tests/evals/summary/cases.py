@@ -82,6 +82,19 @@ SMALL_N = "small_n"
 EMPTY_WEEK = "empty_week"
 MIXED_WEEK = "mixed_week"
 
+# The family the owner's ruling of 2026-09-09 adds: below the n-threshold a week's
+# summary names themes only and may not reuse the commenters' own word strings.
+# Work-order decision D9 pairs a prompt instruction with a structural guard at
+# store time; this family is where what the *model* does with the instruction is
+# measured, which neither of those can say.
+SMALL_N_THEMES_ONLY = "small_n_themes_only"
+
+# How long a shared run of characters has to be before it is a quotation rather
+# than a coincidence — the same bound D9 gives the store-time guard, written out
+# here rather than imported from it so the eval is not agreeing with the guard
+# about what the guard does (`docs/MISTAKES.md` entry 19).
+A_QUOTATION = 20
+
 # What a signal is: criticism that may never be sanded off, or praise that must
 # not be dropped when a complaint is reported.
 CRITICISM = "criticism"
@@ -281,11 +294,62 @@ MIXED_WEEK_CASE = SummaryCase(
     family=MIXED_WEEK,
 )
 
+# The owner's ruling of 2026-09-09, as a case. Two comments — a week well under
+# any plausible threshold — each carrying a long, distinctive phrase a model
+# summarizing them would be tempted to lift whole. The signals are ordinary §5.1
+# fidelity signals, because the ruling does not excuse a small-N summary from
+# saying what the week said: it has to carry the criticism *and* say it in its own
+# words, and a case that only checked the second half would be passed by a summary
+# that reported nothing.
+SMALL_N_THEMES_ONLY_CASE = SummaryCase(
+    case_id="sm-to-001",
+    stream=COURSE_STREAM,
+    comments=(
+        "The Wednesday laboratory demonstration ran twenty minutes past the scheduled hour.",
+        "Nobody at the back of the lecture theatre could hear the questions being asked.",
+    ),
+    signals=(
+        Signal(
+            kind=CRITICISM,
+            name="the laboratory session overran",
+            topic=("laboratory", "lab", "demonstration", "session", "practical"),
+            judgement=(
+                "overran",
+                "over-ran",
+                "ran over",
+                "ran late",
+                "past the hour",
+                "too long",
+                "overrunning",
+                "late finish",
+            ),
+            carried_by=1,
+        ),
+        Signal(
+            kind=CRITICISM,
+            name="questions could not be heard from the back",
+            topic=("audibility", "hear", "heard", "audible", "acoustics", "sound"),
+            judgement=(
+                "could not",
+                "cannot",
+                "hard to",
+                "difficult",
+                "inaudible",
+                "not audible",
+                "unable",
+            ),
+            carried_by=1,
+        ),
+    ),
+    family=SMALL_N_THEMES_ONLY,
+)
+
 CASES: tuple[SummaryCase, ...] = (
     CRITICISM_PRESERVED_CASE,
     SMALL_N_CASE,
     EMPTY_WEEK_CASE,
     MIXED_WEEK_CASE,
+    SMALL_N_THEMES_ONLY_CASE,
 )
 
 
@@ -422,7 +486,85 @@ def absent_summary(case: SummaryCase, output: WeeklySummaryOutput) -> tuple[str,
     return ("the answer carries no summary text at all",)
 
 
-CHECKS = (sanded_signals, invented_themes, overclaimed_themes, wrong_stream, absent_summary)
+def _normalized(text: str) -> str:
+    """Case and whitespace normalized, as the owner's ruling of 2026-09-09 is read.
+
+    A model that lifts a phrase capitalizes it at the head of a sentence and
+    re-wraps it across a line as a matter of course, so a comparison of raw text
+    catches the one spelling nobody produces and misses every spelling somebody
+    does.
+    """
+    return " ".join(text.lower().split())
+
+
+def _longest_shared_run(left: str, right: str) -> int:
+    """The longest run of characters the two normalized strings share."""
+    first, second = _normalized(left), _normalized(right)
+    best = 0
+    for start in range(len(first)):
+        for end in range(start + best + 1, len(first) + 1):
+            if first[start:end] in second:
+                best = end - start
+            else:
+                break
+    return best
+
+
+def quoted_a_commenters_words(case: SummaryCase, output: WeeklySummaryOutput) -> tuple[str, ...]:
+    """A small-N summary that reuses a commenter's own word strings — the 2026-09-09 ruling.
+
+    Below the n-threshold the raw comments are withheld, and §5.1 makes the summary
+    the only comment signal the instructor gets. A summary that quotes is the
+    threshold undone on the one surface that is left: the words come back, to a
+    reader who can put them beside SPEC §3.4's per-week completion ledger in the
+    gradebook (instructor-visible, ADR 0125) and narrow the author to whoever
+    completed that week's comment item.
+
+    **Scoped to `SMALL_N_THEMES_ONLY`, and the narrowness is deliberate rather than
+    an oversight.** `SMALL_N_CASE` is also a below-threshold week and the ruling
+    covers it too, but its expectations and the floors measured over them were set
+    before the ruling existed; extending this check to it changes what a shipped
+    floor is measured against, which is a decision with a floor consequence and is
+    not a test author's to take quietly. The residual is stated here so the next
+    reader meets it: **one small-N case in this family is checked and one in the
+    older family is not.**
+
+    **Scoped to the summary text, not the theme labels**, because D9 words the
+    guard as "the text contains any 20-character substring". A theme label that
+    quotes is the same disclosure by the same route and nothing here catches it;
+    that is an open question for the owner rather than something this check may
+    widen into on its own.
+
+    **The bound is asserted from one side only here.** An eval reports rather than
+    gates, so this names a defect when it sees one; the boundary pair at nineteen
+    and twenty characters is driven against the *guard* in
+    `tests/integration/test_a_small_n_summary_never_reuses_a_commenters_words.py`,
+    where an exact comparison is possible.
+    """
+    if case.family != SMALL_N_THEMES_ONLY:
+        return ()
+    text = getattr(output, "summary", "") or ""
+    if not text.strip():
+        return ()
+    found = []
+    for comment in case.comments:
+        run = _longest_shared_run(text, comment)
+        if run >= A_QUOTATION:
+            found.append(
+                f"the summary reuses {run} characters of a commenter's own words "
+                f"(bound {A_QUOTATION}): {comment!r}"
+            )
+    return tuple(found)
+
+
+CHECKS = (
+    sanded_signals,
+    invented_themes,
+    overclaimed_themes,
+    wrong_stream,
+    absent_summary,
+    quoted_a_commenters_words,
+)
 
 
 def defects(case: SummaryCase, output: WeeklySummaryOutput) -> tuple[str, ...]:
@@ -525,6 +667,22 @@ def faithful_answers(contracts: Any) -> dict[str, Any]:
             "reading list points at. The other says the handout and the slides use different "
             "notation for the same quantity.",
             (("assigned chapter unavailable", 1), ("handout and slides use different notation", 1)),
+        ),
+        # **The themes-only case's control, and the one place in this dict where
+        # the paraphrase is the subject rather than the style.** Every answer here
+        # is written paraphrased, for the reason the docstring gives; this one has
+        # to be, because `quoted_a_commenters_words` runs over it. Both criticisms
+        # survive — a session that overran, questions that could not be heard —
+        # and neither sentence shares twenty characters with the comment it is
+        # about: the longest run either way is eleven (" scheduled " against the
+        # first comment, " questions " against the second), counted by hand.
+        SMALL_N_THEMES_ONLY_CASE.case_id: build_answer(
+            contracts,
+            SMALL_N_THEMES_ONLY_CASE,
+            "Two students commented. One reports that a practical session overran, finishing "
+            "well past its scheduled end. The other says questions from the rear of the room "
+            "could not be heard.",
+            (("a practical session overran", 1), ("questions were not audible at the back", 1)),
         ),
         EMPTY_WEEK_CASE.case_id: build_answer(
             contracts,

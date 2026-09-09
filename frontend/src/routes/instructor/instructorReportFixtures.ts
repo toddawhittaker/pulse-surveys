@@ -35,6 +35,18 @@ import type { InstructorReportView, TaughtSectionView } from '../../api/instruct
  * that began in the term's third week is what makes the two axes
  * distinguishable.
  *
+ * **The status and stream tokens are the wire's own, and the E4 boundary round
+ * is why that is said out loud.** A comment's `status` is
+ * `app.services.report_comments.REPORTED_STATUS` — `MODERATION_STATES`
+ * lower-cased, so `published`, `flagged_collapsed`, `excluded`, `kept` — and its
+ * `stream` is one of `app.models.survey.REPORT_STREAMS`, which are upper case.
+ * These fixtures carried `'flagged'` nowhere and `'instructor'` everywhere, and
+ * the page's two adapters compared against exactly those wrong spellings, so the
+ * fixtures agreed with the defect instead of catching it (`docs/MISTAKES.md`
+ * entry 30: a test that agrees with its own fixture about the thing under test).
+ * Both are typed as `string` on the wire, so TypeScript could not have caught it
+ * either; what catches it now is these values being the server's.
+ *
  * **The published weeks have a hole in them on purpose.** `[2, 4, 7]` is a
  * section whose weeks 1, 3, 5 and 6 never published — a window that had not
  * closed, or a week the section does not run. A page that derived a range from
@@ -82,6 +94,22 @@ export const COURSE_COMMENT =
 export const RELEASED_COMMENT =
   'The reading is stacking up faster than I can keep pace with, but the labs are good.';
 
+/** A second released comment, so the release carries one of each wire stream. */
+export const RELEASED_INSTRUCTOR_COMMENT =
+  'Feedback on the second problem set came back quickly and was worth reading twice.';
+
+/**
+ * A comment a moderator is holding, in the state the wire calls it.
+ *
+ * `flagged_collapsed` is §5.2's held state, and the card draws it as a chip and a
+ * disclosure with the words themselves out of the DOM until the disclosure is
+ * opened. Its text is distinctive so a test can assert its **absence** and mean
+ * something: a substring that also appeared in a summary or another card would
+ * make that assertion about the wrong string.
+ */
+export const HELD_COMMENT =
+  'Quadrat transect week was a shambles and the demonstrator said so out loud.';
+
 /**
  * The wire body for one published week with data in it.
  *
@@ -112,7 +140,7 @@ export const A_PUBLISHED_WEEK = {
         response_count: 13,
         held_note: null,
       },
-      comments: [{ text: INSTRUCTOR_COMMENT, status: 'published', stream: 'instructor' }],
+      comments: [{ text: INSTRUCTOR_COMMENT, status: 'published', stream: 'INSTRUCTOR' }],
     },
     course: {
       trend: [
@@ -125,7 +153,7 @@ export const A_PUBLISHED_WEEK = {
         response_count: 13,
         held_note: null,
       },
-      comments: [{ text: COURSE_COMMENT, status: 'published', stream: 'course' }],
+      comments: [{ text: COURSE_COMMENT, status: 'published', stream: 'COURSE' }],
     },
   },
   workload: { mean: 9.46, median: 8.04 },
@@ -238,11 +266,44 @@ export const A_SMALL_N_WEEK = {
  *
  * The released comment names no week and the payload gives it none; what it does
  * carry is its stream, which is what the card's optional chip is for — this is
- * the one list on the surface that holds both streams together.
+ * the one list on the surface that holds both streams together, so it carries one
+ * of each wire stream rather than one of one.
  */
 export const A_WEEK_WITH_A_RELEASE = {
   ...A_PUBLISHED_WEEK,
   released_from_earlier_weeks: [
-    { text: RELEASED_COMMENT, status: 'published', stream: 'course' },
+    { text: RELEASED_COMMENT, status: 'published', stream: 'COURSE' },
+    { text: RELEASED_INSTRUCTOR_COMMENT, status: 'published', stream: 'INSTRUCTOR' },
   ],
+} satisfies InstructorReportView & { comparison: unknown };
+
+/**
+ * A published week one of whose comments a moderator is holding.
+ *
+ * Above the threshold, so §4 shows the week's raw comments and this is a
+ * statement about the moderation treatment rather than about suppression. The
+ * instructor stream carries the held comment beside a plain one, so "the held
+ * one's words are not in the DOM" is asserted on a page that certainly has
+ * comment text on it — the near miss being a page that rendered no comments at
+ * all, which every absence assertion would be vacuously true of.
+ *
+ * **Nothing renders it yet.** The case it exists for is a component test this
+ * branch could not write: the test-edit wall covers `*.test.tsx` here, and the
+ * exemption that lets an implementer write frontend component tests lives on
+ * `process/test-edit-hook-component-tests` and has not reached this epic. The
+ * fixture is left because it is the payload that case needs and because deriving
+ * the wire's shape twice is how the two spellings came apart in the first place.
+ */
+export const A_WEEK_WITH_A_HELD_COMMENT = {
+  ...A_PUBLISHED_WEEK,
+  streams: {
+    ...A_PUBLISHED_WEEK.streams,
+    instructor: {
+      ...A_PUBLISHED_WEEK.streams.instructor,
+      comments: [
+        { text: INSTRUCTOR_COMMENT, status: 'published', stream: 'INSTRUCTOR' },
+        { text: HELD_COMMENT, status: 'flagged_collapsed', stream: 'INSTRUCTOR' },
+      ],
+    },
+  },
 } satisfies InstructorReportView & { comparison: unknown };

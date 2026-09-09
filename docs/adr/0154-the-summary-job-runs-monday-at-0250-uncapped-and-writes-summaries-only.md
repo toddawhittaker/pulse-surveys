@@ -114,6 +114,31 @@ each other's files.
   count found, the rows stored, the seconds taken — and nothing stops it. SPEC
   §10's thirty-minute budget is about the ordinary Monday, and this record does
   not claim it covers a backfill.
+
+  > **Amended 2026-09-08 by E4-15's boundary round: the *ordinary* Monday does not
+  > fit inside that budget either, on the numbers the spec itself supplies.** The
+  > walk is serial — one section-week at a time, two provider calls each, in one
+  > worker — and SPEC §10 budgets "Monday report generation for 500 sections
+  > < 30 min" while §7.4 and §3.3 budget a model call at p95 < 2s. Five hundred
+  > sections with one closed week each is 1,000 calls; at 2s apiece, executed one
+  > after another, that is 2,000 seconds — **about 33 minutes**, over §10's line
+  > before a single database read, commit or retry is counted, and before the
+  > release cut at 02:40 or the participation sweep at 02:20 have taken any of the
+  > same half hour. The margin this record says an uncapped run spends is not
+  > there to spend.
+  >
+  > Nothing is changed here on that basis, and the reason is that the arithmetic
+  > is a bound rather than a measurement: it assumes the p95 for every call, which
+  > no run has, and it says nothing about what the mean actually is against a real
+  > provider. What it does say is that the two spec figures are close enough that
+  > the ordinary Monday is a capacity question rather than a comfortable one, and
+  > that the answer — a concurrency, a per-section fan-out, a longer window, or a
+  > revised §10 figure — is a design decision that needs a measurement first.
+  >
+  > **E13's load test is the owner of that revisit.** It is the ticket that
+  > measures a Monday at scale, and this paragraph is what it should read before
+  > it does. Recorded here rather than in a carried-work file because the number
+  > it corrects is this record's own.
 - **E4-04 and E4-06 each own one scheduled task**, so the two tickets touch
   `app/jobs/schedules.py` and `app/jobs/tasks.py` in the same wave and their
   appended entries are merged rather than rebased over each other. Neither

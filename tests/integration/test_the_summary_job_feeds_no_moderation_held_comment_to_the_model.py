@@ -58,7 +58,15 @@ from fixtures.summary_job import (
     comment_text,
 )
 
-pytestmark = pytest.mark.integration
+# **Marked `invariant`, which puts this module in CI's isolated §4.1 pass** where a
+# skip or an empty collection is a failure (`scripts/ci/check_invariants.py`).
+# SPEC §5.1's "exclude flagged-held content" and §5.2's small-N concealment, which
+# §4.1 item 3 is the general form of. A held comment fed to the model comes back
+# paraphrased inside a summary the instructor reads — the suppression defeated one
+# layer out, in prose nothing else in this suite inspects, and on a surface where
+# the words no longer look like a comment. That the boundary is a prompt rather
+# than a payload is exactly why it needs the pass that cannot be skipped.
+pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 
 # The module the classification vocabulary lives in, and the one member it has
 # today. **Written out here rather than read off the enum** (`docs/MISTAKES.md`

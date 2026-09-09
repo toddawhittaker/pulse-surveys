@@ -74,20 +74,28 @@ come to disagree about one section.
 rule about posting and E3-06 owns it; this module computes the same thing for a
 dropped student that it computes for an enrolled one, so the behaviour lives in
 one place (ADR 0131).
+
+**§3.4's three tiers are no longer read here either.** They moved to
+`app.services.enrollment_windows` in the E4 boundary round (ADR 0161), because
+§5.1's response-rate denominator asks the same question — when did this enrolment
+begin — and was answering it from `started_on` alone. What stays in this module is
+which *course weeks* a student is credited with, which is the formula's own
+question; the tier branch, the roster-log read behind tier 3, and the `None`
+convention the two callers have to agree about are stated once, over there.
 """
 
 import logging
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Final
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import requests
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -104,7 +112,6 @@ from app.lti.ags import (
     post_score,
 )
 from app.models.ai import Classification, ClassificationTask
-from app.models.base import Base
 from app.models.grades import GradeSync, GradeSyncOutcome
 from app.models.identity import Enrollment
 from app.models.lti import (
@@ -116,7 +123,7 @@ from app.models.lti import (
 from app.models.org import Section
 from app.models.survey import Answer, Response
 from app.models.term import Term, Week
-from app.services import clock
+from app.services import clock, enrollment_windows
 from app.services.authz import WriteSanction, guard_write, sanction_for, section_scoped_assignees
 from app.services.identity import person_for_user, subject_for_user
 from app.services.submissions import current_questions
@@ -158,14 +165,6 @@ LEDGER_JOIN = "\n"
 # half at the second decimal.
 PERCENTAGE_PLACES = Decimal("0.1")
 PER_CENT = Decimal(100)
-
-# Tier 3 compares against the section's earliest roster sync (ADR 0131). The row
-# is read through the table on `Base.metadata` rather than through
-# `app.models.lti.NrpsCall`, because the **formula** may not reach a module path
-# holding `lti` — that is the rule keeping E3-04's AGS client out of the
-# arithmetic, and the roster-sync log happens to share a module with it. The
-# passback halves below reach that module freely and name it outright.
-NRPS_CALL = Base.metadata.tables["nrps_call"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,11 +214,11 @@ def participation_scores(
     items_per_week = _items_per_week(session)
     completed = _completed_items(session, section, windows)
     zone = ZoneInfo(settings.institution_timezone)
-    first_sync_day = _first_sync_day(session, section, zone=zone)
+    synced_on = enrollment_windows.first_sync_day(session, section_id=section.id, zone=zone)
 
     scores: dict[UUID, ParticipationScore] = {}
     for user_id, first_week in _first_enrolled_weeks(
-        session, section, windows, first_sync_day=first_sync_day, zone=zone
+        session, section, windows, first_sync_day=synced_on, zone=zone
     ).items():
         credited = [course_week for course_week in elapsed if course_week >= first_week]
         if not credited:
@@ -336,37 +335,14 @@ def _course_weeks_by_week_id(
 
 # ---------------------------------------------------------------------------
 # Which weeks are a student's: SPEC §3.4's three tiers (ADR 0131).
+#
+# **The tiers themselves are `app.services.enrollment_windows`' since the E4
+# boundary round**, because §5.1's response-rate denominator asks the same
+# question and was answering it from `started_on` alone (ADR 0161). What stays
+# here is what is the formula's own: which *course weeks* a student is credited
+# with, and the decision — §3.4's, argued in `_first_enrolled_weeks` — that a drop
+# takes no week away.
 # ---------------------------------------------------------------------------
-
-
-def _first_sync_day(session: Session, section: Section, *, zone: ZoneInfo) -> date | None:
-    """The institution-timezone day the section's earliest roster sync fell on.
-
-    `None` where the section has never been synced, which is the state seeded data
-    is in and which makes every member of it tier 2. ADR 0131 takes the earliest
-    call rather than any student's own first-sighting date, because only the log
-    can say what the section's *first* sync was.
-
-    **Only calls that read a roster count** (E3-08's boundary round, LO-M4).
-    `nrps_call` is SPEC §6.1's log at the grain of one HTTP call, so it holds the
-    attempts as well as the reads: a call the platform refused, one the token
-    endpoint refused before the roster was asked at all, and one this container
-    refused to make are all rows here, and `members_seen` is NULL on every one of
-    them (`app.services.roster_sync._record_call`). Counting those as "the
-    section's first sync" dates the tier-3 boundary from a sync that never
-    happened — and the ordinary way to get one is a new registration whose first
-    scheduled walk ran before its credentials were right, which then costs every
-    undated member of that section the weeks between, permanently. A read that
-    found an empty roster is a different thing and does count: `members_seen` is
-    `0` there, which is not NULL.
-    """
-    earliest: datetime | None = session.scalar(
-        select(func.min(NRPS_CALL.c.called_at)).where(
-            NRPS_CALL.c.section_id == section.id,
-            NRPS_CALL.c.members_seen.is_not(None),
-        )
-    )
-    return None if earliest is None else earliest.astimezone(zone).date()
 
 
 def _first_enrolled_weeks(
@@ -412,36 +388,13 @@ def _first_course_week(
     section's windows had closed before that instant, which is a student with
     nothing to score.
     """
-    enrolled_from = _enrolled_from(enrollment, first_sync_day=first_sync_day, zone=zone)
-    if enrolled_from is None:
-        return min(window.course_week for window in windows)
-    still_open = [window.course_week for window in windows if window.closes_at >= enrolled_from]
+    began = enrollment_windows.enrolled_from(enrollment, first_sync_day=first_sync_day, zone=zone)
+    still_open = [
+        window.course_week
+        for window in windows
+        if enrollment_windows.began_by(began, closes_at=window.closes_at)
+    ]
     return min(still_open) if still_open else None
-
-
-def _enrolled_from(
-    enrollment: Enrollment, *, first_sync_day: date | None, zone: ZoneInfo
-) -> datetime | None:
-    """The instant a student's enrollment runs from, under §3.4's tiers, or `None` for tier 2.
-
-    - **Tier 1** — the platform dated them, so its instant is the answer. It is
-      consulted first: §3.4 dates the denominator "from NRPS enrollment data" and
-      falls back to the observed record only "where the platform supplies no
-      enrollment dates".
-    - **Tier 3** — the platform did not, the section has been synced, and this
-      student was first seen after the day of that first sync. Their day begins in
-      the institution's own timezone, which is the zone every window's wall clock
-      is in.
-    - **Tier 2** — otherwise the section's start, which is `None` here and every
-      course week at the caller. A late add the first sync already contained
-      cannot be told from a day-one student, and §3.4 accepts that under-credit
-      outright: no rule can recover data the platform never supplied.
-    """
-    if enrollment.lms_window_start is not None:
-        return enrollment.lms_window_start
-    if first_sync_day is not None and enrollment.started_on > first_sync_day:
-        return datetime.combine(enrollment.started_on, time.min, tzinfo=zone)
-    return None
 
 
 # ---------------------------------------------------------------------------

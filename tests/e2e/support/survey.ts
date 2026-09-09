@@ -255,23 +255,50 @@ export async function expectTheFormIsShowing(block: Locator): Promise<void> {
 /**
  * Delete these sections' stored responses, so their weeks are unanswered again.
  *
- * Three statements and they have to be in this order: `classification.answer_id`
- * carries `ON DELETE RESTRICT` (ADR 0055, ADR 0115), which is the database
- * refusing to let a verdict lose the comment it judged, so the verdicts go
- * first, then the answers they named, then the responses holding them.
+ * **Five statements now, and they have to be in this order.** Three tables carry
+ * a restricting reference to `answer`, and the database refuses to let any of
+ * them lose the row it is about, so every one of them goes before the answers and
+ * the answers go before the responses holding them:
+ *
+ *   1. `release_batch_member.answer_id` — E4-02's membership row (ADR 0146), a
+ *      released comment's only record. It is deleted first because it also
+ *      references the batch, so a batch deleted ahead of it would be refused.
+ *   2. `release_batch` — the batch itself, addressed by section. Once no
+ *      membership points at it there is nothing holding it.
+ *   3. `moderation_state.answer_id` — E4-02's append-only lifecycle record
+ *      (ADR 0145), one row per decision about one comment.
+ *   4. `classification.answer_id` — `ON DELETE RESTRICT` (ADR 0055, ADR 0115),
+ *      the database refusing to let a verdict lose the comment it judged.
+ *   5. then the answers, then the responses.
+ *
+ * **The first three were missing and this is what they cost**, which is worth
+ * writing down rather than quietly adding: before E4 a section had no batches and
+ * no moderation rows, so three statements cleared a week and this helper was
+ * correct. Since E4-02 and E4-04, a section whose comments have been released or
+ * moderated cannot be cleared at all — the `delete from answer` is refused, the
+ * whole statement fails, and what a caller sees is a `docker compose` exit rather
+ * than a week that quietly did not clear. That is the better failure of the two,
+ * and it is still a spec that cannot put the stack back.
  *
  * The application has no path that does this and should not: SPEC §3.1 says a
  * week cannot be back-filled and §8 keeps the record. This is a development
  * stack being put back to a known state, which is the same thing `make seed`
- * does for the institution around it.
+ * does for the institution around it. Nothing here deletes a batch the *product*
+ * would ever delete — ADR 0146 is explicit that nothing un-releases — which is
+ * exactly why this lives in a test-support module and not behind a route.
  */
 export function clearTheWeek(codes: readonly string[]): void {
   const list = codes.map((code) => quoted(code)).join(', ');
   const ofTheseSections =
     'select r.id from response r join section s on s.id = r.section_id ' +
     `where s.lms_section_code in (${list})`;
+  const theirAnswers = `select id from answer where response_id in (${ofTheseSections})`;
+  const theseSections = `select id from section where lms_section_code in (${list})`;
   databaseStatement(
-    `delete from classification where answer_id in (select id from answer where response_id in (${ofTheseSections}));\n` +
+    `delete from release_batch_member where answer_id in (${theirAnswers});\n` +
+      `delete from release_batch where section_id in (${theseSections});\n` +
+      `delete from moderation_state where answer_id in (${theirAnswers});\n` +
+      `delete from classification where answer_id in (${theirAnswers});\n` +
       `delete from answer where response_id in (${ofTheseSections});\n` +
       `delete from response where id in (${ofTheseSections});`,
   );

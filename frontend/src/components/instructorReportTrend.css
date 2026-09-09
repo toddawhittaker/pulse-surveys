@@ -12,24 +12,38 @@
    invented spacing, and no radius outside the two the brief allows (4px
    inputs, 8px cards).
 
-   **Colour, in one paragraph.** Marigold is the single hero accent and it is
-   the section's own line and terminal dot — `design/Usage Rules.md` §2, and
-   the semantic mapping in `docs/DESIGN_BRIEF.md`: "section line = marigold,
-   solid, 2.5px, rounded caps, small dot on current week". Hairline draws the
-   gridlines, spruce-60 the axis text, mist the quiet term-week sub-label.
-   Nothing here is madder, which means "attend to this" and belongs to flags.
-   The mist that the prototype's benchmark and university lines are drawn in
-   appears nowhere below, because E4 has no comparison data to draw.
+   **Colour, in one paragraph.** The marigold family is the single hero accent
+   and it is the section's own line and terminal dot — `design/Usage Rules.md`
+   §2, and the semantic mapping in `docs/DESIGN_BRIEF.md`: "section line =
+   marigold, solid, 2.5px, rounded caps, small dot on current week". Hairline
+   draws the gridlines and spruce-60 the axis text, both halves of it. Nothing
+   here is madder, which means "attend to this" and belongs to flags. The mist
+   that the prototype's benchmark and university lines are drawn in appears
+   nowhere below, because E4 has no comparison data to draw.
+
+   **Which marigold, and the measurement behind it.** The line, the dot and the
+   legend swatch that names them are `--marigold-deep`, not `--marigold`. The
+   accent measures 2.23:1 against paper and 2.09:1 against chalk, which is under
+   WCAG's 3:1 floor for a graphical object carrying meaning — and this line *is*
+   the meaning: it is the only mark that says which way a stream is going.
+   `--marigold-deep` is 4.96:1 and 4.64:1. This is the correction
+   `design/tokens.css` already made for the focus ring, in its own words —
+   "deep marigold, not the accent" — arriving at the other place the accent was
+   asked to carry information rather than decoration. It was found in the E4
+   boundary round.
 
    **Type, in one paragraph.** Axis labels are mono, which is the brief's rule
    for every number ("tabular figures give charts and stats an instrument
    feel"). The prototype sets the week label at 12px and the term-week
    sub-label at 10px; the ramp in `design/tokens.css` has one step at or below
-   both (`--text-1`, 13px) and nothing smaller, so both take that step and the
-   sub-label is made quiet by colour — mist against the label's spruce-60 —
-   rather than by a size the token file does not publish. The type inside the
-   SVG scales with the chart's viewBox, so at the reading column the brief
-   gives report surfaces these render at about the size the prototype draws.
+   both (`--text-1`, 13px) and nothing smaller, so both take that step. The
+   sub-label used to be made quiet by colour as well — mist against the label's
+   spruce-60 — and that reading is gone: mist is 2.58:1 against paper, which is
+   not a quiet label but an unreadable one, and both axis labels are spruce-60
+   now. What separates them is the mark-up's own order and the sub-label's
+   position under the week it qualifies. The type inside the SVG scales with the
+   chart's viewBox, so at the reading column the brief gives report surfaces
+   these render at about the size the prototype draws.
 
    **Motion, in one paragraph.** The hero line draws on once, left to right,
    600ms, and the terminal dot fades in behind it (150ms). In the stacked pair
@@ -105,7 +119,7 @@
    * `stroke-dashoffset: 0` leaves the line fully drawn. */
   .pulse-trend-line {
     fill: none;
-    stroke: var(--marigold);
+    stroke: var(--marigold-deep);
     stroke-width: 2.5;
     stroke-linecap: round;
     stroke-linejoin: round;
@@ -116,7 +130,7 @@
 
   /* The terminal dot on the most recent week that has a rating. */
   .pulse-trend-dot {
-    fill: var(--marigold);
+    fill: var(--marigold-deep);
     animation: pulse-trend-dot-in 150ms ease-out 560ms both;
   }
 
@@ -137,11 +151,18 @@
     fill: var(--spruce-60);
   }
 
-  /* The quiet half of SPEC §2.2's two axes. */
+  /* The quiet half of SPEC §2.2's two axes.
+   *
+   * **Spruce-60 rather than mist**, measured in the E4 boundary round: mist is
+   * 2.58:1 against paper, and this is a text label at the ramp's smallest step.
+   * It is quiet now by being the same ink as the label above it at a smaller
+   * weight in the mark-up's own hierarchy rather than by a contrast a reader
+   * cannot resolve. Spruce-60 is 5.18:1 on paper, 4.85:1 on chalk, and
+   * `design/tokens.css` publishes it for exactly this — "axis text". */
   .pulse-trend-tick-sub {
     font-family: var(--font-mono);
     font-size: var(--text-1);
-    fill: var(--mist);
+    fill: var(--spruce-60);
   }
 
   .pulse-trend-legend {
@@ -160,14 +181,17 @@
     gap: var(--space-2);
   }
 
+  /* The legend's swatch is the line drawn small, so it moves with it — a legend
+   * in the accent above a plot in the deep tone would name a line that is not
+   * there. */
   .pulse-trend-legend-line {
-    stroke: var(--marigold);
+    stroke: var(--marigold-deep);
     stroke-width: 2.5;
     stroke-linecap: round;
   }
 
   .pulse-trend-legend-dot {
-    fill: var(--marigold);
+    fill: var(--marigold-deep);
   }
 
   /* The stacked pair: instructor stream above, course stream below, one x axis

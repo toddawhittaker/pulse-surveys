@@ -133,6 +133,16 @@ def test_a_five_response_week_sums_to_five_in_each_stream(report_world: ReportWo
         )
 
 
+# **This test alone is `invariant`-marked, and the module is not.** The rest of
+# this file is arithmetic — that a distribution counts each submitted rating once,
+# that an unanswered question contributes nothing — and getting that wrong is a
+# wrong number rather than a disclosure. This one is the section boundary: §4.1
+# item 6, no view widening what one section's reader may see. A view whose
+# `section_id` predicate is dropped or joined loosely reports another section's
+# students inside this section's figures, and in a small week a distribution *is*
+# an identification channel. Marking the module whole would put four arithmetic
+# tests in the isolated pass and dilute what that pass means.
+@pytest.mark.invariant
 def test_a_rating_is_counted_for_the_section_it_was_submitted_in(
     report_world: ReportWorld,
 ) -> None:
