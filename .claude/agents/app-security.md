@@ -2,7 +2,7 @@
 name: app-security
 description: Generic application security review plus the project-specific surfaces the generic checklist cannot know. Runs /security-review first, then adds LTI token handling, the sanctioned fail-open path, and audit-write completeness. Fires on api, lti, mocks, Dockerfiles, and dependency manifests.
 model: opus
-effort: high
+effort: medium
 tools: Read, Grep, Glob, Bash, Skill, Agent
 disallowedTools: Write, Edit, NotebookEdit
 color: orange

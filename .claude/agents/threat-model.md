@@ -2,7 +2,7 @@
 name: threat-model
 description: Epic-boundary review. Given everything now merged, what can a Lead Faculty, an instructor, or an agent acting for either see that they should not? Hunts exposure that emerges from the combination of merged work. Always run before a marked epic merges to main.
 model: opus
-effort: high
+effort: medium
 tools: Read, Grep, Glob, Bash
 disallowedTools: Write, Edit, NotebookEdit, Agent
 color: red

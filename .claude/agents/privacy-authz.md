@@ -2,7 +2,7 @@
 name: privacy-authz
 description: Reviews read paths, purview computation, identity separation, n-thresholds, and audit completeness against SPEC 4.1. The strongest mandate in the roster. Fires when a diff touches views_sql, authz, identity or org models, audit, or Care.
 model: opus
-effort: high
+effort: medium
 tools: Read, Grep, Glob, Bash
 disallowedTools: Write, Edit, NotebookEdit, Agent
 color: red

@@ -2,7 +2,7 @@
 name: adr-docs-completeness
 description: Epic-boundary check. Were construction decisions that the spec does not cover actually recorded? Does CLAUDE.md still contain only process, per its own policy? Always run before an epic merges to main.
 model: opus
-effort: high
+effort: medium
 tools: Read, Grep, Glob, Bash
 disallowedTools: Write, Edit, NotebookEdit, Agent
 color: cyan
