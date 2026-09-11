@@ -140,7 +140,8 @@ from app.services.validity import recompute_response_validity, record_verdict
 
 # `BIOL-215-R3WW`, by the §2.2 code the `section` row carries. The choice is E4-15's
 # work order decision 1 and it is measured rather than preferred: the mock
-# platform's three contexts are the only launchable sections, `NURS-8100-Q2FF`
+# platform's contexts — three when this was measured; E4-20 added a demo
+# fourth — are the only launchable sections, `NURS-8100-Q2FF`
 # collides with the two student-survey specs, `MATH-140-E1FF` loses its learner to
 # the E3 exit drive's roster drop, and this one receives no runtime roster
 # amendment from any spec.

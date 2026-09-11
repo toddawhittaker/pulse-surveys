@@ -177,6 +177,17 @@ ticket may depart from only by saying so.
    week makes a derived number disagree with the report. The ADR in E4-19's
    pull request records it.
 
+13. **The exit story is a proof, not a demonstration — a representative
+   story is its own ticket.** Found test-driving the merged epic on
+   2026-09-09: the exit world's one-comment-per-stream weeks read as
+   unrepresentatively thin, and the owner ruled that richer demo data
+   should exist — 20 students, a rotating 70–85% of them commenting each
+   week — with no tests asserting the generated data's statistics. The exit
+   story stays frozen because the exit e2e asserts its exact numbers, so
+   the representative world lands as a fourth mock LMS section and a second
+   seeder, as **E4-20**. The ADR in its pull request records the rejected
+   alternatives.
+
 ## Build order
 
 | # | Ticket | Branch | Lane | Depends on | Summary | Merged |
@@ -200,6 +211,7 @@ ticket may depart from only by saying so.
 | 17 | [The week eyebrow says how long the course runs](E4-17-eyebrow-course-length.md) | `e4/eyebrow-course-length` | heavy | none | The carried E2 entry, unblocked by the owner's ruling of 2026-09-07: `OpenSurvey` gains the section's week count, `survey_read` reads it off the section row, and the eyebrow renders `COURSE WK 04 / 12, TERM WK 07`. | #205 as 8360f3a, 2026-09-07 |
 | 18 | [The instructor's section list](E4-18-instructor-section-list.md) | `e4/instructor-sections` | heavy | 07 | The contract gap found starting 11, ruled 2026-09-07 (decision 11): `GET /instructor/sections` answers the session's own taught sections — id, code, governed label — the student pattern applied to the instructor surface. | #207 as 932b231, 2026-09-08 |
 | 19 | [The trend points carry both week axes](E4-19-trend-term-weeks.md) | `e4/trend-term-weeks` | heavy | 07 | The contract gap found reconciling 08 with 07's schema, ruled 2026-09-07 (decision 12): `TrendPoint` gains `term_week` so the chart's §2.2 sub-label has a wire source, populated from the window rows the report read already holds. | #208 as aface05, 2026-09-08 |
+| 20 | [A representative demo story for the Monday report](E4-20-demo-seed-story.md) | `e4/demo-seed-story` | heavy | 15 | The post-exit ruling (decision 13): a fourth mock LMS section, `BIOL-310-R7FF`, with its own 20-student cast, and `seed_demo_story.py` filling every closed week with rotating realistic responses and comments; the exit story stays frozen. | |
 
 ## Dependency graph
 

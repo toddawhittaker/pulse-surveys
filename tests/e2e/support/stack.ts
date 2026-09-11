@@ -69,7 +69,7 @@ function compose(args: string[], input?: string): string {
 /**
  * Derive every section's survey windows, now rather than on the hour.
  *
- * A section provisioned by a launch — which is how the mock platform's three
+ * A section provisioned by a launch — which is how the mock platform's four
  * contexts reach this database at all — has no `survey_window` rows until
  * `app.jobs.tasks.derive_survey_windows` next runs, and
  * `app.jobs.schedules` runs it on `crontab(minute="30")`. A spec cannot wait up

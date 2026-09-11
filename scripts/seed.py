@@ -1509,7 +1509,7 @@ def demo_context_id(section: DemoSection) -> str:
     **Fiction, and shaped so it can never be mistaken for a real one.** E1-10
     round 3 binds every section to the context it was discovered from, and a demo
     section was discovered from nothing — these eighteen are invented, and the
-    in-repo mock platform's own three contexts are different courses entirely. A
+    in-repo mock platform's own four contexts are different courses entirely. A
     launch resolves a section by the context id its platform signed, so a
     synthetic value under this prefix is a section no launch can ever reach,
     which is exactly right for a row no launch created.
