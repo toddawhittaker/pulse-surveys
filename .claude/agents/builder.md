@@ -2,7 +2,7 @@
 name: builder
 description: Builds a light-lane ticket - code and ordinary tests together, no separate test author, no mutation battery. Invoked by /build-ticket only for tickets whose header says "Lane: light". Holds context across attempts within a ticket; re-address it by name with SendMessage rather than spawning a new one.
 model: opus
-effort: high
+effort: medium
 memory: project
 disallowedTools: Agent
 color: green
