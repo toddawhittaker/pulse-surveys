@@ -70,7 +70,7 @@ const SEVEN_OF_TWELVE_WEEKS: readonly TrendPoint[] = [
   { courseWeek: 6, termWeek: 9, mean: 3.2 },
   { courseWeek: 7, termWeek: 10, mean: 3.6 },
 ];
-const TERM_LENGTH = 12;
+const SECTION_WEEKS = 12;
 
 const INSTRUCTOR = 'Instructor';
 
@@ -400,12 +400,12 @@ describe('PulseTrendChart', () => {
         <PulseTrendChart
           points={SEVEN_OF_TWELVE_WEEKS}
           label={INSTRUCTOR}
-          lengthWeeks={TERM_LENGTH}
+          lengthWeeks={SECTION_WEEKS}
         />,
       );
 
       const ticks = textsOf(container, 'pulse-trend-tick-label');
-      expect(ticks).toHaveLength(TERM_LENGTH);
+      expect(ticks).toHaveLength(SECTION_WEEKS);
       expect(ticks).toEqual([
         'WK 01',
         '02',
@@ -427,7 +427,7 @@ describe('PulseTrendChart', () => {
         <PulseTrendChart
           points={SEVEN_OF_TWELVE_WEEKS}
           label={INSTRUCTOR}
-          lengthWeeks={TERM_LENGTH}
+          lengthWeeks={SECTION_WEEKS}
         />,
       );
 
@@ -442,7 +442,7 @@ describe('PulseTrendChart', () => {
       const last = required(drawn[drawn.length - 1], 'the last week drawn');
       expect(first.x).toBeCloseTo(xOfWeek(container, 1), 1);
       expect(last.x).toBeCloseTo(xOfWeek(container, 7), 1);
-      expect(last.x).toBeLessThan(xOfWeek(container, TERM_LENGTH));
+      expect(last.x).toBeLessThan(xOfWeek(container, SECTION_WEEKS));
     });
 
     it('writes the term sub-label only under the weeks the payload answered for', () => {
@@ -453,7 +453,7 @@ describe('PulseTrendChart', () => {
         <PulseTrendChart
           points={SEVEN_OF_TWELVE_WEEKS}
           label={INSTRUCTOR}
-          lengthWeeks={TERM_LENGTH}
+          lengthWeeks={SECTION_WEEKS}
         />,
       );
 
@@ -481,11 +481,11 @@ describe('PulseTrendChart', () => {
             { courseWeek: 4, termWeek: 7, mean: 3.6 },
           ]}
           label={INSTRUCTOR}
-          lengthWeeks={TERM_LENGTH}
+          lengthWeeks={SECTION_WEEKS}
         />,
       );
 
-      expect(textsOf(container, 'pulse-trend-tick-label')).toHaveLength(TERM_LENGTH);
+      expect(textsOf(container, 'pulse-trend-tick-label')).toHaveLength(SECTION_WEEKS);
       const [first, second] = heroCoordinates(container);
       expect(required(first, 'the first week drawn').x).toBeCloseTo(xOfWeek(container, 2), 1);
       expect(required(second, 'the second week drawn').x).toBeCloseTo(xOfWeek(container, 4), 1);

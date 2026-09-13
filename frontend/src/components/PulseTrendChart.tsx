@@ -173,13 +173,13 @@ interface AxisTick {
  * refuses.
  */
 function axisTicks(weeks: number, points: readonly TrendPoint[]): readonly AxisTick[] {
-  const termWeeks = new Map(points.map((point) => [point.courseWeek, point.termWeek]));
-  const first = Math.min(...termWeeks.keys());
+  const byCourseWeek = new Map(points.map((point) => [point.courseWeek, point.termWeek]));
+  const first = Math.min(...byCourseWeek.keys());
   return Array.from({ length: weeks }, (_, index) => {
     const courseWeek = index + 1;
     return {
       courseWeek,
-      termWeek: termWeeks.get(courseWeek) ?? null,
+      termWeek: byCourseWeek.get(courseWeek) ?? null,
       leadsTheTermAxis: courseWeek === first,
     };
   });
