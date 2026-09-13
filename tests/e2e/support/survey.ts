@@ -104,6 +104,73 @@ export function sectionBlock(code: string): string {
   return `survey-section-${code}`;
 }
 
+// The day each cohort begins, keyed by its §2.2 start letter and **transcribed
+// from `scripts/seed.py`'s `START_LETTER_MAP`** — the tuple `(letter, weeks,
+// date)` that fixes when a start letter's cohort runs. Each entry below is one
+// row of that tuple, its date verbatim:
+//
+//   ("U", 12, date(2026,  8, 17))  ("R", 12, date(2026,  9,  7))
+//   ("Q", 12, date(2026,  9, 28))  ("E",  6, date(2026,  8, 17))
+//   ("F",  6, date(2026,  9, 28))  ("H",  6, date(2026, 11,  9))
+//   ("X",  8, date(2026,  8, 17))  ("Y",  8, date(2026,  9, 28))
+//   ("Z",  8, date(2026, 10, 26))  ("S", 10, date(2026,  8, 17))
+//   ("T", 10, date(2026, 10, 12))  ("V", 15, date(2026,  8, 17))
+//   ("D", 15, date(2026,  9,  7))  ("K", 16, date(2026,  8, 17))
+//
+// It is derived from the code and not written as a bare literal for the reason
+// `docs/MISTAKES.md` entry 19 records: a date typed straight into a spec reads
+// from nothing and drifts from the seed silently. This is the seed's own axis,
+// so anchoring a launch here dates its enrollment the day the section began.
+const SECTION_START_BY_LETTER: Readonly<Record<string, string>> = {
+  U: '2026-08-17',
+  R: '2026-09-07',
+  Q: '2026-09-28',
+  E: '2026-08-17',
+  F: '2026-09-28',
+  H: '2026-11-09',
+  X: '2026-08-17',
+  Y: '2026-09-28',
+  Z: '2026-10-26',
+  S: '2026-08-17',
+  T: '2026-10-12',
+  V: '2026-08-17',
+  D: '2026-09-07',
+  K: '2026-08-17',
+};
+
+/**
+ * The dev-console clock value that stands the stack on a section's own start day.
+ *
+ * A §2.2 section code's first character is its start letter (`R3WW` → `R`), and
+ * `SECTION_START_BY_LETTER` gives that letter's start date from the seed's
+ * `START_LETTER_MAP`. The minute is noon so the day is unambiguous in the
+ * institution's timezone at any offset.
+ *
+ * **Why a launch anchors here.** The roster sync stamps `enrollment.started_on`
+ * from the effective clock the moment it first sees a member
+ * (`backend/app/services/roster_sync.py`, and its docstring: "a first-seen fact
+ * and is never rewritten"), and the student read path shows a section only while
+ * `started_on <= today`. A sync-triggering staff launch left at the wall clock
+ * therefore dates every enrollment the day CI happens to run, and a spec that
+ * reads at a fixed past minute is refused the moment the calendar passes it —
+ * the time-bomb E4-22 removes. Launching at the section's start dates the
+ * enrollment in the past for good, which SPEC §3.4 says is right anyway: a
+ * platform that supplies no enrollment dates (the mock supplies none) enrolls a
+ * student from the section's start.
+ */
+export function sectionStartClock(code: string): string {
+  const letter = code.charAt(0);
+  const start = SECTION_START_BY_LETTER[letter];
+  if (start === undefined) {
+    throw new Error(
+      `No seeded start date for section code ${JSON.stringify(code)} (start letter ` +
+        `${JSON.stringify(letter)}). Transcribe that letter's row from scripts/seed.py's ` +
+        '`START_LETTER_MAP` into `SECTION_START_BY_LETTER` above.',
+    );
+  }
+  return `${start}T12:00`;
+}
+
 /**
  * Enrol the learner in each named section, at a stated clock, with windows derived.
  *
@@ -184,7 +251,7 @@ export async function standTheLearnerIn(
  * Each attempt opens its own context, because a launch reuses whatever session
  * the last one left.
  */
-async function waitForTheLearnersBlocks(
+export async function waitForTheLearnersBlocks(
   browser: Browser,
   placement: string,
   sections: readonly SectionUnderTest[],
