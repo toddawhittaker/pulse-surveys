@@ -2,7 +2,7 @@
 name: invariant-coverage
 description: Epic-boundary audit. The SPEC 4.1 tests only cover read paths someone thought to test. Did new read paths appear that the invariant suite never touches? Always run before an epic merges to main.
 model: opus
-effort: high
+effort: medium
 tools: Read, Grep, Glob, Bash
 disallowedTools: Write, Edit, NotebookEdit, Agent
 color: red

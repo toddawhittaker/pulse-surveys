@@ -2,7 +2,7 @@
 name: implementer
 description: Writes the code for a ticket. Holds context across attempts within a ticket so it remembers what it already tried. Invoked by /build-ticket; re-address it by name with SendMessage rather than spawning a new one.
 model: opus
-effort: high
+effort: medium
 memory: project
 disallowedTools: Agent
 color: blue
