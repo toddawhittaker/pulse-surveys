@@ -188,6 +188,21 @@ ticket may depart from only by saying so.
    seeder, as **E4-20**. The ADR in its pull request records the rejected
    alternatives.
 
+14. **Where the built report and its mockup disagree, the mockup governs —
+   unless a recorded decision says otherwise.** Found driving the demo world
+   on 2026-09-11: a design-fidelity audit against
+   `design/InstructorMondayReport.dc.html` listed sixteen differences, and
+   the owner confirmed the mockup is the intended look. The plain slips —
+   drift with no ruling, ADR, or spec section behind it — are **E4-21**.
+   Differences a recorded decision produced (the trend line's contrast
+   colour, the eyebrow wording of FIX-01, the refusal to duplicate the
+   versioned survey questions, the serif comment face that
+   `design/Usage Rules.md` §5 argues for, and the two post-mockup content
+   blocks) are each revisited on their own ruling or not at all; E4-21
+   touches none of them. Comparison figures, the compose block, the lead
+   faculty line, and the flagged row need data that no payload carries, and
+   stay with their owning epics.
+
 ## Build order
 
 | # | Ticket | Branch | Lane | Depends on | Summary | Merged |
@@ -211,7 +226,8 @@ ticket may depart from only by saying so.
 | 17 | [The week eyebrow says how long the course runs](E4-17-eyebrow-course-length.md) | `e4/eyebrow-course-length` | heavy | none | The carried E2 entry, unblocked by the owner's ruling of 2026-09-07: `OpenSurvey` gains the section's week count, `survey_read` reads it off the section row, and the eyebrow renders `COURSE WK 04 / 12, TERM WK 07`. | #205 as 8360f3a, 2026-09-07 |
 | 18 | [The instructor's section list](E4-18-instructor-section-list.md) | `e4/instructor-sections` | heavy | 07 | The contract gap found starting 11, ruled 2026-09-07 (decision 11): `GET /instructor/sections` answers the session's own taught sections — id, code, governed label — the student pattern applied to the instructor surface. | #207 as 932b231, 2026-09-08 |
 | 19 | [The trend points carry both week axes](E4-19-trend-term-weeks.md) | `e4/trend-term-weeks` | heavy | 07 | The contract gap found reconciling 08 with 07's schema, ruled 2026-09-07 (decision 12): `TrendPoint` gains `term_week` so the chart's §2.2 sub-label has a wire source, populated from the window rows the report read already holds. | #208 as aface05, 2026-09-08 |
-| 20 | [A representative demo story for the Monday report](E4-20-demo-seed-story.md) | `e4/demo-seed-story` | heavy | 15 | The post-exit ruling (decision 13): a fourth mock LMS section, `BIOL-310-R7FF`, with its own 20-student cast, and `seed_demo_story.py` filling every closed week with rotating realistic responses and comments; the exit story stays frozen. | |
+| 20 | [A representative demo story for the Monday report](E4-20-demo-seed-story.md) | `e4/demo-seed-story` | heavy | 15 | The post-exit ruling (decision 13): a fourth mock LMS section, `BIOL-310-R7FF`, with its own 20-student cast, and `seed_demo_story.py` filling every closed week with rotating realistic responses and comments; the exit story stays frozen. | #215 as 4d7ca93, 2026-09-11 |
+| 21 | [The report matches its mockup again](E4-21-report-design-fidelity.md) | `e4/report-design-fidelity` | light | 11, 20 | The fidelity ruling (decision 14): the white card, the header subline, the eyebrow-row arrows, the histogram's single baseline and two-box layout, the full-term x-axis, the small-N notice's place and full copy, and the small copy drift — mockup-governed slips only, no recorded decision revisited. | |
 
 ## Dependency graph
 
