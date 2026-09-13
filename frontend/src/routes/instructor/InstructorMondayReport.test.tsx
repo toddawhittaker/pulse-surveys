@@ -196,6 +196,24 @@ describe('a published week with data in it', () => {
     expect(container.querySelectorAll('h1')).toHaveLength(1);
   });
 
+  it('draws the trend axis over the section’s whole term', async () => {
+    // E4-21 scope item 5. The fixture's section runs twelve weeks and has
+    // published two of them, so the axis carries twelve ticks — the number is
+    // `section.length_weeks` and not a count of the trend rows, which is two.
+    servingWeeks({ 4: A_PUBLISHED_WEEK });
+    const { container } = open(4);
+    await screen.findByRole('heading', { level: 2, name: 'Rating trend' });
+
+    expect(A_PUBLISHED_WEEK.section.length_weeks).toBe(12);
+    expect(A_PUBLISHED_WEEK.streams.course.trend).toHaveLength(2);
+    // One axis for the pair, under the lower panel.
+    expect(container.querySelectorAll('.pulse-trend-tick-label')).toHaveLength(12);
+    // And the term sub-label only under the two weeks the payload answered for.
+    expect(
+      [...container.querySelectorAll('.pulse-trend-tick-sub')].map((tick) => tick.textContent),
+    ).toEqual(['TERM 05', '07']);
+  });
+
   it('names no comparison anywhere, though the payload carries the member', async () => {
     // SPEC §4.1 item 7 and E4's breakdown: the `comparison` member is on the
     // wire from day one so E5's benchmarks have a chokepoint to pass through,

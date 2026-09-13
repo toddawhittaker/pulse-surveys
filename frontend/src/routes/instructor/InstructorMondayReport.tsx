@@ -330,6 +330,7 @@ function ReportWeek({ report }: { readonly report: InstructorReportView }): JSX.
       <TrendPair
         instructor={trendOf(streams.instructor.trend)}
         course={trendOf(streams.course.trend)}
+        lengthWeeks={report.section.length_weeks}
       />
 
       <h2 className="pulse-report-heading">{copy('instructor_report_page.ratings_heading')}</h2>

@@ -22,7 +22,10 @@ import './instructorReportTrend.css';
  *
  * **One axis and one legend, at the bottom.** The upper panel draws neither:
  * the weeks under the lower panel are the weeks of both, and a legend repeated
- * per panel would say the same thing twice about one chart.
+ * per panel would say the same thing twice about one chart. The section's length
+ * reaches both panels because it is the axis they share — the upper one plots
+ * against it even though the lower one is what labels it, and two panels on
+ * different domains would put one stream's week 3 above the other's week 4.
  *
  * **The lower panel's line draws second** — "TrendPair: top panel then bottom"
  * (`design/Usage Rules.md` §3). That is a delay on one 600ms draw rather than a
@@ -32,22 +35,27 @@ import './instructorReportTrend.css';
 export function TrendPair({
   instructor,
   course,
+  lengthWeeks,
 }: {
   /** The instructor stream's published weeks, oldest first. */
   readonly instructor: readonly TrendPoint[];
   /** The course stream's published weeks, oldest first. */
   readonly course: readonly TrendPoint[];
+  /** How many weeks the section runs for, which is the axis both panels plot on. */
+  readonly lengthWeeks: number;
 }): JSX.Element {
   return (
     <div className="pulse-trend-pair">
       <PulseTrendChart
         points={instructor}
         label={copy('instructor_report_trend.panel_instructor')}
+        lengthWeeks={lengthWeeks}
         showTicks={false}
       />
       <PulseTrendChart
         points={course}
         label={copy('instructor_report_trend.panel_course')}
+        lengthWeeks={lengthWeeks}
         showLegend
         drawDelayed
       />
