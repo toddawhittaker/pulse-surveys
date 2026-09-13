@@ -25,6 +25,73 @@ export interface TrendPoint {
   readonly mean: number | null;
 }
 
+/**
+ * One week of one comparison series — ticket E5-07, shaped by the payload
+ * sketch in `docs/tickets/e5/README.md`.
+ *
+ * The field names are {@link TrendPoint}'s, because they are the same two
+ * facts: which course week, and what the mean was. **There is no `termWeek`,
+ * and that is the sketch's shape rather than an omission.** A benchmark is
+ * past-referencing (SPEC §5.1): week N of this section is compared against week
+ * N of matching sections in the current *and prior* terms, so the figure behind
+ * one point belongs to several terms at once and has no single term week to
+ * carry. The axis's term-week sub-labels stay the section's own, which is the
+ * only stream that has them.
+ *
+ * `mean` is `null` for a week the series has no reportable figure in. The line
+ * breaks there, exactly as the section's line breaks at a week nobody answered:
+ * drawing across it would be a claim about a week that was not reported.
+ */
+export interface OverlayPoint {
+  readonly courseWeek: number;
+  readonly mean: number | null;
+}
+
+/**
+ * One comparison series as the report payload carries it: either its weeks, or
+ * the fact that it is suppressed.
+ *
+ * SPEC §4.1 item 7 suppresses every figure computed from a comparison set below
+ * the benchmark minimums, and E5's breakdown decision 2 puts the decision in
+ * `comparison_after_suppression` on the server. **Nothing in this component
+ * decides it** — the flag is read, never computed, and a suppressed series
+ * arrives carrying no points to draw even if a caller passed some.
+ *
+ * `reason` is the payload's one-word token (`"below-minimum"` in the sketch) and
+ * **nothing renders it**: a wire token is not a governed string, and the words a
+ * reader sees come from `instructorReportTrendCopy.ts` like every other sentence
+ * on this surface. It is carried so the payload can reach this component whole
+ * in E5-10 rather than being trimmed on the way.
+ */
+export interface OverlaySeries {
+  readonly suppressed: boolean;
+  readonly reason?: string;
+  readonly points: readonly OverlayPoint[];
+}
+
+/**
+ * The two comparison series of one stream, as `streams.<stream>.benchmark` in
+ * the payload sketch. Either member may be absent, and an absent member draws
+ * nothing at all.
+ */
+export interface StreamBenchmark {
+  readonly comparison?: OverlaySeries;
+  readonly university?: OverlaySeries;
+}
+
+/** The comparison line, addressable from a test and from the end-to-end suite. */
+export const TREND_LINE_COMPARISON_TESTID = 'trend-line-comparison';
+/** The university line. */
+export const TREND_LINE_UNIVERSITY_TESTID = 'trend-line-university';
+/** The legend entry naming the comparison line, present only when that line is. */
+export const TREND_LEGEND_COMPARISON_TESTID = 'trend-legend-comparison';
+/** The legend entry naming the university line. */
+export const TREND_LEGEND_UNIVERSITY_TESTID = 'trend-legend-university';
+/** The notice standing in for a suppressed comparison series. */
+export const TREND_SUPPRESSION_COMPARISON_TESTID = 'trend-suppression-comparison';
+/** The notice standing in for a suppressed university series. */
+export const TREND_SUPPRESSION_UNIVERSITY_TESTID = 'trend-suppression-university';
+
 /** The scale every rating chart in this product shares: SPEC §5.1's 1–5. */
 const SCALE_MINIMUM = 1;
 const SCALE_MAXIMUM = 5;
@@ -84,7 +151,7 @@ function xFor(courseWeek: number, weeks: number): number {
  * payload disagreeing with itself; drawing the axis short would put those weeks
  * off the right-hand edge, where nobody would see that anything was wrong.
  */
-function axisWeeks(lengthWeeks: number, points: readonly TrendPoint[]): number {
+function axisWeeks(lengthWeeks: number, points: readonly OverlayPoint[]): number {
   return Math.max(lengthWeeks, ...points.map((point) => point.courseWeek), 1);
 }
 
@@ -104,7 +171,7 @@ interface PlottedPoint {
 }
 
 /** Each week's place on the plot, or `null` for a week with no rating. */
-function plot(points: readonly TrendPoint[], weeks: number): readonly (PlottedPoint | null)[] {
+function plot(points: readonly OverlayPoint[], weeks: number): readonly (PlottedPoint | null)[] {
   return points.map((point) =>
     point.mean === null ? null : { x: xFor(point.courseWeek, weeks), y: yFor(point.mean) },
   );
@@ -128,12 +195,16 @@ function subpath(run: readonly PlottedPoint[]): string {
 }
 
 /**
- * The hero line: one path, one subpath per run of answered weeks.
+ * One series' line: one path, one subpath per run of weeks that have a figure.
  *
  * A week with no responses ends the run it was in and the next answered week
  * starts a new one, so the line is visibly broken across the gap. Joining
  * across it would draw a straight segment through weeks nobody rated, which is
  * a claim about ratings that were never given.
+ *
+ * The hero line and the two comparison overlays share this, and share it for
+ * the same reason: a comparison week the payload reported no figure for is a
+ * gap in that line too, never a bridge between the weeks on either side of it.
  */
 function linePath(plotted: readonly (PlottedPoint | null)[]): string {
   const runs: PlottedPoint[][] = [];
@@ -192,13 +263,29 @@ function axisTicks(weeks: number, points: readonly TrendPoint[]): readonly AxisT
  * with rounded caps and a terminal dot on the most recent answered week, over
  * hairline gridlines at each point of the 1–5 scale.
  *
- * **One line, and the props say so.** §7.6 names a three-line variant — the
- * section, its comparison set, and the university — and E4 has none of the data
- * behind the second and third. This component takes one series because that is
- * what E4 can draw; E5 adds the comparison lines together with the figures they
- * plot and the suppression rule (§4.1 item 7) that decides whether they may
- * appear at all. Nothing here anticipates them, in a prop, a legend entry, or
- * an aria label.
+ * **Three lines, and two of them are optional — ticket E5-07.** §7.6 names a
+ * three-line variant: the section, its comparison set, and the university. The
+ * second and third arrive as `comparison` and `university`, and **an absent
+ * prop draws absolutely nothing**: no path, no legend entry, no table, no
+ * notice. That is not tidiness, it is SPEC §4.1 item 1 — this component is the
+ * one the benchmark-free surfaces render too, and a default that drew would put
+ * a comparison line in front of a reader the payload sends none to. There is no
+ * default value for either prop anywhere in this file, and the test file's
+ * absent-prop render is what holds it there.
+ *
+ * **Nothing here decides whether a comparison may be shown.** §4.1 item 7 and
+ * the benchmark minimums behind it are the server's (`comparison_after_suppression`,
+ * E5's breakdown decision 2). A series arrives either with points or marked
+ * suppressed, and this renders what it was handed: a suppressed series draws no
+ * line, contributes no legend entry, publishes no table, and says in words that
+ * it is not there.
+ *
+ * **The three lines are told apart without colour.** The section's is solid and
+ * 2.5px with its terminal dot; the comparison set's is dashed; the university's
+ * is dotted — `docs/DESIGN_BRIEF.md`'s semantic mapping, and each pattern is a
+ * class in `instructorReportTrend.css` rather than an inline attribute, so the
+ * dash and the stroke stay in one place. On the colour those two lines take,
+ * and where that departs from the brief, see the stylesheet.
  *
  * **The axis is the whole term, and the line is what has happened so far**
  * (E4-21). Every one of the section's weeks gets a tick, whether or not a report
@@ -229,6 +316,8 @@ export function PulseTrendChart({
   points,
   label,
   lengthWeeks,
+  comparison,
+  university,
   showTicks = true,
   showLegend = false,
   drawDelayed = false,
@@ -249,6 +338,16 @@ export function PulseTrendChart({
    * it.
    */
   readonly lengthWeeks: number;
+  /**
+   * This stream's comparison-set series, or nothing.
+   *
+   * Optional with **no default**, and undefined means undefined: the chart is
+   * then exactly the single-line chart E4 shipped. See this component's
+   * docstring on why that is §4.1 item 1 rather than a convenience.
+   */
+  readonly comparison?: OverlaySeries;
+  /** This stream's university-wide series, on the same terms as `comparison`. */
+  readonly university?: OverlaySeries;
   /** Whether this panel draws the week axis. A stacked pair draws it once. */
   readonly showTicks?: boolean;
   /** Whether this panel carries the legend. A stacked pair carries it once. */
@@ -256,9 +355,25 @@ export function PulseTrendChart({
   /** Whether the draw waits for another panel's: the pair draws top, then bottom. */
   readonly drawDelayed?: boolean;
 }): JSX.Element {
-  const weeks = axisWeeks(lengthWeeks, points);
+  // What each comparison series actually contributes to the drawing. Absent and
+  // suppressed both come out empty here, and they part company below: absent
+  // renders nothing anywhere, suppressed renders a notice.
+  const comparisonPoints = drawnPoints(comparison);
+  const universityPoints = drawnPoints(university);
+
+  // The axis still spans the section's term. The overlays join the guard for
+  // the reason the section's own weeks are in it: a week past the end of the
+  // axis would be drawn off the right-hand edge, where nobody would see that
+  // the payload and the section's length disagreed.
+  const weeks = axisWeeks(lengthWeeks, [...points, ...comparisonPoints, ...universityPoints]);
   const plotted = plot(points, weeks);
   const path = linePath(plotted);
+  const comparisonPath = linePath(plot(comparisonPoints, weeks));
+  const universityPath = linePath(plot(universityPoints, weeks));
+  const comparisonLabel = fillCopy('instructor_report_trend.legend_comparison', {
+    weeks: String(lengthWeeks),
+  });
+  const universityLabel = copy('instructor_report_trend.legend_university');
   const terminal = plotted.reduce<PlottedPoint | null>(
     (latest, point) => point ?? latest,
     null,
@@ -296,6 +411,25 @@ export function PulseTrendChart({
             {value.toFixed(1)}
           </text>
         ))}
+        {/* The two overlays are drawn before the hero, so the hero is the line
+            on top wherever they cross. Neither carries `pathLength`: they fade
+            in rather than drawing on, which is the brief's "benchmark lines
+            fade in after" and keeps the one 600ms signature moment the
+            section's line owns. */}
+        {universityPath !== '' && (
+          <path
+            className="pulse-trend-line-university"
+            data-testid={TREND_LINE_UNIVERSITY_TESTID}
+            d={universityPath}
+          />
+        )}
+        {comparisonPath !== '' && (
+          <path
+            className="pulse-trend-line-comparison"
+            data-testid={TREND_LINE_COMPARISON_TESTID}
+            d={comparisonPath}
+          />
+        )}
         {path !== '' && <path className="pulse-trend-line" d={path} pathLength={1} />}
         {terminal !== null && (
           // Rounded the way the path rounds, so the dot and the end of the line
@@ -368,6 +502,24 @@ export function PulseTrendChart({
           ))}
         </tbody>
       </table>
+      {comparisonPoints.length > 0 && (
+        <OverlayTable stream={label} series={comparisonLabel} points={comparisonPoints} />
+      )}
+      {universityPoints.length > 0 && (
+        <OverlayTable stream={label} series={universityLabel} points={universityPoints} />
+      )}
+      {comparison?.suppressed === true && (
+        <p className="pulse-trend-suppression" data-testid={TREND_SUPPRESSION_COMPARISON_TESTID}>
+          {fillCopy('instructor_report_trend.comparison_suppressed', {
+            weeks: String(lengthWeeks),
+          })}
+        </p>
+      )}
+      {university?.suppressed === true && (
+        <p className="pulse-trend-suppression" data-testid={TREND_SUPPRESSION_UNIVERSITY_TESTID}>
+          {copy('instructor_report_trend.university_suppressed')}
+        </p>
+      )}
       {showLegend && (
         <figcaption className="pulse-trend-legend">
           <span className="pulse-trend-legend-item">
@@ -377,8 +529,97 @@ export function PulseTrendChart({
             </svg>
             {copy('instructor_report_trend.legend_section')}
           </span>
+          {/* A legend entry only for a line that is on the plot. A legend naming
+              a suppressed series would be the chart claiming a line a reader
+              cannot find, and a legend naming an absent one would be comparison
+              language on a surface the payload sent no comparison to. */}
+          {comparisonPath !== '' && (
+            <span className="pulse-trend-legend-item" data-testid={TREND_LEGEND_COMPARISON_TESTID}>
+              <svg width="28" height="8" aria-hidden="true" focusable="false">
+                <line className="pulse-trend-legend-line-comparison" x1="2" y1="4" x2="26" y2="4" />
+              </svg>
+              {comparisonLabel}
+            </span>
+          )}
+          {universityPath !== '' && (
+            <span className="pulse-trend-legend-item" data-testid={TREND_LEGEND_UNIVERSITY_TESTID}>
+              <svg width="28" height="8" aria-hidden="true" focusable="false">
+                <line className="pulse-trend-legend-line-university" x1="2" y1="4" x2="26" y2="4" />
+              </svg>
+              {universityLabel}
+            </span>
+          )}
         </figcaption>
       )}
     </figure>
+  );
+}
+
+/**
+ * The weeks one comparison series carries, or an empty list.
+ *
+ * Absent and suppressed both come out empty, and the caller is what tells them
+ * apart. A suppressed series is emptied here rather than trusted to arrive with
+ * no points: the payload sketch says a suppressed member carries `points: []`
+ * and nothing else, and a chart that drew whatever it was handed would put a
+ * line under a suppression notice the first time that contract slipped.
+ */
+function drawnPoints(series: OverlaySeries | undefined): readonly OverlayPoint[] {
+  if (series === undefined || series.suppressed) return [];
+  return series.points;
+}
+
+/**
+ * One comparison series as text, beside the drawing.
+ *
+ * The same job the section's own table does, for the same reason — the brief
+ * asks every chart for an accessible alternative — and a table of its own
+ * rather than two more columns on the section's, because the two series do not
+ * share the section's rows: a benchmark can report a week the section never
+ * published, and folding it into a row set keyed by the section's weeks would
+ * drop it from the text while leaving it on the picture.
+ *
+ * There is no term-week column, because an {@link OverlayPoint} has no term
+ * week to put in one.
+ */
+function OverlayTable({
+  stream,
+  series,
+  points,
+}: {
+  /** The panel's own label, which is what tells two panels' tables apart. */
+  readonly stream: string;
+  /** This series' name, in the same words the legend gives it. */
+  readonly series: string;
+  readonly points: readonly OverlayPoint[];
+}): JSX.Element {
+  return (
+    <table className="sr-only">
+      <caption>
+        {fillCopy('instructor_report_trend.overlay_table_caption', { stream, series })}
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">{copy('instructor_report_trend.table_course_week_header')}</th>
+          <th scope="col">{copy('instructor_report_trend.table_mean_header')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {points.map((point) => (
+          <tr key={point.courseWeek}>
+            <th scope="row">
+              {fillCopy('instructor_report_trend.course_week_tick', {
+                week: padWeek(point.courseWeek),
+              })}
+            </th>
+            <td>
+              {point.mean === null
+                ? copy('instructor_report_trend.overlay_no_figure')
+                : point.mean.toFixed(1)}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
