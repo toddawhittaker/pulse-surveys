@@ -44,6 +44,10 @@ E5-01's ADR; E5-03's view contracts.
   counting distinct students.
 - Every emitted figure constructed through `comparison_after_suppression`;
   nothing in this module builds a `ComparisonFigure` any other way.
+- Grants: the first read of E5-01's tables lands here — SELECT on
+  `comparison_set` and its membership relation to `pulse_app`,
+  versioned-grants shape (the E4-02 precedent: a privilege lands in the
+  change that spends it; E5-01 granted nothing on purpose).
 - The ADR carrying decisions 2 (university line under the same minimums),
   5 (hero excluded from its own set, included in university) and 6 (no
   second horizon beyond retention), each with its rejected alternative.

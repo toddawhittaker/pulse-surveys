@@ -35,7 +35,11 @@ conventions (`backend/app/models/report.py` and its E4-02 migration).
   declared length is one of §2.2's length set; the declared level is one of
   §8's five; a member course's level equals the set's declared level,
   enforced at the database, not only in a route.
-- Grants for the runtime role, following the versioned-grants shape.
+- **No grants, on purpose** — corrected at cut time to follow E4-02's
+  precedent ("a privilege lands in the change that spends it", quoted in
+  `weekly_summary_grants_v001.sql`): the first reader is E5-04 and the
+  writer is E5-06, so each grants what it spends in its own PR. This
+  ticket proves the *absence* of privilege instead.
 - A migration taking the first chain slot off `e5a2b81c47d3` (before E5-03;
   whichever merges later re-points).
 - The ADR for decision 3: membership unit and declared-pair shape, with the
@@ -55,9 +59,12 @@ conventions (`backend/app/models/report.py` and its E4-02 migration).
 4. The table carries no identity column and no response data; the
    identity-column marker sweep covers it.
 5. `alembic upgrade`/`downgrade` both succeed; `alembic check` is clean.
-6. Grants: the runtime role can read and write exactly this table and its
-   membership relation, proven through the connection production uses
-   (MISTAKES entry 46), not through the migrating engine.
+6. Grants: `pulse_app` holds **no** privilege on the new tables, proven
+   through the connection production uses (MISTAKES entry 46), not through
+   the migrating engine — a refused SELECT and a refused INSERT, both
+   asserted; and the `RUNTIME_BASE_TABLE_PRIVILEGES` equality record in
+   `tests/integration/test_identity_grants.py` stays consistent with that
+   in whichever direction the record's convention requires.
 
 ## Decisions this ticket settles
 
