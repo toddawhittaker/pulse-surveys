@@ -67,10 +67,6 @@
   list-style: none;
 }
 
-.pulse-comment-group__notice {
-  margin-top: var(--space-3);
-}
-
 /* ---- The AI summary panel ---- */
 
 .pulse-ai-panel {
@@ -137,14 +133,18 @@
   font-family: var(--font-body);
 }
 
-/* A student's own words, at reading size, in the display face —
- * `design/tokens.css` reserves `--font-display` for "any student's or
- * instructor's own words at reading size (comments, cases, responses)" and
- * `design/Usage Rules.md` §5 calls it the dignified treatment a person's words
- * get. */
+/* A student's own words, at reading size, in the body face — which is what
+ * `design/CommentCard.dc.html:11` sets them in, and the owner's ruling of
+ * 2026-09-13 settles it that way (E4-21). The reading treatment
+ * `design/Usage Rules.md` §5 describes still holds for the longer passages a
+ * person writes deliberately — a Care case, an instructor's published response —
+ * and a comment card is a short remark in a stacked list, which reads better in
+ * the face the rest of the report is set in. The §5 line and the note in
+ * `design/tokens.css` are corrected in the same change, so no record is left
+ * asserting the old treatment. */
 .pulse-comment-card__text {
   margin: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-body);
   font-size: var(--text-2);
   line-height: 1.55;
   color: var(--spruce);

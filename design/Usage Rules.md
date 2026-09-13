@@ -38,7 +38,7 @@ Decision rules established across sessions 1–6. Companion to `tokens.css` (val
 
 - **Pulse-line divider**: the small marigold ECG stroke under page titles. Its flat (mist) variant marks empty/closed states; the beat variant marks success (StateNotice). On the Care queue it appears only in the empty state, flat.
 - **Mono eyebrow**: uppercase Spline Sans Mono, 0.08em tracking, spruce-60 — week markers, legends, panel labels, section codes.
-- **Reading treatment for people's words**: comments, cases, and instructor responses are set in Literata at reading size on paper — a person's words get the dignified treatment, never a data-row excerpt.
+- **Reading treatment for people's words**: cases and instructor responses are set in Literata at reading size on paper — a person's words get the dignified treatment, never a data-row excerpt. Ruled 2026-09-13: student comments are the exception and take the sans body face, as `CommentCard.dc.html` sets them.
 
 ## 6. Component inventory note
 

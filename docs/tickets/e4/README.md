@@ -188,6 +188,24 @@ ticket may depart from only by saying so.
    seeder, as **E4-20**. The ADR in its pull request records the rejected
    alternatives.
 
+14. **Where the built report and its mockup disagree, the mockup governs —
+   unless a recorded decision says otherwise.** Found driving the demo world
+   on 2026-09-11: a design-fidelity audit against
+   `design/InstructorMondayReport.dc.html` listed sixteen differences, and
+   the owner confirmed the mockup is the intended look. The plain slips —
+   drift with no ruling, ADR, or spec section behind it — are **E4-21**.
+   Differences a recorded decision produced were each ruled on 2026-09-13:
+   the trend line keeps its contrast colour; the eyebrow keeps FIX-01's
+   wording and gains the mockup's close note once the payload carries a
+   close instant; the histogram titles will quote the survey questions
+   served from the payload, never pasted; comment text goes sans and
+   `design/Usage Rules.md` §5 is corrected to match (in E4-21); both
+   post-mockup content blocks stay. The two payload additions (question
+   texts, close instant) are one follow-up ticket, named in E4-21.
+   Comparison figures, the compose block, the lead faculty line, and the
+   flagged row need data that no payload carries, and stay with their
+   owning epics.
+
 ## Build order
 
 | # | Ticket | Branch | Lane | Depends on | Summary | Merged |
@@ -212,7 +230,8 @@ ticket may depart from only by saying so.
 | 18 | [The instructor's section list](E4-18-instructor-section-list.md) | `e4/instructor-sections` | heavy | 07 | The contract gap found starting 11, ruled 2026-09-07 (decision 11): `GET /instructor/sections` answers the session's own taught sections — id, code, governed label — the student pattern applied to the instructor surface. | #207 as 932b231, 2026-09-08 |
 | 19 | [The trend points carry both week axes](E4-19-trend-term-weeks.md) | `e4/trend-term-weeks` | heavy | 07 | The contract gap found reconciling 08 with 07's schema, ruled 2026-09-07 (decision 12): `TrendPoint` gains `term_week` so the chart's §2.2 sub-label has a wire source, populated from the window rows the report read already holds. | #208 as aface05, 2026-09-08 |
 | 20 | [A representative demo story for the Monday report](E4-20-demo-seed-story.md) | `e4/demo-seed-story` | heavy | 15 | The post-exit ruling (decision 13): a fourth mock LMS section, `BIOL-310-R7FF`, with its own 20-student cast, and `seed_demo_story.py` filling every closed week with rotating realistic responses and comments; the exit story stays frozen. | #215 as 4d7ca93, 2026-09-11 |
-| 22 | [The student-survey e2e world stops depending on the wall calendar](E4-22-e2e-enrollment-clock-anchor.md) | `e4/e2e-clock-anchor` | light | none | A calendar time-bomb found building E4-21: e2e enrollments are stamped `started_on` at the real CI clock but read at fixed past dates, so the suite reds once the calendar passes a pinned date. A first-running setup spec creates the shared learner enrollments at each section's own start (SPEC §3.4), killing the wall-clock dependency; `tests/e2e/` only. | |
+| 21 | [The report matches its mockup again](E4-21-report-design-fidelity.md) | `e4/report-design-fidelity` | light | 11, 20 | The fidelity ruling (decision 14): the white card, the header subline, the eyebrow-row arrows, the histogram's single baseline and two-box layout, the full-term x-axis, the small-N notice's place and full copy, and the small copy drift — mockup-governed slips only, no recorded decision revisited. | |
+| 22 | [The student-survey e2e world stops depending on the wall calendar](E4-22-e2e-enrollment-clock-anchor.md) | `e4/e2e-clock-anchor` | light | none | A calendar time-bomb found building E4-21: e2e enrollments are stamped `started_on` at the real CI clock but read at fixed past dates, so the suite reds once the calendar passes a pinned date. A first-running setup spec creates the shared learner enrollments at each section's own start (SPEC §3.4), killing the wall-clock dependency; `tests/e2e/` only. | #218 as 57cad96, 2026-09-13 |
 
 ## Dependency graph
 

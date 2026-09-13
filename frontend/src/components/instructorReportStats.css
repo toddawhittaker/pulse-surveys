@@ -44,24 +44,45 @@
   color: var(--spruce-60);
 }
 
-.pulse-stat-histogram-buckets {
+/* The mean's own digits in full ink against the label beside them
+   (`design/RatingHistogram.dc.html:13`): the figure is the thing being read, and
+   the word in front of it is a label. */
+.pulse-stat-histogram-mean {
+  color: var(--spruce);
+}
+
+/* **Two boxes, which is `design/RatingHistogram.dc.html:14-24`.** This row is
+   96px tall and holds each bucket's count above its bar; the tick row below it is
+   a second box carrying one continuous rule.
+
+   They were one box until E4-21 — a 96px column per bucket holding the count, the
+   bar *and* the tick — and what that cost is not what the audit predicted.
+   Measured in a browser against both layouts: nothing overflowed, because the bar
+   is a flex item and flexbox shrank it instead. The tallest bar drew at **47px
+   against the 72px the component asks for**, so every distribution was drawn at
+   about two thirds of the prototype's scale and the shortfall varied with nothing
+   a reader could see. Here the bar is alone in the box with its count and reaches
+   its full 72px. */
+.pulse-stat-histogram-bars {
   display: flex;
+  align-items: flex-end;
   gap: var(--space-2);
+  height: 96px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/* One bucket per rating value: its count above, its bar, its tick below. The
-   prototype draws the counts, the bars and the ticks as three rows; a column per
-   bucket lays out identically and keeps a bucket one thing rather than three. */
+/* One bucket per rating value: its count above its bar, both pushed to the
+   bottom of the row, so an empty bucket's count sits where a full one's bar
+   begins. */
 .pulse-stat-histogram-bucket {
   display: flex;
   flex: 1;
   flex-direction: column;
   justify-content: flex-end;
   gap: var(--space-1);
-  height: 96px;
+  height: 100%;
 }
 
 .pulse-stat-histogram-count {
@@ -80,9 +101,20 @@
   border-radius: 2px 2px 0 0;
 }
 
-.pulse-stat-histogram-tick {
-  padding-top: var(--space-1);
+/* The rating values, under one rule that runs the width of the chart. The rule
+   is on this row and not on each tick: five per-bucket rules leave four gaps in
+   what the prototype draws as a single baseline. */
+.pulse-stat-histogram-ticks {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-1) 0 0;
   border-top: 1px solid var(--hairline);
+  list-style: none;
+}
+
+.pulse-stat-histogram-tick {
+  flex: 1;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--spruce-60);

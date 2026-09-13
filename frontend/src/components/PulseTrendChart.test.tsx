@@ -52,6 +52,26 @@ const A_WEEK_AT_THE_FLOOR: readonly TrendPoint[] = [
   { courseWeek: 2, termWeek: 8, mean: 4.4 },
 ];
 
+/**
+ * Seven published weeks of a twelve-week section — E4-21's axis rule, in the
+ * shape the demo world produces.
+ *
+ * The two numbers are different on purpose: an axis drawn over the data would
+ * show seven ticks and an axis drawn over the term shows twelve, so the two
+ * rules cannot both be satisfied by one picture. The term offset is a constant
+ * three, which is the property every payload holds.
+ */
+const SEVEN_OF_TWELVE_WEEKS: readonly TrendPoint[] = [
+  { courseWeek: 1, termWeek: 4, mean: 4.1 },
+  { courseWeek: 2, termWeek: 5, mean: 4.0 },
+  { courseWeek: 3, termWeek: 6, mean: 3.7 },
+  { courseWeek: 4, termWeek: 7, mean: 4.1 },
+  { courseWeek: 5, termWeek: 8, mean: 3.6 },
+  { courseWeek: 6, termWeek: 9, mean: 3.2 },
+  { courseWeek: 7, termWeek: 10, mean: 3.6 },
+];
+const SECTION_WEEKS = 12;
+
 const INSTRUCTOR = 'Instructor';
 
 // `@testing-library/react` registers its own cleanup only when `afterEach` is an
@@ -128,6 +148,13 @@ function gridlineFor(container: HTMLElement, label: string): number {
   );
 }
 
+/** Where one course week's tick sits on the axis, read off the tick itself. */
+function xOfWeek(container: HTMLElement, week: number): number {
+  const ticks = [...plotOf(container).querySelectorAll('.pulse-trend-tick-label')];
+  const tick = required(ticks[week - 1], `the tick for course week ${String(week)}`);
+  return Number(required(tick.getAttribute('x'), 'its x'));
+}
+
 /** The text of every element with one of the plot's classes, in document order. */
 function textsOf(container: HTMLElement, className: string): (string | null)[] {
   return [...plotOf(container).querySelectorAll(`.${className}`)].map(
@@ -137,7 +164,7 @@ function textsOf(container: HTMLElement, className: string): (string | null)[] {
 
 describe('PulseTrendChart', () => {
   it('carries every week and its value into the table beside the drawing', () => {
-    render(<PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} />);
+    render(<PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} lengthWeeks={THREE_WEEKS.length} />);
 
     const table = screen.getByRole('table', { name: 'Weekly ratings: Instructor' });
     expect(within(table).getAllByRole('rowheader').map((cell) => cell.textContent)).toEqual([
@@ -162,7 +189,7 @@ describe('PulseTrendChart', () => {
 
   it('breaks the line at a week nobody answered and says so in words', () => {
     const { container } = render(
-      <PulseTrendChart points={A_SILENT_MIDDLE_WEEK} label={INSTRUCTOR} />,
+      <PulseTrendChart points={A_SILENT_MIDDLE_WEEK} label={INSTRUCTOR} lengthWeeks={A_SILENT_MIDDLE_WEEK.length} />,
     );
 
     // The silent week is a sentence, not a figure: a zero is a rating, and a
@@ -179,7 +206,7 @@ describe('PulseTrendChart', () => {
     expect(broken.filter((point) => point.command === 'M')).toHaveLength(2);
 
     const { container: unbroken } = render(
-      <PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} />,
+      <PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} lengthWeeks={THREE_WEEKS.length} />,
     );
     expect(heroCoordinates(unbroken).filter((point) => point.command === 'M')).toHaveLength(1);
 
@@ -191,7 +218,7 @@ describe('PulseTrendChart', () => {
 
   it('puts a week rated 1.0 on the scale’s bottom gridline', () => {
     const { container } = render(
-      <PulseTrendChart points={A_WEEK_AT_THE_FLOOR} label={INSTRUCTOR} />,
+      <PulseTrendChart points={A_WEEK_AT_THE_FLOOR} label={INSTRUCTOR} lengthWeeks={A_WEEK_AT_THE_FLOOR.length} />,
     );
 
     const floor = gridlineFor(container, '1.0');
@@ -225,7 +252,7 @@ describe('PulseTrendChart', () => {
     // week labels, and the assertion at the end of this test would be measuring
     // that band rather than the scale.
     const { container } = render(
-      <PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} showTicks={false} />,
+      <PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} lengthWeeks={THREE_WEEKS.length} showTicks={false} />,
     );
 
     expect(textsOf(container, 'pulse-trend-grid-label')).toEqual([
@@ -261,7 +288,7 @@ describe('PulseTrendChart', () => {
     // whichever section it was drawing. The second render is what says
     // otherwise: same course weeks, different term weeks, and only the
     // sub-labels move.
-    const { container } = render(<PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} />);
+    const { container } = render(<PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} lengthWeeks={THREE_WEEKS.length} />);
 
     expect(textsOf(container, 'pulse-trend-tick-label')).toEqual(['WK 01', '02', '03']);
     expect(textsOf(container, 'pulse-trend-tick-sub')).toEqual(['TERM 07', '08', '09']);
@@ -272,6 +299,7 @@ describe('PulseTrendChart', () => {
       <PulseTrendChart
         points={THREE_WEEKS.map((point, index) => ({ ...point, termWeek: index + 3 }))}
         label={INSTRUCTOR}
+        lengthWeeks={THREE_WEEKS.length}
       />,
     );
     expect(textsOf(earlier, 'pulse-trend-tick-label')).toEqual(['WK 01', '02', '03']);
@@ -308,6 +336,7 @@ describe('PulseTrendChart', () => {
           { courseWeek: 2, termWeek: 7, mean: 3.6 },
         ]}
         label={INSTRUCTOR}
+        lengthWeeks={2}
       />,
     );
 
@@ -321,7 +350,7 @@ describe('PulseTrendChart', () => {
   });
 
   it('writes the term week under the course week, at the same place on the axis', () => {
-    const { container } = render(<PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} />);
+    const { container } = render(<PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} lengthWeeks={THREE_WEEKS.length} />);
 
     const week = required(
       plotOf(container).querySelector('.pulse-trend-tick-label'),
@@ -348,6 +377,7 @@ describe('PulseTrendChart', () => {
           { courseWeek: 3, termWeek: 9, mean: null },
         ]}
         label={INSTRUCTOR}
+        lengthWeeks={3}
       />,
     );
 
@@ -360,11 +390,118 @@ describe('PulseTrendChart', () => {
     expect(Number(dot.getAttribute('cy'))).toBe(last.y);
   });
 
+  describe('the axis spans the whole term', () => {
+    it('draws a tick for every one of the section’s weeks, not only the elapsed ones', () => {
+      // E4-21 scope item 5, and `design/PulseTrendChart.dc.html:93`: a twelve-week
+      // section in its seventh week shows twelve ticks. The near miss is the axis
+      // this replaces — seven weeks stretched across the full width — which draws
+      // the identical picture in week 7 and in week 12 and cannot say which.
+      const { container } = render(
+        <PulseTrendChart
+          points={SEVEN_OF_TWELVE_WEEKS}
+          label={INSTRUCTOR}
+          lengthWeeks={SECTION_WEEKS}
+        />,
+      );
+
+      const ticks = textsOf(container, 'pulse-trend-tick-label');
+      expect(ticks).toHaveLength(SECTION_WEEKS);
+      expect(ticks).toEqual([
+        'WK 01',
+        '02',
+        '03',
+        '04',
+        '05',
+        '06',
+        '07',
+        '08',
+        '09',
+        '10',
+        '11',
+        '12',
+      ]);
+    });
+
+    it('puts the line in the elapsed part of it and leaves the rest empty', () => {
+      const { container } = render(
+        <PulseTrendChart
+          points={SEVEN_OF_TWELVE_WEEKS}
+          label={INSTRUCTOR}
+          lengthWeeks={SECTION_WEEKS}
+        />,
+      );
+
+      // Week 1 starts the axis and week 7 is halfway along it, so the line stops
+      // well short of the right-hand edge. The line's ends are read against the
+      // ticks rather than against a coordinate computed here: recomputing the
+      // arithmetic would agree with whatever arithmetic the component used.
+      // `toBeCloseTo` because a path coordinate is written to one decimal place
+      // and a tick's `x` is not rounded at all.
+      const drawn = heroCoordinates(container);
+      const first = required(drawn[0], 'the first week drawn');
+      const last = required(drawn[drawn.length - 1], 'the last week drawn');
+      expect(first.x).toBeCloseTo(xOfWeek(container, 1), 1);
+      expect(last.x).toBeCloseTo(xOfWeek(container, 7), 1);
+      expect(last.x).toBeLessThan(xOfWeek(container, SECTION_WEEKS));
+    });
+
+    it('writes the term sub-label only under the weeks the payload answered for', () => {
+      // SPEC §2.2 forbids the client deriving a term week, so the five weeks
+      // ahead of the report carry a course week and nothing under it. The seven
+      // that are there are the payload's own numbers, the first named in words.
+      const { container } = render(
+        <PulseTrendChart
+          points={SEVEN_OF_TWELVE_WEEKS}
+          label={INSTRUCTOR}
+          lengthWeeks={SECTION_WEEKS}
+        />,
+      );
+
+      expect(textsOf(container, 'pulse-trend-tick-sub')).toEqual([
+        'TERM 04',
+        '05',
+        '06',
+        '07',
+        '08',
+        '09',
+        '10',
+      ]);
+    });
+
+    it('keeps a week the payload skipped in its own place on the axis', () => {
+      // Published weeks have holes in them: this section's week 3 never
+      // published, so the payload sends weeks 2 and 4 next to each other. The
+      // week each point is drawn at is its own `courseWeek` and not its position
+      // in the array — the mutation this kills is an index-placed axis, under
+      // which week 4 would be drawn where week 3 belongs.
+      const { container } = render(
+        <PulseTrendChart
+          points={[
+            { courseWeek: 2, termWeek: 5, mean: 4.1 },
+            { courseWeek: 4, termWeek: 7, mean: 3.6 },
+          ]}
+          label={INSTRUCTOR}
+          lengthWeeks={SECTION_WEEKS}
+        />,
+      );
+
+      expect(textsOf(container, 'pulse-trend-tick-label')).toHaveLength(SECTION_WEEKS);
+      const [first, second] = heroCoordinates(container);
+      expect(required(first, 'the first week drawn').x).toBeCloseTo(xOfWeek(container, 2), 1);
+      expect(required(second, 'the second week drawn').x).toBeCloseTo(xOfWeek(container, 4), 1);
+
+      // And the sub-labels sit under those same two weeks, the first of them
+      // named in words: five sub-labels would mean the chart had filled in the
+      // weeks nobody published.
+      expect(textsOf(container, 'pulse-trend-tick-sub')).toEqual(['TERM 05', '07']);
+    });
+  });
+
   it('shows the legend only when it is asked to, and names one line', () => {
-    const { container } = render(<PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} />);
+    const { container } = render(<PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} lengthWeeks={THREE_WEEKS.length} />);
     expect(container.querySelector('.pulse-trend-legend')).toBeNull();
 
-    render(<PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} showLegend />);
+    render(<PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} lengthWeeks={THREE_WEEKS.length} showLegend />);
     expect(screen.getByText('This section')).toBeTruthy();
     // E4 draws the section's own line and nothing else. The comparison and
     // university entries the prototype's legend carries arrive with E5, and

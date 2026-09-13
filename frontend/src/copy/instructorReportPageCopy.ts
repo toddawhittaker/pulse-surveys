@@ -80,6 +80,19 @@ export const INSTRUCTOR_REPORT_PAGE_COPY = {
   'instructor_report_page.picker_body': 'Choose a section to read its week.',
   'instructor_report_page.picker_list_label': 'Sections you teach',
 
+  // The line under the section's name — E4-21, restoring
+  // `design/InstructorMondayReport.dc.html`'s subtitle. Three facts a reader
+  // uses to know which report they are looking at: the section code the
+  // institution knows it by, what the page is, and how many of the section's
+  // students answered this week. Every value is already on the payload
+  // (`section.code`, `rates.responses`, `rates.enrolled`), so the page fills
+  // the holes and derives nothing.
+  //
+  // Fractions rather than a percent, which is the register
+  // `design/Usage Rules.md` §4 sets for counting people. The percent is the
+  // Participation region's, beside the bar it belongs to.
+  'instructor_report_page.subline': '{code} · Monday Report · {responses} of {enrolled} responded',
+
   // The report's own regions, in the order `design/InstructorMondayReport.dc.html`
   // lays them out. Each is a second-level heading on the page, so the report is
   // navigable by heading rather than by scrolling.
@@ -152,4 +165,19 @@ export type InstructorReportPageCopyKey = keyof typeof INSTRUCTOR_REPORT_PAGE_CO
  */
 export function copy(key: InstructorReportPageCopyKey): string {
   return INSTRUCTOR_REPORT_PAGE_COPY[key];
+}
+
+/**
+ * One entry with its `{placeholders}` filled in.
+ *
+ * One entry takes them today — the subline's section code and its two response
+ * counts, each a value the payload supplies. The substitution lives here rather
+ * than in the page so that a sentence and the shape of its holes stay in one
+ * file, which is the shape the three sibling copy modules already use.
+ */
+export function fillCopy(
+  key: InstructorReportPageCopyKey,
+  values: Readonly<Record<string, string>>,
+): string {
+  return copy(key).replace(/\{(\w+)\}/g, (whole, name: string) => values[name] ?? whole);
 }

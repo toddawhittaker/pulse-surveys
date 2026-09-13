@@ -54,18 +54,38 @@ function yFor(mean: number): number {
 }
 
 /**
- * Where the week at `index` sits horizontally.
+ * Where one course week sits horizontally, on an axis that spans the whole term.
  *
- * The axis spans the weeks the payload carries and no further. The prototype's
- * axis runs the section's whole length, labelling every week ahead from a term
- * offset — and that offset is the arithmetic SPEC §2.2 and this ticket's
- * known-trap forbid, because the sub-label under a week nobody has published is
- * a number the server never said. So the axis ends where the data does.
+ * **The axis is the section's length and not the data's** (E4-21, and
+ * `design/PulseTrendChart.dc.html:93` is what it draws): a twelve-week section in
+ * its seventh week shows twelve ticks with the line occupying the elapsed seven,
+ * so the shape of the term is on the page from week one and the line does not
+ * re-scale itself every Monday. Stretching seven weeks across the full width
+ * drew the same picture whatever the week, which is a chart that cannot say how
+ * far through a course it is.
+ *
+ * A week's place is read off its own `courseWeek` rather than off its position in
+ * the array, because published weeks have holes in them: a section whose week 3
+ * never published sends weeks 2 and 4 consecutively, and an index would draw the
+ * second of them one week early.
  */
-function xFor(index: number, count: number): number {
+function xFor(courseWeek: number, weeks: number): number {
   const span = VIEW_WIDTH - LABEL_GUTTER;
-  if (count <= 1) return LABEL_GUTTER + span / 2;
-  return LABEL_GUTTER + (index * span) / (count - 1);
+  if (weeks <= 1) return LABEL_GUTTER + span / 2;
+  return LABEL_GUTTER + ((courseWeek - 1) * span) / (weeks - 1);
+}
+
+/**
+ * How many weeks the axis draws: the section's length, or far enough to hold
+ * every week the payload carries.
+ *
+ * The second half is a guard and not a feature. `lengthWeeks` is the server's
+ * (`section.length_weeks`), and a report whose trend reached past it would be a
+ * payload disagreeing with itself; drawing the axis short would put those weeks
+ * off the right-hand edge, where nobody would see that anything was wrong.
+ */
+function axisWeeks(lengthWeeks: number, points: readonly TrendPoint[]): number {
+  return Math.max(lengthWeeks, ...points.map((point) => point.courseWeek), 1);
 }
 
 /** A coordinate as the path writes it: one decimal, the way the prototype rounds. */
@@ -84,9 +104,9 @@ interface PlottedPoint {
 }
 
 /** Each week's place on the plot, or `null` for a week with no rating. */
-function plot(points: readonly TrendPoint[]): readonly (PlottedPoint | null)[] {
-  return points.map((point, index) =>
-    point.mean === null ? null : { x: xFor(index, points.length), y: yFor(point.mean) },
+function plot(points: readonly TrendPoint[], weeks: number): readonly (PlottedPoint | null)[] {
+  return points.map((point) =>
+    point.mean === null ? null : { x: xFor(point.courseWeek, weeks), y: yFor(point.mean) },
   );
 }
 
@@ -130,6 +150,41 @@ function linePath(plotted: readonly (PlottedPoint | null)[]): string {
   return runs.map(subpath).join(' ');
 }
 
+/** One week of the axis: its course week, and the term week under it if there is one. */
+interface AxisTick {
+  readonly courseWeek: number;
+  /** The term week the payload gave for this course week, or `null` for a week it has not sent. */
+  readonly termWeek: number | null;
+  /** Whether this is the first sub-label on the axis, which is the one named in words. */
+  readonly leadsTheTermAxis: boolean;
+}
+
+/**
+ * Every week of the term, with the term week under the ones the payload has
+ * answered for.
+ *
+ * **A week ahead of the report gets no sub-label, and that is the rule rather
+ * than a gap.** SPEC §2.2 keeps the term week off the client's arithmetic — "a
+ * section that began in the term's fourth week, or paused over a break week,
+ * breaks any offset a chart might compute" — so the axis can say which course
+ * week is which for the whole term, and can say which term week a course week
+ * falls in only for the weeks the server has said it about. The prototype fills
+ * the rest from a term offset; that offset is exactly the derivation the spec
+ * refuses.
+ */
+function axisTicks(weeks: number, points: readonly TrendPoint[]): readonly AxisTick[] {
+  const byCourseWeek = new Map(points.map((point) => [point.courseWeek, point.termWeek]));
+  const first = Math.min(...byCourseWeek.keys());
+  return Array.from({ length: weeks }, (_, index) => {
+    const courseWeek = index + 1;
+    return {
+      courseWeek,
+      termWeek: byCourseWeek.get(courseWeek) ?? null,
+      leadsTheTermAxis: courseWeek === first,
+    };
+  });
+}
+
 /**
  * SPEC §7.6's `PulseTrendChart`, single-line — ticket E4-08.
  *
@@ -144,6 +199,12 @@ function linePath(plotted: readonly (PlottedPoint | null)[]): string {
  * plot and the suppression rule (§4.1 item 7) that decides whether they may
  * appear at all. Nothing here anticipates them, in a prop, a legend entry, or
  * an aria label.
+ *
+ * **The axis is the whole term, and the line is what has happened so far**
+ * (E4-21). Every one of the section's weeks gets a tick, whether or not a report
+ * exists for it; the term-week sub-label appears only under the weeks the
+ * payload has answered for, because SPEC §2.2 forbids deriving one for a week
+ * the server has not spoken about. See `xFor` and `axisTicks`.
  *
  * **A gap is not a zero.** A week with no responses breaks the line and says so
  * in words in the table below; a week rated 1.0 sits on the scale's bottom
@@ -167,6 +228,7 @@ function linePath(plotted: readonly (PlottedPoint | null)[]): string {
 export function PulseTrendChart({
   points,
   label,
+  lengthWeeks,
   showTicks = true,
   showLegend = false,
   drawDelayed = false,
@@ -175,6 +237,18 @@ export function PulseTrendChart({
   readonly points: readonly TrendPoint[];
   /** The stream this panel plots, in the words the pair labels it with. */
   readonly label: string;
+  /**
+   * How many weeks the section runs for — `section.length_weeks`, and the whole
+   * axis (E4-21).
+   *
+   * Required rather than defaulted to the number of points: a default would be
+   * the elapsed-weeks axis this ticket removes, arriving silently wherever a
+   * caller forgot the section it was drawing. The number is the server's, for
+   * the reason `WeekEyebrow` gives about the same field — SPEC §2.2 keeps the
+   * letter-to-length table on the institution's side, and nothing here derives
+   * it.
+   */
+  readonly lengthWeeks: number;
   /** Whether this panel draws the week axis. A stacked pair draws it once. */
   readonly showTicks?: boolean;
   /** Whether this panel carries the legend. A stacked pair carries it once. */
@@ -182,7 +256,8 @@ export function PulseTrendChart({
   /** Whether the draw waits for another panel's: the pair draws top, then bottom. */
   readonly drawDelayed?: boolean;
 }): JSX.Element {
-  const plotted = plot(points);
+  const weeks = axisWeeks(lengthWeeks, points);
+  const plotted = plot(points, weeks);
   const path = linePath(plotted);
   const terminal = plotted.reduce<PlottedPoint | null>(
     (latest, point) => point ?? latest,
@@ -229,32 +304,34 @@ export function PulseTrendChart({
           <circle className="pulse-trend-dot" cx={round(terminal.x)} cy={round(terminal.y)} r={4} />
         )}
         {showTicks &&
-          points.map((point, index) => (
-            <g key={point.courseWeek} className="pulse-trend-tick">
+          axisTicks(weeks, points).map((tick) => (
+            <g key={tick.courseWeek} className="pulse-trend-tick">
               <text
                 className="pulse-trend-tick-label"
-                x={xFor(index, points.length)}
+                x={xFor(tick.courseWeek, weeks)}
                 y={PLOT_HEIGHT + 4}
                 textAnchor="middle"
               >
-                {index === 0
+                {tick.courseWeek === 1
                   ? fillCopy('instructor_report_trend.course_week_tick', {
-                      week: padWeek(point.courseWeek),
+                      week: padWeek(tick.courseWeek),
                     })
-                  : padWeek(point.courseWeek)}
+                  : padWeek(tick.courseWeek)}
               </text>
-              <text
-                className="pulse-trend-tick-sub"
-                x={xFor(index, points.length)}
-                y={PLOT_HEIGHT + 22}
-                textAnchor="middle"
-              >
-                {index === 0
-                  ? fillCopy('instructor_report_trend.term_week_tick', {
-                      week: padWeek(point.termWeek),
-                    })
-                  : padWeek(point.termWeek)}
-              </text>
+              {tick.termWeek === null ? null : (
+                <text
+                  className="pulse-trend-tick-sub"
+                  x={xFor(tick.courseWeek, weeks)}
+                  y={PLOT_HEIGHT + 22}
+                  textAnchor="middle"
+                >
+                  {tick.leadsTheTermAxis
+                    ? fillCopy('instructor_report_trend.term_week_tick', {
+                        week: padWeek(tick.termWeek),
+                      })
+                    : padWeek(tick.termWeek)}
+                </text>
+              )}
             </g>
           ))}
       </svg>

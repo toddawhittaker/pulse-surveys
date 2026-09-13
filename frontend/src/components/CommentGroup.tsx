@@ -4,7 +4,6 @@ import type { JSX } from 'react';
 import { AiPanel } from './AiPanel';
 import { CommentCard } from './CommentCard';
 import type { ReportComment } from './CommentCard';
-import { SmallNNotice } from './SmallNNotice';
 import './instructorReportComments.css';
 import { copy } from '../copy/instructorReportCommentCopy';
 
@@ -20,11 +19,11 @@ import { copy } from '../copy/instructorReportCommentCopy';
  * with comments shows its summary and its cards. A group whose week produced
  * none shows §5.1's one-line notice under its heading. A group whose week is
  * below the response threshold shows §4's small-N framing instead: the summary,
- * no cards, and — where the surface has not already stated it — the notice
- * explaining why. Nothing written here blurs the second into the third: a week
+ * and no cards. Nothing written here blurs the second into the third: a week
  * nobody wrote in and a week whose comments are withheld are different facts
  * about the class, and an instructor who is told the wrong one draws the wrong
- * conclusion about their students.
+ * conclusion about their students — so a suppressed group renders neither the
+ * cards nor the empty-week line.
  *
  * **A group with no summary is a fourth state, and it is honest rather than
  * empty** (E4-11). `summary` is nullable because `StreamReport.summary` is: a
@@ -44,12 +43,19 @@ import { copy } from '../copy/instructorReportCommentCopy';
  * both in the payload, not in the browser); if either ever is not, the
  * concealment is still what happens.
  *
- * **`smallN.withNotice` is not a style option.** SPEC §4.1 item 5 requires
- * confidentiality copy to appear exactly once per surface, and a suppressed
- * week suppresses both of a report's groups — so exactly one of them carries
- * the notice and the other does not, and the surface placing them is the only
- * thing that can know which. The field is required rather than defaulted so the
- * choice is made out loud at the call site.
+ * **The notice explaining the suppression is not this component's** (E4-21). A
+ * suppressed week suppresses both of a report's groups, so the explanation is
+ * one statement about the week rather than one per group, and
+ * `design/InstructorMondayReport.dc.html:69-73` places it under both of them.
+ * This component is told the week is suppressed and conceals accordingly; where
+ * the sentence about it goes is the surface's, which is also what keeps SPEC
+ * §4.1 item 5's once-per-surface count a fact about a placement rather than
+ * about which group happened to render first.
+ *
+ * **`suppressed` is required rather than defaulted**, so the choice is made out
+ * loud at every call site: a caller who forgot it would be a caller showing a
+ * below-threshold week's raw comments, and that is not a default anything should
+ * have.
  *
  * **Order is the order given.** The randomization SPEC §4 requires is the
  * server's; nothing here sorts, shuffles, groups or numbers, and the cards
@@ -59,7 +65,7 @@ export function CommentGroup({
   stream,
   summary,
   comments,
-  smallN,
+  suppressed,
 }: {
   readonly stream: 'instructor' | 'course';
   /** The stream's generated summary, or `null` for a week none was written for. */
@@ -69,12 +75,8 @@ export function CommentGroup({
     readonly heldNote: string | null;
   } | null;
   readonly comments: readonly ReportComment[];
-  /** Present only on a week below the threshold, per the sketch's `small_n` member. */
-  readonly smallN?: {
-    readonly threshold: number;
-    /** Whether this group is the one carrying the surface's confidentiality copy. */
-    readonly withNotice: boolean;
-  };
+  /** Whether this week is below SPEC §4's threshold, as the payload declares it. */
+  readonly suppressed: boolean;
 }): JSX.Element {
   const headingId = useId();
   const instructorStream = stream === 'instructor';
@@ -109,16 +111,10 @@ export function CommentGroup({
           // one other thing on this panel that could carry a hint: it obeys the
           // suppression the payload already declared, and decides no threshold
           // of its own.
-          heldNote={smallN === undefined ? summary.heldNote : null}
+          heldNote={suppressed ? null : summary.heldNote}
         />
       )}
-      {smallN === undefined ? (
-        <GroupComments comments={comments} />
-      ) : smallN.withNotice ? (
-        <div className="pulse-comment-group__notice">
-          <SmallNNotice threshold={smallN.threshold} />
-        </div>
-      ) : null}
+      {suppressed ? null : <GroupComments comments={comments} />}
     </section>
   );
 }

@@ -62,8 +62,13 @@ export const INSTRUCTOR_REPORT_COMMENT_COPY = {
   // person reading it cannot check it. The singular has its own entry rather
   // than a plural rule in a component: "1 responses" is the shape of defect a
   // rule invented at the call site produces.
-  'instructor_report_comments.ai.drawn_from': 'Drawn from {count} responses',
-  'instructor_report_comments.ai.drawn_from_one': 'Drawn from 1 response',
+  // The wording is the mockup's — "Generated from 18 responses"
+  // (`design/AiPanel.dc.html:20`), restored by E4-21. "Drawn from" was this
+  // file's own phrasing and said less: what the panel states is where a
+  // generated paragraph came from, and the verb that names the generation is the
+  // one the provenance treatment is for.
+  'instructor_report_comments.ai.generated_from': 'Generated from {count} responses',
+  'instructor_report_comments.ai.generated_from_one': 'Generated from 1 response',
   // §5.1: above small-N a summary "may note 'one comment is held for review'
   // with type only". Whether the note appears is the payload's decision and
   // never this component's; this is only what it says when it does.
@@ -82,9 +87,21 @@ export const INSTRUCTOR_REPORT_COMMENT_COPY = {
   // "an honest explanation of why", and `design/Usage Rules.md` §4 asks the
   // instructor register to be "formative and factual". The threshold is the
   // configured number and arrives as a number, never a 5 written down here.
+  //
+  // **E4-21 restores the two sentences the mockup writes around that one**
+  // (`design/SmallNNotice.dc.html:31-33`): the leading count of who has answered,
+  // and "the AI summary above" rather than "the summary above". The count is the
+  // week's own participation figure — the same pair the Participation region
+  // states — and it is what makes the sentence an explanation rather than a rule:
+  // an instructor reading it learns that three of nine answered, which is the
+  // fact the suppression follows from. It is not a count of what was withheld,
+  // which §5.2 forbids and which this component is given no prop for. Naming the
+  // summary as the AI one is the brief's provenance rule applied to a reference:
+  // the panel above carries the mono AI label, and a sentence pointing at it
+  // says which summary it means.
   'instructor_report_comments.small_n.title': 'Comments are hidden this week',
   'instructor_report_comments.small_n.body':
-    'To keep individual voices unidentifiable, raw comments stay hidden until at least {threshold} responses arrive. The summary above draws on everything received so far.',
+    'Only {responded} of {enrolled} students have responded. To keep individual voices unidentifiable, raw comments stay hidden until at least {threshold} responses arrive. The AI summary above draws on everything received so far.',
 
   // A comment card. The label is what an assistive technology announces the
   // card as; the words inside it are the student's.

@@ -59,7 +59,13 @@ export const INSTRUCTOR_REPORT_STATS_COPY = {
   // themselves are `aria-hidden`, and this sentence is what a screen reader
   // gets in their place — the total the week rests on and every bucket's count,
   // in rating order.
-  'instructor_report_stats.distribution_mean': 'mean {mean}',
+  // The label alone, with the figure beside it rather than inside it: the mockup
+  // sets the digits in full spruce against the label's spruce-60
+  // (`design/RatingHistogram.dc.html:13`), and a colour cannot be applied to part
+  // of one text node. So the word is copy and the number is a figure, which is
+  // what they are — nothing a reader sees is assembled here beyond the space
+  // between them.
+  'instructor_report_stats.distribution_mean_label': 'mean',
   'instructor_report_stats.distribution_reading':
     '{stream}, ratings this week: {total} responses, mean {mean}. Responses by rating 1 to 5: {counts}.',
   'instructor_report_stats.distribution_reading_absent':

@@ -374,3 +374,27 @@ the leadership shell, is the first candidate.
 copy module per surface, rows in the governance map, the line-or-no-line
 decision made for each landing), or a recorded decision widens the sweep's
 scope over `frontend/src/lib/` instead.
+
+## The student survey still renders the eyebrow's double separator
+
+**What is not enforced.** The 2026-09-07 ruling's eyebrow reads
+`COURSE WK 04 / 12, TERM WK 07` — one separator. The student survey renders
+`COURSE WK 04 / 12, · TERM WK 07`: the copy string's trailing comma plus the
+`· ` the shared stylesheet rule prepends to every following segment. E4-21
+fixed this on the instructor report only, by scoping its change to the
+report's own surface.
+
+**Why it was left.** The student copy string is pinned byte-for-byte by
+`test_the_student_surveys_ruled_copy_is_in_the_governed_inventory.py`, so the
+fix is not one selector edit: it moves a governed string and its inventory
+test together, on a surface E4-21's ticket does not name. A cross-surface
+edit smuggled into a fidelity ticket is how a scoped diff grows an unreviewed
+rider.
+
+**Owner:** the next ticket that touches the student survey's copy or eyebrow;
+failing that, the E4 exit's cleanup pass names a home for it.
+
+**Done when:** the student survey renders exactly one separator between the
+course-week and term-week segments, the governed inventory test pins the
+corrected string, and the shared rule in `frontend/src/styles.css` no longer
+needs a per-surface override to produce it.

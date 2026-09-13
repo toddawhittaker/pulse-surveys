@@ -62,7 +62,7 @@ function yAxisOf(panel: Element): { label: string | null; y: string | null }[] {
 describe('TrendPair', () => {
   it('stacks the instructor stream above the course stream', () => {
     const { container } = render(
-      <TrendPair instructor={INSTRUCTOR_WEEKS} course={COURSE_WEEKS} />,
+      <TrendPair instructor={INSTRUCTOR_WEEKS} course={COURSE_WEEKS} lengthWeeks={INSTRUCTOR_WEEKS.length} />,
     );
 
     // SPEC §5.1 fixes the order — instructor above, course below — and
@@ -84,7 +84,7 @@ describe('TrendPair', () => {
 
   it('gives both panels the same 1 to 5 scale, whatever each stream did', () => {
     const { container } = render(
-      <TrendPair instructor={INSTRUCTOR_WEEKS} course={COURSE_WEEKS} />,
+      <TrendPair instructor={INSTRUCTOR_WEEKS} course={COURSE_WEEKS} lengthWeeks={INSTRUCTOR_WEEKS.length} />,
     );
 
     const { upper, lower } = panelsOf(container);
@@ -100,7 +100,7 @@ describe('TrendPair', () => {
 
   it('draws one week axis and one legend, at the bottom of the pair', () => {
     const { container } = render(
-      <TrendPair instructor={INSTRUCTOR_WEEKS} course={COURSE_WEEKS} />,
+      <TrendPair instructor={INSTRUCTOR_WEEKS} course={COURSE_WEEKS} lengthWeeks={INSTRUCTOR_WEEKS.length} />,
     );
 
     const { upper, lower } = panelsOf(container);
@@ -123,12 +123,43 @@ describe('TrendPair', () => {
     );
   });
 
+  it('plots both panels on the section’s whole term', () => {
+    // E4-21: the axis is `section.length_weeks`, and both panels share it. The
+    // labelled ticks are the lower panel's — the upper one draws none — so what
+    // this checks of the upper panel is that its line ends where the lower one's
+    // does: two panels on different domains would put one stream's week 3 above
+    // the other's week 4.
+    const { container } = render(
+      <TrendPair instructor={INSTRUCTOR_WEEKS} course={COURSE_WEEKS} lengthWeeks={12} />,
+    );
+
+    const { upper, lower } = panelsOf(container);
+    expect([...lower.querySelectorAll('.pulse-trend-tick-label')]).toHaveLength(12);
+
+    const endOf = (panel: Element): number => {
+      const path = panel.querySelector('.pulse-trend-line')?.getAttribute('d') ?? '';
+      const coordinates = [...path.matchAll(/[ML](?<x>-?[\d.]+) /g)].map((match) =>
+        Number(match.groups?.x),
+      );
+      expect(coordinates.length, 'a panel drew no line at all').toBeGreaterThan(0);
+      return Number(coordinates[coordinates.length - 1]);
+    };
+    expect(endOf(upper)).toBe(endOf(lower));
+
+    // And the line stops a quarter of the way along a twelve-week axis, because
+    // three of the twelve weeks have been published. The last labelled tick is
+    // week 12, so the end of the line is well short of it.
+    const ticks = [...lower.querySelectorAll('.pulse-trend-tick-label')];
+    const lastTick = Number(ticks[ticks.length - 1]?.getAttribute('x'));
+    expect(endOf(lower)).toBeLessThan(lastTick);
+  });
+
   it('lets the lower panel draw after the upper one', () => {
     // `design/Usage Rules.md` §3: "TrendPair: top panel then bottom". The delay
     // is a class the stylesheet reads, so the reduced-motion switch in
     // `design/tokens.css` removes the whole staggered draw with everything else.
     const { container } = render(
-      <TrendPair instructor={INSTRUCTOR_WEEKS} course={COURSE_WEEKS} />,
+      <TrendPair instructor={INSTRUCTOR_WEEKS} course={COURSE_WEEKS} lengthWeeks={INSTRUCTOR_WEEKS.length} />,
     );
 
     const { upper, lower } = panelsOf(container);
@@ -140,7 +171,7 @@ describe('TrendPair', () => {
   });
 
   it('reads each stream’s weeks into its own table', () => {
-    render(<TrendPair instructor={INSTRUCTOR_WEEKS} course={COURSE_WEEKS} />);
+    render(<TrendPair instructor={INSTRUCTOR_WEEKS} course={COURSE_WEEKS} lengthWeeks={INSTRUCTOR_WEEKS.length} />);
 
     const instructor = screen.getByRole('table', { name: 'Weekly ratings: Instructor' });
     expect(within(instructor).getAllByRole('cell').map((cell) => cell.textContent)).toEqual([

@@ -44,8 +44,9 @@ const STREAM_TITLE = {
  * SPEC §5.1 puts two of these on the Monday report, one per stream, showing "this
  * week rating distributions for both streams". `design/RatingHistogram.dc.html`
  * is the contract for what they look like: a title, a quiet mono mean above the
- * bars, five bars sharing the tallest count's scale, and the rating values along
- * a hairline beneath them.
+ * bars with its own figure in full ink, five bars sharing the tallest count's
+ * scale inside a fixed 96px row, and the rating values under one continuous
+ * hairline beneath them.
  *
  * **Every bucket is drawn, including the empty ones.** A distribution that
  * dropped its zeroes would redraw its own axis every week and quietly say that
@@ -98,11 +99,23 @@ export function RatingHistogram({
     <div className="pulse-stat-histogram" role="img" aria-label={reading}>
       <p className="pulse-stat-histogram-title">{title}</p>
       <p className="pulse-stat-histogram-summary">
-        {mean === null
-          ? copy('instructor_report_stats.no_responses')
-          : fillCopy('instructor_report_stats.distribution_mean', { mean: formatStatistic(mean) })}
+        {mean === null ? (
+          copy('instructor_report_stats.no_responses')
+        ) : (
+          <>
+            {copy('instructor_report_stats.distribution_mean_label')}{' '}
+            <span className="pulse-stat-histogram-mean">{formatStatistic(mean)}</span>
+          </>
+        )}
       </p>
-      <ul className="pulse-stat-histogram-buckets" aria-hidden="true">
+      {/* Two boxes, as `design/RatingHistogram.dc.html:14-24` draws them: a fixed
+          96px row holding each bucket's count above its bar, and a tick row
+          beneath it carrying one continuous hairline rule. The count used to
+          share a 96px column with the bar and the tick, and flexbox paid for that
+          by shrinking the bar — the tallest one drew at 47px of the 72px
+          `barHeight` asks for, measured in a browser — rather than by pushing
+          anything out of the chart. */}
+      <ul className="pulse-stat-histogram-bars" aria-hidden="true">
         {buckets.map((bucket) => (
           <li className="pulse-stat-histogram-bucket" key={bucket.value}>
             <span className="pulse-stat-histogram-count">{String(bucket.count)}</span>
@@ -110,7 +123,13 @@ export function RatingHistogram({
               className="pulse-stat-histogram-bar"
               style={{ height: barHeight(bucket.count, tallest) }}
             />
-            <span className="pulse-stat-histogram-tick">{bucket.value}</span>
+          </li>
+        ))}
+      </ul>
+      <ul className="pulse-stat-histogram-ticks" aria-hidden="true">
+        {buckets.map((bucket) => (
+          <li className="pulse-stat-histogram-tick" key={bucket.value}>
+            {bucket.value}
           </li>
         ))}
       </ul>
