@@ -16,22 +16,37 @@ hats they hold. Nothing outside this module obtains a Care session, and
 `tests/unit/test_care_session_is_bound_to_the_care_service.py` sweeps every module
 under `app/` for one that does.
 
-**The door is two calls, and `reveal_identity` is still one.** E0-26 item 1
+**The door is three calls, and `reveal_identity` is still one.** E0-26 item 1
 split `public.reveal_student_identity` in two: `public.record_identity_reveal`
 writes the `audit_log` row and hands back its id, and the reveal takes that id
 and answers only where the record's writing transaction has **committed**. So a
 caller that rolls back keeps no name — the rollback destroys the record, and
-without a committed record the second call raises. What this module does with
-that is record, commit, and then reveal in a second transaction. §6.2 asks for
-"a plain, one-click procedural action", which is about what Care staff do rather
-than about how many statements the service sends, so `reveal_identity` keeps its
-signature and its single call.
+without a committed record the second call raises. E4-01 adds the third,
+`public.reveal_subject_for_answer`, which answers who wrote one comment. What
+this module does with those is derive, record, commit, and then reveal in a
+second transaction. §6.2 asks for "a plain, one-click procedural action", which
+is about what Care staff do rather than about how many statements the service
+sends, so `reveal_identity` is still one call from where the queue stands.
+
+**Nobody hands this module a student any more, and that is E4-01.**
+`docs/tickets/e1/carried-from-e0.md` records the composition it closes:
+`public.section_roster` hands instructor-scoped code the `user_id` of every
+enrolled student, which is that view's whole point, and §2.1 permits one person
+to hold a Care assignment and a teaching assignment at once — so a Care officer
+who also teaches could take a key off her own roster, name it here, and leave an
+audit row indistinguishable from a legitimate access. The parameter that
+accepted it is deleted rather than validated: `reveal_identity` names one
+comment, and the student is derived from it inside the Care session. ADR 0144
+records the shape, why the derivation is a third `SECURITY DEFINER` function
+rather than a grant, and what it deliberately leaves to E6 and E10.
 
 **The actor is checked three times, in three places, and that is the design.**
 `reveal_identity` verifies the actor holds a live `CARE` assignment before it
 calls anything; `public.record_identity_reveal` verifies the actor it is handed;
 and `public.reveal_student_identity` verifies the actor named by the record it is
-spending. None alone:
+spending. E4-01's third function adds no fourth check and does not need one — it
+returns a `user` row id and never a name, only `pulse_care` may execute it, and
+this module runs it after the check below. None alone:
 
 * the check here catches a **routing** mistake — a request that reached the Care
   service with an actor who is not Care staff is refused before a `SECURITY
@@ -80,6 +95,7 @@ __all__ = [
     "CareQueueNotConfiguredError",
     "NotCareStaffError",
     "RevealedIdentity",
+    "UnknownRevealSubjectError",
     "reveal_identity",
 ]
 
@@ -102,14 +118,32 @@ _HOLDS_A_LIVE_CARE_ASSIGNMENT = text(
     ")"
 )
 
-# The first half of the door: the record, which the caller must commit before the
-# second half will answer. It returns the `audit_log` row's id and nothing else —
-# no identity, on any path — so a scalar rather than a row.
+# The three functions of the door, declared in the order this module runs them.
+#
+# The first is E4-01's, and it is the only one that takes something the caller
+# chose: a comment's id. It answers the key of whoever wrote that comment, or
+# NULL where no such comment exists. A scalar, for the same reason the record is
+# one — there is no path through it that returns a name, and it reads no column
+# of `public.user_identity`.
+#
+# It is a `SECURITY DEFINER` function rather than a read this connection makes
+# for itself because `pulse_care` holds `SELECT` on exactly one base table and on
+# no view. Granting it the two tables the derivation walks would be a standing
+# route from any comment id to any student key that works outside this door, with
+# nothing written and nothing in the way. ADR 0144 argues it, and
+# `reveal_subject_for_answer_v001.sql` carries the body and its controls.
+_DERIVE_THE_SUBJECT = text("SELECT public.reveal_subject_for_answer(:answer_id)")
+
+# Then the record, which the caller must commit before the last one will answer.
+# It returns the `audit_log` row's id and nothing else — no identity, on any path
+# — so a scalar rather than a row. Its subject is the key the derivation above
+# handed back; E4-01 changed where that value comes from and left this function's
+# own contract exactly as E0-26 item 1 wrote it.
 _RECORD_THE_REVEAL = text(
     "SELECT public.record_identity_reveal(:actor_person_id, :subject_user_id, :case_id)"
 )
 
-# The second half. `SELECT * FROM` a set-returning function rather than
+# Then the reveal. `SELECT * FROM` a set-returning function rather than
 # `SELECT reveal(...)`, so the two output columns arrive as columns rather than
 # as one composite value to take apart here. It takes the record's id and nothing
 # else, so the subject is read from the committed record and this module cannot
@@ -139,6 +173,28 @@ class NotCareStaffError(Exception):
     exist, and §6.2's queue has to tell a Care staffer which of those happened.
     Carries the actor's key and never the subject's identity — an exception
     message is the most-copied string in an incident.
+    """
+
+
+class UnknownRevealSubjectError(Exception):
+    """The comment named here belongs to nobody this system knows, so nothing was revealed.
+
+    E4-01's refusal, and it is deliberately **not** a subclass of
+    `NotCareStaffError` and has none of its own. The two mean different things —
+    one is about who is asking and one is about what they asked about — and §6.2's
+    queue has to tell them apart to say anything useful to a Care officer. A
+    shared base class would put them back together for every caller that writes
+    `except NotCareStaffError`, which is the conflation one level down.
+
+    Raised rather than returned, and that is the half worth stating. `None` is
+    already the answer to a different question — a student who has no
+    `user_identity` row, which is an ordinary state the queue renders as "no
+    identity on file" — so a refusal that came back empty would reach the queue as
+    a claim about a student it never reached.
+
+    Carries the identifier it was given and nothing else. That id names a comment
+    rather than a person, and no name, address or comment text ever passes through
+    here: an exception message is the most-copied string in an incident.
     """
 
 
@@ -224,21 +280,30 @@ def _care_session() -> Iterator[Session]:
 def reveal_identity(
     *,
     actor_person_id: UUID,
-    subject_user_id: UUID,
+    answer_id: UUID,
     case_id: UUID | None = None,
 ) -> RevealedIdentity | None:
-    """Reveal one student's identity to one Care staff member, and record that it happened.
+    """Reveal the author of one comment to one Care staff member, and record that it happened.
 
-    Answers `None` where the student has no identity row — an LMS user Pulse has
-    seen but whose name never arrived over NRPS — which is a different answer from
-    a refusal and is why `NotCareStaffError` is raised rather than returned.
+    **The caller names a comment, never a student.** `answer_id` is the identifier
+    of the record §6.2's queue is open on, and who wrote it is derived here rather
+    than supplied — E4-01, and the module docstring says what that closes. A
+    comment matching no row raises `UnknownRevealSubjectError`, which is a
+    different class from `NotCareStaffError` so that the queue can tell "you may
+    not use this door" from "that is not a record you can act on" without reading
+    a message.
 
-    **Three statements and two transactions, and the order is the guarantee.**
-    The record is written and *committed* first, and only then is identity read,
-    in a second transaction against the committed record. So there is no state in
-    which this returns a name that is not already recorded: a failure anywhere
-    after the commit — the reveal raising, the connection dropping, this process
-    being killed — leaves the record standing and hands back nothing.
+    Answers `None` where the derived author has no identity row — an LMS user
+    Pulse has seen but whose name never arrived over NRPS — which is a different
+    answer from either refusal and is why both are raised rather than returned.
+
+    **Four statements and two transactions, and the order is the guarantee.**
+    The actor's assignment is checked first, then the subject is derived, and only
+    then is the record written and *committed*; identity is read in a second
+    transaction against the committed record. So there is no state in which this
+    returns a name that is not already recorded: a failure anywhere after the
+    commit — the reveal raising, the connection dropping, this process being
+    killed — leaves the record standing and hands back nothing.
 
     That is the safe direction and it is not free: a record committed here for
     a reveal that then fails is a row saying an access was authorised when no
@@ -247,6 +312,19 @@ def reveal_identity(
     nothing limits a committed record to a single spend, so one row can stand
     behind several reads of the same subject's name. ADR 0071 argues both, and
     the re-spend half is E10's.
+
+    **The derivation sits between the actor check and the record, and both edges
+    matter.** Below the actor check, because a caller with no `CARE` assignment
+    must not be able to learn which comment identifiers exist — running the
+    derivation first would answer them differently depending on whether the id
+    names a real comment, an existence oracle handed to exactly the
+    reporting-scoped caller this guard keeps away from the queue. Above the
+    record, because §4's log is a record of *accesses*: a call that reached no
+    student is not one, and this session has written nothing at the moment the
+    refusal is raised, so the transaction closes without a row. §6.2's monthly
+    review outside the Care office reads that log, and one padded with
+    authorizations that named nobody makes it read a fabricated pattern of
+    access.
 
     `case_id` is optional and defaults to nothing because there is no case model
     until E10; §4 asks for "actor, timestamp, and case" and the column is there
@@ -264,15 +342,27 @@ def reveal_identity(
                 "only by the Care role (SPEC 4, 6.2)."
             )
 
+        # Before the record and after the check above. `scalar_one` rather than
+        # `scalar_one_or_none`: the function is scalar and always answers exactly
+        # one row, and it is the *value* in that row that is null when the
+        # comment is unknown.
+        author = session.execute(_DERIVE_THE_SUBJECT, {"answer_id": answer_id}).scalar_one()
+        if author is None:
+            raise UnknownRevealSubjectError(
+                f"{answer_id} names no comment, so there is no author to identify and nothing "
+                "was revealed. The Care queue acts on a record and the student is derived from "
+                "it; an identifier that matches no record is not a student (SPEC 4, 6.2)."
+            )
+
         reveal_id = session.execute(
             _RECORD_THE_REVEAL,
             {
                 "actor_person_id": actor_person_id,
-                "subject_user_id": subject_user_id,
+                "subject_user_id": author,
                 "case_id": case_id,
             },
         ).scalar_one()
-        # The commit the whole ticket is about. Until it returns, the record is
+        # The commit E0-26 item 1 exists for. Until it returns, the record is
         # this transaction's to discard and `public.reveal_student_identity` will
         # refuse to answer against it.
         session.commit()

@@ -1,27 +1,83 @@
 # 44. A guard raised in a fixture turned a module's reds into setup errors
 
-**Caught: 1**
+**Caught: 7**
 
-## A catch: E3-04's enforcement module builds its gradebook in the test body (2026-09-04)
+*This file keeps the founding incident (it carries the root cause) and the
+three most recent catches. Two older catches were trimmed 2026-09-07 — E4-03's
+report-view suite (2026-09-06) and E3-04's AGS enforcement module (2026-09-04)
+— after dating the paragraphs from git per the ordering rule; both live in this
+file's history. A third was trimmed 2026-09-08 when E4-15's catch was added —
+E4-04's comment suite (2026-09-06), which shared its date with the E4-01
+paragraph inside the founding incident and was the removable one of the two.*
 
-Every test in `tests/integration/test_mock_lms_ags_requires_a_token.py` needs the
-same six addressed AGS routes, and building them means *creating a line item and
-posting a score through the very enforcement under test*. A `@pytest.fixture`
-was the obvious home and is exactly this entry's mistake: an implementation that
-refused a call it should serve would have turned all forty-odd reds in the module
-into setup ERRORs, proving nothing about the refusals they exist to make and
-reading to a hurried eye as "the suite is red". It is a plain `gradebook(platform)`
-function called as each test body's first statement instead, so the same failure
-arrives as a FAILED naming the accepted call that did not work.
+## A catch: E4-20's seeder reds name the missing script instead of missing it (2026-09-09)
 
-The same rule shaped the client side, where the deliverable is a whole module:
-`tests/fixtures/ags_client.py` imports `app.lti.ags` inside the call rather than
-at fixture setup, so an unbuilt tree gives nineteen failed assertions naming the
-missing module rather than nineteen errors.
+E4-20's two red tests run `scripts/seed_demo_story.py` as a process, and the
+machinery they follow — `DemoSeed` in `tests/fixtures/seed.py` — already answers
+the fixture half of this entry: when the script is absent it hands back a
+*synthetic* run, exit 127 with the reason on stderr, rather than failing from
+inside setup. Copying that alone would have avoided the ERROR wall and still
+produced the wrong red. The refusal assertions read what the run printed, so on
+the unbuilt tree each test would have failed on "the run refused and did not say
+the environment was why", with the sentence that actually explains the tree —
+the script does not exist — folded into a tailed stream underneath it.
 
-Counted as a catch: without the entry the module would have shipped with its
-guard in a fixture, and the red-run verification would have had a wall of errors
-to sort through instead of a manifest to compare against.
+Acting on the entry's rule as written, the guard is `require_the_story_seeder`, a
+plain function called as the first statement of both bodies, naming the script
+and the ticket that owes it. Today's red is therefore a FAILED whose message is
+the deliverable, and the assertions about what a refusal says only ever run
+against a refusal that exists.
+
+Counted as a catch: without the entry the module would have inherited the shared
+runner's fallback and reported two reds about the *content* of a refusal on a
+tree with no script in it, which is a red that reads as a wrong assertion rather
+than as a missing deliverable. The lesson the earlier catches did not carry: a
+fixture that avoids raising is not the same as a body guard that names the thing,
+and shared machinery which softens the absence can hide it just as well.
+
+## A catch: E4-15's exit drive builds its world in a test rather than a hook (2026-09-08)
+
+The E4 exit drive is a browser suite, not a pytest one, and the shape is the
+same: its world costs a staff launch, a roster sync, a seeder run, two Monday
+jobs and several `docker compose` round trips, so the natural home is
+`test.beforeAll` — and the seeder the ticket owes does not exist while the reds
+are being written. Written that way, the drive's pre-implementation red is a
+**hook error**, every one of its eight cases is reported as not having run, and
+the wall reads as "the exit spec is broken" rather than as "one named deliverable
+is missing".
+
+Instead `beforeAll` discovers placements only — shipped machinery, nothing this
+ticket owes — and every write to the stack sits in the drive's first test, whose
+whole subject is that the world can be built. Playwright's serial mode then skips
+the remaining seven, which is the same protection a failing hook gives and a
+better report: one FAILED naming `scripts/seed_exit_story.py` and the contract it
+owes, seven skipped.
+
+Counted as a catch: without the entry the world-building would have gone in the
+hook, because that is where a browser suite's expensive setup belongs and every
+other spec in `tests/e2e/` puts it there. The entry is what made the cost of that
+choice visible on the one tree the reds are measured on.
+
+## A catch: E4-18's section-list suite discovers nothing at setup (2026-09-07)
+
+E4-18's world is expensive — a launch, a session, three sections and three
+teaching grants — so it is a fixture, and the natural thing to put in it is the
+lookup that says whether the route exists yet. `tests/fixtures/report_api.py`
+next door does discover E4-07's routes through the module, and copying that shape
+would have meant every one of this ticket's eleven tests reporting ERROR at setup
+on the unbuilt tree, the must-be-green control among them — the one test whose
+whole job is to be green and to prove the fixtures plant the grant they claim.
+
+Instead the fixture seeds rows and writes grants and asks the application
+nothing. The route is reached over HTTP at the settled path, and the guard that
+names the missing deliverable is `entries_in`, a plain function each test body
+calls on the response it just read; the session-module lookups in `_minted` are
+in a method the test body calls too. Ten of the eleven reds are therefore
+assertions about a status, a list or a header, and the eleventh passes.
+
+Counted as a catch: without the entry the world fixture would have carried a
+route discovery, and the tests-first run would have been eleven setup errors with
+nothing to compare against the manifest.
 
 ## Instance: E3-01's rotation module errored at setup instead of failing (2026-09-04)
 
@@ -47,3 +103,11 @@ The root cause: a fixture is the natural place to share setup, and the guard
 fixture reports in the wrong phase. The distinction is invisible in green and
 only shows on the unbuilt tree, which is exactly the tree tests-first reds are
 measured on.
+
+**Instance, 2026-09-06 (E4-01, caught at authoring time).** The reveal-guard
+suite's interface check — is the new signature there yet — was written as a
+plain function, `require_the_reveal_interface`, called as each test body's
+first statement rather than as a fixture, precisely so the pre-implementation
+reds reported as FAILED naming the missing symbol instead of as fifteen setup
+ERRORs. Counted as a catch: the entry's rule shaped the suite before any red
+was run, and the red-run verification then confirmed every red behavioral.

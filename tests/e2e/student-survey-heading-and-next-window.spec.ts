@@ -14,6 +14,13 @@
 //     from the date. The system already holds that row; the sentence was
 //     withholding it.
 //
+// **The eyebrow grew again after this file was written, and the first bullet is
+// left as the history it is.** E4-17 and the owner's ruling of 2026-09-07 add how
+// long the course runs to the course-week half, so what this spec asserts today
+// is `COURSE WK 01 / 12, TERM WK 04` — the same two axes, in the same words, with
+// the section's own length after the first number. Nothing about the three
+// rulings above changed; the total sits inside the first of them.
+//
 // Only a browser on the composed stack can prove any of them. The eyebrow and the
 // heading are strings assembled from a read answer, governed copy and CSS; the
 // placeholder's `6:00PM EDT` is produced by `Intl.DateTimeFormat` inside the page,
@@ -109,9 +116,23 @@ const STORED_COURSE = {
 // `MATH-140-E1FF` runs six weeks from term week 1 (start letter `E`, 17 August)
 // so the same week is its *fourth*. A screen serving the term week in the course
 // week's place would read `COURSE WK 04` for both.
+//
+// **Their two lengths differ as well, and E4-17 is why that now matters.** The
+// ruling of 2026-09-07 puts how long the course runs on the course-week half, so
+// this pair is the only place on the whole suite where two sections of different
+// lengths are on one screen at one minute: BIOL reads `/ 12` and MATH reads
+// `/ 06`. A length looked up once and repeated reads the same on both, and the
+// term's own eighteen weeks reads as neither.
+//
+// The lengths are the same sentence of `scripts/seed.py`'s `START_LETTER_MAP`
+// the course weeks above are read from — `R` twelve weeks, `E` six — transcribed
+// and derived from nothing (`docs/MISTAKES.md` entry 19). Padded to two digits,
+// because the mono eyebrow pads the total exactly as it pads a week, which is
+// what keeps a six-week section and a twelve-week one the same width down a
+// column; `06` is the case that catches a total interpolated raw.
 const BOTH_WINDOWS_OPEN = "2026-09-11T19:00";
-const BIOLOGY_EYEBROW = { course: "01", term: "04" };
-const MATHEMATICS_EYEBROW = { course: "04", term: "04" };
+const BIOLOGY_EYEBROW = { course: "01", term: "04", length: "12" };
+const MATHEMATICS_EYEBROW = { course: "04", term: "04", length: "06" };
 
 // Monday 5 October at nine in the morning — `student-survey.spec.ts`'s
 // `AFTER_THE_WINDOW`. Term week 7's window closed at 23:59:59 on Sunday the 4th,
@@ -289,20 +310,35 @@ test("the week eyebrow names both of the two week axes in words", async ({
   // a quiet term-week sub-label — and until this ruling the page printed them as
   // `WK 03 / TERM 03`, which had to be explained to its own product owner.
   //
-  // **Two sections, and their course weeks differ.** At this minute BIOL is in
-  // its first course week and MATH in its fourth, both in term week 4. A page
-  // serving the term week in the course week's place reads `COURSE WK 04` for
-  // both and passes any single-section reading of this.
+  // **And E4-17's ruling of 2026-09-07 grows the first half** to `COURSE WK NN /
+  // NN,`: how long the course runs, attached to the course-week number, filled
+  // from the section's own count on the read answer. The term-week half is
+  // untouched — that ruling adds a total rather than removing an axis.
+  //
+  // **Two sections, and their course weeks *and* their lengths differ.** At this
+  // minute BIOL is in its first course week of twelve and MATH in its fourth of
+  // six, both in term week 4. A page serving the term week in the course week's
+  // place reads `COURSE WK 04` for both and passes any single-section reading of
+  // this; a page serving one length for both, or the term's own eighteen weeks,
+  // fails on at least one of them for the same reason.
   //
   // **The mutations this kills.** The old `WK NN` and `TERM NN` left in place —
   // `TERM 04` is not a substring of `TERM WK 04`, so the second half of each pair
   // reds on it. The comma dropped, which the ruling puts inside the first string.
-  // And the two labels swapped, which each section's own distinct pair catches.
+  // The two labels swapped, which each section's own distinct pair catches. The
+  // total absent, which is the state this is written red against. The total
+  // filled from the term week (`/ 04` for both) or from the course week (`/ 01`
+  // and `/ 04`), which is criterion 5's near miss and which each section's own
+  // triple tells apart. The total taken from the term rather than the section
+  // (`/ 18` for both). And the total left unpadded, which MATH's `/ 06` catches
+  // and BIOL's `/ 12` cannot.
   //
   // **Matched with `\s*` between the halves**, deliberately: the two numbers are
   // rendered as separate spans and whether any whitespace sits between them in
-  // the DOM is a rendering decision the ruling does not make. What is asserted is
-  // the ruled words, in the ruled order, with the ruled comma.
+  // the DOM is a rendering decision the ruling does not make. The spaces *inside*
+  // the first half are matched literally, because that half is one governed copy
+  // string with two holes in it — `COURSE WK {week} / {total},` — so nothing
+  // splits it and the solidus's spacing is the ruling's own.
   await setTheClockTo(page, BOTH_WINDOWS_OPEN);
   await landOnTheSurvey(page, placement, BIOLOGY.code);
 
@@ -312,12 +348,17 @@ test("the week eyebrow names both of the two week axes in words", async ({
   ] as const) {
     await expect(
       page.getByTestId(sectionBlock(section.code)),
-      `${section.code}'s eyebrow does not read "COURSE WK ${weeks.course}, TERM WK ${weeks.term}". ` +
+      `${section.code}'s eyebrow does not read "COURSE WK ${weeks.course} / ${weeks.length}, ` +
+        `TERM WK ${weeks.term}". ` +
         "SPEC §2.2 keeps the two axes apart because a 12-week section that started in term week 4 " +
         "is not thirteen weeks into itself, and the ruling of 2026-09-03 makes the page say which " +
-        "is which in words.",
+        "is which in words. The ruling of 2026-09-07 adds the section's own length after the " +
+        "course week, from the read answer — the other section on this same screen runs a " +
+        "different number of weeks, so one number serving both is caught here.",
     ).toContainText(
-      new RegExp(`COURSE WK ${weeks.course},\\s*TERM WK ${weeks.term}`),
+      new RegExp(
+        `COURSE WK ${weeks.course} / ${weeks.length},\\s*TERM WK ${weeks.term}`,
+      ),
     );
   }
 });

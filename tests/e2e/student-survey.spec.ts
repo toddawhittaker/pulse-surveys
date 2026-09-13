@@ -92,6 +92,18 @@ const INSIDE_THE_WINDOW = '2026-10-02T19:00';
 const COURSE_WEEK = '04';
 const TERM_WEEK = '07';
 
+// How long this section runs for, from the same line of the same map as the
+// dates above: `START_LETTER_MAP` gives `R` **twelve** weeks. Transcribed like
+// every other constant here and derived from nothing — the whole point of E4-17
+// is that this number reaches the screen from the read answer, so a spec that
+// computed it from the section code would be writing the derivation the ticket
+// rejects in order to check that the product does not (`docs/MISTAKES.md`
+// entry 19).
+//
+// Padded to two digits, because the mono eyebrow pads the total exactly as it
+// pads a week — a three-week section reads `/ 03`, and the column stays aligned.
+const SECTION_LENGTH = '12';
+
 // Monday morning, after that window closed at 23:59:59 on Sunday 4 October and
 // four days before the next one opens on Friday the 9th. SPEC §3.1: "missed
 // weeks cannot be back-filled", so at this instant the section has nothing to
@@ -264,7 +276,19 @@ test('a student answers all five questions, the slider by keyboard, and the week
   // are matched separately, as they always were here, because they render as two
   // spans; the ruled string as a whole — comma and order included — is asserted
   // in `student-survey-heading-and-next-window.spec.ts`.
-  await expect(block).toContainText(`COURSE WK ${COURSE_WEEK},`);
+  //
+  // **And grown by the ruling of 2026-09-07** (E4-17), which puts how long the
+  // course runs on the course-week half: `COURSE WK 04 / 12`. The number is the
+  // section's own, carried on the read answer — the frontend derives nothing —
+  // and the term-week half is untouched, because that ruling adds a total rather
+  // than removing an axis.
+  //
+  // The three numbers this section produces are all different, which is what
+  // makes the first assertion mean something: the course week is 4, the term week
+  // is 7, and the length is 12. The term's own length, 18, is a fourth. So the
+  // term week served in the course week's place fails, and the term's length
+  // served in the section's fails, both here and by name.
+  await expect(block).toContainText(`COURSE WK ${COURSE_WEEK} / ${SECTION_LENGTH},`);
   await expect(block).toContainText(`TERM WK ${TERM_WEEK}`);
 
   await expectTheFormIsShowing(block);

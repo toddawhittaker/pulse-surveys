@@ -1,8 +1,9 @@
 # 0043 — The reveal function has an owner of its own, holding a readable list of grants
 
-**Status:** Accepted — amended by ADR 0071; the list is four, and was three
-**Date:** 2026-08-16 (amended 2026-08-20)
-**Tickets:** E0-10, E0-26, E10
+**Status:** Accepted — amended by ADR 0071 and ADR 0144; the list is four table
+grants and two column-scoped reads, and was three
+**Date:** 2026-08-16 (amended 2026-08-20 and 2026-09-06)
+**Tickets:** E0-10, E0-26, E4-01, E10
 **Relates to:** [ADR 0040](0040-pulse-migrate-is-the-bootstrap-identity-under-another-name.md),
 which counts the roles this ticket creates, and
 [ADR 0042](0042-the-care-pool-has-its-own-credential-and-opens-on-first-use.md),
@@ -21,6 +22,22 @@ which decides who may call this function.
 > count was three when this was written and is four**; it is the first time it has
 > moved, and the title no longer states a number, so the next move is an amendment
 > here rather than a heading nobody can rename.
+>
+> **Amended 2026-09-06 by
+> [ADR 0144](0144-the-reveal-derives-its-subject-from-the-record-care-is-acting-on.md),
+> and this is the second move.** E4-01 added a third function,
+> `public.reveal_subject_for_answer(uuid)`, which answers which student wrote one
+> comment so that the reveal derives its subject from the record Care is acting on
+> instead of taking a `user_id` from its caller. The same role owns it — a second
+> owner would be a second privilege surface, and every rule about what this one may
+> reach measures one set — and it gains **two column-scoped reads**, `SELECT (id,
+> response_id)` on `public.answer` and `SELECT (id, user_id)` on `public.response`,
+> which are the four columns that body reads. The rule this record sets is again
+> unchanged, and the grain is the one thing about it that is weaker: a column grant
+> lives in `pg_attribute.attacl`, which `has_table_privilege` cannot see, so the
+> pinned equality in `tests/integration/test_identity_grants.py` admits those two
+> rather than requiring them. It was chosen anyway, because table grain would put
+> every comment's text inside the door's owner. ADR 0144 argues the trade.
 
 ## Context
 

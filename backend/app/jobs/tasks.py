@@ -6,26 +6,34 @@ E1-08's daily maintenance of the two launch tables, the two `sync_*` tasks are
 E1-11's roster pull, `derive_survey_windows` is E2-06's hourly reconciler over the
 weekly rhythm (§3.1), `reclassify_floored_comments` is E2-08's async half of
 §3.3's fail-open, `create_line_item` is E3-05's half of §3.4's line item "created
-by the tool on first launch", and `post_participation_scores` is E3-06's weekly
-recompute of §3.4's score. Summaries (§7.4) are E4's, and every one of these is a
-call into `app/services/` from here rather than domain logic written in this file
-— which is exactly the shape every task below takes: it opens a session and calls
-a service.
+by the tool on first launch", `post_participation_scores` is E3-06's weekly
+recompute of §3.4's score, `cut_release_batches` is E4-04's weekly release of the
+comments §4's small-N rule has been holding, and `generate_weekly_summaries` is
+E4-06's Monday walk over §5.1's per-stream AI summaries (§7.4's summary task,
+called per stream). Every one of these is a call into `app/services/` from here
+rather than domain logic written in this file — which is exactly the shape every
+task below takes: it opens a session and calls a service.
 
-**Who commits is part of that shape, and one task departs from it on purpose.**
-Every task here opens the session and commits it, because the service decides and
+**Who commits is part of that shape, and three tasks depart from it on purpose.**
+Most tasks here open the session and commit it, because the service decides and
 writes while the caller owns the transaction. `post_participation_scores` does
 not: its service commits after each section, because the rows it writes are the
 record of scores that have already reached somebody else's gradebook and cannot be
-allowed to depend on a walk over the whole institution finishing. That task's
-docstring carries the argument, and it is the place to read before making this
-file consistent with itself.
+allowed to depend on a walk over the whole institution finishing.
+`generate_weekly_summaries` does not either, for the neighbouring reason: its
+service commits after each section-week, so one provider failure costs that
+section-week rather than the institution's Monday. `cut_release_batches` does not
+either, for a weaker reason it states in its own words: nothing it writes leaves
+this system, and what a per-section commit buys is the walk's own progress. Each
+docstring carries its own argument, and they are the place to read before making
+this file consistent with itself.
 """
 
 import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
+from app.ai.gateway import AIGateway
 from app.config import Settings
 from app.db import SessionLocal
 from app.jobs.celery_app import celery_app
@@ -34,6 +42,8 @@ from app.lti.in_flight import purge_expired_launch_states
 from app.lti.replay_guard import purge_expired_nonces
 from app.services import clock
 from app.services.grading import ensure_line_item, post_scores_for_all_sections
+from app.services.report_comments import cut_due_release_batches
+from app.services.reporting import generate_missing_summaries
 from app.services.roster_sync import sync_all_rosters, sync_section
 from app.services.survey_windows import derive_windows_for_all_sections
 from app.services.validity import (
@@ -95,8 +105,15 @@ def purge_launch_nonces() -> int:
     (`lti_launch_state`) live in Postgres, so a daily beat entry
     (`app.jobs.schedules`) reclaims their expired tails rather than letting either
     grow without bound. Runs on the worker's `pulse_app` connection, which holds
-    `DELETE` on both for exactly this. One task rather than two beat entries — the
-    schedule holds a single launch-housekeeping entry.
+    `DELETE` on both, plus the column-scoped `SELECT (expires_at)` on
+    `lti_launch_nonce` that E4-14 added — Postgres refuses a `DELETE ... WHERE`
+    whose column the role cannot read, and this task's `WHERE` reads `expires_at`
+    on both tables (`lti_launch_state` has held table-wide `SELECT` since E1-08).
+    Before E4-14, the nonce half of this task raised `InsufficientPrivilege` on
+    every run and the state half never ran either, sharing this one
+    `SessionLocal` (`docs/tickets/e4/carried-from-e3.md`, "The daily purge of the
+    launch replay ledger cannot run"; ADR 0150). One task rather than two beat
+    entries — the schedule holds a single launch-housekeeping entry.
     """
     now = datetime.now(UTC)
     with SessionLocal() as session:
@@ -325,3 +342,84 @@ def post_participation_scores() -> dict[str, int]:
             counts["failed"],
         )
         return counts
+
+
+@celery_app.task
+def cut_release_batches() -> int:
+    """Release the comments SPEC §4 has been holding, where a section has crossed (E4-04).
+
+    The weekly pass `app.jobs.schedules` runs on `crontab(day_of_week="mon",
+    hour="2", minute="40")`. SPEC §4: comments from under-threshold weeks "are not
+    discarded — they feed the summary, and they surface as raw text once the
+    section's cumulative comment volume for the term crosses the threshold,
+    batched so that timing cannot identify an author."
+
+    A thin wrapper, like every task above: the session is this task's, and every
+    decision — what counts as volume, which comments were held, what a batch holds
+    and whether one is due at all — is `app.services.report_comments`'s, which is
+    the one place SPEC §4's suppression is decided and the one writer of both
+    release tables.
+
+    **The commit is not this task's**, which is the second task here to say so and
+    the second to mean something slightly different by it. `post_participation_scores`
+    above does not commit because its rows record a score that has already reached
+    somebody else's gradebook. Nothing here leaves this system — what a per-section
+    commit buys is the walk's own progress, so a worker killed on the fifth section
+    keeps the four releases it has already cut instead of re-deriving them next
+    Monday. The service commits after each section and term for that reason, and a
+    trailing commit on this line would tell the next reader that durability is the
+    task's, which is the belief this paragraph exists to correct.
+    `SessionLocal()`'s context manager discards whatever open transaction a run
+    leaves behind.
+
+    Answers how many batches were cut, which is what a worker log line and an
+    operator asking "did anything surface this week" both want.
+    """
+    with SessionLocal() as session:
+        batches = cut_due_release_batches(session)
+        logger.info("the weekly release cut produced %d batch(es)", batches)
+        return batches
+
+
+@celery_app.task
+def generate_weekly_summaries(gateway: AIGateway | None = None) -> dict[str, int]:
+    """Write §5.1's per-stream AI summaries for every closed week that has none (E4-06).
+
+    The Monday walk `app.jobs.schedules` runs on `crontab(day_of_week="mon",
+    hour="2", minute="50")`. SPEC §3.1 closes every survey window on Sunday at
+    23:59:59 institution time and puts the instructor's report on Monday morning,
+    so Monday is the first day the week that just ended can be summarized and the
+    last day it can be summarized before its reader arrives.
+
+    A thin wrapper, like every task above: the session and the configuration are
+    this task's, and every decision — which section-weeks have closed, which
+    comments a moderator is holding, what count a summary states, and what a
+    provider failure costs — is `app.services.reporting`'s.
+
+    **No argument beat could not supply, and one seam a test can reach through.**
+    Beat fires this with nothing at all, so a required parameter would be a policy
+    decision (which sections, since when, which provider) written into a signature
+    where nobody reviewing the schedule would look. `gateway` is the seam E4-05
+    already publishes on `summarize_stream`, threaded straight through: `None` is
+    the ordinary case and `app.ai.tasks.process_gateway` builds the one this
+    process shares, on first use and never before — so a run that finds nothing to
+    do reaches no provider and constructs no client either.
+
+    **The commit is not this task's**, which is the departure `post_participation_scores`
+    above already makes and this one makes for a neighbouring reason. The service
+    commits after each section-week, because §5.1's two summaries for one week are
+    written together or not at all and because one section's provider failure may
+    not cost every section after it. Under one commit at the end, a worker killed
+    mid-walk would throw away every summary generated before it — and the walk
+    would generate them again next Monday, spending a provider request per stream
+    per section-week for work already done. There is deliberately no trailing
+    commit here as a tail-cover: nothing in the service writes outside a
+    section-week, and a commit on this line would tell the next reader that this
+    task owns durability.
+
+    Answers how many summary rows were stored and how many section-weeks were left
+    for the next run — the dict the service composed, unchanged, for §6.1's console.
+    """
+    settings = Settings()
+    with SessionLocal() as session:
+        return generate_missing_summaries(session, settings=settings, gateway=gateway)

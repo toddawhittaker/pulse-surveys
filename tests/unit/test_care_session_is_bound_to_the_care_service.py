@@ -21,7 +21,9 @@ sources it must flag and sources it must allow; every `Settings` field whose nam
 mentions Care is a spelling the sweep can recognise; and — at runtime, against the
 imported module rather than its text — the service's public surface hands out
 nothing that is, returns, or is named as one. `reveal_identity`,
-`NotCareStaffError` and `RevealedIdentity` are public; the engine, the
+`NotCareStaffError`, `UnknownRevealSubjectError` (E4-01's, the refusal for a
+subject that cannot be derived from the record) and `RevealedIdentity` are
+public; the engine, the
 sessionmaker and the session are `_care_engine`, `_care_sessions` and
 `_care_session`, and the runtime test below is what keeps them that way.
 
@@ -447,7 +449,8 @@ def test_the_care_service_exposes_nothing_that_hands_out_a_care_session(
         "reporting path in the application, and the person it would be misused for is the two-hat "
         "case §2.1 permits and §6.2 spends a paragraph on — a Care staffer who also teaches, whose "
         "instructor requests must run on `pulse_app` with no path to identity. `reveal_identity`, "
-        "`NotCareStaffError` and `RevealedIdentity` are the surface this module is meant to have."
+        "`NotCareStaffError`, `UnknownRevealSubjectError` and `RevealedIdentity` are the surface "
+        "this module is meant to have."
     )
 
 

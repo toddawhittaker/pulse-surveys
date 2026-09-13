@@ -44,12 +44,18 @@ denial-module closure sweep's inventory note (see also the new entry below —
 the E3 boundary widened the inventory and sharpened the disclosed limit); the
 bounced verdict rows' cap and aggregation halves; the unproven structural
 battery rows; the bounce that names no offending position; the week eyebrow's
-course length; the self-hosted font licences (E13); the resubmission that
+course length (taken as E4-17 after the owner's ruling of 2026-09-07 settled
+where the total sits, so it no longer passes through); the self-hosted font
+licences (E13); the resubmission that
 500s under a rewound clock; the model identifier in three untied places; the
 floor-headroom variance point (E10); the copy collector's symlinked-directory
-gap (E4); the bounced comment refused before harm screening (E10, with the
-E6 hook); the rendered student surface's string convention (E4); and the Care
-landing's stale docstring (a light-lane candidate E3 could not take). The
+gap (closed by E4-12, whose section is at the end of this file); the bounced
+comment refused before harm screening (E10, with the
+E6 hook); the rendered student surface's string convention (closed by E4-12,
+whose section is at the end of this file); and the Care
+landing's stale docstring (recorded here as a light-lane candidate E3 could not
+take — closed by E4-13, whose section is at the end of this file, and the lane
+was heavy rather than light). The
 "Owned by the spec already" list passes through with one change: E3's own
 row — grade passback reading validity state — is superseded, not closed. The
 item-based formula E3 built counts completed items from the answer rows and
@@ -72,6 +78,16 @@ on a Pulse surface, what a week's credit is made of, that a comment refused
 by §3.3 does not complete its item, what a blank optional comment costs, and
 that a posted score can move down on a later re-classification.
 
+**The instructor half closed by E4-12; the student half stays open against
+E8.** `instructor_report_page.participation_credit_note` renders in every
+week of the report's Participation region: what the validity rate counts,
+that credit is completed items out of total items with the week-by-week
+arithmetic in each posted score's gradebook comment, and that a later
+judgement can lower a posted score. The wording deliberately teaches that an
+unanswered item and a refused comment leave the same deficit — the
+privacy review of that ticket found a first draft stating the per-student
+join too plainly, and ADR 0153 carries the dated re-read.
+
 ## Comment de-anonymization by completion pattern
 
 Accepted in ADR 0125 on the ground that a weekly-updated score already
@@ -80,6 +96,27 @@ carries the same signal through its deltas.
 **Done when:** each states in writing that its suppression holds against a
 reader who also has the gradebook open, or changes what it suppresses.
 Nothing was owed inside E3.
+
+**E4's half is done, at E4-04, and it changed what it suppresses — twice.** ADR
+0153 is the statement. A released comment carries no week attribution anywhere,
+because a comment labelled with its week, read beside the per-week completion
+ledger the gradebook carries, narrows the author to about one person in a
+four-response week. And, after that ticket's security round, no batch may hold
+one week's worth of comments or fewer than a threshold's worth of distinct
+authors — ADR 0152's release gate — because the first version dropped the week
+from the payload and left the report's own week-to-week delta to say it instead.
+The residual that record names is a floor rather than a hole: a release is
+attributable no more closely than "one of at least two quiet weeks, one of at
+least a threshold's worth of people", which is the same size of candidate set §4
+already accepts for an ordinary week shown under its own heading. **E6 still owes
+the same statement for its moderation views**, which put comments beside a roster
+with reviewer decisions attached, and this entry stays open against that epic
+alone.
+
+2026-09-08: E4-12's credit-rule note stated the completion-to-content link a
+first time too plainly, and ADR 0153's own "what would change the answer"
+clause fired — the record carries the dated re-read, the note was reworded,
+and the accepted residual is unchanged.
 
 ## The roster sync's token-acquisition dial is unbounded
 
@@ -105,6 +142,16 @@ items-4-and-5 vocabulary gate over them.
 **Owner:** E4, with the copy-inventory growth over report surfaces.
 **Done when:** both strings are collected by the inventory or the inventory
 records why the gradebook is not a governed surface.
+
+**Closed by E4-12, on the first branch of the done-when: collected.**
+`backend/app/copy/gradebook.py` publishes `gradebook.line_item_label` and
+`gradebook.ledger_line`; `app/lti/ags.py` and `app/services/grading.py` read
+them, texts byte-identical, and the grading suites' byte-for-byte pins were
+untouched. The items-4-and-5 vocabulary gate was seen failing against a
+reassurance planted on the label. The gradebook is governed for vocabulary
+while recorded as owing no §4.1-item-5 confidentiality line — it is rendered
+by the LMS, not by Pulse — with the reason held in the test module's no-line
+map and argued in ADR 0158.
 
 ## The launch door ignores `azp` and reads a multi-valued `aud` as its first element
 
@@ -280,6 +327,18 @@ expired rows, proven by driving the task rather than by reading the grant, and
 the privilege record names whatever was added with the reason `SELECT` was
 withheld in the first place.
 
+**Closed by E4-14.** `lti_launch_nonce_grants_v002.sql` grants `pulse_app` the
+column-scoped `SELECT (expires_at)` the purge's own `DELETE ... WHERE` needs;
+`RUNTIME_COLUMN_PRIVILEGES` in `tests/integration/test_identity_grants.py`
+records it, beside a direct-query negative control proving `nonce` itself
+stays unreadable. `tests/integration/test_the_launch_replay_purge_runs_as_pulse_app.py`
+drives `purge_launch_nonces` as `pulse_app` against a table seeded with an
+expired and a live row in each of `lti_launch_nonce` and `lti_launch_state`:
+the task completes, the expired rows are gone, the live rows are intact, and
+the `lti_launch_state` half — the latent failure this entry names explicitly —
+now runs too. ADR 0150 records why `SELECT` was withheld in E1-08 and what
+this one-column widening concedes.
+
 ## ruff still lints as though the runtime were Python 3.13
 
 Not an E3 item — added by FIX-04, which moved the runtime to Python 3.14.
@@ -295,3 +354,67 @@ does not read this key, so nothing goes red while it waits.
 ecosystem proposes it. **Done when:** `target-version` says `py314` and the
 pinned ruff accepts it, proven by a `ruff check` that exits 0 rather than by
 the version number alone.
+
+## The Care landing's stale docstring
+
+Carried through the ledger above from `../e3/carried-from-e2.md`'s "The Care
+landing still says there are five landing views", which holds the detail and now
+carries the same closure note.
+
+**Closed by E4-13**, both halves of the done-when:
+
+- The docstring in `frontend/src/routes/care/index.tsx` describes the tree as it
+  is. Where it said "none of the five landings has any" motion it now names the
+  four landing views — admin, care, instructor, leadership — says none of them
+  has any, and adds that the tree is not motionless: the route that stopped
+  being a landing in E2-10, the student weekly survey, is the one surface with
+  motion today. The census was read off each landing's own source rather than
+  off another record. All four landings render `components/LandingView.tsx`,
+  whose only styled classes are `.pulse-landing` and `.pulse-line`, and neither
+  rule in `frontend/src/styles.css` carries an `animation` or a `transition`;
+  the survey's classes carry nine such declarations in the same file, and
+  nothing in `frontend/src` animates in JavaScript.
+- The stylesheet's opening comment is dated in words, and marked as history
+  besides — the entry offered either. The paragraph is attributed to E1-04 and
+  dated 2026-08-25, its sentence kept rather than rewritten, with one line
+  recording where the utility-class question stands: no utility class is used
+  anywhere in `frontend/src`, checked 2026-09-06.
+
+The assertion the component makes was correct before the ticket and is unchanged
+by it. The diff is comment blocks only, which is what lets a reviewer see the
+no-behavior-change claim in the diff shape.
+
+## The rendered student surface's string convention
+
+Carried through the ledger above from `../e3/carried-from-e2.md`'s "The
+rendered student surface's strings rest on a convention nothing sweeps",
+which holds the detail and now carries the same closure note.
+
+**Closed by E4-12.** `tests/fixtures/component_strings.py` parses every
+TypeScript file under `frontend/src/components/` and `frontend/src/routes/`,
+reusing the inventory's string and escape readers, and the invariant-marked
+rule refuses a user-visible string literal outside the copy modules: JSX text
+carrying letters, a literal in a user-visible attribute, a sentence-shaped
+literal anywhere unclassified, and anything the classifier cannot classify —
+fail closed, naming the line. The planted offender and the near misses the
+done-when asks for (a test id, a class name, a key literal, and the arrow
+shape `(week) => week < currentWeek` verbatim) are committed controls, and
+the sweep found real prey on day one: `UnknownAddress.tsx` shipped two
+literal sentences, governed now under `unknown_address.*`. Disclosed limits
+are recorded in ADR 0159; the sentences in `frontend/src/lib/landings.ts`
+sit outside the swept trees and are a new entry in `deferred.md` with an
+owner.
+
+## The copy collector's symlinked-directory gap
+
+Carried through the ledger above from `../e3/carried-from-e2.md`, whose
+entry holds the detail and now carries the same closure note; the deeper
+source is `../e2/deferred.md`'s last entry.
+
+**Closed by E4-12, on the done-when's first branch.** Both walks in
+`tests/fixtures/copy_inventory.py` pass `recurse_symlinks=True`. The planted
+symlinked-directory control was seen red against the unfixed walks (the run
+is summarized in `.attempts/E4-12.md`), the symlinked-file behavior is
+pinned so the repair could not narrow it, and the mutation battery re-proved
+all three mechanisms plus the near miss — a walk narrowed to skip symlinked
+files outright is killed by its own control.

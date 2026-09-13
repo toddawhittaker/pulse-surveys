@@ -654,9 +654,14 @@ points at, so an injection in application code cannot reach a shell in the
 database container, read past a row-level security policy, or read a student's
 name — it holds no privilege of any kind on `user_identity`. `DB_CARE_USER`
 serves the Care queue (SPEC §6.2) and is the only role that can re-identify a
-student, through two `SECURITY DEFINER` functions: one records that a reveal is
-about to happen and returns the record's id, and the other returns the name only
-against a record the caller has already **committed**. It holds no direct
+student, through three `SECURITY DEFINER` functions: one answers which student
+wrote a given comment, one records that a reveal is about to happen and returns
+the record's id, and the third returns the name only
+against a record the caller has already **committed**. The first is E4-01's and
+returns a key rather than a name — the Care queue names the comment it is acting
+on, and can no longer name a student at all
+([ADR 0144](docs/adr/0144-the-reveal-derives-its-subject-from-the-record-care-is-acting-on.md)).
+It holds no direct
 `SELECT` on that table either, so every route to a name goes through those
 functions, and a caller that rolls its own transaction back keeps neither the
 record nor the name. That was a real gap until E0-26 — the rows are streamed
@@ -670,10 +675,10 @@ log under-records too. Closing that is E10's. Only the `api` process is given th
 credential, which is a separate control and stays.
 
 A fourth role, `pulse_reveal_definer`, appears in `\du` and in none of this
-file. It owns both halves of the reveal and holds four grants, so that the only
-code able to read a name runs with a readable list of privileges rather than
-the migration identity's. It cannot log in, has no password anywhere, and needs
-nothing from an operator —
+file. It owns all three functions of the reveal and holds four table grants and
+two column-scoped reads, so that the only code able to read a name runs with a
+readable list of privileges rather than the migration identity's. It cannot log
+in, has no password anywhere, and needs nothing from an operator —
 [ADR 0043](docs/adr/0043-the-reveal-function-has-an-owner-of-its-own.md) is why
 it exists and what it does not protect against.
 

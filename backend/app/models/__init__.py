@@ -9,15 +9,21 @@ supervision graph, role_assignment and lead_faculty_mapping (E0-09), which SPEC
 §13 puts in that module. `audit` holds audit_log, which E0-10 needs because the
 Care reveal cannot return a name until its record is committed (ADR 0071). `ai` holds
 classification, the append-only record of what a model answered and which prompt
-version and model ID produced it (E0-13); §13 gives that module `summary` too,
-and E4 adds it. `clock` holds `clock_override`, the single row E2-04 lets a
+version and model ID produced it (E0-13). §13 gives that module `summary` too
+and this sentence used to promise it here; E4-02 built the stored summary in
+`report` instead, as `weekly_summary`, and ADR 0145 argues the move and names it
+as a departure from §13's layout rather than a gap in it. `clock` holds
+`clock_override`, the single row E2-04 lets a
 developer move the effective clock with — the one module here that §13 names no
 aggregate for, because a development scaffold is not part of the product's
 domain. `survey` holds question_set, question, response and answer — the
 weekly instrument and everything it collects (E2-05). `grades` holds grade_sync,
 the append-only account of what Pulse posted to a platform's gradebook, one row per
 post and a failed attempt included (E3-02, ADR 0124); the AGS call log beside it is
-in `lti`, with the registration the calls are made against. The other aggregates §13 lists arrive with the tickets that need
+in `lti`, with the registration the calls are made against. `report` holds what
+the weekly report stores — `weekly_summary`, `moderation_state` and the release
+batch as `release_batch` plus `release_batch_member` (E4-02, ADR 0145 and ADR
+0146). The other aggregates §13 lists arrive with the tickets that need
 them.
 
 **Importing this package must import every model module.** `backend/migrations/
@@ -31,7 +37,7 @@ The module is imported for that side effect, so it is re-exported in `__all__`
 rather than left to look like an unused import that a later cleanup can delete.
 """
 
-from app.models import ai, audit, clock, grades, identity, lti, org, survey, term
+from app.models import ai, audit, clock, grades, identity, lti, org, report, survey, term
 from app.models.base import NAMING_CONVENTION, AwareDateTime, Base, UuidPrimaryKey
 
 __all__ = [
@@ -46,6 +52,7 @@ __all__ = [
     "identity",
     "lti",
     "org",
+    "report",
     "survey",
     "term",
 ]

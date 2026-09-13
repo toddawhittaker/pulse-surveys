@@ -281,12 +281,23 @@ def _course_label(*, course: Course, prefix: Prefix, section: Section, term: Ter
 def _open_survey(
     session: Session, *, window: SurveyWindow, section: Section, term: Term, user_id: UUID
 ) -> OpenSurvey:
-    """The open window, the questions to answer, and this reader's own answers."""
+    """The open window, the questions to answer, and this reader's own answers.
+
+    **`length_weeks` is read off the section handed down here, never looked up
+    and never derived** (E4-17). It is the column `section_codes` wrote from the
+    §2.2 section code against the term's start-letter map, and the section is the
+    one the window belongs to — the same row the course week is measured against
+    two lines above, so a count and a week that disagreed about which section
+    they described could not arise. Deriving the total from the section code
+    again, here or in the browser, would be a second copy of the institution's
+    letter-to-length map.
+    """
     term_week = _term_week_of(session, window)
     question_set, questions = _current_question_set(session)
     return OpenSurvey(
         window_id=window.id,
         course_week=_course_week(term_week, section=section, term=term),
+        length_weeks=section.length_weeks,
         term_week=term_week,
         opens_at=window.opens_at,
         closes_at=window.closes_at,

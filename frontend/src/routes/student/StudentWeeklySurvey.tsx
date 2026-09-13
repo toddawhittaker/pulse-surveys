@@ -524,6 +524,7 @@ function OpenSurveyForm({
     <WeekEyebrow
       courseWeek={survey.course_week}
       termWeek={survey.term_week}
+      lengthWeeks={survey.length_weeks}
       closesAt={survey.closes_at}
     />
   );

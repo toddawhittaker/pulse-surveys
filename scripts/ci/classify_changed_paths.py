@@ -133,6 +133,29 @@ PARSED_DOCUMENTS = frozenset(
         # usage note, and no `COPY` names one — and the `design/` entry in
         # `INERT_DIRECTORIES` above is unchanged.
         "design/tokens.css",
+        # The third file to move, and the first that moves for the reason the
+        # docstring's sweep was written to catch rather than for a build input.
+        # E4-07's criterion 8 reconciles the report payload's Pydantic schema with
+        # the sketch in this breakdown, and
+        # `tests/unit/test_the_payload_sketch_and_the_schema_are_reconciled.py`
+        # does it by *parsing* the fenced JSON block out of this file and
+        # comparing its members with the schema's — which is exactly the shape
+        # `test_ai_contracts.py` takes over `docs/SPEC.md`, one directory over.
+        #
+        # Called inert, an edit to that sketch ran none of the suite that checks
+        # the schema still describes it, which is the whole of what criterion 8
+        # buys: a sketch that has quietly stopped describing the payload is a set
+        # of frontend fixtures built against something that will never arrive, and
+        # the pull request that made it stop is the one that should have found out.
+        #
+        # The coverage given up is pull requests that touch only this file, which
+        # is a saving E4 has taken often — every ticket that fills in a Merged cell
+        # in its table. That is the real cost and it is accepted on the same
+        # reasoning ADR 0070 records: a document a test parses is not documentation
+        # to the pipeline, whatever directory it sits in. **Only this path moves**;
+        # the rest of `docs/tickets/` is genuinely inert and the `docs/` entry in
+        # `INERT_DIRECTORIES` above is unchanged.
+        "docs/tickets/e4/README.md",
     }
 )
 

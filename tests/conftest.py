@@ -101,12 +101,53 @@ boundary: `metadata_tables` is asked for by both.
     client can post to and a term's worth of answers the participation formula can
     score, the `grade_sync` rows a test plants and reads back newest-first, and the
     names that ticket's work order settles.
+  - `fixtures/summary_task.py` — E4-05: the weekly-summary task, its renderer, its
+    two contract classes and its six constants, each looked up inside the test
+    body so a deliverable that has not landed is a FAILED naming it rather than a
+    setup error; plus the two gateway doubles — one that fails on any use at all,
+    for the empty week that must reach no model, and one that answers a script and
+    counts what it was asked.
+  - `fixtures/report_views.py` — E4-03: the term, section, question sets carrying
+    E4-02's `stream`, and answered weeks the three report views aggregate; the one
+    reader for a row of each view, on `db_session` and on a committed world the
+    application role can reach; and the validity service's recompute, bound by
+    signature because no record settles it.
   - `fixtures/dev_console.py` — E3-07: the `/dev` console built with the mock
     identity provider mounted so its roster fetch resolves in process, the reader
     that says which `data-testid` a page carries and which form encloses it, and
     the same-origin value a browser would send from that page. The shared home
     for a builder four modules already keep a copy of; those copies are not
     migrated yet, and the file says so.
+  - `fixtures/report_comments.py` — E4-04: the names that ticket's work order
+    settles for the comment read path, the cutter, its beat entry and its view;
+    a world whose windows this suite dates rather than SPEC §3.1's calendar, so
+    that "this week has closed and that one has not" is the same answer on every
+    date CI runs; the comments and moderation states a test plants; and the two
+    release tables read back, never written, by anything but the cutter.
+  - `fixtures/care_subject.py` — E4-01: the names that ticket's work order
+    settles, the comment a Care reveal derives its subject from (planted through
+    the model layer, since the moderation task that would write one is E6's), the
+    two-hat actor and a `user_id` off the roster of the section she teaches, and
+    the `audit_log` rows one actor left, read on a second connection.
+  - `fixtures/summary_job.py` — E4-06: the Monday summary job's settled names, the
+    world it walks (`report_views.py`'s on a committed session, with the
+    development clock moved so a week is *closed*, which is the whole of what the
+    job selects on), a gateway double that answers about whichever stream's
+    comments it was sent and can be made to fail on one section, and
+    `weekly_summary` read back on a connection that sees the task's own commits.
+  - `fixtures/report_api.py` — E4-07: the names that ticket's work order settles for
+    the report API, the two routes *discovered* through the module it settles
+    (nothing names their URLs), the six-week world one instructor's report is read
+    over with a section she teaches and one she does not, and the door she reads it
+    through with a session a real launch issued. The item-7 suppression helper and
+    the type of the `comparison` member are found by annotation, because the work
+    order settles the mechanism and no spelling.
+  - `fixtures/instructor_sections.py` — E4-18: the route that ticket settles, the
+    instructor who teaches two sections and the other instructor who teaches a
+    third, her second section under a second course so that the declared order is
+    neither the creation order nor the code order, and the two sessions criterion
+    3 is about — a person holding no grant, and a session naming no person —
+    which no launch can issue and which are therefore minted.
 
 Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
@@ -168,6 +209,13 @@ pytest_plugins = (
     "fixtures.line_item_creation",
     "fixtures.grade_sweep",
     "fixtures.dev_console",
+    "fixtures.summary_task",
+    "fixtures.care_subject",
+    "fixtures.report_views",
+    "fixtures.report_comments",
+    "fixtures.summary_job",
+    "fixtures.report_api",
+    "fixtures.instructor_sections",
 )
 
 

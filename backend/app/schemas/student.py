@@ -93,11 +93,27 @@ class OpenSurvey(BaseModel):
     back-filled, so a closed week is not something the form can answer and is not
     offered as one; the section it belonged to is still reported, which is how a
     student is told they are enrolled and there is nothing to do this minute.
+
+    **`length_weeks` is the reader's own section's length and nobody else's**
+    (E4-17). It is the `length_weeks` column of the section the window belongs
+    to, reached through the section the reader is enrolled in — the same scoping
+    argument `EnrolledSection.course_label` stands on, and §4.1 item 1 is what it
+    has to hold against. It names no other section, carries no identity, and
+    discloses nothing new: SPEC §2.2 puts the length in the section code the
+    student is already shown. It is a number about a calendar rather than about a
+    person, so no confidentiality rule in §4 reaches it.
+
+    It is a plain integer because the column is `NOT NULL` on the section row. An
+    optional one would let a read path that found no length answer a half-eyebrow
+    — "COURSE WK 04 / , TERM WK 07" — instead of failing where the data is wrong.
     """
 
     window_id: UUID = Field(description="The survey window this answers over.")
     course_week: int = Field(
         description="Which week of this section's own run the window covers, counting from 1."
+    )
+    length_weeks: int = Field(
+        description="How many weeks this section's own run lasts in total (SPEC §2.2)."
     )
     term_week: int = Field(description="Which week of the term the same window covers.")
     opens_at: datetime = Field(description="When the window opened.")

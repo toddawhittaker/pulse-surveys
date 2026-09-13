@@ -116,7 +116,25 @@ describes one tree. Landing two files at minute two would have made it describe
 neither, and nothing in the output would have said so. The edits waited; this
 paragraph is one of them.
 
+**E4-04's fix round, 2026-09-07 — the background suite run that was killed rather
+than read.** The security round's ten reds had to be confirmed before the fix
+landed, and the whole suite was started in the background first. The first edit of
+the fix went into the tree while that run was still going. The run was killed
+unread rather than reported, for a reason this ticket can name precisely: the
+service module under test is imported lazily inside test bodies, not at module
+scope, so a worker that had not yet reached one of those bodies would have loaded
+the *new* file — the run would have straddled the two trees exactly where its
+subject lives, and the failures it printed would have been a mix nobody could
+attribute.
+
+The reds were then confirmed the honest way: `git stash` the fix, run the four
+changed modules, `git stash pop` — **10 failed, 14 passed**, matching the
+coordinator's count, every red a FAILED. The general lesson is the one this entry
+already carries; the specific one is that a *background* run is easy to forget you
+are standing in. Nothing about starting it says "this tree is read-only now", and
+the work waiting to be done is what the run exists to justify.
+
 **Note for whoever trims this file next.** The rule is the three most recent
-instances, and adding this one makes four. Removing the oldest (E1-13) was
+instances, and this file now holds five. Removing the oldest (E1-13) was
 refused by the permission classifier as a deletion from a mistakes record, so the
 trim is left rather than worked around.

@@ -316,6 +316,28 @@ section, a reveal that must be refused. It lands **before any instructor-facing
 surface renders roster rows**, because that surface is what makes the path
 reachable.
 
+**Closed 2026-09-06 by E4-01**
+(`docs/tickets/e4/E4-01-reveal-subject-guard.md`,
+[ADR 0144](../../adr/0144-the-reveal-derives-its-subject-from-the-record-care-is-acting-on.md)).
+The equivalent guard rather than the Care case, because there is no case model
+until E10: `subject_user_id` is deleted from `reveal_identity` rather than
+validated, so the composition has no call to make — the reveal names one comment
+and derives its author through a third `SECURITY DEFINER` function that the Care
+connection may execute and nothing else may. The test the "done when" asks for is
+`tests/integration/test_the_reveal_derives_its_subject.py::test_a_roster_user_id_cannot_be_named_as_the_subject_by_a_care_officer_who_teaches`,
+and the refusal is attributed to the derivation rather than to the actor check by
+exception type in the tests beside it. The deadline held: E4-11 is the first
+instructor-facing surface to render roster rows, and E4's breakdown makes it wait
+on this ticket.
+
+Two things this did **not** close, and neither is new. The other half above — the
+Care-session sweep not seeing a reporting module import the reveal — is still
+E0-26 item 4's, carried to E10. And the guard says the subject must be somebody
+who wrote a comment, not that the comment is one Care has business with;
+restricting it to the threat and self-harm set waits for E6's moderation task,
+because `ClassificationTask` has one member today and a task member lands with the
+code that writes it. ADR 0144 records both rather than leaving them implied.
+
 ## `own_grant` and `resolve_scope` verify nothing about their caller
 
 **Found 2026-08-22 by the epic-boundary threat model.** Both take an arbitrary

@@ -60,6 +60,11 @@ runs were voided that way before the two timeouts were separated
 - `registry.py` — every task the runner walks.
 - `runner.py` — the command line, the refusals, the comparison, and the cost.
 - `validity/` — SPEC §3.3's comment-validity set and its floor.
+- `summary/` — SPEC §5.1's weekly-summary contract as cases, the checks that
+  grade them, and the sycophantic variant they are proven to fail against. The
+  registry slot is deferred and carries no cases: the set is exercised offline by
+  `tests/unit/test_the_summary_eval_cases_can_go_red.py`, and the first
+  real-provider run sets the numbers.
 - `threat/` — SPEC §9.3's strictest floor, as a slot with no set and no number.
   E10 sets it.
 
@@ -95,6 +100,17 @@ replacing it, so the figure carries over with its provenance rather than being
 restated on the new denominator; re-sizing it belongs to E10's revisit. Subtract the variance back out and two
 errors of real-regression headroom remain, which is the point of composing the two
 rules rather than letting the larger one win.
+
+**The weekly-summary floors are not set, and `tests/evals/summary/floors.py` says
+what they wait for.** E4-05 ships the cases and the way of grading them and stages
+the numbers the way E2 staged the validity pair: a figure written before a
+measurement is a floor nobody took. Two consequences worth knowing before reading
+that directory. The cases are not attached to the registry's summary slot, so no
+live run grades them — which is deliberate, because an AI-touching pull request
+runs the eval job live and four ungraded cases would cost a provider call each on
+every merge. And the checks are executed on every ordinary test run instead, over
+answers that hold the contract and answers that sand its criticism off, so the set
+is known capable of failing before it is ever measured.
 
 They may tighten in a later deliberate pull request as more runs refine the
 variance figure — that direction is the cheap one, and loosening is the one this

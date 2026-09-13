@@ -1,14 +1,15 @@
 """The people, courses and placements this platform pretends to have.
 
 **Small on purpose.** E0-15: "this seed data belongs to the mock platform and
-stays small". It is three sections in one term, each with a roster of its own —
-enough that a roster pages, that one student joins late and one drops, and that
-both modalities and more than one start letter reach a tool. The full demo
-institution is
+stays small". It is four sections in one term, each with a roster of its own —
+enough that a roster pages, that one student joins late and one drops, that both
+modalities and more than one start letter reach a tool, and that one class is
+large enough for a week of its survey answers to read like a real one. The full
+demo institution is
 E0-17's, and it is seeded into Pulse's own database rather than into this
 platform.
 
-Seven things about the shape are deliberate rather than incidental.
+Eight things about the shape are deliberate rather than incidental.
 
 **Every course carries a title, and a number SPEC §8 admits.** `course.lms_title`
 is `NOT NULL` (E0-05), so a titleless course is a row Pulse cannot store, and §8
@@ -54,6 +55,18 @@ section's single-page container fixture rests on.
 enrolled in `MATH-140-E1FF` and nowhere else, with a roles claim carrying no
 Instructor URN — see the constant for why that claim is the learner pair rather
 than something invented.
+
+**One section holds a class big enough to demonstrate a Monday report**
+(E4-20). `BIOL-310-R7FF` carries the shared instructor and twenty students of
+its own, and neither the shared learner nor the dean. Its start letter is `R`,
+so it runs the same twelve weeks from 2026-09-07 as `BIOL-215-R3WW` and one
+pretended clock serves both stories. The two people left out are the point
+rather than a convenience: a fourth open section under the shared learner
+collides with the two student-survey suites, and the dean's single-section shape
+is what `NURS-8100-Q2FF`'s five-member roster and E1-15's launch-page fixtures
+rest on. No spec launches this section, so it stays inert for every suite that
+exists; `scripts/seed_demo_story.py` writes its survey answers, after a staff
+launch has provisioned the section on the tool's side.
 
 **One enrollment window ends, and it is the same person the roster reports as
 gone.** SPEC §3.4 has the tool learn about a drop from NRPS enrollment data, and
@@ -227,11 +240,15 @@ INSTRUCTOR_ROLES = (f"{MEMBERSHIP_ROLE}Instructor", f"{INSTITUTION_ROLE}Instruct
 # than the URN it omits.
 NO_INSTRUCTOR_URN_ROLES = LEARNER_ROLES
 
-# The two people who are in every section, and so the two every suite that wants
-# an arbitrary section launches as.
+# The two people every suite that wants an arbitrary section launches as. The
+# instructor teaches all four; the learner takes the three that carry a mixed
+# cast, and E4-20's `BIOL-310-R7FF` is deliberately not one of them — a fourth
+# open section under her is a fourth survey in front of every student-survey
+# spec. Her label says so rather than leaving a reader to find it out from the
+# enrollments below.
 LEARNER = MockUser(
     user_id="mock-lms-user-learner",
-    label="A student enrolled in every section",
+    label="A student enrolled in every section but the demo story's",
     email=f"learner@{STUDENT_MAIL_DOMAIN}",
 )
 INSTRUCTOR = MockUser(
@@ -260,15 +277,15 @@ DEAN = MockUser(
 
 # Who the launch page offers, and the whole of it. The per-section students below
 # are seeded so a roster has members and pages; they are not people a browser
-# picks from, and offering all twenty-one would bury the three that every other
+# picks from, and offering all forty-one would bury the three that every other
 # suite reaches by name. `launch_users()` filters this by enrollment, so a name
 # added here without an enrollment is left off the page rather than published as
 # an option `resolve_launch` refuses.
 LAUNCH_PAGE_CAST = (INSTRUCTOR, LEARNER, DEAN)
 
-# The three sections. Course numbers are read off SPEC §8's table: `215` and
-# `140` are undergraduate three-digit numbers inside `000`-`799`, and `8100` is a
-# doctoral four-digit number inside `8000`-`9999`. Section codes are §2.2's:
+# The four sections. Course numbers are read off SPEC §8's table: `215`, `140`
+# and `310` are undergraduate three-digit numbers inside `000`-`799`, and `8100`
+# is a doctoral four-digit number inside `8000`-`9999`. Section codes are §2.2's:
 # more than one start letter, both modalities, `WW` online and `FF` face-to-face.
 CELL_BIOLOGY = MockContext(
     context_id="mock-lms-context-biol-215-r3ww",
@@ -285,6 +302,27 @@ NURSING_INQUIRY = MockContext(
     label="NURS-8100-Q2FF",
     title="Doctoral Practice Inquiry",
 )
+
+# E4-20's section: the one whose class is large enough that a week of its survey
+# answers reads like a real week. Start letter `R`, so it runs the same twelve
+# weeks from 2026-09-07 that `BIOL-215-R3WW` does and one pretended clock serves
+# both stories; `FF`, and the `BIOL` prefix, which `scripts/seed.py` seeds — a
+# launch into a context whose prefix the institution does not hold is refused as
+# an `unknown_prefix` defect and provisions nothing (`docs/MISTAKES.md` entry
+# 48).
+MOLECULAR_GENETICS = MockContext(
+    context_id="mock-lms-context-biol-310-r7ff",
+    label="BIOL-310-R7FF",
+    title="Molecular Genetics",
+)
+
+# How many students of its own `BIOL-310-R7FF` carries. Twenty is the owner's
+# parameter of 2026-09-09 and it is what makes the section worth having: SPEC
+# §4's default threshold is five, so a week where three quarters of a class of
+# twenty answer clears it several times over and the report reads as a busy week
+# rather than as a fixture. The seeder that fills the section reads the roster
+# rather than this number.
+DEMO_STORY_CLASS_SIZE = 20
 
 
 @dataclass
@@ -511,7 +549,7 @@ def enrolled(
 def seeded_platform() -> SeededPlatform:
     """The seed, built fresh: the sections, the people in them, and their enrollments.
 
-    The three roster sizes are chosen against the page size in `app.nrps`, and
+    The four roster sizes are chosen against the page size in `app.nrps`, and
     each is a case rather than a number picked to look plausible:
 
       - `BIOL-215-R3WW` holds twelve, which is two full pages and a short one;
@@ -521,13 +559,18 @@ def seeded_platform() -> SeededPlatform:
         boundary where a platform that advertises a next page whenever the page
         it just served was full serves an empty one. This is the section the dean
         is kept out of, and the reason he is.
+      - `BIOL-310-R7FF` holds twenty-one — the instructor and twenty students —
+        which is four full pages and a last page of one, the smallest short page
+        a roster can end on. It is E4-20's section and it is assembled separately
+        below, because the loop puts the shared learner in every section it
+        walks and this is the one section she is deliberately not in.
 
     Two rewrites are applied over the uniform sections at the end: the late add
     and the drop in `BIOL-215-R3WW`, and the one windowless enrollment in
     `NURS-8100-Q2FF`. Each is a function a reader can check against the rule it
     comes from, rather than a branch inside the loop above.
     """
-    contexts = (CELL_BIOLOGY, COLLEGE_ALGEBRA, NURSING_INQUIRY)
+    contexts = (CELL_BIOLOGY, COLLEGE_ALGEBRA, NURSING_INQUIRY, MOLECULAR_GENETICS)
     placements = tuple(
         MockPlacement(
             resource_link_id=f"mock-lms-link-{context.label.lower()}-weekly-pulse",
@@ -561,12 +604,45 @@ def seeded_platform() -> SeededPlatform:
     # shift five students across a page boundary for no reason.
     enrollments.append(enrolled(DEAN, COLLEGE_ALGEBRA, NO_INSTRUCTOR_URN_ROLES, E_SECTIONS_OPEN))
 
+    # E4-20's section, assembled on its own for the reason the docstring gives:
+    # the loop above enrolls the shared learner in every section it walks, and
+    # this is the section she is kept out of.
+    story_students, story_enrollments = the_demo_story_roster()
+    users.extend(story_students)
+    enrollments.extend(story_enrollments)
+
     return SeededPlatform(
         users=tuple(users),
         contexts=contexts,
         placements=placements,
         enrollments=tuple(without_an_enrollment_window(with_the_add_and_the_drop(enrollments))),
     )
+
+
+def the_demo_story_roster() -> tuple[list[MockUser], list[MockEnrollment]]:
+    """`BIOL-310-R7FF`'s people: the shared instructor and twenty students of its own.
+
+    A function of its own rather than a fourth row in the loop above, because the
+    loop's rule is "the instructor, the learner, then this many students" and
+    this section's rule is "the instructor, then this many students". Writing it
+    as a flag on the loop would put the one interesting fact about this
+    section — that the shared learner is not in it — inside a branch, where the
+    reader who wonders why her survey list did not grow has to reconstruct it.
+
+    Everybody here enrolls when the section opens, `Active`, with a window: the
+    two enrollment edge cases SPEC §3.4 asks for are seeded in the two sections
+    that already hold them, and repeating either here would give E4-20's report
+    a participation denominator that is interesting for a reason that has
+    nothing to do with the report.
+    """
+    students = [
+        student(MOLECULAR_GENETICS, ordinal) for ordinal in range(1, DEMO_STORY_CLASS_SIZE + 1)
+    ]
+    enrollments = [enrolled(INSTRUCTOR, MOLECULAR_GENETICS, INSTRUCTOR_ROLES, R_SECTIONS_OPEN)]
+    enrollments.extend(
+        enrolled(person, MOLECULAR_GENETICS, LEARNER_ROLES, R_SECTIONS_OPEN) for person in students
+    )
+    return students, enrollments
 
 
 def with_the_add_and_the_drop(enrollments: list[MockEnrollment]) -> list[MockEnrollment]:

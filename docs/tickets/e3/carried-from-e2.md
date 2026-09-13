@@ -375,9 +375,20 @@ and requires the untouched one to carry no coaching.
 nothing that says how many weeks the section runs for; deriving it in the
 frontend would be a second copy of the start-letter map in TypeScript. Source:
 `../e2/deferred.md`.
-**Owner:** a candidate heavy-lane ticket — one field on a schema and one read in
-the survey read service.
-**Done when:** the deferred entry's.
+**Owner:** [E4-17](../e4/E4-17-eyebrow-course-length.md), heavy lane, taken
+after the owner's ruling of 2026-09-07 settled where the course length sits in
+the eyebrow string. It was a candidate rather than an owned item until then —
+one field on a schema and one read in the survey read service, which is what
+made it heavy.
+**Done when:** the deferred entry's, both halves, read together with that
+entry's note of 2026-09-07.
+**Closed by E4-17.** `OpenSurvey` carries `length_weeks`, read off the section
+the window belongs to, and the eyebrow renders `COURSE WK 04 / 12, TERM WK 07`
+from governed copy with the total padded like the week beside it. The count is
+asserted against the seeded start letter and the term's start-letter map rather
+than against the service that computed it, and a sweep over `frontend/src/`
+keeps the TypeScript copy of that map from arriving later. The closing record is
+in `../e2/deferred.md`, with this entry.
 
 ## The self-hosted faces: an unrecognized licence, a missing notice, and a second copy nobody fetches
 
@@ -444,6 +455,9 @@ directory symlink committed under the copy tree would ship strings with SPEC
 and cheap to take sooner.
 **Done when:** the deferred entry's, with a planted symlinked-directory control
 seen red.
+**Closed by E4-12** — `../e4/carried-from-e3.md` carries the closure note:
+both walks follow directory symlinks now, the control was seen red first, and
+the battery proved every mechanism.
 
 ## A bounced comment is refused before any harm screening exists — E10's floor takes the path into scope
 
@@ -489,6 +503,10 @@ inventory E4 grows anyway.
 user-visible string literal outside the copy modules, reusing the
 inventory's parser, with a planted offender and a near miss (a test id, a
 class name, a key literal) both proven.
+**Closed by E4-12** — `../e4/carried-from-e3.md` carries the closure note:
+the sweep exists with offender and near-miss controls, it caught two real
+ungoverned sentences on its first run, and its disclosed limits are ADR
+0159's.
 
 ## The Care landing still says there are five landing views
 
@@ -509,6 +527,12 @@ which reads as history rather than as a claim about the tree today.
 is the light lane.
 **Done when:** that docstring describes the tree as it is, and the stylesheet's
 opening comment is either left as dated history or dated in words.
+
+**Closed by E4-13**, which took both halves; `../e4/carried-from-e3.md` records
+the closure in full. The owner line above was one lane out: the next ticket
+covering `frontend/src/routes/care/` is a heavy one, because
+`.claude/heavy-lane-paths.md` makes any path matching `*care*` heavy wherever it
+lives.
 
 ## Owned by the spec already
 
@@ -538,6 +562,15 @@ standing ADR's, or an earlier boundary's, not re-owned here.
   stated: component-level regressions surface in a browser run instead of a unit
   run. Revisit when a screen's logic outgrows what the end-to-end suite pins
   cheaply; `../e2/README.md` carries the entry.
+  **Closed by E4-16.** The revisit trigger tripped structurally rather than
+  through one screen growing large: E4 scheduled four component tickets
+  (E4-08, E4-09 and E4-10 among them, three building in parallel) whose
+  acceptance criteria are component tests, and none could execute a test
+  before this ticket. E4-16 added vitest, jsdom and `@testing-library/react`
+  to the frontend workspace, wired `npm run test --workspace frontend` into
+  the `lint-frontend` CI job, and recorded the runner choice and the
+  component-test conventions the three tickets build to in
+  [ADR 0151](../../adr/0151-the-frontend-gains-a-unit-test-runner.md).
 - **Leadership landing views stay empty until E9.** The transitive purview walk
   raises by design (ADR 0003), so an assistant dean's roll-up is fail-closed
   rather than partial; ADR 0108 records why that is the honest state and names

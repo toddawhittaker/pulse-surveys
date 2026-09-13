@@ -1,0 +1,299 @@
+/* The instructor report's comment half — ticket E4-10.
+ *
+ * Tokens only, as SPEC §7.6 requires: every colour, face, size, space, radius
+ * and shadow below is a `var(--*)` reference into `design/tokens.css`, and
+ * there is no raw hex here for `tests/unit/test_the_frontend_source_uses_tokens_only.py`
+ * to find. The definitions are not imported: `src/styles.css` imports
+ * `design/tokens.css` once for the whole application, and a second import
+ * would be a second opinion about where the palette lives.
+ *
+ * A component-scoped stylesheet rather than a block in `src/styles.css`: three
+ * frontend tickets of this wave (E4-08, E4-09 and E4-10) build in parallel
+ * against the same payload sketch, and one shared file edited three times is a
+ * merge nobody reviews. Whether these rules eventually fold into the
+ * application stylesheet is E4-11's or E4-12's call, made when all three are in
+ * one tree; nothing here depends on the answer.
+ *
+ * All motion is CSS, so `design/tokens.css`'s reduced-motion kill switch
+ * removes it. Nothing in these components animates in JavaScript.
+ */
+
+/* ---- The group: heading, summary, then its cards ---- */
+
+.pulse-comment-group + .pulse-comment-group {
+  margin-top: var(--space-6);
+}
+
+/* The mono eyebrow the prototype gives a group heading: uppercase Spline Sans
+ * Mono at 0.08em, spruce-60 (`design/Usage Rules.md` §5). It is a real heading
+ * element carrying eyebrow styling rather than a styled div, because §5.1 says
+ * an empty group shows its notice under its heading rather than hiding it —
+ * which only means something if the heading is one. */
+.pulse-comment-group__heading {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--spruce-60);
+}
+
+.pulse-comment-group__empty {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-1);
+  line-height: 1.55;
+  color: var(--spruce-60);
+}
+
+/* Where the AI panel would have been, on a week no summary was written for
+ * (E4-11). A quiet line in the flow rather than an empty inset panel: the panel
+ * is the brief's provenance treatment for generated prose, and an empty one
+ * would be that treatment applied to nothing. It sits above the cards, in the
+ * panel's place, so the group's order is the same whether a summary arrived. */
+.pulse-comment-group__absent-summary {
+  margin: 0;
+  font-size: var(--text-1);
+  line-height: 1.55;
+  color: var(--spruce-60);
+}
+
+.pulse-comment-group__cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ---- The AI summary panel ---- */
+
+.pulse-ai-panel {
+  display: block;
+  background: var(--chalk);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  padding: var(--space-4) var(--space-5);
+  font-family: var(--font-body);
+}
+
+.pulse-ai-panel__provenance {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.pulse-ai-panel__label {
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--spruce-60);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+  padding: 2px 6px;
+}
+
+.pulse-ai-panel__heading {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-1);
+  font-weight: 500;
+  color: var(--spruce-60);
+}
+
+.pulse-ai-panel__text {
+  margin: 0;
+  font-size: var(--text-2);
+  line-height: 1.55;
+  color: var(--spruce);
+}
+
+/* The response count and the held note are meta about the summary, in the mono
+ * face every other number on this report wears. */
+.pulse-ai-panel__meta {
+  margin: var(--space-2) 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  color: var(--spruce-60);
+}
+
+/* ---- A comment card ---- */
+
+.pulse-comment-card {
+  display: block;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-4) var(--space-5);
+  font-family: var(--font-body);
+}
+
+/* A student's own words, at reading size, in the body face — which is what
+ * `design/CommentCard.dc.html:11` sets them in, and the owner's ruling of
+ * 2026-09-13 settles it that way (E4-21). The reading treatment
+ * `design/Usage Rules.md` §5 describes still holds for the longer passages a
+ * person writes deliberately — a Care case, an instructor's published response —
+ * and a comment card is a short remark in a stacked list, which reads better in
+ * the face the rest of the report is set in. The §5 line and the note in
+ * `design/tokens.css` are corrected in the same change, so no record is left
+ * asserting the old treatment. */
+.pulse-comment-card__text {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-2);
+  line-height: 1.55;
+  color: var(--spruce);
+}
+
+/* §5.2's excluded state: the text stays visible to the instructor, muted, above
+ * the exclusion notice.
+ *
+ * **Spruce-60 rather than mist, and the E4 boundary round measured why.** Mist
+ * against paper is 2.58:1 — below WCAG AA's 4.5:1 for body text and below even
+ * the 3:1 graphical floor — so an excluded comment's own words and the sentence
+ * explaining them were the least readable text on the report, which is the wrong
+ * direction for a passage an instructor is being asked to make a decision about.
+ * Spruce-60 is 5.18:1 on paper and 4.85:1 on chalk, and `design/tokens.css`
+ * already names it "secondary ink: labels, helpers, meta", which is what these
+ * two are.
+ *
+ * `design/tokens.css` still names mist for excluded comment text and this file
+ * departs from it deliberately: that line predates the measurement, the token's
+ * own published role is de-emphasis for *lines* in a chart, and the file's focus
+ * ring already carries the same correction in the other colour — it moved to
+ * marigold-deep because "the accent measures 2.1:1 against chalk and 2.2:1
+ * against paper". De-emphasis here is carried by weight, size and the notice
+ * beside it rather than by a contrast a reader cannot resolve. */
+.pulse-comment-card__text--muted {
+  color: var(--spruce-60);
+}
+
+.pulse-comment-card__notice {
+  display: block;
+  margin-top: var(--space-3);
+  font-size: var(--text-1);
+  line-height: 1.5;
+  color: var(--spruce-60);
+}
+
+.pulse-comment-card__flag-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* Madder means "attend to this" and nothing else (`design/Usage Rules.md` §2). */
+.pulse-comment-card__flag-chip {
+  font-size: var(--text-1);
+  font-weight: 500;
+  color: var(--madder);
+  border: 1px solid var(--madder);
+  border-radius: var(--radius-input);
+  padding: 2px 8px;
+}
+
+.pulse-comment-card__flag-note {
+  font-size: var(--text-1);
+  color: var(--spruce-60);
+}
+
+/* The disclosure. A real button, so the browser gives it Enter and Space and
+ * the focus ring `design/tokens.css` publishes. */
+.pulse-comment-card__disclosure {
+  margin-left: auto;
+  white-space: nowrap;
+  font-family: var(--font-body);
+  font-size: var(--text-1);
+  font-weight: 500;
+  padding: 6px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+  background: var(--paper);
+  color: var(--spruce);
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.pulse-comment-card__disclosure:hover {
+  background: var(--chalk);
+}
+
+/* The optional stream chip, default off — a mono eyebrow in a hairline box. */
+.pulse-comment-card__stream-chip {
+  display: inline-block;
+  margin-bottom: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--spruce-60);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+  padding: 2px 8px;
+}
+
+/* The flagged-comment expand: 200ms height ease, inside the brief's 150–220ms
+ * band, with the flag row above it unmoved so the chip stays the eye's anchor.
+ * It is an animation rather than a transition because the text is in the DOM
+ * only while it is shown — a collapsed disclosure whose words a screen reader
+ * can still read is not collapsed — so there is nothing to transition from.
+ * The bound is on the animation alone and not on the element, so a long comment
+ * settles at its own height rather than being clipped. */
+.pulse-comment-card__body {
+  margin-top: var(--space-3);
+  animation: pulse-comment-card-expand 200ms ease;
+}
+
+@keyframes pulse-comment-card-expand {
+  from {
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+  }
+
+  to {
+    max-height: 480px;
+    opacity: 1;
+    overflow: hidden;
+  }
+}
+
+/* ---- The small-N notice, instructor audience ---- */
+
+.pulse-small-n-notice {
+  display: block;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-5);
+  font-family: var(--font-body);
+}
+
+/* The flat pulse line: the signature motif's empty/withheld variant, in mist. */
+.pulse-small-n-notice__mark {
+  display: block;
+  margin-bottom: var(--space-3);
+}
+
+.pulse-small-n-notice__title {
+  margin: 0 0 var(--space-1);
+  font-family: var(--font-body);
+  font-size: var(--text-2);
+  font-weight: 500;
+  color: var(--spruce);
+}
+
+.pulse-small-n-notice__body {
+  margin: 0;
+  font-size: var(--text-1);
+  line-height: 1.55;
+  color: var(--spruce-60);
+  text-wrap: pretty;
+}

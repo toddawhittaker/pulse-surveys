@@ -1,13 +1,32 @@
 # Entry 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 8**
+**Caught: 9**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*13 occurrences recorded; seven of them are catches. This file keeps the three
+*14 occurrences recorded; eight of them are catches. This file keeps the three
 most recent instances; the rest live in git history — plus the oldest catch and
 the addendum under it, which are one lesson, and trimming one without the other
-would leave a paragraph referring to nothing.*
+would leave a paragraph referring to nothing. The E4-04 catch below makes four
+recent ones, and the trim of the E2-16 paragraph is owed to whoever touches this
+file next.*
+
+*(**A catch**, writing E4-04's grant tests, 2026-09-06. The ACL half of
+`tests/integration/test_the_comment_path_runs_over_the_connection_production_uses.py`
+asks `has_table_privilege` in both directions over four relations and two roles,
+and every one of those questions is answerable by a probe that has gone blind. So
+each probe passes a control first: a relation the role under test certainly reads,
+**one per role and that is the point rather than a detail** — `pulse_app` reads
+`classification`, and `pulse_care` does not read it at all, because the Care role's
+whole grant list is `SELECT` on `role_assignment` plus the reveal's definer path.
+A control pointed at the wrong role's relation reports absence, passes, and makes
+every assertion behind it vacuous, which is the failure a control exists to catch.
+The same reading covers the one place this ticket reaches identity: the
+respondent leg of the release gate walks `answer.response_id` to `response.user_id`,
+and the identity-table sweep polices relation names and model classes, neither of
+which a column called `user_id` is — so the module docstring names the three
+functions a reviewer has to read rather than letting a green sweep stand as the
+claim.)*
 
 *(**A catch**, writing the E3 exit cleanup's tests, 2026-09-06. The view guards
 on identity enumerate two currencies — a column dependency and a whole-row

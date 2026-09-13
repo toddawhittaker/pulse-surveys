@@ -1,0 +1,57 @@
+-- What the application may read to answer the instructor's Monday report —
+-- ticket E4-03, SPEC §5.1, §4.1 item 1, ADR 0001, ADR 0009, ADR 0041, ADR 0147.
+--
+-- Three views and one verb. Without this file every read of them is refused by
+-- Postgres with 42501 rather than by anything E4-07 is about, because the report
+-- runs on the connection `pulse_app` holds and nothing grants that role a
+-- privilege in advance.
+--
+-- **SELECT, on these three, and nothing else.** This ticket only reads. The
+-- rule every grants file in this tree follows is that a privilege lands in the
+-- change that spends it, so no verb here anticipates a writer: nothing in E4
+-- writes a report view, and the tables underneath already carry the grants their
+-- own tickets gave them.
+--
+-- **The withheld verbs are the load-bearing half.** These are aggregates over
+-- what students submitted, so a runtime role that could write to one could
+-- rewrite a week's report. Postgres would in fact refuse such a write a second
+-- time — a view with a `GROUP BY` is not auto-updatable, and the rewriter answers
+-- 55000 — but that is a different layer's refusal and it would be identical
+-- against a role holding `ALL PRIVILEGES`. The ACL is the layer this ticket owns,
+-- and `tests/integration/test_the_report_views_are_readable_by_the_runtime_role_and_written_by_nobody.py`
+-- asserts the SQLSTATE rather than merely that something raised, so a widened
+-- grant here is a red test rather than a green one.
+--
+-- **A grant on a view does not make its rows reachable.** A view executes with
+-- its owner's privileges and `security_invoker` is off, so what stands behind
+-- these three is the migrating owner's read of the survey tables, not this file.
+-- That is why the same test suite reads real rows through the application
+-- connection: a view re-owned by a role holding nothing on those tables leaves
+-- every grant in this file intact and every instructor's report empty.
+--
+-- **pulse_care is granted nothing.** The Care surface reaches a threat comment
+-- and the audited reveal (SPEC §6.2, ADR 0001); a section's rating distribution
+-- is no part of it, and a role gets no privilege it has no use for.
+--
+-- **USAGE ON SCHEMA public is not granted again here.** `identity_grants_v001.sql`
+-- grants it to pulse_app and `identity_grants_v002.sql` restates it; an ACL entry
+-- records no history, so a third grant would be indistinguishable from those and
+-- any matching revoke would remove all of them.
+--
+-- **The downgrade has nothing to revoke**, which is the difference between this
+-- file and `student_read_grants_v001.sql`. That one grants on base tables which
+-- outlive its revision, so its revision writes the REVOKE by hand. These three
+-- privileges are recorded on objects the same revision creates, and dropping a
+-- view takes its ACL entries with it.
+--
+-- **This widens what pulse_app can reach, and it is meant to be visible.**
+-- `SANCTIONED_VIEW_COLUMNS` in `tests/integration/test_identity_grants.py` is the
+-- hand-written record every readable view column is compared against as an
+-- equality in both directions, deliberately not derived from these `.sql` files
+-- so that a widening cannot justify itself. The three entries admitting these
+-- views carry the sentence that admits them: not one of the columns names a
+-- person in any currency.
+
+GRANT SELECT ON public.report_rating_distribution TO pulse_app;
+GRANT SELECT ON public.report_workload TO pulse_app;
+GRANT SELECT ON public.report_response_counts TO pulse_app;

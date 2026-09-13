@@ -72,3 +72,44 @@ the privilege at all.** Where a ticket's behaviour depends on a grant, at least
 one test has to reach the code through the connection production uses; the
 grant-shaped failure is invisible to every other test in the module and will pass
 review as a green suite.
+
+## A catch: E4-03's report views are read once as the runtime role (2026-09-06)
+
+E4-03's three aggregate views are read by `pulse_app` and by nothing else, and
+every natural test of them reads through `db_session` — the migrating identity —
+because that is the only connection that can see rows inside a transaction the
+fixture rolls back. Written that way the whole suite would have proved the
+arithmetic and nothing about the grant, and two failures would have shipped
+green: a `GRANT SELECT` naming the wrong view, and a view left owned by a role
+that cannot read `answer` or `response` underneath, which refuses at execution
+time however correct the grant on the view is.
+
+So `tests/integration/test_the_report_views_are_readable_by_the_runtime_role_and_
+written_by_nobody.py` opens `application_engine` for all three of its tests,
+asserts `current_user` first as the control that the connection really is the
+restricted one, and one of them commits a world through `committed_rows` and
+compares the rows the application connection reads against the rows the migrating
+one does.
+
+Counted as a catch: the rule named a test that would otherwise not have been
+written, and it is the only test in the ticket that can see either of those two
+failures.
+
+## A catch: E4-04's comment path is read and written as `pulse_app` (2026-09-06)
+
+E4-04 widens the runtime role four ways — `SELECT` on the new `report_comment`
+view and on `moderation_state`, `SELECT, INSERT` on `release_batch` and
+`release_batch_member` — and every other test in the ticket drives the service
+through the migrating engine, which holds everything. This entry is why
+`tests/integration/test_the_comment_path_runs_over_the_connection_production_uses.py`
+exists, and why it has two behavioural halves rather than one. The read half
+commits a world and reads it back as `pulse_app`, which is the only test that can
+see a view left owned by a role holding nothing on `answer` or `response`
+underneath: the grant on the view can be perfectly in place and the read still
+refuse at execution time. The write half drives the cutter over the same
+connection, because `INSERT` is a privilege no read covers and a grants file
+copied from a read view's is exactly how a missing one arrives — a defect
+invisible to the whole suite and waiting for the first Monday of a term.
+
+Counted as a catch: two grant-shaped failures with no test between them and the
+scheduled job, both of them green under every other module in the ticket.

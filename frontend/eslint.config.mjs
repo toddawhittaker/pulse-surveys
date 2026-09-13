@@ -20,7 +20,7 @@ import eslint from '@eslint/js';
 import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
-const CHECKED = ['src/**/*.ts', 'src/**/*.tsx', 'vite.config.ts'];
+const CHECKED = ['src/**/*.ts', 'src/**/*.tsx', 'vite.config.ts', 'vitest.config.ts'];
 
 export default tseslint.config(
   {

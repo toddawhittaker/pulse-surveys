@@ -12,8 +12,8 @@ once the epic is finished:
 - `gateway.py` and `tasks.py` — the single-shot client and the per-task calls.
   `gateway.py` is the one place a model is called from; `tasks.py` gives each
   §7.4 task its own function. E0-13 built both and implements the first task
-  end to end — the other four carry contracts and wait on the prompts that
-  belong to E2, E4, E6 and E7.
+  end to end, and E4-05 the third — the other three carry contracts and wait on
+  the prompts that belong to their own epics.
 
 Nothing in this package reaches the database or the configuration surface. A
 contracts module that imports `app.db` builds an engine out of `Settings()` at

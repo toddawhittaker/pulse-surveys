@@ -97,7 +97,12 @@ CARE_ENGINE_BUILDER = "_care_engine"
 CARE_REFUSAL = "CareQueueNotConfiguredError"
 
 # The public entry point ADR 0042 gives E10: "`reveal_identity` takes the acting
-# person, the subject and an optional case id".
+# person, the subject and an optional case id". **E4-01 changed how the subject is
+# named** — the caller hands over the identifier of the comment Care is acting on
+# and the author is derived server-side — and this module is unaffected, because
+# the call below is assembled from the signature rather than written out. The
+# quotation is left as ADR 0042 wrote it; ADR 0144 is where the change is
+# recorded.
 REVEAL = "reveal_identity"
 
 # Absent, empty, and whitespace-only — the three ways a process ends up without
@@ -433,6 +438,13 @@ def test_a_reveal_in_a_process_without_the_credential_refuses_naming_the_variabl
     optional ones are left alone. If a required parameter arrives that a UUID
     cannot stand in for, that is an interface question for the ticket rather than
     something to guess at here, and the failure will name the parameter.
+
+    **E4-01 renamed one of those parameters and this test did not have to change**,
+    which is the assembly earning its keep: the subject is no longer a
+    `subject_user_id` but the `answer_id` of the comment Care is acting on, and a
+    UUID stands in for that just as well. What is asserted here is untouched by
+    that — a process without the credential refuses before any argument means
+    anything.
 
     Nothing about argument validity should decide this: the actor's assignment is
     checked over the Care connection (ADR 0042's third consequence), so there is

@@ -1,157 +1,17 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 15**
+**Caught: 21**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*19 instances recorded; the 14 most recent are below, newest first — except the
-E0-18 PR 2 one, which sits further down beside the consequence it illustrates.
-The 5 earliest are in this file's git history and in the pull requests they cite.
-It carries more than three because the E2-16 one and the E2-05 one are
-the same inventory in the same module a ticket apart, and reading either without
-the other loses what the pair shows; **the trim is overdue and it should take
-that pair together**, not a paragraph off the end.*
-
-*(**2026-09-04, E3-04 (`e3/ags-client-and-mock-enforcement`), caught before
-anything was written.** The ticket turns on credential enforcement across the
-mock's whole AGS surface, which is the largest instance of this shape the
-repository has met: every line-item, score and result call in two merged E0-15
-suites is made without a credential and every one of them would answer 401, with
-the repair on the read-only side of the wall. The ticket's own known-traps
-section names the entry, so the sweep was the first thing done. Nearly all of the
-calls funnel through `MockPlatform`, so the repair is one fixture: an
-`ags_token(scope)` cache and an `ags_get`/`ags_post` pair that attach the scope
-each route takes. **The half a fixture-only repair would have missed is the nine
-direct call sites** — `mock_platform.service_get(...)` written out in
-`test_mock_lms_paging_and_service_urls.py` and
-`test_mock_lms_ags_line_items_and_scores.py`, found by grepping for the method
-rather than for the helpers — and one of them is worse than a red: the naive
-`/scores` concatenation test asserts `400 <= status < 500`, so a 401 would have
-kept it **green while measuring the credential instead of the URL**, which is
-entry 3 arriving through this one. Attaching tokens is inert until the
-enforcement lands, so the whole repair rides the tests-first commit. Counted as a
-catch: without it the implementer's first run would have been two walls of red
-E0-15 tests, one of them silently passing for the wrong reason, on modules they
-may not edit.)*
-
-*(**2026-09-04, E3-02 (`e3/passback-schema-and-address`), caught while the tests
-were being written.** E3-02 puts a second launch address — the AGS line-item
-container — through the same chokepoint the roster address passes, and records a
-defect kind of its own when it is refused. The mock platform advertises that
-container at `http://mock-lms:8000/…`: cleartext, on the mock's own host, refused
-twice over under a deployment's name. Every launch in
-`test_a_roster_address_is_judged_by_the_registration_rules.py` is driven under
-`ENVIRONMENT=production` and every assertion in it goes through
-`the_one(rows.defects())` — exactly one recorded defect. Left alone, E3-02 would
-have put a second defect on every one of those launches and reddened a merged
-ticket's module inside its own driving, on a rule that module's ticket never
-heard of, with the repair on the read-only side of the wall. Acting on the
-entry, the module's fixture now rewrites the gradebook address to an acceptable
-literal and its docstring says why; the change is inert before E3-02 lands — a
-claim member nothing reads — and correct after. Counted as a catch: without it
-the implementer's first run would have been a wall of red roster-address tests
-reading as a defect in address judgement, on a module they may not edit. The
-same sweep found nothing else: `grade_sync` and `ags_call` are new tables, and
-the two `section` columns are nullable additions with no constraint, so E0-33's
-forty-one-fixture shape did not repeat.)*
-
-*(**2026-09-03, FIX-01 (`fix/student-surface-copy`), caught before anything was
-written.** FIX-01 adds a second read-time question to
-`app.services.survey_windows` — `next_window_for_section`, beside E2-06's
-`open_window_for_section`. The obvious place to name it is
-`tests/fixtures/survey_windows.py`, whose `survey_window_service` fixture
-already looks `derive_windows_for_section` and `open_window_for_section` up and
-`pytest.fail`s by name when either is missing. That fixture is asked for by
-every E2-06 suite and by E2-08's submit-machinery module, so a third required
-name would have failed all of them **inside their own setup**, on a symbol their
-own tickets never promised, with the repair on the read-only side of the wall —
-this entry's shape exactly. Acting on the entry, the test author read the
-fixture before editing it: the constant is added there so a rename stays one
-line, and the *lookup* lives in FIX-01's own module, which fails by name for the
-one suite that is about the new function. Counted as a catch: without it the
-implementer's first run would have been a wall of red E2-06 tests reading as a
-defect in window scheduling, and they may not have edited a line of it.)*
-
-*(**2026-09-03, E2-16 (`e2/data-model-repairs`), disputes E2-16-01 and
-E2-16-02.** The ticket gives `response` the term-agreement rule `survey_window`
-has had since E2-05: a `term_id` on the row, held by composite foreign keys into
-`section (id, term_id)` and `week (id, term_id)`. It reddened two classes of
-test the implementer may not touch. The first is the closed inventory in
-`test_identity_column_marker.py` expiring on the new column — this entry's
-E2-05 instance replayed, and the pin working exactly as built: the repair is a
-human re-reading the reason and re-pinning the columns. The second is eighteen
-tests across three seeding sites, red **inside their own setup**: each writes a
-`response` naming a section and a week explicitly while handing `seed_row` an
-empty chain, so the walker — which fills an unnamed NOT NULL foreign key from
-the chain and builds the target when the chain has none — invented a section in
-a fresh term and took that term, and the composite key refused a row whose
-section and week were somebody else's. Fourteen of the eighteen were one
-fixture. **Not counted as a catch**: nothing swept for them before the schema
-changed, and both classes arrived as a red runner and a dispute round. The sweep
-that would have found them is this entry's own and is one line — the callers that
-write the table the new rule constrains, read for which of them name only part of
-the key.
-
-**What this instance adds is the half the sweep would still have missed.** Of the
-four seeding calls in `test_survey_schema.py`, three went red and the fourth went
-**green** — the duplicate insert, whose test asks only "was this refused?" through
-a helper that accepts any `DatabaseError`. With the term left to the walker it was
-refused by the composite foreign key rather than by
-`uq_response_user_id_section_id_week_id`, so the test would have gone on passing
-while measuring a different constraint entirely (`docs/MISTAKES.md` entry 3, and
-it was found by reading the file rather than by the run). So: **when a new write
-rule reddens setup, look at the tests around it that stayed green.** A test that
-asserts a refusal cannot tell one refusal from another, and a new constraint is a
-new way for it to pass.)*
-
-*(**2026-09-02, E2-12 (`e2/eval-floors`).** The ticket's configuration split
-strikes the spelling `AI_MODEL_NAME` and gives the mock endpoint a triple of its
-own, so assertions naming the old variable, and fixtures that configure a
-test-process gateway under the real triple's names, describe spellings the
-ruling removed. Acting on this entry, the test author swept for them before
-writing anything and repaired nine files in a commit of their own — then
-measured the blast radius rather than counting the diff, and found that one of
-the nine carries four more with it: the renamed assignment in the submit
-fixture reddens four committed integration modules that consume it, thirteen
-files rather than nine. Those four are green at HEAD and red only with the
-repair, so they were named as must-go-green in the implementer's work order
-instead of reading later as an unrelated regression. Counted as a catch: the
-sweep turned a class of reds the implementer may not repair into one
-attributable commit, and the four-module tail is the half a naive reading of the
-diff would have missed.)*
-
-*(**2026-09-01, E2-07 (`e2/mock-ai-provider`).** The ticket's two new
-configuration rules — a deployment refuses a plain-http provider URL and
-refuses the mock's own host — make `.env.example`'s new dev value refusable,
-and every existing test that builds `Settings` as a deployment would have
-stopped in its own setup on a rule that is not its subject, with the repair on
-the read-only side of the wall. Acting on this entry, the test author routed
-the repair through the two shared deployment fixtures in the same tests-first
-change, so the implementer never meets a red they may not fix.)*
-
-*(**2026-09-01, E2-06 (`e2/window-scheduling`).** The ticket adds a third Celery
-beat entry, and `tests/unit/test_celery_app.py` asserts the schedule's contents
-as an *equality* — deliberately, so that a new job cannot land without a
-conversation. That equality is on the implementer's side of the test wall in
-the heavy lane. Acting on this entry, the test author rewrote it in the same
-change: the entry set is now an equality over task names, with the new entry
-found by its task rather than by a schedule key the ticket does not settle.
-Without it the implementer would have met a red test they may not repair.)*
-
-*(Writing E2-05's tests (2026-09-01), found by asking this entry's question of
-a discovery walk's fixed point rather than of a fixture. E2-05's
-`response.user_id` puts `response` one foreign-key hop from `user` and
-`answer.response_id` puts `answer` two, so the `people_tables` walk in
-`test_identity_column_marker.py` reaches both the moment the migration lands —
-and the closed inventory `REACHED_TABLES_THAT_CARRY_NOTHING`, asserted by an
-`@invariant` test in a module the ticket does not otherwise edit, would go red
-with the repair on the read-only side of the wall. The two entries were added
-with pinned columns and reasons in the ticket's own tests-first round, and the
-two docstrings the change falsifies were corrected in the same pass, so the
-implementer never meets a red they are forbidden to fix. Counted as a catch:
-without this entry's sweep, the tests would have shipped green-looking and the
-red would have surfaced in the implementer's runner as an apparent defect in
-the migration.)*
+*24 instances recorded; the 3 most recent are below (E4-06, E4-18, E4-17),
+each after the "What happened" section. The overdue trim the previous header
+owed was taken on 2026-09-08 with the E4-17 bump, removing the E3-04, E4-01,
+E4-05 and E4-04 paragraphs; they are in this file's git history and in the
+pull requests they cite. The E0-18 PR 2 paragraph stays where it sits, beside
+the consequence it illustrates: it carries a rule sentence of its own — that
+any instruction to remove or rename a thing is a claim nothing asserts on it —
+rather than only an instance.*
 
 **What happened.** Twice in E0-11, from two unrelated mechanisms, with the same
 consequence: the ticket cannot be finished green and the implementer cannot fix
@@ -258,53 +118,57 @@ agreement.
 
 ---
 
-**Instance, 2026-08-26 (E1-10, dispute E1-10-01).** E1-10 added
-`course.title_is_fallback`, and E0-11's migration tests went red inside their
-own seeding: `seed_row` ends `.returning(*table.columns)` — every column
-`Base.metadata` declares — while the test seeds a database pinned eight
-revisions back, so no definition of the new column avoided it. The module's own
-docstring stated the premise that had expired ("seeding at `RANK_REVISION`
-keeps their columns the ones today's models declare"). The repair was on the
-other side of the test wall, exactly this entry's shape: the test author moved
-seeding to head with a walk back down, closing the class — any table a future
-revision touches — rather than the one column. Not counted as a catch; the
-entry describes what happened, it did not prevent it.
+**Instance, 2026-09-06 (E4-06, PR #195, dispute E4-06-02's sibling E4-06-01).**
+SPEC §5.1 has the weekly summaries "exclude flagged-held content", ADR 0145 puts
+the record of what is held in `moderation_state` and nowhere else, and the Monday
+walk runs on the `pulse_app` connection — so the filter that sentence requires
+cannot execute without a `SELECT` the ticket's own work order had said it would not
+take ("`weekly_summary` and nothing wider"). Granting it reddened **three**
+inventories at once, all of them read-only to the implementer:
+`RUNTIME_BASE_TABLE_PRIVILEGES`'s equality in `test_identity_grants.py`, the
+narrowed walk in `test_report_schema.py`, and — the one that is the lesson here —
+`STILL_UNGRANTED`, a closed tuple inside a test module **this ticket had just
+written**. The first two are the familiar shape: an earlier ticket's rule, a later
+ticket's need. The third is the same collision arriving from the ticket's own
+tests-first commit, where nobody thinks to look for it, because the reflex is to
+grep the *existing* suite for what a new rule forbids and a module written an hour
+ago does not feel like the existing suite.
 
-**Instance, 2026-08-27 (E1-12, caught before it landed).** E1-12's rule that a
-verified web login whose subject has no `web_login_subject` linkage lands on
-the no-account page turns roughly fifty merged E1-09 web-door tests into calm
-no-account landings inside their own flow — a module the ticket does not
-otherwise edit, and one the implementer may not touch. The test author ran
-`grep -rn 'oidc_callback' tests/` before writing anything, found the class,
-and repaired it at the `provider` fixture in the same tests-first round, so
-the reds never existed. Counted as a catch: the entry's rule — go looking for
-the earlier ticket's tests your new rule breaks, from the side of the wall
-that can fix them — is what found it.
-**Instance, 2026-08-27 (E1-11, dispute E1-11-02).** D7 made
-`user_identity.identity_name` nullable, and seventeen merged Care-door tests —
-eleven of them invariant-marked — errored inside their own seeding:
-`seed_row`'s documented rule leaves a nullable column to the database, and the
-helpers' non-vacuity guard had been leaning on the NOT NULL constraint to fill
-a value they never named. Found by the implementer's full-suite run, repaired
-on the test side after a ruling: each helper now states the identity it seeds.
-Not counted as a catch; the entry describes what happened, it did not prevent
-it — the pre-write sweep that caught E1-12's instance looked for route
-consumers, not schema-constraint dependents.
+Counted as a catch: the entry is why the grant became dispute E4-06-01 with all
+three assertions named and measured up front, rather than a green branch reached by
+quietly widening a tuple the same author had written. **The clause it adds:** when a
+ticket takes a privilege, a row or a state its own work order said it would not,
+grep its own new test modules for closed sets naming the thing — the read-only rule
+is about who may edit a test, not about how old the test is, and a set written
+earlier in the same branch is as much on the other side of the wall as one written
+in E0.
 
-**Instance, 2026-09-04 (E3-02, disputes E3-02-01 and E3-02-02).** E3-02 added a
-ninth launch-defect kind and a Pulse-owned column on `section`, and two standing
-inventories — the defect-kind equality pin and the LMS-owned-column ownership
-sweep — went red in modules the ticket's test manifest never named. Both repairs
-sat on the read-only side of the wall and went through `docs/disputes/`; the
-whole-suite run is what found them, a scoped run would have reported the ticket
-green. Not counted as a catch; the entry describes what happened, it did not
-prevent it — the test author's pre-write sweep covered the enumerations the
-ticket itself edited and not the inventories that pin them.
+**Instance, 2026-09-07 (E4-18, and the named repair was not the whole repair).**
+E4-18's ticket names this entry itself: `tests/fixtures/report_api.py`'s
+`instructor_route_objects` fails every E4-07 suite unless the module has exactly
+two GET routes, and the prescribed repair is a test-side flip of that count to
+three. Reading the fixture whole showed the count is half of it. `instructor_routes`
+maps `_shape_of` over every GET route the module mounts, and `_shape_of` fails **by
+name** on a route declaring no section parameter — which is exactly what E4-18's
+parameterless `GET /instructor/sections` declares. So a count-only flip leaves all
+six E4-07 modules red against a correctly built route, in files the implementer may
+not edit, one step after the flip was supposed to have fixed them. The prepared diff
+therefore also adds a `_names_a_section` predicate and shapes only the two routes
+that take a section, and corrects the two "…'s two GET routes…" sentences the third
+route makes false (entry 1). Counted as a catch: the entry's rule is to go and look
+for what a new rule makes unrunnable rather than to trust the repair a ticket names,
+and here the named repair was incomplete in a way that would have surfaced as an
+implementer's red run.
 
-**Instance, 2026-09-04 (E3-01, caught before it landed).** E3-01's multi-row
-signing-key rule falsifies the E1-11 roster suite's assumption that exactly one
-key row exists: its `stored_signing_key` fixture read `existing[0]`. The test
-author found the class before writing anything, changed the fixture to the
-newest unretired row, and added a `BEFORE_ANY_KEY` sentinel so the suite still
-runs on the unbuilt tree — 95 roster tests stayed green through the whole
-build. Counted as a catch: the entry's rule is what sent the author looking.
+**Instance, 2026-09-07 (E4-17, PR #205, caught at planning).** The work plan
+assigned a component-test edit to "the implementer", and no agent the hooks
+permit could make it: the implementer's hook denies every `*.test.*` file and
+the test author's denies reading `frontend/src`, so component tests have no
+permitted agent editor at all. The operative fact was mechanical permission,
+not ownership — the same wall this entry is about, arriving from the harness
+configuration rather than from a test's content. Caught before any edit: the
+orchestrating session took the edit itself as scribe and recorded doing so in
+the pull request, and the standing fix is the owed process change to the hook
+pair. Counted as a catch per the pull request's own wording: without the
+entry, the round would have dispatched an agent into a denial and read the
+refusal as a defect.

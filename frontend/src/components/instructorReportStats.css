@@ -1,0 +1,213 @@
+/* The Monday report's stat components — ticket E4-09.
+ *
+ * A component-scoped stylesheet, imported by the three components it dresses,
+ * rather than more rules in `frontend/src/styles.css`: that file is the
+ * application's one stylesheet for the surfaces E1 and E2 shipped, and three
+ * report tickets are building beside each other in this wave. One file per
+ * component group keeps them out of each other's way, and E4-11 imports nothing
+ * new to assemble the page.
+ *
+ * Tokens only. `design/tokens.css` reaches every one of these rules through
+ * `styles.css`'s import of it (SPEC §7.6: one source for palette, type, spacing,
+ * radii, shadow, focus ring and the reduced-motion kill switch), so nothing here
+ * holds a colour, a face or a size of its own.
+ *
+ * Nothing here animates. `design/Usage Rules.md` §3 gives the report exactly one
+ * motion — the trend line drawing on, which is E4-08's — and these are the
+ * numbers beside it; a bar that grew on load would be a second signature moment
+ * on one screen. What motion the page does have is CSS, so the token file's
+ * reduced-motion rule removes it.
+ *
+ * Every measurement follows `design/RatingHistogram.dc.html`,
+ * `design/StatPair.dc.html` and `design/ResponseRateBar.dc.html`, which are the
+ * contract (SPEC §7.6). Where a prototype writes a bare pixel value that is not
+ * on the token ramp — the 96px bar area, the 6px track — it is kept as written.
+ */
+
+/* ---- RatingHistogram ---------------------------------------------------- */
+
+.pulse-stat-histogram {
+  font-family: var(--font-body);
+}
+
+.pulse-stat-histogram-title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-1);
+  font-weight: 500;
+  color: var(--spruce);
+}
+
+.pulse-stat-histogram-summary {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  color: var(--spruce-60);
+}
+
+/* The mean's own digits in full ink against the label beside them
+   (`design/RatingHistogram.dc.html:13`): the figure is the thing being read, and
+   the word in front of it is a label. */
+.pulse-stat-histogram-mean {
+  color: var(--spruce);
+}
+
+/* **Two boxes, which is `design/RatingHistogram.dc.html:14-24`.** This row is
+   96px tall and holds each bucket's count above its bar; the tick row below it is
+   a second box carrying one continuous rule.
+
+   They were one box until E4-21 — a 96px column per bucket holding the count, the
+   bar *and* the tick — and what that cost is not what the audit predicted.
+   Measured in a browser against both layouts: nothing overflowed, because the bar
+   is a flex item and flexbox shrank it instead. The tallest bar drew at **47px
+   against the 72px the component asks for**, so every distribution was drawn at
+   about two thirds of the prototype's scale and the shortfall varied with nothing
+   a reader could see. Here the bar is alone in the box with its count and reaches
+   its full 72px. */
+.pulse-stat-histogram-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  height: 96px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One bucket per rating value: its count above its bar, both pushed to the
+   bottom of the row, so an empty bucket's count sits where a full one's bar
+   begins. */
+.pulse-stat-histogram-bucket {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  height: 100%;
+}
+
+.pulse-stat-histogram-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--spruce-60);
+  text-align: center;
+}
+
+/* The bar's height is the datum and rides on the element. A zero-count bucket
+   keeps a 2px stub so that "no responses at this rating" is drawn as an empty
+   bar rather than as a missing one. */
+.pulse-stat-histogram-bar {
+  display: block;
+  background: var(--spruce);
+  border-radius: 2px 2px 0 0;
+}
+
+/* The rating values, under one rule that runs the width of the chart. The rule
+   is on this row and not on each tick: five per-bucket rules leave four gaps in
+   what the prototype draws as a single baseline. */
+.pulse-stat-histogram-ticks {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-1) 0 0;
+  border-top: 1px solid var(--hairline);
+  list-style: none;
+}
+
+.pulse-stat-histogram-tick {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--spruce-60);
+  text-align: center;
+}
+
+/* ---- StatPair ----------------------------------------------------------- */
+
+.pulse-stat-pair-figures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+  margin: 0;
+}
+
+.pulse-stat-figure-label {
+  margin-bottom: var(--space-1);
+  font-family: var(--font-body);
+  font-size: var(--text-1);
+  font-weight: 500;
+  color: var(--spruce-60);
+}
+
+.pulse-stat-figure-value {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-4);
+  font-weight: 500;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--spruce);
+}
+
+.pulse-stat-figure-unit {
+  font-size: var(--text-2);
+  color: var(--spruce-60);
+}
+
+/* The prototype's third line, under the value. It carries a comparison in the
+   prototype; comparisons are E5's, so on this surface it carries the one thing
+   an absent figure has to say. */
+.pulse-stat-note {
+  margin: var(--space-2) 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  color: var(--spruce-60);
+}
+
+/* ---- ResponseRateBar ---------------------------------------------------- */
+
+.pulse-stat-rates {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.pulse-stat-rate {
+  font-family: var(--font-body);
+}
+
+.pulse-stat-rate-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: 6px;
+}
+
+.pulse-stat-rate-label {
+  font-size: var(--text-1);
+  font-weight: 500;
+  color: var(--spruce-60);
+}
+
+.pulse-stat-rate-readout {
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  color: var(--spruce);
+}
+
+.pulse-stat-rate-track {
+  height: 6px;
+  background: var(--chalk);
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+/* Absent when there is no percent to draw, so an empty track is empty rather
+   than a zero-width fill pretending to be a measurement. */
+.pulse-stat-rate-fill {
+  height: 100%;
+  background: var(--spruce);
+  border-radius: 3px;
+}

@@ -17,6 +17,16 @@
 --     off the row count of the conflict, so it needs no SELECT, and SELECT stays
 --     withheld: nothing reads this table back, and a role that could enumerate
 --     spent nonces learns which launches happened without adding any defence.
+--
+--     **Superseded in part, 2026-09-06 (E4-14).** The daily purge
+--     (`purge_expired_nonces`, below) turned out to need `SELECT` too — a
+--     `DELETE ... WHERE expires_at < now()` is a read of `expires_at`, and
+--     Postgres refuses a `DELETE` whose `WHERE` names a column the role holds
+--     no `SELECT` on. `lti_launch_nonce_grants_v002.sql` grants `pulse_app`
+--     `SELECT (expires_at)` — one column, not the table — so this file's own
+--     `GRANT` line stays byte-identical to what E1-08 applied and the
+--     narrowing lives in v002. `nonce` remains unreadable to `pulse_app`;
+--     ADR 0150 records the decision and what it concedes.
 --   - DELETE is what `purge_expired_nonces` reclaims the expired tail with, on
 --     the daily Celery beat — the replacement for the native TTL a Redis store
 --     would have had (ADR 0089). The worker builds `Settings` the same way the

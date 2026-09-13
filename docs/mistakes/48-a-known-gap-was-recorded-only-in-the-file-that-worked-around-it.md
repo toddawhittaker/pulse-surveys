@@ -86,3 +86,17 @@ test wall. The finding was on its way into the pull request body and the
 implementer's report and nowhere else, which is this entry's shape exactly. It
 went into `docs/tickets/e4/carried-from-e3.md` with an owner and a done-when
 instead, in the same change as the drive that found it.
+
+**2026-09-06, E4-05 (PR #187).** `WeeklySummaryRecord.held_note_type` is
+`str | None`, so SPEC §5.2's rule that threat and self-harm never appear in an
+instructor-facing summary is asked of every caller rather than made
+unrepresentable by the type. E4 could not close it — E6 writes the moderation
+states the closed set would enumerate, and a set guessed at before they exist
+reads as a guarantee while being wrong — so the field is `None` on every record
+the epic produces, with a test asserting that default. The gap was written in
+the field's own docstring, which is this entry's shape: a limitation recorded
+where the workaround lives. Acting on the entry, it also went into
+`docs/tickets/e4/deferred.md` with owner E6 and a done-when — the type is a
+closed set that cannot express either verdict, enforced where the note is
+written rather than where it is rendered. Counted as a catch: the docstring
+alone would have left E6's breakdown to rediscover it.

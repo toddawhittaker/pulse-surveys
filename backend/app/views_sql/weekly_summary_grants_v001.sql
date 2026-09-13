@@ -1,0 +1,57 @@
+-- What the Monday summary job may do to the table it writes — ticket E4-06,
+-- SPEC §5.1, §4.1, ADR 0001, ADR 0009, ADR 0145.
+--
+-- E4-02 created public.weekly_summary and granted nothing on it on purpose: "a
+-- privilege lands in the change that spends it, and a GRANT written for a writer
+-- that does not exist yet widens the runtime role for nobody". This is that
+-- change. The walk runs in a Celery worker on the connection pulse_app holds, so
+-- without this file every row it writes is refused by Postgres with 42501 rather
+-- than by anything E4-06 is about.
+--
+-- **SELECT and INSERT, and nothing else.**
+--
+--   - INSERT is the row itself. SPEC §5.1 leads each of a week's two comment
+--     groups with its own AI summary, and this job is the only writer §5.1 admits
+--     — ADR 0145's third decision rests on that being true.
+--   - SELECT is how the walk finds its work. Its scope is the closed section-weeks
+--     *lacking* summary rows, and there is no way to ask that question without
+--     reading the table. It is also what makes a second run of a pair a no-op
+--     rather than a duplicate insert refused by a unique constraint.
+--
+-- **The withheld verbs are the assertion, and UPDATE is the one worth naming.**
+-- The E4 breakdown's decision 2 rules out regeneration in v1: a summary that
+-- silently changes under its reader is worse than one that is a week honest. A
+-- connection holding UPDATE here can rewrite what an instructor read this
+-- morning, and the job's idempotence would then be a property of this project's
+-- Python rather than of what the database will permit. DELETE and TRUNCATE stay
+-- withheld too: §4's retention purge is E13's and runs under a different
+-- identity. So do REFERENCES and TRIGGER. That is the shape classification,
+-- grade_sync and ags_call already have.
+--
+-- **A base table rather than a read view**, the same exception every grants file
+-- before this one takes for a table holding no person: the columns here are a
+-- section, a week, a stream, generated prose, a count and SPEC §7.4's audit pair.
+-- SPEC §4.1 routes an *identity* read path through a view, and a view over this
+-- table would select every one of its columns and exist only to satisfy the shape
+-- of that rule.
+--
+-- **pulse_care is granted nothing.** SPEC §6.2 isolates the Care role to the
+-- safety path; an instructor's report is no part of it, and a role gets no
+-- privilege it has no use for.
+--
+-- **USAGE ON SCHEMA public is not granted again here.** identity_grants_v001.sql
+-- grants it to pulse_app and identity_grants_v002.sql restates it; an ACL entry
+-- records no history, so a third grant would be indistinguishable from those and
+-- any matching revoke would remove all of them.
+--
+-- **This widens what pulse_app can reach, and it is meant to be visible.**
+-- `RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py`
+-- is the hand-written record every base-table grant is compared against as an
+-- equality in both directions, so these two verbs are recorded there in the same
+-- change — and E4-06's test author made that edit before this file existed.
+--
+-- **The downgrade revokes rather than dropping anything.** public.weekly_summary
+-- is a1e7c4b60d92's and outlives this revision, so the revision that executes
+-- this file writes the matching REVOKE by hand.
+
+GRANT SELECT, INSERT ON public.weekly_summary TO pulse_app;

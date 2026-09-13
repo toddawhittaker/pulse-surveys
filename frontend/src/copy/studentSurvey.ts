@@ -91,7 +91,14 @@ export const STUDENT_SURVEY_COPY = {
   // The week numbers are the API's and arrive through `fillCopy`; the comma
   // belongs to the first string rather than to the component, so the whole of
   // what a reader sees is inside this inventory and the §4.1 sweeps read it.
-  'student_survey.course_week_eyebrow': 'COURSE WK {week},',
+  //
+  // The course-week half also states how long the section runs, which is the
+  // owner's ruling of 2026-09-07 and the brief's "WK 07 / 12" — the total on
+  // the course-week half, the quiet term-week label unchanged. That number is
+  // the API's too (`OpenSurvey.length_weeks`) and it fills the second hole
+  // here, so the solidus and the spaces around it are governed copy rather
+  // than something the component assembles around this string.
+  'student_survey.course_week_eyebrow': 'COURSE WK {week} / {total},',
   'student_survey.term_week_eyebrow': 'TERM WK {week}',
   'student_survey.closes_label': 'closes',
 
