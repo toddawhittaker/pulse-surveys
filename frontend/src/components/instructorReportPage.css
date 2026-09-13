@@ -14,9 +14,14 @@
  * here for `tests/unit/test_the_frontend_source_uses_tokens_only.py` to find.
  *
  * The measurements are `design/InstructorMondayReport.dc.html`'s and
- * `docs/DESIGN_BRIEF.md`'s: a single reading column at 720px with the charts
- * allowed to break out wider, no dashboard grid of cards, 8px card radius, and
- * the one barely-there shadow.
+ * `docs/DESIGN_BRIEF.md`'s: a single reading column, no dashboard grid of cards,
+ * 8px card radius, and the one barely-there shadow. **E4-21 restores the card
+ * and the mockup's column width**: the report is a paper-white article at 760px
+ * on the chalk page (`design/InstructorMondayReport.dc.html:11-12`), where it
+ * had been rendering straight onto the chalk in a 720px column. The brief's
+ * "~720px" is its reading-column rule of thumb and the mockup is the measurement,
+ * which is decision 14 in the epic's README: where the two disagree and no
+ * ruling says otherwise, the mockup governs.
  *
  * **Nothing here animates.** `design/Usage Rules.md` §3 gives this screen exactly
  * one motion — the trend line drawing on, which is E4-08's — and the brief allows
@@ -25,12 +30,58 @@
  * reduced-motion switch removes it.
  */
 
-/* ---- The reading column ------------------------------------------------- */
+/* ---- The reading column, as a card on the chalk page --------------------- */
 
+/* The mockup's two boxes in one element: the chalk ground is the application's
+ * own background, and the outer padding it draws around the article is this
+ * element's margin. `width: min(…)` is what keeps the 24px gutter on a viewport
+ * narrower than the column — inside the LMS iframe, which the brief puts at
+ * ~1000px or less, the card must not run to both edges. */
 .pulse-report {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: var(--space-7) var(--space-5);
+  box-sizing: border-box;
+  width: min(760px, 100% - var(--space-7));
+  margin: var(--space-6) auto;
+  padding: var(--space-6) var(--space-7);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+/* ---- The header: the eyebrow, the week arrows, the title and its subline -- */
+
+/* The week this report is about on the left, the two controls that change it on
+ * the right (`design/InstructorMondayReport.dc.html:13-19`). The eyebrow's own
+ * top margin belongs to the survey, where it follows a heading; here it is the
+ * first thing in the card. */
+.pulse-report-eyebrow-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.pulse-report-eyebrow-row .pulse-eyebrow {
+  margin: 0;
+}
+
+/* **One separator between the eyebrow's segments, not two.** The course-week
+ * half ends in a comma — governed copy since FIX-01, and the ruling of
+ * 2026-09-07 spells the whole eyebrow `COURSE WK 04 / 12, TERM WK 07 · closes
+ * Sun 11:59 PM` — while `styles.css` prepends a middot to every quiet segment.
+ * The first quiet segment therefore renders both. The separator is dropped from
+ * that one segment here, leaving the comma the copy carries; the middot stays on
+ * anything after it, which is where the ruling puts one. Scoped to the report
+ * because the student survey's eyebrow is not this ticket's to change. */
+.pulse-report .pulse-eyebrow-week + .pulse-eyebrow-quiet::before {
+  content: none;
+}
+
+/* The signature pulse line under the title, at the mockup's spacing
+ * (`design/InstructorMondayReport.dc.html:23`). `styles.css` gives the divider
+ * the survey's tighter margin, which is the rule that wins without this one. */
+.pulse-report .pulse-line-divider {
+  margin: var(--space-4) 0 var(--space-6);
 }
 
 .pulse-report-title {
@@ -49,6 +100,14 @@
 .pulse-report-title:focus-visible {
   outline: 2px solid var(--marigold-deep);
   outline-offset: 2px;
+}
+
+/* The line under the section's name: the code, what the page is, and the week's
+ * response count (`design/InstructorMondayReport.dc.html:21`). */
+.pulse-report-subline {
+  margin: 0;
+  font-size: var(--text-1);
+  color: var(--spruce-60);
 }
 
 .pulse-report-heading {
@@ -127,6 +186,14 @@
 
 .pulse-report-section-link:hover {
   background: var(--chalk);
+}
+
+/* ---- The small-N notice, under both comment groups (E4-21) --------------- */
+
+/* The week's one suppression, stated once and after both groups
+ * (`design/InstructorMondayReport.dc.html:69-73`). */
+.pulse-report-small-n {
+  margin-top: var(--space-4);
 }
 
 /* ---- Comments released from earlier weeks (ADR 0152) --------------------- */

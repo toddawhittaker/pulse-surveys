@@ -196,6 +196,52 @@ describe('a published week with data in it', () => {
     expect(container.querySelectorAll('h1')).toHaveLength(1);
   });
 
+  it('states the section, the page and the week’s answer count under the title', async () => {
+    // E4-21 scope item 2, and `design/InstructorMondayReport.dc.html:21`. Every
+    // value is the payload's: the code from `section.code` and the pair from
+    // `rates`. The three numbers in this fixture are different from each other —
+    // 13 responses, 21 enrolled, course week 4 — so a member read from the wrong
+    // place renders a different sentence.
+    servingWeeks({ 4: A_PUBLISHED_WEEK });
+    const { container } = open(4);
+    await screen.findByRole('heading', { level: 2, name: 'Rating trend' });
+
+    const subline = container.querySelector('.pulse-report-subline');
+    expect(subline?.textContent).toBe('R3WW · Monday Report · 13 of 21 responded');
+
+    // Under the title rather than over it: the eyebrow leads the card and the
+    // title names the section, and this qualifies the title.
+    const title = screen.getByRole('heading', { level: 1 });
+    expect(
+      title.compareDocumentPosition(subline as Element) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('puts the week arrows in the eyebrow row, above the title', async () => {
+    // E4-21 scope item 3: `design/InstructorMondayReport.dc.html:13-19` puts the
+    // two controls in the eyebrow's own flex row, top right. They had been
+    // sitting below the title with the rest of the week's content. The keyboard
+    // order follows the mark-up, so this is also the tab order the criterion
+    // asks for — the arrows come before everything they change.
+    servingWeeks({ 4: A_PUBLISHED_WEEK });
+    const { container } = open(4);
+    await screen.findByRole('heading', { level: 2, name: 'Rating trend' });
+
+    const row = container.querySelector('.pulse-report-eyebrow-row');
+    const navigation = screen.getByRole('navigation', { name: 'Week navigation' });
+    expect(row?.contains(navigation)).toBe(true);
+    expect(row?.querySelector('.pulse-eyebrow')).not.toBeNull();
+
+    const title = screen.getByRole('heading', { level: 1 });
+    expect(
+      navigation.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // Both buttons are still reachable and still do what E4-08 built them to do.
+    expect(screen.getByRole('button', { name: 'Previous week' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Next week' })).toBeTruthy();
+  });
+
   it('draws the trend axis over the section’s whole term', async () => {
     // E4-21 scope item 5. The fixture's section runs twelve weeks and has
     // published two of them, so the axis carries twelve ticks — the number is
@@ -348,6 +394,37 @@ describe('the credit-rule note', () => {
 });
 
 describe('a week below the response threshold', () => {
+  it('states the reason once, under both comment groups', async () => {
+    // E4-21 scope item 6, and `design/InstructorMondayReport.dc.html:69-73`: the
+    // suppression is a fact about the week, so the notice explaining it follows
+    // both groups rather than sitting inside the first. The mutation this kills
+    // is the notice back in a group — which reads as a statement about that
+    // group's comments, and which put it between the two summaries.
+    servingWeeks({ 7: A_SMALL_N_WEEK });
+    const { container } = open(7);
+    await screen.findByRole('heading', { level: 2, name: 'Comments' });
+
+    const notice = screen.getByRole('region', { name: SMALL_N_TITLE });
+    const groups = [...container.querySelectorAll('.pulse-comment-group')];
+    expect(groups).toHaveLength(2);
+    for (const group of groups) {
+      expect(group.contains(notice)).toBe(false);
+      expect(
+        group.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
+        'the notice is not after both comment groups',
+      ).toBeTruthy();
+    }
+
+    // And it speaks the mockup's whole sentence, with the week's own counts on
+    // the front of it: three of twenty-one answered, against a threshold of
+    // four. Three different numbers, so none of them can stand in for another.
+    expect(
+      screen.getByText(
+        'Only 3 of 21 students have responded. To keep individual voices unidentifiable, raw comments stay hidden until at least 4 responses arrive. The AI summary above draws on everything received so far.',
+      ),
+    ).toBeTruthy();
+  });
+
   it('keeps both summaries, shows no comment card, and states the reason once', async () => {
     servingWeeks({ 7: A_SMALL_N_WEEK });
     const { container } = open(7);

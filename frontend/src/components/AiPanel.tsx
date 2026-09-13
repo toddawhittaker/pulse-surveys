@@ -60,8 +60,8 @@ export function AiPanel({
       <p className="pulse-ai-panel__text">{text}</p>
       <p className="pulse-ai-panel__meta">
         {responseCount === 1
-          ? copy('instructor_report_comments.ai.drawn_from_one')
-          : fillCopy('instructor_report_comments.ai.drawn_from', {
+          ? copy('instructor_report_comments.ai.generated_from_one')
+          : fillCopy('instructor_report_comments.ai.generated_from', {
               count: String(responseCount),
             })}
       </p>

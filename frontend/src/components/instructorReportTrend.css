@@ -203,20 +203,28 @@
   }
 
   /* Week navigation, drawn as the prototype draws it: two small mono buttons on
-   * paper with a hairline border. */
+   * paper with a hairline border. `flex: none` so the pair keeps its size beside
+   * the eyebrow it shares a row with. */
   .pulse-week-nav {
     display: flex;
+    flex: none;
     gap: var(--space-2);
   }
 
+  /* 28px square with a 14px glyph, which is
+   * `design/InstructorMondayReport.dc.html:16-17` exactly — the size the mockup
+   * draws them at in the eyebrow row, where E4-21 returns them from below the
+   * title. Neither number is on the token ramp, and both are kept as the
+   * prototype writes them, which is the rule the stats stylesheet already
+   * follows for the 96px bar area and the 6px track. */
   .pulse-week-nav-button {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: var(--space-6);
-    height: var(--space-6);
+    width: 28px;
+    height: 28px;
     font-family: var(--font-mono);
-    font-size: var(--text-2);
+    font-size: 14px;
     color: var(--spruce);
     background: var(--paper);
     border: 1px solid var(--hairline);

@@ -41,20 +41,23 @@ describe('AiPanel', () => {
     // three comments in the fixture beside it — the two counts differ on
     // purpose (§3.2 makes a comment optional), so a panel deriving the number
     // from a list could not produce this.
-    expect(screen.getByText('Drawn from 13 responses')).toBeTruthy();
+    //
+    // The wording is `design/AiPanel.dc.html:20`'s, restored by E4-21: the panel
+    // says the prose was generated, which is what its AI label is there for.
+    expect(screen.getByText('Generated from 13 responses')).toBeTruthy();
   });
 
   it('states a different count when it is given one', () => {
     render(<AiPanel heading={HEADING} text={INSTRUCTOR_SUMMARY.text} responseCount={3} heldNote={null} />);
 
-    expect(screen.getByText('Drawn from 3 responses')).toBeTruthy();
+    expect(screen.getByText('Generated from 3 responses')).toBeTruthy();
   });
 
   it('writes a week of one response in the singular', () => {
     render(<AiPanel heading={HEADING} text={INSTRUCTOR_SUMMARY.text} responseCount={1} heldNote={null} />);
 
-    expect(screen.getByText('Drawn from 1 response')).toBeTruthy();
-    expect(screen.queryByText('Drawn from 1 responses')).toBeNull();
+    expect(screen.getByText('Generated from 1 response')).toBeTruthy();
+    expect(screen.queryByText('Generated from 1 responses')).toBeNull();
   });
 
   describe('the held-note slot', () => {

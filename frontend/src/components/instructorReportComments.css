@@ -67,10 +67,6 @@
   list-style: none;
 }
 
-.pulse-comment-group__notice {
-  margin-top: var(--space-3);
-}
-
 /* ---- The AI summary panel ---- */
 
 .pulse-ai-panel {

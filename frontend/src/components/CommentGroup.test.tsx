@@ -8,7 +8,6 @@ import {
   INSTRUCTOR_COMMENTS,
   INSTRUCTOR_SUMMARY,
   SMALL_N_SUMMARY,
-  SMALL_N_THRESHOLD,
   WITHHELD_COMMENT_COUNT,
   WITHHELD_COMMENTS,
 } from './instructorReportCommentFixtures';
@@ -37,6 +36,7 @@ describe('CommentGroup', () => {
         stream="instructor"
         summary={INSTRUCTOR_SUMMARY}
         comments={INSTRUCTOR_COMMENTS}
+        suppressed={false}
       />,
     );
 
@@ -59,7 +59,12 @@ describe('CommentGroup', () => {
   });
 
   it('names the course stream with the course stream headings', () => {
-    render(<CommentGroup stream="course" summary={COURSE_SUMMARY} comments={COURSE_COMMENTS} />);
+    render(<CommentGroup
+        stream="course"
+        summary={COURSE_SUMMARY}
+        comments={COURSE_COMMENTS}
+        suppressed={false}
+      />);
 
     expect(screen.getByRole('heading', { name: 'About the course' })).toBeTruthy();
     expect(screen.getByRole('region', { name: 'AI summary — course comments' })).toBeTruthy();
@@ -68,7 +73,7 @@ describe('CommentGroup', () => {
 
   describe('a week that produced no comments', () => {
     it('keeps its heading and its summary and states the fact in one line', () => {
-      render(<CommentGroup stream="instructor" summary={INSTRUCTOR_SUMMARY} comments={[]} />);
+      render(<CommentGroup stream="instructor" summary={INSTRUCTOR_SUMMARY} comments={[]} suppressed={false} />);
 
       // §5.1: "empty groups show a one-line notice, not a hidden heading."
       expect(screen.getByRole('heading', { name: 'About the instructor' })).toBeTruthy();
@@ -78,7 +83,7 @@ describe('CommentGroup', () => {
     });
 
     it('does not tell the instructor the comments are being withheld', () => {
-      render(<CommentGroup stream="instructor" summary={INSTRUCTOR_SUMMARY} comments={[]} />);
+      render(<CommentGroup stream="instructor" summary={INSTRUCTOR_SUMMARY} comments={[]} suppressed={false} />);
 
       // The empty group and the suppressed group are different facts about the
       // class, and the copy for one must never stand in for the other.
@@ -102,7 +107,12 @@ describe('CommentGroup', () => {
       // empty-week notice standing in for the absence, which is a different fact
       // about the class.
       render(
-        <CommentGroup stream="instructor" summary={null} comments={INSTRUCTOR_COMMENTS} />,
+        <CommentGroup
+          stream="instructor"
+          summary={null}
+          comments={INSTRUCTOR_COMMENTS}
+          suppressed={false}
+        />,
       );
 
       expect(screen.getByText(ABSENT_SUMMARY)).toBeTruthy();
@@ -116,7 +126,7 @@ describe('CommentGroup', () => {
       expect(screen.queryByText(EMPTY_NOTICE)).toBeNull();
     });
 
-    it('keeps the small-N notice and the concealment when the week is also suppressed', () => {
+    it('keeps the concealment when the week is also suppressed', () => {
       // The two absences are independent: E4-06 not having run is not the same
       // fact as the week being under the threshold, and a week can be both. The
       // concealment must survive the summary being gone — otherwise the branch
@@ -126,12 +136,14 @@ describe('CommentGroup', () => {
           stream="instructor"
           summary={null}
           comments={WITHHELD_COMMENTS}
-          smallN={{ threshold: SMALL_N_THRESHOLD, withNotice: true }}
+          suppressed
         />,
       );
 
+      // The absence line is the positive control: the group rendered, so the
+      // cards being gone is a fact about the suppression rather than about a
+      // component that drew nothing.
       expect(screen.getByText(ABSENT_SUMMARY)).toBeTruthy();
-      expect(screen.getByRole('region', { name: SMALL_N_TITLE })).toBeTruthy();
       expect(screen.queryAllByRole('article')).toHaveLength(0);
       for (const comment of WITHHELD_COMMENTS) {
         expect(screen.queryByText(comment.text)).toBeNull();
@@ -145,6 +157,7 @@ describe('CommentGroup', () => {
         stream="instructor"
         summary={SUMMARY_WITH_HELD_NOTE}
         comments={INSTRUCTOR_COMMENTS}
+        suppressed={false}
       />,
     );
 
@@ -156,7 +169,7 @@ describe('CommentGroup', () => {
   });
 
   describe('a week below the response threshold', () => {
-    it('shows the notice and the summary and no comments at all', () => {
+    it('keeps the summary and shows no comment at all', () => {
       // The fixture hands a suppressed group a full week of comments on purpose:
       // "no cards rendered" has to be a fact about the suppression rather than
       // about an empty array.
@@ -167,17 +180,15 @@ describe('CommentGroup', () => {
           stream="instructor"
           summary={SMALL_N_SUMMARY}
           comments={WITHHELD_COMMENTS}
-          smallN={{ threshold: SMALL_N_THRESHOLD, withNotice: true }}
+          suppressed
         />,
       );
 
       // §4: below the threshold the instructor sees the summary and no raw
-      // comments. All three assertions matter together — the summary and the
-      // notice are the positive controls that make the empty card list mean
-      // suppression rather than a group that failed to render.
+      // comments. The summary is the positive control that makes the empty card
+      // list mean suppression rather than a group that failed to render.
       expect(screen.getByRole('region', { name: 'AI summary — instructor comments' })).toBeTruthy();
       expect(screen.getByText(SMALL_N_SUMMARY.text)).toBeTruthy();
-      expect(screen.getByRole('region', { name: SMALL_N_TITLE })).toBeTruthy();
       expect(screen.queryAllByRole('article')).toHaveLength(0);
       for (const comment of WITHHELD_COMMENTS) {
         expect(screen.queryByText(comment.text)).toBeNull();
@@ -192,7 +203,7 @@ describe('CommentGroup', () => {
           stream="instructor"
           summary={SMALL_N_SUMMARY}
           comments={WITHHELD_COMMENTS}
-          smallN={{ threshold: SMALL_N_THRESHOLD, withNotice: true }}
+          suppressed
         />,
       );
 
@@ -201,10 +212,13 @@ describe('CommentGroup', () => {
       // reader sees, and every number an attribute carries.
       expect(container.textContent).toContain(SMALL_N_SUMMARY.text);
 
-      // The only numbers in the words are the count the summary drew from and
-      // the configured threshold — in that order, as the group renders them.
+      // The only number in the words is the count the summary drew from. The
+      // threshold left with the notice (E4-21): the sentence explaining the
+      // suppression belongs to the week and the surface places it under both
+      // groups, so a group's own text carries one number and it is the
+      // payload's.
       const digits = (container.textContent ?? '').match(/\d+/g) ?? [];
-      expect(digits).toEqual([String(SMALL_N_SUMMARY.responseCount), String(SMALL_N_THRESHOLD)]);
+      expect(digits).toEqual([String(SMALL_N_SUMMARY.responseCount)]);
 
       // And the attributes, `data-` ones included. React's generated ids are
       // skipped: they are the runtime's own counter and say nothing about this
@@ -232,7 +246,7 @@ describe('CommentGroup', () => {
           stream="instructor"
           summary={SUMMARY_WITH_HELD_NOTE}
           comments={WITHHELD_COMMENTS}
-          smallN={{ threshold: SMALL_N_THRESHOLD, withNotice: true }}
+          suppressed
         />,
       );
 
@@ -244,11 +258,10 @@ describe('CommentGroup', () => {
       // payload already declared is the same fail-closed move the cards make,
       // not a threshold rule invented here.
       //
-      // The summary and the notice are the positive controls: the group did
-      // render, so the note's absence is a fact about the concealment rather
-      // than about a group that rendered nothing.
+      // The summary is the positive control: the group did render, so the
+      // note's absence is a fact about the concealment rather than about a
+      // group that rendered nothing.
       expect(screen.getByText(SMALL_N_SUMMARY.text)).toBeTruthy();
-      expect(screen.getByRole('region', { name: SMALL_N_TITLE })).toBeTruthy();
       expect(screen.queryByText(HELD_NOTE)).toBeNull();
       expect(screen.queryByText(/held for review/)).toBeNull();
       // The flag type itself, wherever it might have been written — the
@@ -256,21 +269,22 @@ describe('CommentGroup', () => {
       expect(container.innerHTML).not.toContain('privacy');
     });
 
-    it('shows the summary without the notice when the surface states it elsewhere', () => {
+    it('leaves the notice to the surface, in either stream', () => {
       render(
         <CommentGroup
           stream="course"
           summary={SMALL_N_SUMMARY}
           comments={WITHHELD_COMMENTS}
-          smallN={{ threshold: SMALL_N_THRESHOLD, withNotice: false }}
+          suppressed
         />,
       );
 
-      // SPEC §4.1 item 5: confidentiality copy appears exactly once per surface.
-      // A suppressed week suppresses both of the report's groups, so the second
-      // one carries the summary and no second copy of the notice — and it does
-      // not fall back to the empty-week line either, because the week was not
-      // empty.
+      // E4-21: a suppressed week suppresses both of the report's groups, and the
+      // sentence explaining it renders once, under both of them
+      // (`design/InstructorMondayReport.dc.html:69-73`). So neither group writes
+      // it — the mutation this kills is the notice returning to the group, which
+      // would put two of them on a suppressed report. It does not fall back to
+      // the empty-week line either, because the week was not empty.
       expect(screen.getByRole('region', { name: 'AI summary — course comments' })).toBeTruthy();
       expect(screen.getByText(SMALL_N_SUMMARY.text)).toBeTruthy();
       expect(screen.queryByText(SMALL_N_TITLE)).toBeNull();

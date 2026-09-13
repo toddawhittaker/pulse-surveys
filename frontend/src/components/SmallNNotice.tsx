@@ -15,22 +15,36 @@ import { copy, fillCopy } from '../copy/instructorReportCommentCopy';
  * and factual. So this says what is hidden, why, and that the summary above
  * still drew on everything received.
  *
- * **The threshold is a number the payload carries** (the sketch's
- * `small_n.threshold`), because SPEC §4 makes it configurable and a 5 written
- * into a component is a second, wrong copy of a configured value the day
- * anybody changes it.
+ * **Every number here is the payload's** — the threshold from the sketch's
+ * `small_n.threshold`, because SPEC §4 makes it configurable and a 5 written into
+ * a component is a second, wrong copy of a configured value the day anybody
+ * changes it; and the two counts from `rates`, which are the same pair the
+ * report's Participation region states.
  *
  * **Nothing here counts what was withheld.** §5.2 forbids a count or a flag
  * hint below the threshold, and this component is given neither — there is no
- * prop for a number of hidden comments, so nothing can render one.
+ * prop for a number of hidden comments, so nothing can render one. The counts it
+ * does carry are of people who answered, which is a participation figure and not
+ * a fact about the comments (E4-21, restoring
+ * `design/SmallNNotice.dc.html:31-33`).
  *
  * **Where it appears is the caller's decision, and §4.1 item 5 governs it:**
  * confidentiality copy appears exactly once per surface. A report whose two
- * comment groups are both suppressed shows this notice once, which is why
- * `CommentGroup` is told whether it is the group that carries it rather than
- * deciding for itself.
+ * comment groups are both suppressed shows this notice once, under both of them,
+ * because the suppression is a fact about the week rather than about a group.
  */
-export function SmallNNotice({ threshold }: { readonly threshold: number }): JSX.Element {
+export function SmallNNotice({
+  responded,
+  enrolled,
+  threshold,
+}: {
+  /** How many of the section's students answered this week. */
+  readonly responded: number;
+  /** How many are enrolled in it. */
+  readonly enrolled: number;
+  /** The configured number of responses raw comments are held until. */
+  readonly threshold: number;
+}): JSX.Element {
   const titleId = useId();
 
   return (
@@ -40,7 +54,11 @@ export function SmallNNotice({ threshold }: { readonly threshold: number }): JSX
         {copy('instructor_report_comments.small_n.title')}
       </p>
       <p className="pulse-small-n-notice__body">
-        {fillCopy('instructor_report_comments.small_n.body', { threshold: String(threshold) })}
+        {fillCopy('instructor_report_comments.small_n.body', {
+          responded: String(responded),
+          enrolled: String(enrolled),
+          threshold: String(threshold),
+        })}
       </p>
     </section>
   );

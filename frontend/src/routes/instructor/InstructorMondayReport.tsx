@@ -22,7 +22,8 @@ import { TrendPair } from '../../components/TrendPair';
 import type { TrendPoint } from '../../components/PulseTrendChart';
 import { WeekEyebrow } from '../../components/WeekEyebrow';
 import { WeekNav } from '../../components/WeekNav';
-import { copy } from '../../copy/instructorReportPageCopy';
+import { SmallNNotice } from '../../components/SmallNNotice';
+import { copy, fillCopy } from '../../copy/instructorReportPageCopy';
 import '../../components/instructorReportPage.css';
 
 /**
@@ -229,32 +230,54 @@ export function InstructorMondayReport({
       data-testid={INSTRUCTOR_LANDING_TESTID}
       aria-labelledby={HEADING_ID}
     >
+      {/* **The eyebrow and the week arrows share one row** (E4-21), which is
+          where `design/InstructorMondayReport.dc.html:13-19` puts them: the week
+          this report is about on the left, the two controls that change it on
+          the right. They arrive together because they are the same fact — a
+          reader who has just read WK 04 / 12 reaches for the arrow beside it —
+          and the arrows are the first thing in the tab order for the same
+          reason. Both are present only with a report: the weeks a reader may
+          page to are the payload's, and the whole row is part of the report
+          rather than part of the page. */}
       {report === null ? null : (
-        <WeekEyebrow
-          courseWeek={report.week.course_week}
-          termWeek={report.week.term_week}
-          lengthWeeks={report.section.length_weeks}
-        />
+        <div className="pulse-report-eyebrow-row">
+          <WeekEyebrow
+            courseWeek={report.week.course_week}
+            termWeek={report.week.term_week}
+            lengthWeeks={report.section.length_weeks}
+          />
+          <WeekNav
+            publishedWeeks={report.week.published_weeks}
+            currentWeek={report.week.course_week}
+            onSelectWeek={selectWeek}
+          />
+        </div>
       )}
       {/* Focusable but not in the tab order, so the week change below can put a
           reader on it without adding a stop nobody asked for. */}
       <h1 className="pulse-report-title" id={HEADING_ID} tabIndex={-1}>
         {heading}
       </h1>
+      {/* The mockup's subline (E4-21): the section code, what this page is, and
+          how many of the section's students answered. Absent with the report,
+          like the eyebrow above it — every value in it is the payload's. */}
+      {report === null ? null : (
+        <p className="pulse-report-subline">
+          {fillCopy('instructor_report_page.subline', {
+            code: report.section.code,
+            responses: String(report.rates.responses),
+            enrolled: String(report.rates.enrolled),
+          })}
+        </p>
+      )}
       <PulseDivider />
-      <ReportBody load={load} onSelectWeek={selectWeek} />
+      <ReportBody load={load} />
     </main>
   );
 }
 
 /** Whichever one of the page's states is true, and never two of them. */
-function ReportBody({
-  load,
-  onSelectWeek,
-}: {
-  readonly load: Load;
-  readonly onSelectWeek: (week: number) => void;
-}): JSX.Element {
+function ReportBody({ load }: { readonly load: Load }): JSX.Element {
   if (load.kind === 'loading') {
     return (
       <p className="pulse-report-status" role="status">
@@ -309,11 +332,6 @@ function ReportBody({
       data-testid={INSTRUCTOR_REPORT_TESTID}
       key={load.report.week.course_week}
     >
-      <WeekNav
-        publishedWeeks={load.report.week.published_weeks}
-        currentWeek={load.report.week.course_week}
-        onSelectWeek={onSelectWeek}
-      />
       <ReportWeek report={load.report} />
     </div>
   );
@@ -381,13 +399,13 @@ function ReportWeek({ report }: { readonly report: InstructorReportView }): JSX.
       <p className="pulse-report-note">{copy('instructor_report_page.comments_note')}</p>
       {/* **One small-N notice for the week, and it is the page's decision.**
           SPEC §4's threshold suppresses a week and not a group, so both groups
-          go quiet together and there is one fact to state: the first of them
-          carries the notice and the second does not, because a page saying it
-          twice would be reporting two suppressions where §5.2 has one. The
-          instructor group is first everywhere in this product
-          (`design/Usage Rules.md` §1), so it is the one that carries it.
-          `CommentGroup` requires the field rather than defaulting it, which is
-          what makes this a choice made out loud.
+          go quiet together and there is one fact to state. E4-21 moves the
+          notice out of the first group and under both of them, where
+          `design/InstructorMondayReport.dc.html:69-73` puts it: it explains a
+          silence that belongs to the whole week, and inside one group it read as
+          a statement about that group's comments alone. `CommentGroup` is told
+          the week is suppressed and renders no notice of its own, so there is
+          one placement and it is here.
 
           **This is not SPEC §4.1 item 5's line.** Item 5 counts confidentiality
           copy once per surface, and this surface's one line is
@@ -400,14 +418,27 @@ function ReportWeek({ report }: { readonly report: InstructorReportView }): JSX.
         stream="instructor"
         summary={summaryOf(streams.instructor.summary)}
         comments={cardsOf(streams.instructor.comments)}
-        smallN={suppressed ? { threshold: smallN.threshold, withNotice: true } : undefined}
+        suppressed={suppressed}
       />
       <CommentGroup
         stream="course"
         summary={summaryOf(streams.course.summary)}
         comments={cardsOf(streams.course.comments)}
-        smallN={suppressed ? { threshold: smallN.threshold, withNotice: false } : undefined}
+        suppressed={suppressed}
       />
+      {suppressed ? (
+        <div className="pulse-report-small-n">
+          {/* The two counts are the week's own participation figures, which the
+              Participation region above states in the same words. What §5.2
+              forbids below the threshold is a count of what was *withheld*, and
+              this notice is given no such number to render. */}
+          <SmallNNotice
+            responded={rates.responses}
+            enrolled={rates.enrolled}
+            threshold={smallN.threshold}
+          />
+        </div>
+      ) : null}
 
       <ReleasedFromEarlierWeeks comments={report.released_from_earlier_weeks} />
     </>
