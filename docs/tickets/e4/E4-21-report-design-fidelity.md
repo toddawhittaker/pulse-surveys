@@ -76,6 +76,12 @@ a time — this ticket revisits none of them.
    TERM …") — the artifact only; the wording itself is a recorded ruling
    and stays. The header sparkline takes the mockup's `margin: 16px 0 32px`.
 
+8. **Comment text goes sans.** Ruled 2026-09-13: student comments render in
+   the sans body face, as the mockup sets them (`design/CommentCard.dc.html:11`),
+   not Literata. `design/Usage Rules.md` §5 said the opposite; this ticket
+   corrects that line (and the matching note in `design/tokens.css`) in the
+   same PR, so the design records agree again.
+
 ## Acceptance criteria
 
 - Side by side against the mockup, driven on the demo world
@@ -94,22 +100,30 @@ a time — this ticket revisits none of them.
 
 ## Deliberately not fixed here
 
-Conflicts with recorded decisions, each waiting on its own ruling before
-anyone touches it:
+The five decision conflicts were each ruled on 2026-09-13:
 
-- The trend line's colour (marigold in the mockup, marigold-deep in the
-  build for a documented 2.23:1 contrast failure of the accent on paper).
-- The eyebrow's wording (the built "COURSE WK … TERM WK …" is the FIX-01
-  ruling of 2026-09-03; the mockup's "WK 07 / 12 · RESPONSES CLOSED …" close
-  note is part of the same question).
-- The histogram titles (the mockup quotes the survey questions; the build
-  refuses to duplicate a versioned server-side instrument — the fix is a
-  payload field, not a pasted string).
-- Comment text's face (the mockup sets it sans; `design/Usage Rules.md` §5
-  says a student's own words get the serif treatment — the two design
-  records contradict each other).
-- The two blocks the mockup lacks: the participation-credit paragraph
-  (E4-12, an E3 carried item) and "Comments from earlier weeks" (ADR 0152).
+- **The trend line stays marigold-deep.** The mockup's marigold fails
+  contrast at 2.23:1 on the paper card and the line is the only mark
+  carrying meaning; readability wins.
+- **The eyebrow keeps its FIX-01 wording and gains the close note.** The
+  built "COURSE WK … · TERM WK …" stands, with the mockup's "responses
+  closed Sun 11:59 PM" segment appended. `WeekEyebrow` already takes an
+  optional `closesAt`, but the report payload carries no close instant, so
+  this lands in the payload follow-up ticket below, not here.
+- **The histogram titles will quote the survey questions, served from the
+  payload.** No pasted strings — the wording stays in its versioned
+  server-side table and the report API serves it. The payload follow-up
+  ticket below.
+- **Comment text goes sans** — moved into scope item 8 above, with the
+  `design/Usage Rules.md` §5 correction.
+- **Both post-mockup blocks stay:** the participation-credit paragraph
+  (E4-12) and "Comments from earlier weeks" (ADR 0152). The mockup predates
+  both.
+
+**Follow-up ticket owed** (heavy — it touches `backend/app/api/`): the
+report payload gains the two survey question texts and the week's close
+instant; the frontend then quotes the questions as the mockup does and
+passes `closesAt` to the eyebrow. To be broken down when scheduled.
 
 Later-epic work, not styling: the comparable and university figures
 everywhere they appear (trend lines, legend entries, histogram "comparable

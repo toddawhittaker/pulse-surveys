@@ -194,14 +194,17 @@ ticket may depart from only by saying so.
    `design/InstructorMondayReport.dc.html` listed sixteen differences, and
    the owner confirmed the mockup is the intended look. The plain slips —
    drift with no ruling, ADR, or spec section behind it — are **E4-21**.
-   Differences a recorded decision produced (the trend line's contrast
-   colour, the eyebrow wording of FIX-01, the refusal to duplicate the
-   versioned survey questions, the serif comment face that
-   `design/Usage Rules.md` §5 argues for, and the two post-mockup content
-   blocks) are each revisited on their own ruling or not at all; E4-21
-   touches none of them. Comparison figures, the compose block, the lead
-   faculty line, and the flagged row need data that no payload carries, and
-   stay with their owning epics.
+   Differences a recorded decision produced were each ruled on 2026-09-13:
+   the trend line keeps its contrast colour; the eyebrow keeps FIX-01's
+   wording and gains the mockup's close note once the payload carries a
+   close instant; the histogram titles will quote the survey questions
+   served from the payload, never pasted; comment text goes sans and
+   `design/Usage Rules.md` §5 is corrected to match (in E4-21); both
+   post-mockup content blocks stay. The two payload additions (question
+   texts, close instant) are one follow-up ticket, named in E4-21.
+   Comparison figures, the compose block, the lead faculty line, and the
+   flagged row need data that no payload carries, and stay with their
+   owning epics.
 
 ## Build order
 
