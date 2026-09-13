@@ -56,6 +56,13 @@ the held-note type, the forged block boundaries, the moderation tie-break,
 the §6.2 threat class, the course label's two homes, and the landing
 strings — re-listed below with what the boundary added to each.
 
+**Added after E4-15's pass:** the post-exit design-fidelity ticket (E4-21,
+breakdown decision 14) deferred two report-payload fields to E5 and added the
+student survey's eyebrow-separator entry to `../e4/deferred.md`. The two
+payload fields are the last section below. They sit outside the completeness
+demonstration above, which covers the sources as they stood at the exit; they
+are carried here so the hand-off between epics does not lose them.
+
 ## The de-anonymization statement — E4's half closed, E6's still owed
 
 E4's half closed at the boundary, and it changed what it suppresses a third
@@ -204,3 +211,29 @@ closed (marked, with two new tests); the class stays open, now covering
 the frontend pass too (the entry above). **Owner:** a candidate process
 ticket, unchanged. **Done when:** the source entry's — a collection-count
 floor or an equivalent the guarded set cannot shrink, watched failing.
+
+## Two report-payload fields the design mockup needs (E4-21)
+
+The post-exit design-fidelity review (E4-21) found two mockup details the
+frontend cannot render because the report payload does not carry the data, and
+both were deferred rather than faked in the client:
+
+- **The survey question texts.** The mockup titles each histogram with the
+  question a student answered ("My instructor supported my learning" /
+  "Materials and activities supported my learning"); the built report titles
+  them by stream. The wording is versioned server-side (SPEC §3.2), so it is
+  served on the payload rather than copied into the frontend, where a second
+  copy would drift the first time a question set is re-versioned.
+- **The week's survey-window close instant.** The mockup's eyebrow reads
+  "responses closed Sun 11:59 PM"; `WeekEyebrow` already takes an optional
+  `closesAt`, but the report payload carries no close time to pass it. The
+  instant is on the `survey_window` row the report read already holds.
+
+Both are read-path additions (`backend/app/api/` report schema and the view
+the report reads), so the ticket is heavy; the frontend change that follows is
+small. Neither changes what the report shows — only which authoritative fact it
+carries. **Owner:** E5, whose breakdown already reopens the report payload and
+the histogram block for the comparison figures, so both fields land beside that
+work. **Done when:** the report payload carries the two question texts and the
+week's close instant, the histogram titles quote the served questions, and the
+eyebrow renders its close note, each proven against the mockup.
