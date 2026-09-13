@@ -26,7 +26,7 @@ ticket. Shipping a line an instructor with low vision cannot see was not an
 option, and editing the owner's brief inside a light-lane build is not this
 ticket's to do. Naming the divergence is the honest middle.
 
-**Owner:** Todd, on the brief; E5-13 is where an E5 ticket next reads this
+**Owner:** the brief's owner; E5-13 is where an E5 ticket next reads this
 surface and can carry the edit if it is ruled.
 
 **Done when:** either the brief's mapping names a token that measures at or above
