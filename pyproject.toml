@@ -44,7 +44,7 @@ dependencies = [
     # hashed. psycopg is LGPL-3.0: the license gate classifies it "review —
     # weak copyleft, linkage matters", which is the right answer for a library
     # imported unmodified from a wheel rather than vendored into our source.
-    "psycopg[binary]==3.3.4",
+    "psycopg[binary]==3.3.5",
     # Already in the closure under pydantic-settings, and declared here because
     # `backend/migrations/env.py` imports it directly: `alembic` is not started
     # by `Settings`, so it reads `.env` itself, and an import we write is a
@@ -95,7 +95,7 @@ dependencies = [
     # right answer for a library imported unmodified from a wheel; ADR 0089
     # records the supply-chain fact.
     "pylti1p3==2.0.0",
-    "jwcrypto==1.5.9",
+    "jwcrypto==1.6.0",
     # The AI provider client, imported by `backend/app/ai/gateway.py` and by
     # nothing else — SPEC §7.4 puts every model call behind one internal gateway,
     # and `tests/unit/test_provider_library_is_confined_to_the_gateway.py` holds
@@ -114,7 +114,7 @@ dependencies = [
     # imports `openai`, and a direct dependency would say something imports it.
     # `make lock` resolves the extra into explicit, hashed lines in both
     # lockfiles, so what ships is still named and pinned.
-    "pydantic-ai-slim[openai]==2.35.3",
+    "pydantic-ai-slim[openai]==2.39.0",
     # The IANA database as a package, so `zoneinfo` resolves
     # INSTITUTION_TIMEZONE identically on a developer's machine and in a slim
     # container that ships no system tzdata (§3.1 — windows are timezone-bound).
@@ -133,7 +133,7 @@ dev = [
     # the wall clock. The §4.1 invariant pass stays serial.
     "pytest-xdist==3.8.0",
     "testcontainers==4.15.0",
-    "hypothesis==6.165.10",
+    "hypothesis==6.167.1",
     # Test-only. `tests/unit/test_compose_stack.py` asserts properties of the
     # Compose files that no running stack can check — chiefly that host port
     # publishing lives in the development override and not in the base file,
