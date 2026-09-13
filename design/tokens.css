@@ -22,7 +22,7 @@
                                excluded-comment text, flat pulse-line in empty states. */
 
   /* ---- Type — three faces, three jobs ---- */
-  --font-display: 'Literata', Georgia, serif;                      /* Report titles, section heads, and any student's or instructor's own words at reading size (comments, cases, responses). */
+  --font-display: 'Literata', Georgia, serif;                      /* Report titles, section heads, and a person's own words at reading size (cases, instructor responses). Ruled 2026-09-13: student comments take --font-body instead. */
   --font-body: 'Schibsted Grotesk', 'Helvetica Neue', sans-serif;  /* UI copy, helpers, buttons, labels. */
   --font-mono: 'Spline Sans Mono', ui-monospace, monospace;        /* Numerals, eyebrows, section codes, dates, rule names, audit/meta lines. Dominant voice on the Admin Console. */
 

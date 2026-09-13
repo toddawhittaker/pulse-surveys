@@ -33,6 +33,7 @@ const read = (name: string): string =>
 
 const PAGE_CSS = read('instructorReportPage.css');
 const STATS_CSS = read('instructorReportStats.css');
+const COMMENTS_CSS = read('instructorReportComments.css');
 const TREND_CSS = read('instructorReportTrend.css');
 
 /** The first declaration block following this exact selector. */
@@ -131,5 +132,13 @@ describe('the histogram’s two boxes', () => {
 
   it('sets the mean’s figure in full ink', () => {
     expect(ruleFor(STATS_CSS, '.pulse-stat-histogram-mean')).toContain('color: var(--spruce)');
+  });
+});
+
+describe('a student’s comment', () => {
+  it('is set in the body face, as the owner ruled on 2026-09-13', () => {
+    const rule = ruleFor(COMMENTS_CSS, '.pulse-comment-card__text');
+    expect(rule).toContain('font-family: var(--font-body)');
+    expect(rule).not.toContain('var(--font-display)');
   });
 });
