@@ -152,6 +152,17 @@ record with a scheduled expiry (`docs/MISTAKES.md` entry 1). E2-05 added two,
 `PERSON_TABLES` question answered about a table that holds a figure describing a
 person and no column that identifies one.
 
+**E5-01 adds the first column this vocabulary recognises that holds no person**,
+and the remedy is the one the tripwire's own failure message has always offered:
+a named exclusion with a reason, in this file. `comparison_set.name` is what
+leadership calls a cohort, on a table the walk reaches through the creator's
+`person` key, and marking it would forbid the read SPEC §5.1 requires of every
+surface that offers a named set. `NAMES_THAT_HOLD_NO_PERSON` below is that
+exclusion and it is a subtraction from the *recognition* rule alone — no view
+rule, no grant and no member of `PERSON_TABLES` reads it. Two tests beside the
+tripwire keep it narrow: nothing on a person table may be excused, and every
+entry has to be a column the sweep would otherwise report.
+
 What remains outside the search is stated on `IDENTITY_NAME_FRAGMENTS` below
 rather than here, beside the tuple that decides it (`docs/MISTAKES.md` entry 14).
 """
@@ -220,6 +231,46 @@ IDENTITY_NAME_FRAGMENTS = (
     "avatar",
     "username",
 )
+
+# The columns whose name matches a fragment above and that hold no person at all,
+# each with the reason. **This is the remedy the tripwire's own failure message
+# offers**, in its words: "If a column in this list is genuinely not a person's
+# identity — a `person` category label that happens to be spelled `name`, say —
+# take it out of the sweep in this file with the reason in the pull request,
+# rather than leaving the marker convention with a hole in it."
+#
+# **It is a subtraction from the recognition rule and not from the marker
+# convention**, and the difference is the whole of why this is safe. A column
+# named here is not swept, so it does not have to carry the marker; nothing here
+# grants anything, hides anything from a view rule, or takes a table out of
+# `PERSON_TABLES` — the view guards below are phrased over marked columns and
+# over the three person tables, and neither reads this dictionary. What it does
+# change is the *classification* of the table it sits on: a table whose only
+# fragment match is excused here is unrecognised, so it belongs in
+# `REACHED_TABLES_THAT_CARRY_NOTHING` at the foot of this file with its reason,
+# which is where the judgement is recorded a second time and expires when a
+# column arrives.
+#
+# **Two rules on it, both asserted below rather than left as a convention.** No
+# entry may name a column of a `PERSON_TABLES` table — those hold a person by
+# construction, and excusing a name on one of them is the hole this convention
+# exists to prevent. And every entry has to be a column that really is there and
+# really would be swept without it, so a stale line cannot sit here excusing
+# nothing while a reader believes it is doing work
+# (`docs/MISTAKES.md` entry 35: require the guard to *find* the thing).
+#
+# E5-01 is the first ticket that needs one. `comparison_set.name` is what
+# leadership calls a cohort — "College of Nursing, 6-week undergraduate" — and
+# SPEC §5.1 requires that name to be readable by every surface that offers a
+# named set, so marking it would forbid exactly the read the product is for.
+NAMES_THAT_HOLD_NO_PERSON: dict[tuple[str, str], str] = {
+    ("comparison_set", "name"): (
+        "The name leadership gives a comparison set (SPEC §5.1: 'leadership can define named "
+        "sets'), which describes a cohort of courses and never a person. E5-06 lists these names "
+        "and E5-09 renders them, so the column is read by design; the only person on the row is "
+        "the creator, held as a foreign key to `person` and named nowhere."
+    ),
+}
 
 # The tables that hold a person by construction. Anything with a foreign key to
 # one of them is swept too — see `people_tables`.
@@ -622,14 +673,44 @@ def people_tables(engine: Any) -> set[str]:
 
 
 def identity_bearing_columns(engine: Any) -> set[tuple[str, str]]:
-    """Every column on a people table whose name reads as a name or an email address."""
+    """Every column on a people table whose name reads as a name or an email address.
+
+    Less whatever `NAMES_THAT_HOLD_NO_PERSON` excuses, which is the only place a
+    fragment match is ever overruled and which the two tests beside this
+    function's callers keep narrow: no entry may name a column of a person table,
+    and every entry has to be a column the sweep would otherwise report.
+    """
     inspector = inspect(engine)
     found: set[tuple[str, str]] = set()
     for table_name in sorted(people_tables(engine)):
         for column in inspector.get_columns(table_name):
+            if (table_name, column["name"]) in NAMES_THAT_HOLD_NO_PERSON:
+                continue
             if any(f in column["name"].lower() for f in IDENTITY_NAME_FRAGMENTS):
                 found.add((table_name, column["name"]))
     return found
+
+
+def excused_columns_the_sweep_would_otherwise_report(engine: Any) -> set[tuple[str, str]]:
+    """The entries of `NAMES_THAT_HOLD_NO_PERSON` that are doing work right now.
+
+    A column counts only if the table is one the person walk reaches, the column
+    is really on it, and its name really matches a fragment — the three things
+    that together mean the sweep would have reported it. Anything else is a stale
+    entry, and the test beside this one is what says so.
+    """
+    inspector = inspect(engine)
+    reached = people_tables(engine)
+    working: set[tuple[str, str]] = set()
+    for table_name, column_name in NAMES_THAT_HOLD_NO_PERSON:
+        if table_name not in reached:
+            continue
+        names = {column["name"] for column in inspector.get_columns(table_name)}
+        if column_name not in names:
+            continue
+        if any(f in column_name.lower() for f in IDENTITY_NAME_FRAGMENTS):
+            working.add((table_name, column_name))
+    return working
 
 
 @pytest.fixture(scope="session")
@@ -718,6 +799,79 @@ def test_every_identity_bearing_column_is_discoverable_through_the_marker(
         "column in this list is genuinely not a person's identity — a `person` category label "
         "that happens to be spelled `name`, say — take it out of the sweep in this file with the "
         "reason in the pull request, rather than leaving the marker convention with a hole in it."
+    )
+
+
+def test_nothing_excused_from_the_sweep_sits_on_a_table_that_holds_a_person() -> None:
+    """CONTROL — must be green, and it is green today over an empty exclusion.
+
+    `NAMES_THAT_HOLD_NO_PERSON` is the one subtraction from the recognition rule
+    in this file, and this is the line it may not cross: `user`, `user_identity`
+    and `person` hold a person by construction, so a `name` column on one of them
+    is a person's name whatever a reason says. An entry there would take the
+    marker convention's own subject out of its own sweep, which is the hole the
+    convention exists to close rather than a judgement anybody may make.
+
+    **The mutation it kills:** `("user_identity", "full_name")` added to the
+    dictionary to quiet a red — the exact move that looks like housekeeping and
+    is the whole of §4.1's wall coming down.
+    """
+    on_a_person_table = sorted(
+        f"{table}.{column}" for table, column in NAMES_THAT_HOLD_NO_PERSON if table in PERSON_TABLES
+    )
+    assert not on_a_person_table, (
+        f"{on_a_person_table} are excused from the identity sweep and sit on one of "
+        f"{list(PERSON_TABLES)}. Those three tables hold a person by construction — that is what "
+        "`PERSON_TABLES` means — so a name on one of them is a person's name and the reason "
+        "beside the entry cannot make it otherwise. E0-10's views, its grants and the CI "
+        "invariant pass are all built from the enumeration this dictionary subtracts from."
+    )
+
+
+def test_every_column_excused_from_the_sweep_is_one_the_sweep_would_report(
+    migrated_engine: Any,
+) -> None:
+    """The other half: an entry that excuses nothing is a record nobody re-reads.
+
+    Three things have to hold for an entry to be doing work — the table is one the
+    person walk reaches, the column is on it, and the column's name matches a
+    fragment — and if any of them stops holding, the entry is stale: the table was
+    renamed, the column was dropped, or the vocabulary moved. A stale line goes on
+    reading as a considered judgement while excusing nothing, and the next column
+    that lands on that table inherits the appearance of having been judged
+    (`docs/MISTAKES.md` entry 1).
+
+    **This is also the control that says the sweep can still see the fragment on
+    that table** (`docs/MISTAKES.md` entry 35): if `comparison_set.name` were no
+    longer recognised for some reason of its own — the walk no longer reaching the
+    table, `name` gone from `IDENTITY_NAME_FRAGMENTS` — the exclusion would be
+    protecting nothing and the tripwire's silence about that table would mean
+    something quite different.
+
+    **Which failure a red here is, before E5-01 lands**: the entry for
+    `comparison_set.name` names a table that is not in the database yet, so this
+    test fails naming it. That is the intended red, and it goes green when the
+    migration lands.
+    """
+    assert NAMES_THAT_HOLD_NO_PERSON, (
+        "The exclusion dictionary is empty, so this test compares nothing. It is not wrong for it "
+        "to be empty — it was until E5-01 — but the assertion below would then be vacuous, and "
+        "this line is what says which of the two happened."
+    )
+
+    working = excused_columns_the_sweep_would_otherwise_report(migrated_engine)
+    stale = sorted(
+        f"{table}.{column}"
+        for table, column in NAMES_THAT_HOLD_NO_PERSON
+        if (table, column) not in working
+    )
+    assert not stale, (
+        f"{stale} are excused from the identity sweep and the sweep would not report them anyway. "
+        "Each entry has to be a column that is really there, on a table the person walk really "
+        "reaches, whose name really matches one of "
+        f"{list(IDENTITY_NAME_FRAGMENTS)}. A line that excuses nothing is a judgement about a "
+        "schema that no longer exists, and the reason beside it is what a reviewer would read the "
+        "next time the table changed. Take it out in the change that made it stale."
     )
 
 
@@ -2739,6 +2893,54 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
         "every moderation state in the set the identity-separated views may not read, which is the "
         "opposite of what §5.1's report needs, so an entry is the right record and a marker is "
         "not.",
+    ),
+    # E5-01's two, written before the tables exist as E2-05's, E3-02's and
+    # E4-02's were, and for the same reason. `comparison_set.created_by_person_id`
+    # records which member of leadership defined the cohort (the actor convention
+    # `backend/app/models/audit.py` already uses), which puts the table one hop
+    # from `person`; the membership table references the set, which puts it two.
+    # So the fixed-point walk reaches both the moment that ticket's migration
+    # runs, neither carries a name any identity vocabulary knows, and without
+    # these entries the report would name them and the repair would be on the
+    # other side of the test wall from the ticket that caused it
+    # (`docs/MISTAKES.md` entry 22).
+    #
+    # **The standing `PERSON_TABLES` question, asked of the table E5-01 adds** —
+    # `docs/tickets/e5/README.md` schedules exactly that re-check at the epic's
+    # exit. The answer is that a comparison set is a statement about *courses*:
+    # SPEC §5.1's named sets are cohorts of sections matched on length and level,
+    # and §4.1 item 7 is what governs the figures computed from them, at the
+    # suppression chokepoint rather than here. The one person on the row is the
+    # creator, as a foreign key, and the identity behind it sits on
+    # `user_identity`, which `pulse_app` is granted no `SELECT` on by any
+    # mechanism — the same argument `audit_log`'s actor makes one entry up. No
+    # student is reachable from either table at all: the walk arrives through
+    # leadership, and membership names a course rather than a section, a response
+    # or an answer.
+    "comparison_set": CarriesNothing(
+        (
+            "created_at",
+            "created_by_person_id",
+            "id",
+            "length_weeks",
+            "level",
+            "name",
+            "updated_at",
+        ),
+        "A leadership-defined cohort: the name it is chosen by, the length and level pair SPEC "
+        "§5.1 requires a comparison to match on, the person who created it as a foreign key, and "
+        "the timestamps. Nothing about the creator beyond the key, and nothing about a student at "
+        "all — membership is at course grain, so no response, answer or enrollment is reachable "
+        "from this row. Marking a column here would put every named set in the set the "
+        "identity-separated views may not read, which is the opposite of what E5-04's resolution "
+        "and E5-06's management API need.",
+    ),
+    "comparison_set_member": CarriesNothing(
+        ("course_id", "course_level", "id", "set_id", "set_level"),
+        "One course in one set: the two keys, and the level each of them carries so that the "
+        "database can hold SPEC §5.1's exact-match rule as a constraint rather than as a rule a "
+        "route remembers (E5-01, ADR 0164). A course is org structure the LMS owns and names "
+        "nobody; the person this walk arrived by is two hops away through the set's creator.",
     ),
     "release_batch_member": CarriesNothing(
         ("answer_id", "batch_id", "id"),
