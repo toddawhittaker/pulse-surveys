@@ -14,7 +14,7 @@ Before adding a line here, ask whether it would still be true if the process
 changed; if yes, it belongs elsewhere. No feature decisions, status, or
 changelog entries. Under 150 lines; growth means something here belongs elsewhere.
 
-**Active epic:** E4 — Instructor Monday report. Tickets: `docs/tickets/e4/README.md`.
+**Active epic:** E5 — Benchmarks & comparison sets. Tickets: `docs/tickets/e5/README.md`.
 
 ## Read before you start
 
