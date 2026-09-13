@@ -53,12 +53,16 @@
 
 /* **Two boxes, which is `design/RatingHistogram.dc.html:14-24`.** This row is
    96px tall and holds each bucket's count above its bar; the tick row below it is
-   a second box carrying one continuous rule. They were one box until E4-21 — a
-   96px column per bucket holding the count, the bar *and* the tick — which left
-   the count sharing 96px with a bar that reaches 72px and a tick of its own, so
-   the tallest bucket's count was pushed out of the chart region and into the mean
-   line above it. Here the bar has the whole 96px to grow into and the count sits
-   inside the same box, which is why it cannot. */
+   a second box carrying one continuous rule.
+
+   They were one box until E4-21 — a 96px column per bucket holding the count, the
+   bar *and* the tick — and what that cost is not what the audit predicted.
+   Measured in a browser against both layouts: nothing overflowed, because the bar
+   is a flex item and flexbox shrank it instead. The tallest bar drew at **47px
+   against the 72px the component asks for**, so every distribution was drawn at
+   about two thirds of the prototype's scale and the shortfall varied with nothing
+   a reader could see. Here the bar is alone in the box with its count and reaches
+   its full 72px. */
 .pulse-stat-histogram-bars {
   display: flex;
   align-items: flex-end;

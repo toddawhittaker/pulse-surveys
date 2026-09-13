@@ -116,8 +116,10 @@ describe('the histogram’s two boxes', () => {
     expect(bars).toContain('height: 96px');
     expect(bars).toContain('align-items: flex-end');
 
-    // The bucket fills that row rather than declaring a second 96px of its own,
-    // which is the layout that pushed a tall bucket's count out of the chart.
+    // The bucket fills that row rather than declaring a second 96px of its own.
+    // That second box is the layout that left the bar sharing 96px with a count
+    // and a tick, and flexbox shrank the bar to fit: 47px drawn of the 72px
+    // asked for, measured in a browser against both layouts.
     const bucket = ruleFor(STATS_CSS, '.pulse-stat-histogram-bucket');
     expect(bucket).toContain('height: 100%');
     expect(bucket).not.toContain('96px');

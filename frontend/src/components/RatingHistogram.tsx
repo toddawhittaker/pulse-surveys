@@ -111,8 +111,10 @@ export function RatingHistogram({
       {/* Two boxes, as `design/RatingHistogram.dc.html:14-24` draws them: a fixed
           96px row holding each bucket's count above its bar, and a tick row
           beneath it carrying one continuous hairline rule. The count used to
-          share a 96px column with the bar and the tick, so a tall bar pushed its
-          own count out of the chart region and into the mean line above. */}
+          share a 96px column with the bar and the tick, and flexbox paid for that
+          by shrinking the bar — the tallest one drew at 47px of the 72px
+          `barHeight` asks for, measured in a browser — rather than by pushing
+          anything out of the chart. */}
       <ul className="pulse-stat-histogram-bars" aria-hidden="true">
         {buckets.map((bucket) => (
           <li className="pulse-stat-histogram-bucket" key={bucket.value}>

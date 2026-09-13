@@ -49,10 +49,11 @@ describe('RatingHistogram', () => {
 
   it('holds the counts and the bars in one box and the ticks in another', () => {
     // E4-21 scope item 4, and `design/RatingHistogram.dc.html:14-24`. The count
-    // shared a 96px column with its bar *and* its tick, so the tallest bucket's
-    // count was pushed out of the chart region and into the mean line above it.
-    // Two boxes is what stops that, and the rule under the bars is one rule and
-    // not five dashes.
+    // shared a 96px column with its bar *and* its tick, and what that cost was
+    // measured in a browser rather than read off the CSS: nothing overflowed,
+    // because flexbox shrank the bar instead — the tallest drew at 47px of the
+    // 72px the component asks for. Two boxes is what gives the bar the whole
+    // 96px, and the rule under it is one rule and not five dashes.
     const { container } = render(
       <RatingHistogram
         stream="instructor"
