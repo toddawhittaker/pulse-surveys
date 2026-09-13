@@ -2,7 +2,7 @@
 name: spec-conformance
 description: Checks whether a diff does what its ticket and the spec say, or something adjacent that seemed reasonable. Also checks that the tests assert the acceptance criteria rather than something weaker. Runs on every PR.
 model: opus
-effort: high
+effort: medium
 tools: Read, Grep, Glob, Bash
 disallowedTools: Write, Edit, NotebookEdit, Agent
 color: green

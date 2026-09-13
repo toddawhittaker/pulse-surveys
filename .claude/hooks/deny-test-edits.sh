@@ -71,6 +71,31 @@ fi
 repo_root="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 rel="${path#"$repo_root"/}"
 
+# Frontend component tests (`*.test.ts(x)` beside their components under
+# frontend/src/) are the implementer's to write. The test author may not enter
+# frontend/src/ (deny-impl-reads.sh), so blocking the implementer here left
+# those files with no permitted editor at all — E4-16's proof test was blocked
+# by exactly this (docs/tickets/e4/.attempts/E4-16.md).
+#
+# The exemption is the one directory, not the file class: the suffix patterns
+# below still block a Write or Edit of a `*.test.ts` or `*.spec.ts` anywhere
+# else (mock-lms/, a future workspace), so on this tool path a test landing
+# outside frontend/src/ and tests/ is refused by default rather than silently
+# uncovered — the fail-closed shape docs/mistakes/53 asks for. The shell
+# branch above is narrower and always was: its patterns require a literal
+# `tests/` in the command line, so it has no suffix counterpart and never
+# covered these files. A path carrying `..` is not exempted: the prefix strip
+# above does not resolve dot-dot, and an unresolved spelling falls through to
+# the block patterns.
+case "$rel" in
+  frontend/src/*.test.ts|frontend/src/*.test.tsx)
+    case "$rel" in
+      *..*) ;;
+      *) exit 0 ;;
+    esac
+    ;;
+esac
+
 case "$rel" in
   tests/*|*/tests/*|*_test.py|*.test.ts|*.test.tsx|*.spec.ts|*.spec.tsx|conftest.py|*/conftest.py)
     cat >&2 <<EOF

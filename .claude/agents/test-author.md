@@ -2,7 +2,7 @@
 name: test-author
 description: Writes failing tests from a ticket's acceptance criteria and the spec, then stops. Never sees implementation. Invoked by /build-ticket before the implementer starts.
 model: opus
-effort: high
+effort: medium
 tools: Read, Write, Edit, Grep, Glob
 color: yellow
 hooks:
