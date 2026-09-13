@@ -13,14 +13,20 @@
  * `frontend/src/copy/`**, the directory the inventory walks, so the strings
  * below are collected and swept rather than held to items 4 and 5 by review.
  *
- * ## What is deliberately not here
+ * ## The comparison words arrived in E5-07
  *
- * **Every comparison word.** "Comparable courses", "university", and the
- * benchmark legend the prototype draws are E5's, and E4 has no comparison data
- * at all: SPEC §4.1 item 1 makes comparison language a visibility question
- * rather than a copy question, so a string that named a comparison this epic
- * cannot show would be a claim the report is not entitled to make. The legend
- * below names the section's own line and nothing else.
+ * E4 shipped this file with every comparison word deliberately absent, because
+ * E4 had no comparison data at all and SPEC §4.1 item 1 makes comparison
+ * language a visibility question rather than a copy question. E5-07 draws the
+ * two overlay series, so the words the legend and the suppression notices need
+ * are below — and only those. **They belong to the instructor surface.** The
+ * student surfaces read `studentSurvey.ts`, where the same words are still
+ * forbidden and swept for (`tests/unit/test_the_submit_paths_copy_is_externalised.py`'s
+ * `FORBIDDEN_COMPARISONS`); item 1 is what keeps the two files apart, and a
+ * comparison string reaching a student surface would have to be written into
+ * that file to get there.
+ *
+ * ## What is deliberately not here
  *
  * **The week eyebrow's wording.** `student_survey.course_week_eyebrow`'s
  * `COURSE WK NN / NN, TERM WK NN` is the owner's FIX-01 ruling of 2026-09-03,
@@ -61,10 +67,40 @@ export const INSTRUCTOR_REPORT_TREND_COPY = {
   'instructor_report_trend.course_week_tick': 'WK {week}',
   'instructor_report_trend.term_week_tick': 'TERM {week}',
 
-  // The legend, which names one line because E4 draws one line. The comparison
-  // and university entries the prototype's legend carries are E5's to add, with
-  // the data behind them.
+  // The legend. One entry per line the panel actually draws: the section's own,
+  // and — from E5-07, and only when the payload carries them unsuppressed — the
+  // comparison set and the university.
   'instructor_report_trend.legend_section': 'This section',
+  // `design/Usage Rules.md` §1: "Legend names the comparison honestly
+  // ('Comparable 12-week courses' — comparables are same-length,
+  // past-referencing)". The number is the section's own `length_weeks`, which
+  // the API supplies and the chart already draws its axis from; SPEC §5.1 makes
+  // length half of what a section must match on to be comparable, so naming it
+  // is the honest half of the label rather than decoration. Nothing here counts
+  // the sections in the set: a set size under a legend is the inference §4.1
+  // item 7 exists to prevent, exactly as it is under a suppression.
+  'instructor_report_trend.legend_comparison': 'Comparable {weeks}-week courses',
+  'instructor_report_trend.legend_university': 'University',
+
+  // A series the payload suppressed. Two sentences: the line is not there, and
+  // the set behind it is too small to report on.
+  //
+  // **No number, and no cause spelled finer than this.** SPEC §4.1 item 7
+  // suppresses every figure computed from a comparison set, and E5's breakdown
+  // decision 2 puts two minimums behind that — a count of sections and a count
+  // of distinct students — so a notice naming one of them would be wrong
+  // whenever the other fired. "Too small" covers both and states no figure the
+  // suppression is withholding.
+  //
+  // **This is state copy, not the surface's confidentiality line** (§4.1 item
+  // 5, in the item's own words since the ruling of 2026-09-08): it explains why
+  // something is hidden, renders only in that state, and promises nothing about
+  // identity. `instructor_report_page.comments_note` is still the report's one
+  // standing identity promise.
+  'instructor_report_trend.comparison_suppressed':
+    'Comparable {weeks}-week courses: no line this week. The set behind it is too small to report on.',
+  'instructor_report_trend.university_suppressed':
+    'University: no line this week. The set behind it is too small to report on.',
 
   // The accessible alternative. `docs/DESIGN_BRIEF.md` requires one for every
   // chart, and the shape here is a visually hidden table carrying the same
@@ -80,6 +116,18 @@ export const INSTRUCTOR_REPORT_TREND_COPY = {
   // figure: zero is a rating a student can give, and a week with no responses
   // is not a week that was rated badly.
   'instructor_report_trend.no_responses': 'No responses that week',
+
+  // Each overlay series gets its own table beside the drawing, for the same
+  // reason the section's line has one: a line is a picture, and the brief asks
+  // every chart for an alternative that carries the same facts. The caption
+  // names both the panel and the series, so a reader hearing four tables in a
+  // stacked pair can tell which is which.
+  'instructor_report_trend.overlay_table_caption': 'Weekly ratings: {stream}, {series}',
+  // A week the series carries no figure for. Not the same sentence as the
+  // section's silent week: nobody's responses are being described here, only a
+  // week the cohort has no reportable figure in — which is why the line breaks
+  // there rather than being drawn straight across it.
+  'instructor_report_trend.overlay_no_figure': 'No figure that week',
 
   // Week navigation. The report pages across published weeks (SPEC §5.1), and
   // which weeks those are is the API's answer — these two controls carry no
@@ -114,10 +162,12 @@ export function copy(key: InstructorReportTrendCopyKey): string {
 /**
  * One entry with its `{placeholders}` filled in.
  *
- * Three entries take them: the two axis labels, whose week numbers are the
- * API's, and the table caption, whose stream name is the panel's own label. The
- * substitution lives here rather than in the components so that a sentence and
- * the shape of its holes stay in one file.
+ * The entries that take them are the two axis labels, whose week numbers are the
+ * API's; the two table captions, whose stream name is the panel's own label; and
+ * the comparison legend and the two suppression notices, whose `{weeks}` is the
+ * section's own length as the API gave it. The substitution lives here rather
+ * than in the components so that a sentence and the shape of its holes stay in
+ * one file.
  */
 export function fillCopy(
   key: InstructorReportTrendCopyKey,
