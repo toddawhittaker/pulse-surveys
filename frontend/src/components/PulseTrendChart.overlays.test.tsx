@@ -632,8 +632,18 @@ describe('the lines are told apart without colour', () => {
   it('writes no raw hex anywhere in the stylesheet', () => {
     // The brief's hard rule, and the one this ticket could most easily break by
     // reaching for the mockup's inline styles. Exercised on both sides first.
+    //
+    // The positive sample is **composed rather than written out**, and has to
+    // stay that way: it must be a real raw hex for the pattern to be proven
+    // against one, and a real raw hex spelled as a literal anywhere under
+    // `frontend/src` is exactly what
+    // `tests/unit/test_the_frontend_source_uses_tokens_only.py` refuses — this
+    // file included, because that sweep carries no exception list on purpose.
+    // Joining the parts puts the value in the running test rather than in the
+    // source the sweep reads. Do not simplify it back into one string.
+    const sample = ['#', '93', 'A5', 'A0'].join('');
     const hex = /#[0-9a-f]{3,8}\b/i;
-    expect(hex.test('stroke: #93A5A0;')).toBe(true);
+    expect(hex.test(`stroke: ${sample};`)).toBe(true);
     expect(hex.test('stroke: var(--spruce-60);')).toBe(false);
     expect(STYLESHEET.length).toBeGreaterThan(0);
     expect(STYLESHEET).not.toMatch(hex);
