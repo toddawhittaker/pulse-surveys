@@ -268,7 +268,9 @@ def _a_rating(rng: random.Random, weights: Sequence[int]) -> int:
     return rng.choices(values, weights=list(weights))[0]
 
 
-def plan_one_week(label: str, course_week: int, roster: Sequence[str]) -> tuple[PlannedResponse, ...]:
+def plan_one_week(
+    label: str, course_week: int, roster: Sequence[str]
+) -> tuple[PlannedResponse, ...]:
     """Who answers this week of this section, and what they say.
 
     Seeded from the section label and the course week, so a re-run writes the same
@@ -547,9 +549,7 @@ def refuse_a_foreign_response(
     foreign = [
         (user_id, week_id)
         for user_id, week_id in session.execute(
-            select(Response.user_id, Response.week_id).where(
-                Response.section_id == world.row.id
-            )
+            select(Response.user_id, Response.week_id).where(Response.section_id == world.row.id)
         )
         if week_id in written_weeks and (user_id, week_id) not in planned
     ]
@@ -977,9 +977,12 @@ def main() -> int:
         f"across {written.sections} sections of {PRIOR_TERM_NAME}."
     )
     for count in counts:
+        sections_held = "section" if count.section_count == 1 else "sections"
+        students_held = "student" if count.respondent_count == 1 else "students"
         print(
             f"  {count.length_weeks}-week {count.level}, course week {count.course_week}: "
-            f"{count.section_count} sections, {count.respondent_count} distinct students"
+            f"{count.section_count} {sections_held}, {count.respondent_count} distinct "
+            f"{students_held}"
         )
 
     faults = check_the_cohorts(
