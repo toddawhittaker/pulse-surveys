@@ -1,5 +1,6 @@
 import type { RatingDistribution } from './RatingHistogram';
 import type { RateFigure } from './ResponseRateBar';
+import type { WorkloadBenchmark } from './StatPair';
 
 /**
  * The report weeks the stat component tests render — ticket E4-09.
@@ -97,6 +98,72 @@ export const A_WEEK_NOBODY_ANSWERED: ReportWeekFixture = {
   },
   workload: { mean: null, median: null },
 };
+
+/**
+ * The workload comparison figures — ticket E5-08, shaped by the
+ * `workload_benchmark` member of the payload sketch in `docs/tickets/e5/README.md`.
+ *
+ * **No two figures in a fixture render the same string**, and none renders the
+ * same string as the section's own pair (8.0 h and 9.5 h): a component that drew
+ * the university's median where the comparison set's belongs would otherwise
+ * agree with the wrong reading. **Each number is rounding-revealing** in the
+ * E4-09 way — 8.96 is "9.0" rounded and "8.9" truncated, 7.04 is "7.0" rounded
+ * and "7" with trailing zeroes dropped, 10.46 is "10.5" against "10.4", 8.06 is
+ * "8.1" against "8.0" — so a wrong number rule prints a different string rather
+ * than passing.
+ *
+ * **A suppressed member carries `suppressed` and a reason and nothing else.**
+ * That is the sketch's own rule, and it is the shape rather than a convenience:
+ * a mean sent beside a suppression is a figure the suppression is withholding,
+ * so the payload does not carry one and neither do these.
+ */
+export const A_BENCHMARK_BOTH_REPORTING: WorkloadBenchmark = {
+  comparison: { suppressed: false, mean: 8.96, median: 7.04 },
+  university: { suppressed: false, mean: 10.46, median: 8.06 },
+};
+
+/** The comparison set is below the minimum; the university, computed over every
+ * matching section institution-wide, is not. */
+export const A_BENCHMARK_WITH_THE_COMPARISON_SUPPRESSED: WorkloadBenchmark = {
+  comparison: { suppressed: true, reason: 'below-minimum' },
+  university: { suppressed: false, mean: 10.46, median: 8.06 },
+};
+
+/** The other way round. Rare in production and not impossible — a section whose
+ * length and level are unusual institution-wide can have a named comparison set
+ * that clears the minimum while the university's does not. */
+export const A_BENCHMARK_WITH_THE_UNIVERSITY_SUPPRESSED: WorkloadBenchmark = {
+  comparison: { suppressed: false, mean: 8.96, median: 7.04 },
+  university: { suppressed: true, reason: 'below-minimum' },
+};
+
+/**
+ * A week the comparison set reports nothing in, unsuppressed.
+ *
+ * Not the same fact as a suppression: the set is large enough to report on, and
+ * this week has no figure from it — the trend chart's `mean: null` week, in the
+ * workload pair's shape. It is here because the two cases say different things
+ * to a reader and the component has to tell them apart.
+ */
+export const A_BENCHMARK_WITH_NO_FIGURE_THIS_WEEK: WorkloadBenchmark = {
+  comparison: { suppressed: false, mean: null, median: null },
+  university: { suppressed: false, mean: 10.46, median: 8.06 },
+};
+
+/**
+ * A payload whose flag cannot be read.
+ *
+ * The comparison member lost its `suppressed` on the way and carries figures;
+ * the university member has a flag that is not a boolean at all. Neither is a
+ * shape the server should ever send, and both are shapes a client casting JSON
+ * can be handed — which is the whole reason the component's check is `=== false`
+ * rather than a truthiness test. The cast is deliberate and named: this fixture
+ * exists precisely to be a value the type forbids.
+ */
+export const A_BENCHMARK_WITH_AN_UNREADABLE_FLAG = {
+  comparison: { reason: 'below-minimum', mean: 8.96, median: 7.04 },
+  university: { suppressed: null, mean: 10.46, median: 8.06 },
+} as unknown as WorkloadBenchmark;
 
 /** Everyone answered: the end of the range where a fraction is mistaken for a percent. */
 export const A_FULL_RESPONSE_RATE: RateFigure = { rate: 1, numerator: 21, denominator: 21 };
