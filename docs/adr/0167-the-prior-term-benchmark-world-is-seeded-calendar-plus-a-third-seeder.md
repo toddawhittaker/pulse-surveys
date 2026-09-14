@@ -1,5 +1,31 @@
 # 0167 — The prior-term benchmark world is a seeded calendar and a third seeder
 
+> **Amended 2026-09-14 (E5-SEED).** The decision below is unchanged and the world
+> it describes was built. Two sentences in it were wrong about what that world
+> resolved to, and this says so rather than editing them out.
+>
+> Decision part 2 calls the three twelve-week prior-term sections
+> "`BIOL-310-R7FF`'s own length and level and so its comparison set", and the last
+> sentence of part 3 says the seeder's self-check "exits non-zero unless the
+> comparison set clears both configured minimums". Neither was true when this was
+> written. SPEC §5.1 draws a section's **default** comparison set from its
+> course's Lead Faculty's courses, and `scripts/seed.py` mapped no lead to
+> `BIOL 310` — so `app.services.benchmarks.resolve_default_set` answered an empty
+> list for the hero section, and those three sections were in nobody's default
+> set. Matching length and level is necessary and not sufficient.
+>
+> The self-check did not catch it because it never asked the service. It counts
+> the sections and students the seeder wrote, narrowed to the section codes it was
+> handed — the recount this ADR's own rejected alternative argues for — and that
+> reports a full cohort whether or not any reader can resolve one.
+> `docs/MISTAKES.md` entry 58 is the lesson.
+>
+> Closed by `scripts/seed.py` holding `BIOL 310` and `BIOL 215` as courses and
+> mapping a lead faculty to `BIOL 310`. The hero's default set now holds the three
+> prior-term sections, asserted through the service rather than through any
+> recount. `BIOL 215` keeps no lead on purpose, so the suppressed direction is
+> still demonstrable.
+
 ## Context
 
 SPEC §5.1 compares a section against every section of its own length and level,

@@ -4542,3 +4542,179 @@ def test_a_second_seed_run_leaves_the_question_set_exactly_as_it_was(
             "set is not a visible failure, it is a demo database where the survey has ten "
             "questions and every response is scored against a set nothing chose."
         )
+
+
+# ---------------------------------------------------------------------------
+# E5's two biology courses — which of them the seed gives a lead faculty to.
+#
+# SPEC §5.1 draws a section's default comparison set from "the same Lead Faculty's
+# courses", so a course with no lead-faculty mapping has no default set however many
+# sections were launched under it. Two seeded courses are load-bearing for E5 in
+# opposite directions, and both are decided here rather than in any benchmark code:
+#
+#   - **BIOL 310** is the hero section `BIOL-310-R7FF`'s course. The prior-term world
+#     (E5-12) launches three more twelve-week sections under it precisely so the hero
+#     has something to be compared with, and the demo screen draws that line only if
+#     this course has a lead.
+#   - **BIOL 215** is `BIOL-215-R3WW`'s course, which E5-10's browser spec drives as the
+#     section whose comparison line is *absent*. It is also E0-17 criterion 8's
+#     deliberately unmapped course, which SPEC §2.1's fall-to-chair path needs.
+#
+# So the pair below is one criterion in two directions, and a seed that mapped every
+# course would satisfy the first and break the second.
+# ---------------------------------------------------------------------------
+
+# `(prefix code, course number)`, as a person writes them beside each other — the
+# spelling `mock-lms/app/seed.py` gives the two placements and the spelling
+# `tests/integration/test_mock_lms_seed_data.py` reads a course number in. The number
+# is compared as text, because `course.lms_number` stores what the platform sent.
+HERO_SECTIONS_COURSE = ("BIOL", "310")
+UNLED_COURSE = ("BIOL", "215")
+
+
+def courses_numbered(
+    tables: dict[str, Any], rows: dict[str, Any], code: str, number: str
+) -> list[dict[str, Any]]:
+    """Every seeded course carrying `number` under the prefix coded `code`.
+
+    Matched on the prefix *and* the number, never on the number alone: course numbers
+    repeat across prefixes by design — §8's bands are about the number — so a lookup
+    for `310` would answer about whichever department's course it met first.
+    """
+    prefix_table = require_table(tables, "prefix")
+    course_table = require_table(tables, "course")
+    code_column = require_column(prefix_table, PREFIX_CODE_COLUMNS)
+    prefix_key = single_primary_key(prefix_table)
+    course_to_prefix = one_foreign_key_column(course_table, "prefix")
+
+    under = {row[prefix_key] for row in rows_of(rows, "prefix") if str(row[code_column]) == code}
+    return [
+        row
+        for row in rows_of(rows, "course")
+        if row[course_to_prefix] in under and str(row[COURSE_NUMBER_COLUMN]) == number
+    ]
+
+
+def the_seeded_course(tables: dict[str, Any], rows: dict[str, Any], course: tuple[str, str]) -> Any:
+    """The primary key of one seeded course, or a failure saying the world is not the one.
+
+    A guard rather than an assertion about the seed: both courses below are read by
+    every E5 test that reasons about the demo world, and a database holding neither
+    makes "it has no mapping" true for a reason that has nothing to do with mappings.
+    """
+    code, number = course
+    course_table = require_table(tables, "course")
+    key = single_primary_key(course_table)
+    found = courses_numbered(tables, rows, code, number)
+    if len(found) != 1:
+        numbers = sorted(str(row[COURSE_NUMBER_COLUMN]) for row in rows_of(rows, "course"))
+        pytest.fail(
+            f"The seeded database holds {len(found)} courses numbered {number!r} under the prefix "
+            f"{code!r}; the course numbers it holds are {numbers}. `{code} {number}` is one of the "
+            "two courses E5's demo world is built on — the hero section's own course and the one "
+            "its browser spec reads as unmapped — so a seed that does not hold it is a world the "
+            "benchmark screens cannot be driven against, and neither assertion about its "
+            "lead-faculty mapping would mean anything."
+        )
+    return found[0][key]
+
+
+def test_the_seed_maps_a_lead_faculty_to_the_hero_sections_course(
+    seeded_demo: Any, demo_database: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """The hero section's course has a lead, so its comparison set can be resolved at all.
+
+    SPEC §5.1: the default comparison set is "the same Lead Faculty's courses filtered
+    to matching length+level". `lead_faculty_mapping` is the only place that person is
+    recorded — `public.lead_faculty_course` reads it and the benchmark service resolves
+    through that view — so with no row here the hero's comparison set is empty whatever
+    else the demo world holds.
+
+    **The mutation this kills**: the lead-faculty assignment for BIOL 310 dropped from
+    the seed's own list, which is the state the repository is in today. It is invisible
+    to every other test of this script: the course is seeded, its sections are launched,
+    the counts all report a complete world, and the one screen the demo exists to show
+    draws no comparison line.
+
+    **The near miss it must not fire on**: a mapping written for the *other* biology
+    course instead, which satisfies "some biology course has a lead" and breaks E5-10's
+    suppressed direction. The test below is that half.
+
+    **The controls**: the seed wrote some mappings at all, so a reader that can see none
+    does not report this course as unmapped; and the course itself is in the database,
+    read by prefix and number together.
+
+    E0-09 makes one lead per course a database constraint, so the count being exactly
+    one is mostly the schema's doing — what this asserts is that it is not zero, and the
+    exact count is written out so a seed that somehow wrote two is a named failure rather
+    than a pass.
+    """
+    seeded(seeded_demo)
+    mappings = require_table(metadata_tables, MAPPINGS)
+    course_column = one_foreign_key_column(mappings, "course")
+
+    with reading(demo_database, metadata_tables) as rows:
+        course_id = the_seeded_course(metadata_tables, rows, HERO_SECTIONS_COURSE)
+        mapped = [row[course_column] for row in rows_of(rows, MAPPINGS)]
+
+    assert mapped, (
+        f"The seed wrote no `{MAPPINGS}` rows at all, so every course is unmapped and the "
+        "assertion below would be about a table this run never filled rather than about the "
+        "hero's course. E0-17's scope asks for the mappings; "
+        "`test_at_least_one_seeded_course_has_no_lead_faculty_mapping` asks for the exception."
+    )
+    named = " ".join(HERO_SECTIONS_COURSE)
+    held = [row for row in mapped if row == course_id]
+    assert len(held) == 1, (
+        f"`{named}` — the hero section `BIOL-310-R7FF`'s course, id "
+        f"{course_id} — has {len(held)} rows in `{MAPPINGS}`; the seed wrote {len(mapped)} "
+        "mappings in all. SPEC §5.1 resolves a section's default comparison set through the "
+        "course's Lead Faculty, so with no mapping the hero's set is empty no matter how many "
+        "prior-term sections were launched under that course — which is what the demo's headline "
+        "screen is for, and what `scripts/seed_benchmark_history.py` claims in its own opening "
+        "comment. Two rows would be E0-09's one-lead-per-course constraint gone."
+    )
+
+
+def test_the_seed_leaves_the_browser_specs_unmapped_course_without_a_lead(
+    seeded_demo: Any, demo_database: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """The other biology course keeps having no lead, and that is deliberate.
+
+    SPEC §2.1: "A course with no mapping falls to its department chair", and E0-17
+    criterion 8 asks the seed to leave one course there so that path is exercised in
+    development. `BIOL-215-R3WW`'s course is the one E5-10's browser spec reads as the
+    section with no comparison line, so this is also the world that spec is written
+    against.
+
+    **The mutation this kills**: a lead-faculty mapping written for every seeded course,
+    or written for this course in place of the hero's. Either turns the suppressed
+    direction into a section that draws a benchmark, and the browser spec asserting its
+    absence would then fail for a reason nobody would look for in this script.
+
+    **The control is a course that *is* mapped** (`docs/MISTAKES.md` entry 35): this
+    reads the mapping table and reports what it does not find there, so it has to be
+    shown finding something first. Over an empty table it would pass most convincingly.
+    """
+    seeded(seeded_demo)
+    mappings = require_table(metadata_tables, MAPPINGS)
+    course_column = one_foreign_key_column(mappings, "course")
+
+    with reading(demo_database, metadata_tables) as rows:
+        course_id = the_seeded_course(metadata_tables, rows, UNLED_COURSE)
+        mapped = [row[course_column] for row in rows_of(rows, MAPPINGS)]
+
+    assert mapped, (
+        f"The seed wrote no `{MAPPINGS}` rows at all, so this test cannot tell a course the seed "
+        "deliberately left unmapped from a table nothing ever wrote to — and it would pass over "
+        "both."
+    )
+    held = [row for row in mapped if row == course_id]
+    assert not held, (
+        f"`{' '.join(UNLED_COURSE)}` — the course of `BIOL-215-R3WW`, id {course_id} — holds "
+        f"{len(held)} `{MAPPINGS}` rows. It is meant to hold none: SPEC §2.1 falls a course with "
+        "no mapping to its department chair, E0-17 criterion 8 asks the seed for one such course "
+        "so that path is exercised in development, and E5-10's browser spec drives this section "
+        "as the one whose comparison line is absent. A lead here makes that spec assert the "
+        "absence of a line the product now draws."
+    )

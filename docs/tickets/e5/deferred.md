@@ -302,3 +302,23 @@ another's paragraph; the correction is recorded here instead.
 
 **Owner:** unchanged — the first ticket that reads one of the three. **Done
 when** that entry's own done-when is met.
+
+## The length half of §5.1's matching has no test that fails without it (E5-04)
+
+**What is not enforced.** `app.services.benchmarks._matching_sections` filters
+candidate sections on both the hero's length and the hero's level. With the
+length predicate removed, the whole backend suite still passes (3767 of 3767,
+measured on 2026-09-14 during the seed fix's mutation battery), because every
+planted world's other-length sections belong to courses the lead does not hold,
+so the lead filter excludes them on its own. The function also feeds
+`resolve_university`, where no lead filter stands in front of it.
+
+**Why it was left.** The seed fix does not touch the service, and the world
+that would prove the predicate — a led course with sections of two lengths —
+is a fixture for E5-04's suite, not for a seed correction.
+
+**Owner:** E5-14 at the epic exit, unless a ticket touches `benchmarks.py`
+first. **Done when** a test plants a led course with a section of another
+length and asserts, in both directions, that it is excluded from the default
+set and from the university population while a same-length section is
+included.

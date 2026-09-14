@@ -587,6 +587,32 @@ COURSES: tuple[DemoCourse, ...] = (
     DemoCourse("STAT", "610", "Statistical Inference"),
     DemoCourse("MIS", "320", "Database Systems"),
     DemoCourse("BIOL", "101", "Principles of Biology"),
+    # **The two courses E5's demo world is built on, seeded rather than left to a
+    # launch.** Both are provisioned anyway by the first launch into them — a
+    # launch adopts an existing course by `(prefix_id, lms_number)` and creates one
+    # only when no row is there — so seeding them duplicates nothing, and the
+    # titles below are the ones `mock-lms/app/seed.py` sends, which leaves a
+    # launched course's stored title unchanged.
+    #
+    # They are seeded because the seed has to say something about their Lead
+    # Faculty, and a lead-faculty mapping needs the course row to exist when the
+    # mapping is written:
+    #
+    #   - `BIOL 310` is the hero section `BIOL-310-R7FF`'s course, and it gets a
+    #     lead below. SPEC §5.1 draws a section's default comparison set from "the
+    #     same Lead Faculty's courses", so without that mapping the demo's headline
+    #     screen resolves an empty set however many prior-term sections were
+    #     launched under the course.
+    #   - `BIOL 215` is `BIOL-215-R3WW`'s course, and it deliberately gets no lead.
+    #     That is E0-17 criterion 8's unmapped course, which SPEC §2.1's
+    #     fall-to-chair path needs, and it is the section whose absent comparison
+    #     line the browser specs read.
+    #
+    # `MATH 140` — the mock platform's other undergraduate course — is not seeded.
+    # Nothing needs it: no seeded assignment names it, and a launch into it
+    # provisions it the same way it always did.
+    DemoCourse("BIOL", "215", "Cell Biology"),
+    DemoCourse("BIOL", "310", "Molecular Genetics"),
     DemoCourse("BIOL", "8200", "Doctoral Research Seminar in Biology"),
     DemoCourse("PSYC", "110", "Introduction to Psychology"),
     DemoCourse("PSYC", "545", "Cognitive Neuroscience"),
@@ -790,6 +816,19 @@ ASSIGNMENTS: tuple[DemoAssignment, ...] = (
         scope=("course", "BIOL 101"),
         reports_to="chair-biology",
     ),
+    # The hero section's course. `BIOL-310-R7FF` is the section E5's benchmark
+    # screens are demonstrated on, and SPEC §5.1 resolves its default comparison
+    # set through this row: the same lead's courses, filtered to matching length
+    # and level. Held by the same person as `BIOL 101` — a lead's span is more than
+    # one course (SPEC §2.1) — and `BIOL 215` keeps no lead at all, which is the
+    # other half of E5's demo world and E0-17 criterion 8's fall-to-chair course.
+    DemoAssignment(
+        key="lead-biol-310",
+        person="lead-biology",
+        role=AssignmentRole.LEAD_FACULTY,
+        scope=("course", "BIOL 310"),
+        reports_to="chair-biology",
+    ),
     DemoAssignment(
         key="lead-csci-240",
         person="lead-computer-science",
@@ -845,15 +884,20 @@ ASSIGNMENTS: tuple[DemoAssignment, ...] = (
 # where an editor keeping them in step gets built, so the demo seeds them
 # agreeing.
 #
-# **Eight of the fifteen courses are deliberately absent**, so the fall-to-chair
+# **Nine of the seventeen courses are deliberately absent**, so the fall-to-chair
 # path has something to exercise: with every course mapped, an implementation that
-# never implements the fallback passes every screen in development.
+# never implements the fallback passes every screen in development. `BIOL 215` is
+# one of the nine, and it is the one the browser specs read as the section with no
+# comparison line.
 LEAD_FACULTY_MAPPINGS: tuple[tuple[str, str], ...] = (
     ("chair-mathematics", "MATH 040"),
     ("lead-mathematics-one", "MATH 210"),
     ("lead-mathematics-two", "MATH 505"),
     ("lead-mathematics-two", "STAT 250"),
     ("lead-biology", "BIOL 101"),
+    # The hero section's course, which is what makes `BIOL-310-R7FF` resolve a
+    # default comparison set at all (SPEC §5.1: the same Lead Faculty's courses).
+    ("lead-biology", "BIOL 310"),
     ("lead-computer-science", "CSCI 240"),
     ("assistant-dean-arts-sciences", "PSYC 110"),
 )
@@ -943,7 +987,7 @@ MOCK_LMS_LEADERSHIP_USER_ID = "mock-lms-user-dean"
 # containment tree a development box holds. Two of them avoid a node the demo
 # already uses the same way: the assistant dean sits in the College of Business
 # and Technology, whose own assistant dean the demo does not seed, and the lead
-# faculty leads `BUSA 300`, one of the eight courses `LEAD_FACULTY_MAPPINGS`
+# faculty leads `BUSA 300`, one of the nine courses `LEAD_FACULTY_MAPPINGS`
 # leaves unmapped on purpose — so neither can be mistaken for part of §2.1's
 # assistant-dean shape or for a second lead on a mapped course. The other four
 # share a node with a demo person holding the same role, which `role_assignment`

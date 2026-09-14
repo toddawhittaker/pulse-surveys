@@ -5,8 +5,18 @@ and the exit line says "benchmarked against prior terms". Nothing seeded before
 this ticket lived in a prior term at all, so every comparison a developer could
 build was against the current one. This file fills the term before it: a week of
 survey answers for each of the prior-term sections the mock platform publishes,
-so that the hero section's comparison set has something in it and one deliberately
-thin cohort has too little.
+so that the hero section's comparison set has something to hold and one
+deliberately thin cohort has too little.
+
+**Filling the sections is necessary and it is not sufficient**, which this line
+claimed otherwise until 2026-09-14. SPEC §5.1 draws a section's *default*
+comparison set from its course's Lead Faculty's courses, so a section whose
+course has no lead-faculty mapping resolves an empty set however many matching
+sections this file fills. `scripts/seed.py` maps a lead to `BIOL 310` for exactly
+that reason, and the self-check at the end of this file does not check it: the
+recount counts what this file wrote, by section code, and a reader asking
+`app.services.benchmarks.resolve_default_set` is the only thing that answers
+whether the set resolves at all (`docs/MISTAKES.md` entry 58).
 
 **It is a second seeder rather than a fattened demo story**, and ADR 0167 records
 why. `scripts/seed_demo_story.py` is deterministic per its own section label and
