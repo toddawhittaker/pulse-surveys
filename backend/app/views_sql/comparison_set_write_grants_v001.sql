@@ -1,0 +1,72 @@
+-- What the application may write on a named comparison set — ticket E5-06,
+-- SPEC §5.1, §4.1 items 1 and 7, §8, ADR 0001, ADR 0164, ADR 0173.
+--
+-- E5-01 created public.comparison_set and public.comparison_set_member and
+-- granted nothing on either on purpose, naming the two tickets that would each
+-- spend a privilege in its own change: E5-04 reads a set to resolve it, and
+-- E5-06 writes one. comparison_set_grants_v001.sql is the read half. This is the
+-- write half and the last of the two, and it follows the same E4-02 precedent —
+-- a privilege landing in the change that spends it.
+--
+-- **Five verbs, each one a route actually spends.** app.api.leadership serves
+-- SPEC §5.1's "leadership can define named sets", through
+-- app.services.comparison_sets, on the connection every request in the product
+-- runs on:
+--
+--   - INSERT on comparison_set: a definer creates a set.
+--   - UPDATE on comparison_set: an edit replaces a set's name, its declared
+--     length and level, and stamps updated_at — which is, with created_at and
+--     the creator key, the whole record that the set was written at all (ADR
+--     0174: this ticket writes no audit_log row).
+--   - DELETE on comparison_set: a definer deletes a set they defined. The
+--     membership rows go with it through the ON DELETE CASCADE on the composite
+--     key, and every course stays exactly where it was — a course named by a set
+--     is undeletable, which is the opposite direction of the same rule (ADR
+--     0164).
+--   - INSERT on comparison_set_member: a create and an edit both write the
+--     membership list.
+--   - DELETE on comparison_set_member: an edit replaces membership wholesale,
+--     which means deleting the rows that are no longer in the list.
+--
+-- **UPDATE on comparison_set_member is withheld, and that is the assertion.**
+-- Membership is replaced rather than edited: on a PUT the rows are deleted and
+-- the new ones inserted, so nothing in this product edits a membership row in
+-- place. A connection that could would be able to move one set's course into
+-- another set's cohort — changing which sections a published benchmark was
+-- computed over — without touching either set row, which no read of the set
+-- table would show.
+--
+-- **TRUNCATE, REFERENCES and TRIGGER stay withheld too**, which is the shape
+-- classification, grade_sync, ags_call and weekly_summary already have.
+--
+-- **pulse_care is granted nothing**, as the read half says: SPEC §6.2 isolates
+-- the Care role to the safety path, a benchmark cohort is no part of it, and a
+-- role gets no privilege it has no use for.
+--
+-- **What these writes can reach, for §4.1.** A name, a declared length, a level,
+-- a creator person key and a list of courses — the same columns the read half
+-- describes, no student and no subject. The authorization deciding *whose* set
+-- may be changed is E5-06's leadership scoping in the service (ADR 0173): this
+-- grant says the application may write these two tables at all, and the route
+-- says which rows.
+--
+-- **This widens what pulse_app can reach, and it is meant to be visible.**
+-- RUNTIME_BASE_TABLE_PRIVILEGES in tests/integration/test_identity_grants.py is
+-- the hand-written record every base-table grant is compared against as an
+-- equality in both directions, and these five are recorded there in the same
+-- change — deliberately not derived from this file, so that a widening cannot
+-- justify itself.
+--
+-- **USAGE ON SCHEMA public is not granted again here.** identity_grants_v001.sql
+-- grants it to pulse_app and identity_grants_v002.sql restates it; an ACL entry
+-- records no history, so a third grant would be indistinguishable from those and
+-- any matching revoke would remove all of them.
+--
+-- **The downgrade revokes rather than dropping anything.** Both tables belong to
+-- b4d7e2a91c58 and outlive this revision, so the revision that executes this file
+-- writes the matching REVOKE by hand, naming the five verbs rather than ALL: ALL
+-- would take E5-04's SELECT with it and leave a database one step back from head
+-- unable to resolve a named set at all.
+
+GRANT INSERT, UPDATE, DELETE ON public.comparison_set TO pulse_app;
+GRANT INSERT, DELETE ON public.comparison_set_member TO pulse_app;
