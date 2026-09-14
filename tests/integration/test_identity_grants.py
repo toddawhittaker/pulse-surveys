@@ -4214,6 +4214,29 @@ MEMBER_OF_ROLES = """
 #     `public."user"` is `(id)` only, so the key resolves to nobody through it.
 #     Decided and spent in E5-04.
 
+#   - `pulse_app` **writes** `comparison_set` (`INSERT`, `UPDATE`, `DELETE`) and
+#     `comparison_set_member` (`INSERT`, `DELETE`), beside the reads above.
+#     **E5-06 is the writer E5-01's tables were waiting for**, and the second and
+#     last ticket that ticket named. SPEC §5.1: "leadership can define named
+#     sets", and `backend/app/api/leadership.py` is where they are defined,
+#     edited and deleted — on the connection every request in the product runs
+#     on. Each verb is one the routes actually spend: a create inserts a set and
+#     its membership rows, an edit updates the set and replaces its membership,
+#     and a delete removes the set and cascades its members.
+#     **What is withheld is the assertion, and it is one verb.** No `UPDATE` on
+#     `comparison_set_member`: membership is replaced wholesale on a `PUT` — the
+#     rows not in the new list are deleted and the new ones inserted — so nothing
+#     in this product edits a membership row in place, and a connection that
+#     could would be able to move one set's course into another set's cohort
+#     without touching either set row, which no read of the set table would show.
+#     **What this write reaches, for §4.1.** A name, a declared length, a level, a
+#     creator `person` key and a list of courses — the same columns E5-04's read
+#     entry describes, no student and no subject. The authorization that decides
+#     *whose* set may be changed is E5-06's leadership scoping, not this grant:
+#     the grant says the application may write these two tables at all, and the
+#     route says which rows.
+#     Decided and spent in E5-06.
+
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -4267,7 +4290,12 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "release_batch_member", "SELECT"),
         (APPLICATION_ROLE, "release_batch_member", "INSERT"),
         (APPLICATION_ROLE, "comparison_set", "SELECT"),
+        (APPLICATION_ROLE, "comparison_set", "INSERT"),
+        (APPLICATION_ROLE, "comparison_set", "UPDATE"),
+        (APPLICATION_ROLE, "comparison_set", "DELETE"),
         (APPLICATION_ROLE, "comparison_set_member", "SELECT"),
+        (APPLICATION_ROLE, "comparison_set_member", "INSERT"),
+        (APPLICATION_ROLE, "comparison_set_member", "DELETE"),
     }
 )
 

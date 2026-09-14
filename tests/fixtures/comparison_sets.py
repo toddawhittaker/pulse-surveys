@@ -131,6 +131,68 @@ INVALID_VALUE = "22"
 REFUSED_A_VALUE = (INTEGRITY_VIOLATION, INVALID_VALUE)
 
 
+# Postgres' insufficient-privilege SQLSTATE, for the two modules that ask what
+# `pulse_app` may do with these tables. Pinned exactly, because there the
+# *reason* for a refusal is the criterion: `42P01` is a table that is not there
+# and `23502` is a row the role was allowed to attempt.
+INSUFFICIENT_PRIVILEGE = "42501"
+
+
+def refusal_of_statement(engine: Any, statement: str) -> DatabaseError | None:
+    """Run one statement on its own connection as this engine's role; answer the error.
+
+    Its own connection and its own transaction per call, because a refused
+    statement aborts the transaction it ran in — a second probe on the same
+    connection would fail with `25P02` and read as a second refusal. Every call
+    rolls back, so nothing here leaves a row behind.
+
+    Here rather than in the module that first wrote it, because E5-06 asks the
+    same question of a second database: the grants module probes the session
+    container, and the downgrade module probes a throwaway one it walks up and
+    down (`docs/MISTAKES.md` entry 13 — one hazard, one helper).
+    """
+    from sqlalchemy import text
+
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            connection.execute(text(statement))
+        except DatabaseError as refused:
+            transaction.rollback()
+            return refused
+        transaction.rollback()
+        return None
+
+
+def a_write_of(verb: str, relation: str, tables: dict[str, Any]) -> str:
+    """One write statement per verb, built so that only a privilege can refuse it *first*.
+
+    The update assigns a column to itself, and the column is read off the
+    declared table rather than guessed: a statement naming a column that is not
+    there is refused with `42703` before any privilege is consulted, and a
+    caller would then report a missing column as a withheld grant
+    (`docs/MISTAKES.md` entry 3 in its SQLSTATE form). The insert names no
+    columns for the same reason — a `DEFAULT VALUES` insert cannot fail at parse
+    time for a reason about spelling, and Postgres consults the privilege before
+    the `NOT NULL`.
+    """
+    if verb == "INSERT":
+        return f"INSERT INTO public.{relation} DEFAULT VALUES"
+    if verb == "DELETE":
+        return f"DELETE FROM public.{relation}"  # noqa: S608
+    if verb == "SELECT":
+        return f"SELECT * FROM public.{relation}"  # noqa: S608
+    table = tables.get(relation)
+    if table is None:
+        pytest.fail(
+            f"There is no `{relation}` table on `Base.metadata` (there are {sorted(tables)}), so "
+            "this helper cannot name a column to write. E5-01 ships both tables in "
+            "`backend/app/models/benchmark.py`."
+        )
+    column = next(iter(table.columns)).name
+    return f'UPDATE public.{relation} SET "{column}" = "{column}"'  # noqa: S608
+
+
 def require_table(tables: dict[str, Any], name: str, why: str) -> Any:
     """The declared table called `name`, or a failure saying it is not there."""
     table = tables.get(name)

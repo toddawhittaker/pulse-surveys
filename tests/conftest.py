@@ -170,6 +170,16 @@ boundary: `metadata_tables` is asked for by both.
     which sections, whose two counts the test that writes it states — plus the
     lookup of `app.services.benchmarks` and the readers that say whether a
     comparison figure carries a number without asserting the figure's shape.
+  - `fixtures/named_sets.py` — E5-06: the names that ticket's work order settles
+    for the leadership API and the seven paths it fixes outright, with the
+    refusal sentences **discovered** in `app.copy` rather than transcribed,
+    because the work order settles each constant's name and neither its module
+    nor its words; the leadership session E4-07's door launches, the second
+    leader whose set is the out-of-scope half of every edit pair, and the
+    two-hat person whose two sessions are minted because a launch lands her at
+    exactly one of her two views; and four courses and five sections planted so
+    that a set's member count and its resolved section count are two different
+    numbers.
 
 Five modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
@@ -256,6 +266,7 @@ pytest_plugins = (
     "fixtures.report_question_text",
     "fixtures.instructor_sections",
     "fixtures.benchmark_views",
+    "fixtures.named_sets",
 )
 
 
