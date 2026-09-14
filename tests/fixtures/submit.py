@@ -937,6 +937,12 @@ DEPENDENCIES_MODULE = "app.api.deps"
 # `tests/integration/test_every_csrf_verified_dependency_refuses_a_cookie_borne_write.py`
 # is the first — so an indirect delegation that this cannot see is a constant to
 # correct rather than a defect to report.
+#
+# **What counts as reaching it is a call, not a mention**, and the re-mutation is
+# why: the first version of `reaches_the_double_submit_check` searched the source
+# as text and stayed green against a `csrf_verified_leadership` whose body was
+# `return claims`, because the name survived in its docstring. See
+# `_calls_the_double_submit_check`.
 DOUBLE_SUBMIT_HELPER = "_double_submit_verified"
 
 
@@ -963,29 +969,74 @@ def csrf_verified_dependencies() -> dict[str, Any]:
     }
 
 
+def _calls_the_double_submit_check(source: str) -> bool:
+    """Whether this source **calls** the shared check, read off the syntax tree.
+
+    **A substring search was the first version and it did not work**, which is
+    worth leaving written down: E5-06's re-mutation gutted
+    `csrf_verified_leadership` to `return claims` and this stayed green, because
+    the function's own docstring names `_double_submit_verified`. The same
+    mutation on `csrf_verified_student` went red — and only because *that*
+    docstring happens not to mention it. A guard whose verdict depends on how a
+    function is commented is not reading what the function does
+    (`docs/MISTAKES.md` entry 3).
+
+    So the match is a `Call` whose callee is that name, spelled bare or through
+    an attribute. A docstring, a comment and a mention in prose are none of
+    those, and a source that does not parse answers `False` rather than raising
+    — the caller then goes on to whatever the function wraps.
+
+    **Its disclosed limit** (`docs/MISTAKES.md` entry 14): a member that
+    delegated by *declaring* the check as a FastAPI dependency —
+    `claims: X = Depends(_double_submit_verified)` — passes the helper as an
+    argument rather than calling it, and is not matched here. Neither member of
+    today's family is written that way. If one comes to be, this function is
+    what widens, in the same change as the member — never the behavioural pair,
+    which is what actually executes the check.
+    """
+    import ast
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:  # pragma: no cover - a fragment `getsource` could not close
+        return False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        called = node.func
+        if isinstance(called, ast.Name) and called.id == DOUBLE_SUBMIT_HELPER:
+            return True
+        if isinstance(called, ast.Attribute) and called.attr == DOUBLE_SUBMIT_HELPER:
+            return True
+    return False
+
+
 def reaches_the_double_submit_check(dependency: Any) -> bool:
-    """Whether a dependency's own source, or something it wraps, names the shared check.
+    """Whether a dependency's own body, or something it wraps, calls the shared check.
 
     The cheap second line beside the behavioural pair. It reads source rather
     than running anything, so it cannot say the check *executed* — that is what
     the three requests are for — but it does say, in one assertion per family
     member, that the delegation is written at all.
 
-    The `__wrapped__` chain is followed because a dependency built with
-    `functools.wraps` hides its body from `getsource`, and the walk is bounded so
-    a cycle is a `False` rather than a hang.
+    The source is dedented before it is parsed, because `getsource` of a method
+    or a nested function is indented and would not parse on its own. The
+    `__wrapped__` chain is followed because a dependency built with
+    `functools.wraps` shows its wrapper rather than its body, and the walk is
+    bounded so a cycle is a `False` rather than a hang.
     """
     import inspect
+    import textwrap
 
     current = dependency
     for _ in range(8):
         if current is None:
             return False
         try:
-            source = inspect.getsource(current)
+            source = textwrap.dedent(inspect.getsource(current))
         except (OSError, TypeError):  # pragma: no cover - a builtin or a C object
             source = ""
-        if DOUBLE_SUBMIT_HELPER in source:
+        if source and _calls_the_double_submit_check(source):
             return True
         current = getattr(current, "__wrapped__", None)
     return False  # pragma: no cover - a chain eight deep is not a shape this repository has
