@@ -947,6 +947,24 @@ def csrf_verified_student(
     attacker whether their forgery was well formed, which is what
     `verify_csrf_token`'s constant-time comparison is protecting one layer down.
     """
+    return _double_submit_verified(request, claims)
+
+
+def _double_submit_verified(request: Request, claims: SessionClaims) -> SessionClaims:
+    """ADR 0089's double-submit check itself, for whichever role gate carries it.
+
+    The mechanism is one mechanism and the role gates are several — a write route
+    says which role it is for by which dependency it declares, and every one of
+    them then asks this one question. Two copies of a CSRF check is
+    `docs/MISTAKES.md` entry 13's shape in the place it costs most: the copy that
+    is edited and the copy that is not are a guard that holds on one surface and
+    not on the next.
+
+    The whole argument for what it does and does not check — the Bearer
+    exemption, the HMAC binding to the session's `jti`, one answer for a missing
+    token and a wrong one — is in `csrf_verified_student` above, which is the
+    dependency this was factored out of.
+    """
     if bearer_token(request) is not None:
         return claims
 
