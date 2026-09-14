@@ -11,16 +11,23 @@ import { CareLanding } from './routes/care';
 import { InstructorLanding } from './routes/instructor';
 import { InstructorReportRoute } from './routes/instructor/InstructorMondayReport';
 import { LeadershipLanding } from './routes/leadership';
+import { ComparisonSetsRoute } from './routes/leadership/ComparisonSets';
+import {
+  COMPARISON_SETS_ROUTE,
+  COMPARISON_SET_EDIT_ROUTE,
+  ComparisonSetEditRoute,
+} from './routes/leadership/ComparisonSetForm';
 import { StudentLanding } from './routes/student';
 
 /**
  * The client route table — SPEC §13's `router.tsx`.
  *
  * The routes are declared one by one rather than generated from a table. There
- * are six now — the five role areas, and the instructor's per-section report
- * under hers — and each is the file E2 onwards edits; a loop over a list would
- * save a few lines and cost the thing that makes this file readable, which is
- * that you can see which component answers which path.
+ * are eight now — the five role areas, the instructor's per-section report under
+ * hers, and the two addresses of leadership's comparison sets — and each is the
+ * file E2 onwards edits; a loop over a list would save a few lines and cost the
+ * thing that makes this file readable, which is that you can see which component
+ * answers which path.
  *
  * **The report is the first route in this repository with a parameter**, and
  * with a search parameter, and both are here rather than in the page for the
@@ -121,6 +128,28 @@ const leadershipRoute = createRoute({
   component: LeadershipLanding,
 });
 
+// SPEC §5.1's comparison sets, under the leadership area (E5-09). Two addresses
+// rather than one: the list is where sets are read, compared for size and
+// defined, and a set being edited has an address of its own so that opening one
+// is a link somebody can send. The set is in the path because that is what
+// `api/leadership.py`'s routes are keyed by.
+//
+// Declared flat off the root, as every route in this table is. "A child of
+// `/leadership`" in the ticket is about what the address says, not about
+// nesting: the leadership landing renders no outlet, and a nested tree here
+// would change what that page renders for the sake of a shape nothing reads.
+const leadershipComparisonSetsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: COMPARISON_SETS_ROUTE,
+  component: ComparisonSetsRoute,
+});
+
+const leadershipComparisonSetRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: COMPARISON_SET_EDIT_ROUTE,
+  component: ComparisonSetEditRoute,
+});
+
 const careRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/care',
@@ -148,6 +177,8 @@ export const routeTree = rootRoute.addChildren([
   instructorRoute,
   instructorReportRoute,
   leadershipRoute,
+  leadershipComparisonSetsRoute,
+  leadershipComparisonSetRoute,
   careRoute,
   adminRoute,
 ]);
