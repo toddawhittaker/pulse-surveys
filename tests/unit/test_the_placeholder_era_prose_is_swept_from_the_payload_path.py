@@ -29,11 +29,23 @@ exclusions are named rather than left to be discovered:
     `tests/` that this ticket touches", which is a rule for the author rather than
     an assertion, and E4-07's module is not one of them.
 
-**The canary** (`docs/MISTAKES.md` entry 3): the pattern is run against a line
-copied whole out of a file in this repository that certainly carries the claim,
-and against a whole line of ordinary prose about comparison sets that it must not
-match. A search that has gone blind — a pattern that matches nothing anywhere —
-is then a failure here rather than a clean sweep.
+**What the sweep is looking for is the claim, and not the words.** The E4-era
+sentences say that *no comparison set can exist yet* — the suppression reason "no
+comparison set exists until E5 builds them", and E4's own "E4 computes no
+comparison set". A sentence saying that *one particular* set does not exist is a
+different statement and a legitimate one: E5-06 ships "There is no comparison set
+here." as the copy a leadership reader sees when a set id names nothing. The
+first version of this sweep matched the second along with the first, and the
+repair was the pattern rather than the copy — see `PLACEHOLDER_CLAIM` for the two
+shapes it now reads, and the sweep's own docstring for how to tell a hit of one
+kind from a hit of the other.
+
+**The canary** (`docs/MISTAKES.md` entry 3): the pattern is run against two whole
+lines copied out of files in this repository that certainly carry the claim, one
+per shape, and against two whole lines that must not match — ordinary prose about
+comparison sets, and E5-06's shipped copy. A search that has gone blind — a
+pattern that matches nothing anywhere — is then a failure here rather than a
+clean sweep, and so is a pattern that has been widened back over the copy.
 """
 
 import re
@@ -42,25 +54,53 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_PATH = REPO_ROOT / "backend" / "app"
 
-# The claim, as the work order's own grep spells it: `grep -rn "no comparison
-# set" backend tests docs/adr`. Case-insensitive, because the sentence starts a
-# comment as often as it sits mid-line.
-PLACEHOLDER_CLAIM = re.compile(r"no comparison set", re.IGNORECASE)
-
-# A line that certainly carries the claim, copied whole — the line the sentence
-# starts on included — out of `docs/tickets/e5/E5-05-report-benchmark-lines.md`.
-# Retyping a sentence from where you think it begins is the thing this sample
-# exists to disprove.
-A_LINE_THAT_CARRIES_THE_CLAIM = (
-    '5. The E4-era "no comparison set exists" reason is gone from the live'
+# **The claim, not every mention of an absent set.** The work order's own grep is
+# `grep -rn "no comparison set" backend tests docs/adr`, and that is the right
+# reading tool for a person and the wrong one for a standing gate: E5-06 ships
+# the sentence "There is no comparison set here." as the copy a leadership reader
+# sees when a set id names nothing, which is a statement about *one* set that does
+# not exist and not the placeholder-era claim that *none can*. The two E4-era
+# shapes this sweep is for both say the second thing:
+#
+#   - the suppression reason itself — "no comparison set exists", which criterion
+#     5 quotes in as many words, and its longer form "no comparison set exists
+#     until E5 builds them";
+#   - E4's own statement about what it computes — "E4 computes no comparison set",
+#     "E4 builds no comparison set".
+#
+# So the pattern is the reason's own words, or a verb of *making* in front of the
+# noun. `is`/`are` are deliberately absent from that verb list, because "there is
+# no comparison set here" is the sentence this gate must leave alone.
+# Case-insensitive, because either shape starts a comment as often as it sits
+# mid-line; `\s+` between the verb and the noun, because a comment wrap puts a
+# newline where a space was.
+PLACEHOLDER_CLAIM = re.compile(
+    r"no comparison set exists|(?:computes|computed|builds|built)\s+no comparison set",
+    re.IGNORECASE,
 )
 
-# A whole line of ordinary prose about comparison sets, from
-# `docs/tickets/e5/README.md`'s decision 4, which the pattern must leave alone. A
-# sweep that matched every mention of a comparison set would be unpassable, and a
-# reviewer would widen the exclusion list rather than the prose.
-A_LINE_THE_SWEEP_MUST_ALLOW = (
-    "   set can be created, edited and resolved but no report renders it — the"
+# Two lines that certainly carry the claim, one per shape, each copied whole —
+# the line the sentence starts on included — out of a file in this repository:
+# `docs/tickets/e5/E5-05-report-benchmark-lines.md` line 56, and
+# `docs/tickets/e4/README.md` line 91. Retyping a sentence from where you think
+# it begins is the thing these samples exist to disprove, and a pattern narrowed
+# to one shape while the other still ships is exactly what a two-sample canary
+# catches.
+LINES_THAT_CARRY_THE_CLAIM = (
+    '5. The E4-era "no comparison set exists" reason is gone from the live',
+    "   E4 builds no comparison set — that is E5 — but the report payload carries",
+)
+
+# Whole lines the pattern must leave alone. The first is ordinary prose about
+# comparison sets, from `docs/tickets/e5/README.md`'s decision 4. The second is
+# E5-06's shipped copy, quoted from `backend/app/copy/leadership_sets.py` line 75
+# in this ticket's fix round: a leadership reader who opens a set id that names
+# nothing is told so, and that sentence is not the era claim. It is the sample
+# this canary most needs, because it is the one a widened pattern eats — and a
+# sweep that cannot be passed is one somebody deletes a line of copy for.
+LINES_THE_SWEEP_MUST_ALLOW = (
+    "   set can be created, edited and resolved but no report renders it — the",
+    'SET_UNAVAILABLE = "There is no comparison set here."',
 )
 
 
@@ -69,23 +109,35 @@ def test_the_sweeps_pattern_finds_the_claim_and_leaves_ordinary_prose_alone() ->
 
     A pattern searched against a tree is a guard, and a guard nobody has run
     against the text it claims to catch is a comment (`docs/MISTAKES.md` entries 3
-    and 9). Both directions are driven: the claim is found, and prose about a
-    comparison set that is not the claim is not.
+    and 9). Both directions are driven, in both shapes: each E4-era claim is
+    found, and each sentence that merely mentions an absent comparison set is
+    left alone.
+
+    **The second allowed sample is the one that earned this test its keep.** The
+    pattern was `no comparison set` until E5-06 landed, and it matched that
+    ticket's shipped 404 copy — a sentence telling a leadership reader that the
+    set id they opened names nothing. Nothing was wrong with the copy; the
+    pattern was reading "a set that does not exist" as "no set can exist". Both
+    halves of this canary now carry two samples apiece, so narrowing the pattern
+    to let the copy through cannot quietly let an E4 shape through with it.
 
     **The mutation this kills:** the pattern narrowed or mistyped so that the
-    sweep below passes over a tree that still carries the sentence — a green tick
-    reporting that nothing was found because nothing could be.
+    sweep below passes over a tree that still carries one of the era sentences —
+    a green tick reporting that nothing was found because nothing could be.
     """
-    assert PLACEHOLDER_CLAIM.search(A_LINE_THAT_CARRIES_THE_CLAIM), (
-        f"The sweep's pattern {PLACEHOLDER_CLAIM.pattern!r} does not match a line that certainly "
-        f"carries the claim: {A_LINE_THAT_CARRIES_THE_CLAIM!r}. Until it does, the sweep below "
-        "reports a clean tree because it can see nothing at all."
-    )
-    assert not PLACEHOLDER_CLAIM.search(A_LINE_THE_SWEEP_MUST_ALLOW), (
-        f"The sweep's pattern matches ordinary prose about a comparison set: "
-        f"{A_LINE_THE_SWEEP_MUST_ALLOW!r}. A sweep that cannot be passed is one somebody will "
-        "exclude a directory from."
-    )
+    for sample in LINES_THAT_CARRY_THE_CLAIM:
+        assert PLACEHOLDER_CLAIM.search(sample), (
+            f"The sweep's pattern {PLACEHOLDER_CLAIM.pattern!r} does not match a line that "
+            f"certainly carries the claim: {sample!r}. Until it does, the sweep below reports a "
+            "clean tree because it can see nothing at all."
+        )
+    for sample in LINES_THE_SWEEP_MUST_ALLOW:
+        assert not PLACEHOLDER_CLAIM.search(sample), (
+            f"The sweep's pattern matches a sentence that is not the placeholder-era claim: "
+            f"{sample!r}. A sentence about one comparison set that does not exist — E5-06's copy "
+            "for a set id that names nothing — is ordinary user-facing prose, and a sweep that "
+            "cannot be passed is one somebody deletes a line of copy for."
+        )
 
 
 def test_no_module_in_the_payload_path_still_says_a_comparison_set_does_not_exist() -> None:
@@ -101,8 +153,17 @@ def test_no_module_in_the_payload_path_still_says_a_comparison_set_does_not_exis
     explanation left in place, which is the state that made `docs/MISTAKES.md`
     entry 1 the second-most-caught entry in this repository.
 
-    **What a red looks like:** a list of files and line numbers. Each is a
-    sentence to rewrite, not a pattern to narrow.
+    **What a red looks like:** a list of files and line numbers, and each is
+    ordinarily a sentence to rewrite rather than a pattern to narrow. Once it was
+    the other way round, and the case is worth carrying: E5-06 shipped "There is
+    no comparison set here." as the copy for a set id that names nothing, the
+    pattern was `no comparison set`, and the hit was the pattern's fault. The
+    difference is what the sentence claims — that *one* set does not exist, which
+    is a true thing a reader may be told, against the placeholder-era claim that
+    *none can exist until E5 builds them*, which is what this sweep is for. Read
+    the hit before deciding which of the two it is; the canary above holds a
+    sample of each, so narrowing is a change with two tests over it rather than a
+    quiet widening of what may ship.
     """
     assert PAYLOAD_PATH.is_dir(), f"{PAYLOAD_PATH} is not a directory, so this test read nothing."
 
