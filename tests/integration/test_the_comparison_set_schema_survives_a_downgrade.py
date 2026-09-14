@@ -27,8 +27,10 @@ this module is written before the migration exists, so there is no identifier to
 pin. The database is walked down one step at a time until `comparison_set` is no
 longer there, which is also the assertion that *some* revision drops it. The walk
 is bounded and running past the bound is a failure saying so rather than a hang —
-and the bound is generous because E5 cuts two migration-adding tickets off one
-head, so whatever landed above this one is undone on the way past.
+and **the bound is derived from the chain** rather than written down, because a
+number that is generous today is the exact distance to something tomorrow: that
+is what happened to the module this walk was copied from, and
+`docs/disputes/E5-01-02.md` is the record.
 
 **Each test migrates a database of its own.** `empty_database` is a second
 database in the same container, created for one test and dropped after, so a
@@ -62,6 +64,7 @@ from fixtures.migration_journey import (
     MODEL_SCHEMA,
     columns_the_database_reports,
     migrate,
+    most_steps_a_walk_down_may_take,
     session_on,
 )
 from fixtures.supervision import seed_row
@@ -74,12 +77,16 @@ pytestmark = pytest.mark.integration
 # database's catalog, and a catalog takes a name.
 THE_TABLES = (COMPARISON_SET_TABLE, EXPECTED_MEMBERSHIP_TABLE)
 
-# How many revisions the walk down may cross before it is called broken rather
-# than long. E5-01's revision takes the first slot off head `e5a2b81c47d3` and
-# E5-03 takes the second, so at merge time there may be a handful above it;
-# anything past this bound is a downgrade that is not undoing what it should — or
-# a `downgrade()` that does nothing, which the control in the middle catches.
-MOST_STEPS_DOWN = 12
+# How far the walk down may go is derived from the chain by
+# `most_steps_a_walk_down_may_take`. This module was written with
+# `MOST_STEPS_DOWN = 12`, copied from the three modules that already had it, and
+# `docs/disputes/E5-01-02.md` is why it is not here any more: in the oldest of
+# those three the same value was the exact distance to the revision being
+# descended towards, so it fired on the next ticket to add a migration. Here the
+# arithmetic is only latent — the table this walk looks for is created at the head
+# today — but "generous now" is what that constant was the last time somebody
+# wrote it down, and a bound that measures the chain rather than the property is
+# wrong in every copy.
 
 SCHEMA_OF_ONE_TABLE = text(
     """
@@ -114,13 +121,20 @@ def schema_of(database: Any, tables: tuple[str, ...]) -> dict[str, list[tuple[An
 
 
 def walk_down_until_the_comparison_tables_are_gone(config: Any, database: Any) -> int:
-    """Downgrade one revision at a time until `comparison_set` is not there, and say how far."""
-    for step in range(1, MOST_STEPS_DOWN + 1):
+    """Downgrade one revision at a time until `comparison_set` is not there, and say how far.
+
+    The bound comes from the chain, so a revision landing above this one — E5-03's
+    is expected to, off the same head — cannot turn this walk's own arithmetic
+    into a red on a ticket that did nothing wrong.
+    """
+    bound = most_steps_a_walk_down_may_take(config)
+    for step in range(1, bound + 1):
         migrate(config, "downgrade", "-1", f"stepping one revision below head, step {step}")
         if not columns_the_database_reports(database, COMPARISON_SET_TABLE):
             return step
     pytest.fail(
-        f"After {MOST_STEPS_DOWN} downgrade steps `{COMPARISON_SET_TABLE}` is still in the "
+        f"After {bound} downgrade steps — the whole revision history — "
+        f"`{COMPARISON_SET_TABLE}` is still in the "
         "database, so no revision crossed drops it. E5-01's migration is required to be "
         "reversible, and a `downgrade()` that leaves its own table behind is the shape E2-16 was "
         "written to repair: an operator who goes down cannot come back up, because the upgrade "
@@ -218,8 +232,13 @@ def test_the_level_agreement_still_refuses_a_cross_level_member_after_the_round_
     migrate(config, "upgrade", MODEL_SCHEMA, f"re-applying the {steps} revision(s) the walk undid")
 
     with session_on(empty_database) as session:
-
-        def seed(name: str, chain: dict[str, Any] | None = None, **overrides: Any) -> Any:
+        # `/` because `name` is also a column name: without it this closure
+        # cannot write to any table that has one, which includes the table this
+        # module is about (`docs/disputes/E5-01-01.md`). Latent here — nothing
+        # below passes a name — and fixed in the same change as the live copy in
+        # `seed_rows`, because a hazard worked around in one of two places is
+        # `docs/MISTAKES.md` entry 13.
+        def seed(name: str, chain: dict[str, Any] | None = None, /, **overrides: Any) -> Any:
             return seed_row(session, metadata_tables, name, chain, **overrides)
 
         stored_set = write_set(seed, length=6, level="UG")
