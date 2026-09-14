@@ -182,7 +182,13 @@ complete.
     refused run is read by, the SPEC §2.2 reader that says which sections a
     refusal named, and the self-check's recount — `the_cohort_recount(session,
     section_codes)`, settled by the ruling of 2026-09-13 — reached by importing
-    the script the way `fixtures/seed.py` imports `scripts/seed.py`.
+    the script the way `fixtures/seed.py` imports `scripts/seed.py`. Also the
+    seeded calendar's readers, moved out of the calendar module when a second
+    caller needed them (`term_link_column` among them: ADR 0018's composite key,
+    `docs/disputes/E5-12-01.md`), and the launched prior-term world — the
+    sections, windows, rosters and enrollments four staff launches and a roster
+    sync would have left, planted row by row out of the seeder's own refusals, so
+    that its write path can be executed by a test at all.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no

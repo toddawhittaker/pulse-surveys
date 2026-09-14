@@ -61,6 +61,7 @@ from fixtures.benchmark_history import (
     TRACEBACK_MARKER,
     WRITABLE_TABLES,
     changed_counts,
+    prior_term,
     reads_as_the_environment_refusal,
     require_the_benchmark_history_seeder,
     require_the_writable_tables,
@@ -287,11 +288,21 @@ def test_the_benchmark_history_seeder_refuses_a_world_whose_prior_term_sections_
         "for the pull request, not a rule this suite should relax."
     )
 
+    # **By the bare §2.2 code, and narrowed to the prior term.** Both halves were
+    # wrong at first and the check was therefore vacuous: it looked the whole label
+    # up in a column that stores only the code, so the query matched nothing
+    # whatever it was handed and this assertion was true of every possible world —
+    # `docs/MISTAKES.md` entry 3, in a line written to prevent exactly that. The
+    # narrowing is the second half: a code is per-term data, so an unnarrowed lookup
+    # answers about Fall 2026's section of the same name.
+    earlier = prior_term(demo_database, metadata_tables, seeded_demo)
     unlaunched = [
-        code for code in named if not sections_coded(demo_database, metadata_tables, code)
+        label
+        for label in named
+        if not sections_coded(demo_database, metadata_tables, label, term=earlier)
     ]
     assert unlaunched, (
-        f"Every section the refusal named is already in this database: {named}.\n{run.report()}\n"
+        f"Every section the refusal named is already in the prior term: {named}.\n{run.report()}\n"
         "The criterion is what the seeder does when the staff launches have *not* happened. "
         "Nothing in this module launches anything and `scripts/seed.py` seeds no section under "
         "these codes, so a row here was written by the script under test — which is the "

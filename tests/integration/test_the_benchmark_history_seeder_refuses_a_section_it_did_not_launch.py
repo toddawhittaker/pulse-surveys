@@ -21,10 +21,22 @@ adoption here writes a term's worth of generated responses into a stranger's
 section, under students who are not its roster, and every figure that section's
 instructor reads on Monday is then partly invented.
 
-**The foreign row is planted as a section the seeder's world does not contain**:
-the same code, under a course, prefix and term of its own that the seeding walker
-builds. Nothing about it belongs to the prior term the seeder is filling, which is
-what makes it foreign rather than a re-run's own row.
+**The foreign row is planted as a section in the wrong term, and otherwise
+complete.** The same code, under the course its code names, but in **Fall 2026**
+— with a `survey_window` for every one of its course weeks and a twenty-student
+roster enrolled from its first day, exactly as a launch and a roster sync would
+have left it. The term is the only thing wrong with it.
+
+That completeness is the whole strength of this test and it was missing at first.
+The first draft planted a bare `section` row and nothing else, and the mutation
+battery reported the obvious mutant surviving: a seeder matching on the code alone
+*did* find the planted row, and then stopped on its own next check — the section
+holds no window — so it exited non-zero having written nothing and satisfied every
+assertion here. A world a code-alone build cannot get past cannot tell a code-alone
+build from a correct one. Now it can: an adopter reaches a section that is ready in
+every way except the one that matters and writes a term of responses into it, while
+the correct build never sees it at all, because it resolves its sections by
+`(course, term, code)`.
 
 **Which code, and why this module does not name one.** E5-12 spells none of its
 prior-term section codes, so this module asks the seeder which sections it is
@@ -49,17 +61,21 @@ import pytest
 from fixtures.benchmark_history import (
     DEVELOPMENT_ENVIRONMENT,
     ENVIRONMENT_VARIABLE,
-    SECTION_CODE_COLUMN,
-    SECTION_TABLE,
+    RESPONSE_TABLE,
     TRACEBACK_MARKER,
     changed_counts,
+    fall_2026,
+    plant_one_launch,
+    prior_term,
     require_the_benchmark_history_seeder,
     require_the_writable_tables,
     row_counts,
+    rows_of,
     run_the_benchmark_seeder,
     section_codes_in,
     sections_coded,
 )
+from fixtures.grading import RESPONSE_SECTION_COLUMN
 
 pytestmark = pytest.mark.integration
 
@@ -72,12 +88,13 @@ def test_the_benchmark_history_seeder_refuses_a_foreign_section_holding_a_code_i
     **The mutations this has to kill.**
 
       - *The section lookup matched on the code alone, and the row adopted.* The
-        seeder finds a section carrying one of its codes, decides the world is
-        ready, and writes generated responses against a section it never launched —
-        rows under a foreign section, a foreign course and a foreign term. Caught by
-        the exit status and by the row counts, which move on `response` and `answer`
-        the moment an adoption is acted on. This is entry 31's own defect, one
-        table over.
+        seeder finds a section carrying one of its codes — in the wrong term, with a
+        window for every week and a roster of its own, so nothing further stops it —
+        decides the world is ready, and writes a term of generated responses against
+        a section it never launched, under students who are not its roster. Caught by
+        the exit status, by the row counts, and by the count of responses hanging on
+        the planted section. This is entry 31's own defect, one table over, and the
+        reason the planted world is complete rather than bare.
       - *The lookup scoped correctly but the refusal made silent* — a zero exit and
         nothing written, which reads to an operator as a drive that worked. Caught
         by the status.
@@ -91,11 +108,11 @@ def test_the_benchmark_history_seeder_refuses_a_foreign_section_holding_a_code_i
         `response`, and foreign rows are refused by name rather than removed.
 
     **The near miss this must not fire on.** A seeder that resolves its sections by
-    `(term, code)` and therefore never sees the planted row at all is *correct*, and
-    it reaches the same missing-section refusal it gave before the plant: non-zero,
-    nothing written, the code named. Every assertion below is satisfied by that
-    seeder, which is deliberate — the criterion is that a foreign row is not
-    adopted, not that a particular lookup is written.
+    `(course, term, code)` and therefore never sees the planted row at all is
+    *correct*, and it reaches the same missing-section refusal it gave before the
+    plant: non-zero, nothing written, the code named. Every assertion below is
+    satisfied by that seeder, which is deliberate — the criterion is that a foreign
+    row is not adopted, not that a particular lookup is written.
 
     **The controls, in order, and why each is not ceremony.** The demo seed must
     have succeeded, or the world is not the one the criterion is stated over. The
@@ -125,21 +142,45 @@ def test_the_benchmark_history_seeder_refuses_a_foreign_section_holding_a_code_i
         "launched`, and this module needs it only as the question 'which sections do you look "
         "for?'. A plant made against a code the seeder never looks for is a test that cannot fail."
     )
-    absent = [code for code in looked_for if not sections_coded(demo, metadata_tables, code)]
+    earlier = prior_term(demo, metadata_tables, seeded)
+    absent = [
+        label
+        for label in looked_for
+        if not sections_coded(demo, metadata_tables, label, term=earlier)
+    ]
     assert absent, (
-        f"Every code the seeder named is already in this database: {looked_for}. There is nothing "
-        "for this test to occupy, and a database holding those sections after nothing but "
+        f"Every section the seeder named is already in the prior term: {looked_for}. There is "
+        "nothing for this test to occupy, and a database holding those sections after nothing but "
         "`scripts/seed.py` and a refused run is `docs/MISTAKES.md` entry 48 — the seeder "
-        "provisioning what a launch should have."
+        "provisioning what a launch should have. The lookup is by the bare §2.2 code, which is "
+        "what `section.lms_section_code` stores, and narrowed to the prior term, because a code is "
+        "per-term data and the same one names a different section in Fall 2026."
     )
-    code = absent[0]
+    label = absent[0]
 
-    plant_in(demo, SECTION_TABLE, None, **{SECTION_CODE_COLUMN: code})
-    foreign = sections_coded(demo, metadata_tables, code)
+    # Planted into Fall 2026 — the seeded term that is *not* the prior one — with
+    # every row a launch and a roster sync would have written under it. The term is
+    # the only thing about this section that is wrong, which is what makes a
+    # code-alone build and a correct one produce different outcomes here.
+    fall = fall_2026(demo, metadata_tables, seeded)
+    planted = plant_one_launch(demo, plant_in, metadata_tables, fall, label)
+    foreign = sections_coded(demo, metadata_tables, label)
     assert len(foreign) == 1, (
-        f"After planting one section coded {code}, this database holds {len(foreign)} of them: "
-        f"{foreign}. Every assertion below compares this row against itself after the run, and a "
-        "comparison that starts from nothing is satisfied by a run that deleted everything."
+        f"After planting one section for {label}, {len(foreign)} sections carry its code "
+        f"{planted.code!r}: {foreign}. **This is the assertion that says the collision is real.** "
+        "Until the currency was fixed, this test planted the whole label into a column that stores "
+        "SPEC §2.2's bare code, so nothing the seeder could look up ever matched it: the run below "
+        "refused for the ordinary missing-section reason and every assertion passed while proving "
+        "nothing about adoption — `docs/MISTAKES.md` entry 3. Every assertion below also compares "
+        "this row against itself after the run, and a comparison that starts from nothing is "
+        "satisfied by a run that deleted everything."
+    )
+    assert planted.windows and planted.students, (
+        f"The planted section for {label} carries {len(planted.windows)} windows and "
+        f"{len(planted.students)} enrolled students. A section with neither is one a seeder "
+        "matching on the code alone would find and then refuse for a second reason of its own — "
+        "which is how the first version of this test let that mutant survive. The world has to be "
+        "one an adopter could write into before 'it wrote nothing' means anything."
     )
 
     before = row_counts(demo, metadata_tables)
@@ -148,7 +189,8 @@ def test_the_benchmark_history_seeder_refuses_a_foreign_section_holding_a_code_i
     after = row_counts(demo, metadata_tables)
 
     assert second.returncode != 0, (
-        f"The seeder exited zero against a database holding a section coded {code} that it did not "
+        f"The seeder exited zero against a database holding a section coded {planted.code!r} — "
+        f"{label}'s code, in Fall 2026 — that it did not "
         f"launch.\n{second.report()}\nThat row is not part of the world this seeder fills: it "
         "hangs under a course, a prefix and a term of its own, seeded by this test. Entry 31's "
         "rule is that a loader shown a foreign row sharing its natural key must be asked what it "
@@ -164,9 +206,21 @@ def test_the_benchmark_history_seeder_refuses_a_foreign_section_holding_a_code_i
         "tables counted, by the check above this run."
     )
 
-    assert sections_coded(demo, metadata_tables, code) == foreign, (
-        f"The planted section coded {code} is not as this test left it. Before: {foreign}. After: "
-        f"{sections_coded(demo, metadata_tables, code)}.\n{second.report()}\nA collision this "
+    written_into_it = rows_of(
+        demo, metadata_tables, RESPONSE_TABLE, **{RESPONSE_SECTION_COLUMN: planted.section_id}
+    )
+    assert not written_into_it, (
+        f"The run wrote {len(written_into_it)} responses into the {label} section that this "
+        f"test planted in Fall 2026.\n{second.report()}\nThose rows sit under students who are not "
+        "that section's roster, in a term this seeder has no business in, and its instructor's "
+        "Monday report is computed over them. Stated separately from the row counts above because "
+        "it is the sentence a reader needs: not 'something was written' but 'it was written into "
+        "the stranger's section'."
+    )
+
+    assert sections_coded(demo, metadata_tables, label) == foreign, (
+        f"The planted {label} section is not as this test left it. Before: {foreign}. After: "
+        f"{sections_coded(demo, metadata_tables, label)}.\n{second.report()}\nA collision this "
         "seeder clears out of its way is worse than one it adopts, because the row it removed "
         "belonged to whoever put it there. The work order holds the same line from the "
         "connection's side: this seeder holds no DELETE on the rows it reads, and a foreign row is "
@@ -181,8 +235,9 @@ def test_the_benchmark_history_seeder_refuses_a_foreign_section_holding_a_code_i
         "dying is not a decision."
     )
 
-    assert code.lower() in second.output.lower(), (
-        f"The run refused without naming {code}.\n{second.report()}\nThe operator meeting this has "
+    assert label.lower() in second.output.lower(), (
+        f"The run refused without naming {label}.\n{second.report()}\nThe operator meeting this "
+        "has "
         "a database in which somebody else's section carries one of the demo world's codes, and "
         "the refusal is the only thing that will tell them which one. 'Something is in the way' "
         "sends them to read the seeder's source."
