@@ -116,7 +116,13 @@ from fixtures.student_read import (
     StudentReadWorld,
     decoded,
 )
-from fixtures.submit import session_secret
+from fixtures.submit import (
+    CSRF_HEADER,
+    CSRF_REFUSED_STATUS,
+    csrf_token_for,
+    session_cookie_names,
+    session_secret,
+)
 from fixtures.supervision import (
     foreign_key_columns,
     require_table,
@@ -222,6 +228,12 @@ NOT_THE_DEFINER = 403
 UNKNOWN_SET = 404
 DUPLICATE_NAME = 409
 REFUSED_VALUE = 422
+
+# The three methods the contract makes writes, spelled as the route table spells
+# them. Named here rather than in the sweep that reads them, because this file is
+# where E5-06's contract lives and a second copy is a second place for it to
+# drift (`docs/MISTAKES.md` entry 13).
+LEADERSHIP_WRITE_METHODS = ("POST", "PUT", "DELETE")
 
 # Route conventions the work order names beside `_unavailable`: every answer
 # carries `Cache-Control: no-store`.
@@ -589,6 +601,11 @@ def body_of(answered: Any, what: str, expected: int) -> Any:
 # caller passes on purpose here — it is criterion 1's unauthenticated call.
 NOT_GIVEN: Any = object()
 
+# "Mint the double-submit token this session is entitled to", which likewise
+# cannot be spelled `None`: `None` is the request that carries no CSRF pair at
+# all, which is the first half of the cookie-carrier pair.
+MINTED: Any = object()
+
 
 class NamedSetDoor:
     """The seven routes, asked with exactly one credential each.
@@ -640,6 +657,71 @@ class NamedSetDoor:
         """The caller's token, or this door's leadership one when none was named."""
         return self.door.token if given is NOT_GIVEN else given
 
+    # -- the cookie carrier, which is the one ADR 0089's check guards ----------
+
+    def create_as_a_browser(
+        self, body: Any, *, csrf_token: Any = MINTED, token: Any = NOT_GIVEN
+    ) -> Any:
+        """One create with the session carried as the **cookie** and no `Authorization` header.
+
+        Every other request this door makes rides a Bearer header, and
+        `_double_submit_verified` exempts that carrier deliberately: a Bearer
+        header is not sent by a cross-site form, so there is nothing for the
+        check to protect there. That exemption is also why a gutted
+        `csrf_verified_leadership` left the whole suite green — every named-set
+        test took the exempt path. This is the path that is not exempt.
+
+        `csrf_token` is `MINTED` for the token this session is entitled to,
+        `None` for a request carrying no CSRF pair at all, or a string to send
+        as the pair. **A chosen string goes in the cookie *and* the header**,
+        which is the only shape that can tell verification from a comparison: an
+        attacker who can make a browser send a cross-site request can toss a
+        cookie too, so they control both halves of a double submit and a check
+        that compares them to each other passes for them
+        (`docs/disputes/E2-08-06.md`, mutation M1c).
+
+        **The jar is emptied, filled and emptied again on the client itself, and
+        the wrapper the rest of this class uses is deliberately not in the way.**
+        This is `tests/fixtures/submit.py::SignedInStudent.submit`'s invocation,
+        copied rather than adapted (`docs/MISTAKES.md` entry 37). The first
+        version wrapped these three lines in `ReportDoor.carrying_no_cookie`,
+        which *replaces* the client's jar with a fresh `httpx.Cookies()` for the
+        body and puts the old one back afterwards; on the pinned httpx the object
+        that comes back out of that round trip raises `AttributeError: 'Cookies'
+        object has no attribute 'set_cookie'` the moment anything sets a cookie
+        on it, so both leadership cases errored before asserting anything. The
+        two ways of emptying a jar are not interchangeable: `clear()` empties the
+        jar the client already has, which is the one `set()` then writes into.
+
+        `clear()` first is what `carrying_no_cookie` was wanted for — the launch
+        that built this door left its own session cookie in the jar, and without
+        emptying it the request would carry that session as well as the one this
+        call is about (`docs/disputes/E2-09-01.md`). `clear()` in the `finally`
+        is what keeps a cookie set for this request from authenticating the next
+        one, which is exactly the near miss the Bearer-exemption pair would
+        otherwise pass on. The cookies are set on the client rather than passed
+        per request because httpx deprecates a per-request `cookies` argument and
+        this suite turns a `DeprecationWarning` into a failure.
+        """
+        carried = self._token(token)
+        session_cookie, csrf_cookie = session_cookie_names()
+        headers: dict[str, str] = {}
+        cookies = {session_cookie: carried}
+        if csrf_token is not None:
+            value = (
+                csrf_token_for(carried, self.world.secret) if csrf_token is MINTED else csrf_token
+            )
+            cookies[csrf_cookie] = value
+            headers[CSRF_HEADER] = value
+
+        self.door.tool.cookies.clear()
+        try:
+            for name, value in cookies.items():
+                self.door.tool.cookies.set(name, value)
+            return self.door.tool.post(SETS_PATH, json=body, headers=headers)
+        finally:
+            self.door.tool.cookies.clear()
+
 
 class PlantedSet(NamedTuple):
     """One `comparison_set` row as the handful of facts a test names it by."""
@@ -686,6 +768,17 @@ class NamedSetWorld:
     @property
     def session(self) -> Any:
         return self.world.session
+
+    @property
+    def secret(self) -> bytes:
+        """The secret this application signs a session and a CSRF token with.
+
+        Read out of the mapping the tool was built under rather than out of
+        `os.environ`, so the token this suite mints and the token the application
+        verifies cannot come from two readings of the environment
+        (`docs/MISTAKES.md` entry 40).
+        """
+        return session_secret(self.configured)
 
     @property
     def leader_person_id(self) -> Any:
@@ -1226,6 +1319,8 @@ def named_set_contract() -> Any:
         no_store = NO_STORE
         authenticate_header = AUTHENTICATE_HEADER
         authenticate_scheme = AUTHENTICATE_SCHEME
+        csrf_header = CSRF_HEADER
+        csrf_refused = CSRF_REFUSED_STATUS
 
         spec_lengths = SPEC_LENGTHS
         spec_levels = SPEC_LEVELS

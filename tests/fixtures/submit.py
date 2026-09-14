@@ -915,6 +915,82 @@ def issue_student_session(
     return issue(**values)
 
 
+# ---------------------------------------------------------------------------
+# The family of CSRF-checked session dependencies, and whether each one checks.
+# ---------------------------------------------------------------------------
+
+# How `app.api.deps` spells a session dependency that also carries ADR 0089's
+# double-submit check. E2-08 shipped the student one and E5-06 the leadership
+# one — "identical in mechanism", its work order says — and the prefix is what
+# lets a role added later be swept from the day its dependency lands rather than
+# the day somebody remembers a list.
+CSRF_DEPENDENCY_PREFIX = "csrf_verified_"
+
+# Where this project's shared route dependencies live (E1-13's module layout).
+DEPENDENCIES_MODULE = "app.api.deps"
+
+# The shared helper every member of that family is supposed to delegate to. The
+# name is the one E5-06's battery and security pass named when they found the
+# hole: `csrf_verified_leadership` gutted to `return claims` left all 3716 tests
+# green, because every named-set request rode a Bearer header, which this helper
+# exempts. It is a *structural* second line here — the behavioural pair in
+# `tests/integration/test_every_csrf_verified_dependency_refuses_a_cookie_borne_write.py`
+# is the first — so an indirect delegation that this cannot see is a constant to
+# correct rather than a defect to report.
+DOUBLE_SUBMIT_HELPER = "_double_submit_verified"
+
+
+def csrf_verified_dependencies() -> dict[str, Any]:
+    """Every `csrf_verified_*` dependency `app.api.deps` exposes, by name.
+
+    One discovery rather than two, because two modules ask this question: the
+    route sweep that requires every mutating route to hold one of them, and the
+    behavioural sweep that requires each of them to refuse a cookie-borne write
+    carrying no token (`docs/MISTAKES.md` entry 13).
+
+    **Discovery by prefix is deliberately not the whole guard.** A name is not a
+    check: the battery's survivor was a member of this family that verified
+    nothing. Callers pair this with something that executes — the required-member
+    check in the route sweep, and the three requests in the behavioural one.
+    """
+    from importlib import import_module
+
+    module = import_module(DEPENDENCIES_MODULE)
+    return {
+        name: value
+        for name, value in vars(module).items()
+        if name.startswith(CSRF_DEPENDENCY_PREFIX) and callable(value)
+    }
+
+
+def reaches_the_double_submit_check(dependency: Any) -> bool:
+    """Whether a dependency's own source, or something it wraps, names the shared check.
+
+    The cheap second line beside the behavioural pair. It reads source rather
+    than running anything, so it cannot say the check *executed* — that is what
+    the three requests are for — but it does say, in one assertion per family
+    member, that the delegation is written at all.
+
+    The `__wrapped__` chain is followed because a dependency built with
+    `functools.wraps` hides its body from `getsource`, and the walk is bounded so
+    a cycle is a `False` rather than a hang.
+    """
+    import inspect
+
+    current = dependency
+    for _ in range(8):
+        if current is None:
+            return False
+        try:
+            source = inspect.getsource(current)
+        except (OSError, TypeError):  # pragma: no cover - a builtin or a C object
+            source = ""
+        if DOUBLE_SUBMIT_HELPER in source:
+            return True
+        current = getattr(current, "__wrapped__", None)
+    return False  # pragma: no cover - a chain eight deep is not a shape this repository has
+
+
 def session_cookie_names() -> tuple[str, str]:
     """`SESSION_COOKIE` and `CSRF_COOKIE`, read out of the module both doors issue through.
 

@@ -109,7 +109,11 @@ from fixtures.routing import (
     dependencies_of,
     every_route,
 )
-from fixtures.submit import submit_route
+from fixtures.submit import (
+    CSRF_DEPENDENCY_PREFIX,
+    csrf_verified_dependencies,
+    submit_route,
+)
 
 ENVIRONMENT_VARIABLE = "ENVIRONMENT"
 
@@ -142,7 +146,16 @@ CSRF_DEPENDENCY = "csrf_verified_student"
 # stopped exporting them — is a failure rather than a sweep that quietly has no
 # currency to look for (`docs/MISTAKES.md` entry 53: the coverage check must not
 # be built from the guard's own enumeration).
-CSRF_DEPENDENCY_PREFIX = "csrf_verified_"
+#
+# **A name is not a check, and this sweep does not pretend otherwise.** E5-06's
+# mutation battery and its security pass found the same hole from two
+# directions: `csrf_verified_leadership` gutted to `return claims` left all 3716
+# tests green, and this sweep admitted it because it was spelled like a member of
+# the family. What executes the check is
+# `tests/integration/test_every_csrf_verified_dependency_refuses_a_cookie_borne_write.py`,
+# which drives each member over HTTP on the carrier the check exists for. The
+# discovery is shared with it (`docs/MISTAKES.md` entry 13), so the two sweeps
+# cannot come to disagree about who is in the family.
 REQUIRED_CSRF_DEPENDENCIES = ("csrf_verified_student", "csrf_verified_leadership")
 
 # The paths this module names. Each is settled somewhere outside this file:
@@ -251,12 +264,7 @@ def csrf_dependencies() -> tuple[Any, ...]:
     **Expected red before E5-06 lands:** a FAILED naming
     `csrf_verified_leadership` as a symbol `app.api.deps` does not expose.
     """
-    module = importlib.import_module(DEPS_MODULE)
-    found = {
-        name: value
-        for name, value in vars(module).items()
-        if name.startswith(CSRF_DEPENDENCY_PREFIX) and callable(value)
-    }
+    found = csrf_verified_dependencies()
     missing = [name for name in REQUIRED_CSRF_DEPENDENCIES if name not in found]
     if missing:
         pytest.fail(
@@ -1048,48 +1056,67 @@ def test_the_passback_route_is_found_carrying_the_dev_control_currency(
     )
 
 
-def test_the_named_set_write_routes_are_found_carrying_the_leadership_csrf_dependency(
+def test_every_named_set_write_route_is_found_carrying_the_leadership_csrf_dependency(
     configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Currency 1's canary for the family's second member — E5-06's three writing routes.
+    """Currency 1's canary for the family's second member — all three of E5-06's writing routes.
 
     The submit canary above proves the collector can see the student
     dependency; it says nothing about the leadership one, and a family read by
     prefix is exactly the kind of guard that can grow a member nothing ever
-    finds (`docs/MISTAKES.md` entry 35). So the three routes that certainly hold
-    it — `POST`, `PUT` and `DELETE` on the comparison-set paths — are required
-    to be found holding it, by object.
+    finds (`docs/MISTAKES.md` entry 35).
 
-    **The mutations this kills:** the leadership writes composed from
-    `require_leadership` rather than `csrf_verified_leadership`, which is the
-    one-import mistake the carried E2 entry names and which the ledger sweep
-    below would otherwise report as three unguarded paths with no hint about
-    which dependency was meant; and a `csrf_verified_leadership` that exists but
-    is wired to no route, which leaves the family with a member the sweep can
-    see and no route holding it.
+    **Every one of the three, matched as the object, and the "at least one"
+    version of this test was wrong.** As first written it asked only that *some*
+    mutating route under the comparison-set paths carried *some* member of the
+    family — which is green on a tree where the create is guarded and the edit
+    and the delete are not, and it is the delete that removes the cohort an
+    instructor's published figures were drawn against. The three methods are
+    named here, and each is required to hold `csrf_verified_leadership`
+    specifically: a write guarded by another role's dependency would be a
+    different defect wearing this test's green.
+
+    **The mutations this kills:** any one of the three composed from
+    `require_leadership` rather than `csrf_verified_leadership` — the one-import
+    mistake the carried E2 entry names, which the ledger sweep would otherwise
+    report as an unguarded path with no hint about which dependency was meant;
+    and a `csrf_verified_leadership` that exists but is wired to no route, which
+    leaves the family with a member the sweep can see and no route holding it.
+
+    **What it does not kill, and what does:** a `csrf_verified_leadership` that
+    checks nothing. This is a sweep over the route table, and
+    `tests/integration/test_every_csrf_verified_dependency_refuses_a_cookie_borne_write.py`
+    is what drives the check (`docs/MISTAKES.md` entry 47: a sweep answers "is
+    the dependency there", never "does the gate run").
 
     **Expected red before E5-06 lands:** a FAILED naming
     `csrf_verified_leadership` as a symbol `app.api.deps` does not expose.
     """
-    from fixtures.named_sets import SETS_PATH
+    from fixtures.named_sets import LEADERSHIP_WRITE_METHODS, SETS_PATH
 
     application = application_in(DEVELOPMENT, monkeypatch)
-    family = csrf_dependencies()
+    leadership = csrf_verified_dependencies()[REQUIRED_CSRF_DEPENDENCIES[1]]
 
-    guarded = {
-        path_of(route)
-        for route in mutating_routes(application)
-        if BY_DEPENDENCY in currencies_of(route, dependency=family, route_class=NoRouteIsThis)
-    }
-    writes = {path for path in guarded if path.startswith(SETS_PATH)}
+    carried: dict[str, list[str]] = {}
+    for route in mutating_routes(application):
+        path = path_of(route)
+        if not path.startswith(SETS_PATH):
+            continue
+        held = BY_DEPENDENCY in currencies_of(
+            route, dependency=leadership, route_class=NoRouteIsThis
+        )
+        for method in methods_of(route):
+            if method in LEADERSHIP_WRITE_METHODS and held:
+                carried.setdefault(method, []).append(path)
 
-    assert writes, (
-        f"No mutating route under `{SETS_PATH}` carries any member of the "
-        f"`{CSRF_DEPENDENCY_PREFIX}` family. The guarded mutating routes are {sorted(guarded)}, "
-        f"and every mutating route this application serves is "
-        f"{sorted(paths_of(mutating_routes(application)))}.\n\n"
-        "E5-06 ships a create, an edit and a delete there, and its work order puts "
-        "`csrf_verified_leadership` on all three."
+    missing = [method for method in LEADERSHIP_WRITE_METHODS if method not in carried]
+    assert not missing, (
+        f"These comparison-set write methods carry no `{REQUIRED_CSRF_DEPENDENCIES[1]}`: "
+        f"{missing}. Found carrying it: {carried}. Every mutating route this application serves "
+        f"is {sorted(paths_of(mutating_routes(application)))}.\n\n"
+        "E5-06 ships a create, an edit and a delete under "
+        f"`{SETS_PATH}`, and its work order puts the checked dependency on all three: writes "
+        "carry `csrf_verified_leadership`, reads carry `require_leadership`."
     )
 
 
