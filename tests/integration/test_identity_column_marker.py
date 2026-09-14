@@ -162,7 +162,9 @@ exclusion, and **it reaches one file further than this one**:
 `test_identity_separated_views.py` builds E0-34's view-file identity vocabulary
 by calling `identity_bearing_columns` here, so a column excused in this file
 leaves that vocabulary too — and where it was a table's only evidence of
-identity, the table leaves that vocabulary's **star mechanism** with it, so a
+identity, the table leaves that vocabulary's **whole-row mechanisms** with it
+— the star rule and the whole-row-read-hidden-by-a-join rule both iterate
+`vocabulary.tables` — so a
 `SELECT *` over the table in a `views_sql/` file stops being flagged. Nothing
 else moves: no grant, no member of `PERSON_TABLES`, and no view rule phrased over
 marked columns. The rule for the next entry follows from that — read
@@ -269,9 +271,11 @@ IDENTITY_NAME_FRAGMENTS = (
 #     `backend/app/views_sql/`, which for a name shared with an innocent column
 #     changes nothing — such a name is subtracted as `ambiguous` there anyway;
 #   - if the excused column was the table's **only** evidence of identity, the
-#     table leaves `IdentityVocabulary.tables` and therefore the **star
-#     mechanism**, so `SELECT * FROM public.<that table>` in a view file stops
-#     being flagged. That is a real guard going quiet, on a table nobody has
+#     table leaves `IdentityVocabulary.tables` and therefore both **whole-row
+#     mechanisms** — the star rule and the whole-row-read-hidden-by-a-join rule
+#     iterate that same table set — so `SELECT * FROM public.<that table>` in a
+#     view file, and `SELECT c.* FROM <that table> c JOIN ...`, both stop being
+#     flagged. That is a real guard going quiet, on a table nobody has
 #     re-examined since the entry was written.
 #
 # Neither costs anything on `comparison_set`, which holds no identity to reach
@@ -714,7 +718,9 @@ def identity_bearing_columns(engine: Any) -> set[tuple[str, str]]:
     that dictionary cost more than it looks.**
     `test_identity_separated_views.py::build_identity_vocabulary` calls it to
     build E0-34's view-file vocabulary, so a subtraction here is a subtraction
-    there — including from the star mechanism, if the excused column was its
+    there — including from both whole-row mechanisms (the star rule and the
+    join-hidden whole-row rule, which iterate the same table set), if the
+    excused column was its
     table's only evidence of identity. The constant's own comment carries the
     rule that follows.
     """
