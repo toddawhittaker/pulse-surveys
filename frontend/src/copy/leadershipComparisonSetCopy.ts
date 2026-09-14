@@ -135,6 +135,22 @@ export const LEADERSHIP_COMPARISON_SET_COPY = {
     'The level changed, so {count} courses left this set: {labels}.',
   'leadership_comparison_sets.members_removed_dismiss': 'Dismiss',
 
+  // A course that is in the stored set and is not in the choice lists this
+  // reader was served — withdrawn from the catalogue, or moved out of their
+  // purview, while nobody was looking. It is taken out of the form as the form
+  // opens, and said so at once: a course the form cannot offer is one the
+  // reader cannot see, uncheck or reason about, and leaving it in the body
+  // being saved would submit a member they never chose and cannot read.
+  //
+  // These two sentences name no course, and that is the wire's doing rather
+  // than a choice: the label lives on the options answer, and a course missing
+  // from that answer has no label to print. So they count instead of naming,
+  // which is the honest half of what is known.
+  'leadership_comparison_sets.members_withdrawn_one':
+    'One course in this set is no longer offered to you, so it is not in the form and will not be saved.',
+  'leadership_comparison_sets.members_withdrawn_many':
+    '{count} courses in this set are no longer offered to you, so they are not in the form and will not be saved.',
+
   'leadership_comparison_sets.save': 'Save this set',
   'leadership_comparison_sets.saving': 'Saving…',
   'leadership_comparison_sets.cancel': 'Cancel',

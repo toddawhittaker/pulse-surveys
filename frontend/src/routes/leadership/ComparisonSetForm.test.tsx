@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-import type { ComparisonSetWrite, ComparisonSetWriteOutcome } from '../../api/leadership';
+import type {
+  ComparisonSetOptionsView,
+  ComparisonSetWrite,
+  ComparisonSetWriteOutcome,
+} from '../../api/leadership';
 import {
   A_BIOLOGY_COURSE,
   A_CHEMISTRY_COURSE,
@@ -12,6 +16,9 @@ import {
   A_NURSING_COURSE,
   A_SECOND_GRADUATE_COURSE,
   A_SET_THIS_READER_DEFINED,
+  A_COURSE_NO_LONGER_OFFERED,
+  A_SET_WITH_A_WITHDRAWN_COURSE,
+  OPTIONS_NO_INSTITUTION_WOULD_SEND,
   THE_OPTIONS,
 } from './comparisonSetFixtures';
 import {
@@ -53,6 +60,8 @@ const SAVE = 'Save this set';
 const DISMISS = 'Dismiss';
 const INCOMPLETE = 'A set needs a name, a length and a level before it can be saved.';
 const SAVE_UNAVAILABLE = 'This set could not be saved just now. Try again in a moment.';
+const WITHDRAWN_ONE =
+  'One course in this set is no longer offered to you, so it is not in the form and will not be saved.';
 
 /** The two sentences a level change writes, transcribed. */
 const ONE_REMOVED = (labels: string) => `The level changed, so one course left this set: ${labels}.`;
@@ -77,15 +86,11 @@ type SaveHandler = (write: ComparisonSetWrite) => Promise<ComparisonSetWriteOutc
 function renderForm(
   save: SaveHandler = () => Promise.resolve({ kind: 'saved', set: A_NEW_SET }),
   initial: typeof A_SET_THIS_READER_DEFINED | null = null,
+  options: ComparisonSetOptionsView = THE_OPTIONS,
 ) {
   const cancelled = vi.fn();
   render(
-    <ComparisonSetForm
-      options={THE_OPTIONS}
-      initial={initial}
-      onSave={save}
-      onCancel={cancelled}
-    />,
+    <ComparisonSetForm options={options} initial={initial} onSave={save} onCancel={cancelled} />,
   );
   return { cancelled };
 }
@@ -131,6 +136,43 @@ describe('the form cannot express an invalid combination', () => {
     // form, so there is no free-text length and no free-text level to give.
     const typed = screen.getAllByRole('textbox');
     expect(typed).toEqual([nameField()]);
+  });
+
+  it('offers whatever the options answer carried, and nothing of its own', () => {
+    // **The test above cannot prove this and this one can.** `THE_OPTIONS`
+    // carries the real lengths and the real levels, so a form holding its own
+    // copy of SPEC §2.2 and §8 would render exactly what that fixture serves
+    // and pass — the fixture would be supplying the value under test
+    // (`docs/MISTAKES.md` entry 30). This answer carries two lengths that are
+    // not course lengths, one level that is not one of the five bands, and no
+    // courses at all.
+    renderForm(undefined, null, OPTIONS_NO_INSTITUTION_WOULD_SEND);
+
+    expect(
+      within(lengthField())
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['Choose a length', '4 weeks', '7 weeks']);
+    expect(
+      within(levelField())
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['Choose a level', 'ZZ']);
+
+    // Nothing from the real lists survived into either control.
+    for (const length of THE_OPTIONS.lengths) {
+      expect(within(lengthField()).queryByText(`${String(length)} weeks`)).toBeNull();
+    }
+    for (const band of THE_OPTIONS.levels) {
+      expect(within(levelField()).queryByText(band)).toBeNull();
+    }
+
+    // And the level this answer does offer offers no course, because the
+    // answer carried none — a picker with a catalogue of its own would show
+    // one here.
+    type(levelField(), 'ZZ');
+    expect(offeredCourses()).toEqual([]);
+    expect(screen.getByText(NO_COURSES)).toBeTruthy();
   });
 
   it('offers no course at all until a level is chosen', () => {
@@ -323,6 +365,37 @@ describe('the form opened on a set that already exists', () => {
       expect(writes[0]?.member_course_ids).toEqual([A_BIOLOGY_COURSE.id]);
     });
     expect(writes[0]?.name).toBe(A_SET_THIS_READER_DEFINED.name);
+  });
+
+  it('says at once when a member of the set is no longer offered', () => {
+    renderForm(undefined, A_SET_WITH_A_WITHDRAWN_COURSE);
+
+    // The notice is there before anything is touched: the reader is told as the
+    // form opens rather than when they change something.
+    expect(
+      within(screen.getByTestId(COMPARISON_SET_REMOVED_TESTID)).getByText(WITHDRAWN_ONE),
+    ).toBeTruthy();
+
+    // The two courses the options answer does carry are still ticked, so the
+    // filter took out the withdrawn member and nothing else.
+    expect(offeredCourses()).toEqual([A_BIOLOGY_COURSE.label, A_CHEMISTRY_COURSE.label]);
+    expect(boxFor(A_BIOLOGY_COURSE.label).checked).toBe(true);
+    expect(boxFor(A_CHEMISTRY_COURSE.label).checked).toBe(true);
+  });
+
+  it('never saves a member the options answer did not offer', async () => {
+    const { writes, save } = acceptingSaves();
+    renderForm(save, A_SET_WITH_A_WITHDRAWN_COURSE);
+
+    // Saved untouched: the level is unchanged, so nothing but the load-time
+    // filter stands between the stored member and the request body.
+    fireEvent.click(screen.getByRole('button', { name: SAVE }));
+
+    await waitFor(() => {
+      expect(writes).toHaveLength(1);
+    });
+    expect(writes[0]?.member_course_ids).toEqual([A_BIOLOGY_COURSE.id, A_CHEMISTRY_COURSE.id]);
+    expect(writes[0]?.member_course_ids).not.toContain(A_COURSE_NO_LONGER_OFFERED);
   });
 });
 

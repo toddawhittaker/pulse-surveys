@@ -24,6 +24,15 @@ import type {
  * fixture stands in for the server: this file is the server's answer, not the
  * screen's opinion.
  *
+ * **`THE_OPTIONS` cannot prove that, and the first version of this paragraph
+ * said it could.** Its lengths and levels are the real ones, so a form carrying
+ * its own copy of §2.2 and §8 would render exactly what this fixture serves and
+ * every test over it would stay green — a fixture that supplies the value under
+ * test (`docs/MISTAKES.md` entry 30). `OPTIONS_NO_INSTITUTION_WOULD_SEND` below
+ * is what settles the question: values no spec anywhere in this repository
+ * contains, so a select offering anything else is offering something it did not
+ * read from its options.
+ *
  * **It sits beside the route it serves**, where
  * `routes/instructor/instructorReportFixtures.ts` sits beside the instructor
  * route (ADR 0151's placement convention). The strings in it — course labels,
@@ -189,6 +198,45 @@ export const A_NEW_SET: ComparisonSetDetailView = {
   member_course_ids: [A_NURSING_COURSE.id, A_SECOND_GRADUATE_COURSE.id],
   created_at: '2026-09-14T11:00:00-04:00',
   updated_at: '2026-09-14T11:00:00-04:00',
+};
+
+/**
+ * A choice list no institution would send, for the provenance test.
+ *
+ * Four and seven are not course lengths in SPEC §2.2 and `ZZ` is not one of
+ * §8's five bands, so nothing in this repository could supply them by accident:
+ * a form that offers them offers them because this answer carried them, and a
+ * form that offers 12 weeks or `UG` while holding this answer is reading a list
+ * of its own. The course list is empty, which is the other half of the same
+ * question — a picker with a literal catalogue would still show courses here.
+ */
+export const OPTIONS_NO_INSTITUTION_WOULD_SEND: ComparisonSetOptionsView = {
+  lengths: [4, 7],
+  levels: ['ZZ'],
+  courses: [],
+};
+
+/**
+ * A stored set carrying a member the options answer does not offer.
+ *
+ * The course was withdrawn, or moved out of this reader's purview, between the
+ * set being defined and the form being opened — the race the form cannot
+ * prevent and must not hide. Two of its three members are courses
+ * `THE_OPTIONS` carries; the third is an id nothing in that answer names, so
+ * this screen has no label for it and no box to render it in.
+ */
+export const A_COURSE_NO_LONGER_OFFERED = '0f4c6a11-0c4e-4b2f-9a3d-2a71c3e5d0ff';
+
+export const A_SET_WITH_A_WITHDRAWN_COURSE: ComparisonSetDetailView = {
+  id: '9c1b77e3-5d84-4a06-b0f2-6e9a1b4c7a14',
+  name: 'Fall biology cohort, as it was',
+  length_weeks: 12,
+  level: 'UG',
+  member_count: 3,
+  editable: true,
+  member_course_ids: [A_BIOLOGY_COURSE.id, A_COURSE_NO_LONGER_OFFERED, A_CHEMISTRY_COURSE.id],
+  created_at: '2026-08-31T14:05:00-04:00',
+  updated_at: '2026-09-07T09:20:00-04:00',
 };
 
 /**

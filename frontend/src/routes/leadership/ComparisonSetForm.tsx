@@ -36,12 +36,15 @@ import './leadershipComparisonSets.css';
  * opinion about which courses belong together; it holds the three choices a
  * reader has made and the courses those choices leave available.
  *
- * **Changing the level in front of chosen courses is the one moment the form
- * takes something away**, and it says so. The courses whose level still matches
- * stay chosen; the rest leave, and a notice names how many left and which, until
- * the reader dismisses it or changes the level again. The alternative — dropping
- * them quietly — submits a set the reader did not compose, or asks the server to
- * refuse a body the form built.
+ * **The form takes something away in two places, and says so in both.**
+ * Changing the level keeps the chosen courses whose level still matches and
+ * removes the rest, naming them. And opening a stored set whose membership the
+ * options answer no longer carries — a course withdrawn, or moved out of this
+ * reader's purview, while nobody was looking — removes those members as the
+ * form opens and counts them, because a course this screen cannot offer is one
+ * the reader cannot see or uncheck, and a member that survives invisibly into
+ * the saved body is a set nobody composed. Dropping either quietly is the
+ * failure both notices exist to prevent.
  */
 
 /** The list this form returns to, and the address that opens one set in it. */
@@ -75,9 +78,27 @@ const PAGE_HEADING_ID = 'pulse-leadership-sets-heading';
 /** The value a select carries while nothing has been chosen. */
 const UNCHOSEN = '';
 
-/** What a level change took away, while the notice about it is still on screen. */
-interface Removal {
-  readonly labels: readonly string[];
+/**
+ * What the form took out of the set, while the notice about it is on screen.
+ *
+ * Two shapes, because two different things are known. A level change removes
+ * courses the form was offering a moment ago, so it can name them. A course
+ * that is in the stored set and not in the options answer has no label
+ * anywhere on this screen, so the notice counts rather than names — and it is
+ * still a removal the reader is told about, because the alternative is a
+ * member they cannot see being saved on their behalf.
+ */
+type Removal =
+  | { readonly kind: 'level-changed'; readonly labels: readonly string[] }
+  | { readonly kind: 'withdrawn'; readonly count: number };
+
+/** The member ids of `initial` that the options answer still offers. */
+function membersStillOffered(
+  options: ComparisonSetOptionsView,
+  initial: ComparisonSetDetailView | null,
+): readonly string[] {
+  const offered = new Set(options.courses.map((course) => course.id));
+  return (initial?.member_course_ids ?? []).filter((id) => offered.has(id));
 }
 
 export function ComparisonSetForm({
@@ -96,8 +117,21 @@ export function ComparisonSetForm({
   const [name, setName] = useState(editing?.name ?? '');
   const [length, setLength] = useState<number | null>(editing?.length_weeks ?? null);
   const [level, setLevel] = useState<string | null>(editing?.level ?? null);
-  const [members, setMembers] = useState<readonly string[]>(editing?.member_course_ids ?? []);
-  const [removal, setRemoval] = useState<Removal | null>(null);
+  // **The set is filtered against the choice lists as the form opens**, and the
+  // difference is announced rather than absorbed. A stored member the options
+  // answer does not carry cannot be rendered, unchecked or reasoned about by
+  // the person editing the set, so leaving it in the form's state would save a
+  // member they never chose and could not see — invisible on the way in and
+  // invisible on the way out. Lazy initialisers, so the filter runs once, on
+  // the props the form opened with.
+  const [members, setMembers] = useState<readonly string[]>(() =>
+    membersStillOffered(options, editing),
+  );
+  const [removal, setRemoval] = useState<Removal | null>(() => {
+    const withdrawn =
+      (editing?.member_course_ids.length ?? 0) - membersStillOffered(options, editing).length;
+    return withdrawn === 0 ? null : { kind: 'withdrawn', count: withdrawn };
+  });
   const [saving, setSaving] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
 
@@ -119,7 +153,11 @@ export function ComparisonSetForm({
     // **The notice is replaced on every level change, never accumulated.** A
     // second change with nothing to remove clears the first change's sentence,
     // which would otherwise stand over a form it is no longer true of.
-    setRemoval(leaving.length === 0 ? null : { labels: leaving.map((course) => course.label) });
+    setRemoval(
+      leaving.length === 0
+        ? null
+        : { kind: 'level-changed', labels: leaving.map((course) => course.label) },
+    );
   }
 
   function toggleMember(courseId: string): void {
@@ -237,16 +275,7 @@ export function ComparisonSetForm({
         </legend>
         {removal === null ? null : (
           <div className="pulse-set-removed" data-testid={COMPARISON_SET_REMOVED_TESTID}>
-            <p className="pulse-set-removed-body">
-              {removal.labels.length === 1
-                ? fillCopy('leadership_comparison_sets.members_removed_one', {
-                    labels: removal.labels.join(', '),
-                  })
-                : fillCopy('leadership_comparison_sets.members_removed_many', {
-                    count: String(removal.labels.length),
-                    labels: removal.labels.join(', '),
-                  })}
-            </p>
+            <p className="pulse-set-removed-body">{removalSentence(removal)}</p>
             <button
               className="pulse-set-plain-button"
               type="button"
@@ -308,6 +337,25 @@ export function ComparisonSetForm({
       </p>
     </form>
   );
+}
+
+/** The sentence one removal is told in. */
+function removalSentence(removal: Removal): string {
+  if (removal.kind === 'withdrawn') {
+    return removal.count === 1
+      ? copy('leadership_comparison_sets.members_withdrawn_one')
+      : fillCopy('leadership_comparison_sets.members_withdrawn_many', {
+          count: String(removal.count),
+        });
+  }
+  return removal.labels.length === 1
+    ? fillCopy('leadership_comparison_sets.members_removed_one', {
+        labels: removal.labels.join(', '),
+      })
+    : fillCopy('leadership_comparison_sets.members_removed_many', {
+        count: String(removal.labels.length),
+        labels: removal.labels.join(', '),
+      });
 }
 
 /** What the edit address has been able to read so far. */
