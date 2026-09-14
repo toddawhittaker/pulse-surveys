@@ -245,6 +245,11 @@ export function InstructorMondayReport({
             courseWeek={report.week.course_week}
             termWeek={report.week.term_week}
             lengthWeeks={report.section.length_weeks}
+            // The past-tense close note (E5-02). Both halves are the payload's —
+            // the reported week's own close instant and the institution's zone —
+            // and a payload carrying neither renders the eyebrow as before.
+            closedAt={report.week.closes_at}
+            timeZone={report.institution_timezone}
           />
           <WeekNav
             publishedWeeks={report.week.published_weeks}
@@ -353,8 +358,18 @@ function ReportWeek({ report }: { readonly report: InstructorReportView }): JSX.
 
       <h2 className="pulse-report-heading">{copy('instructor_report_page.ratings_heading')}</h2>
       <div className="pulse-report-histograms">
-        <RatingHistogram stream="instructor" distribution={bucketsOf(streams.instructor)} />
-        <RatingHistogram stream="course" distribution={bucketsOf(streams.course)} />
+        {/* The served question wording titles each chart where the payload
+            carries it (E5-02); without it each keeps its stream label. */}
+        <RatingHistogram
+          stream="instructor"
+          distribution={bucketsOf(streams.instructor)}
+          questionText={streams.instructor.question_text}
+        />
+        <RatingHistogram
+          stream="course"
+          distribution={bucketsOf(streams.course)}
+          questionText={streams.course.question_text}
+        />
       </div>
 
       <h2 className="pulse-report-heading">{copy('instructor_report_page.workload_heading')}</h2>

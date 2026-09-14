@@ -149,6 +149,25 @@ export const INSTRUCTOR_REPORT_PAGE_COPY = {
   // so that timing cannot identify an author", and ADR 0153 strips the week from
   // every one of them — so this block names no week, no count and no timing, and
   // says only what these comments are.
+  // The eyebrow's past-tense state note — E5-02, restoring
+  // `design/InstructorMondayReport.dc.html`'s "responses closed Sun 11:59 PM".
+  // The student's eyebrow says when a window *closes*; this page is read after it
+  // has shut, and the same sentence in the present tense would be a deadline that
+  // has already passed. The weekday and the time are filled from the payload's
+  // own close instant, read in the institution's zone.
+  //
+  // A state note and not a confidentiality promise: it says when the week ended
+  // and nothing about who answered or what is withheld, so §4.1 item 5's one
+  // promise per surface is still `comments_note` above.
+  'instructor_report_page.responses_closed_note': 'responses closed {when}',
+
+  // How a histogram is titled once the payload carries the question its bars
+  // answer — E5-02. The wording itself is served, because SPEC §3.2 versions it,
+  // so the only thing written here is the treatment the mockup gives it: the
+  // question in typographic quotes, which is what tells a reader the line quotes
+  // what students were asked rather than naming a section of the page.
+  'instructor_report_page.histogram_question_title': '“{question}”',
+
   'instructor_report_page.released_heading': 'Comments from earlier weeks',
   'instructor_report_page.released_body':
     'These were written in earlier weeks of this section and are shown now that enough responses have arrived. They are not part of this week’s figures.',
