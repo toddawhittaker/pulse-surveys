@@ -65,13 +65,13 @@ from typing import Any
 
 import pytest
 from fixtures.benchmark_views import serialized_figure
-from fixtures.report_api import ReportDoor
+from fixtures.report_api import FULL_WEEK, ReportDoor
 from fixtures.report_benchmarks import (
     COMPARISON_POPULATION,
     FIGURE_FIELD,
-    FIGURE_MEMBERS,
     MEAN_FIELD,
     MEDIAN_FIELD,
+    POPULATIONS,
     REASON_FIELD,
     SUPPRESSED_FIELD,
     UNIVERSITY_POPULATION,
@@ -80,10 +80,13 @@ from fixtures.report_benchmarks import (
     WEEK_THIN_PEOPLE,
     WEEK_THIN_SECTIONS,
     a_suppressed_figures_complaint,
+    after_the_close_of,
+    benchmark_member_shapes,
     carries_number,
     every_benchmark_figure,
     numbers_of,
     points_of,
+    published_course_weeks,
     workload_figures,
 )
 from fixtures.report_views import COURSE_STREAM, INSTRUCTOR_STREAM
@@ -91,6 +94,12 @@ from fixtures.report_views import COURSE_STREAM, INSTRUCTOR_STREAM
 pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 
 STREAMS = (INSTRUCTOR_STREAM, COURSE_STREAM)
+
+# The hero's own week that no comparison section answered in. E4-07's world puts
+# five respondents in its full week — course week 1 — and this ticket's cohort
+# plants nothing there, which is what makes it the "a hero week with no
+# comparison data" half of the week-axis pair.
+HERO_ONLY_WEEK = FULL_WEEK
 
 # The rating means each week's comparison set answered, by hand over the values
 # `tests/fixtures/report_benchmarks.py` plants — see that file's tables. The two
@@ -319,6 +328,129 @@ def test_a_suppressed_week_stays_in_the_series_as_a_point_rather_than_being_drop
     )
 
 
+@pytest.mark.parametrize("stream", STREAMS, ids=list(STREAMS))
+@pytest.mark.parametrize("population", POPULATIONS, ids=list(POPULATIONS))
+def test_a_series_carries_the_heros_own_published_weeks_and_no_others(
+    report_door: ReportDoor,
+    report_api_contract: Any,
+    benchmark_cohort: Callable[..., Any],
+    stream: str,
+    population: str,
+) -> None:
+    """The week axis of a series is the hero's own, and nothing about anybody else's term.
+
+    The security round's MEDIUM, and it is an inference rather than a figure. A
+    series whose points are the *union* of the hero's weeks and the comparison
+    population's tells a reader which weeks other sections answered in: subtract
+    your own published weeks from the points you were sent and what is left is a
+    cohort's week-by-week activity, read straight off a fully suppressed series.
+    Over an empty or thin set it is worse than an inference — a point that exists
+    at all is an existence oracle for a population §4.1 item 7 means to say
+    nothing about.
+
+    Ruled in this ticket's fix round: a series carries **exactly** the hero
+    section's own published weeks, one point each, shown or suppressed. The weeks
+    are read from the payload's own `published_weeks` rather than counted here,
+    because which weeks the hero has published is E4-07's answer against the
+    clock and this test holds the series to it rather than to a number it chose.
+
+    **The mutation this kills:** the assembler passing the comparison
+    population's weeks into the trend call as extra weeks to plot — the union
+    that shipped, which reads as generosity and is a disclosure.
+    """
+    benchmark_cohort(report_door, minimums=report_api_contract.minimums())
+    report_door.pretend(after_the_close_of(WEEK_THIN_SECTIONS))
+
+    body, answered = report_door.payload(course_week=WEEK_THIN_SECTIONS)
+    published = published_course_weeks(body, answered=answered)
+    points = points_of(body, stream, population, answered=answered)
+
+    assert WEEK_THIN_SECTIONS in published, (
+        f"The payload says the hero has published {sorted(published)}, which does not include the "
+        f"week it was just asked for ({WEEK_THIN_SECTIONS}). This suite reads "
+        f"`{report_api_contract.published_weeks_field}` as course weeks; if it is a list of term "
+        "weeks, `published_course_weeks` in tests/fixtures/report_benchmarks.py is where that is "
+        "taught — until then this comparison is between two different currencies."
+    )
+    assert sorted(points) == sorted(published), (
+        f"The {stream} panel's {population} series carries course weeks {sorted(points)} and the "
+        f"hero has published {sorted(published)}.\n\n"
+        f"In the series and not the hero's own: {sorted(set(points) - set(published))} — each one "
+        "tells a reader that some other section answered in a week this instructor has not reached "
+        "yet, which is the week-by-week activity of a population §4.1 item 7 exists to say nothing "
+        "about. Missing from the series: "
+        f"{sorted(set(published) - set(points))} — a dropped week is a gap in a chart rather than a "
+        "suppression (criterion 4)."
+    )
+
+
+@pytest.mark.parametrize("stream", STREAMS, ids=list(STREAMS))
+def test_a_week_only_the_comparison_population_answered_in_is_absent_from_both_series(
+    report_door: ReportDoor,
+    report_api_contract: Any,
+    benchmark_cohort: Callable[..., Any],
+    stream: str,
+) -> None:
+    """The pair the ruling asks for, in one world and one payload.
+
+    With the clock standing after the hero's fourth week closes, course week 5 is
+    a week the comparison population answered in and the hero has not published.
+    It must not be on the wire at all: not as a figure, and not as a suppressed
+    point either, because a suppressed point still says *that week happened for
+    somebody else*.
+
+    Its twin is course week 1, which the hero published and the comparison set
+    never answered in: that week **is** on the wire, as a point whose figure is
+    suppressed, because it is one of the hero's own weeks and a chart that
+    dropped it would show a term with a hole in it.
+
+    Both halves in one test on purpose: the presence of one and the absence of
+    the other are the same rule read in two directions, and a series that carried
+    neither would satisfy half of this and be a chart with nothing on it.
+
+    **The mutation this kills:** the union again, from the other side — and, in
+    the opposite direction, an assembler that answered only the weeks the
+    comparison population has data for, which would drop the hero's own early
+    weeks and suppress by omission.
+    """
+    benchmark_cohort(report_door, minimums=report_api_contract.minimums())
+    report_door.pretend(after_the_close_of(WEEK_THIN_SECTIONS))
+
+    body, answered = report_door.payload(course_week=WEEK_THIN_SECTIONS)
+    comparison = points_of(body, stream, COMPARISON_POPULATION, answered=answered)
+    university = points_of(body, stream, UNIVERSITY_POPULATION, answered=answered)
+
+    assert WEEK_CLEAR in comparison and numbers_of(comparison[WEEK_CLEAR]), (
+        f"The control failed before the assertions it protects: course week {WEEK_CLEAR}, planted "
+        f"at both minimums and published by the hero, carries no figure in the {stream} panel: "
+        f"{comparison.get(WEEK_CLEAR)!r}. With nothing on this series the two claims below are "
+        "about an empty chart."
+    )
+
+    for population, series in (
+        (COMPARISON_POPULATION, comparison),
+        (UNIVERSITY_POPULATION, university),
+    ):
+        assert WEEK_CLEAR_TWIN not in series, (
+            f"The {stream} panel's {population} series carries a point for course week "
+            f"{WEEK_CLEAR_TWIN}: {series[WEEK_CLEAR_TWIN]!r}. The hero has not published that week "
+            "— its window has not closed — and the only reason the week exists in this payload at "
+            "all is that other sections answered in it. A point there, suppressed or not, is an "
+            "existence oracle for a population this report is meant to say nothing about."
+        )
+        assert HERO_ONLY_WEEK in series, (
+            f"The {stream} panel's {population} series carries course weeks {sorted(series)} and "
+            f"not {HERO_ONLY_WEEK}, which the hero published and the comparison set never answered "
+            "in. A week of the hero's own term is a point on the chart whether or not there is "
+            "anything to compare it against; dropping it suppresses by omission (criterion 4)."
+        )
+        assert_it_is_suppressed_and_empty(
+            series[HERO_ONLY_WEEK],
+            f"The {stream} panel's {population} figure for course week {HERO_ONLY_WEEK}, where no "
+            "comparison section answered",
+        )
+
+
 def test_a_suppressed_benchmark_member_carries_its_reason_and_nothing_else(
     report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
 ) -> None:
@@ -330,17 +462,26 @@ def test_a_suppressed_benchmark_member_carries_its_reason_and_nothing_else(
     to prevent."
 
     Every member is walked, at every depth — both panels, both populations, every
-    point, and both workload figures — because a rule enforced on the members
-    somebody remembered is a rule with a door beside it, and the depth at which a
-    figure sits has nothing to do with whether it is shown.
+    series, every point, every point's figure, the workload member, its two
+    populations and their four statistics — because a rule enforced on the
+    members somebody remembered is a rule with a door beside it, and the depth at
+    which a count sits has nothing to do with what it discloses.
+
+    **The first version of this test walked figures only, and that was a real
+    gap.** A `sections` count added beside `course_week` and `mean` on a series
+    *point* is the same disclosure and sits where no figure walk would ever look;
+    it reached the wire in this ticket's own fix round and was caught by the
+    reconciliation test rather than by the invariant that exists for it. The walk
+    now holds every object to the member set the work order settles for it.
 
     **The control** is in the same payload and is asserted first: some member has
     to be carrying a figure, or "no member carries a count" is true of a payload
     with no members in it.
 
-    **The mutation this kills:** a section count or a respondent count added to a
-    suppressed member so the frontend can say "over 2 sections" — the exact
-    disclosure the suppression exists to prevent.
+    **The mutation this kills:** a section count or a respondent count added
+    anywhere under the benchmark members so the frontend can say "over 2
+    sections" — on a figure, on a point, on a series, or on the member holding
+    the two populations.
     """
     benchmark_cohort(report_door, minimums=report_api_contract.minimums())
 
@@ -353,14 +494,17 @@ def test_a_suppressed_benchmark_member_carries_its_reason_and_nothing_else(
         f"vacuous (`docs/MISTAKES.md` entry 3). The members read were {sorted(figures)}."
     )
 
-    for where, figure in sorted(figures.items()):
-        extra = sorted(set(figure) - FIGURE_MEMBERS)
+    for where, held, allowed in benchmark_member_shapes(body, answered=answered):
+        extra = sorted(set(held) - allowed)
         assert not extra, (
-            f"`{where}` carries {extra} beside {sorted(FIGURE_MEMBERS)}: {figure!r}.\n\n"
+            f"`{where}` carries {extra} beside {sorted(allowed)}: {held!r}.\n\n"
             "A member that says how many sections or how many people are behind it hands back the "
             "inference the minimum exists to prevent, and it does so whether the member is "
-            "suppressed or shown."
+            "suppressed or shown, and whichever object it is hung on — a figure, a point, a "
+            "series, or the member holding the two populations."
         )
+
+    for where, figure in sorted(figures.items()):
         if figure.get(SUPPRESSED_FIELD) is True:
             assert_it_is_suppressed_and_empty(figure, f"`{where}`")
 

@@ -27,6 +27,7 @@ protects people crossed by a count of something else.
 """
 
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -39,6 +40,7 @@ from fixtures.benchmark_views import (
 from fixtures.report_api import ReportDoor
 from fixtures.report_benchmarks import (
     BENCHMARK_WEEKS,
+    HERO_WORKLOAD_HOURS,
     WEEK_CLEAR,
     WEEK_CLEAR_TWIN,
     WEEK_THIN_PEOPLE,
@@ -46,6 +48,7 @@ from fixtures.report_benchmarks import (
     course_levels,
     hero_answers_to,
     hero_responses,
+    hero_workload_hours,
     lead_faculty_course_ids,
     section_lengths,
 )
@@ -207,6 +210,48 @@ def test_the_hero_contributes_to_both_panels_in_every_planted_week(
             "each of them, because E4-07's world writes course ratings in its full week only — and "
             "without them the course panel's university line is the comparison set's rows alone."
         )
+
+
+def test_the_hero_reports_its_own_workload_hours_at_the_reported_week(
+    report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
+) -> None:
+    """The premise under "university is not comparison": the hero has hours of its own.
+
+    The university population keeps the hero and the comparison set excludes it
+    (E5 breakdown decision 5), so on the workload axis the two members differ by
+    exactly these values. Without them the union is the set — the same fifteen
+    hours, the same mean, the same median — and swapping the two populations in
+    the assembler is a change no test can see. Two mutation battery survivors
+    lived in that world.
+
+    The values are read back from the `answer` rows rather than trusted, because
+    the university mean and median asserted in
+    `test_the_report_serves_three_lines_per_panel.py` are arithmetic over exactly
+    these plus the comparison set's.
+
+    **What a red here means:** the hero contributes no hours, or different ones,
+    and the university workload assertions are either vacuous or wrong for a
+    reason that has nothing to do with the implementation.
+    """
+    minimums = report_api_contract.minimums()
+    cohort = benchmark_cohort(report_door, minimums=minimums)
+    world = cohort.world
+    world.session.rollback()
+
+    stored = hero_workload_hours(world, report_door, WEEK_CLEAR)
+    assert sorted(Decimal(str(value)) for value in stored) == sorted(HERO_WORKLOAD_HOURS), (
+        f"The hero's respondents stored the hours {sorted(stored)} in course week {WEEK_CLEAR}; "
+        f"`plant_the_benchmark_cohort` deals {sorted(HERO_WORKLOAD_HOURS)}. Those values are the "
+        "whole of the difference between the university workload pair and the comparison pair."
+    )
+
+    planted = sorted(BENCHMARK_WEEKS[WEEK_CLEAR].hours)
+    assert all(hours > planted[-1] for hours in HERO_WORKLOAD_HOURS), (
+        f"The hero reports {sorted(HERO_WORKLOAD_HOURS)} and the comparison set's largest value "
+        f"that week is {planted[-1]}. The hero's hours sit above the set's on purpose, so that the "
+        "union's median moves as well as its mean — otherwise the two populations could still "
+        "share a median and half the swap would be invisible."
+    )
 
 
 def test_the_hero_and_the_set_are_comparable_and_led_by_one_person(

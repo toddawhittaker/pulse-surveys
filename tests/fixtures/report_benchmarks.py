@@ -76,6 +76,7 @@ from fixtures.benchmark_views import (
     LEAD_FACULTY_MAPPING_TABLE,
     PERSON_TABLE,
     UG,
+    WORKLOAD_POSITION,
     BenchmarkWorld,
     PlantedSection,
     numbers_in,
@@ -84,14 +85,23 @@ from fixtures.grading import RESPONSE_SECTION_COLUMN, RESPONSE_WEEK_COLUMN
 from fixtures.report_api import (
     BENCHMARK_MIN_RESPONDENTS,
     BENCHMARK_MIN_SECTIONS,
+    EITHER_SIDE_OF_A_CLOSE,
     PAYLOAD_STREAM_KEY,
+    PUBLISHED_WEEKS_FIELD,
     STREAMS_MEMBER,
     TAUGHT_COHORT,
+    TERM_WEEK_OF_COURSE_WEEK,
+    WEEK_MEMBER,
     ReportDoor,
     member,
 )
 from fixtures.report_views import FIRST_VERSION
-from fixtures.submit import ANSWER_TABLE, QUESTION_TABLE, RESPONSE_TABLE
+from fixtures.submit import (
+    ANSWER_TABLE,
+    QUESTION_TABLE,
+    RESPONSE_TABLE,
+    WORKLOAD_HOURS_COLUMN,
+)
 from fixtures.supervision import require_table, single_primary_key
 from fixtures.survey_windows import (
     COHORT_SECTION_MODALITY,
@@ -103,6 +113,7 @@ from fixtures.survey_windows import (
     SECTION_TABLE,
     SEEDED_COHORTS,
     TERM_TABLE,
+    WINDOWS_BY_TERM_WEEK,
 )
 
 # ---------------------------------------------------------------------------
@@ -166,6 +177,20 @@ THE_LEAD = "e5-05-lead"
 # and the control module reads every level back and requires them equal.
 SHARED_COURSE_NUMBER = COURSE_NUMBER_FOR_LEVEL[UG]
 LEVEL_COLUMN = "level"
+
+# The workload hours the hero's own respondents report **at the reported week**,
+# and only there. Two values, because E4-07's world gives the hero two
+# respondents in that week; the planter refuses to deal them if that ever stops
+# being true, rather than spreading them over a count it did not expect.
+#
+# **Why this exists.** Without it the hero contributes no hours at all, so the
+# university workload pair is *numerically* the comparison pair over the same
+# rows — and swapping the two populations behind `workload_benchmark` in the
+# assembler changes nothing any test can see. That is `docs/MISTAKES.md` entry
+# 30's shape (a world that cannot tell the two answers apart) and it survived the
+# mutation battery twice. Both values sit above every hours value the comparison
+# set reports, so the union's median moves as well as its mean.
+HERO_WORKLOAD_HOURS = (Decimal("13.5"), Decimal("14.5"))
 
 # The course rating the hero's own respondents give in the four benchmark weeks —
 # see `_the_hero_answers_the_course_question` for why this planter writes it and
@@ -474,6 +499,7 @@ def plant_the_benchmark_cohort(
         )
         _the_hero_answers_the_course_question(world, door, course_week)
 
+    _the_hero_reports_workload_hours(world, door, WEEK_CLEAR)
     door.commit()
     return PlantedBenchmarkCohort(
         world=world,
@@ -562,6 +588,108 @@ def _the_hero_answers_the_course_question(
         world.report.answer(
             response, COURSE_RATING_POSITION, HERO_COURSE_RATING, version=FIRST_VERSION
         )
+
+
+def _the_hero_reports_workload_hours(
+    world: BenchmarkWorld, door: ReportDoor, course_week: int
+) -> None:
+    """Give the hero's respondents in the reported week their own workload hours.
+
+    **Only the reported week, deliberately.** The hero is in the university
+    population and out of the comparison set (E5 breakdown decision 5), so these
+    hours are the whole of the difference between the two workload members on the
+    wire. Written at one week rather than at all four because the two near-miss
+    weeks are about a *comparison* figure being suppressed, and moving the
+    university population there would change what those weeks are for.
+
+    E4-07's world writes the hero's hours in its own full week (course week 1)
+    and nowhere else, so nothing is overwritten here. The count is a premise
+    rather than an assumption: if the hero's respondents in that week are not as
+    many as there are values to give them, this stops and says so, because the
+    university mean and median the tests assert are arithmetic over exactly these
+    values plus the comparison set's.
+    """
+    responses = hero_responses(world, door, course_week)
+    if len(responses) != len(HERO_WORKLOAD_HOURS):
+        pytest.fail(
+            f"The hero section holds {len(responses)} responses in course week {course_week} and "
+            f"`HERO_WORKLOAD_HOURS` carries {len(HERO_WORKLOAD_HOURS)} values. The university "
+            "workload mean and median asserted by "
+            "`test_the_report_serves_three_lines_per_panel.py` are worked out by hand over exactly "
+            "these values and the comparison set's, so a different number of respondents is a "
+            "world whose arithmetic nobody has done — `HERO_WORKLOAD_HOURS` in "
+            "tests/fixtures/report_benchmarks.py and those expectations move together."
+        )
+    for response, hours in zip(responses, HERO_WORKLOAD_HOURS, strict=True):
+        world.report.answer(response, WORKLOAD_POSITION, hours, version=FIRST_VERSION)
+
+
+def hero_workload_hours(world: BenchmarkWorld, door: ReportDoor, course_week: int) -> list[Any]:
+    """The workload values the hero's respondents actually stored in one course week."""
+    answers = require_table(world.tables, ANSWER_TABLE)
+    response_column = world.report.link(ANSWER_TABLE, RESPONSE_TABLE)
+    question_column = world.report.link(ANSWER_TABLE, QUESTION_TABLE)
+    question = world.report.questions[FIRST_VERSION][WORKLOAD_POSITION]
+    key = world.key_of(RESPONSE_TABLE)
+    response_ids = [row[key] for row in hero_responses(world, door, course_week)]
+    if not response_ids:
+        return []
+    world.session.flush()
+    rows = world.session.execute(
+        select(answers.c[WORKLOAD_HOURS_COLUMN]).where(
+            answers.c[response_column].in_(response_ids),
+            answers.c[question_column] == question[world.key_of(QUESTION_TABLE)],
+        )
+    )
+    return [row[0] for row in rows]
+
+
+def after_the_close_of(course_week: int) -> datetime:
+    """An instant safely after one of the hero's course weeks has closed, and before the next.
+
+    The hero's windows carry SPEC §3.1's own Fall 2026 instants
+    (`tests/fixtures/survey_windows.py`), and a *published* week is one whose
+    window has closed — E4-07's breakdown decision 6 — so where the clock stands
+    decides how much of the hero's own term exists. Six hours past the close,
+    which is `tests/fixtures/report_api.py`'s own distance from an edge and for
+    its reason: ADR 0109's effective instant keeps moving while it is read, so a
+    value placed a second from an edge is a boundary nothing can stand on.
+    """
+    term_week = TERM_WEEK_OF_COURSE_WEEK[course_week]
+    _opens_at, closes_at = WINDOWS_BY_TERM_WEEK[term_week]
+    return closes_at + EITHER_SIDE_OF_A_CLOSE
+
+
+def published_course_weeks(body: Any, answered: Any = None) -> list[int]:
+    """The course weeks the payload itself says the hero has published.
+
+    Read off the payload rather than counted here, because "the hero section's
+    own published weeks" is a fact this ticket does not own: E4-07 computes it
+    against the clock, and a series is being held to it. Both spellings the
+    member could take are read — a list of week numbers, or a list of objects
+    naming a course week — and anything else is a failure naming the ambiguity
+    rather than a comparison against a currency this suite guessed at.
+    """
+    published = member(body, WEEK_MEMBER, PUBLISHED_WEEKS_FIELD, answered=answered)
+    if not isinstance(published, list):
+        pytest.fail(
+            f"`{WEEK_MEMBER}.{PUBLISHED_WEEKS_FIELD}` is {published!r}, which is not a list of "
+            "weeks."
+        )
+    found: list[int] = []
+    for entry in published:
+        if isinstance(entry, dict) and POINT_WEEK_FIELD in entry:
+            found.append(int(entry[POINT_WEEK_FIELD]))
+        elif isinstance(entry, int) and not isinstance(entry, bool):
+            found.append(int(entry))
+        else:
+            pytest.fail(
+                f"`{WEEK_MEMBER}.{PUBLISHED_WEEKS_FIELD}` holds {entry!r}, which this suite cannot "
+                f"read as a course week. It reads a number or an object naming "
+                f"`{POINT_WEEK_FIELD}`; a third spelling is taught in `published_course_weeks` in "
+                "tests/fixtures/report_benchmarks.py."
+            )
+    return found
 
 
 def _give_every_course_one_level(world: BenchmarkWorld, hero_course: Mapping[str, Any]) -> Any:
@@ -722,6 +850,62 @@ def workload_figures(body: Any, population: str, answered: Any = None) -> dict[s
         name: _require_a_figure(figures[name], f"`{WORKLOAD_BENCHMARK_MEMBER}.{population}.{name}`")
         for name in (MEAN_FIELD, MEDIAN_FIELD)
     }
+
+
+# What each object in the benchmark members is made of, as the work order spells
+# it. These are the sets the disclosure walk holds every object to: a member that
+# is not one of them is a count, a set size or a flag that nothing sealed, and
+# "over 2 sections" under a suppression is itself the inference §4.1 item 7
+# exists to prevent.
+BENCHMARK_POPULATION_MEMBERS = frozenset(POPULATIONS)
+SERIES_MEMBERS = frozenset({POINTS_FIELD})
+POINT_MEMBERS = frozenset({POINT_WEEK_FIELD, POINT_MEAN_FIELD})
+WORKLOAD_FIGURE_MEMBERS = frozenset({MEAN_FIELD, MEDIAN_FIELD})
+
+
+def benchmark_member_shapes(body: Any, answered: Any = None) -> list[tuple[str, Any, frozenset]]:
+    """Every object the benchmark members are made of, with the members it may carry.
+
+    **Every object, not every figure**, which is the repair the E5-05 fix round
+    asks for: a count added to a series *point* — beside `course_week` and `mean`,
+    where no figure walk would ever look — is the same disclosure as a count
+    inside a figure, and it slipped past the first version of that test entirely.
+    The walk therefore descends the whole shape: the stream's benchmark member,
+    each population's series, each point, each point's figure, the workload
+    member, each of its populations, and each of their two statistics.
+    """
+    found: list[tuple[str, Any, frozenset]] = []
+    for stream, key in PAYLOAD_STREAM_KEY.items():
+        at = f"streams.{key}.{BENCHMARK_MEMBER}"
+        benchmark = member(body, STREAMS_MEMBER, key, BENCHMARK_MEMBER, answered=answered)
+        found.append((at, benchmark, BENCHMARK_POPULATION_MEMBERS))
+        for population in POPULATIONS:
+            series = stream_benchmark(body, stream, population, answered=answered)
+            found.append((f"{at}.{population}", series, SERIES_MEMBERS))
+            for point in member(series, POINTS_FIELD, answered=answered):
+                week = point.get(POINT_WEEK_FIELD) if isinstance(point, dict) else None
+                where = f"{at}.{population}.{POINTS_FIELD}[week {week}]"
+                found.append((where, point, POINT_MEMBERS))
+                if isinstance(point, dict) and POINT_MEAN_FIELD in point:
+                    found.append(
+                        (f"{where}.{POINT_MEAN_FIELD}", point[POINT_MEAN_FIELD], FIGURE_MEMBERS)
+                    )
+    workload = member(body, WORKLOAD_BENCHMARK_MEMBER, answered=answered)
+    found.append((WORKLOAD_BENCHMARK_MEMBER, workload, BENCHMARK_POPULATION_MEMBERS))
+    for population in POPULATIONS:
+        figures = workload_figures(body, population, answered=answered)
+        at = f"{WORKLOAD_BENCHMARK_MEMBER}.{population}"
+        held = member(body, WORKLOAD_BENCHMARK_MEMBER, population, answered=answered)
+        found.append((at, held, WORKLOAD_FIGURE_MEMBERS))
+        for name, figure in figures.items():
+            found.append((f"{at}.{name}", figure, FIGURE_MEMBERS))
+    for where, held, _allowed in found:
+        if not isinstance(held, dict):
+            pytest.fail(
+                f"`{where}` is {held!r} rather than an object this walk can read the members of.\n\n"
+                f"{BENCHMARK_MEMBERS_ARE_OWED}"
+            )
+    return found
 
 
 def every_benchmark_figure(body: Any, answered: Any = None) -> dict[str, Any]:

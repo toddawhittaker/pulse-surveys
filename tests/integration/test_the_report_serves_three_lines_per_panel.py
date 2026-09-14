@@ -37,6 +37,7 @@ from fixtures.report_benchmarks import (
     BENCHMARK_WEEKS,
     COMPARISON_POPULATION,
     FIGURE_FIELD,
+    HERO_WORKLOAD_HOURS,
     MEAN_FIELD,
     MEDIAN_FIELD,
     SUPPRESSED_FIELD,
@@ -78,6 +79,19 @@ COMPARISON_WORKLOAD_MEAN = 8.9
 COMPARISON_WORKLOAD_MEDIAN = 7.5
 COMPARISON_RATING_MEAN = {INSTRUCTOR_STREAM: 3.6, COURSE_STREAM: 2.8}
 
+# The hero's own two respondents report these hours in the reported week, and the
+# university population keeps the hero (E5 breakdown decision 5) while the
+# comparison set excludes it. So the university pair is the seventeen values
+# together:
+#   mean   133.5 + 13.5 + 14.5 = 161.5, over 17 -> 9.5
+#   median the ninth of the seventeen sorted, which is 10.5 — the eight 7.5s
+#          come first, then seven 10.5s, then the hero's two
+# Four different numbers across the two populations, so neither member can be
+# read as the other: a swap shows 8.9 where 9.5 belongs and 7.5 where 10.5 does.
+PLANTED_HERO_HOURS = (Decimal("13.5"), Decimal("14.5"))
+UNIVERSITY_WORKLOAD_MEAN = 9.5
+UNIVERSITY_WORKLOAD_MEDIAN = 10.5
+
 STREAMS = (INSTRUCTOR_STREAM, COURSE_STREAM)
 
 
@@ -104,6 +118,12 @@ def assert_the_planted_values_are_what_this_module_says() -> None:
         f"The course ratings planted in course week {REPORTED_WEEK} are "
         f"{sorted(plan.course_ratings)}; this module's mean is written over "
         f"{sorted(PLANTED_COURSE_RATINGS)}."
+    )
+    assert sorted(HERO_WORKLOAD_HOURS) == sorted(PLANTED_HERO_HOURS), (
+        f"The hero's own respondents report {sorted(HERO_WORKLOAD_HOURS)} in the reported week; "
+        f"the university arithmetic in this module is written over {sorted(PLANTED_HERO_HOURS)}. "
+        "Those two values are the whole of the difference between the university pair and the "
+        "comparison pair on the wire."
     )
 
 
@@ -242,28 +262,95 @@ def test_the_reported_weeks_workload_comparison_carries_a_mean_and_a_median(
     )
 
 
-def test_the_reported_weeks_workload_university_figures_are_served_beside_them(
+def test_the_reported_weeks_workload_university_figures_are_the_wider_populations_own(
     report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
 ) -> None:
-    """The other half of §5.1's sentence: the same two statistics, university-wide.
+    """The other half of §5.1's sentence: the same two statistics over the wider population.
 
     E5-08's StatPair renders "section beside comparison-set beside university,
     mean and median, each column independently suppressible", so a payload
     carrying one population's pair is a component with a column it cannot fill.
 
-    **The mutation this kills:** the university population never asked for on the
-    workload axis — the member built from one call to the service instead of two.
+    **Both values are asserted exactly, and that is the repair the mutation
+    battery asked for.** While the hero reported no hours in this week the
+    university pair was *numerically* the comparison pair over the same rows, so
+    swapping the two populations behind `workload_benchmark` in the assembler
+    changed nothing any test could see — two battery survivors, and
+    `docs/MISTAKES.md` entry 30's shape: a world in which the right answer and the
+    wrong one are the same number. The hero's own two respondents now report hours
+    (`HERO_WORKLOAD_HOURS`), so the union's mean and median are numbers only the
+    union produces.
+
+    **The mutations this kills:** `population=UNIVERSITY` swapped for
+    `population=DEFAULT_SET` behind `workload_benchmark.university` — which now
+    shows 8.9 and 7.5 where 9.5 and 10.5 belong — and the university population
+    never asked for at all, the member built from one call to the service instead
+    of two.
     """
+    assert_the_planted_values_are_what_this_module_says()
     benchmark_cohort(report_door, minimums=report_api_contract.minimums())
 
     body, answered = report_door.payload(course_week=REPORTED_WEEK)
     figures = workload_figures(body, UNIVERSITY_POPULATION, answered=answered)
 
+    assert carries_number(figures[MEAN_FIELD], UNIVERSITY_WORKLOAD_MEAN), (
+        f"The university workload mean for course week {REPORTED_WEEK} is "
+        f"{figures[MEAN_FIELD]!r} and does not carry {UNIVERSITY_WORKLOAD_MEAN} — the mean over "
+        f"the comparison set's {sorted(PLANTED_HOURS)} together with the hero's own "
+        f"{sorted(PLANTED_HERO_HOURS)}, which is the population §5.1 calls university-wide: 'all "
+        "same-length+level sections institution-wide'."
+    )
+    assert carries_number(figures[MEDIAN_FIELD], UNIVERSITY_WORKLOAD_MEDIAN), (
+        f"The university workload median is {figures[MEDIAN_FIELD]!r} and does not carry "
+        f"{UNIVERSITY_WORKLOAD_MEDIAN}, the ninth of those seventeen values sorted."
+    )
+    assert not carries_number(figures[MEAN_FIELD], COMPARISON_WORKLOAD_MEAN), (
+        f"The university workload mean carries {COMPARISON_WORKLOAD_MEAN}, which is the "
+        f"*comparison set's* mean: {figures[MEAN_FIELD]!r}. The two populations differ by the "
+        "hero's own section, which decision 5 excludes from its own set and keeps in the "
+        "university line, so this member has been filled from the wrong population."
+    )
+    assert not carries_number(figures[MEDIAN_FIELD], COMPARISON_WORKLOAD_MEDIAN), (
+        f"The university workload median carries {COMPARISON_WORKLOAD_MEDIAN}, which is the "
+        f"comparison set's: {figures[MEDIAN_FIELD]!r}."
+    )
+
+
+def test_the_two_workload_populations_are_different_numbers_in_this_world(
+    report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
+) -> None:
+    """The control that makes the four assertions above capable of failing.
+
+    Every "this member carries the wrong population's number" assertion rests on
+    the two populations being distinguishable *in this world at this week*. They
+    were not until the hero reported hours here: with no hero hours the union and
+    the set are the same fifteen values, and both members are correct whichever
+    population the assembler asked for. A test suite cannot detect a swap in a
+    world where the two answers coincide, and this is the assertion that says so
+    out loud rather than leaving it to a reader of the fixture.
+
+    **The mutation this kills:** the hero's hours quietly dropped from
+    `plant_the_benchmark_cohort` — which reds nothing else in this module's
+    neighbourhood while restoring the world the two battery survivors lived in.
+    """
+    benchmark_cohort(report_door, minimums=report_api_contract.minimums())
+
+    body, answered = report_door.payload(course_week=REPORTED_WEEK)
+    comparison = workload_figures(body, COMPARISON_POPULATION, answered=answered)
+    university = workload_figures(body, UNIVERSITY_POPULATION, answered=answered)
+
     for name in (MEAN_FIELD, MEDIAN_FIELD):
-        assert numbers_of(figures[name]), (
-            f"The university workload {name} for course week {REPORTED_WEEK} carries no number at "
-            f"all: {figures[name]!r}. Its population is the comparison set plus the hero's own "
-            "section, so it clears both minimums by more than the set does."
+        assert numbers_of(comparison[name]) and numbers_of(university[name]), (
+            f"One of the two workload {name} members carries no number at all — comparison "
+            f"{comparison[name]!r}, university {university[name]!r} — so this control says nothing "
+            "about telling them apart."
+        )
+        assert comparison[name] != university[name], (
+            f"The comparison and university workload {name} are the same value on the wire: "
+            f"{comparison[name]!r}. In a world where the two populations produce one number, a "
+            "swap between them is undetectable by any test — which is exactly what two mutation "
+            "battery survivors demonstrated before the hero's own respondents reported hours in "
+            "this week."
         )
 
 
