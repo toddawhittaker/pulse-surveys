@@ -1,0 +1,311 @@
+"""E5-05 criterion 1 — the positive control: a seeded world serves all of it through the route.
+
+> A seeded world serves both panels' comparison and university series and the
+> workload comparison figures through the route — the positive control.
+
+SPEC §5.1 is what "three lines per panel" means: "each panel carries three lines
+— this section (hero), the **comparison set**, and **university-wide**" — and,
+beside the charts, "workload mean/median for the section against comparison-set
+and university figures (true numeric statistics — §3.2)".
+
+**This module is the reason the suppression module beside it means anything.**
+Every assertion here is that a figure *arrives*, with its value written out by
+hand over the answers this world planted. Without it, `docs/MISTAKES.md` entries
+3 and 9 are the whole story: a route that served an empty benchmark member for
+every world would satisfy every suppression assertion in this ticket.
+
+**Every expected number is arithmetic this module writes**, over the values
+`tests/fixtures/report_benchmarks.py` plants — and the multiset it planted is
+asserted first, so a drifted value table is a named failure here rather than four
+wrong expectations that still agree with each other (`docs/MISTAKES.md` entries
+19 and 30). No expected value is a number the payload could also hold for another
+reason: none is a count, a minimum, a rate, or one of the hero's own figures.
+
+**Which failure a red is, before E5-05 lands.** The benchmark members are read
+through `tests/fixtures/report_benchmarks.py`, whose readers `pytest.fail` naming
+the member the work order owes, so the first red is a FAILED naming a deliverable
+rather than a `KeyError` or a collection error (`docs/MISTAKES.md` entry 44).
+"""
+
+from collections.abc import Callable
+from decimal import Decimal
+from typing import Any
+
+import pytest
+from fixtures.report_api import ReportDoor
+from fixtures.report_benchmarks import (
+    BENCHMARK_WEEKS,
+    COMPARISON_POPULATION,
+    FIGURE_FIELD,
+    MEAN_FIELD,
+    MEDIAN_FIELD,
+    SUPPRESSED_FIELD,
+    UNIVERSITY_POPULATION,
+    WEEK_CLEAR,
+    carries_number,
+    numbers_of,
+    points_of,
+    workload_figures,
+)
+from fixtures.report_views import COURSE_STREAM, INSTRUCTOR_STREAM
+
+pytestmark = [pytest.mark.integration]
+
+# The week every assertion here is driven at: the one planted at both configured
+# minimums exactly. At the minimum rather than above it, because SPEC §5.1
+# suppresses a figure "computed from fewer than the configured number of
+# sections" — so the configured number itself is shown, and an implementation
+# written with `>` where `>=` belongs is red here and green on every suppression
+# test beside it.
+REPORTED_WEEK = WEEK_CLEAR
+
+# What the fifteen people who answered that week reported, as multisets. Written
+# out here and checked against the planter's tables before anything is read, so
+# that the four expectations below rest on values this module can see rather than
+# on a fixture's promise (`docs/MISTAKES.md` entry 19).
+PLANTED_HOURS = (*(Decimal("7.5"),) * 8, *(Decimal("10.5"),) * 7)
+PLANTED_INSTRUCTOR_RATINGS = (*(4,) * 12, *(2,) * 3)
+PLANTED_COURSE_RATINGS = (*(1,) * 6, *(4,) * 9)
+
+# The arithmetic, by hand:
+#   hours   8 x 7.5 + 7 x 10.5 = 133.5, over 15 responses -> 8.9; sorted, the
+#           eighth of fifteen is 7.5.
+#   ratings 12 x 4 + 3 x 2 = 54 over 15 -> 3.6, and 6 x 1 + 9 x 4 = 42 over 15
+#           -> 2.8.
+# Sixteen distinct numbers across this world's four weeks, none of them a count,
+# a minimum, a rate, or one of E4-07's own hero figures (10, 9, 4, 3).
+COMPARISON_WORKLOAD_MEAN = 8.9
+COMPARISON_WORKLOAD_MEDIAN = 7.5
+COMPARISON_RATING_MEAN = {INSTRUCTOR_STREAM: 3.6, COURSE_STREAM: 2.8}
+
+STREAMS = (INSTRUCTOR_STREAM, COURSE_STREAM)
+
+
+def assert_the_planted_values_are_what_this_module_says() -> None:
+    """The planter's tables against this module's copy of them, before anything is read.
+
+    Not a recomputation of the means — that would be holding the expectation in a
+    copy of the thing under test (`docs/MISTAKES.md` entry 19) — but a check that
+    the *inputs* the hand arithmetic above was done over are still the inputs
+    being planted. A value table that moved would otherwise make every expectation
+    here wrong in a way that reads as an implementation defect.
+    """
+    plan = BENCHMARK_WEEKS[REPORTED_WEEK]
+    assert sorted(plan.hours) == sorted(PLANTED_HOURS), (
+        f"Course week {REPORTED_WEEK} is planted with the hours {sorted(plan.hours)}; the "
+        f"arithmetic in this module is written over {sorted(PLANTED_HOURS)}."
+    )
+    assert sorted(plan.instructor_ratings) == sorted(PLANTED_INSTRUCTOR_RATINGS), (
+        f"The instructor ratings planted in course week {REPORTED_WEEK} are "
+        f"{sorted(plan.instructor_ratings)}; this module's mean is written over "
+        f"{sorted(PLANTED_INSTRUCTOR_RATINGS)}."
+    )
+    assert sorted(plan.course_ratings) == sorted(PLANTED_COURSE_RATINGS), (
+        f"The course ratings planted in course week {REPORTED_WEEK} are "
+        f"{sorted(plan.course_ratings)}; this module's mean is written over "
+        f"{sorted(PLANTED_COURSE_RATINGS)}."
+    )
+
+
+@pytest.mark.parametrize("stream", STREAMS, ids=list(STREAMS))
+def test_each_panel_serves_the_comparison_sets_own_figure_for_the_reported_week(
+    report_door: ReportDoor,
+    report_api_contract: Any,
+    benchmark_cohort: Callable[..., Any],
+    stream: str,
+) -> None:
+    """The comparison line, per panel, carrying the mean the set actually answered.
+
+    Both panels, because SPEC §5.1's stacked pair is "instructor stream above,
+    course stream below" and each carries its own three lines: a route that
+    assembled one stream's series and reused it for the other would be green
+    against a single-stream assertion and wrong on the page.
+
+    **The value is the set's and nobody else's.** The two streams' means are 3.6
+    and 2.8 over the same fifteen people, so a panel serving the other stream's
+    figure is red here rather than plausible; and neither number is the hero's own
+    trend mean, which E4-07's world puts at 4 and 3.
+
+    **The mutation this kills:** the per-stream benchmark member left unpopulated
+    — an empty series, or one assembled for the wrong stream — which every
+    suppression assertion in this ticket is satisfied by.
+    """
+    assert_the_planted_values_are_what_this_module_says()
+    benchmark_cohort(report_door, minimums=report_api_contract.minimums())
+
+    body, answered = report_door.payload(course_week=REPORTED_WEEK)
+    points = points_of(body, stream, COMPARISON_POPULATION, answered=answered)
+
+    assert REPORTED_WEEK in points, (
+        f"The {stream} panel's comparison series carries course weeks {sorted(points)} and not "
+        f"{REPORTED_WEEK}, which is the week this world planted at both configured minimums. A "
+        "week left out of the series altogether is a gap in a chart rather than a figure."
+    )
+    figure = points[REPORTED_WEEK]
+    expected = COMPARISON_RATING_MEAN[stream]
+    assert carries_number(figure, expected), (
+        f"The {stream} panel's comparison figure for course week {REPORTED_WEEK} is {figure!r} and "
+        f"does not carry {expected}, which is the mean of the ratings the comparison set answered "
+        f"that week ({sorted(BENCHMARK_WEEKS[REPORTED_WEEK].instructor_ratings)} and "
+        f"{sorted(BENCHMARK_WEEKS[REPORTED_WEEK].course_ratings)} over the two streams). Both "
+        "minimums are cleared exactly, and §5.1 suppresses a figure computed from *fewer* than the "
+        "configured number."
+    )
+    assert figure.get(SUPPRESSED_FIELD) is False, (
+        f"The figure carries the number and still says it is suppressed: {figure!r}. A frontend "
+        "draws the flag, so a shown figure that claims suppression is an empty panel with the "
+        "number riding along beside it in the response body."
+    )
+
+
+@pytest.mark.parametrize("stream", STREAMS, ids=list(STREAMS))
+def test_each_panel_serves_a_university_line_beside_the_comparison_one(
+    report_door: ReportDoor,
+    report_api_contract: Any,
+    benchmark_cohort: Callable[..., Any],
+    stream: str,
+) -> None:
+    """The third line: §5.1's university-wide series, on the same panel and the same week.
+
+    Asserted as "a figure arrives" rather than against a hand-computed mean,
+    deliberately: the university population is every matching section including
+    the hero (E5 breakdown decision 5), so its value depends on E4-07's own world
+    as well as this one, and an expectation built from both would be a copy of two
+    fixtures rather than a claim about the route. What this ticket owes is the
+    *line*, and that it was sealed by the chokepoint like every other figure.
+
+    **The mutation this kills:** the university series never assembled — one line
+    per panel where §5.1 asks for three. That the two series are not one member
+    copied twice is asserted where the two populations genuinely diverge, in the
+    section-minimum test of
+    `test_the_benchmark_payload_plants_both_sides_of_both_minimums.py`: there the
+    comparison line is suppressed and the university line over the same rows plus
+    the hero is shown.
+    """
+    benchmark_cohort(report_door, minimums=report_api_contract.minimums())
+
+    body, answered = report_door.payload(course_week=REPORTED_WEEK)
+    university = points_of(body, stream, UNIVERSITY_POPULATION, answered=answered)
+
+    assert REPORTED_WEEK in university, (
+        f"The {stream} panel's university series carries course weeks {sorted(university)} and not "
+        f"{REPORTED_WEEK}. SPEC §5.1: 'the university-wide line is all same-length+level sections "
+        "institution-wide', and this world holds the hero and the set at one length and one level."
+    )
+    figure = university[REPORTED_WEEK]
+    assert numbers_of(figure), (
+        f"The {stream} panel's university figure for course week {REPORTED_WEEK} carries no number "
+        f"at all: {figure!r}. The population is the comparison set plus the hero's own section, so "
+        "it clears both minimums by more than the set does — a suppression here is a line §5.1 "
+        "requires and nothing computed."
+    )
+
+
+def test_the_reported_weeks_workload_comparison_carries_a_mean_and_a_median(
+    report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
+) -> None:
+    """§5.1's workload statistics, against the comparison set, for the week being reported.
+
+    > workload mean/median for the section against comparison-set and university
+    > figures (true numeric statistics — §3.2)
+
+    **Both figures, each asserted on its own**, because §4.1 item 7 covers "a
+    mean, a median, or any other statistic, not only a drawn line": a member that
+    served one of the two is half the requirement, and the two values here are
+    different numbers (8.9 and 7.5) so neither can stand in for the other.
+
+    **The mutation this kills:** the workload member assembled with one figure, or
+    with the mean assigned to both slots — which reads as a rounding curiosity on
+    a page and is a different statistic about the same people.
+    """
+    assert_the_planted_values_are_what_this_module_says()
+    benchmark_cohort(report_door, minimums=report_api_contract.minimums())
+
+    body, answered = report_door.payload(course_week=REPORTED_WEEK)
+    figures = workload_figures(body, COMPARISON_POPULATION, answered=answered)
+
+    assert carries_number(figures[MEAN_FIELD], COMPARISON_WORKLOAD_MEAN), (
+        f"The comparison workload mean for course week {REPORTED_WEEK} is {figures[MEAN_FIELD]!r} "
+        f"and does not carry {COMPARISON_WORKLOAD_MEAN} — the mean of "
+        f"{sorted(PLANTED_HOURS)}, which is what the set reported that week."
+    )
+    assert carries_number(figures[MEDIAN_FIELD], COMPARISON_WORKLOAD_MEDIAN), (
+        f"The comparison workload median is {figures[MEDIAN_FIELD]!r} and does not carry "
+        f"{COMPARISON_WORKLOAD_MEDIAN} — the eighth of the fifteen hours values sorted. §4.1 item 7 "
+        "covers the median as much as the mean, and a member that seals one of the two has half a "
+        "chokepoint."
+    )
+    assert not carries_number(figures[MEDIAN_FIELD], COMPARISON_WORKLOAD_MEAN), (
+        f"The median carries {COMPARISON_WORKLOAD_MEAN}, which is the *mean*: "
+        f"{figures[MEDIAN_FIELD]!r}. Two slots filled from one figure is the shape this pair exists "
+        "to catch."
+    )
+
+
+def test_the_reported_weeks_workload_university_figures_are_served_beside_them(
+    report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
+) -> None:
+    """The other half of §5.1's sentence: the same two statistics, university-wide.
+
+    E5-08's StatPair renders "section beside comparison-set beside university,
+    mean and median, each column independently suppressible", so a payload
+    carrying one population's pair is a component with a column it cannot fill.
+
+    **The mutation this kills:** the university population never asked for on the
+    workload axis — the member built from one call to the service instead of two.
+    """
+    benchmark_cohort(report_door, minimums=report_api_contract.minimums())
+
+    body, answered = report_door.payload(course_week=REPORTED_WEEK)
+    figures = workload_figures(body, UNIVERSITY_POPULATION, answered=answered)
+
+    for name in (MEAN_FIELD, MEDIAN_FIELD):
+        assert numbers_of(figures[name]), (
+            f"The university workload {name} for course week {REPORTED_WEEK} carries no number at "
+            f"all: {figures[name]!r}. Its population is the comparison set plus the hero's own "
+            "section, so it clears both minimums by more than the set does."
+        )
+
+
+def test_the_top_level_comparison_member_carries_the_same_workload_mean_the_new_member_does(
+    report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
+) -> None:
+    """Criterion 6's additivity, at the one member E4 already shipped.
+
+    E5-05's work order, decision 5: the existing top-level `comparison` member
+    stays and "carries the default set's workload mean for the reported week — the
+    same sealed object as `workload_benchmark.comparison.mean`, assigned twice,
+    computed once". Retiring it would break every E4 reader; filling it with
+    something *else* would give two members one name.
+
+    Identity cannot be asserted across the wire, so what is asserted is the
+    serialization: the two members say the same thing, number and flag alike.
+
+    **The mutation this kills:** the E4-era member left permanently suppressed
+    while the new one carries a figure — which passes every other test in this
+    ticket and leaves the payload contradicting itself about the same statistic.
+    """
+    assert_the_planted_values_are_what_this_module_says()
+    benchmark_cohort(report_door, minimums=report_api_contract.minimums())
+
+    body, answered = report_door.payload(course_week=REPORTED_WEEK)
+    legacy = report_api_contract.member(
+        body, report_api_contract.comparison_member, answered=answered
+    )
+    workload = workload_figures(body, COMPARISON_POPULATION, answered=answered)[MEAN_FIELD]
+
+    assert carries_number(legacy, COMPARISON_WORKLOAD_MEAN), (
+        f"The top-level `{report_api_contract.comparison_member}` member is {legacy!r} and does not "
+        f"carry {COMPARISON_WORKLOAD_MEAN}, the comparison set's workload mean for course week "
+        f"{REPORTED_WEEK}. E4 shipped the member with nothing behind it; E5-05 is the ticket that "
+        "fills it."
+    )
+    assert legacy == workload, (
+        f"The top-level `{report_api_contract.comparison_member}` serializes as {legacy!r} and "
+        f"`workload_benchmark.comparison.{MEAN_FIELD}` as {workload!r}. They are one figure "
+        "assigned twice; two spellings of the same statistic is a payload that contradicts itself."
+    )
+    assert legacy.get(FIGURE_FIELD) is not None, (
+        f"The top-level member's `{FIGURE_FIELD}` is null while the member carries a number "
+        f"elsewhere: {legacy!r}."
+    )

@@ -171,6 +171,20 @@ boundary: `metadata_tables` is asked for by both.
     lookup of `app.services.benchmarks` and the readers that say whether a
     comparison figure carries a number without asserting the figure's shape.
 
+  - `fixtures/report_benchmarks.py` — E5-05: the benchmark members the report
+    payload gains, spelled once from that ticket's work order; the comparison
+    population planted around the section E4-07's door already teaches — one Lead
+    Faculty over the hero's course and the set's, every course on one number so
+    the level both sides match on is a stored fact rather than a fixture's
+    choice, and four course weeks planted at and one below each configured
+    minimum as *offsets*, never as transcribed numbers; the readers that take a
+    series or a workload figure off a decoded payload; and the unsealed figure the
+    criterion-2 tests hand to the wire boundary, built past the constructor the
+    way E4-07's security round found it could be. Every value it plants is an
+    input a test writes its own arithmetic over, and its planter is a factory a
+    test calls from its own body so an unbuilt E5-05 is a FAILED naming the
+    missing member.
+
 Five modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
 `seed_row` already is. They are listed here because this docstring is the index
@@ -256,6 +270,7 @@ pytest_plugins = (
     "fixtures.report_question_text",
     "fixtures.instructor_sections",
     "fixtures.benchmark_views",
+    "fixtures.report_benchmarks",
 )
 
 
