@@ -219,6 +219,10 @@ const CREDIT_NOTE_CLAUSE = 'can lower a score that has already posted';
 // instructor launch reaches.
 const INSTRUCTOR_LANDING = 'pulse-landing-instructor';
 const REPORT = 'pulse-instructor-report';
+// E5-07's two overlay lines, which are what says how many overlay tables this
+// report owes (see `expectTheTablesMatchTheLines`).
+const TREND_LINE_COMPARISON = 'trend-line-comparison';
+const TREND_LINE_UNIVERSITY = 'trend-line-university';
 const SECTIONS_MENU = 'pulse-instructor-sections';
 
 // Budgets. The world is built once and it is a launch plus a form plus a
@@ -411,9 +415,8 @@ test('an instructor launches, chooses a section, and reads its week', async ({ p
     `COURSE WK 0${String(BIOL_COURSE_WEEK)} / 12,`,
   );
 
-  // SPEC §5.1's stacked pair: two panels, each with the accessible table that
-  // carries its weeks and values as text.
-  await expect(report.getByRole('table')).toHaveCount(2);
+  // SPEC §5.1's stacked pair, read through the accessible tables it publishes.
+  await expectTheTablesMatchTheLines(report);
 
   // Both comment groups, each led by its own heading, and the note §4's
   // randomized order and absent timestamps are stated in.
@@ -508,7 +511,7 @@ test('week navigation carries the week in the address and lands focus on the hea
   // treatment, rather than an error or an empty page.
   await expect(report).toBeVisible();
   await expect(report.getByText(NO_RESPONSES).first()).toBeVisible();
-  await expect(report.getByRole('table')).toHaveCount(2);
+  await expectTheTablesMatchTheLines(report);
 
   // And focus is on the heading, which is what names the thing that changed.
   await expect(page.locator('h1')).toBeFocused();
@@ -695,6 +698,70 @@ async function openTheReport(page: Page, code: string): Promise<Locator> {
   const report = page.getByTestId(REPORT);
   await expect(report).toBeVisible();
   return report;
+}
+
+/**
+ * Every accessible table on the report, named — the section's own two, and one
+ * for each comparison line that is actually drawn.
+ *
+ * **What this replaced, and why a count of two stopped being true.** Through E4
+ * the assertion here was `toHaveCount(2)`, with the comment "two panels, each
+ * with the accessible table that carries its weeks and values as text". That was
+ * the whole structure while the report drew one line per panel. E5-07 gives each
+ * *drawn* comparison series a table of its own — a benchmark can report a week
+ * the section never published, so folding it into the section's row set would
+ * drop it from the text while leaving it on the picture — and E5-10 wires the
+ * payload's benchmark members through, so this section's report now publishes
+ * four: the two panels' own, and one per panel for the series the server did not
+ * withhold.
+ *
+ * So the structure is asserted rather than the number. The two panel tables are
+ * required **by name**, because a count cannot tell four tables from two tables
+ * rendered twice; and the overlay tables are required to be exactly one per
+ * drawn overlay line, which is the property E5-07 built and the one a count of
+ * four would stop holding the moment this world's suppression changed. The line
+ * count is the server's decision, read off the page; the table count is the
+ * accessible rendering of the same decision; and the claim is that the two
+ * agree — neither is read from the other's source.
+ *
+ * `BIOL-215-R3WW` is alone in its cohort, so its comparison series is withheld
+ * and contributes neither a line nor a table, which the suppression assertions
+ * in the first test state directly. Its university series is a population this
+ * file does not control, and that is exactly why nothing here writes down how
+ * many lines there should be.
+ */
+async function expectTheTablesMatchTheLines(report: Locator): Promise<void> {
+  for (const panel of ['Instructor', 'Course']) {
+    await expect(
+      // **`exact`, because a role's accessible name matches as a substring.**
+      // Without it "Weekly ratings: Instructor" also names that panel's overlay
+      // table, "Weekly ratings: Instructor, University" — measured: the locator
+      // resolved to two. It is the `getByText` trap this file already records
+      // for the validity label, one locator along.
+      report.getByRole('table', { name: `Weekly ratings: ${panel}`, exact: true }),
+      `The ${panel} panel published no table of its own weeks. Every chart on this surface owes ` +
+        'an accessible alternative (`docs/DESIGN_BRIEF.md`, SPEC §14.2 item 4).',
+    ).toHaveCount(1);
+  }
+
+  const comparisonLines = await report.getByTestId(TREND_LINE_COMPARISON).count();
+  const universityLines = await report.getByTestId(TREND_LINE_UNIVERSITY).count();
+
+  await expect(
+    report.getByRole('table', { name: /, Comparable \d+-week courses$/ }),
+    'The comparison series’ tables and its lines disagree. A drawn series publishes its weeks as ' +
+      'text and a withheld one publishes nothing at all — a table of "no figure" rows under a ' +
+      'suppression would be publishing the shape of the set §4.1 item 7 withholds.',
+  ).toHaveCount(comparisonLines);
+  await expect(
+    report.getByRole('table', { name: /, University$/ }),
+    'The university series’ tables and its lines disagree.',
+  ).toHaveCount(universityLines);
+
+  await expect(
+    report.getByRole('table'),
+    'The report published a table that is neither a panel’s own nor a drawn comparison series’.',
+  ).toHaveCount(2 + comparisonLines + universityLines);
 }
 
 /** Which of the three sections a §2.2 code belongs to. */
