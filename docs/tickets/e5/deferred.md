@@ -74,3 +74,49 @@ malformed first-party payload becomes possible.
 **Done when:** a flag-without-points member renders the suppressed treatment
 (or another stated treatment) rather than throwing, pinned by a test beside
 the malformed-flag pair.
+
+## The benchmark definer's reach has no pinned equality (E5-03)
+
+`pulse_benchmark_definer` owns the two benchmark set functions and holds
+column-grain `SELECT` on `response`, `answer`, `question`, `section`, `term` and
+`week`. The other three definer owners each have a test asserting their grants
+as an **equality** — `test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answers`
+and its roster sibling — so a later ticket widening one of those owners is a red
+rather than a diff. This owner has no such test: its entry in
+`IDENTITY_DEFINER_ROLES` names the gap, and E5-03's own suite asserts what the
+functions answer rather than what their owner may read. **Done when** a test
+asserts, as an equality in both directions, the exact set of
+`(relation, column)` pairs `pulse_benchmark_definer` holds `SELECT` on, with no
+column of `user`, `user_identity` or `person` among them. Owner: E5-04, which is
+the next ticket to touch this door; a security round on E5-03's pull request may
+pull it earlier.
+
+## The benchmark views do not filter a response's validity (E5-03)
+
+SPEC §3.3 classifies a submission as valid or not, and `response.is_valid`
+records the verdict. Neither `report_rating_distribution` nor `report_workload`
+filters on it, and E5-03's four cohort views and two set functions follow them,
+so a benchmark counts every stored response exactly as a section's own report
+does. That is consistency rather than a decision: nothing in E5-03's ticket, the
+E5 breakdown or the ruling on `docs/disputes/E5-03-01.md` says whether a
+comparison figure should be computed over valid responses only, and making the
+benchmark disagree with the figure it is drawn beside would be a change to what
+both numbers mean. **Done when** the question is answered in the open — either
+"a comparison figure counts every response, as a section's own figures do,
+recorded in a sentence" or a `_v002.sql` per view plus the same filter in both
+function bodies. Owner: E5-04, which is where comparison policy lives; E5-08
+reads the workload figures and would inherit the answer.
+
+## A course week assumes a section starts on one of its term's week boundaries (E5-03)
+
+The course week these views key on is derived as
+`week.number - floor((section.start_date - term.start_date) / 7)`. That is exact
+for every section §2.2's start-letter map produces, because each start date is a
+Monday a whole number of weeks after the term's first, and the seeded worlds and
+the property test over all twenty cohorts agree with it. A section whose stored
+start date fell mid-week — which no writer produces today and no constraint
+forbids — would be keyed to the week its start rounds down to, silently. **Done
+when** either a database constraint makes a mid-week section start unstorable,
+or a sentence records that the derivation rounds and that this is the intended
+answer. Owner: E5-14 at the epic exit, unless a roster ticket writes a start
+date from a platform first.
