@@ -3,7 +3,9 @@
 
 `make seed` runs this file. It loads a small, deliberately awkward institution:
 two colleges, a department that groups three prefixes, courses across all five of
-SPEC §8's level bands, a Fall 2026 term carrying §2.2's start-letter map, sections
+SPEC §8's level bands, a Fall 2026 term carrying §2.2's start-letter map and the
+Spring 2026 term before it carrying its own (the term a benchmark reaches back
+into, SPEC §5.1), sections
 spanning sixteen start positions and seven lengths in both modalities, and a
 people graph holding the two shapes that break naive purview code — SPEC §2.1's
 assistant dean, and a person wearing two hats.
@@ -279,6 +281,56 @@ START_LETTER_MAP: tuple[tuple[str, int, date], ...] = (
     ("5", 3, date(2026, 10, 19)),
     ("6", 3, date(2026, 11, 9)),
     ("7", 3, date(2026, 11, 30)),
+)
+
+# **The term before the current one** (E5-12). SPEC §5.1 benchmarks a section
+# against prior terms, and until this row existed the demo world held no term to
+# reach back into: every comparison a developer could build was against Fall 2026
+# alone. Eighteen weeks from Monday 12 January 2026, ending Sunday 17 May —
+# comfortably before Fall 2026 begins on 17 August, which is what keeps "which
+# term is this section in" a question with one answer. `app.services.provisioning`
+# puts a launched section in the one term whose dates contain the day of the
+# launch, so two terms that overlapped would make that answer depend on the hour.
+PRIOR_TERM_NAME = "Spring 2026"
+PRIOR_TERM_START = date(2026, 1, 12)
+PRIOR_TERM_END = date(2026, 5, 17)
+PRIOR_TERM_LENGTH_WEEKS = 18
+# Spring 2026's own start-letter map, and **its dates are its own**. The letters
+# are the institution's convention and repeat from term to term — §2.2 makes the
+# map per-term configuration, and a letter means a length and a start date only
+# through the term it is read against — but every date here is a Monday of this
+# term's own calendar, computed against 12 January and written out the way the
+# map above is written out. Copying Fall 2026's dates would place every
+# prior-term section in September, which resolves, launches and is wrong with
+# nothing to notice: it is the silent policy E5-12's known traps name.
+#
+# The cohort structure mirrors Fall's — each family of equal-length cohorts
+# begins on the term's first day and then staggers — because that is the
+# institution's timetable rather than one term's accident, and because it keeps
+# §2.2's cohort selector worth having in a prior term too. `check_calendar_fits`
+# re-derives that every one of them ends inside the term rather than trusting
+# this comment.
+PRIOR_START_LETTER_MAP: tuple[tuple[str, int, date], ...] = (
+    ("U", 12, date(2026, 1, 12)),
+    ("R", 12, date(2026, 2, 2)),
+    ("Q", 12, date(2026, 2, 23)),
+    ("E", 6, date(2026, 1, 12)),
+    ("F", 6, date(2026, 2, 23)),
+    ("H", 6, date(2026, 4, 6)),
+    ("X", 8, date(2026, 1, 12)),
+    ("Y", 8, date(2026, 2, 23)),
+    ("Z", 8, date(2026, 3, 23)),
+    ("S", 10, date(2026, 1, 12)),
+    ("T", 10, date(2026, 3, 9)),
+    ("V", 15, date(2026, 1, 12)),
+    ("D", 15, date(2026, 2, 2)),
+    ("K", 16, date(2026, 1, 12)),
+    ("2", 3, date(2026, 1, 12)),
+    ("3", 3, date(2026, 2, 2)),
+    ("4", 3, date(2026, 2, 23)),
+    ("5", 3, date(2026, 3, 16)),
+    ("6", 3, date(2026, 4, 6)),
+    ("7", 3, date(2026, 4, 27)),
 )
 
 # The registration the demo people belong to. **Not the mock platform**, and the
@@ -1317,7 +1369,7 @@ def seed_question_set(session: Session) -> QuestionSet:
 
 
 def check_calendar_fits() -> None:
-    """Every cohort in the start-letter map begins and ends inside the term.
+    """Every cohort in every seeded start-letter map begins and ends inside its term.
 
     Derived here rather than asserted in a comment, and checked before anything is
     written. The schema catches part of this on its own — `start_letter_map` has a
@@ -1327,14 +1379,21 @@ def check_calendar_fits() -> None:
     most of this map. A cohort that runs past the end of the term is a calendar
     somebody has to fix, and finding it here costs one loop and names the letter.
     """
+    calendars = (
+        (TERM_NAME, TERM_START, TERM_END, START_LETTER_MAP),
+        (PRIOR_TERM_NAME, PRIOR_TERM_START, PRIOR_TERM_END, PRIOR_START_LETTER_MAP),
+    )
     wrong: list[str] = []
-    for letter, length_weeks, start in START_LETTER_MAP:
-        end = start + _days(length_weeks)
-        if start < TERM_START or end > TERM_END:
-            wrong.append(f"{letter}: {length_weeks} weeks, {start} to {end}")
+    for name, term_start, term_end, letters in calendars:
+        for letter, length_weeks, start in letters:
+            end = start + _days(length_weeks)
+            if start < term_start or end > term_end:
+                wrong.append(f"{name} {letter}: {length_weeks} weeks, {start} to {end}")
     if wrong:
         raise SeedError(
-            f"These start positions do not fit inside {TERM_NAME} ({TERM_START} to {TERM_END}):\n"
+            "These start positions do not fit inside the term they are seeded for "
+            f"({TERM_NAME} runs {TERM_START} to {TERM_END}; {PRIOR_TERM_NAME} runs "
+            f"{PRIOR_TERM_START} to {PRIOR_TERM_END}):\n"
             + "\n".join(f"  {line}" for line in wrong)
             + "\nA section using one of them would be refused by "
             "`app.services.section_codes.derive_section_calendar`, and a position nothing uses "
@@ -1461,13 +1520,61 @@ def seed_containment(session: Session) -> dict[tuple[str, str], UUID]:
 
 def seed_calendar(session: Session, institution_id: UUID) -> Term:
     """The Fall 2026 term, its eighteen weeks, and §2.2's start-letter map."""
-    term = upsert(
+    return seed_term(
         session,
-        Term,
-        {"institution_id": institution_id, "name": TERM_NAME},
+        institution_id,
+        name=TERM_NAME,
         start_date=TERM_START,
         end_date=TERM_END,
         length_weeks=TERM_LENGTH_WEEKS,
+        letters=START_LETTER_MAP,
+    )
+
+
+def seed_prior_calendar(session: Session, institution_id: UUID) -> Term:
+    """Spring 2026 — the term a benchmark reaches back into (E5-12).
+
+    Configuration and nothing else: a term row, its eighteen weeks and its own
+    start-letter map. No section is seeded into it. The prior-term sections the
+    benchmark world needs arrive the way every other launched section does — a
+    staff launch from the mock platform, then the roster sync (SPEC §7.3) — and
+    `scripts/seed_benchmark_history.py` writes their survey answers afterwards.
+    """
+    return seed_term(
+        session,
+        institution_id,
+        name=PRIOR_TERM_NAME,
+        start_date=PRIOR_TERM_START,
+        end_date=PRIOR_TERM_END,
+        length_weeks=PRIOR_TERM_LENGTH_WEEKS,
+        letters=PRIOR_START_LETTER_MAP,
+    )
+
+
+def seed_term(
+    session: Session,
+    institution_id: UUID,
+    *,
+    name: str,
+    start_date: date,
+    end_date: date,
+    length_weeks: int,
+    letters: tuple[tuple[str, int, date], ...],
+) -> Term:
+    """One term, its week rows, and the start-letter map read against it.
+
+    Parameterised because the demo world holds two terms now and both are seeded
+    the same way: a term's weeks and its map are per-term data (SPEC §2.2), and
+    two copies of this function would be two places to fix the week-count
+    reconciliation below.
+    """
+    term = upsert(
+        session,
+        Term,
+        {"institution_id": institution_id, "name": name},
+        start_date=start_date,
+        end_date=end_date,
+        length_weeks=length_weeks,
     )
 
     # `week_rows_for_term` is the one producer of these rows, and it always emits
@@ -1481,22 +1588,22 @@ def seed_calendar(session: Session, institution_id: UUID) -> Term:
     if existing == 0:
         session.add_all(week_rows_for_term(term))
         session.flush()
-    elif existing != TERM_LENGTH_WEEKS:
+    elif existing != length_weeks:
         raise SeedError(
-            f"{TERM_NAME} holds {existing} week rows and runs {TERM_LENGTH_WEEKS} weeks. "
+            f"{name} holds {existing} week rows and runs {length_weeks} weeks. "
             "`app.models.term.week_rows_for_term` always produces 1..N and cannot fill a gap, "
             "and reconciling a term whose length was edited belongs to E2 and E11's calendar "
             "editor rather than to a seed script (docs/adr/0018). Drop the term's weeks and run "
             "this again, or fix the term."
         )
 
-    for letter, length_weeks, start in START_LETTER_MAP:
+    for letter, cohort_length_weeks, start in letters:
         upsert(
             session,
             StartLetterMap,
             {"term_id": term.id, "letter": letter},
-            term_length_weeks=TERM_LENGTH_WEEKS,
-            length_weeks=length_weeks,
+            term_length_weeks=length_weeks,
+            length_weeks=cohort_length_weeks,
             start_date=start,
         )
 
@@ -2017,6 +2124,9 @@ def seed(session: Session, configuration: Mapping[str, str]) -> None:
     demo = seed_demo_platform(session, configuration)
     nodes = seed_containment(session)
     term = seed_calendar(session, nodes["institution", INSTITUTION_NAME])
+    # The prior term is configuration beside the current one and carries no
+    # section of its own (E5-12); `seed_sections` below is Fall 2026's.
+    seed_prior_calendar(session, nodes["institution", INSTITUTION_NAME])
     seed_sections(session, term, nodes, demo.deployment)
     seed_survey_windows(session)
     people = seed_people(session, configuration)
@@ -2078,6 +2188,8 @@ def main(environ: Mapping[str, str] | None = None, dotenv_path: Path | None = No
         f"{sum(len(college.departments) for college in COLLEGES)} departments, "
         f"{len(PREFIXES)} prefixes, {len(COURSES)} courses, {len(SECTIONS)} sections, "
         f"{TERM_NAME} with {len(START_LETTER_MAP)} start positions, "
+        f"{PRIOR_TERM_NAME} with {len(PRIOR_START_LETTER_MAP)} start positions and no sections "
+        "of its own, "
         f"{len(PEOPLE)} people, {len(ASSIGNMENTS)} assignments, "
         f"{len(LEAD_FACULTY_MAPPINGS)} lead-faculty mappings, two platform "
         f"registrations — the fictional one its people belong to, and {MOCK_PLATFORM_ISSUER} "
