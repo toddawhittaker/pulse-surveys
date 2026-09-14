@@ -46,6 +46,17 @@ from sqlalchemy.exc import DatabaseError
 pytestmark = pytest.mark.integration
 
 APPLICATION_ROLE = "pulse_app"
+
+# The NOLOGIN role that owns the two functions, ruled after the dispute: a new
+# role rather than a reuse of `pulse_resolve_definer`, because that one holds
+# column grants on `user` and `person` and a benchmark body that counts students
+# must not have an owner that can read their names. Spelled here rather than
+# discovered, for the reason `test_identity_grants.py` spells the Care door's two
+# functions: an owner settled by a ruling is a name a test may assert, and a
+# fixture that went looking for "whichever role happens to own it" would pass
+# against every wrong answer.
+BENCHMARK_DEFINER_ROLE = "pulse_benchmark_definer"
+
 TWELVE_WEEKS = 12
 THE_COURSE_WEEK = 2
 
@@ -428,8 +439,10 @@ def test_an_empty_section_set_answers_no_rows(benchmark_world: BenchmarkWorld) -
     )
 
 
-def test_both_set_functions_are_security_definer(db_session: Any) -> None:
-    """The mechanism, not just the answer — a definer is the whole of the ruling.
+def test_both_set_functions_are_security_definer_owned_by_the_benchmark_definer(
+    db_session: Any,
+) -> None:
+    """The mechanism and its owner — together they are the whole of the ruling.
 
     "The section-id set goes in, numbers come out, and no row keyed to a student
     is ever selectable by `pulse_app`." That property is bought by the function
@@ -441,14 +454,23 @@ def test_both_set_functions_are_security_definer(db_session: Any) -> None:
     `test_identity_grants.py` already sweeps every definer in `public` for an
     owner that is not a superuser. What that sweep cannot ask is whether *these
     two* are definers at all — a plain function passes it by not being in the
-    set.
+    set — nor which role owns them, which is the half that decides what they can
+    reach.
 
-    **The mutation it exists to survive**: `SECURITY DEFINER` left off either
-    file. On a tree where the application role happens to hold the reads the
-    body needs, that mutation changes no answer in this module and no answer in
-    E5-04 — it changes only what happens when a later ticket narrows a base-table
-    grant, at which point every benchmark in the product fails at once, for a
-    reason nobody will connect to this file.
+    **The owner is asserted by name because a ruling settled it**, after the
+    dispute rather than in it: `pulse_benchmark_definer`, a new NOLOGIN role,
+    with the reuse of `pulse_resolve_definer` refused on the ground that its
+    column grants on `user` and `person` would give a body that counts students
+    an owner that can read their names.
+
+    **The mutations it exists to survive**: `SECURITY DEFINER` left off either
+    file — which on a tree where the application role happens to hold the reads
+    the body needs changes no answer here and none in E5-04, and shows up only
+    when a later ticket narrows a base-table grant and every benchmark in the
+    product fails at once, for a reason nobody will connect to this file. And
+    the owner: the functions created by the migration identity and left owned by
+    it (a superuser body behind an `EXECUTE` the application holds), or hung off
+    `pulse_resolve_definer` because it was the definer owner already in the file.
     """
     for name in sorted(BENCHMARK_FUNCTIONS):
         shape = require_benchmark_function(db_session, name)
@@ -461,20 +483,22 @@ def test_both_set_functions_are_security_definer(db_session: Any) -> None:
             "on person-keyed rows, which is the thing being refused'. A `SECURITY INVOKER` "
             "function answers with the caller's own reach and buys none of that."
         )
-        assert shape["owner"] != APPLICATION_ROLE, (
-            f"`public.{name}` is owned by `{shape['owner']}`, which is the application role "
-            "itself. A definer owned by its own caller runs with exactly the caller's privileges "
-            "and is a `SECURITY DEFINER` in name only.\n\n"
-            "**Which role owns these two is not settled anywhere**, and this assertion is "
-            "deliberately the weakest true thing rather than a name this test invented. If the "
-            "implementation adds a new NOLOGIN owner, `IDENTITY_DEFINER_ROLES` in "
-            "tests/integration/test_identity_grants.py is a closed set that has to gain it with "
-            "the sentence that admits it, and "
-            "`test_no_role_outside_this_scheme_is_granted_anything_in_public` is the test that "
-            "will say so. Reusing an existing definer owner is the other answer, and it is a "
-            "different one: `pulse_resolve_definer` holds column grants on `user` and `person`, "
-            "which is a wider surface than these two functions need and would widen what an "
-            "`EXECUTE` on them could reach if a body ever changed."
+        assert shape["owner"] == BENCHMARK_DEFINER_ROLE, (
+            f"`public.{name}` is owned by `{shape['owner']}` rather than by "
+            f"`{BENCHMARK_DEFINER_ROLE}`.\n\n"
+            "An owner is what a `SECURITY DEFINER` function's privileges *are*, so this is the "
+            "assertion that says what these two can reach. Owned by "
+            f"`{APPLICATION_ROLE}` a definer runs with exactly its caller's reach and is one in "
+            "name only. Owned by `pulse_resolve_definer` — the reuse that was refused — it runs "
+            "with that role's column grants on `user` and `person`, so a body whose job is to "
+            "count students would have an owner that can read their names: the widening the "
+            "ruling on `docs/disputes/E5-03-01.md` narrowed, reintroduced in the place the "
+            "dispute was about. Owned by the migration identity it runs as a superuser and the "
+            "scheme is moot.\n\n"
+            f"`{BENCHMARK_DEFINER_ROLE}` is a NOLOGIN role that exists for nothing but these two "
+            "functions, and it is in `IDENTITY_DEFINER_ROLES` in "
+            "tests/integration/test_identity_grants.py with the sentence that admits it. What it "
+            "may reach has no equality of its own yet, which is named as owed beside that entry."
         )
 
 

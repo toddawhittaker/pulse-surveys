@@ -689,7 +689,21 @@ THE_CARE_DOOR = (RECORD_FUNCTION, REVEAL_FUNCTION, SUBJECT_RESOLVER_FUNCTION)
 # already holds, and a fifth NOLOGIN role holding a subset of an existing one's
 # grants would be a role to audit rather than a boundary), `pulse_roster_definer`
 # the email write, and `pulse_instructor_definer` the teaching-instructor write the
-# security round's F2 moved off a table grant. They are named here because the
+# security round's F2 moved off a table grant. **`pulse_benchmark_definer` owns
+# E5-03's two benchmark set functions**: they exist so that a cohort figure over
+# an arbitrary section set is computed where the person rows live, so their SQL
+# has to run with an owner's read on `response` while `pulse_app` holds `EXECUTE`
+# and no `SELECT` on what they aggregate (the ruling on
+# `docs/disputes/E5-03-01.md`). It is a **new** role rather than a reuse of
+# `pulse_resolve_definer`, and the refusal is the whole point: that owner holds
+# column grants on `user` and `person`, so hanging benchmark SQL off it would
+# hand a body that counts students an owner that can read their names — widening
+# exactly what the dispute narrowed, and doing it in the place the dispute was
+# about. The rule the fourth role does not break is the one stated for E3-06
+# above: a new NOLOGIN role is refused where it would hold a *subset* of an
+# existing one's grants, and this one holds a disjoint set.
+#
+# They are named here because the
 # grantee sweep below asks *who* is named in an ACL anywhere in `public` and would
 # otherwise report the grants they hold on `user`, `person`, `web_login_subject`,
 # `user_identity` and `role_assignment` as roles no ticket sanctioned. What each
@@ -697,12 +711,17 @@ THE_CARE_DOOR = (RECORD_FUNCTION, REVEAL_FUNCTION, SUBJECT_RESOLVER_FUNCTION)
 # `test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answers`
 # below for the first, and
 # `tests/integration/test_the_roster_definers_answer_a_point_query_and_nothing_more.py`
-# for the other two — and what is asserted here is only that they are expected to
-# exist.
+# for the next two — and what is asserted here is only that they are expected to
+# exist. **The fourth has no such equality yet**, which is a gap rather than an
+# exemption: E5-03 ships the role and the two functions, and the equality over
+# what `pulse_benchmark_definer` may reach — `SELECT` on the tables a cohort
+# figure is computed from, and no column of `user`, `user_identity` or `person`
+# — is owed by that ticket or named in its deferrals.
 IDENTITY_DEFINER_ROLES = (
     RESOLVE_DEFINER_ROLE,
     "pulse_roster_definer",
     "pulse_instructor_definer",
+    "pulse_benchmark_definer",
 )
 
 # How the two halves are called. The record's third argument is a null case id:
@@ -4675,8 +4694,9 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     assert not unexpected, (
         f"{unexpected}. On a relation, the roles this scheme names are {sorted(expected)} — the "
         "two connection roles of ADR 0001, the reveal function's own owner from ADR 0043, and the "
-        f"three definer owners this epic adds ({', '.join(IDENTITY_DEFINER_ROLES)} — ADR 0094, "
-        "E1-11's D7 and that ticket's security round) — plus whoever owns the relation, which is "
+        f"definer owners these epics add ({', '.join(IDENTITY_DEFINER_ROLES)} — ADR 0094, "
+        "E1-11's D7, that ticket's security round and the ruling on `docs/disputes/E5-03-01.md`) "
+        "— plus whoever owns the relation, which is "
         "the migration identity ADR 0009 "
         f"sanctions. On a `SECURITY DEFINER` function it is `{CARE_ROLE}`, the owner, and "
         f"`{APPLICATION_ROLE}` on the functions `SANCTIONED_APPLICATION_EXECUTE` names, and "

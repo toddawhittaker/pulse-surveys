@@ -877,12 +877,17 @@ class BenchmarkWorld:
         holding no value, so an absent row is the only spelling this schema has
         for it.
 
-        **Every caller in this suite supplies a workload figure**, and that is
-        deliberate rather than incidental: whether a cohort week with responses
-        and no workload answers has a row with a null mean or no row at all is a
-        question the ruling does not settle, so no test here depends on the
-        answer. It is recorded as an open question for ADR 0165 instead of being
-        decided by a fixture.
+        **A response carrying no workload figure is a case this suite plants
+        rather than avoids**, and it was the other way round until the question
+        was ruled. While it was open — does a cohort week with responses and no
+        hours have a row with null figures, or no row? — every caller here
+        supplied hours and no test depended on the answer, because a fixture
+        that chose one would have settled it. It has since been ruled: the row
+        exists and its workload figures are null. The pair in
+        `test_the_benchmark_views_return_the_columns_their_contract_names.py`
+        pins both halves — the counts are carried, and the absent figures are
+        null rather than nought — and they are the only two callers here that
+        leave `workload` out.
         """
         planted = self.section(label)
         term_week = self.term_week_of(label, course_week)

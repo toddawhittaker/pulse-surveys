@@ -14,10 +14,22 @@ Three questions, none of them about a number:
     "section id and numbers, never a person" and on §8's *structural*
     separation. These four are what remain, and a person key arriving on one of
     them later is the same defect wearing this ticket's name.
-  - **Whether a cohort week nobody answered has a row.** Absence, not zeros —
-    the contract E5-04's service is written against, and the direction that
-    would otherwise be discovered by a chart drawing a zero somebody meant as a
-    gap.
+  - **What a cohort week has a row for**, which is three states rather than two
+    and the third was ruled after this suite's first red run:
+
+    | the week | the row |
+    |---|---|
+    | nobody answered | no row — absence, not zeros |
+    | answered, no workload figures | a row, with its counts and **null** workload figures |
+    | answered with hours | a row, with figures |
+
+    The first is the contract E5-04's service is written against, and the
+    direction that would otherwise be discovered by a chart drawing a zero
+    somebody meant as a gap. The third row of that table is the one that
+    departs from E4-03's `report_workload`, and
+    `test_a_cohort_week_answered_without_workload_still_has_a_row_with_its_counts`
+    carries the reasoning: this view holds three counts beside the two figures,
+    so the row has to exist to carry them.
 
 **The identity sweeps next door need nothing added here.**
 `tests/integration/test_identity_column_marker.py` discovers every view in
@@ -36,6 +48,7 @@ from typing import Any
 import pytest
 from fixtures.benchmark_views import (
     BENCHMARK_VIEWS,
+    COHORT_RATING_WEEK_VIEW,
     COHORT_WEEK_VIEW,
     COURSE_WEEK_VIEWS,
     UG,
@@ -70,6 +83,14 @@ THE_COURSE_WEEK = 2
 AN_UNANSWERED_COURSE_WEEK = 4
 A_WORKLOAD = Decimal("3.5")
 A_RATING = Decimal("4")
+
+# The third state, ruled after the first red run: a course week whose responses
+# carry ratings and no workload answer. Two respondents in one week and one in
+# another, so the week with no hours has counts worth carrying and the week with
+# hours is the contrast that makes a null mean mean something.
+RATING_ONLY_COURSE_WEEK = 3
+RATING_ONLY_RESPONDENTS = 2
+A_LATER_WORKLOAD = Decimal("4.0")
 
 
 @pytest.mark.invariant
@@ -259,6 +280,165 @@ def test_a_cohort_week_nobody_answered_has_no_row(
         "that emitted a zero week here would make E5-04's job ambiguous — a cohort of nobody and a "
         "week nobody answered would arrive looking the same, and one of them suppresses for a "
         "reason the other does not."
+    )
+
+
+def a_week_answered_without_hours(world: BenchmarkWorld) -> BenchmarkWorld:
+    """One section: a course week of ratings and no workload, and a later week with hours.
+
+    The third state of a cohort week, beside "nobody answered" above and "a
+    figure was submitted" everywhere else. Both weeks are in one world so the
+    null and the number are read off the same view in the same test.
+    """
+    world.build()
+    world.plant_section("hero", cohort="U", level=UG)
+    for index in range(RATING_ONLY_RESPONDENTS):
+        world.respond(
+            "hero",
+            course_week=RATING_ONLY_COURSE_WEEK,
+            subject=f"e5-03-no-hours-{index}",
+            instructor_rating=A_RATING,
+            course_rating=A_RATING,
+        )
+    world.respond(
+        "hero",
+        course_week=THE_COURSE_WEEK,
+        subject="e5-03-with-hours",
+        workload=A_LATER_WORKLOAD,
+        instructor_rating=A_RATING,
+    )
+    return world
+
+
+def test_a_cohort_week_answered_without_workload_still_has_a_row_with_its_counts(
+    benchmark_world: BenchmarkWorld,
+) -> None:
+    """The third state, ruled after the first red run: the week exists, so the row does.
+
+    Two students answered both ratings in this course week and neither submitted
+    a workload figure. The row is there, carrying the counts that are real —
+    two responses, two respondents, one section — because those are facts about
+    the week whatever the hours column holds. A gap in one figure is not a gap
+    in the week.
+
+    **This is a departure from E4-03's shape and should be recorded as one**, not
+    as following it. `report_workload` has no row for a section-week whose
+    responses carry no hours, and that is right there: every column of that view
+    is a workload figure, so a row with nulls would be a week that looks answered
+    and is not. The cohort view is a different shape — it carries
+    `response_count`, `respondent_count` and `section_count` beside the two
+    workload figures — so withholding the row would withhold three true counts to
+    avoid publishing two absent ones, and E5-04 would read a week that had data
+    as a week that had none. ADR 0165 is where that reasoning belongs, and citing
+    E4-03 as the precedent for it would be citing a rule for its opposite.
+
+    **The non-vacuity guard is the rating view**, taken first: if the two
+    responses had not reached the views at all, "the row exists" would be the
+    only thing this test could fail on and it would fail for the wrong reason.
+
+    **The mutation it exists to survive**: the cohort row derived from the
+    workload answers — an inner join to the hours, or a `FROM answer WHERE
+    question is the workload one` — which drops the whole week, counts and all,
+    the moment nobody reports hours. That view answers every other test in this
+    ticket correctly.
+    """
+    world = a_week_answered_without_hours(benchmark_world)
+
+    ratings = world.rows(
+        COHORT_RATING_WEEK_VIEW,
+        length_weeks=THE_COHORT_LENGTH,
+        level=UG,
+        term_id=world.term_id(),
+        course_week=RATING_ONLY_COURSE_WEEK,
+    )
+    assert ratings, (
+        f"`{COHORT_RATING_WEEK_VIEW}` has no row for course week {RATING_ONLY_COURSE_WEEK}, in "
+        f"which {RATING_ONLY_RESPONDENTS} students submitted both ratings. The responses have not "
+        "reached the views at all, so the assertion below would be about an empty world rather "
+        "than about a week with no hours in it."
+    )
+
+    row = world.cohort_week(
+        length_weeks=THE_COHORT_LENGTH, level=UG, course_week=RATING_ONLY_COURSE_WEEK
+    )
+    assert row is not None, (
+        f"`{COHORT_WEEK_VIEW}` has no row for course week {RATING_ONLY_COURSE_WEEK}, in which "
+        f"{RATING_ONLY_RESPONDENTS} students responded and none reported hours. The week exists "
+        "and its counts are real; the ruling of this round is that the row exists with null "
+        "workload figures rather than being withheld. A view built from the workload answers "
+        "drops the week entirely, and E5-04 then reads a week that had data as a week that had "
+        "none."
+    )
+    assert row["response_count"] == RATING_ONLY_RESPONDENTS, (
+        f"`response_count` is {row['response_count']!r} where {RATING_ONLY_RESPONDENTS} responses "
+        f"were submitted in course week {RATING_ONLY_COURSE_WEEK}. The row is {row}."
+    )
+    assert row["respondent_count"] == RATING_ONLY_RESPONDENTS, (
+        f"`respondent_count` is {row['respondent_count']!r} where {RATING_ONLY_RESPONDENTS} "
+        "different students responded. A count of people is what E5-04's minimum is compared "
+        "against, and it does not depend on whether they answered the workload question."
+    )
+    assert (
+        row["section_count"] == 1
+    ), f"`section_count` is {row['section_count']!r} where one section answered this cohort week."
+
+
+def test_the_workload_figures_of_a_week_with_no_hours_are_null_rather_than_zero(
+    benchmark_world: BenchmarkWorld,
+) -> None:
+    """The other half: an absent figure is null, and null is not nought.
+
+    Nobody reported hours in this course week, so there is no mean and no median
+    to report. A zero would be a statement about the cohort that no student
+    made — "these students spent no time on the course" — and it would travel:
+    E5-05 renders the workload comparison beside a section's own figure, so a
+    fabricated 0.0 becomes a benchmark an instructor is measured against.
+
+    **The contrast week is the discriminator**, and without it this assertion is
+    satisfied by a view whose workload columns are null for everybody. The same
+    world's other course week has one submitted figure and must report it.
+
+    **The mutation it exists to survive**: `coalesce(avg(...), 0)` and
+    `coalesce(percentile_cont(...), 0)` — the shape somebody writes to keep a
+    numeric column non-null, which is exactly the wrong instinct here. Also
+    `avg(coalesce(hours, 0))`, which is worse and harder to see: it counts every
+    response as zero hours, so a week where one of five students reported four
+    hours reads as 0.8 rather than 4.0.
+    """
+    world = a_week_answered_without_hours(benchmark_world)
+
+    row = world.cohort_week(
+        length_weeks=THE_COHORT_LENGTH, level=UG, course_week=RATING_ONLY_COURSE_WEEK
+    )
+    assert row is not None, (
+        f"`{COHORT_WEEK_VIEW}` has no row for course week {RATING_ONLY_COURSE_WEEK}; the test "
+        "above is where that is diagnosed."
+    )
+
+    with_hours = world.cohort_week(
+        length_weeks=THE_COHORT_LENGTH, level=UG, course_week=THE_COURSE_WEEK
+    )
+    assert with_hours is not None and with_hours["workload_mean"] == A_LATER_WORKLOAD, (
+        f"The cohort week that *does* carry hours reads {with_hours}, where one student submitted "
+        f"{A_LATER_WORKLOAD}. Until this row is right, a null in the other week says nothing — a "
+        "view whose workload columns are null for every week would satisfy the assertion below "
+        "perfectly (`docs/MISTAKES.md` entry 3)."
+    )
+
+    nulls = {
+        figure: row[figure]
+        for figure in ("workload_mean", "workload_median")
+        if row[figure] is not None
+    }
+    assert not nulls, (
+        f"{nulls} are reported for a cohort week in which nobody submitted a workload figure. "
+        f"The whole row is {row}.\n\n"
+        "A zero is the answer to look for and the one that must not be here: it is a statement "
+        "about how long these students worked, made by nobody, and E5-05 renders the comparison "
+        "workload figure beside the section's own — so it arrives on an instructor's page as a "
+        "benchmark. `coalesce(avg(...), 0)` is how it gets there. Null is the honest answer, and "
+        f"the counts on this same row ({row['respondent_count']!r} respondents) are what tell "
+        "E5-04 that the week had data and this particular figure did not."
     )
 
 
