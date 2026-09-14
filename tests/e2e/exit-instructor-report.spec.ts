@@ -85,6 +85,7 @@ import {
   generateWeeklySummaries,
   seedTheExitStory,
 } from './support/stack';
+import { expectTheTablesMatchTheLines, panelTable } from './support/reportTables';
 import { INSTRUCTOR_SUBJECT, LEARNER_SUBJECT } from './support/survey';
 
 // ---------------------------------------------------------------------------
@@ -642,20 +643,34 @@ test('the two streams diverge across six published weeks, and the stacked pair r
 
   // The rendered pair: §5.1's two panels, each carrying the accessible table
   // that states its weeks and values as text (E4-08).
-  await expect(
-    report.getByRole('table'),
-    'SPEC §5.1 puts the instructor stream above the course stream as a stacked pair with a shared ' +
-      'scale, and E4-08 gives each panel a visually hidden data table so the chart’s data is ' +
-      'reachable as text. Two tables is one panel each.',
-  ).toHaveCount(2);
+  //
+  // **This asked for two tables until E5-10.** That was the whole structure
+  // while each panel drew one line; E5-07 gives every drawn comparison series a
+  // table of its own and E5-10 wires the payload's benchmark members through, so
+  // this section's report publishes four — the two panels' own, and one per
+  // panel for the series the server did not withhold. The count is not raised to
+  // four: `expectTheTablesMatchTheLines` asserts the two panel tables by name
+  // and requires the overlay tables to be exactly one per drawn overlay line,
+  // which stays true whichever way this world's suppression goes.
+  await expectTheTablesMatchTheLines(report);
 
-  const tables = await report.getByRole('table').allInnerTexts();
+  // And the two panels are drawn from two streams, read through the table each
+  // panel owns rather than through the first two the report happens to publish:
+  // with the overlays on the page, positions 0 and 1 are the instructor panel's
+  // own table and the instructor panel's *overlay* table, which are two
+  // different series of one stream and would differ whatever the panels drew.
+  const instructorPanel = (await panelTable(report, 'Instructor').innerText()).trim();
+  const coursePanel = (await panelTable(report, 'Course').innerText()).trim();
   expect(
-    tables[0],
+    instructorPanel.length,
+    'The instructor panel’s data table is empty, so the comparison below asserts nothing.',
+  ).toBeGreaterThan(0);
+  expect(
+    instructorPanel,
     'The two panels’ data tables carry identical text, so both panels are drawn from one stream. ' +
       'The story’s two streams answer six different numbers each, and no week of it gives them the ' +
       'same mean.',
-  ).not.toBe(tables[1]);
+  ).not.toBe(coursePanel);
 
   // The two axes SPEC §2.2 requires, in the two spellings the epic settled.
   await expect(report).toContainText(FIRST_AXIS_WEEK);
