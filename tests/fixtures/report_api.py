@@ -118,6 +118,7 @@ from fixtures.student_read import (
     REFUSED_STATUS,
     SESSION_FRAGMENT,
     STUDENT_LANDING,
+    STUDENT_READ_PATH,
     decoded,
     scalars_in,
     session_token_at,
@@ -1558,6 +1559,118 @@ def report_door_as(
         )
 
     return build
+
+
+class StudentInTheReportWorld:
+    """A student session at the same door the instructor's report is read through.
+
+    One person, one launch, one token, and reads of the student read path through
+    the tool the `ReportDoor` beside it is already serving. What it exists for is
+    a sentence E5-11 has to be able to assert: *while* the instructor is being
+    served three lines over this world's planted comparison population, the
+    student is served none of them — the same application, the same database, the
+    same moment.
+    """
+
+    def __init__(
+        self,
+        tool: Any,
+        token: str,
+        *,
+        user_id: Any,
+        landing_section_id: Any,
+        taught_section_id: Any,
+    ) -> None:
+        self.tool = tool
+        self.token = token
+        self.user_id = user_id
+        # Where the landing's own enrolment put her (`tests/fixtures/landing.py`
+        # picks the graph's scope section) and this world's taught section, which
+        # she is enrolled in as well so that the section under comparison is one
+        # she can actually read about.
+        self.landing_section_id = landing_section_id
+        self.taught_section_id = taught_section_id
+
+    def credential(self) -> dict[str, str]:
+        """This student's session as a Bearer token, the way the SPA sends it (ADR 0089)."""
+        return {"authorization": f"{AUTHENTICATE_SCHEME} {self.token}"}
+
+    def get(self, path: str = STUDENT_READ_PATH, **params: Any) -> Any:
+        """One read of `path` carrying this student's session."""
+        return self.tool.get(path, params=params or None, headers=self.credential())
+
+
+@pytest.fixture
+def student_session_in(
+    metadata_tables: dict[str, Any],
+    landing_ground: Any,
+    enrol: Any,
+) -> Callable[..., StudentInTheReportWorld]:
+    """A student signed in at a `ReportDoor`'s own world, launched through its driver.
+
+    **Why this is not `tests/fixtures/student_read.py`'s door.** That fixture
+    builds a world of its own — its own term, its own sections, and its own
+    question set at the shipped version. Standing it up beside a `ReportDoor`
+    seeds `question_set` version 1 twice and the second one is refused by
+    `uq_question_set_version`, which is a measured fact rather than a prediction:
+    it is what three of E5-11's tests errored on. So the student is made *here*,
+    in the world that already exists, out of the same rows `_build_report_door`
+    makes its refused-role student from — `landing_ground().a_student(...)`, then
+    a real launch through the door's own driver — and no second world is built.
+
+    **She is enrolled in the taught section as well**, which the refused-role
+    student deliberately is not. That student exists to be refused by role, and an
+    enrolment in the section under test would let a 404 stand in for the 401
+    (`a_day_the_student_is_already_enrolled_on` says so). This one is the opposite
+    case: SPEC §4.1 item 1 is about what a student is shown *about her own
+    section*, and the strongest subject for it is a student enrolled in the very
+    section whose comparison figures the instructor is being served. Her enrolment
+    starts on the taught cohort's own first day, from the calendar this world is
+    built on rather than from the wall clock.
+
+    The caller gets the token and the two section keys; reading is
+    `StudentInTheReportWorld.get`.
+    """
+
+    def sign_in(door: ReportDoor) -> StudentInTheReportWorld:
+        driver = door.driver
+        offer = driver.offer_for_role(LEARNER_ROLE_URN)
+        claims = driver.claims_of(offer)
+        subject = claims.get("sub")
+        assert isinstance(subject, str) and subject, (
+            "The learner launch this platform signs carries no `sub`, so there is no subject to "
+            f"seed a `user` row for and no student to read as. The claims it signed: "
+            f"{sorted(claims)}."
+        )
+        platform_id = driver.registration.platform_row[
+            single_primary_key(require_table(metadata_tables, "lti_platform"))
+        ]
+
+        seeded = landing_ground().a_student(
+            platform_id=platform_id,
+            subject=subject,
+            on=a_day_the_student_is_already_enrolled_on(),
+        )
+        _length, _first, section_starts = SEEDED_COHORTS[TAUGHT_COHORT]
+        enrol.enrol(
+            user_id=seeded["user_id"],
+            section_id=door.rows.taught_section_id,
+            started_on=section_starts,
+            ended_on=None,
+        )
+        door.commit()
+
+        landed, _ = driver.launch(offer)
+        token = session_token_at(landed, LANDING_FOR[STUDENT_ROLE], "The seeded student's launch")
+        return StudentInTheReportWorld(
+            door.tool,
+            token,
+            user_id=seeded["user_id"],
+            landing_section_id=seeded["section_id"],
+            taught_section_id=door.rows.taught_section_id,
+        )
+
+    return sign_in
 
 
 @pytest.fixture

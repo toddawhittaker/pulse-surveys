@@ -80,7 +80,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from fixtures.routing import dependencies_of, every_route
+from fixtures.routing import every_route, paths_of, student_visible_routes
 from fixtures.student_read import (
     AUTHENTICATE_HEADER,
     AUTHENTICATE_SCHEME,
@@ -116,35 +116,16 @@ PLANTED_OPEN_PATH = "/e2-09-planted/open-to-anybody"
 SECTION_PARAMETERS = ("section_id", "section", "section_code")
 
 
-# `dependencies_of` was defined here until E3-07 and now lives in
-# `tests/fixtures/routing.py`, unchanged, beside the route walk it is always used
-# with. E3-07's CSRF sweep asks the same question of the same kind of object —
-# which callables are in this route's dependency graph — and two copies of that
-# walk is `docs/MISTAKES.md` entry 13: one of them would learn about a new way
-# FastAPI nests a `Dependant` and the other would go on reporting a clean
-# application. Nothing about what this module asserts moved with it.
-
-
-def student_visible_routes(application: Any, dependency: Any) -> list[Any]:
-    """Every route on `application` a student session can reach.
-
-    The inventory SPEC §4.1 item 1 is swept over, and the whole of why it is
-    derived rather than listed: its source is the application object, which is
-    the thing that decides what is served. A route added without this dependency
-    is not student-visible and is not swept; a route added with it is swept the
-    day it is registered, with nothing to remember to update.
-    """
-    return [
-        route
-        for route in every_route(application)
-        if getattr(route, "dependant", None) is not None
-        and dependency in dependencies_of(route.dependant)
-    ]
-
-
-def paths_of(routes: list[Any]) -> set[str]:
-    """The paths of a set of routes, for a message a reader can act on."""
-    return {path for path in (getattr(route, "path", None) for route in routes) if path}
+# `dependencies_of` was defined here until E3-07, and `student_visible_routes`
+# and `paths_of` until E5-11; all three now live in `tests/fixtures/routing.py`,
+# unchanged, beside the route walk they are always used with. E3-07's CSRF sweep
+# asks the same question of the same kind of object — which callables are in this
+# route's dependency graph — and E5-11's benchmark sweep derives the same §4.1
+# item 1 inventory this module does. Two copies of either is `docs/MISTAKES.md`
+# entry 13: one of them would learn about a new way FastAPI nests a `Dependant`
+# and the other would go on reporting a clean application. Nothing about what this
+# module asserts moved with them, and the planted-route control below is still the
+# thing that guards `student_visible_routes` — for both of its callers now.
 
 
 # ---------------------------------------------------------------------------
