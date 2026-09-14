@@ -142,6 +142,13 @@ boundary: `metadata_tables` is asked for by both.
     through with a session a real launch issued. The item-7 suppression helper and
     the type of the `comparison` member are found by annotation, because the work
     order settles the mechanism and no spelling.
+  - `fixtures/report_question_text.py` — E5-02: the question wording a week's
+    report serves, planted so a test can recognise it. One distinct string per
+    question-set version and position, written into every free-text column the
+    `question` table carries out of a named candidate set — because E5-02's work
+    order leaves the source column (`name` or `prompt`) to the implementer and a
+    fixture that planted into one of them would decide it. Also the further
+    versions criterion 2's proof plants, answered in the weeks the test names.
   - `fixtures/instructor_sections.py` — E4-18: the route that ticket settles, the
     instructor who teaches two sections and the other instructor who teaches a
     third, her second section under a second course so that the declared order is
@@ -157,7 +164,12 @@ boundary: `metadata_tables` is asked for by both.
     and each function, on `db_session` and on a committed world the application
     role can reach. Every guard it raises is a `pytest.fail` a test body reaches,
     never a fixture, so an unbuilt E5-03 is a wall of FAILEDs naming deliverables
-    rather than of setup errors (`docs/MISTAKES.md` entry 44).
+    rather than of setup errors (`docs/MISTAKES.md` entry 44). E5-04 added the
+    three things its service is resolved over — a lead-faculty mapping, a named
+    comparison set with member courses, and a plan of which student answers in
+    which sections, whose two counts the test that writes it states — plus the
+    lookup of `app.services.benchmarks` and the readers that say whether a
+    comparison figure carries a number without asserting the figure's shape.
 
 Five modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
@@ -241,6 +253,7 @@ pytest_plugins = (
     "fixtures.report_comments",
     "fixtures.summary_job",
     "fixtures.report_api",
+    "fixtures.report_question_text",
     "fixtures.instructor_sections",
     "fixtures.benchmark_views",
 )

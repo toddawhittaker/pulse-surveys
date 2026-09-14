@@ -111,13 +111,51 @@ export const HELD_COMMENT =
   'Quadrat transect week was a shambles and the demonstrator said so out loud.';
 
 /**
+ * The zone the institution keeps its calendar in, as the payload names it.
+ *
+ * **Deliberately not `America/New_York`.** That is the zone the development
+ * stack is configured with, so a rendering that hard-coded it — or that fell
+ * back to the machine's own — would be right here for the wrong reason. It is
+ * also a zone whose clocks change, which is what makes the fall-back fixture
+ * below able to catch a conversion done with one fixed offset.
+ */
+export const INSTITUTION_TIMEZONE = 'America/Chicago';
+
+/**
+ * The wording each stream's rating question is served with — E5-02.
+ *
+ * **Deliberately not the mockup's sentences.** `design/InstructorMondayReport.dc.html`
+ * titles its two histograms "My instructor supported my learning" and "Materials
+ * and activities supported my learning"; a fixture repeating either would let a
+ * page that pasted the mockup's words into the client pass, which is the whole
+ * thing criterion 4 is about. SPEC §3.2 versions this wording server-side, so
+ * whatever the server sends is what the title says.
+ */
+export const INSTRUCTOR_QUESTION_TEXT = 'This week my instructor was worth turning up for';
+export const COURSE_QUESTION_TEXT = 'This week the course materials earned the time they took';
+
+/**
+ * When the week the fixtures below report on stopped taking answers.
+ *
+ * A Sunday at 23:59:59 in `INSTITUTION_TIMEZONE`, written as the UTC instant the
+ * wire carries — 2026-10-04, which is central daylight time, so the offset is
+ * five hours. SPEC §3.1's rhythm closes every window at that wall clock.
+ */
+export const WEEK_CLOSED_AT = '2026-10-05T04:59:59+00:00';
+
+/**
  * The wire body for one published week with data in it.
  *
  * `comparison` is present and suppressed, as every E4 payload's is.
  */
 export const A_PUBLISHED_WEEK = {
   section: { code: 'R3WW', course_label: COURSE_LABEL, length_weeks: 12 },
-  week: { course_week: 4, term_week: 7, published_weeks: PUBLISHED_WEEKS },
+  week: {
+    course_week: 4,
+    term_week: 7,
+    published_weeks: PUBLISHED_WEEKS,
+    closes_at: WEEK_CLOSED_AT,
+  },
   rates: {
     response_rate: 0.62,
     validity_rate: 0.92,
@@ -141,6 +179,7 @@ export const A_PUBLISHED_WEEK = {
         held_note: null,
       },
       comments: [{ text: INSTRUCTOR_COMMENT, status: 'published', stream: 'INSTRUCTOR' }],
+      question_text: INSTRUCTOR_QUESTION_TEXT,
     },
     course: {
       trend: [
@@ -154,12 +193,41 @@ export const A_PUBLISHED_WEEK = {
         held_note: null,
       },
       comments: [{ text: COURSE_COMMENT, status: 'published', stream: 'COURSE' }],
+      question_text: COURSE_QUESTION_TEXT,
     },
   },
   workload: { mean: 9.46, median: 8.04 },
   comparison: { suppressed: true, reason: 'below-minimum' },
   small_n: { suppressed: false, threshold: SMALL_N_THRESHOLD },
   released_from_earlier_weeks: [],
+  institution_timezone: INSTITUTION_TIMEZONE,
+} satisfies InstructorReportView & { comparison: unknown };
+
+/**
+ * The same report for the week the clocks go back — E5-02's timezone proof.
+ *
+ * Course week 8 is term week 11 at this section's constant offset of three, and
+ * term week 11 of Fall 2026 closes on **2026-11-01**, the Sunday North American
+ * clocks return to standard time (the backend's hand-written calendar pins the
+ * same date, and `tests/unit/test_the_fall_2026_window_calendar_is_spec_3_1s_rhythm.py`
+ * is where). At 23:59:59 that night the zone is six hours behind UTC, not five,
+ * so the instant below is `2026-11-02T05:59:59Z`.
+ *
+ * **What it catches.** A rendering that converted with one offset for the whole
+ * term — or with the reader's own zone, or with none — puts this close at
+ * 12:59 AM on the **Monday**. Every other week in these fixtures renders the same
+ * either way, which is exactly why one week has to sit on the boundary.
+ */
+export const FALL_BACK_WEEK_CLOSED_AT = '2026-11-02T05:59:59+00:00';
+
+export const A_WEEK_THAT_CLOSED_AS_THE_CLOCKS_WENT_BACK = {
+  ...A_PUBLISHED_WEEK,
+  week: {
+    course_week: 8,
+    term_week: 11,
+    published_weeks: [...PUBLISHED_WEEKS, 8],
+    closes_at: FALL_BACK_WEEK_CLOSED_AT,
+  },
 } satisfies InstructorReportView & { comparison: unknown };
 
 /**
@@ -171,6 +239,12 @@ export const A_PUBLISHED_WEEK = {
  * real zero over a real enrolment — twenty-one students, none of whom answered —
  * which is a different fact from the enrolment being empty, and both are drawn
  * apart below.
+ *
+ * **It also carries none of E5-02's three members**, because it replaces both
+ * the `week` and the `streams` objects outright. That is deliberate and is
+ * criterion 5's fixture: a report built before those members existed still
+ * renders — the eyebrow prints no close note and each histogram keeps its stream
+ * label — rather than crashing or printing a half-formed sentence.
  */
 export const A_WEEK_NOBODY_ANSWERED = {
   ...A_PUBLISHED_WEEK,

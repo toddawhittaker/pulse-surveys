@@ -237,3 +237,16 @@ the histogram block for the comparison figures, so both fields land beside that
 work. **Done when:** the report payload carries the two question texts and the
 week's close instant, the histogram titles quote the served questions, and the
 eyebrow renders its close note, each proven against the mockup.
+
+**Closed 2026-09-13 by E5-02**
+(`E5-02-report-payload-questions-close.md`). Each stream now carries its rating
+question's served wording, and the week member carries its own window's close
+instant with the institution's timezone beside it, so the close is read in the
+zone that closed it rather than in the browser's. Which version's wording a week
+gets is [ADR 0168](../../adr/0168-a-weeks-served-question-wording-comes-from-the-rows-its-responses-answered.md):
+the question rows that week's responses answered, falling back to the newest set
+for a week nobody answered. The histogram titles quote the served strings and the
+eyebrow prints the past-tense note. Both halves are proven against the mockup —
+the payload half by a test reading three lines copied whole out of
+`design/InstructorMondayReport.dc.html`, the rendering half beside the components,
+including one week that closed as the clocks went back.

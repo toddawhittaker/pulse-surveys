@@ -189,6 +189,26 @@ COURSE_WEEK_FIELD = "course_week"
 TERM_WEEK_FIELD = "term_week"
 PUBLISHED_WEEKS_FIELD = "published_weeks"
 
+# E5-02's three members, spelled here rather than in the modules that read them.
+#
+#   - `week.closes_at` — the reported week's survey window close instant, which
+#     the mockup's eyebrow renders as "responses closed Sun 11:59 PM"
+#     (`design/InstructorMondayReport.dc.html:227`).
+#   - `streams.<stream>.question_text` — the served text of that stream's rating
+#     question, which the mockup quotes as each histogram's title (lines 30-31).
+#     SPEC §3.2 versions that wording server-side, so it is served rather than
+#     copied into the frontend.
+#   - a top-level `institution_timezone` — the IANA name the close instant is
+#     rendered in, mirroring the student payload's own member. It is a top-level
+#     addition, so `tests/unit/test_the_payload_sketch_and_the_schema_are_
+#     reconciled.py`'s `DECLARED_DIVERGENCES` carries it.
+#
+# All three are settled by E5-02's work order; none is discovered, because a
+# spelling invented here would be this suite choosing the wire format.
+CLOSES_AT_FIELD = "closes_at"
+QUESTION_TEXT_FIELD = "question_text"
+INSTITUTION_TIMEZONE_MEMBER = "institution_timezone"
+
 RESPONSE_RATE_FIELD = "response_rate"
 VALIDITY_RATE_FIELD = "validity_rate"
 RESPONSES_FIELD = "responses"
@@ -1506,19 +1526,30 @@ def report_door_as(
     committed_clock_overrides: Any,
     web_identity: Any,
     landing_ground: Any,
-) -> Callable[[str], ReportDoor]:
+) -> Callable[..., ReportDoor]:
     """The door, stood at as a role the caller names. See `_build_report_door`.
 
     A factory, because criterion 2 is "a student session and a leadership session
     are both refused these routes … driven per role", and a fixture that picked
     one role would make the other's test a copy of this file rather than a drive
     through it.
+
+    **Keyword arguments are environment variable names and values**, passed
+    straight through to `launch_driver_in` so they are set before the application
+    is imported (`docs/MISTAKES.md` entry 40) — `tool_doors` only sees a value that
+    came down that way. The shape is copied from
+    `tests/fixtures/student_read.py::student_read_door_in` rather than reinvented
+    (`docs/MISTAKES.md` entry 37), and it exists for the same reason that fixture
+    grew it: E5-02 serves `institution_timezone` on the report payload, and a test
+    that asserted only the documented default would pass against a member
+    hard-coded to that default. Called with none, this builds exactly what it
+    always built.
     """
 
-    def build(role: str = INSTRUCTOR_ROLE) -> ReportDoor:
+    def build(role: str = INSTRUCTOR_ROLE, **settings: str) -> ReportDoor:
         return _build_report_door(
             role,
-            launch_driver_in(),
+            launch_driver_in(**settings),
             committed_rows,
             metadata_tables,
             committed_clock_overrides,
@@ -1530,8 +1561,13 @@ def report_door_as(
 
 
 @pytest.fixture
-def report_door(report_door_as: Callable[[str], ReportDoor]) -> ReportDoor:
-    """The teaching instructor at the door, with her own section and one that is not hers."""
+def report_door(report_door_as: Callable[..., ReportDoor]) -> ReportDoor:
+    """The teaching instructor at the door, with her own section and one that is not hers.
+
+    Built with no environment override, so it runs under whatever `configured_env`
+    laid down — which is what every test about the ordinary path wants, and is the
+    default half of E5-02's timezone pair.
+    """
     return report_door_as(INSTRUCTOR_ROLE)
 
 
@@ -1567,6 +1603,9 @@ def report_api_contract() -> Any:
         course_week_field = COURSE_WEEK_FIELD
         term_week_field = TERM_WEEK_FIELD
         published_weeks_field = PUBLISHED_WEEKS_FIELD
+        closes_at_field = CLOSES_AT_FIELD
+        question_text_field = QUESTION_TEXT_FIELD
+        institution_timezone_member = INSTITUTION_TIMEZONE_MEMBER
         response_rate_field = RESPONSE_RATE_FIELD
         validity_rate_field = VALIDITY_RATE_FIELD
         responses_field = RESPONSES_FIELD

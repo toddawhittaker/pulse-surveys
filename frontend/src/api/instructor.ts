@@ -100,6 +100,17 @@ export interface WeekView {
   readonly course_week: number;
   readonly term_week: number;
   readonly published_weeks: readonly number[];
+  /**
+   * When this week's survey window shut — the reported week's own row, not the
+   * latest one's (E5-02). An ISO 8601 instant with an offset; the eyebrow reads
+   * it in `institution_timezone` below and never in the browser's zone.
+   *
+   * Optional here and required on the server, which is the shape every member
+   * added to a live payload takes: a fixture or a cached answer built before
+   * E5-02 has none, and the eyebrow renders without the note rather than
+   * printing a broken sentence.
+   */
+  readonly closes_at?: string;
 }
 
 /**
@@ -167,6 +178,16 @@ export interface StreamReportView {
   readonly distribution: Readonly<Record<string, number>>;
   readonly summary: SummaryView | null;
   readonly comments: readonly CommentView[];
+  /**
+   * The wording of this stream's rating question, as the students who answered
+   * it read it (E5-02). SPEC §3.2 versions question text server-side, so this is
+   * served and never written in the client — a second copy here would be right
+   * until the first re-versioning and silently wrong afterwards.
+   *
+   * Optional for the reason `WeekView.closes_at` gives; without it the histogram
+   * keeps its stream-label title.
+   */
+  readonly question_text?: string;
 }
 
 /** The two groups §5.1 heads separately, never pooled into one. */
@@ -202,6 +223,15 @@ export interface InstructorReportView {
    * A list in every report, populated only in the latest published week's.
    */
   readonly released_from_earlier_weeks: readonly CommentView[];
+  /**
+   * The IANA name of the institution's timezone (E5-02) — the zone
+   * `week.closes_at` is read in. The institution's calendar is what closed the
+   * week, so its zone is what says which day that was; the browser's own zone
+   * would name the Monday for a reader one timezone east.
+   *
+   * Optional for the reason `WeekView.closes_at` gives.
+   */
+  readonly institution_timezone?: string;
 }
 
 /**

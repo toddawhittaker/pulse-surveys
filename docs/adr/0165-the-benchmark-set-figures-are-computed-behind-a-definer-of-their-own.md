@@ -1,6 +1,46 @@
 # 0165 — The benchmark set figures are computed behind a definer of their own, the term axis is keyed by a start date, and a cohort week keeps its row when nobody reports hours
 
-**Status:** Accepted — E5-03.
+**Status:** Accepted — E5-03; amended 2026-09-13 (E5-04).
+
+> **Amendment, 2026-09-13.** The decision below is unchanged. What it left
+> unstated is the thing this record was the only place to state: **exactly which
+> `(relation, column)` pairs `pulse_benchmark_definer` holds `SELECT` on.** The
+> consequences section says the owner "has no pinned equality of its own yet",
+> and `docs/tickets/e5/deferred.md` gave E5-04 the job of closing that. A test
+> could not close it alone: an expected set transcribed from
+> `benchmark_definer_v001.sql` would assert that the SQL equals itself, which is
+> `docs/MISTAKES.md` entry 19, and the sibling equality test refuses it in its
+> own docstring — "the expected sets are derived from the records' own sentences
+> rather than copied from the migration". So the sentence goes here, where a
+> reviewer weighs it as a claim about what the owner may reach, and the equality
+> is derived from it.
+>
+> `pulse_benchmark_definer` holds `SELECT` on these eighteen columns of these six
+> relations, and on nothing else — no seventh relation, no other verb, and no
+> privilege at the grain of a whole relation:
+>
+> - `public.response` — `id`, `user_id`, `section_id`, `week_id`
+> - `public.answer` — `response_id`, `question_id`, `rating`, `workload_hours`
+> - `public.question` — `id`, `kind`, `stream`
+> - `public.section` — `id`, `term_id`, `start_date`
+> - `public.term` — `id`, `start_date`
+> - `public.week` — `id`, `number`
+>
+> **Not one of them is a column of `user`, `user_identity` or `person`**, which
+> is the property the deferral was about. `response.user_id` is the only column
+> in the list that reaches a person at all; it is the key the distinct count of
+> people is computed over, it is grouped away inside both function bodies, and it
+> never leaves either function's row. The columns are exactly the ones those two
+> bodies name — a length and a level reach the cohort views through the section
+> and its course rather than through this owner, and a course week is derived
+> from `section.start_date`, `term.start_date` and `week.number`.
+>
+> **What changes if this list moves.** A column added to the owner widens what a
+> `SECURITY DEFINER` body may read past what any reviewer of this record agreed
+> to, and the widening is invisible in a diff of the two function bodies. So the
+> list above is the reviewable claim and the equality derived from it is the
+> gate; moving either without the other is the failure both exist to prevent.
+> `docs/tickets/e5/deferred.md`'s entry closes on this amendment.
 
 ## Context
 

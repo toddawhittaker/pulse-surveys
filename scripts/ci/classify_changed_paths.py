@@ -156,6 +156,27 @@ PARSED_DOCUMENTS = frozenset(
         # the rest of `docs/tickets/` is genuinely inert and the `docs/` entry in
         # `INERT_DIRECTORIES` above is unchanged.
         "docs/tickets/e4/README.md",
+        # The fourth file to move, and the second that moves for the sweep's
+        # reason rather than for a build input. E5-02 puts the instructor
+        # report's two histogram titles and its eyebrow's close note on the
+        # payload, and its criterion 6 is "each half proven against the mockup".
+        # `tests/integration/test_the_report_payload_carries_the_weeks_close_instant.py`
+        # proves it the only way that claim can be proven: it reads three lines
+        # **copied whole out of this canvas** and fails naming them if the file no
+        # longer carries them, so a re-cut mockup reds that test rather than
+        # leaving it quietly asserting about a design nobody ships.
+        #
+        # Called inert, a re-cut of this canvas would run none of the suite that
+        # checks the payload still feeds it — which is precisely the silence the
+        # sweep in
+        # `tests/unit/test_a_documentation_only_diff_does_not_run_the_expensive_gates.py`
+        # exists to break, and that sweep is what named this file.
+        #
+        # The coverage given up is pull requests touching only this one canvas.
+        # **Only this path moves**; every other `.dc.html` prototype is still
+        # genuinely inert — nothing imports one and no test parses one — and the
+        # `design/` entry in `INERT_DIRECTORIES` above is unchanged.
+        "design/InstructorMondayReport.dc.html",
     }
 )
 

@@ -91,6 +91,51 @@ column of `user`, `user_identity` or `person` among them. Owner: E5-04, which is
 the next ticket to touch this door; a security round on E5-03's pull request may
 pull it earlier.
 
+**Resolution, 2026-09-13 (E5-04) — answered and closed.** The missing half was a
+record rather than a test: an expected set transcribed from
+`benchmark_definer_v001.sql` would assert that the SQL equals itself
+(`docs/MISTAKES.md` entry 19), which the sibling equality test refuses in its own
+docstring. So ADR 0165 gains an amendment naming the exact eighteen
+`(relation, column)` `SELECT` pairs — `response (id, user_id, section_id,
+week_id)`, `answer (response_id, question_id, rating, workload_hours)`,
+`question (id, kind, stream)`, `section (id, term_id, start_date)`,
+`term (id, start_date)`, `week (id, number)` — and states that not one of them is
+a column of `user`, `user_identity` or `person`. The list was checked against
+both the SQL file and the migrated catalog before it was written down: eighteen
+pairs, `SELECT` only, and nothing held at the grain of a whole relation. The
+equality is derived from that sentence rather than from the SQL, in
+`ROSTER_DEFINER_PRIVILEGES`' shape, and the relation-grain test E5-04's red run
+shipped stands beside it.
+
+## The benchmark service spells two statements `views_sql/queries.py` also holds (E5-04)
+
+**What is not enforced.** `app.views_sql.queries` carries typed wrappers for
+`benchmark_set_week` and `benchmark_set_rating_week`, written there by E5-03 "so
+that E5-04 has no reason to spell a statement of its own".
+`app.services.benchmarks` spells them anyway, because
+`tests/unit/test_the_org_views_are_read_only_through_the_grant.py` excuses
+exactly one importer of that module — `backend/app/services/authz.py` — and reds
+every other module under `backend/app/` that imports it. So the same two
+statements exist in two files, and a change to one can miss the other. Nothing
+about confidentiality rests on the duplication: neither function is a relation
+that sweep polices, no exemption was added, and both copies call the same
+`SECURITY DEFINER` bodies with the same bound array.
+
+**Why it was left.** The three ways to remove it are each larger than this
+ticket. Moving the wrappers out of `queries.py` breaks E5-03's own suite, which
+reads them there by name. Widening the import exemption to a second module is a
+change to a guard, which CLAUDE.md puts in its own reviewed pull request and
+which this file's own doctrine treats as the repair that looks smallest under
+time pressure. Routing the call through `authz.py` puts benchmark aggregation in
+the authorization chokepoint, where it does not belong. E5-03's comment asserting
+the opposite has been corrected in place; the duplication itself is named here.
+
+**Owner:** E5-14 at the epic exit, which is the next pass over this surface.
+
+**Done when** either the two statements have one home that both the service and
+the sweep accept, or a record states that two copies is the intended answer and
+says which file is authoritative.
+
 ## The benchmark views do not filter a response's validity (E5-03)
 
 SPEC §3.3 classifies a submission as valid or not, and `response.is_valid`
@@ -107,6 +152,18 @@ recorded in a sentence" or a `_v002.sql` per view plus the same filter in both
 function bodies. Owner: E5-04, which is where comparison policy lives; E5-08
 reads the workload figures and would inherit the answer.
 
+**Resolution, 2026-09-13 (E5-04) — answered in the open and closed.** A benchmark
+figure counts **every stored response, exactly as the section's own report
+figures do**; `response.is_valid` is not filtered. The reason is the one this
+entry names: a comparison figure and the section figure drawn beside it are read
+off the same chart, and computing them over different populations would change
+what both numbers mean without anybody saying so. The first of the two answers
+this entry offered is therefore taken — the sentence, not a `_v002.sql` — and it
+is recorded in the module docstring of `backend/app/services/benchmarks.py`,
+where the figures are computed. No view or function body changes. E5-08 inherits
+the answer, and a later decision to filter validity is a change to both the
+benchmark views and the report views together.
+
 ## A course week assumes a section starts on one of its term's week boundaries (E5-03)
 
 The course week these views key on is derived as
@@ -120,6 +177,30 @@ when** either a database constraint makes a mid-week section start unstorable,
 or a sentence records that the derivation rounds and that this is the intended
 answer. Owner: E5-14 at the epic exit, unless a roster ticket writes a start
 date from a platform first.
+
+## Three cohort views still pair whole-week counts with subset figures (E5-04)
+
+**What is not enforced.** The contributor-count rule E5-04's fix round
+established — a figure is sealed against counts of its own contributors —
+is applied everywhere the service reads: the two set functions and
+`benchmark_cohort_term_axis`, all in `_v002` bodies. The three sibling
+views (`benchmark_cohort_week`, `benchmark_cohort_rating_week`,
+`benchmark_cohort_rating_term_axis`) still carry the week's overall
+`respondent_count`/`section_count` beside figures computed over a subset
+(rating rows per stream; workload rows over hours-carrying responses).
+Nothing under `backend/app/` reads any of the three today, so no live path
+can seal a figure with the wrong counts.
+
+**Why it was left.** The fix round's declared stopping rule covered the
+reviewed findings, all on read paths that exist; widening three unread
+views would have been new surface with no consumer and no test to prove it
+against.
+
+**Owner:** the first ticket that reads one of the three (E5-05 reads
+through the service, so in practice E5-06's preview or E9's dashboards);
+E5-14 re-checks at exit. **Done when** any consumer of these views seals
+figures only against contributor counts the view itself carries (a `_v002`
+per view, the established shape), or the views are retired unread.
 
 ## The benchmark-history self-check scopes on section codes without a term filter (E5-12)
 
