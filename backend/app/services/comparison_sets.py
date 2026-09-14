@@ -195,8 +195,13 @@ def _foreign_key_to(table: Table, target: str) -> str:
 # 19). The three rules are named the way E5-01 names them and the lookup is what
 # turns each into the name Postgres reports — the naming convention's prefix is
 # applied at DDL time and is not a string worth repeating in two places.
-_SET_TABLE = ComparisonSet.__table__
-_MEMBER_TABLE = ComparisonSetMember.__table__
+#
+# Both tables are read off the shared metadata rather than through `__table__`,
+# which a declarative class types as the wider `FromClause` — a clause the three
+# readers above could not walk, and one whose narrowing would be an assertion
+# rather than a lookup.
+_SET_TABLE = ComparisonSet.metadata.tables[ComparisonSet.__tablename__]
+_MEMBER_TABLE = ComparisonSetMember.metadata.tables[ComparisonSetMember.__tablename__]
 
 REFUSAL_BY_CONSTRAINT = {
     _check_ending(_SET_TABLE, "length_is_a_calendar_length"): (
