@@ -356,6 +356,16 @@ PLANTED_SECTIONS = (
 HER_SET_NAME = "E5-06 the set this session's leader defined"
 THEIR_SET_NAME = "E5-06 the set another leader defined"
 
+# **The two-hat person's own set**, planted by the ruling on
+# `docs/disputes/E5-06-01.md`. The two-hat test's subject is the role gate — the
+# same person admitted through one hat and refused through the other — and for
+# `edit` and `delete` that question can only be asked of a set she is entitled to
+# write, because decision 1 scopes those two by creator. Driving her at another
+# leader's set asked the role question and a scoping question at once, and the
+# scoping module answers the second one the other way; no tree satisfied both.
+# So she gets a set of her own, and her two sessions are pointed at it.
+TWO_HAT_SET_NAME = "E5-06 the set the two-hat leader defined"
+
 # The subjects the minted sessions name. Neither is a subject any launch in this
 # suite signs, so a session carrying one cannot be confused with a session a
 # door issued.
@@ -667,6 +677,7 @@ class NamedSetWorld:
         self.sections: list[Any] = []
         self.hers: PlantedSet | None = None
         self.theirs: PlantedSet | None = None
+        self.the_two_hats: PlantedSet | None = None
         self.another_leader_person_id: Any = None
         self.two_hat_person_id: Any = None
 
@@ -765,6 +776,7 @@ class NamedSetWorld:
             ]
         found["the name of this leader's set"] = HER_SET_NAME
         found["the name of the other leader's set"] = THEIR_SET_NAME
+        found["the name of the two-hat leader's set"] = TWO_HAT_SET_NAME
         return found
 
     # -- the sessions ---------------------------------------------------------
@@ -1086,6 +1098,16 @@ def build_named_set_world(
         creator=world.another_leader_person_id,
         members=[world.courses["outsider"]],
     )
+    # Hers to write, by the ruling on `docs/disputes/E5-06-01.md`: the two-hat
+    # person's leadership session needs a set of her own before "she is admitted
+    # where her instructor session was refused" can be asked of `edit` and
+    # `delete` without also asserting the opposite of decision 1.
+    world.the_two_hats = _plant_set(
+        world,
+        name=TWO_HAT_SET_NAME,
+        creator=world.two_hat_person_id,
+        members=[world.courses["first_member"]],
+    )
     committed_rows.commit()
 
     course_key = inner.key_of(COURSE_TABLE)
@@ -1098,12 +1120,16 @@ def build_named_set_world(
         "The sections this world is built on are not five rows: "
         f"{[section[SECTION_CODE_COLUMN] for section in world.sections]}."
     )
-    two_creators = world.hers.creator_person_id != world.theirs.creator_person_id
-    assert door.person_id is not None and two_creators, (
-        "The two planted sets do not have two different creators — the leadership session names "
-        f"{door.person_id!r} and the sets were written for {world.hers.creator_person_id!r} and "
-        f"{world.theirs.creator_person_id!r}. Every scope assertion in this ticket is the "
-        "difference between those two."
+    definers = [
+        world.hers.creator_person_id,
+        world.theirs.creator_person_id,
+        world.the_two_hats.creator_person_id,
+    ]
+    assert door.person_id is not None and len({str(who) for who in definers}) == len(definers), (
+        "The three planted sets do not have three different creators — the leadership session "
+        f"names {door.person_id!r} and the sets were written for {definers}. Every scope assertion "
+        "in this ticket is the difference between them: one set this session may write, one it may "
+        "not, and one the two-hat leader may write through her leadership session alone."
     )
     held = committed_rows.graph.assignments_of(world.two_hat_person_id)
     assert len(held) == 2, (

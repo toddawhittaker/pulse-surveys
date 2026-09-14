@@ -10,6 +10,15 @@ and her *instructor* session is refused every one of these routes while her
 which hat the session names. SPEC §2.1: scope resolves by role assignment and
 never by identity.
 
+**On the two writing routes she is driven at a set she defined**, because
+work-order decision 1 scopes `PUT` and `DELETE` by the set's creator as well as
+by the session's role. This module's subject is the role gate alone; which sets
+a leader may write is
+`test_a_named_set_is_edited_only_by_the_leader_who_defined_it.py`'s, and it
+answers that question both ways. Pointing the two-hat leader at another
+leader's set asked both questions in one request and required the answer
+decision 1 refuses, which is the ruling on `docs/disputes/E5-06-01.md`.
+
 **Both directions, per route, and that is the whole design of the module.** A
 refusal test alone is satisfied by a route nobody registered: an application
 serving no `/leadership/comparison-sets` at all refuses every session that asks
@@ -69,16 +78,27 @@ ROUTES = tuple(ADMITTED_STATUS)
 REFUSED_SESSIONS = ("none", "student", "instructor", "two-hat instructor")
 
 
-def ask(door: NamedSetDoor, route: str, *, token: Any) -> Any:
+def ask(door: NamedSetDoor, route: str, *, token: Any, set_id: Any = None) -> Any:
     """One request to one of the seven routes, carrying exactly the named credential.
 
-    The set it names is the one this world's leadership person defined, so an
-    admitted call reaches a real row and a refused call is refused for its
-    session rather than for a set that is not there — the difference between a
-    401 and a 404 is what tells the role gate from the scope read.
+    The set it names defaults to the one this world's launched leadership person
+    defined, so an admitted call reaches a real row and a refused call is refused
+    for its session rather than for a set that is not there — the difference
+    between a 401 and a 404 is what tells the role gate from the scope read.
+
+    **`set_id` is the repair the ruling on `docs/disputes/E5-06-01.md` asks
+    for.** The default is sound for the launched leadership session, which is the
+    default set's definer, and for every refused session, which is turned away at
+    the door before any set is read. It stops being sound for a valid leadership
+    session belonging to somebody who is not the definer — and the two-hat
+    person's is exactly that, so her writing pair names a set of her own.
+
+    The edit body carries a fresh unique name rather than the target set's own,
+    so that this helper can be pointed at any set without the name it sends
+    becoming a duplicate of a different one.
     """
     world = door.world
-    hers = world.hers
+    target = world.hers.set_id if set_id is None else set_id
     if route == "list":
         return door.list_sets(token=token)
     if route == "create":
@@ -86,13 +106,13 @@ def ask(door: NamedSetDoor, route: str, *, token: Any) -> Any:
     if route == "options":
         return door.options(token=token)
     if route == "read":
-        return door.read(hers.set_id, token=token)
+        return door.read(target, token=token)
     if route == "edit":
-        return door.edit(hers.set_id, world.a_write(name=hers.name), token=token)
+        return door.edit(target, world.a_write(), token=token)
     if route == "delete":
-        return door.remove(hers.set_id, token=token)
+        return door.remove(target, token=token)
     if route == "preview":
-        return door.preview(hers.set_id, token=token)
+        return door.preview(target, token=token)
     raise AssertionError(f"{route!r} is not one of {ROUTES}")
 
 
@@ -283,9 +303,18 @@ def test_a_session_that_is_not_leadership_is_refused_by_every_named_set_route(
     )
 
 
+# The two routes whose answer is decided by more than the session's role: work-order
+# decision 1 scopes `PUT` and `DELETE` by the set's creator. For those two the
+# two-hat person is driven at a set **she** defined, so the question asked is the
+# one this test exists for — the role gate — and not also a question about scoping
+# that `test_a_named_set_is_edited_only_by_the_leader_who_defined_it.py` answers
+# the other way. The ruling on `docs/disputes/E5-06-01.md`.
+SCOPED_BY_CREATOR = ("edit", "delete")
+
+
 @pytest.mark.parametrize("route", ROUTES, ids=ROUTES)
 def test_the_two_hat_persons_leadership_session_is_admitted_where_her_instructor_one_was_refused(
-    named_sets: NamedSetDoor, route: str
+    named_sets: NamedSetDoor, named_set_contract: Any, route: str
 ) -> None:
     """Criterion 2's trap, the other way round: the same person, admitted through the other hat.
 
@@ -301,17 +330,52 @@ def test_the_two_hat_persons_leadership_session_is_admitted_where_her_instructor
     is caught by the refusal above; a gate that refused both would be caught
     here.
 
+    **`edit` and `delete` name a set she defined, and the pair is asserted in
+    this test rather than borrowed from the one above** — the ruling on
+    `docs/disputes/E5-06-01.md`. Those two routes are scoped by creator as well
+    as by role, so driving her at somebody else's set asked two questions at
+    once and required the answer decision 1 refuses; a set of her own asks only
+    the role question. Her instructor session is refused on that **same** set
+    first, which is what keeps the two halves a pair: without it, "her
+    leadership session may write her set" is satisfied by a surface with no role
+    gate on the writing routes at all.
+
     **Expected red before E5-06 lands:** a FAILED naming the router.
     """
-    _instructor, leadership = named_sets.world.two_hat_sessions()
+    world = named_sets.world
+    instructor, leadership = world.two_hat_sessions()
+    target = world.the_two_hats.set_id if route in SCOPED_BY_CREATOR else None
 
-    answered = ask(named_sets, route, token=leadership)
+    if route in SCOPED_BY_CREATOR:
+        refused = ask(named_sets, route, token=instructor, set_id=target)
+        assert refused.status_code == named_set_contract.role_refused, (
+            f"The `{route}` route answered {refused.status_code} to the **instructor** session of "
+            f"the person who defined this set; it is refused with "
+            f"{named_set_contract.role_refused} whoever holds it, because the session names a role "
+            f"this surface does not serve. Body begins {refused.text[:400]!r}."
+        )
+        assert named_set_contract.detail_of(refused) == named_set_contract.sentence(
+            named_set_contract.not_leadership
+        ), (
+            f"Her instructor session was refused the `{route}` of her own set with "
+            f"{named_set_contract.detail_of(refused)!r} rather than with the `NOT_LEADERSHIP` "
+            "sentence. A 403 carrying the definer sentence here would mean the scope read ran "
+            "before the role gate, which is the ordering the whole dependency chain exists to fix."
+        )
+
+    answered = ask(named_sets, route, token=leadership, set_id=target)
 
     assert answered.status_code == ADMITTED_STATUS[route], (
         f"The `{route}` route answered {answered.status_code} to the leadership session of the "
         f"person who holds both hats; it answers {ADMITTED_STATUS[route]} to the leadership "
-        "session this world launched, and the two differ in nothing but who is holding them. Body "
-        f"begins {answered.text[:400]!r}."
+        "session this world launched, and the two differ in nothing but who is holding them. "
+        + (
+            "This request names the set she defined herself, so decision 1's creator scoping "
+            "admits it. "
+            if route in SCOPED_BY_CREATOR
+            else ""
+        )
+        + f"Body begins {answered.text[:400]!r}."
     )
 
 
