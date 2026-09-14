@@ -638,9 +638,13 @@ WORKLOAD_VIEW = table(
 # between a chart with no bars and a chart of a quiet week.
 LIKERT_VALUES = (1, 2, 3, 4, 5)
 
-# What a suppressed comparison says about itself. One word for one reason, because
-# E4 has exactly one: no comparison set exists until E5 builds them, so every
-# figure over one is below the minimum by construction.
+# What a suppressed comparison says about itself. One word, and one word only: a
+# figure is withheld because the population behind it is below a configured
+# minimum, and this system has no second reason to give. E5-05 is where that
+# became a statement about real comparison sets rather than about a member with
+# nothing behind it, and it did not add a reason — a population nobody could
+# resolve arrives here as counts of zero and is suppressed by the same
+# comparison.
 BELOW_MINIMUM = "below-minimum"
 
 # **The token SPEC §4.1 item 7's chokepoint is made of.** A module-level object
@@ -704,9 +708,12 @@ class ComparisonFigure(BaseModel):
     walked past by every entry point that does not call `__init__`, and pydantic
     has several.
 
-    **E5 fills this, and it fills it through the same helper.** Until then every
-    report carries a suppressed value with no number in it, which is what gives
-    the invariant something to stand on before there is any data to suppress.
+    **Every figure the report shows is built here, through the one helper**, and
+    since E5-05 there are several of them: the two comparison lines per panel, the
+    reported week's workload mean and median against each population, and the
+    top-level `comparison` member. `app.services.benchmarks` is the only caller
+    that resolves a population, and it reaches this type through
+    `comparison_after_suppression` like everything else.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -873,11 +880,11 @@ def comparison_after_suppression(
     "computed from fewer than the configured number of sections", so the configured
     number itself passes and `n - 1` does not.
 
-    **`figure` may be `None`, and that is E4's own case.** No comparison set exists
-    until E5 builds them, so the report calls this with no figure over no sections
-    and no respondents and gets back the suppressed value the payload carries. E5
-    calls the same function with real numbers, and gets suppression or passage from
-    the same two comparisons.
+    **`figure` may be `None`, and that is an ordinary case rather than an error.**
+    A cohort week that carries responses but no hours has a null statistic, and a
+    population that resolves to nothing answers with nulls over counts of zero —
+    both come here and both come back suppressed, from the same two comparisons
+    that pass a real number.
 
     The minimums are read from `Settings` here rather than taken as parameters, the
     way `visible_comments` reads the n-threshold: the promise §4.1 item 7 makes is

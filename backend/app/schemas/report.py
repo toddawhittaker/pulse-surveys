@@ -28,8 +28,8 @@ its own ticket's pull request rather than only here:
     which is a statement in one named zone, and that zone is configuration the
     server holds and the browser does not.
   - `streams.<stream>.benchmark` and `workload_benchmark` — E5-05's, and they
-    could not have been in E4's sketch at all: E4 built no comparison set, so
-    there were no figures for the sketch to describe. They are SPEC §5.1's
+    could not have been in E4's sketch at all: nothing in E4 resolved a
+    comparison population, so there were no figures for the sketch to describe. They are SPEC §5.1's
     second and third lines per panel and its workload statistics "against
     comparison-set and university figures". Their own models are in
     `app.schemas.report_benchmark`, which says why they are not here, and E5's
@@ -45,9 +45,11 @@ to guarantee.
 
 **`comparison` is typed with a class this module cannot construct, and it is
 re-checked here anyway.** SPEC §4.1 item 7 suppresses any figure computed from a
-comparison set below the configured minimums, and E4's breakdown decision 4 puts
-the member on the wire from day one so that chokepoint has somewhere to stand
-before E5 fills it. `app.services.reporting.ComparisonFigure`'s constructor
+comparison set below the configured minimums, and E4's breakdown decision 4 put
+the member on the wire from day one so that chokepoint had somewhere to stand
+before there were figures to put through it. E5-05 filled it: it carries the
+default comparison set's workload mean for the reported week, which is the same
+sealed value `workload_benchmark.comparison.mean` carries. `app.services.reporting.ComparisonFigure`'s constructor
 demands a token private to that module — but a constructor is not the only way to
 produce a pydantic instance, and E4-07's security round demonstrated two that skip
 it: `model_construct`, which runs neither validation nor `__init__`, and
