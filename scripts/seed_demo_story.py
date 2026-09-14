@@ -61,6 +61,9 @@ on `sys.path`, so it cannot import `scripts/seed.py` and does not try; and
    `docker compose exec -T api python -c ...`. This file writes neither of their
    tables.
 7. Open the instructor's report for `BIOL-310-R7FF`.
+8. For the benchmark this section is compared against, run the prior term's own
+   drive: `scripts/seed_benchmark_history.py`'s module docstring carries it, and
+   its steps are anchored to a different clock from this one's.
 
 ## The rules it is built on, and where each comes from
 
