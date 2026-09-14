@@ -65,6 +65,16 @@ const SAVE = 'Save this set';
 const COUNTING = 'Counting what this set reaches…';
 const PREVIEW_UNAVAILABLE = 'What this set reaches could not be counted just now.';
 
+/**
+ * The one element a graphic may sit inside on this surface: `StateNotice`'s
+ * root, which carries the design's pulse-line motif. Transcribed rather than
+ * imported for the reason the copy is (`docs/MISTAKES.md` entry 19) — and if the
+ * component renames it, this sweep reddens, which is the right way round: the
+ * rule is that drawings live in exactly one place, and a rename is a change to
+ * where that place is.
+ */
+const STATE_NOTICE_CLASS = 'pulse-state-notice';
+
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -582,11 +592,15 @@ describe('what this surface never renders', () => {
         expect(words.toLowerCase(), `${state}: ${word}`).not.toContain(word);
       }
 
-      // Nothing drawn, either. The only graphics this surface may carry are the
-      // design's own pulse-line motif inside `StateNotice`, which is decorative
-      // and marked as such; a chart would not be.
+      // Nothing drawn, either — and this is a closed set rather than a
+      // property. "Every graphic is `aria-hidden`" is exactly what a decorative
+      // chart carries, so it would admit the thing it exists to refuse; what is
+      // asserted instead is **where** a graphic may be. This surface has one
+      // legitimate drawing, the design's pulse-line motif, and it lives inside
+      // `StateNotice` — so every `svg` on the page has to sit inside one, and an
+      // `svg` anywhere else is a finding whatever attributes it carries.
       for (const drawing of page.querySelectorAll('svg')) {
-        expect(drawing.getAttribute('aria-hidden'), state).toBe('true');
+        expect(drawing.closest(`.${STATE_NOTICE_CLASS}`), `${state}: ${drawing.outerHTML}`).not.toBeNull();
       }
       expect(page.querySelectorAll('canvas'), state).toHaveLength(0);
       expect(within(page).queryByRole('img'), state).toBeNull();

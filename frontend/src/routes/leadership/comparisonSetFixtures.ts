@@ -239,6 +239,54 @@ export const A_SET_WITH_A_WITHDRAWN_COURSE: ComparisonSetDetailView = {
   updated_at: '2026-09-07T09:20:00-04:00',
 };
 
+/** A second id nothing in the options answer names, for the plural case. */
+export const A_SECOND_COURSE_NO_LONGER_OFFERED = '0f4c6a11-0c4e-4b2f-9a3d-2a71c3e5d0fe';
+
+/**
+ * A stored set with two members the options answer does not carry.
+ *
+ * Two rather than one, because the notice counts and a count of one and a count
+ * of two are two different sentences — a form that always wrote the singular
+ * would read correctly here and be wrong.
+ */
+export const A_SET_WITH_TWO_WITHDRAWN_COURSES: ComparisonSetDetailView = {
+  id: '9c1b77e3-5d84-4a06-b0f2-6e9a1b4c7a15',
+  name: 'Fall biology cohort, thinned',
+  length_weeks: 12,
+  level: 'UG',
+  member_count: 3,
+  editable: true,
+  member_course_ids: [
+    A_COURSE_NO_LONGER_OFFERED,
+    A_BIOLOGY_COURSE.id,
+    A_SECOND_COURSE_NO_LONGER_OFFERED,
+  ],
+  created_at: '2026-08-31T14:05:00-04:00',
+  updated_at: '2026-09-07T09:20:00-04:00',
+};
+
+/**
+ * A stored set carrying a member of another level.
+ *
+ * An undergraduate set with a graduate course in it — a shape the API will not
+ * accept today, and one that a level band re-derived from a renumbered course
+ * (SPEC §8 derives level from the course number) or an older write could leave
+ * behind. The form cannot draw it, because the picker only draws courses of the
+ * set's own level, so for the reader it is exactly as absent as a withdrawn
+ * course and it is treated as one.
+ */
+export const A_SET_WITH_A_CROSS_LEVEL_MEMBER: ComparisonSetDetailView = {
+  id: '9c1b77e3-5d84-4a06-b0f2-6e9a1b4c7a16',
+  name: 'Fall biology cohort, crossed',
+  length_weeks: 12,
+  level: 'UG',
+  member_count: 2,
+  editable: true,
+  member_course_ids: [A_BIOLOGY_COURSE.id, A_NURSING_COURSE.id],
+  created_at: '2026-08-31T14:05:00-04:00',
+  updated_at: '2026-09-07T09:20:00-04:00',
+};
+
 /**
  * The refusals the routes answer with, as sentences on the wire.
  *

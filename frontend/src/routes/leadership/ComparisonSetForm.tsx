@@ -38,13 +38,13 @@ import './leadershipComparisonSets.css';
  *
  * **The form takes something away in two places, and says so in both.**
  * Changing the level keeps the chosen courses whose level still matches and
- * removes the rest, naming them. And opening a stored set whose membership the
- * options answer no longer carries — a course withdrawn, or moved out of this
- * reader's purview, while nobody was looking — removes those members as the
- * form opens and counts them, because a course this screen cannot offer is one
- * the reader cannot see or uncheck, and a member that survives invisibly into
- * the saved body is a set nobody composed. Dropping either quietly is the
- * failure both notices exist to prevent.
+ * removes the rest, naming them. And opening a stored set whose membership this
+ * form cannot draw — a course withdrawn or moved out of this reader's purview
+ * while nobody was looking, or one stored against a level the set no longer
+ * declares — removes those members as the form opens and counts them, because a
+ * course this screen cannot offer is one the reader cannot see or uncheck, and a
+ * member that survives invisibly into the saved body is a set nobody composed.
+ * Dropping either quietly is the failure both notices exist to prevent.
  */
 
 /** The list this form returns to, and the address that opens one set in it. */
@@ -92,13 +92,26 @@ type Removal =
   | { readonly kind: 'level-changed'; readonly labels: readonly string[] }
   | { readonly kind: 'withdrawn'; readonly count: number };
 
-/** The member ids of `initial` that the options answer still offers. */
+/**
+ * The member ids of `initial` this form can actually offer.
+ *
+ * **Filtered against the courses of the set's own level, not the whole
+ * catalogue.** The picker only ever draws courses of the level the form is on,
+ * so a stored member of some other level has no box either — it is as invisible
+ * as a course that left the catalogue, and for the reader's purposes it is the
+ * same fact. Filtering on catalogue membership alone would leave it in the
+ * form's state, unrenderable and saved on a submit that never touched the
+ * level, which is the defect this whole filter exists to stop.
+ */
 function membersStillOffered(
   options: ComparisonSetOptionsView,
   initial: ComparisonSetDetailView | null,
 ): readonly string[] {
-  const offered = new Set(options.courses.map((course) => course.id));
-  return (initial?.member_course_ids ?? []).filter((id) => offered.has(id));
+  if (initial === null) return [];
+  const offered = new Set(
+    options.courses.filter((course) => course.level === initial.level).map((course) => course.id),
+  );
+  return initial.member_course_ids.filter((id) => offered.has(id));
 }
 
 export function ComparisonSetForm({

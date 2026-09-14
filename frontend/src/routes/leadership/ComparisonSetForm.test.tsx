@@ -17,7 +17,9 @@ import {
   A_SECOND_GRADUATE_COURSE,
   A_SET_THIS_READER_DEFINED,
   A_COURSE_NO_LONGER_OFFERED,
+  A_SET_WITH_A_CROSS_LEVEL_MEMBER,
   A_SET_WITH_A_WITHDRAWN_COURSE,
+  A_SET_WITH_TWO_WITHDRAWN_COURSES,
   OPTIONS_NO_INSTITUTION_WOULD_SEND,
   THE_OPTIONS,
 } from './comparisonSetFixtures';
@@ -62,6 +64,8 @@ const INCOMPLETE = 'A set needs a name, a length and a level before it can be sa
 const SAVE_UNAVAILABLE = 'This set could not be saved just now. Try again in a moment.';
 const WITHDRAWN_ONE =
   'One course in this set is no longer offered to you, so it is not in the form and will not be saved.';
+const WITHDRAWN_MANY = (count: number) =>
+  `${String(count)} courses in this set are no longer offered to you, so they are not in the form and will not be saved.`;
 
 /** The two sentences a level change writes, transcribed. */
 const ONE_REMOVED = (labels: string) => `The level changed, so one course left this set: ${labels}.`;
@@ -381,6 +385,43 @@ describe('the form opened on a set that already exists', () => {
     expect(offeredCourses()).toEqual([A_BIOLOGY_COURSE.label, A_CHEMISTRY_COURSE.label]);
     expect(boxFor(A_BIOLOGY_COURSE.label).checked).toBe(true);
     expect(boxFor(A_CHEMISTRY_COURSE.label).checked).toBe(true);
+  });
+
+  it('counts two withdrawn members in the plural', () => {
+    renderForm(undefined, A_SET_WITH_TWO_WITHDRAWN_COURSES);
+
+    expect(
+      within(screen.getByTestId(COMPARISON_SET_REMOVED_TESTID)).getByText(WITHDRAWN_MANY(2)),
+    ).toBeTruthy();
+    // The one member the answer does carry survived, so the count is a count of
+    // what left rather than of the whole set.
+    expect(boxFor(A_BIOLOGY_COURSE.label).checked).toBe(true);
+  });
+
+  it('treats a stored member of another level as one the form cannot offer', () => {
+    // An undergraduate set carrying a graduate course. The picker only ever
+    // draws courses of the set's own level, so this member has no box — as
+    // invisible to the reader as a withdrawn course, and removed the same way.
+    renderForm(undefined, A_SET_WITH_A_CROSS_LEVEL_MEMBER);
+
+    expect(
+      within(screen.getByTestId(COMPARISON_SET_REMOVED_TESTID)).getByText(WITHDRAWN_ONE),
+    ).toBeTruthy();
+    expect(offeredCourses()).toEqual([A_BIOLOGY_COURSE.label, A_CHEMISTRY_COURSE.label]);
+    expect(boxFor(A_BIOLOGY_COURSE.label).checked).toBe(true);
+  });
+
+  it('never saves a stored member of another level', async () => {
+    const { writes, save } = acceptingSaves();
+    renderForm(save, A_SET_WITH_A_CROSS_LEVEL_MEMBER);
+
+    fireEvent.click(screen.getByRole('button', { name: SAVE }));
+
+    await waitFor(() => {
+      expect(writes).toHaveLength(1);
+    });
+    expect(writes[0]?.member_course_ids).toEqual([A_BIOLOGY_COURSE.id]);
+    expect(writes[0]?.member_course_ids).not.toContain(A_NURSING_COURSE.id);
   });
 
   it('never saves a member the options answer did not offer', async () => {

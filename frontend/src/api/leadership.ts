@@ -19,6 +19,13 @@
  * submission, which is why that reader moved out of `student.ts` and up into
  * `lib/session.ts` rather than being copied here (`docs/MISTAKES.md` entry 13).
  *
+ * **What checks that echo is E5-06's, and it is not on this branch yet.**
+ * `api/deps.py` carries one double-submit dependency today, `csrf_verified_student`;
+ * E5-06 adds `csrf_verified_leadership` for the routes below, and this branch
+ * merges after it. So the header these writes send is checked by nothing until
+ * that ticket lands — the client is ready for the dependency rather than
+ * describing one that exists.
+ *
  * **Every field below is the wire's spelling**, snake case included, because
  * these types describe E5-06's Pydantic schemas rather than a shape of this
  * screen's choosing. The contract they are written from is the one both tickets
