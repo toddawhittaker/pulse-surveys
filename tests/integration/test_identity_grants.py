@@ -328,7 +328,7 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 
 # Every `SECURITY DEFINER` function `pulse_app` may call, by name, and why.
 #
-# **Six entries, from three tickets, and one inventory rather than three.** E1-12
+# **Eight entries, from four tickets, and one inventory rather than four.** E1-12
 # and E1-11 opened this door in the same epic and from opposite ends — the first so
 # a verified subject reaches its stored identity, the second so a roster member
 # reaches its `user` row — and each ticket's branch wrote the equality over its own
@@ -391,10 +391,42 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 #
 # What is *not* here is the point of the list: the functions of the Care door.
 # `pulse_app` is refused those by name in an `invariant`-marked test below, and a
-# **seventh** entry appearing here is a new door into identity that some later
+# **ninth** entry appearing here is a new door into identity that some later
 # ticket opened without arguing for it. The number moves only in a change that
-# writes the sentence admitting the entry, as each of the six above did; an entry
-# arriving without one is the thing this inventory exists to make impossible.
+# writes the sentence admitting the entry, as each of the eight above did; an
+# entry arriving without one is the thing this inventory exists to make
+# impossible.
+#
+# **The number in that sentence has moved twice and will move again**, which is
+# why it is stated as "one more than what is here" rather than as a count in a
+# docstring somewhere else (`docs/MISTAKES.md` entry 1). The tuple below is the
+# record; this paragraph is the rule.
+#   - `benchmark_set_week(section_ids uuid[])` and
+#     `benchmark_set_rating_week(section_ids uuid[])` — E5-03's, and the first
+#     entries here that read *no* person key out and exist precisely so that none
+#     can be read. The sentence the ruling on `docs/disputes/E5-03-01.md` writes
+#     for them, quoted: *"A benchmark figure over an arbitrary section set is
+#     computed where the person rows live and leaves the database as numbers:
+#     `pulse_app` may execute the two benchmark set functions and may not select
+#     the rows they aggregate (§4.1 items 1 and 7, §8's structural-separation
+#     constraint, dispute E5-03-01)."*
+#
+#     **Why a function rather than a grant, answered rather than assumed.** ADR
+#     0150 prefers a plain grant wherever one would do, and here one cannot: a
+#     benchmark over an arbitrary section set has to count *distinct students*
+#     across the whole set (SPEC §5.1's comparison sets, and
+#     `docs/MISTAKES.md` entry 50 on why the unit has to be people), and any
+#     relation wide enough to let the application do that arithmetic is a
+#     relation keyed to a student, spanning every section of a cohort in the
+#     current and every retained prior term. That is the read E5-03's own scope
+#     forbids in five words — "section id and numbers, never a person" — and the
+#     work order that asked for it as a view was overruled. Each function takes
+#     one `uuid[]` and answers rows of numbers; neither has anywhere to put a
+#     person, and neither can be asked for one.
+#
+#     **The count moves from six to eight and that is the argument for it.** Two
+#     entries, one ticket, one ruling, one sentence — which is the standard the
+#     six above were held to.
 SANCTIONED_APPLICATION_EXECUTE = (
     "resolve_platform_user",
     "resolve_person_for_user",
@@ -402,6 +434,8 @@ SANCTIONED_APPLICATION_EXECUTE = (
     "record_roster_email",
     "record_teaching_instructor",
     "resolve_subject_for_user",
+    "benchmark_set_week",
+    "benchmark_set_rating_week",
 )
 
 # What the resolve definer may reach at table grain, and the whole of it.
@@ -594,8 +628,10 @@ RESOLVE_BOTH = text("SELECT to_regclass(:bare)::oid, to_regclass(:qualified)::oi
 #
 # **One rule stopped being spellable as emptiness, and E1-12 and E1-11 are why.**
 # "`pulse_app` may execute nothing" needed no name at all while the answer was
-# zero; the answer is now six functions that return no identity (ADR 0094, E1-11's
-# D7, the security round's F2, and E3-06's outbound subject), so the rule is an
+# zero; the answer is now the functions `SANCTIONED_APPLICATION_EXECUTE` names,
+# every one of which returns no identity (ADR 0094, E1-11's D7, the security
+# round's F2, E3-06's outbound subject and E5-03's two benchmark set functions),
+# so the rule is an
 # equality over
 # `SANCTIONED_APPLICATION_EXECUTE` at
 # the head of this file. The **door** it may not open is still spelled without a
@@ -645,7 +681,7 @@ THE_CARE_DOOR = (RECORD_FUNCTION, REVEAL_FUNCTION, SUBJECT_RESOLVER_FUNCTION)
 # three functions *that* ticket granted — and the merge folded its entries and its
 # sentences into that one rather than leaving two equalities to disagree.
 #
-# The owners those six functions run as: NOLOGIN roles that exist for nothing
+# The owners those functions run as: NOLOGIN roles that exist for nothing
 # else, so that "the definer's privileges" is a list you can read in one file
 # against one body (ADR 0043's pattern, ADR 0094 and E1-11's D7).
 # `pulse_resolve_definer` owns the three point resolvers **and E3-06's fourth**
@@ -1296,19 +1332,23 @@ def test_the_application_role_may_not_execute_the_reveal_function(db_session: An
     the audit row that makes the name accountable.
 
     **The inventory half is next door**, in
-    `test_the_application_role_may_execute_only_the_point_resolvers`: that the six
+    `test_the_application_role_may_execute_only_the_point_resolvers`: that the
     sanctioned functions are the only other thing this role may call. Two tests
     because they are two facts — this one is a door, that one is a closed set — and
     a merge that folded them into one would have lost whichever fact it phrased
     second.
 
-    **What the six permitted functions can reach is pinned elsewhere, as
-    equalities over their owners' grants**:
+    **What the permitted functions can reach is pinned elsewhere, as equalities
+    over their owners' grants**:
     `test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answers`
     below, and
     `tests/integration/test_the_roster_definers_answer_a_point_query_and_nothing_more.py`.
     That is where "what could this door possibly reach" is answered, and it is a
-    question about the owner rather than about the body.
+    question about the owner rather than about the body. **E5-03's two benchmark
+    set functions owe the same treatment and do not have it yet**: the ruling on
+    `docs/disputes/E5-03-01.md` settles that they exist and what they answer, and
+    settles nothing about which role owns them, so the equality over that owner's
+    grants is owed by whichever change names it.
 
     **The mutation it exists to survive**: dropping
     `REVOKE ALL ON FUNCTION … FROM PUBLIC` from any of the migrations, which puts
@@ -1383,10 +1423,14 @@ def test_the_application_role_may_execute_only_the_point_resolvers(db_session: A
     writer that takes a person and a section and writes the one role its own body
     names; and ADR 0139 opens a fourth resolver that answers the platform's subject
     for a `user` row id, because E3-06's sweep posts a score keyed by that subject
-    and the column carrying it is revoked from this role. This is the assertion that
-    those six are the only six.
+    and the column carrying it is revoked from this role. E5-03 opens two more,
+    and they are the first here that exist to *prevent* a read: a benchmark over
+    an arbitrary section set has to count distinct students, and any relation
+    wide enough to let this role do that arithmetic is a relation keyed to a
+    student (the ruling on `docs/disputes/E5-03-01.md`). This is the assertion
+    that the functions `SANCTIONED_APPLICATION_EXECUTE` names are the only ones.
 
-    **Two of the six write, and that is not a widening of this rule but the
+    **Two of them write, and that is not a widening of this rule but the
     instrument it now has to carry.** A grant bounds a table and its columns and
     cannot bound a column's *value*: there is no `GRANT INSERT (role =
     'INSTRUCTOR')`. So where a writer must be restricted to one value — an address
@@ -1401,8 +1445,8 @@ def test_the_application_role_may_execute_only_the_point_resolvers(db_session: A
     `SANCTIONED_APPLICATION_EXECUTE` at the head of this file, where every entry
     carries the sentence that admits it.
 
-    **Why an equality rather than a ceiling.** A seventh function granted to
-    `pulse_app` is a seventh door into whatever its owner can read, and nothing else
+    **Why an equality rather than a ceiling.** One more function granted to
+    `pulse_app` is one more door into whatever its owner can read, and nothing else
     in this build would mention it: `alembic check` reads no `pg_proc` entry in
     either direction, the grantee sweep below asks *who* holds something rather
     than *how many things*, and the refusal above is scoped to the Care door. A
@@ -1426,11 +1470,11 @@ def test_the_application_role_may_execute_only_the_point_resolvers(db_session: A
     exist — satisfies "nothing beyond the inventory" perfectly, and would go on
     satisfying it after the grants were dropped and the doors stopped working.
 
-    **The mutation it exists to survive**: `GRANT EXECUTE ON FUNCTION public.<a
-    seventh definer function> TO pulse_app`, and its quieter sibling, a migration
-    that omits `REVOKE ALL … FROM PUBLIC` on a new definer function — `PUBLIC`
-    includes `pulse_app`, so both arrive here.
-    **The near miss it tolerates**: a seventh `SECURITY DEFINER` function that
+    **The mutation it exists to survive**: `GRANT EXECUTE ON FUNCTION public.<an
+    uninventoried definer function> TO pulse_app`, and its quieter sibling, a
+    migration that omits `REVOKE ALL … FROM PUBLIC` on a new definer function —
+    `PUBLIC` includes `pulse_app`, so both arrive here.
+    **The near miss it tolerates**: another `SECURITY DEFINER` function that
     `pulse_app` may not execute. That is somebody else's door and
     `test_no_role_outside_this_scheme_is_granted_anything_in_public` is where its
     grantee is judged.
@@ -1858,13 +1902,14 @@ def test_neither_runtime_role_holds_any_privilege_on_user_identity(db_session: A
     **The execute mechanism is filtered out here and nowhere else**, and that is
     the asymmetry rather than an exemption. Both runtime roles hold `EXECUTE` on a
     definer function *by design* — `pulse_care` on the Care door, because §4 and
-    §6.2 require that door to be open, and since E1-12, E1-11 and E3-06
-    `pulse_app` on six functions that return no identity (ADR 0094, E1-11's D7,
-    the security round's F2 and ADR 0139) — so a rule
+    §6.2 require that door to be open, and since E1-12, E1-11, E3-06 and E5-03
+    `pulse_app` on the functions `SANCTIONED_APPLICATION_EXECUTE` names, every
+    one of which returns no identity (ADR 0094, E1-11's D7, the security round's
+    F2, ADR 0139 and the ruling on `docs/disputes/E5-03-01.md`) — so a rule
     that reported either would fail against the correct schema. It is asserted
     separately instead, and on each side by an equality beside a refusal:
     `test_the_application_role_may_execute_only_the_point_resolvers` says which
-    six `pulse_app` may call, `test_the_application_role_may_not_execute_the_
+    ones `pulse_app` may call, `test_the_application_role_may_not_execute_the_
     reveal_function` says it may not open the Care door, and
     `test_pulse_care_may_execute_exactly_the_functions_the_care_door_is_made_of` says
     `pulse_care` may call exactly those two. Asked about a role a runtime role can
@@ -3375,7 +3420,7 @@ def test_the_downgrade_completes_when_a_role_it_revokes_from_is_absent(
 #
 # **E1-12 and E1-11 add a marked test on the inventory side of that line, and it
 # is deliberate rather than a drift.** `test_the_application_role_may_execute_only_
-# the_point_resolvers` is an equality over the six functions `pulse_app` may call,
+# the_point_resolvers` is an equality over the functions `pulse_app` may call,
 # which by the rule above would be unmarked — but from the moment that set stopped
 # being empty, "the doors are the only doors" is the assertion that the set has not
 # grown, and there is no separate route-test that would notice one more door. The
@@ -4525,21 +4570,23 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     the one function whose job is to return a name.
 
     **The allowed grantees on a definer function are `pulse_care`, and — since
-    E1-12, E1-11, that ticket's security round and E3-06 — `pulse_app` on the six
-    functions `SANCTIONED_APPLICATION_EXECUTE` names.** E0-10's own sentence still governs
+    E1-12, E1-11, that ticket's security round, E3-06 and E5-03 — `pulse_app` on
+    the functions `SANCTIONED_APPLICATION_EXECUTE` names.** E0-10's own sentence still governs
     the door that returns identity: `pulse_care` "gets `EXECUTE` on a **single**
     `SECURITY DEFINER` function". What these tickets add is a different kind of
     function — three point lookups answering with a uuid, owned by a role that
     reads five columns and no identity among them; one writer that takes an address
     and can never write a name; one that takes a person and a section and writes
-    the single role its body names; and one that answers a pseudonymous subject for
-    a row id so a score can be posted against it — and each is admitted here **by
-    name**, out of that constant at the top of this file, rather than by widening
-    the rule to "the application role may execute definer functions". A seventh
-    grant to `pulse_app` therefore still appears below, which is the whole point of
+    the single role its body names; one that answers a pseudonymous subject for
+    a row id so a score can be posted against it; and two that answer cohort
+    figures over a section set precisely so that the rows they aggregate need
+    never be readable — and each is admitted here **by name**, out of that
+    constant at the top of this file, rather than by widening the rule to "the
+    application role may execute definer functions". An uninventoried grant to
+    `pulse_app` therefore still appears below, which is the whole point of
     writing the inventory down.
 
-    Which six they are is *not* this test's question. This sweep owns the grantee
+    Which ones they are is *not* this test's question. This sweep owns the grantee
     axis — who is named in an ACL anywhere — and the count and contents are
     `test_the_application_role_may_execute_only_the_point_resolvers`'s, one
     equality in one place. E0-10's count for `pulse_care` is likewise
@@ -5395,8 +5442,8 @@ APPLICATION_READERS = (APPLICATION_ROLE, "PUBLIC")
 # **Per view, because the sanction is per view.** Each entry below carries the
 # sentence that admits it, and the sentences come from the ticket, SPEC and the
 # ADR rather than from the SQL: E0-10's two, ADR 0046's three, E4-03's three
-# report views and E4-04's comment view, and what each is *for* is written down in
-# those records. No count
+# report views, E4-04's comment view and E5-03's four benchmark views, and what
+# each is *for* is written down in those records. No count
 # is written here — the set grows with every ticket that ships a read view, and a
 # number in a comment is a record with a scheduled expiry (`docs/MISTAKES.md`
 # entry 1).
@@ -5562,6 +5609,86 @@ SANCTIONED_VIEW_COLUMNS: dict[str, tuple[str, ...]] = {
     # first view in the schema whose rows are a person's writing, so the column
     # that must never arrive is any column that would let a reader sort them.
     "report_comment": ("section_id", "week_id", "stream", "answer_id", "comment_text"),
+    # E5-03's four, and the sentence that admits all of them at once: **a
+    # benchmark row is about a cohort, and a cohort has no id, no section and no
+    # person in it**. Each is keyed by a length, a level, a term and a week —
+    # four facts about a *set* of sections — and every other column is a
+    # statistic or a count over what that set's students submitted. There is
+    # deliberately no `section_id` here, which is the difference between these
+    # and E4-03's report views one row up: those are about one section an
+    # instructor already has, and these are about every section of a length and
+    # level in the institution, across the current and every retained prior term
+    # (SPEC §5.1's past-referencing). A key on that row would name a section a
+    # reader has no other route to.
+    #
+    # **`respondent_count` is a count and not a key**, and it is worth saying
+    # outright because it is the one column here that is *about* people. SPEC
+    # §5.1 gives comparison figures their own minimum and §4.1 item 7 covers "a
+    # mean, a median, or any other statistic"; E5-04 compares this number
+    # against `benchmark_min_respondents_default`, so it has to be a count of
+    # students rather than of responses (`docs/MISTAKES.md` entry 50). It is
+    # computed with `COUNT(DISTINCT ...)` inside the view and the key it counts
+    # over never leaves it.
+    #
+    # **What is absent is the whole point, and it was argued.** The work order
+    # for E5-03 asked for a fifth view exposing `(section_id, course_week,
+    # stream, user_id)` — a person-week index spanning a cohort — and the ruling
+    # on `docs/disputes/E5-03-01.md` withdrew it on E5-03's own scope sentence
+    # ("section id and numbers, never a person") and on SPEC §8's "enforced in
+    # the database, not just the application". The figures it was meant to feed
+    # are computed by `benchmark_set_week` and `benchmark_set_rating_week`,
+    # which are in `SANCTIONED_APPLICATION_EXECUTE` above with their own
+    # sentence. A `user_id` arriving on any of the four below is that decision
+    # being reversed without a ruling.
+    #
+    # `stream` is a key column on the two rating views (SPEC §3.2's two Likert
+    # questions, carried on the question rows since E4-02, never derived from a
+    # position), and `section_start_date` is a key column on the two term-axis
+    # views: SPEC §2.2 draws "one line per start cohort" on the aggregate axis,
+    # and a cohort is identified by the date it started rather than by its start
+    # letter, which is per-term admin data.
+    "benchmark_cohort_rating_week": (
+        "length_weeks",
+        "level",
+        "term_id",
+        "course_week",
+        "stream",
+        "rating_mean",
+        "rating_count",
+    ),
+    "benchmark_cohort_week": (
+        "length_weeks",
+        "level",
+        "term_id",
+        "course_week",
+        "workload_mean",
+        "workload_median",
+        "response_count",
+        "respondent_count",
+        "section_count",
+    ),
+    "benchmark_cohort_rating_term_axis": (
+        "length_weeks",
+        "level",
+        "term_id",
+        "section_start_date",
+        "term_week",
+        "stream",
+        "rating_mean",
+        "rating_count",
+    ),
+    "benchmark_cohort_term_axis": (
+        "length_weeks",
+        "level",
+        "term_id",
+        "section_start_date",
+        "term_week",
+        "workload_mean",
+        "workload_median",
+        "response_count",
+        "respondent_count",
+        "section_count",
+    ),
 }
 
 EXPECTED_APPLICATION_READABLE_COLUMNS: frozenset[tuple[str, str]] = frozenset(
