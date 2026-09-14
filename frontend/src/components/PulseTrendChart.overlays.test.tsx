@@ -354,6 +354,110 @@ describe('a suppressed series', () => {
   });
 });
 
+describe('a series whose flag does not say exactly false', () => {
+  /**
+   * The three shapes a `suppressed` that is not the boolean `false` arrives in.
+   *
+   * **The casts are the point rather than a shortcut.** The client casts the
+   * report JSON into its TypeScript shapes without parsing it at runtime, so
+   * `OverlaySeries` describes what the server is expected to send and does not
+   * check that it did. These three are what the props actually hold the day the
+   * field is renamed on the wire, dropped, or serialised loosely — and each is
+   * falsy or truthy in a way a plain `if (series.suppressed)` reads as "not
+   * suppressed", which draws a line SPEC §4.1 item 7 had suppressed. That
+   * reading is the security round's LOW on this file, and this is the pair that
+   * closes it.
+   */
+  const MALFORMED: readonly { readonly what: string; readonly flag: unknown }[] = [
+    { what: 'the flag was dropped from the payload', flag: undefined },
+    { what: 'the flag arrived null', flag: null },
+    { what: 'the flag arrived as a string', flag: 'false' },
+  ];
+
+  for (const { what, flag } of MALFORMED) {
+    it(`is treated as suppressed when ${what}`, () => {
+      const series = {
+        suppressed: flag,
+        reason: 'below-minimum',
+        points: COMPARISON_POINTS,
+      } as unknown as OverlaySeries;
+
+      render(
+        <PulseTrendChart
+          points={SECTION}
+          label={INSTRUCTOR}
+          lengthWeeks={SECTION_WEEKS}
+          comparison={series}
+          showLegend
+        />,
+      );
+
+      // No line, no legend entry, no table — and the notice, so a reader is
+      // told a series is missing rather than left with a chart that quietly
+      // has one line fewer than it should.
+      expect(screen.queryByTestId(TREND_LINE_COMPARISON_TESTID)).toBeNull();
+      expect(screen.queryByTestId(TREND_LEGEND_COMPARISON_TESTID)).toBeNull();
+      expect(screen.getAllByRole('table')).toHaveLength(1);
+      expect(screen.getByTestId(TREND_SUPPRESSION_COMPARISON_TESTID).textContent).toBe(
+        'Comparable 12-week courses: no line this week. The set behind it is too small to report on.',
+      );
+    });
+  }
+
+  it('is drawn when the flag says exactly false', () => {
+    // The near miss, and the half that makes the three above mean anything: a
+    // component that suppressed everything would satisfy them all. Same points,
+    // same reason token, and only the flag is different.
+    render(
+      <PulseTrendChart
+        points={SECTION}
+        label={INSTRUCTOR}
+        lengthWeeks={SECTION_WEEKS}
+        comparison={{ suppressed: false, reason: 'below-minimum', points: COMPARISON_POINTS }}
+        showLegend
+      />,
+    );
+
+    expect(screen.getByTestId(TREND_LINE_COMPARISON_TESTID)).toBeTruthy();
+    expect(screen.getByTestId(TREND_LEGEND_COMPARISON_TESTID)).toBeTruthy();
+    expect(screen.queryByTestId(TREND_SUPPRESSION_COMPARISON_TESTID)).toBeNull();
+    expect(
+      screen.getByRole('table', { name: `Weekly ratings: Instructor, ${COMPARISON_LEGEND}` }),
+    ).toBeTruthy();
+  });
+
+  it('is a different question from a prop that was never sent', () => {
+    // The boundary the fail-closed reading must not cross. A malformed member
+    // is still a member: the payload said something about this series and the
+    // chart could not read it, so it says so. An absent prop said nothing at
+    // all — §4.1 item 1's case — and a notice there would be the chart
+    // announcing a comparison to a reader whose payload carries none.
+    const malformed = { reason: 'below-minimum', points: [] } as unknown as OverlaySeries;
+
+    const { container: present } = render(
+      <PulseTrendChart
+        points={SECTION}
+        label={INSTRUCTOR}
+        lengthWeeks={SECTION_WEEKS}
+        comparison={malformed}
+        showLegend
+      />,
+    );
+    expect(present.querySelectorAll('.pulse-trend-suppression')).toHaveLength(1);
+
+    const { container: absent } = render(
+      <PulseTrendChart
+        points={SECTION}
+        label={INSTRUCTOR}
+        lengthWeeks={SECTION_WEEKS}
+        showLegend
+      />,
+    );
+    expect(absent.querySelectorAll('.pulse-trend-suppression')).toHaveLength(0);
+    expect(absent.querySelectorAll('path')).toHaveLength(1);
+  });
+});
+
 describe('a week the series has no figure for', () => {
   it('breaks the line rather than drawing across it', () => {
     const gapped: OverlaySeries = {

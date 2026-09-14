@@ -57,6 +57,11 @@ export interface OverlayPoint {
  * decides it** — the flag is read, never computed, and a suppressed series
  * arrives carrying no points to draw even if a caller passed some.
  *
+ * **`suppressed` has to say `false` for a line to be drawn.** This is a shape
+ * over JSON the client casts rather than parses, so anything else the flag
+ * turns out to hold — missing, renamed, null — is read as suppressed. See
+ * {@link isSuppressed} for why the check fails in that direction.
+ *
  * `reason` is the payload's one-word token (`"below-minimum"` in the sketch) and
  * **nothing renders it**: a wire token is not a governed string, and the words a
  * reader sees come from `instructorReportTrendCopy.ts` like every other sentence
@@ -508,14 +513,17 @@ export function PulseTrendChart({
       {universityPoints.length > 0 && (
         <OverlayTable stream={label} series={universityLabel} points={universityPoints} />
       )}
-      {comparison?.suppressed === true && (
+      {/* The notice and the line are decided by one question asked one way
+          (`isSuppressed`), so there is no gap between them for a malformed flag
+          to fall into: a series that draws no line always says why. */}
+      {comparison !== undefined && isSuppressed(comparison) && (
         <p className="pulse-trend-suppression" data-testid={TREND_SUPPRESSION_COMPARISON_TESTID}>
           {fillCopy('instructor_report_trend.comparison_suppressed', {
             weeks: String(lengthWeeks),
           })}
         </p>
       )}
-      {university?.suppressed === true && (
+      {university !== undefined && isSuppressed(university) && (
         <p className="pulse-trend-suppression" data-testid={TREND_SUPPRESSION_UNIVERSITY_TESTID}>
           {copy('instructor_report_trend.university_suppressed')}
         </p>
@@ -556,16 +564,47 @@ export function PulseTrendChart({
 }
 
 /**
+ * Whether a series the payload sent may be drawn — **only if its flag says
+ * exactly `false`**.
+ *
+ * This is the one question in the file that fails closed, and the comparison is
+ * `=== false` rather than a truthiness test on purpose. `OverlaySeries` is a
+ * TypeScript shape over JSON the client casts without parsing at runtime, so the
+ * type is a description of what the server is expected to send and not a check
+ * that it did. A flag that arrived renamed, misspelled, or missing is
+ * `undefined` here, and `undefined` is falsy: a truthiness test would read a
+ * dropped `suppressed` as "not suppressed" and draw a line SPEC §4.1 item 7 had
+ * suppressed, with no notice to say anything was withheld. The whole class of
+ * payload slip resolves to "show the figure", which is the wrong direction for a
+ * confidentiality rule to fail in.
+ *
+ * So anything that is not literally `false` is treated as suppressed. The cost,
+ * named: a payload that stopped sending the flag would show suppression notices
+ * on every panel rather than drawing lines — loud, visible, and withholding
+ * nothing a reader was entitled to.
+ *
+ * **An absent prop is not this question.** `comparison === undefined` means the
+ * payload carried no comparison member at all, which is §4.1 item 1's case and
+ * renders nothing whatsoever — no line and no notice. This function is only ever
+ * asked about a series that is there.
+ */
+function isSuppressed(series: OverlaySeries): boolean {
+  return series.suppressed !== false;
+}
+
+/**
  * The weeks one comparison series carries, or an empty list.
  *
  * Absent and suppressed both come out empty, and the caller is what tells them
  * apart. A suppressed series is emptied here rather than trusted to arrive with
  * no points: the payload sketch says a suppressed member carries `points: []`
  * and nothing else, and a chart that drew whatever it was handed would put a
- * line under a suppression notice the first time that contract slipped.
+ * line under a suppression notice the first time that contract slipped. That is
+ * the same defence as {@link isSuppressed}, pointed at the other half of the
+ * member — the flag and the points each stop the other being believed alone.
  */
 function drawnPoints(series: OverlaySeries | undefined): readonly OverlayPoint[] {
-  if (series === undefined || series.suppressed) return [];
+  if (series === undefined || isSuppressed(series)) return [];
   return series.points;
 }
 

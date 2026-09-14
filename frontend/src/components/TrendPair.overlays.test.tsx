@@ -201,6 +201,50 @@ describe('TrendPair with no benchmark at all', () => {
   });
 });
 
+describe('TrendPair carries a malformed flag through unchanged', () => {
+  it('leaves the panel to fail closed, and still draws nothing for an absent member', () => {
+    // `TrendPair` gates nothing: it hands each panel its stream's two members
+    // and the panel decides. This is the proof that the pass-through does not
+    // undo the panel's fail-closed reading — a pair that filled in a default
+    // member, or that read the flag itself on the way past, would show a line
+    // here. The upper panel's comparison member arrives with no flag at all and
+    // its university member is absent entirely, so one panel carries both sides
+    // of the boundary at once: a member that cannot be read says so, a member
+    // that was never sent says nothing.
+    const flagless = {
+      comparison: { reason: 'below-minimum', points: INSTRUCTOR_BENCHMARK.comparison?.points },
+    } as unknown as StreamBenchmark;
+
+    const { container } = render(
+      <TrendPair
+        instructor={INSTRUCTOR_WEEKS}
+        course={COURSE_WEEKS}
+        lengthWeeks={SECTION_WEEKS}
+        instructorBenchmark={flagless}
+        courseBenchmark={COURSE_BENCHMARK}
+      />,
+    );
+
+    const { upper, lower } = panelsOf(container);
+    expect(linesOf(upper)).toEqual(['pulse-trend-line']);
+    expect(
+      upper.querySelectorAll(`[data-testid="${TREND_SUPPRESSION_COMPARISON_TESTID}"]`),
+    ).toHaveLength(1);
+    expect(
+      upper.querySelectorAll(`[data-testid="${TREND_SUPPRESSION_UNIVERSITY_TESTID}"]`),
+    ).toHaveLength(0);
+
+    // And the lower panel, whose members are well formed, is untouched by any
+    // of it: three lines and no notice.
+    expect(linesOf(lower)).toEqual([
+      'pulse-trend-line-university',
+      'pulse-trend-line-comparison',
+      'pulse-trend-line',
+    ]);
+    expect(lower.querySelectorAll('.pulse-trend-suppression')).toHaveLength(0);
+  });
+});
+
 describe('TrendPair when the payload suppresses', () => {
   it('says so under each panel, and keeps the series that was not suppressed', () => {
     const suppressedComparison: StreamBenchmark = {
