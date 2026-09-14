@@ -30,7 +30,12 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from fixtures.benchmark_views import SET_FUNCTION, set_function_rows
+from fixtures.benchmark_views import (
+    COURSE_RATING_POSITION,
+    INSTRUCTOR_RATING_POSITION,
+    SET_FUNCTION,
+    set_function_rows,
+)
 from fixtures.report_api import ReportDoor
 from fixtures.report_benchmarks import (
     BENCHMARK_WEEKS,
@@ -39,6 +44,8 @@ from fixtures.report_benchmarks import (
     WEEK_THIN_PEOPLE,
     WEEK_THIN_SECTIONS,
     course_levels,
+    hero_answers_to,
+    hero_responses,
     lead_faculty_course_ids,
     section_lengths,
 )
@@ -146,6 +153,60 @@ def test_the_two_near_miss_weeks_differ_from_the_passing_ones_by_one_count_each(
         f"Course week {WEEK_THIN_SECTIONS} covers {thin_sections['section_count']} sections and "
         f"the passing week {clear['section_count']}; the near miss is exactly one section."
     )
+
+
+def test_the_hero_contributes_to_both_panels_in_every_planted_week(
+    report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
+) -> None:
+    """The university control's premise, in both currencies, read back from the database.
+
+    The suppression module's university line is "the same rows plus the hero",
+    and E5-04 seals every figure against **its own contributors** — the distinct
+    people who answered *that* stream. So the premise is a claim about answer
+    rows at a question position, not about responses: a hero whose respondents
+    answered only the instructor question contributes nothing to the course
+    panel, and the course-stream control would then be asserting a property the
+    world does not have. That is the defect the ruling on
+    `docs/disputes/E5-05-02.md` settles, and this is where its repair is checked.
+
+    E4-07's world writes the hero's course rating only in its own full week
+    (course week 1), so `plant_the_benchmark_cohort` writes one onto each of the
+    hero's existing responses in the four benchmark weeks — no new response, no
+    moved count of people, only which questions those people answered.
+
+    **What a red here means:** the university line at a benchmark week is
+    computed over the comparison set's rows alone for one of the two panels, and
+    the control in the suppression module is false rather than the implementation
+    being wrong.
+    """
+    minimums = report_api_contract.minimums()
+    cohort = benchmark_cohort(report_door, minimums=minimums)
+    world = cohort.world
+    world.session.rollback()
+
+    for course_week in sorted(BENCHMARK_WEEKS):
+        responses = hero_responses(world, report_door, course_week)
+        assert responses, (
+            f"The hero section holds no response at all in course week {course_week}, so it "
+            "contributes to neither panel's university line there and both controls in the "
+            "suppression module are about a population the hero is not in."
+        )
+        answered = {
+            "instructor": hero_answers_to(
+                world, report_door, course_week, INSTRUCTOR_RATING_POSITION
+            ),
+            "course": hero_answers_to(world, report_door, course_week, COURSE_RATING_POSITION),
+        }
+        assert answered["instructor"] >= 1, (
+            f"None of the hero's {len(responses)} responses in course week {course_week} answered "
+            "the instructor rating, which is E4-07's own planting and this world does not touch."
+        )
+        assert answered["course"] == len(responses), (
+            f"{answered['course']} of the hero's {len(responses)} responses in course week "
+            f"{course_week} carry a course rating. `plant_the_benchmark_cohort` writes one onto "
+            "each of them, because E4-07's world writes course ratings in its full week only — and "
+            "without them the course panel's university line is the comparison set's rows alone."
+        )
 
 
 def test_the_hero_and_the_set_are_comparable_and_led_by_one_person(

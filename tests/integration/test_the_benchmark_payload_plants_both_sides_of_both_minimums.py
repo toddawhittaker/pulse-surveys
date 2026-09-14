@@ -29,6 +29,19 @@ asserted where no figure could have arrived is emptiness wearing a green tick
 (`docs/MISTAKES.md` entries 3 and 9), and in this ticket that is the whole risk:
 before the implementation lands, every one of these members is absent.
 
+**"The same rows plus the hero" is a claim in two currencies, and it had to be
+made true in both.** E5-04 seals each figure against its own contributors — the
+distinct people who answered *that* stream — and E4-07's world writes the hero's
+course rating in its own full week only, so at these four weeks the hero
+contributed to the instructor panel and to nothing else, which made the
+course-stream control false rather than the implementation wrong. Under the
+ruling on `docs/disputes/E5-05-02.md`, `plant_the_benchmark_cohort` writes a
+course rating onto each of the hero's existing responses in the benchmark weeks
+— no new response and no moved count of people, only which questions those
+people answered — and
+`test_the_report_benchmark_world_plants_what_it_claims.py` reads back from the
+database that it did.
+
 **The respondent minimum is a count of people** (`docs/MISTAKES.md` entry 50).
 The thin week is short by one *person*; its responses are not short of anything,
 because each of this world's respondents answers once a week in one section. The

@@ -60,7 +60,7 @@ this file plants into is closed and published wherever something asks.
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -70,6 +70,7 @@ from sqlalchemy import select, update
 from fixtures.benchmark_views import (
     COURSE_NUMBER_COLUMN,
     COURSE_NUMBER_FOR_LEVEL,
+    COURSE_RATING_POSITION,
     COURSE_TABLE,
     CURRENT_TERM,
     LEAD_FACULTY_MAPPING_TABLE,
@@ -79,6 +80,7 @@ from fixtures.benchmark_views import (
     PlantedSection,
     numbers_in,
 )
+from fixtures.grading import RESPONSE_SECTION_COLUMN, RESPONSE_WEEK_COLUMN
 from fixtures.report_api import (
     BENCHMARK_MIN_RESPONDENTS,
     BENCHMARK_MIN_SECTIONS,
@@ -88,6 +90,8 @@ from fixtures.report_api import (
     ReportDoor,
     member,
 )
+from fixtures.report_views import FIRST_VERSION
+from fixtures.submit import ANSWER_TABLE, QUESTION_TABLE, RESPONSE_TABLE
 from fixtures.supervision import require_table, single_primary_key
 from fixtures.survey_windows import (
     COHORT_SECTION_MODALITY,
@@ -162,6 +166,14 @@ THE_LEAD = "e5-05-lead"
 # and the control module reads every level back and requires them equal.
 SHARED_COURSE_NUMBER = COURSE_NUMBER_FOR_LEVEL[UG]
 LEVEL_COLUMN = "level"
+
+# The course rating the hero's own respondents give in the four benchmark weeks —
+# see `_the_hero_answers_the_course_question` for why this planter writes it and
+# E4-07's fixture does not. An integer on SPEC §3.2's 1-5 scale, and a value
+# nothing reads back as an answer: the university line keeps the hero, and no
+# test here hand-computes a university figure, so this exists to make the hero a
+# *contributor* to the course panel and for nothing else.
+HERO_COURSE_RATING = 3
 
 # The four course weeks this world is planted into, by what each is for. Course
 # week 1 is left alone — it is the week E4-07's own suite reads, and a world that
@@ -460,6 +472,7 @@ def plant_the_benchmark_cohort(
         respondents_by_week[course_week] = tuple(
             f"e5-05-respondent-{index:02d}" for index in answering
         )
+        _the_hero_answers_the_course_question(world, door, course_week)
 
     door.commit()
     return PlantedBenchmarkCohort(
@@ -473,6 +486,82 @@ def plant_the_benchmark_cohort(
         respondents_by_week=respondents_by_week,
         plans=plans,
     )
+
+
+def hero_responses(
+    world: BenchmarkWorld, door: ReportDoor, course_week: int
+) -> list[Mapping[str, Any]]:
+    """Every `response` row the hero section holds in one of its course weeks.
+
+    Read back rather than assumed: which of E4-07's respondents answered which
+    week is that fixture's business, and a planter that assumed a count would
+    write the hero's course ratings onto rows that are not there.
+    """
+    table = require_table(world.tables, RESPONSE_TABLE)
+    world.session.flush()
+    rows = world.session.execute(
+        select(table).where(
+            table.c[RESPONSE_SECTION_COLUMN] == door.rows.taught_section_id,
+            table.c[RESPONSE_WEEK_COLUMN] == door.rows.week_id(course_week),
+        )
+    ).mappings()
+    return [dict(row) for row in rows]
+
+
+def hero_answers_to(
+    world: BenchmarkWorld, door: ReportDoor, course_week: int, position: int
+) -> int:
+    """How many of the hero's responses in one course week answered one question.
+
+    The number a per-stream figure's population is counted in: E5-04 seals every
+    figure against the distinct people who answered **that stream**, so "the hero
+    contributes to this line" is a claim about answer rows at one position and
+    never about responses.
+    """
+    answers = require_table(world.tables, ANSWER_TABLE)
+    response_column = world.report.link(ANSWER_TABLE, RESPONSE_TABLE)
+    question_column = world.report.link(ANSWER_TABLE, QUESTION_TABLE)
+    question = world.report.questions[FIRST_VERSION][position]
+    key = world.key_of(RESPONSE_TABLE)
+    response_ids = [row[key] for row in hero_responses(world, door, course_week)]
+    if not response_ids:
+        return 0
+    world.session.flush()
+    rows = world.session.execute(
+        select(answers.c[response_column]).where(
+            answers.c[response_column].in_(response_ids),
+            answers.c[question_column] == question[world.key_of(QUESTION_TABLE)],
+        )
+    )
+    return len(list(rows))
+
+
+def _the_hero_answers_the_course_question(
+    world: BenchmarkWorld, door: ReportDoor, course_week: int
+) -> None:
+    """Give each of the hero's respondents in this week a course rating too.
+
+    **Why this is here, and why it is not in `tests/fixtures/report_api.py`.**
+    E4-07's world writes a course rating only in its full week, course week 1
+    (the `ANSWERED_BY` loop), so in every week this ticket plants into the hero's
+    respondents answer the instructor question and nothing else. E5-04 seals each
+    figure against its own contributors — the distinct people who answered *that*
+    stream — so without this the university **course** line at a benchmark week
+    is computed over the comparison set's rows alone, and the module docstring's
+    premise, "the same rows plus the hero", is false in that currency. The ruling
+    on `docs/disputes/E5-05-02.md` settles the repair here, in this ticket's own
+    fixture: E4-07's world is another ticket's premise and keeps its own answers.
+
+    The rating is written onto the hero's **existing** responses rather than as
+    new ones, so no count of people or of responses in E4-07's world moves —
+    only which questions those people answered. What the planted world really
+    holds is read back from the database by
+    `test_the_report_benchmark_world_plants_what_it_claims.py`.
+    """
+    for response in hero_responses(world, door, course_week):
+        world.report.answer(
+            response, COURSE_RATING_POSITION, HERO_COURSE_RATING, version=FIRST_VERSION
+        )
 
 
 def _give_every_course_one_level(world: BenchmarkWorld, hero_course: Mapping[str, Any]) -> Any:
@@ -744,6 +833,140 @@ def report_payload_model(contract: Any) -> Any:
             "suite needs one to hand a payload to."
         )
     return models[0]
+
+
+# The read service the report route delegates to. E5-05's work order settles the
+# name and the home — "the benchmark members are assembled in
+# `app.services.reporting._payload`", reached through `instructor_report` — and
+# settles no signature, so the parameters are bound **by name** below, the device
+# `tests/fixtures/report_api.py::call_the_helper` uses and for the same reason: a
+# signature a record leaves open is a question for the ticket, and a guess
+# written into a fixture answers it silently.
+REPORT_SERVICE = "instructor_report"
+SESSION_PARAMETERS = ("session", "db", "db_session", "connection")
+# The reader's own person — the one the route resolves from the session's claims.
+# `tests/fixtures/report_api.py` seeds it in `_seed_the_launching_person` and the
+# door keeps it as `ReportDoor.person_id`, which is how a test can hand the
+# service what a request would have carried.
+PERSON_MARK = "person"
+SECTION_MARK = "section"
+WEEK_MARK = "week"
+SETTINGS_MARK = "settings"
+NOW_PARAMETERS = ("now", "at", "instant", "as_of")
+
+
+def an_instructor_report(door: ReportDoor, contract: Any, *, course_week: int) -> Any:
+    """The report **object** the service builds for one section and course week.
+
+    **Not a payload re-validated from its own JSON**, which is the repair the
+    ruling on `docs/disputes/E5-05-01.md` settles. A served body carries its
+    figures as plain mappings, and a mapping validated into a comparison figure
+    presents no seal — so `model_validate(body)` over any payload with a *shown*
+    figure in it is refused by construction, for every implementation that
+    satisfies criterion 1. The seal is deliberately never serialized, because a
+    serialized seal is a forgeable one.
+
+    What the response boundary really re-reads is the object the route returns,
+    with its figures as sealed instances, and that is what this answers. A test
+    can then rewrite one member of it and ask the boundary the only question
+    worth asking: does the unsealed figure reach the wire.
+
+    Every parameter is filled by name and an unfillable required one is a failure
+    naming it — an interface question for the ticket rather than a guess.
+    """
+    import inspect
+
+    module = contract.reporting()
+    service = getattr(module, REPORT_SERVICE, None)
+    if not callable(service):
+        pytest.fail(
+            f"`{contract.reporting_module_name}` exposes no callable `{REPORT_SERVICE}`; it "
+            f"exposes {sorted(name for name in vars(module) if not name.startswith('_'))}. E5-05's "
+            "work order names it as the read the route delegates to, and this suite needs the "
+            "report *object* rather than its serialized body — see this function's docstring and "
+            "the ruling on `docs/disputes/E5-05-01.md`."
+        )
+
+    positional: list[Any] = []
+    keyword: dict[str, Any] = {}
+    unfilled: list[str] = []
+    for parameter in inspect.signature(service).parameters.values():
+        if parameter.kind in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD):
+            continue
+        lowered = parameter.name.lower()
+        if lowered in SESSION_PARAMETERS:
+            value: Any = door.world.session
+        elif PERSON_MARK in lowered:
+            value = _the_readers_person(door)
+        elif SECTION_MARK in lowered:
+            value = door.rows.taught_section_id
+        elif WEEK_MARK in lowered:
+            value = course_week
+        elif SETTINGS_MARK in lowered:
+            value = _settings()
+        elif lowered in NOW_PARAMETERS:
+            value = datetime.now(UTC)
+        elif parameter.default is not parameter.empty:
+            continue
+        else:
+            unfilled.append(parameter.name)
+            continue
+        if parameter.kind is parameter.POSITIONAL_ONLY:
+            positional.append(value)
+        else:
+            keyword[parameter.name] = value
+
+    if unfilled:
+        pytest.fail(
+            f"`{REPORT_SERVICE}{inspect.signature(service)}` requires {unfilled}, which this "
+            "fixture has nothing to fill from. It supplies a session (a parameter named "
+            f"{list(SESSION_PARAMETERS)}), the reader's person (one naming `{PERSON_MARK}`), a "
+            f"section id (one naming `{SECTION_MARK}`), a course week (one naming `{WEEK_MARK}`), "
+            f"`Settings` (one naming `{SETTINGS_MARK}`) and an instant (one named "
+            f"{list(NOW_PARAMETERS)}). A further required input is an interface "
+            "question for the ticket — `an_instructor_report` in "
+            "tests/fixtures/report_benchmarks.py is where a spelling is taught."
+        )
+
+    report = service(*positional, **keyword)
+    fields = getattr(type(report), "model_fields", None) or {}
+    if not fields:
+        pytest.fail(
+            f"`{REPORT_SERVICE}` answered {report!r}, which is not a model this suite can rewrite a "
+            "member of. The route serves a Pydantic report, and the boundary under test is the "
+            "revalidation that report crosses on its way to the wire."
+        )
+    return report
+
+
+def _the_readers_person(door: ReportDoor) -> Any:
+    """The person the route would have resolved from the session's claims.
+
+    The service takes the reader's own person because the report is scoped to the
+    sections that person teaches; a test calling it directly has to hand over what
+    a request would have carried, or it is exercising a read nobody could make.
+    `tests/fixtures/report_api.py` seeds that person in
+    `_seed_the_launching_person` and the door keeps it.
+
+    `None` is a legitimate value of that parameter for a session naming nobody,
+    and it is not what these tests want — it is refused here rather than passed
+    quietly, because a report read as nobody is a different question from the one
+    the smuggling tests ask.
+    """
+    if door.person_id is None:
+        pytest.fail(
+            "This door holds no person id, so there is nobody to read the report as. "
+            "`report_door` builds the instructor door, which seeds one; a door built for a role "
+            "that holds no assignment (the student door) cannot drive the report service."
+        )
+    return door.person_id
+
+
+def _settings() -> Any:
+    """`Settings`, built the way `tests/fixtures/report_api.py` builds it."""
+    from importlib import import_module
+
+    return import_module("app.config").Settings()
 
 
 def an_unsealed_figure(figure_type: Any, *, figure: Any) -> Any:

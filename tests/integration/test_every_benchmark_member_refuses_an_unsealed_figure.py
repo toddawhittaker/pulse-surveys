@@ -27,6 +27,17 @@ with `model_construct`, which runs no validation and no `__init__`, and it is
 built **unsuppressed carrying a number**, because that is the dangerous state:
 §4.1 item 7 is about the figure, not the flag.
 
+**The report these tests smuggle into is the one the service builds**, not a
+payload re-validated from its own served JSON. The ruling on
+`docs/disputes/E5-05-01.md` settles that: a served body carries its figures as
+plain mappings, the seal is a private attribute that is deliberately never
+serialized, and so re-validating a body that carries a *shown* figure is refused
+before any smuggling happens — for every implementation that satisfies criterion
+1, which is to say the tests had a second way to be green that had nothing to do
+with their subject. Starting from the service's own object also puts these tests
+on the layer they claim: sealed instances crossing the revalidation the response
+performs over whatever the route hands back.
+
 **A refusal counts only if it names the member that was tampered with**
 (`tests/fixtures/report_benchmarks.py::through_the_boundary`). A reader counting
 any exception has a second way to be green — a payload that will not round-trip
@@ -52,10 +63,9 @@ from fixtures.report_benchmarks import (
     POINTS_FIELD,
     WEEK_CLEAR,
     WORKLOAD_BENCHMARK_MEMBER,
+    an_instructor_report,
     an_unsealed_figure,
     carries_number,
-    points_of,
-    report_payload_model,
     through_the_boundary,
 )
 from fixtures.report_views import INSTRUCTOR_STREAM
@@ -72,7 +82,7 @@ MISSING = object()
 
 
 def child(node: Any, name: Any) -> Any:
-    """One member of a validated payload, whether the level is a model, a mapping or a list."""
+    """One member of a report object, whether the level is a model, a mapping or a list."""
     if isinstance(name, int):
         if not isinstance(node, Sequence) or isinstance(node, str) or len(node) <= name:
             pytest.fail(f"{node!r} has no item {name}; this walk expected a list of points there.")
@@ -113,6 +123,13 @@ def replaced(node: Any, name: Any, value: Any) -> Any:
     return copy(update={name: value})
 
 
+def walk(node: Any, path: Sequence[Any]) -> Any:
+    """Follow a member path down a report object."""
+    for name in path:
+        node = child(node, name)
+    return node
+
+
 def with_member_replaced(node: Any, path: Sequence[Any], value: Any) -> Any:
     """A payload rebuilt from the leaf upward with one member replaced."""
     if not path:
@@ -121,19 +138,30 @@ def with_member_replaced(node: Any, path: Sequence[Any], value: Any) -> Any:
     return replaced(node, head, with_member_replaced(child(node, head), path[1:], value))
 
 
-def a_point_index(body: Any, answered: Any, course_week: int) -> int:
-    """Where in the served series the point for one course week sits."""
-    series = points_of(body, INSTRUCTOR_STREAM, COMPARISON_POPULATION, answered=answered)
-    assert course_week in series, (
-        f"The instructor panel's comparison series carries course weeks {sorted(series)} and not "
-        f"{course_week}, so there is no point to put a smuggled figure into."
-    )
-    points = body[STREAMS_MEMBER][PAYLOAD_STREAM_KEY[INSTRUCTOR_STREAM]][BENCHMARK_MEMBER][
-        COMPARISON_POPULATION
-    ][POINTS_FIELD]
-    return next(
-        index for index, point in enumerate(points) if int(point[POINT_WEEK_FIELD]) == course_week
-    )
+SERIES_PATH = (
+    STREAMS_MEMBER,
+    PAYLOAD_STREAM_KEY[INSTRUCTOR_STREAM],
+    BENCHMARK_MEMBER,
+    COMPARISON_POPULATION,
+    POINTS_FIELD,
+)
+
+
+def a_point_index(report: Any, course_week: int) -> int:
+    """Where in the report's own series the point for one course week sits.
+
+    Read off the **report object**, not a served body: the body is where the
+    three tests used to start, and the ruling on `docs/disputes/E5-05-01.md`
+    moved them off it.
+    """
+    points = walk(report, SERIES_PATH)
+    weeks = [int(child(point, POINT_WEEK_FIELD)) for point in points]
+    if course_week not in weeks:
+        pytest.fail(
+            f"The instructor panel's comparison series carries course weeks {weeks} and not "
+            f"{course_week}, so there is no point to put a smuggled figure into."
+        )
+    return weeks.index(course_week)
 
 
 class Smuggled(NamedTuple):
@@ -149,29 +177,52 @@ class Smuggled(NamedTuple):
     before: Any
     served: Any
     what_happened: str | None
+    member: str
 
 
 def drive_one_member(
-    door: ReportDoor, contract: Any, *, path: Sequence[Any], named: str
+    door: ReportDoor,
+    contract: Any,
+    *,
+    path: Sequence[Any] | Callable[[Any], Sequence[Any]],
+    named: str,
 ) -> Smuggled:
-    """Smuggle an unsealed figure into one member and ask the wire boundary about it.
+    """Smuggle an unsealed figure into one member of a real report, and ask the boundary.
 
-    The payload is a real one, fetched from the route, with exactly one member
-    rewritten — so every other member is what the route serves and nothing in this
-    walk is a shape the test invented.
+    **The report is the object the service builds, not a body re-validated from
+    its own JSON**, which is the repair the ruling on
+    `docs/disputes/E5-05-01.md` settles. A served body carries every figure as a
+    plain mapping, and a figure rebuilt from a mapping can never carry the seal —
+    it is a private attribute over the field values, deliberately not serialized,
+    because a serialized seal is a forgeable one. So re-validating a payload that
+    carries a *shown* figure is refused before any smuggling happens, for every
+    implementation that satisfies criterion 1, and the tests would have had a
+    second way to be green that has nothing to do with their subject.
+
+    Starting from the service's own report also puts the test on the layer it
+    says it is about: figures as sealed instances, crossing the revalidation the
+    response performs over whatever the route hands back.
+
+    Exactly one member is rewritten, with `model_copy(update=…)`, which runs no
+    validator — so the object handed to the boundary is a report no validator has
+    seen, and everything in it except that one member is what the service built.
     """
-    body, _answered = door.payload(course_week=WEEK_CLEAR)
-    model = report_payload_model(contract)
-    validated = model.model_validate(body)
+    report = an_instructor_report(door, contract, course_week=WEEK_CLEAR)
+    resolved = tuple(path(report) if callable(path) else path)
 
     unsealed = an_unsealed_figure(contract.comparison_type(), figure=A_SMUGGLED_MEAN)
-    smuggled = with_member_replaced(validated, path, unsealed)
+    smuggled = with_member_replaced(report, resolved, unsealed)
 
     # Read before the boundary is asked anything, so the canary the test asserts
     # describes what went in rather than whatever survived.
     before = smuggled.model_dump(mode="json")
-    served, what_happened = through_the_boundary(model, smuggled, named=named)
-    return Smuggled(before=before, served=served, what_happened=what_happened)
+    served, what_happened = through_the_boundary(type(report), smuggled, named=named)
+    return Smuggled(
+        before=before,
+        served=served,
+        what_happened=what_happened,
+        member=".".join(str(step) for step in resolved),
+    )
 
 
 def reached_the_wire(outcome: Smuggled) -> bool:
@@ -179,20 +230,20 @@ def reached_the_wire(outcome: Smuggled) -> bool:
     return outcome.served is not None and carries_number(outcome.served, A_SMUGGLED_MEAN)
 
 
-def the_canary_complaint(outcome: Smuggled, *, member: str) -> str:
+def the_canary_complaint(outcome: Smuggled) -> str:
     """What to say when the smuggle never carried the figure in the first place."""
     return (
-        f"The report smuggled into `{member}` does not carry {A_SMUGGLED_MEAN} before any boundary "
-        f"sees it: {outcome.before!r}. Until it does, this test asserts that a figure nobody "
-        "planted is absent (`docs/MISTAKES.md` entry 3)."
+        f"The report smuggled into `{outcome.member}` does not carry {A_SMUGGLED_MEAN} before any "
+        f"boundary sees it: {outcome.before!r}. Until it does, this test asserts that a figure "
+        "nobody planted is absent (`docs/MISTAKES.md` entry 3)."
     )
 
 
-def the_wire_complaint(outcome: Smuggled, *, member: str) -> str:
+def the_wire_complaint(outcome: Smuggled) -> str:
     """What to say when it did reach the wire."""
     return (
         f"A comparison figure built past the constructor — no token, no chokepoint, no minimum ever "
-        f"consulted — reached the serialized payload through `{member}`.\n\n"
+        f"consulted — reached the serialized payload through `{outcome.member}`.\n\n"
         "§4.1 item 7 is a rule about what is shown, so the boundary that has to hold it is the one "
         "the payload crosses, at every depth a figure can sit. Work-order decision 4 puts a field "
         "validator calling `refuse_an_unsealed_comparison` on this member and "
@@ -217,32 +268,16 @@ def test_a_series_points_mean_refuses_a_figure_the_chokepoint_never_sealed(
     against that tree, which is what makes this test the one that reports it.
     """
     benchmark_cohort(report_door, minimums=report_api_contract.minimums())
-    body, answered = report_door.payload(course_week=WEEK_CLEAR)
-    index = a_point_index(body, answered, WEEK_CLEAR)
 
     outcome = drive_one_member(
         report_door,
         report_api_contract,
-        path=(
-            STREAMS_MEMBER,
-            PAYLOAD_STREAM_KEY[INSTRUCTOR_STREAM],
-            BENCHMARK_MEMBER,
-            COMPARISON_POPULATION,
-            POINTS_FIELD,
-            index,
-            POINT_MEAN_FIELD,
-        ),
+        path=lambda report: (*SERIES_PATH, a_point_index(report, WEEK_CLEAR), POINT_MEAN_FIELD),
         named=POINT_MEAN_FIELD,
     )
-    member = (
-        f"streams.{PAYLOAD_STREAM_KEY[INSTRUCTOR_STREAM]}.{BENCHMARK_MEMBER}."
-        f"{COMPARISON_POPULATION}.{POINTS_FIELD}[{index}].{POINT_MEAN_FIELD}"
-    )
 
-    assert carries_number(outcome.before, A_SMUGGLED_MEAN), the_canary_complaint(
-        outcome, member=member
-    )
-    assert not reached_the_wire(outcome), the_wire_complaint(outcome, member=member)
+    assert carries_number(outcome.before, A_SMUGGLED_MEAN), the_canary_complaint(outcome)
+    assert not reached_the_wire(outcome), the_wire_complaint(outcome)
 
 
 def test_the_workload_benchmarks_mean_refuses_a_figure_the_chokepoint_never_sealed(
@@ -262,12 +297,9 @@ def test_the_workload_benchmarks_mean_refuses_a_figure_the_chokepoint_never_seal
         path=(WORKLOAD_BENCHMARK_MEMBER, COMPARISON_POPULATION, MEAN_FIELD),
         named=MEAN_FIELD,
     )
-    member = f"{WORKLOAD_BENCHMARK_MEMBER}.{COMPARISON_POPULATION}.{MEAN_FIELD}"
 
-    assert carries_number(outcome.before, A_SMUGGLED_MEAN), the_canary_complaint(
-        outcome, member=member
-    )
-    assert not reached_the_wire(outcome), the_wire_complaint(outcome, member=member)
+    assert carries_number(outcome.before, A_SMUGGLED_MEAN), the_canary_complaint(outcome)
+    assert not reached_the_wire(outcome), the_wire_complaint(outcome)
 
 
 def test_the_workload_benchmarks_median_refuses_a_figure_the_chokepoint_never_sealed(
@@ -290,9 +322,6 @@ def test_the_workload_benchmarks_median_refuses_a_figure_the_chokepoint_never_se
         path=(WORKLOAD_BENCHMARK_MEMBER, COMPARISON_POPULATION, MEDIAN_FIELD),
         named=MEDIAN_FIELD,
     )
-    member = f"{WORKLOAD_BENCHMARK_MEMBER}.{COMPARISON_POPULATION}.{MEDIAN_FIELD}"
 
-    assert carries_number(outcome.before, A_SMUGGLED_MEAN), the_canary_complaint(
-        outcome, member=member
-    )
-    assert not reached_the_wire(outcome), the_wire_complaint(outcome, member=member)
+    assert carries_number(outcome.before, A_SMUGGLED_MEAN), the_canary_complaint(outcome)
+    assert not reached_the_wire(outcome), the_wire_complaint(outcome)
