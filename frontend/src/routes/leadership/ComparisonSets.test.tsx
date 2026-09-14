@@ -11,6 +11,7 @@ import {
 import {
   A_GRADUATE_SET,
   A_NEW_SET,
+  A_SET_THIS_READER_DEFINED,
   A_NOT_THE_DEFINER_REFUSAL,
   A_NURSING_COURSE,
   A_PREVIEW_WITHOUT_A_SECTION_COUNT,
@@ -458,32 +459,140 @@ describe('what this surface never renders', () => {
     expect(screen.getByText(NO_REPORT_YET)).toBeTruthy();
   });
 
-  it('renders no figure of any kind, in any state', async () => {
-    servingThreeSets();
-    mountAt('/app/leadership/comparison-sets');
-    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+  it('renders no figure of any kind, in any state this surface has', async () => {
+    // **Every state, not the one that happens to be easiest to reach.** A sweep
+    // over the loaded list says nothing about the form, the empty state or the
+    // three refused ones, and a figure would be just as wrong in any of them.
+    // Each case below carries its own positive control, asserted in the same
+    // pass as the sweep, so a case that rendered nothing at all — a mount that
+    // failed, an address that resolved elsewhere — reds here rather than
+    // reporting a clean page (`docs/MISTAKES.md` entry 3).
+    const states: {
+      readonly state: string;
+      readonly address: string;
+      readonly answers: Record<string, () => Response>;
+      readonly control: string;
+      readonly open?: () => void;
+    }[] = [
+      {
+        state: 'the list, with its previews in',
+        address: '/app/leadership/comparison-sets',
+        answers: {
+          [COMPARISON_SETS_PATH]: () => json(200, { sets: THREE_SETS }),
+          [COMPARISON_SET_OPTIONS_PATH]: () => json(200, THE_OPTIONS),
+          [comparisonSetPreviewPath(A_SET_SOMEBODY_ELSE_DEFINED.id)]: () =>
+            json(200, A_PREVIEW_WITH_BOTH_COUNTS),
+          [comparisonSetPreviewPath(A_SET_SUMMARY.id)]: () =>
+            json(200, A_PREVIEW_WITHOUT_A_SECTION_COUNT),
+          [comparisonSetPreviewPath(A_GRADUATE_SET.id)]: () => json(500, {}),
+        },
+        control: '3 courses, 11 sections across retained terms',
+      },
+      {
+        // A read that has not landed: the fetch never settles, so the page is
+        // in the state it opens in rather than one an answer put it in.
+        state: 'the read still on its way',
+        address: '/app/leadership/comparison-sets',
+        answers: {},
+        control: LOADING,
+      },
+      {
+        state: 'the empty state',
+        address: '/app/leadership/comparison-sets',
+        answers: {
+          [COMPARISON_SETS_PATH]: () => json(200, { sets: [] }),
+          [COMPARISON_SET_OPTIONS_PATH]: () => json(200, THE_OPTIONS),
+        },
+        control: EMPTY_TITLE,
+      },
+      {
+        state: 'the refused read',
+        address: '/app/leadership/comparison-sets',
+        answers: {
+          [COMPARISON_SETS_PATH]: () => json(403, { detail: A_NOT_THE_DEFINER_REFUSAL }),
+          [COMPARISON_SET_OPTIONS_PATH]: () => json(200, THE_OPTIONS),
+        },
+        control: A_NOT_THE_DEFINER_REFUSAL,
+      },
+      {
+        state: 'the ended session',
+        address: '/app/leadership/comparison-sets',
+        answers: {
+          [COMPARISON_SETS_PATH]: () => json(401, { detail: 'Not authenticated' }),
+          [COMPARISON_SET_OPTIONS_PATH]: () => json(401, { detail: 'Not authenticated' }),
+        },
+        control: SESSION_ENDED,
+      },
+      {
+        state: 'the create form, open on the list',
+        address: '/app/leadership/comparison-sets',
+        answers: {
+          [COMPARISON_SETS_PATH]: () => json(200, { sets: [] }),
+          [COMPARISON_SET_OPTIONS_PATH]: () => json(200, THE_OPTIONS),
+        },
+        control: 'Define a comparison set',
+        open: () => {
+          fireEvent.click(screen.getByRole('button', { name: DEFINE }));
+        },
+      },
+      {
+        state: 'the edit form, at a set’s own address',
+        address: `/app/leadership/comparison-sets/${A_SET_THIS_READER_DEFINED.id}`,
+        answers: {
+          [COMPARISON_SET_OPTIONS_PATH]: () => json(200, THE_OPTIONS),
+          [comparisonSetPath(A_SET_THIS_READER_DEFINED.id)]: () =>
+            json(200, A_SET_THIS_READER_DEFINED),
+        },
+        control: 'Edit this comparison set',
+      },
+    ];
 
-    await within(rowOf(A_SET_SOMEBODY_ELSE_DEFINED.name)).findByText(
-      '3 courses, 11 sections across retained terms',
-    );
-    const page = screen.getByTestId(LEADERSHIP_SETS_TESTID);
-    const words = page.textContent ?? '';
+    for (const { state, address, answers, control, open } of states) {
+      // An empty answer table is the never-answering stack the loading state
+      // needs; anything else is served address by address.
+      if (Object.keys(answers).length === 0) {
+        vi.stubGlobal('fetch', () => new Promise<Response>(() => undefined));
+      } else {
+        serving(answers);
+      }
+      mountAt(address);
+      if (open === undefined) {
+        await screen.findByText(control);
+      } else {
+        await screen.findByText(EMPTY_TITLE);
+        open();
+        await screen.findByText(control);
+      }
 
-    // The control first: this page does have text, and it does carry the two
-    // counts, so the sweeps below are reading a rendered page rather than an
-    // empty one (`docs/MISTAKES.md` entry 3).
-    expect(words).toContain(HEADING);
-    expect(words).toContain('11 sections');
+      const page = screen.getByTestId(LEADERSHIP_SETS_TESTID);
+      const words = page.textContent ?? '';
 
-    // Criterion 4. A benchmark figure is a decimal, a percentage or one of the
-    // words a comparison figure is labelled with, and this surface manages sets
-    // rather than showing what they measure.
-    expect(words).not.toMatch(/\d+\.\d/);
-    expect(words).not.toContain('%');
-    for (const word of ['mean', 'median', 'average', 'benchmark', 'university', 'rating']) {
-      expect(words.toLowerCase()).not.toContain(word);
+      // The control: this state rendered, and it rendered the thing that names
+      // it. Everything below is an absence, and an absence over a blank page is
+      // satisfied perfectly by a page that never arrived.
+      expect(words, state).toContain(HEADING);
+      expect(words, state).toContain(control);
+
+      // Criterion 4. A benchmark figure is a decimal, a percentage, or one of
+      // the words a comparison figure is labelled with. This surface manages
+      // sets; it never shows what a set measures.
+      expect(words, state).not.toMatch(/\d+\.\d/);
+      expect(words, state).not.toContain('%');
+      for (const word of ['mean', 'median', 'average', 'benchmark', 'university', 'rating']) {
+        expect(words.toLowerCase(), `${state}: ${word}`).not.toContain(word);
+      }
+
+      // Nothing drawn, either. The only graphics this surface may carry are the
+      // design's own pulse-line motif inside `StateNotice`, which is decorative
+      // and marked as such; a chart would not be.
+      for (const drawing of page.querySelectorAll('svg')) {
+        expect(drawing.getAttribute('aria-hidden'), state).toBe('true');
+      }
+      expect(page.querySelectorAll('canvas'), state).toHaveLength(0);
+      expect(within(page).queryByRole('img'), state).toBeNull();
+
+      cleanup();
+      vi.unstubAllGlobals();
     }
-    // And nothing drawn: no chart, no figure, no image.
-    expect(page.querySelectorAll('svg')).toHaveLength(0);
   });
 });
