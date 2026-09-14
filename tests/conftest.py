@@ -159,7 +159,7 @@ boundary: `metadata_tables` is asked for by both.
     never a fixture, so an unbuilt E5-03 is a wall of FAILEDs naming deliverables
     rather than of setup errors (`docs/MISTAKES.md` entry 44).
 
-Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
+Five modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
 `seed_row` already is. They are listed here because this docstring is the index
 of that directory and a module missing from it is a record that has stopped being
@@ -173,6 +173,16 @@ complete.
   - `fixtures/migration_journey.py` — E2-16: resolving a revision and the one
     below it, running a step that has to complete, and reading the catalog and
     the stored rows at either end of a downgrade.
+  - `fixtures/comparison_sets.py` — E5-01: the comparison-set tables reached
+    without deciding how they are built — two names spelled, the membership
+    table found by its foreign keys, and the two seeding helpers four modules
+    share.
+  - `fixtures/benchmark_history.py` — E5-12: `scripts/seed_benchmark_history.py`
+    piped into an interpreter the way the runbook pipes it, the row counts a
+    refused run is read by, the SPEC §2.2 reader that says which sections a
+    refusal named, and the self-check's recount — `the_cohort_recount(session,
+    section_codes)`, settled by the ruling of 2026-09-13 — reached by importing
+    the script the way `fixtures/seed.py` imports `scripts/seed.py`.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
