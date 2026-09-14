@@ -1,7 +1,7 @@
 """the four benchmark cohort views, the two set functions, and their grants
 
 Revision ID: a7c3e9d21f84
-Revises: e5a2b81c47d3
+Revises: b4d7e2a91c58
 Create Date: 2026-09-13 12:00:00.000000
 
 E5-03. The cohort arithmetic under every benchmark figure SPEC §5.1 asks for,
@@ -36,10 +36,14 @@ times: the four views first, because the grants file names them; the definer rol
 before the two functions, because each ends with `ALTER FUNCTION … OWNER TO`;
 and the view grants last.
 
-**This revision takes the chain slot after `e5a2b81c47d3`.** E5-01 is being built
-in a parallel worktree and takes the other slot off the same head; whichever
-merges second re-points, which is a one-line change because nothing here creates
-a type, an index or a constraint.
+**This revision takes the chain slot after `b4d7e2a91c58`**, E5-01's comparison
+set. Both tickets were cut off `e5a2b81c47d3` in parallel worktrees, E5-01
+merged first, and this is the re-point the breakdown planned for: a one-line
+change, because nothing here creates a type, an index or a constraint and
+nothing it reads comes from E5-01's tables. The two are independent in fact as
+well as on paper — a database at `b4d7e2a91c58` and not at this revision has the
+named-set tables and no benchmark views, which is the state E5-04 composes from
+both.
 
 **The downgrade drops what it made and revokes what outlives it.** A privilege
 granted on a view is recorded in that view's ACL and goes when the view goes, so
@@ -60,7 +64,7 @@ from app.views_sql import read_sql
 
 # revision identifiers, used by Alembic.
 revision: str = "a7c3e9d21f84"
-down_revision: str | Sequence[str] | None = "e5a2b81c47d3"
+down_revision: str | Sequence[str] | None = "b4d7e2a91c58"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
