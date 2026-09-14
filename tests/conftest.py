@@ -171,7 +171,7 @@ boundary: `metadata_tables` is asked for by both.
     lookup of `app.services.benchmarks` and the readers that say whether a
     comparison figure carries a number without asserting the figure's shape.
 
-Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
+Five modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
 `seed_row` already is. They are listed here because this docstring is the index
 of that directory and a module missing from it is a record that has stopped being
@@ -185,6 +185,22 @@ complete.
   - `fixtures/migration_journey.py` — E2-16: resolving a revision and the one
     below it, running a step that has to complete, and reading the catalog and
     the stored rows at either end of a downgrade.
+  - `fixtures/comparison_sets.py` — E5-01: the comparison-set tables reached
+    without deciding how they are built — two names spelled, the membership
+    table found by its foreign keys, and the two seeding helpers four modules
+    share.
+  - `fixtures/benchmark_history.py` — E5-12: `scripts/seed_benchmark_history.py`
+    piped into an interpreter the way the runbook pipes it, the row counts a
+    refused run is read by, the SPEC §2.2 reader that says which sections a
+    refusal named, and the self-check's recount — `the_cohort_recount(session,
+    section_codes)`, settled by the ruling of 2026-09-13 — reached by importing
+    the script the way `fixtures/seed.py` imports `scripts/seed.py`. Also the
+    seeded calendar's readers, moved out of the calendar module when a second
+    caller needed them (`term_link_column` among them: ADR 0018's composite key,
+    `docs/disputes/E5-12-01.md`), and the launched prior-term world — the
+    sections, windows, rosters and enrollments four staff launches and a roster
+    sync would have left, planted row by row out of the seeder's own refusals, so
+    that its write path can be executed by a test at all.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no

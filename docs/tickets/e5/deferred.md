@@ -201,3 +201,23 @@ through the service, so in practice E5-06's preview or E9's dashboards);
 E5-14 re-checks at exit. **Done when** any consumer of these views seals
 figures only against contributor counts the view itself carries (a `_v002`
 per view, the established shape), or the views are retired unread.
+
+## The benchmark-history self-check scopes on section codes without a term filter (E5-12)
+
+**What is not enforced.** `the_cohort_recount(session, section_codes)` counts
+rows for the sections whose `lms_section_code` is in the list it is handed,
+with no term predicate. Section codes recur across terms by design (§2.2's
+letters are per-term data), so a future term reusing one of the prior world's
+codes would fold into the recount silently. Today the mock world's codes are
+unique across terms, so nothing reachable is wrong — this is an honesty gap
+in a development self-check, found by the E5-12 security review and judged a
+note rather than a finding.
+
+**Why it was left.** The recount's contract was ruled during the build and
+the tests bind to it; narrowing it is a contract change with no wrong answer
+it corrects today.
+
+**Owner:** E5-14's cleanup pass; earlier if a ticket seeds a term that reuses
+a code. **Done when** the recount resolves sections the way the seeder itself
+does — by `(course, term, code)` — or a sentence records that the dev worlds
+keep codes unique and why that is acceptable.
