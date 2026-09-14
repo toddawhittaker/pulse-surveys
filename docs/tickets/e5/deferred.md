@@ -54,3 +54,23 @@ file a week earlier.
 `reportContrastTokens.test.ts` with the rest of the measured corrections, or the
 two-module split is recorded as deliberate with the rule that says which pin goes
 where.
+
+## A member that says `suppressed: false` and carries no `points` crashes the panel
+
+**What happens.** `drawnPoints` returns `undefined` for a series whose flag is
+exactly `false` but whose `points` key is missing, and the spread in
+`axisWeeks` then throws, so the panel render fails. The security re-pass of
+the fail-closed fix (`02af6cf`) named it and judged it a robustness note
+rather than a finding: the failure withholds a figure rather than disclosing
+one, and it needs a payload that sends the flag without the array.
+
+**Why it was left.** The fix round's declared stopping rule covered one
+finding; this is not that finding, and the shape that triggers it cannot come
+from the fixtures this ticket ships.
+
+**Owner:** E5-10, the ticket that wires the real payload — the place a
+malformed first-party payload becomes possible.
+
+**Done when:** a flag-without-points member renders the suppressed treatment
+(or another stated treatment) rather than throwing, pinned by a test beside
+the malformed-flag pair.
