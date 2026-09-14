@@ -158,10 +158,18 @@ a named exclusion with a reason, in this file. `comparison_set.name` is what
 leadership calls a cohort, on a table the walk reaches through the creator's
 `person` key, and marking it would forbid the read SPEC §5.1 requires of every
 surface that offers a named set. `NAMES_THAT_HOLD_NO_PERSON` below is that
-exclusion and it is a subtraction from the *recognition* rule alone — no view
-rule, no grant and no member of `PERSON_TABLES` reads it. Two tests beside the
-tripwire keep it narrow: nothing on a person table may be excused, and every
-entry has to be a column the sweep would otherwise report.
+exclusion, and **it reaches one file further than this one**:
+`test_identity_separated_views.py` builds E0-34's view-file identity vocabulary
+by calling `identity_bearing_columns` here, so a column excused in this file
+leaves that vocabulary too — and where it was a table's only evidence of
+identity, the table leaves that vocabulary's **star mechanism** with it, so a
+`SELECT *` over the table in a `views_sql/` file stops being flagged. Nothing
+else moves: no grant, no member of `PERSON_TABLES`, and no view rule phrased over
+marked columns. The rule for the next entry follows from that — read
+`test_identity_separated_views.py` before excusing anything, and excuse nothing
+on a table a view could reach a person through. Two tests beside the tripwire
+keep it narrow as well: nothing on a person table may be excused, and every entry
+has to be a column the sweep would otherwise report.
 
 What remains outside the search is stated on `IDENTITY_NAME_FRAGMENTS` below
 rather than here, beside the tuple that decides it (`docs/MISTAKES.md` entry 14).
@@ -240,16 +248,38 @@ IDENTITY_NAME_FRAGMENTS = (
 # rather than leaving the marker convention with a hole in it."
 #
 # **It is a subtraction from the recognition rule and not from the marker
-# convention**, and the difference is the whole of why this is safe. A column
-# named here is not swept, so it does not have to carry the marker; nothing here
-# grants anything, hides anything from a view rule, or takes a table out of
-# `PERSON_TABLES` — the view guards below are phrased over marked columns and
-# over the three person tables, and neither reads this dictionary. What it does
-# change is the *classification* of the table it sits on: a table whose only
-# fragment match is excused here is unrecognised, so it belongs in
-# `REACHED_TABLES_THAT_CARRY_NOTHING` at the foot of this file with its reason,
-# which is where the judgement is recorded a second time and expires when a
-# column arrives.
+# convention.** A column named here is not swept, so it does not have to carry
+# the marker; nothing here grants anything, and nothing here takes a table out of
+# `PERSON_TABLES`. What it does change in this file is the *classification* of
+# the table it sits on: a table whose only fragment match is excused here is
+# unrecognised, so it belongs in `REACHED_TABLES_THAT_CARRY_NOTHING` at the foot
+# of this file with its reason, which is where the judgement is recorded a second
+# time and expires when a column arrives.
+#
+# **It also reaches a rule in another file, and that is the half a security
+# review had to point out** — this comment used to say "nothing here … hides
+# anything from a view rule", and that sentence was false.
+# `test_identity_separated_views.py` builds E0-34's view-file identity
+# vocabulary by calling `identity_bearing_columns` above
+# (`build_identity_vocabulary`, at the `named = ...` line), so every entry here
+# is subtracted from that vocabulary too. Two consequences, and the second is the
+# one that matters:
+#
+#   - the excused *name* leaves the vocabulary's name-grained text sweep over
+#     `backend/app/views_sql/`, which for a name shared with an innocent column
+#     changes nothing — such a name is subtracted as `ambiguous` there anyway;
+#   - if the excused column was the table's **only** evidence of identity, the
+#     table leaves `IdentityVocabulary.tables` and therefore the **star
+#     mechanism**, so `SELECT * FROM public.<that table>` in a view file stops
+#     being flagged. That is a real guard going quiet, on a table nobody has
+#     re-examined since the entry was written.
+#
+# Neither costs anything on `comparison_set`, which holds no identity to reach
+# and whose bare `name` was ambiguous to the text sweep in any case. The next
+# entry is where it could: **read `test_identity_separated_views.py` before
+# excusing a column, and excuse nothing on a table a view could reach a person
+# through.** An entry whose table carries a person by any route belongs in the
+# marker convention, not here.
 #
 # **Two rules on it, both asserted below rather than left as a convention.** No
 # entry may name a column of a `PERSON_TABLES` table — those hold a person by
@@ -679,6 +709,14 @@ def identity_bearing_columns(engine: Any) -> set[tuple[str, str]]:
     fragment match is ever overruled and which the two tests beside this
     function's callers keep narrow: no entry may name a column of a person table,
     and every entry has to be a column the sweep would otherwise report.
+
+    **This function has a caller in another file, which is what makes an entry in
+    that dictionary cost more than it looks.**
+    `test_identity_separated_views.py::build_identity_vocabulary` calls it to
+    build E0-34's view-file vocabulary, so a subtraction here is a subtraction
+    there — including from the star mechanism, if the excused column was its
+    table's only evidence of identity. The constant's own comment carries the
+    rule that follows.
     """
     inspector = inspect(engine)
     found: set[tuple[str, str]] = set()
