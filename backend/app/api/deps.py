@@ -103,6 +103,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.config import Settings, is_development
+from app.copy.leadership_sets import NOT_LEADERSHIP
 from app.copy.student_read import NOT_A_STUDENT
 from app.copy.submit import COPY
 from app.services.authz import Door, LandingRole, resolve_landing
@@ -136,6 +137,8 @@ __all__ = [
     "NOT_AN_INSTRUCTOR_STATUS",
     "NOT_A_STUDENT_CHALLENGE",
     "NOT_A_STUDENT_STATUS",
+    "NOT_LEADERSHIP_CHALLENGE",
+    "NOT_LEADERSHIP_STATUS",
     "OIDC_LOGIN_COOKIE",
     "PAGE",
     "REFUSED",
@@ -144,6 +147,7 @@ __all__ = [
     "carried_across",
     "carry_across",
     "clear_carried",
+    "csrf_verified_leadership",
     "csrf_verified_student",
     "landing_with_session",
     "no_access",
@@ -153,6 +157,7 @@ __all__ = [
     "refusal_page",
     "refused",
     "require_instructor",
+    "require_leadership",
     "require_student",
     "with_query",
 ]
@@ -396,6 +401,63 @@ def require_instructor(request: Request) -> SessionClaims:
             status_code=NOT_AN_INSTRUCTOR_STATUS,
             detail=NOT_AN_INSTRUCTOR,
             headers=NOT_AN_INSTRUCTOR_CHALLENGE,
+        )
+    return session
+
+
+# What a request that is not a leadership session is answered with — the same 401
+# and the same `Bearer` challenge the two gates above use, for the reasons the
+# comment over `NOT_A_STUDENT_STATUS` gives. Spelled as their own names rather
+# than aliased to either pair, for the reason the instructor pair gives: three
+# surfaces' answers that agree today are still three answers, and a gate
+# borrowing another role's constant moves when somebody changes that other one.
+#
+# The sentence is `app.copy.leadership_sets.NOT_LEADERSHIP` — in the copy package
+# from the day it is written, unlike the instructor refusal above, which is a
+# module constant here because the report surface was not a governed one when
+# E4-07 shipped. `docs/tickets/e5/deferred.md` records what is still owed on the
+# E5 side of that: the leadership sentences are in the package and E5-13 brings
+# them into the inventory the package publishes.
+NOT_LEADERSHIP_STATUS = 401
+NOT_LEADERSHIP_CHALLENGE = {"WWW-Authenticate": BEARER_SCHEME}
+
+
+def require_leadership(request: Request) -> SessionClaims:
+    """The verified session of a leader, or one refusal for everybody else.
+
+    Every route in `app.api.leadership` depends on this or on
+    `csrf_verified_leadership` below, and the object is what makes them
+    **findable**: a sweep asking the running application which routes carry it
+    gets that module's whole surface, and a handler that resolved the session
+    itself would be a leadership route outside every such walk — the shape
+    `require_student` and `require_instructor` already hold for their own.
+
+    **The role comes from the session, which came from the person's own rows.**
+    `LandingRole.LEADERSHIP` was decided at the door by `resolve_landing` out of
+    assignments (ADR 0098), never out of what a launch claimed, and this reads it
+    back. What it does *not* do is decide which sets that leader may change: that
+    is `app.services.comparison_sets`, one layer in, against the set's creator
+    (ADR 0173).
+
+    **A two-hat person is judged by the session and never by the person.** SPEC
+    §2.1 gives somebody who is both an instructor and a dean two assignments and
+    two edges, and a door lands one session at a time. So her instructor session
+    is refused here while her leadership session is admitted — a gate that read
+    the person's assignments instead would admit both, which is a session
+    acquiring a role it does not name.
+
+    **One refusal for absent, malformed, expired, wrongly signed, and a real
+    session in another role**, for the reason the two gates above give twice
+    over: `session_from_request` collapses the first four into `None` so that a
+    caller trying tokens cannot tell a real one from a forgery by the answer, and
+    the fifth joins them here.
+    """
+    session = session_from_request(request, request.app.state.session_secret)
+    if session is None or session.role is not LandingRole.LEADERSHIP:
+        raise HTTPException(
+            status_code=NOT_LEADERSHIP_STATUS,
+            detail=NOT_LEADERSHIP,
+            headers=NOT_LEADERSHIP_CHALLENGE,
         )
     return session
 
@@ -946,6 +1008,53 @@ def csrf_verified_student(
     401 above gives twice over: a refusal that distinguished them would tell an
     attacker whether their forgery was well formed, which is what
     `verify_csrf_token`'s constant-time comparison is protecting one layer down.
+    """
+    return _double_submit_verified(request, claims)
+
+
+def csrf_verified_leadership(
+    request: Request, claims: SessionClaims = Depends(require_leadership)
+) -> SessionClaims:
+    """`require_leadership`, plus the same double-submit check the student writes carry.
+
+    E5-06's three writing routes — defining a set, editing one, deleting one —
+    carry this where the four reading routes carry `require_leadership`. The
+    split is the one `csrf_verified_student` argues above: cross-site request
+    forgery is a defence for writes, a read has nothing for it to protect, and a
+    route says which it means by which dependency it declares.
+
+    **`require_leadership` is *declared* as a dependency rather than called**, for
+    the reason the student pair gives: a plain call resolves the session
+    identically at run time and leaves the route invisible to every sweep that
+    walks a route's `Dependant` graph for it (`docs/MISTAKES.md` entry 2). FastAPI
+    resolves the sub-dependency first, so a 401 from the role gate is raised
+    before this body runs and what arrives in `claims` is exactly what a direct
+    call would have returned.
+
+    **The check itself is `_double_submit_verified`, shared with the student
+    write**, so the cookie-carrier rule, the Bearer exemption and the HMAC
+    binding to this session's `jti` are one implementation rather than two that
+    can drift. What a set definition costs if it is forged is the cohort every
+    instructor in the institution is measured against, changed from a page on the
+    internet by a browser that was already signed in.
+    """
+    return _double_submit_verified(request, claims)
+
+
+def _double_submit_verified(request: Request, claims: SessionClaims) -> SessionClaims:
+    """ADR 0089's double-submit check itself, for whichever role gate carries it.
+
+    The mechanism is one mechanism and the role gates are several — a write route
+    says which role it is for by which dependency it declares, and every one of
+    them then asks this one question. Two copies of a CSRF check is
+    `docs/MISTAKES.md` entry 13's shape in the place it costs most: the copy that
+    is edited and the copy that is not are a guard that holds on one surface and
+    not on the next.
+
+    The whole argument for what it does and does not check — the Bearer
+    exemption, the HMAC binding to the session's `jti`, one answer for a missing
+    token and a wrong one — is in `csrf_verified_student` above, which is the
+    dependency this was factored out of.
     """
     if bearer_token(request) is not None:
         return claims

@@ -171,7 +171,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 21** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 22** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 16. A mutation harness reported kills it had not made
 
@@ -284,7 +284,7 @@ file and check the status, or run the gate bare.
 
 ## 24. A test asserted a property no implementation could satisfy
 
-**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/24-a-test-asserted-a-property-no-implementation-could-satisfy.md)
+**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/24-a-test-asserted-a-property-no-implementation-could-satisfy.md)
 
 ## 25. Two lockfiles resolved the same package to two versions
 
@@ -472,7 +472,7 @@ application over HTTP and reads the status in both directions.
 
 ## 48. A known gap was recorded only in a comment in the file that worked around it
 
-**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/48-a-known-gap-was-recorded-only-in-the-file-that-worked-around-it.md)
+**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/48-a-known-gap-was-recorded-only-in-the-file-that-worked-around-it.md)
 
 **Rule.** A limitation you work around goes in the deferral file the next epic
 reads — `carried-from-eN.md` or `deferred.md`, with an owner — in the same change

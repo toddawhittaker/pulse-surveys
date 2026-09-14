@@ -221,3 +221,71 @@ it corrects today.
 a code. **Done when** the recount resolves sections the way the seeder itself
 does — by `(course, term, code)` — or a sentence records that the dev worlds
 keep codes unique and why that is acceptable.
+
+## The named-set API's eight refusal sentences sit outside the copy inventory (E5-06)
+
+**What is not enforced.** `backend/app/copy/leadership_sets.py` holds the eight
+sentences `app.api.leadership` refuses with — the role gate's, the unknown set's,
+the other leader's set, and the five the database's constraints are translated
+into — and publishes an **empty** `COPY` mapping, so the shipped-copy inventory
+enumerates the module and collects none of its strings. SPEC §4.1 items 4 and 5
+are therefore asserted over none of the eight: nothing sweeps them for vocabulary
+about a person, and none of them counts toward a surface's confidentiality line.
+
+**Why it was left.** The inventory governs a key by its surface prefix, and
+leadership set management is not a governed surface yet. A key published under a
+`leadership_sets.` prefix is refused by the inventory's own totality rule — a
+prefix no surface claims is a red rather than a silence, which is the rule
+working — and the governance row is on the other side of the test wall from this
+ticket. This is the position the report API's two refusals sat in until E4-12,
+one step further along: the sentences are in the registry package, where the
+application reads every user-facing string from one place, rather than written at
+their raise sites.
+
+**Owner:** E5-13, whose scope already names "set-management copy". **Done when**
+the eight are published as `CopyEntry` values under a prefix the inventory's
+governance map claims, with the surface placed in one of its two maps — the one
+that carries item 5's line or the one that records why it owes none.
+
+## A deleted comparison set leaves no trace anywhere (E5-06)
+
+**What is not enforced.** E5-06 writes no `audit_log` row (ADR 0174), so what
+records a write is the set's own row: the creator and `created_at` on a create,
+`updated_at` on an edit. A delete removes the row, and after it nobody can answer
+who deleted a named set, or when, from the database. The ticket's fourth
+acceptance criterion asks for "the log row for each write"; for the two writes
+that leave a row it is met by that row, and for the delete it is not met and is
+not faked.
+
+An edit records that the set changed and not what it changed from, which is the
+same gap one level down: a set's history is not reconstructible.
+
+**Why it was left.** ADR 0174 has the argument in full. The short version is that
+the existing machinery is the Care identity reveal's — one `AuditAction` member,
+a `NOT NULL` subject naming the student whose identity was revealed, no privilege
+at all for the role every request runs on, and a single `SECURITY DEFINER`
+writer. A set write reaching it needs the action family widened, the subject made
+nullable, and either an `INSERT` granted to `pulse_app` or a second definer
+function. That is a change to the audit guarantee and belongs in a change whose
+subject is that guarantee.
+
+**Owner:** E10's audit review surface. **Done when** `audit_log` carries a
+non-reveal action family with a nullable subject and a sanctioned writer for it,
+and the named-set writes use it — or a record states that set definitions are not
+audited events and amends the criterion.
+
+## E5-06's preview reads none of the three unread cohort views (E5-04)
+
+**What is not enforced.** Nothing new. This is a correction to the owner line of
+"Three cohort views still pair whole-week counts with subset figures (E5-04)",
+which names "E5-06's preview or E9's dashboards" as the likely first reader. The
+preview E5-06 shipped answers two counts — the membership rows, and
+`len(resolve_named_set(...))` — and reads none of `benchmark_cohort_week`,
+`benchmark_cohort_rating_week` or `benchmark_cohort_rating_term_axis`. So that
+entry is still open with no reader, and E5-06 is not its owner.
+
+**Why it was left.** The entry belongs to E5-04 and a later ticket does not edit
+another's paragraph; the correction is recorded here instead.
+
+**Owner:** unchanged — the first ticket that reads one of the three. **Done
+when** that entry's own done-when is met.
