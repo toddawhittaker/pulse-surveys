@@ -10,8 +10,8 @@ describe is a payload the frontend fixtures do not know about, and a member the
 sketch describes and this does not is a fixture built against something that will
 never arrive.
 
-**Two members diverge from the sketch deliberately**, and both are recorded in
-this ticket's pull request rather than only here:
+**Three members diverge from the sketch deliberately**, and each is recorded in
+its own ticket's pull request rather than only here:
 
   - `rates.valid_responses` — E4-09's components render the count beside the
     ratio, and the sketch omitted it. Its source is `response.is_valid` as
@@ -23,6 +23,10 @@ this ticket's pull request rather than only here:
     says E4-07 places. Present in every report as a list, populated only in the
     latest published week's report, and carrying no week anywhere
     ([ADR 0153](../../../docs/adr/0153-a-release-drops-its-week-because-the-gradebook-ledger-would-otherwise-name-the-author.md)).
+  - `institution_timezone` — E5-02's, and the first of the three no E4 record
+    settles. The week's close instant is rendered as a weekday and a wall-clock
+    time, which is a statement in one named zone, and that zone is configuration
+    the server holds and the browser does not.
 
 **A comment carries three fields and no fourth.** `ReportComment` — what
 `app.services.report_comments` answers with — is `(text, status, stream)`, and
@@ -72,6 +76,7 @@ absence. The rule is written once, in `app.services.reporting`, and this schema 
 what makes the absent state expressible.
 """
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -130,6 +135,18 @@ class WeekView(BaseModel):
     # service (E4's breakdown decision 6). Nothing is stored to make a week
     # published, so this is a comparison rather than a flag.
     published_weeks: list[int]
+    # The reported week's own `survey_window.closes_at` — the row the report read
+    # already holds, so this member costs no query. It travels as an instant
+    # rather than as a string the server has already formatted, because the
+    # weekday and wall clock the eyebrow prints are a statement in one particular
+    # zone and `institution_timezone` below is what names that zone. A read that
+    # formatted here would be deciding the reader's locale on the server.
+    #
+    # The reported week's, never the current one: week navigation pages back
+    # across published weeks (SPEC §5.1), and a close taken from the latest
+    # window is right on the week an instructor opens by default and wrong on
+    # every week she pages back to.
+    closes_at: datetime
 
 
 class RatesView(BaseModel):
@@ -227,6 +244,19 @@ class StreamReport(BaseModel):
     distribution: dict[str, int]
     summary: SummaryView | None
     comments: list[CommentView]
+    # The wording of this stream's rating question, as the student answering it
+    # read it. SPEC §3.2 stores question text in a versioned table, so this is
+    # served rather than copied into the frontend: a second copy in the client is
+    # correct exactly until the first re-versioning and wrong afterwards in a way
+    # nobody looks for. Which version's wording a given week gets is
+    # [ADR 0168](../../../docs/adr/0168-a-weeks-served-question-wording-comes-from-the-rows-its-responses-answered.md).
+    #
+    # Required rather than optional: the read has an answer for every week — the
+    # wording the week's own responses answered, or the newest set's where nobody
+    # answered — so there is no week with nothing to serve, and an optional member
+    # is one a read can leave empty while the histogram quietly keeps its stream
+    # label.
+    question_text: str
 
 
 class StreamsView(BaseModel):
@@ -294,6 +324,17 @@ class InstructorReport(BaseModel):
     # ADR 0152's release, placed here and nowhere else: a list in every report,
     # populated only in the latest published week's, and carrying no week.
     released_from_earlier_weeks: list[CommentView]
+    # The IANA name of the institution's zone, from `settings.institution_timezone`
+    # — the same member the student payload carries, for the same reason. The
+    # week's close instant above is rendered as a weekday and a wall-clock time,
+    # which is only meaningful in a named zone; the zone is configuration the
+    # server holds and the browser does not, so a payload carrying the instant
+    # without the name cannot be rendered correctly by any client and would leave
+    # the eyebrow formatting in whatever zone the reader's machine is set to.
+    #
+    # A declared divergence from E4's payload sketch, recorded in
+    # `tests/unit/test_the_payload_sketch_and_the_schema_are_reconciled.py`.
+    institution_timezone: str
 
     @field_validator("comparison")
     @classmethod
