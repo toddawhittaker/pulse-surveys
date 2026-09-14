@@ -14,6 +14,18 @@ the two halves honest is
 which reads this answer over the wire and scans it for anything shaped like the
 other section.
 
+**Every model here refuses a member it never declared** (E5-11). Each one carries
+`model_config = ConfigDict(extra="forbid")`, so a benchmark figure, a comparison
+set or a university average handed to one of these constructors raises at
+construction instead of being dropped in silence. SPEC §4.1 item 1 and §5.4 keep
+those figures off every student surface, and E5 is the epic where they begin to
+exist and to flow to instructors — so the exclusion needs a shape rather than a
+habit. A member the type never admits cannot be filled by a service that grows a
+join later, which is what `docs/MISTAKES.md` entry 2 means by asserting the
+forbidden state rather than the permitted one. What measures it is
+`tests/unit/test_the_student_payload_schema_carries_nothing_of_a_benchmark.py`,
+inside the isolated invariant pass.
+
 **Two week numbers, under both names** (SPEC §2.2). A course-level page plots the
 course week with a quiet term-week sub-label, so both travel and the form renders
 one under the other. `course_week` counts from the section's own start — a
@@ -26,7 +38,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.survey import QuestionKind
 
@@ -40,6 +52,8 @@ class SurveyQuestion(BaseModel):
     range with a step, and a form that carried its own copy of either would
     disagree with the validity check the moment a set is versioned.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     id: UUID = Field(description="The question row, which an answer is keyed to.")
     position: int = Field(description="Ordinal within the set, 1-based, ascending.")
@@ -66,6 +80,8 @@ class SubmittedAnswer(BaseModel):
     the student's stored hours are then overwritten by the empty box.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     question_id: UUID = Field(description="The question this answers.")
     rating: int | None = Field(description="A Likert answer, 1-5.")
     comment_text: str | None = Field(description="A free-text answer.")
@@ -80,6 +96,8 @@ class OwnSubmission(BaseModel):
     author; the lookup behind this is over the reader, the section and the week
     together, and the denial suite is what proves the reader is in that key.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     first_submitted_at: datetime = Field(description="When this week was first answered.")
     last_submitted_at: datetime = Field(description="When it was last revised.")
@@ -107,6 +125,8 @@ class OpenSurvey(BaseModel):
     optional one would let a read path that found no length answer a half-eyebrow
     — "COURSE WK 04 / , TERM WK 07" — instead of failing where the data is wrong.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     window_id: UUID = Field(description="The survey window this answers over.")
     course_week: int = Field(
@@ -145,6 +165,8 @@ class EnrolledSection(BaseModel):
     argument covers it: a "when does the next one open" lookup that stopped
     naming the section would put another section's calendar on this page.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     section_id: UUID = Field(description="The section row.")
     section_code: str = Field(description="The section code a person reads (SPEC §2.2).")
@@ -193,6 +215,8 @@ class StudentSurveyView(BaseModel):
     is the same string for every reader of the deployment and says nothing about
     any of them.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     sections: list[EnrolledSection] = Field(
         description="The reader's live enrollments, in section-code order."
