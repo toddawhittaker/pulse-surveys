@@ -5754,6 +5754,30 @@ SANCTIONED_VIEW_COLUMNS: dict[str, tuple[str, ...]] = {
         "rating_mean",
         "rating_count",
     ),
+    # **The last two columns are a widening E5-04 admits here rather than makes
+    # quietly**, on the ruling appended to `docs/disputes/E5-04-01.md`. That
+    # ticket's security round found a figure sealed against counts of a
+    # population it was not computed over: the workload mean and median are
+    # computed only over the responses that carry hours — ADR 0165 keeps a
+    # cohort week's row when nobody reports any — while `respondent_count` and
+    # `section_count` above count everybody who answered anything. So the two
+    # figures were suppressed against the wrong number, which is
+    # `docs/MISTAKES.md` entry 50's class and, on this view, a real disclosure:
+    # two students' hours shown as a figure over fifteen people. The `_v002`
+    # body carries each figure's own contributor counts and the service seals
+    # with those.
+    #
+    # **Why the widening is admissible.** Both are aggregate counts of the same
+    # class the view already exposes — a count of distinct students and a count
+    # of sections, over a cohort that has no id, no section key and no person in
+    # it. Neither is a key and neither is new reach: `pulse_app` could already
+    # read `respondent_count` and `section_count` on this row. The alternative
+    # routes were measured and are in the dispute; the one the ruling rejected
+    # would have reversed an ADR 0166 decision taken in this same pull request.
+    #
+    # This entry is what makes the widening argued rather than discovered, which
+    # is §4.1 item 1's purpose and the convention E5-03 used to admit these four
+    # views in the first place.
     "benchmark_cohort_term_axis": (
         "length_weeks",
         "level",
@@ -5765,6 +5789,8 @@ SANCTIONED_VIEW_COLUMNS: dict[str, tuple[str, ...]] = {
         "response_count",
         "respondent_count",
         "section_count",
+        "workload_respondent_count",
+        "workload_section_count",
     ),
 }
 

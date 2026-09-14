@@ -192,6 +192,27 @@ BENCHMARK_VIEWS: dict[str, tuple[str, ...]] = {
         "rating_mean",
         "rating_count",
     ),
+    # The last two entries below are E5-04's and are **not** part of the E5-03
+    # ruling the rest of this dictionary is transcribed from; they are admitted
+    # on the ruling appended to `docs/disputes/E5-04-01.md`. That ticket's
+    # security round found the workload mean and median sealed against counts of
+    # everyone who answered anything, while the two figures are computed only
+    # over the responses that carry hours — ADR 0165 keeps a cohort week's row
+    # when nobody reports any — so hours from two students could be shown as a
+    # figure over fifteen people. That is `docs/MISTAKES.md` entry 50's class,
+    # and the `_v002` body answers the contributor counts each figure is actually
+    # about.
+    #
+    # **Admitted rather than added quietly.** Every column here is a column
+    # `pulse_app` may read, which is why this dictionary is compared as an
+    # equality in both directions: a widened view is a red test and a decision
+    # somebody argued, never a diff nobody noticed. Both new columns are
+    # aggregate counts of the class this view already carries — distinct students
+    # and distinct sections, over a cohort row with no id, no section key and no
+    # person in it — and neither is new reach, since the whole-relation grant
+    # already exposes `respondent_count` and `section_count` beside them. The
+    # same pair is admitted in `SANCTIONED_VIEW_COLUMNS` in
+    # `tests/integration/test_identity_grants.py` with the same sentence.
     COHORT_TERM_AXIS_VIEW: (
         "length_weeks",
         "level",
@@ -203,6 +224,8 @@ BENCHMARK_VIEWS: dict[str, tuple[str, ...]] = {
         "response_count",
         "respondent_count",
         "section_count",
+        "workload_respondent_count",
+        "workload_section_count",
     ),
 }
 
