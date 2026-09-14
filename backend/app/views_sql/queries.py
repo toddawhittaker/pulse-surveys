@@ -39,14 +39,19 @@ helpers take the keys they are given.
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 __all__ = [
+    "BenchmarkSetRatingWeekRow",
+    "BenchmarkSetWeekRow",
     "SectionEnrollmentCount",
     "SectionRosterRow",
+    "benchmark_set_rating_week",
+    "benchmark_set_week",
     "section_enrollment_counts",
     "section_roster",
 ]
@@ -120,3 +125,91 @@ def section_enrollment_counts(
     """One count per section of `course_id`, including the sections holding nobody."""
     rows = session.execute(_SECTION_ENROLLMENT_COUNTS, {"course_id": course_id}).mappings()
     return [SectionEnrollmentCount(**row) for row in rows]
+
+
+# E5-03's two benchmark set functions, reached the way every read in this package
+# is reached. They are functions rather than views because the comparison set
+# E5-04 resolves is a list of sections rather than a key, and counting distinct
+# students across such a list requires reading rows keyed to a student — which
+# `pulse_app` may not do and, after the ruling on `docs/disputes/E5-03-01.md`,
+# never will. The arithmetic happens under the functions' own owner and numbers
+# come back; the SQL files carry the argument in full.
+#
+# Written here rather than in the service that will call them so that E5-04 has
+# no reason to spell a statement of its own — which is the state
+# `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` exists to
+# prevent, and which in this case would also be a person-keyed read on the
+# application connection.
+#
+# The array is bound and cast rather than interpolated, and the ids are passed as
+# text: the function takes `uuid[]`, and a list of literals spliced into the
+# statement would be a caller's value reaching the SQL.
+_BENCHMARK_SET_WEEK = text(
+    "SELECT course_week, workload_mean, workload_median,"
+    " response_count, respondent_count, section_count"
+    " FROM public.benchmark_set_week(CAST(:section_ids AS uuid[]))"
+    " ORDER BY course_week"
+)
+
+_BENCHMARK_SET_RATING_WEEK = text(
+    "SELECT course_week, stream, rating_mean, rating_count"
+    " FROM public.benchmark_set_rating_week(CAST(:section_ids AS uuid[]))"
+    " ORDER BY course_week, stream"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkSetWeekRow:
+    """One course week's workload statistics and counts over a set of sections.
+
+    `workload_mean` and `workload_median` are `None` for a course week whose
+    responses carry no hours: the week had data and this particular figure did
+    not, and a zero would be a statement about how long those students worked
+    that none of them made. The three counts are always real, and
+    `respondent_count` is a count of **people** — the figure E5-04 compares
+    against its minimum.
+    """
+
+    course_week: int
+    workload_mean: Decimal | None
+    workload_median: Decimal | None
+    response_count: int
+    respondent_count: int
+    section_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkSetRatingWeekRow:
+    """One course week and stream's rating figures over a set of sections.
+
+    `rating_count` counts ratings, not people. A stream nobody answered has no
+    row rather than a row with a null mean.
+    """
+
+    course_week: int
+    stream: str
+    rating_mean: Decimal
+    rating_count: int
+
+
+def benchmark_set_week(
+    session: Session, *, section_ids: Sequence[UUID]
+) -> Sequence[BenchmarkSetWeekRow]:
+    """The workload statistics and counts of each answered course week, over `section_ids`.
+
+    An empty set answers no rows: a named set may have no members and a default
+    set may be empty once the hero section is taken out of it, so it is an
+    ordinary input rather than a programming error.
+    """
+    parameters = {"section_ids": [str(section_id) for section_id in section_ids]}
+    rows = session.execute(_BENCHMARK_SET_WEEK, parameters).mappings()
+    return [BenchmarkSetWeekRow(**row) for row in rows]
+
+
+def benchmark_set_rating_week(
+    session: Session, *, section_ids: Sequence[UUID]
+) -> Sequence[BenchmarkSetRatingWeekRow]:
+    """The per-stream rating figures of each answered course week, over `section_ids`."""
+    parameters = {"section_ids": [str(section_id) for section_id in section_ids]}
+    rows = session.execute(_BENCHMARK_SET_RATING_WEEK, parameters).mappings()
+    return [BenchmarkSetRatingWeekRow(**row) for row in rows]
