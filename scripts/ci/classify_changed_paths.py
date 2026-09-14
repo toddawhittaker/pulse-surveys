@@ -156,6 +156,19 @@ PARSED_DOCUMENTS = frozenset(
         # the rest of `docs/tickets/` is genuinely inert and the `docs/` entry in
         # `INERT_DIRECTORIES` above is unchanged.
         "docs/tickets/e4/README.md",
+        # The fifth file to move, and the third for the sweep's reason. E5-05
+        # reconciles the report payload's benchmark members with the sketch in
+        # E5's own breakdown, and
+        # `tests/unit/test_the_benchmark_payload_sketch_and_the_schema_are_reconciled.py`
+        # does it by parsing the fenced JSON block out of this file — the same
+        # shape as the E4 entry above, one epic later, and E5's sketch is the one
+        # E5-07, E5-08 and E5-10 build their fixtures from.
+        #
+        # Called inert, an edit to that sketch would run none of the suite that
+        # checks the schema still describes it. **Only this path moves**; the rest
+        # of `docs/tickets/` is genuinely inert and the `docs/` entry in
+        # `INERT_DIRECTORIES` above is unchanged.
+        "docs/tickets/e5/README.md",
         # The fourth file to move, and the second that moves for the sweep's
         # reason rather than for a build input. E5-02 puts the instructor
         # report's two histogram titles and its eyebrow's close note on the

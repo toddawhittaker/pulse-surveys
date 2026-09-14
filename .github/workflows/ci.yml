@@ -544,6 +544,16 @@ jobs:
       # of its tests are that one sweep plus the controls that prove the
       # collectors can see each declaration: run without them, a green says
       # nothing.
+      #
+      # The ninth entry is E5-05's, and it arrived the same way: it walks
+      # `backend/app/` for prose still saying a comparison set does not exist,
+      # now that E5 builds them, and
+      # `test_every_repository_wide_sweep_runs_in_a_job_the_filter_cannot_switch_off`
+      # reads that `REPO_ROOT`-rooted walk as a repository-wide sweep. A whole
+      # module rather than node ids, because its other test is the canary that
+      # proves the pattern finds the claim and leaves ordinary prose about
+      # comparison sets alone — a sweep run without that control cannot tell a
+      # clean tree from a pattern that has gone blind.
       - name: Repository-wide sweeps that a docs-only diff must not switch off
         run: |
           pytest -q \
@@ -555,7 +565,8 @@ jobs:
             "tests/unit/test_types_node_tracks_runtime.py" \
             "tests/unit/test_survey_windows_have_one_assignment_site.py" \
             "tests/unit/test_the_signing_key_custody_record_is_amended.py" \
-            "tests/unit/test_the_python_runtime_declarations_agree.py"
+            "tests/unit/test_the_python_runtime_declarations_agree.py" \
+            "tests/unit/test_the_placeholder_era_prose_is_swept_from_the_payload_path.py"
 
   # The job keeps its id and its display name. Branch protection's required-check
   # list keys on the display name, and renaming it is a change to that list
