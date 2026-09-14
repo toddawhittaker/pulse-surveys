@@ -1526,19 +1526,30 @@ def report_door_as(
     committed_clock_overrides: Any,
     web_identity: Any,
     landing_ground: Any,
-) -> Callable[[str], ReportDoor]:
+) -> Callable[..., ReportDoor]:
     """The door, stood at as a role the caller names. See `_build_report_door`.
 
     A factory, because criterion 2 is "a student session and a leadership session
     are both refused these routes … driven per role", and a fixture that picked
     one role would make the other's test a copy of this file rather than a drive
     through it.
+
+    **Keyword arguments are environment variable names and values**, passed
+    straight through to `launch_driver_in` so they are set before the application
+    is imported (`docs/MISTAKES.md` entry 40) — `tool_doors` only sees a value that
+    came down that way. The shape is copied from
+    `tests/fixtures/student_read.py::student_read_door_in` rather than reinvented
+    (`docs/MISTAKES.md` entry 37), and it exists for the same reason that fixture
+    grew it: E5-02 serves `institution_timezone` on the report payload, and a test
+    that asserted only the documented default would pass against a member
+    hard-coded to that default. Called with none, this builds exactly what it
+    always built.
     """
 
-    def build(role: str = INSTRUCTOR_ROLE) -> ReportDoor:
+    def build(role: str = INSTRUCTOR_ROLE, **settings: str) -> ReportDoor:
         return _build_report_door(
             role,
-            launch_driver_in(),
+            launch_driver_in(**settings),
             committed_rows,
             metadata_tables,
             committed_clock_overrides,
@@ -1550,8 +1561,13 @@ def report_door_as(
 
 
 @pytest.fixture
-def report_door(report_door_as: Callable[[str], ReportDoor]) -> ReportDoor:
-    """The teaching instructor at the door, with her own section and one that is not hers."""
+def report_door(report_door_as: Callable[..., ReportDoor]) -> ReportDoor:
+    """The teaching instructor at the door, with her own section and one that is not hers.
+
+    Built with no environment override, so it runs under whatever `configured_env`
+    laid down — which is what every test about the ordinary path wants, and is the
+    default half of E5-02's timezone pair.
+    """
     return report_door_as(INSTRUCTOR_ROLE)
 
 

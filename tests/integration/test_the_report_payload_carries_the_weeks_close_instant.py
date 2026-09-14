@@ -20,6 +20,15 @@ to the latest passes one asserting the latest. So both are asserted, against the
 hand-written calendar's own instants, and each test names the other's value in its
 failure message.
 
+**The zone member is a pair too, and for a reason a mutation battery measured.**
+Every other test here runs under `.env.example`'s documented `INSTITUTION_TIMEZONE`
+— `America/New_York` — so a payload that hard-codes that exact string is
+indistinguishable from one that reads the setting: the planted value and the read
+value coincide. The battery's surviving mutation was precisely that. So one test
+asserts the member under the deployment's own configuration and its twin builds the
+door under a zone this repository configures nowhere, where only a real read can
+answer correctly.
+
 **The timezone half is measured across the fall-back boundary.** The institution's
 zone is what the eyebrow formats in — never the browser's guess, which is the
 ticket's own known trap — so the payload carries the IANA name beside the instant.
@@ -41,15 +50,21 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
+from fixtures.clock import INSTITUTION_TIMEZONE_VARIABLE
 from fixtures.report_api import (
     CONFIG_MODULE,
     IN_DENOMINATOR_WEEK,
+    INSTRUCTOR_ROLE,
     OUT_OF_DENOMINATOR_WEEK,
     SILENT_WEEK,
     TERM_WEEK_OF_COURSE_WEEK,
     ReportDoor,
 )
 from fixtures.report_views import COURSE_STREAM, INSTRUCTOR_STREAM
+from fixtures.student_read import (
+    A_NON_DEFAULT_INSTITUTION_TIMEZONE,
+    DEFAULT_INSTITUTION_TIMEZONE,
+)
 from fixtures.survey_windows import (
     CLOSES_WALL_CLOCK,
     CLOSES_WEEKDAY,
@@ -213,7 +228,7 @@ def test_the_latest_published_weeks_report_carries_its_own_close_instant(
 def test_the_payload_names_the_institution_timezone_the_deployment_is_configured_with(
     report_door: ReportDoor, report_api_contract: Any, configured_env: Any
 ) -> None:
-    """Criterion 1 for the third member: the zone the instant is rendered in, served.
+    """Criterion 1 for the third member, under the deployment's own configuration.
 
     The close instant is stored aware and travels as an instant; the eyebrow
     renders it as a weekday and a wall-clock time, which is a statement in one
@@ -221,9 +236,16 @@ def test_the_payload_names_the_institution_timezone_the_deployment_is_configured
     the browser does not, so a payload carrying the instant without the zone
     cannot be rendered correctly by any client.
 
-    **The mutation this kills:** the member hard-coded to `America/New_York` or to
-    `UTC` rather than read from settings, which is correct on the development
-    stack and wrong for the first deployment that configures anything else.
+    **The default half of a pair, and it cannot stand alone.** This repository
+    configures `America/New_York` in `.env.example` and in `.env`, so a member
+    hard-coded to *that* string passes here — the planted value and the read value
+    coincide — and the mutation battery found exactly that survivor. The twin
+    below is what kills it, by configuring a zone this repository configures
+    nowhere.
+
+    **The mutation this kills:** the member hard-coded to a zone that is not the
+    deployment's (`UTC` is the case that shows up as a Monday-morning eyebrow), and
+    the member left off the payload altogether.
     """
     configured = configured_institution_timezone()
     served = served_timezone(report_door, report_api_contract, course_week=IN_DENOMINATOR_WEEK)
@@ -231,6 +253,56 @@ def test_the_payload_names_the_institution_timezone_the_deployment_is_configured
     assert served == configured, (
         f"The payload names {served!r} as the institution's zone and this deployment is configured "
         f"with `{INSTITUTION_TIMEZONE_SETTING}={configured}`."
+    )
+    ZoneInfo(served)
+
+
+def test_the_payload_names_a_configured_zone_that_is_not_the_documented_default(
+    report_door_as: Any, report_api_contract: Any
+) -> None:
+    """The near-miss twin: a deployment configured somewhere other than New York.
+
+    **The mutation this exists to kill, and the one its twin lets through:**
+    `institution_timezone` hard-coded to `"America/New_York"` in the read. Every
+    other test in this suite runs under `.env.example`'s documented value, which
+    *is* `America/New_York`, so the planted string and the read string coincide and
+    that mutation survives all of them. Here the door is built with
+    `INSTITUTION_TIMEZONE` set to a zone this repository configures nowhere, so the
+    only way to serve it is to have read it.
+
+    The zone is `tests/fixtures/student_read.py`'s
+    `A_NON_DEFAULT_INSTITUTION_TIMEZONE`, imported rather than respelled so the two
+    suites cannot drift into two answers about what "not the default" means. It has
+    no daylight saving, so a green here cannot be a coincidence of offsets.
+
+    **Named before the application is imported** (`docs/MISTAKES.md` entry 40):
+    `Settings` is built at import time, so the value has to come down through
+    `launch_driver_in`, which is what `report_door_as`'s keyword arguments now do.
+    The invocation is copied from the test that already does this one payload over
+    — `tests/integration/test_the_student_read_answer_names_the_next_window.py`'s
+    `test_the_answer_names_the_institution_timezone_the_deployment_is_configured_with`
+    — rather than rewritten (`docs/MISTAKES.md` entry 37).
+    """
+    assert A_NON_DEFAULT_INSTITUTION_TIMEZONE not in (
+        DEFAULT_INSTITUTION_TIMEZONE,
+        INSTITUTION_TIMEZONE,
+    ), (
+        f"This test plants {A_NON_DEFAULT_INSTITUTION_TIMEZONE!r} as a zone the repository does not "
+        f"configure, and it is one of the documented defaults ({DEFAULT_INSTITUTION_TIMEZONE!r}, "
+        f"{INSTITUTION_TIMEZONE!r}). A planted value equal to the default is the whole defect this "
+        "test exists to catch, arriving in the test instead of in the code."
+    )
+
+    door = report_door_as(
+        INSTRUCTOR_ROLE, **{INSTITUTION_TIMEZONE_VARIABLE: A_NON_DEFAULT_INSTITUTION_TIMEZONE}
+    )
+    served = served_timezone(door, report_api_contract, course_week=IN_DENOMINATOR_WEEK)
+
+    assert served == A_NON_DEFAULT_INSTITUTION_TIMEZONE, (
+        f"The payload names {served!r} as the institution's zone, and this door was built with "
+        f"`{INSTITUTION_TIMEZONE_VARIABLE}={A_NON_DEFAULT_INSTITUTION_TIMEZONE}`. "
+        f"{DEFAULT_INSTITUTION_TIMEZONE!r} here is the member hard-coded to the zone this "
+        "repository happens to document, which every other test in this suite agrees with."
     )
     ZoneInfo(served)
 
