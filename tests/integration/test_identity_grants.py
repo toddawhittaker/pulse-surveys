@@ -4190,6 +4190,30 @@ MEMBER_OF_ROLES = """
 #     this list already states: a ticket grants what it **spends**, and a filter is
 #     a read.
 
+#   - `pulse_app` **reads** `comparison_set` and `comparison_set_member`, and
+#     holds no other verb on either. **E5-04 is the reader E5-01's tables were
+#     waiting for.** That ticket granted nothing on purpose, naming the two
+#     tickets that would each spend a privilege in its own pull request: this one
+#     reads a named set to resolve it, and E5-06 writes one. SPEC §5.1:
+#     "leadership can define named sets", and `app.services.benchmarks` turns one
+#     into the sections its figures are computed over — the declared length and
+#     level off the set row, the member courses off the membership table — on the
+#     connection every request in the product runs on.
+#     **What is withheld is the assertion.** No `INSERT` or `UPDATE`: a
+#     connection able to write a set could define the cohort every instructor in
+#     the institution is measured against, from any request path, without passing
+#     the leadership scoping E5-06 builds. No `DELETE`: a set that vanishes takes
+#     a benchmark with it, and because benchmarks are past-referencing the change
+#     reaches figures that were already published —
+#     [ADR 0164](../../docs/adr/0164-a-named-comparison-set-is-courses-plus-one-declared-length-and-level.md)
+#     calls that "a benchmark that changes without anybody deciding it".
+#     **What these tables carry, for §4.1.** A name, a declared length, a level,
+#     a creator `person` key and a list of courses. No student, no subject, and
+#     no name of a person: ADR 0164 records that the creator is a key and that no
+#     name is copied onto the row, and this connection's `SELECT` on
+#     `public."user"` is `(id)` only, so the key resolves to nobody through it.
+#     Decided and spent in E5-04.
+
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -4242,6 +4266,8 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "release_batch", "INSERT"),
         (APPLICATION_ROLE, "release_batch_member", "SELECT"),
         (APPLICATION_ROLE, "release_batch_member", "INSERT"),
+        (APPLICATION_ROLE, "comparison_set", "SELECT"),
+        (APPLICATION_ROLE, "comparison_set_member", "SELECT"),
     }
 )
 

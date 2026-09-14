@@ -692,6 +692,161 @@ def test_each_definer_holds_exactly_the_column_privileges_its_job_needs(
 
 
 # ---------------------------------------------------------------------------
+# E5-03's definer owner, whose reach had no pinned equality until E5-04 — the
+# entry in `docs/tickets/e5/deferred.md` that ticket carries.
+# ---------------------------------------------------------------------------
+
+# The fourth NOLOGIN definer owner, created by E5-03's migration and owning the
+# two benchmark set functions.
+BENCHMARK_DEFINER = "pulse_benchmark_definer"
+
+# **The relations it may read, derived from the records' own sentences** and not
+# from the SQL it polices, which is the rule the equality above states and
+# `docs/MISTAKES.md` entry 19 records: a constant copied out of the migration
+# asserts that the SQL equals itself. `docs/tickets/e5/deferred.md`:
+# "`pulse_benchmark_definer` owns the two benchmark set functions and holds
+# column-grain `SELECT` on `response`, `answer`, `question`, `section`, `term`
+# and `week`", and ADR 0165 says the same in its decision — "column-grain
+# `SELECT` on the six relations the two bodies name and nothing else".
+BENCHMARK_DEFINER_RELATIONS = frozenset(
+    {"response", "answer", "question", "section", "term", "week"}
+)
+
+# The three relations the deferred entry requires to be absent by name. Each is a
+# relation from which a person can be read or identified, and a counting body has
+# no use for any of them.
+NO_COLUMN_OF_THESE = ("user", "user_identity", "person")
+
+# Whether a role holds a privilege on a whole relation. Asked separately from the
+# column sweep because the two are different grants: a column grant leaves this
+# false, and ADR 0165 rejected table-wide `SELECT` for this owner by name.
+WHOLE_TABLE_PRIVILEGE = """
+    SELECT c.relname, p.privilege
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'REFERENCES']) AS p(privilege)
+    WHERE n.nspname = 'public'
+      AND c.relkind IN ('r', 'p')
+      AND has_table_privilege(:role, c.oid, p.privilege)
+    ORDER BY 1, 2
+"""
+
+
+@pytest.mark.invariant
+def test_the_benchmark_definer_reaches_the_six_counting_relations_and_nothing_else(
+    db_session: Any,
+) -> None:
+    """The deferred equality E5-04 owes, at every grain the records settle.
+
+    `docs/tickets/e5/deferred.md`, "The benchmark definer's reach has no pinned
+    equality (E5-03)": the other three definer owners each have a test asserting
+    their grants as an equality, "so a later ticket widening one of those owners
+    is a red rather than a diff", and this owner had none. A `SECURITY DEFINER`
+    function spends its **owner's** privileges, so the owner's grant list is the
+    blast radius of a door `pulse_app` may open.
+
+    Four assertions, each from a sentence in the records:
+
+    - the relations it can reach are exactly the six the deferred entry names;
+    - every privilege it holds is `SELECT` — a counting body writes nothing, and
+      `INSERT` or `UPDATE` on `answer` would be an owner that can rewrite a
+      comment;
+    - no column of `user`, `user_identity` or `person` is among them, which the
+      deferred entry requires by name;
+    - and it holds no *whole relation*, because ADR 0165 settles column-grain
+      `SELECT` and rejects table-wide `SELECT` for this owner explicitly.
+
+    **What is deliberately not asserted here, and is a disclosed limit**
+    (`docs/MISTAKES.md` entry 14). The deferred entry asks for "the exact set of
+    `(relation, column)` pairs" as an equality in both directions, and no record
+    in this repository names those columns — ADR 0165, the E5-03 attempts log and
+    the deferred entry all stop at the six relations. A column list could
+    therefore only be transcribed from `benchmark_definer_v001.sql`, which is the
+    constant-copied-from-the-migration this file's own equality test refuses by
+    name. The four assertions below are every grain the records do settle.
+
+    **The gap is being closed in this ticket rather than narrowed.** ADR 0165 is
+    this owner's own record, and it gains a sentence naming the exact
+    `(relation, column)` `SELECT` pairs — a claim a reviewer weighs in the pull
+    request, with the SQL never entering a test. The equality then extends to
+    column grain from that sentence, in `ROSTER_DEFINER_PRIVILEGES`' shape, and
+    the deferred entry closes in full. Until the record carries the columns, this
+    test says what it can prove and no more.
+
+    **The mutation it kills:** a seventh relation added to the owner's grants
+    (the natural edit when a later body needs one more join), a write verb added
+    beside the reads, and the column grants replaced by a table-wide `SELECT` —
+    which is the tidying edit, changes no answer any test reads, and hands every
+    column of `response` and `answer` to a function family that needs six.
+
+    **The near miss it must not fire on:** a privilege the role holds by owning
+    something, which `has_column_privilege` reports and an `attacl` read would
+    not — the reason both sweeps here ask through the functions.
+    """
+    present = db_session.execute(
+        text(ROLE_EXISTS), {"role": BENCHMARK_DEFINER}
+    ).scalar_one_or_none()
+    assert present is not None, (
+        f"There is no `{BENCHMARK_DEFINER}` role in this cluster. E5-03's migration creates it as "
+        "a NOLOGIN role owning `benchmark_set_week` and `benchmark_set_rating_week` (ADR 0165), "
+        "and every assertion below is about what that role may read."
+    )
+
+    held = held_columns(db_session, BENCHMARK_DEFINER)
+    assert held, (
+        f"`{BENCHMARK_DEFINER}` holds no column privilege anywhere in `public`. E5-03 creates the "
+        "role and grants it the reads its two set functions spend, so an empty answer here means "
+        "the grants are gone and every benchmark in the product is empty — the consequence ADR "
+        "0165 names — or that this sweep is asking the wrong question."
+    )
+
+    relations = {relation for relation, _column, _privilege in held}
+    assert relations == BENCHMARK_DEFINER_RELATIONS, (
+        f"`{BENCHMARK_DEFINER}` can reach {sorted(relations)} and the records say "
+        f"{sorted(BENCHMARK_DEFINER_RELATIONS)}.\n\n"
+        "A `SECURITY DEFINER` function runs as its owner, so every relation in that set is one the "
+        "function's callers can be made to reach — `pulse_app`, the connection every screen runs "
+        "on. `docs/tickets/e5/deferred.md` names the six, and ADR 0165 refuses the reuse of "
+        "`pulse_resolve_definer` on exactly this ground: 'a body whose whole job is counting has "
+        "no use for that reach'. If a seventh is legitimate, it is recorded in the pull request "
+        "that grants it, in this constant, with the sentence it rests on."
+    )
+
+    verbs = sorted({privilege for _relation, _column, privilege in held})
+    assert verbs == ["SELECT"], (
+        f"`{BENCHMARK_DEFINER}` holds {verbs} on the relations it can reach. ADR 0165 gives it "
+        "'column-grain `SELECT` … and nothing else': the two bodies it owns count rows and write "
+        "none, and a write verb here is an owner that can alter the responses it is counting."
+    )
+
+    identity = sorted(
+        (relation, column)
+        for relation, column, _privilege in held
+        if relation in NO_COLUMN_OF_THESE
+    )
+    assert not identity, (
+        f"`{BENCHMARK_DEFINER}` holds {identity}. The deferred entry this test closes asks for "
+        "'no column of `user`, `user_identity` or `person` among them': a benchmark is a number "
+        "about a cohort, and an owner that can reach a person is a door towards one behind a "
+        "function `pulse_app` may execute."
+    )
+
+    whole_tables = sorted(
+        (row[0], row[1])
+        for row in db_session.execute(
+            text(WHOLE_TABLE_PRIVILEGE), {"role": BENCHMARK_DEFINER}
+        ).tuples()
+    )
+    assert not whole_tables, (
+        f"`{BENCHMARK_DEFINER}` holds {whole_tables} at the grain of a whole relation. ADR 0165 "
+        "settles column-grain `SELECT` for this owner and rejects table-wide `SELECT` by name — "
+        "the cheaper spelling that 'gives up the property the decision was taken for'. A table "
+        "grant also silently widens as the table gains columns, which is the widening no reviewer "
+        "ever sees."
+    )
+
+
+# ---------------------------------------------------------------------------
 # F2 — the teaching instructor's row, written by a definer because a grant
 # cannot bound a column's value.
 # ---------------------------------------------------------------------------

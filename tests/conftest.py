@@ -157,7 +157,12 @@ boundary: `metadata_tables` is asked for by both.
     and each function, on `db_session` and on a committed world the application
     role can reach. Every guard it raises is a `pytest.fail` a test body reaches,
     never a fixture, so an unbuilt E5-03 is a wall of FAILEDs naming deliverables
-    rather than of setup errors (`docs/MISTAKES.md` entry 44).
+    rather than of setup errors (`docs/MISTAKES.md` entry 44). E5-04 added the
+    three things its service is resolved over — a lead-faculty mapping, a named
+    comparison set with member courses, and a plan of which student answers in
+    which sections, whose two counts the test that writes it states — plus the
+    lookup of `app.services.benchmarks` and the readers that say whether a
+    comparison figure carries a number without asserting the figure's shape.
 
 Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
