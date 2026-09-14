@@ -36,11 +36,21 @@
  * the distribution belongs to instead — a title copied from §3.2 would be a
  * second instrument agreeing with the real one only until a set is versioned.
  *
- * **Every comparison string.** The prototype's histogram carries a "comparable"
- * benchmark beside the mean and its `StatPair` carries a "vs 5.0 h comparable ·
- * 4.8 h university" line. Comparison figures are E5's, reached through E4-07's
- * guarded member, and §4.1 item 7 suppresses them below the configured minimums;
- * nothing in this ticket renders one, so nothing here names one.
+ * **The histogram's comparison strings.** The prototype's histogram carries a
+ * "comparable" benchmark beside the mean. That figure is E5's, reached through
+ * E4-07's guarded member, and no ticket has drawn it yet; nothing here names it.
+ *
+ * ## The workload comparison words arrived in E5-08
+ *
+ * E4 shipped this file with every comparison word absent, because E4 had no
+ * comparison data at all and SPEC §4.1 item 1 makes comparison language a
+ * visibility question rather than a copy question. **E5-08 draws the two
+ * comparison columns of the workload pair**, so the labels those columns need,
+ * and the words a withheld one says instead of a number, are below — and only
+ * those. They belong to the instructor surface: the student surfaces read
+ * `studentSurvey.ts`, where the same words are forbidden and swept for
+ * (`tests/unit/test_the_submit_paths_copy_is_externalised.py`'s
+ * `FORBIDDEN_COMPARISONS`), and item 1 is what keeps the two files apart.
  */
 
 /**
@@ -86,6 +96,59 @@ export const INSTRUCTOR_REPORT_STATS_COPY = {
   'instructor_report_stats.workload_median': 'Median hours this week',
   'instructor_report_stats.workload_mean': 'Mean hours this week',
   'instructor_report_stats.workload_unit': 'h',
+
+  // The two comparison columns beside the section's own pair — ticket E5-08,
+  // SPEC §5.1's "workload mean/median for the section against comparison-set
+  // and university figures".
+  //
+  // **One complete label per figure**, rather than a column heading a value
+  // sits under: the pair is a description list, each label bound to its own
+  // value, so a reader hearing "Mean hours, comparable courses: 9.0 h" gets the
+  // whole fact in one place. Four entries and no assembled sentence — a label
+  // built from two holes at render time is a string no inventory can read.
+  //
+  // **"Comparable courses" is `instructor_report_trend.legend_comparison`'s
+  // term** ("Comparable {weeks}-week courses"), minus the length. The trend
+  // legend names the length because the chart is given the section's
+  // `length_weeks` and `design/Usage Rules.md` §1 asks the legend to name the
+  // comparison honestly; this component is given no length, and a label naming
+  // one it was not handed would be a claim rather than a fact. What the two
+  // surfaces must not do is call the same set two different things, and they
+  // do not.
+  //
+  // **No ranking, no composite, nothing "vs" anything** (§4.1 item 4). The
+  // prototype's third line reads "vs 5.0 h comparable · 4.8 h university"
+  // (`design/StatPair.dc.html`); three labelled figures state the same numbers
+  // without the comparative framing, and no word here sorts, scores or
+  // positions a section against another.
+  'instructor_report_stats.workload_median_comparison': 'Median hours, comparable courses',
+  'instructor_report_stats.workload_mean_comparison': 'Mean hours, comparable courses',
+  'instructor_report_stats.workload_median_university': 'Median hours, university',
+  'instructor_report_stats.workload_mean_university': 'Mean hours, university',
+
+  // A comparison figure the report is not showing.
+  //
+  // **In words, never in the absent figure's em dash.** The dash is this
+  // surface's treatment for a *section* figure with nothing behind it, and it
+  // sits in a column of hours: a dash there reads as "no hours", and a "0.0"
+  // reads as "this course took nobody any time". Neither is what a suppression
+  // says, so a withheld comparison figure says it in words and shows no
+  // number-shaped thing at all (E5-08's named trap).
+  //
+  // **Two reasons, each true of its own case, and the note is on the screen
+  // rather than only in the accessible text** — a sighted reader is owed the
+  // reason as much as a reader hearing it.
+  //
+  // The suppression sentence is `instructor_report_trend.comparison_suppressed`'s
+  // second sentence, for the same reason it is worded that way there: SPEC §4.1
+  // item 7 suppresses on a count of sections and a count of distinct students
+  // both, so a notice naming either minimum would be wrong whenever the other
+  // fired, and a notice carrying a figure would publish a shape of the set the
+  // suppression exists to withhold. Nothing here says or implies zero.
+  'instructor_report_stats.benchmark_withheld': 'Not shown',
+  'instructor_report_stats.benchmark_withheld_suppressed':
+    'The set behind this figure is too small to report on.',
+  'instructor_report_stats.benchmark_withheld_no_figure': 'There is no figure for this week.',
 
   // SPEC §5.1's two participation figures. The validity rate is instructor and
   // leadership only (§3.3), which is why `ResponseRateBar` renders it from an
