@@ -1232,7 +1232,12 @@ async function openTheReport(
       'straight to a report means the section list answered with exactly one — which is a section ' +
       'list read rather than a menu defect.',
   ).toBeVisible();
-  await menu.getByRole('link', { name: new RegExp(BIOL.course) }).click();
+  // Named by prefix, number and §2.2 code, because E5-10's benchmark drive
+  // provisions the prior term's `BIOL-215-E5WW` and this instructor then teaches
+  // two `BIOL 215` sections — a pattern naming only the course resolves to both
+  // links and strict mode refuses it. The code is in the server's governed
+  // label.
+  await menu.getByRole('link', { name: new RegExp(`${BIOL.course} ${BIOL.code}`) }).click();
   const report = page.getByTestId(REPORT);
   await expect(
     report,

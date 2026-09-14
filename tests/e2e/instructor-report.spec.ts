@@ -384,10 +384,17 @@ test('an instructor launches, chooses a section, and reads its week', async ({ p
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(PICKER_HEADING);
   const menu = page.getByTestId(SECTIONS_MENU);
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole('link', { name: /BIOL 215/ })).toBeVisible();
-  await expect(menu.getByRole('link', { name: /MATH 140/ })).toBeVisible();
+  // **Each link is named by prefix, number and §2.2 code**, which is what makes
+  // it one link rather than several. E5-10's benchmark drive provisions the four
+  // prior-term sections the mock platform publishes, two of which are a `BIOL
+  // 310` and a `BIOL 215`, so a locator naming only the course resolves to more
+  // than one link and Playwright's strict mode refuses it. The section code is
+  // in the governed label the server composes, so naming it asks for the link
+  // this test means.
+  await expect(menu.getByRole('link', { name: /BIOL 215 R3WW/ })).toBeVisible();
+  await expect(menu.getByRole('link', { name: /MATH 140 E1FF/ })).toBeVisible();
 
-  await menu.getByRole('link', { name: /BIOL 215/ }).click();
+  await menu.getByRole('link', { name: /BIOL 215 R3WW/ }).click();
 
   const report = page.getByTestId(REPORT);
   await expect(
@@ -451,11 +458,30 @@ test('an instructor launches, chooses a section, and reads its week', async ({ p
       'the whole of what tells an instructor either thing.',
   ).toBeVisible();
 
-  // Nothing anywhere names a comparison: E5 has not run, and §4.1 item 7 governs
-  // the figures rather than the words.
+  // **The comparison treatment this section actually has, which is the withheld
+  // one.** Through E4 this read "nothing anywhere names a comparison: E5 has not
+  // run" — true while the report carried no benchmark member at all. E5-10 wires
+  // those members through, so the assertion is rewritten to the world it drives
+  // rather than deleted: `BIOL-215-R3WW` is a twelve-week level-200 section and
+  // the prior term holds no other of its length and level, so its comparison set
+  // cannot clear SPEC §11's section minimum and every figure from it is withheld
+  // (§4.1 item 7). The words are the copy modules' own, transcribed.
+  //
+  // The comparison *word* is therefore on the page now, in the notice that says
+  // the line is not there — so the absence asserted here is the thing that
+  // matters: no comparison figure, anywhere, in any column.
   const shown = (await page.getByTestId(INSTRUCTOR_LANDING).textContent()) ?? '';
-  expect(shown.toLowerCase()).not.toContain('comparable');
-  expect(shown.toLowerCase()).not.toContain('university');
+  expect(
+    shown,
+    'The report names no comparison at all. Since E5-10 the payload carries the benchmark ' +
+      'members and this section’s comparison set is below the section minimum, so each panel ' +
+      'should say the line is not there rather than say nothing.',
+  ).toContain('no line this week. The set behind it is too small to report on.');
+  for (const cell of await report.getByTestId('stat-cell-comparison').all()) {
+    await expect(cell).toContainText('Not shown');
+    await expect(cell).toContainText('The set behind this figure is too small to report on.');
+    await expect(cell).not.toContainText(/\d/);
+  }
 });
 
 test('week navigation carries the week in the address and lands focus on the heading', async ({
@@ -678,10 +704,18 @@ function sectionLabelOf(code: string): string {
   return known?.label ?? '';
 }
 
-/** How the menu names one section's course, as a pattern its link is found by. */
+/**
+ * How the menu names one section, as a pattern its link is found by.
+ *
+ * The prefix, the LMS number **and** the §2.2 section code: the governed label
+ * the server composes carries all three, and the code is what makes the pattern
+ * match one link. Since E5-10's benchmark drive provisions the prior term's four
+ * sections, this instructor teaches more than one `BIOL 215` and more than one
+ * `BIOL 310`, and a pattern naming only the course is refused by strict mode.
+ */
 function courseOf(code: string): string {
-  if (code === BIOL.code) return 'BIOL 215';
-  return 'MATH 140';
+  if (code === BIOL.code) return `BIOL 215 ${BIOL.code}`;
+  return `MATH 140 ${MATH.code}`;
 }
 
 /** The section key out of the address the report is being read at. */
