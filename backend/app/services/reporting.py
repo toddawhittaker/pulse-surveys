@@ -72,7 +72,14 @@ from app.config import Settings
 from app.models.identity import Enrollment
 from app.models.org import Course, Prefix, Section
 from app.models.report import WeeklySummary
-from app.models.survey import REPORT_STREAMS, Answer, Question, QuestionKind, Response
+from app.models.survey import (
+    REPORT_STREAMS,
+    Answer,
+    Question,
+    QuestionKind,
+    QuestionSet,
+    Response,
+)
 from app.models.term import SurveyWindow, Term, Week
 from app.services import clock, enrollment_windows
 from app.services.authz import (
@@ -1117,6 +1124,101 @@ def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
     ]
 
 
+# The four columns every wording lookup below reads: which stream the question
+# belongs to, which set version it is part of, and the two text columns — the
+# sentence a student reads and the bold heading SPEC §3.2 gives the question.
+_RATING_WORDING = (Question.stream, QuestionSet.version, Question.prompt, Question.name)
+
+
+def _newest_wording_by_stream(rows: Sequence[Any]) -> dict[str, str]:
+    """One wording per stream out of some rating-question rows, newest version winning.
+
+    **`prompt` is the served column, and that is a verified fact rather than a
+    preference.** The student's form draws a Likert question's heading straight
+    from it — `frontend/src/components/LikertInput.tsx` renders
+    `<legend>{question.prompt}</legend>` — so `prompt` is the string the person who
+    answered actually read, which is what the instructor's histogram title is
+    claiming to repeat. `name` is SPEC §3.2's bold heading ("Instructor rating"),
+    which no student sees; it stands in only where a question carries no prompt at
+    all, since the column is nullable and a report is not the place to discover it.
+    """
+    found: dict[str, tuple[int, str]] = {}
+    for stream, version, prompt, name in rows:
+        wording = (prompt or "").strip() or (name or "").strip()
+        if stream is None or not wording:
+            continue
+        seen = found.get(stream)
+        if seen is None or version > seen[0]:
+            found[stream] = (version, wording)
+    return {stream: wording for stream, (_, wording) in found.items()}
+
+
+def _served_question_texts(session: Session, *, section_id: UUID, week_id: UUID) -> dict[str, str]:
+    """The wording each stream's rating question was asked in, for one section-week.
+
+    [ADR 0168](../../../docs/adr/0168-a-weeks-served-question-wording-comes-from-the-rows-its-responses-answered.md)
+    is the rule, and it has two halves because a week may have no responses:
+
+      - **A week somebody answered serves the wording of the rows its own responses
+        answered.** `answer.question_id` is durable, so the questions a week's
+        responses point at stay the questions that week was asked whatever is
+        published afterwards — which is what SPEC §3.2's versioning is for. A
+        report of an October week showing December's wording would be a chart
+        titled with a question nobody in it was asked.
+      - **A week nobody answered serves the newest set's matching question**, the
+        same highest-version rule a submission is judged against
+        (`app.services.submissions.current_questions`). `question_set` has no
+        `is_active` column and no dating — E2-05 says so in as many words — so the
+        newest set is the only thing "the set in force" can mean for a week with no
+        answered rows to read.
+
+    A week whose responses answered two versions serves the newest answered one:
+    the two queries below are read the same way, by version descending, so mixing
+    is decided by the same line that decides everything else.
+
+    The stream comes from `question.stream` and never from a position, for the
+    reason `_comments_reaching_the_model` gives: a later set may put the course
+    rating at a different ordinal, and E4-02 added the column to be the fact.
+    """
+    answered = session.execute(
+        select(*_RATING_WORDING)
+        .join(QuestionSet, QuestionSet.id == Question.question_set_id)
+        .join(Answer, Answer.question_id == Question.id)
+        .join(Response, Response.id == Answer.response_id)
+        .where(
+            Response.section_id == section_id,
+            Response.week_id == week_id,
+            Question.kind == QuestionKind.LIKERT,
+            Question.stream.in_(REPORT_STREAMS),
+        )
+    ).all()
+    newest = session.execute(
+        select(*_RATING_WORDING)
+        .join(QuestionSet, QuestionSet.id == Question.question_set_id)
+        .where(
+            Question.kind == QuestionKind.LIKERT,
+            Question.stream.in_(REPORT_STREAMS),
+        )
+    ).all()
+
+    served = _newest_wording_by_stream(newest)
+    served.update(_newest_wording_by_stream(answered))
+
+    missing = [token for token in REPORT_STREAMS if token not in served]
+    if missing:
+        # Loud rather than an empty title. Every deployment has a question set —
+        # `scripts/seed.py` writes SPEC §3.2's v1 — and a rating question for each
+        # of the two streams is what makes the report's two histograms meaningful,
+        # so an absence here is a broken instrument rather than a quiet week.
+        # `app.services.submissions.current_questions` refuses the same way.
+        raise RuntimeError(
+            f"No rating question was found for {missing} in any question set, so this report has no "
+            "wording to title those histograms with. SPEC §3.2's set carries one rating question per "
+            "stream, and `scripts/seed.py` writes it."
+        )
+    return served
+
+
 def _payload(
     session: Session,
     *,
@@ -1163,6 +1265,7 @@ def _payload(
     # follow. E4-07's security round found exactly that, and
     # `app.services.report_comments.n_threshold` carries the argument.
     threshold = n_threshold()
+    question_texts = _served_question_texts(session, section_id=section.id, week_id=week.week_id)
 
     streams = {
         token: schema.StreamReport(
@@ -1182,6 +1285,7 @@ def _payload(
             comments=_comment_views(
                 visible_comments(session, section_id=section.id, week_id=week.week_id, stream=token)
             ),
+            question_text=question_texts[token],
         )
         for token in REPORT_STREAMS
     }
@@ -1197,6 +1301,10 @@ def _payload(
             course_week=week.course_week,
             term_week=week.term_week,
             published_weeks=[other.course_week for other in published],
+            # The reported week's own window row, which `_section_weeks` already
+            # read — never the latest published week's and never the one the clock
+            # is standing in.
+            closes_at=week.closes_at,
         ),
         rates=schema.RatesView(
             response_rate=None if enrolled == 0 else responses / enrolled,
@@ -1216,6 +1324,7 @@ def _payload(
         comparison=comparison_after_suppression(None, sections=0, respondents=0),
         small_n=schema.SmallNView(suppressed=responses < threshold, threshold=threshold),
         released_from_earlier_weeks=_comment_views(released),
+        institution_timezone=settings.institution_timezone,
     )
 
 
