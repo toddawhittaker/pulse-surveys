@@ -13,6 +13,7 @@ import {
   A_BENCHMARK_WITH_A_NULL_MEMBER,
   A_BENCHMARK_WITH_AN_UNREADABLE_FLAG,
   A_BENCHMARK_WITH_NO_FIGURE_THIS_WEEK,
+  A_BENCHMARK_WITH_ONLY_THE_MEDIAN_WITHHELD,
   A_BENCHMARK_WITH_THE_COMPARISON_SUPPRESSED,
   A_BENCHMARK_WITH_THE_UNIVERSITY_SUPPRESSED,
 } from './instructorReportStats.fixtures';
@@ -193,9 +194,12 @@ describe('StatPair with one comparison column suppressed', () => {
     );
 
     expect(
-      A_BENCHMARK_WITH_THE_COMPARISON_SUPPRESSED.comparison?.reason,
-      'the fixture carries no reason, so this asserted nothing',
-    ).toBe('below-minimum');
+      [
+        A_BENCHMARK_WITH_THE_COMPARISON_SUPPRESSED.comparison?.mean?.reason,
+        A_BENCHMARK_WITH_THE_COMPARISON_SUPPRESSED.comparison?.median?.reason,
+      ],
+      'the fixture carries no reason token, so this asserted nothing',
+    ).toEqual(['below-minimum', 'below-minimum']);
     expect(container.textContent).not.toContain('below-minimum');
   });
 });
@@ -214,6 +218,38 @@ describe('StatPair with a comparison member that reports nothing this week', () 
       expect(cell.textContent).not.toMatch(/\d/);
     }
     expect(screen.getByText(`Median hours, university`)).toBeTruthy();
+  });
+});
+
+describe('StatPair with one figure of a column withheld and the other not', () => {
+  it('withholds that figure alone and prints the one the payload could answer', () => {
+    // The shape the payload sketch could not express, and the reason E5-10
+    // respelled these props: `workload_benchmark.comparison.mean` and `.median`
+    // are sealed independently on the wire, so a column may report one and
+    // withhold the other. A component carrying one flag per column had to
+    // withhold both or show both, and either answer misstates the payload.
+    render(<StatPair {...WEEK} benchmark={A_BENCHMARK_WITH_ONLY_THE_MEDIAN_WITHHELD} />);
+
+    const [median, mean] = cellsOf(STAT_CELL_COMPARISON_TESTID);
+    if (median === undefined || mean === undefined) {
+      throw new Error('the comparison column did not render both of its cells.');
+    }
+
+    // The median is the withheld one, in words and with no digit of any kind.
+    expect(within(median).getByText(WITHHELD)).toBeTruthy();
+    expect(within(median).getByText(TOO_SMALL)).toBeTruthy();
+    expect(median.textContent).not.toMatch(/\d/);
+
+    // And the mean is printed, which is the half a component that withheld the
+    // whole column would fail.
+    expect(mean.textContent).toBe(`Mean hours, comparable courses${COMPARISON_MEAN}`);
+    expect(within(mean).queryByText(WITHHELD)).toBeNull();
+
+    // The university column is untouched by either decision.
+    expect(cellsOf(STAT_CELL_UNIVERSITY_TESTID).map((cell) => cell.textContent)).toEqual([
+      `Median hours, university${UNIVERSITY_MEDIAN}`,
+      `Mean hours, university${UNIVERSITY_MEAN}`,
+    ]);
   });
 });
 
