@@ -221,3 +221,28 @@ it corrects today.
 a code. **Done when** the recount resolves sections the way the seeder itself
 does — by `(course, term, code)` — or a sentence records that the dev worlds
 keep codes unique and why that is acceptable.
+
+## The comparison-set fixtures sit outside both frontend string sweeps (E5-09)
+
+**What is not enforced.** `frontend/src/api/comparisonSetFixtures.ts` carries
+set names, course labels and the API's three refusal sentences, and no sweep
+reads it. `tests/unit/test_the_component_and_route_trees_ship_no_ungoverned_string.py`
+sweeps `components/` and `routes/` only, and steps over a test-support module
+inside those trees by naming it in `EXCLUDED_SUPPORT_MODULES`; the copy
+inventory reads `frontend/src/copy/`. A fixture module is shipped to nobody
+either way, so nothing is wrong today — what is missing is the check that it
+stays that way. The sweep's own disclosed limits already name "files outside
+the two trees" as a gap, and this is one more file in it.
+
+**Why it was left.** The module's natural home is beside the route it serves,
+and putting it there means adding a row to `tests/fixtures/component_strings.py`
+— a path `.claude/heavy-lane-paths.md` marks heavy, which this light-lane
+ticket may not edit. The alternatives were a heavy edit for a placement, or a
+fixture module in `api/` beside the contract it mirrors. The second is the one
+this ticket took, and this entry is its cost.
+
+**Owner:** E5-13, which grows the inventory over the E5 surfaces and is heavy.
+**Done when** either the module moves under `routes/leadership/` and is named
+in `EXCLUDED_SUPPORT_MODULES`, or the sweep reaches `frontend/src/api/` and
+excuses the fixture modules there by name — with the planted offender and near
+miss that module's rules already require.
