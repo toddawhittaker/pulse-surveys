@@ -39,6 +39,10 @@ alone).
   is ready, the preview ships member count only and the section count is a
   named criterion moved to E5-09's join, recorded in the PR body (no
   half-wired stub).
+- Grants: the write verbs on E5-01's tables land here with the writer
+  (INSERT, UPDATE, DELETE as the routes actually spend them, withheld
+  verbs named), versioned-grants shape — the same E4-02 precedent E5-04's
+  SELECT follows; E5-01 granted nothing on purpose.
 - Audit: the recommendation is that creates, edits and deletes write
   `audit_log` rows — a named set changes what leaders compare, and the
   trail is cheap. Whether the existing audit machinery fits a
