@@ -40,6 +40,12 @@ import './instructorReportTrend.css';
  * two-line pair E4 shipped — SPEC §4.1 item 1, and `PulseTrendChart`'s
  * docstring on why an absent prop may not draw.
  *
+ * **The members are the wire's own, and this reads none of them** (E5-10). The
+ * props are typed as the payload spells them, so the page passes
+ * `streams.<stream>.benchmark` straight through and no shape is mapped on the
+ * way; every question about whether a figure may be shown is asked once, in the
+ * panel, where the fail-closed reading lives.
+ *
  * One consequence of one legend, said out loud: the legend is the lower panel's,
  * so it names the lines that panel draws. The two panels suppress together in
  * practice — the benchmark minimums count the sections and the students in the

@@ -26,12 +26,18 @@ import {
  * beside the component for the reason `WeekEyebrow.courseLength.test.tsx` is
  * (ADR 0151's placement convention, one file per body of work).
  *
- * The fixtures are shaped by the payload sketch in `docs/tickets/e5/README.md`:
- * a series is `{suppressed, reason, points}`, and a suppressed one carries
- * `points: []` and a one-word reason. The overlay points carry a course week
- * and a mean and no term week, which is the sketch's shape — SPEC §5.1 makes a
- * benchmark past-referencing, so the figure behind one point spans several
- * terms and has no single term week to name.
+ * **The fixtures are the wire's own shape** — `app/schemas/report_benchmark.py`
+ * as E5-05 shipped it, which E5-10 reconciled this component's props to. A
+ * series is its weeks and nothing else; every published week is a point; and
+ * each point's `mean` is a sealed figure carrying its own `suppressed`, its own
+ * one-word `reason` and its own number. There is no series-level flag to write
+ * here, because there is none on the wire. The three builders below are the only
+ * place a point is written out, so a fixture cannot drift into the sketch's
+ * shape one literal at a time.
+ *
+ * An overlay point carries a course week and no term week, which is the schema's
+ * shape — SPEC §5.1 makes a benchmark past-referencing, so the figure behind one
+ * point spans several terms and has no single term week to name.
  *
  * **No two series share a value in any week, and none of the twelve numbers
  * repeats.** A chart that drew one series' points onto another's path would
@@ -50,27 +56,56 @@ const SECTION: readonly TrendPoint[] = [
   { courseWeek: 3, termWeek: 6, mean: 4.4 },
 ];
 
-const COMPARISON_POINTS: readonly OverlayPoint[] = [
-  { courseWeek: 1, mean: 3.9 },
-  { courseWeek: 2, mean: 3.2 },
-  { courseWeek: 3, mean: 3.7 },
-];
-
-const UNIVERSITY_POINTS: readonly OverlayPoint[] = [
-  { courseWeek: 1, mean: 2.8 },
-  { courseWeek: 2, mean: 3.0 },
-  { courseWeek: 3, mean: 2.6 },
-];
-
-const COMPARISON: OverlaySeries = { suppressed: false, points: COMPARISON_POINTS };
-const UNIVERSITY: OverlaySeries = { suppressed: false, points: UNIVERSITY_POINTS };
+/** A week the population reported, sealed open, as the server sends one. */
+function reported(courseWeek: number, figure: number): OverlayPoint {
+  return { course_week: courseWeek, mean: { suppressed: false, reason: null, figure } };
+}
 
 /**
- * A suppressed series exactly as the sketch carries one: the flag, a one-word
- * reason, and no points at all. The reason is a wire token and no component
- * writes it on a screen; one of the tests below is that it reaches none.
+ * A week SPEC §4.1 item 7 withheld: the seal says so, there is no number, and the
+ * one-word reason is the wire's token.
+ *
+ * The server's own rule is that a suppressed figure carries no figure — "a value
+ * carrying both would be a suppressed figure on the wire" — so a fixture that
+ * wrote one here would not be a payload this client can be sent. The one test
+ * that does write one says in its own body that it is the contradiction.
  */
-const SUPPRESSED: OverlaySeries = { suppressed: true, reason: 'below-minimum', points: [] };
+function withheld(courseWeek: number): OverlayPoint {
+  return {
+    course_week: courseWeek,
+    mean: { suppressed: true, reason: 'below-minimum', figure: null },
+  };
+}
+
+/**
+ * A week the population reported nothing in — unsuppressed and empty.
+ *
+ * Not the same fact as a suppression: the set is large enough to report on and
+ * this week has no figure from it. The two are told apart in the assertions
+ * below, because a reader is owed the right one.
+ */
+function unreported(courseWeek: number): OverlayPoint {
+  return { course_week: courseWeek, mean: { suppressed: false, reason: null, figure: null } };
+}
+
+const COMPARISON_POINTS: readonly OverlayPoint[] = [reported(1, 3.9), reported(2, 3.2), reported(3, 3.7)];
+
+const UNIVERSITY_POINTS: readonly OverlayPoint[] = [reported(1, 2.8), reported(2, 3.0), reported(3, 2.6)];
+
+const COMPARISON: OverlaySeries = { points: COMPARISON_POINTS };
+const UNIVERSITY: OverlaySeries = { points: UNIVERSITY_POINTS };
+
+/**
+ * A series the server withheld altogether: every published week present as a
+ * point, and every one of them sealed shut.
+ *
+ * **That is what a fully suppressed series looks like on the wire**, and it is
+ * not an empty array: the points are the report's own published weeks, so the
+ * series never says which weeks the comparison population answered in. The
+ * reason token rides along and no component writes it on a screen; one of the
+ * tests below is that it reaches none.
+ */
+const SUPPRESSED: OverlaySeries = { points: [withheld(1), withheld(2), withheld(3)] };
 
 const INSTRUCTOR = 'Instructor';
 const COMPARISON_LEGEND = 'Comparable 12-week courses';
@@ -327,23 +362,33 @@ describe('a suppressed series', () => {
       />,
     );
 
-    expect(SUPPRESSED.reason, 'the fixture carries no reason, so this asserted nothing').toBe(
-      'below-minimum',
-    );
+    expect(
+      SUPPRESSED.points.map((point) => point.mean.reason),
+      'the fixture carries no reason token, so this asserted nothing',
+    ).toEqual(['below-minimum', 'below-minimum', 'below-minimum']);
     expect(container.textContent).not.toContain('below-minimum');
   });
 
-  it('draws no line even if points arrive beside the flag', () => {
-    // The sketch says a suppressed member carries `points: []` and nothing
-    // else. This component does not take that on trust: the flag wins, so a
-    // payload that ever sent both would still show the notice rather than the
-    // line it says is not there.
+  it('draws no week whose seal says suppressed, even when a figure arrives beside it', () => {
+    // The server's rule is that `figure` is `null` wherever `suppressed` is
+    // true, so a week carrying both is a payload contradicting itself. This
+    // component does not take the number on trust: the seal wins, so a payload
+    // that ever sent both would still show the notice rather than the line it
+    // says is not there. Every week of this series is that contradiction, so
+    // nothing at all is drawable.
+    const contradicting: OverlaySeries = {
+      points: COMPARISON_POINTS.map((point) => ({
+        course_week: point.course_week,
+        mean: { suppressed: true, reason: 'below-minimum', figure: point.mean.figure },
+      })),
+    };
+
     render(
       <PulseTrendChart
         points={SECTION}
         label={INSTRUCTOR}
         lengthWeeks={SECTION_WEEKS}
-        comparison={{ suppressed: true, reason: 'below-minimum', points: COMPARISON_POINTS }}
+        comparison={contradicting}
         showLegend
       />,
     );
@@ -354,32 +399,41 @@ describe('a suppressed series', () => {
   });
 });
 
-describe('a series whose flag does not say exactly false', () => {
+describe('a week whose seal does not say exactly false', () => {
   /**
-   * The three shapes a `suppressed` that is not the boolean `false` arrives in.
+   * The four shapes a per-point seal that is not "false beside a number" arrives
+   * in.
    *
    * **The casts are the point rather than a shortcut.** The client casts the
    * report JSON into its TypeScript shapes without parsing it at runtime, so
-   * `OverlaySeries` describes what the server is expected to send and does not
-   * check that it did. These three are what the props actually hold the day the
-   * field is renamed on the wire, dropped, or serialised loosely — and each is
-   * falsy or truthy in a way a plain `if (series.suppressed)` reads as "not
-   * suppressed", which draws a line SPEC §4.1 item 7 had suppressed. That
-   * reading is the security round's LOW on this file, and this is the pair that
-   * closes it.
+   * `OverlayFigure` describes what the server is expected to send and does not
+   * check that it did. These are what the props actually hold the day the field
+   * is renamed on the wire, dropped, or serialised loosely — and each of the
+   * first three is falsy or truthy in a way a plain `if (mean.suppressed)` reads
+   * as "not suppressed", which draws a figure SPEC §4.1 item 7 had suppressed.
+   * That reading is the security round's LOW on this file, carried down to the
+   * per-point seal E5-10 reconciled the props to.
+   *
+   * The fourth is the other half of the seal: a flag that says exactly `false`
+   * beside a number that is not one. A component that asked only about the flag
+   * would plot the string and print `NaN` across the panel.
    */
-  const MALFORMED: readonly { readonly what: string; readonly flag: unknown }[] = [
-    { what: 'the flag was dropped from the payload', flag: undefined },
-    { what: 'the flag arrived null', flag: null },
-    { what: 'the flag arrived as a string', flag: 'false' },
+  const MALFORMED: readonly { readonly what: string; readonly mean: unknown }[] = [
+    { what: 'the flag was dropped from the payload', mean: { reason: 'below-minimum', figure: 3.9 } },
+    { what: 'the flag arrived null', mean: { suppressed: null, reason: null, figure: 3.9 } },
+    { what: 'the flag arrived as a string', mean: { suppressed: 'false', reason: null, figure: 3.9 } },
+    {
+      what: 'the figure arrived as a string',
+      mean: { suppressed: false, reason: null, figure: '3.9' },
+    },
   ];
 
-  for (const { what, flag } of MALFORMED) {
-    it(`is treated as suppressed when ${what}`, () => {
+  for (const { what, mean } of MALFORMED) {
+    it(`is treated as withheld when ${what}`, () => {
+      // Every week of the series carries the same malformed seal, so the series
+      // has nothing drawable and the panel's notice is what a reader meets.
       const series = {
-        suppressed: flag,
-        reason: 'below-minimum',
-        points: COMPARISON_POINTS,
+        points: COMPARISON_POINTS.map((point) => ({ course_week: point.course_week, mean })),
       } as unknown as OverlaySeries;
 
       render(
@@ -404,16 +458,16 @@ describe('a series whose flag does not say exactly false', () => {
     });
   }
 
-  it('is drawn when the flag says exactly false', () => {
-    // The near miss, and the half that makes the three above mean anything: a
-    // component that suppressed everything would satisfy them all. Same points,
-    // same reason token, and only the flag is different.
+  it('is drawn when the seal says exactly false beside a real number', () => {
+    // The near miss, and the half that makes the four above mean anything: a
+    // component that withheld everything would satisfy them all. The same three
+    // weeks, and only the seal is well formed.
     render(
       <PulseTrendChart
         points={SECTION}
         label={INSTRUCTOR}
         lengthWeeks={SECTION_WEEKS}
-        comparison={{ suppressed: false, reason: 'below-minimum', points: COMPARISON_POINTS }}
+        comparison={COMPARISON}
         showLegend
       />,
     );
@@ -458,16 +512,17 @@ describe('a series whose flag does not say exactly false', () => {
   });
 });
 
+/** One week reported, one week the population reported nothing in, one reported. */
+const GAPPED: OverlaySeries = { points: [reported(1, 3.9), unreported(2), reported(3, 3.7)] };
+
+/** The same three weeks, with the middle one withheld by §4.1 item 7 instead. */
+const PARTLY_WITHHELD: OverlaySeries = {
+  points: [reported(1, 3.9), withheld(2), reported(3, 3.7)],
+};
+
 describe('a week the series has no figure for', () => {
   it('breaks the line rather than drawing across it', () => {
-    const gapped: OverlaySeries = {
-      suppressed: false,
-      points: [
-        { courseWeek: 1, mean: 3.9 },
-        { courseWeek: 2, mean: null },
-        { courseWeek: 3, mean: 3.7 },
-      ],
-    };
+    const gapped = GAPPED;
 
     const { container } = render(
       <PulseTrendChart
@@ -501,14 +556,7 @@ describe('a week the series has no figure for', () => {
   });
 
   it('says so in words, and does not call it a rating of zero', () => {
-    const gapped: OverlaySeries = {
-      suppressed: false,
-      points: [
-        { courseWeek: 1, mean: 3.9 },
-        { courseWeek: 2, mean: null },
-        { courseWeek: 3, mean: 3.7 },
-      ],
-    };
+    const gapped = GAPPED;
 
     render(
       <PulseTrendChart
@@ -528,6 +576,138 @@ describe('a week the series has no figure for', () => {
       .map((cell) => cell.textContent);
     expect(values).toEqual(['3.9', 'No figure that week', '3.7']);
     expect(values).not.toContain('0.0');
+  });
+});
+
+describe('a series some of whose weeks are withheld', () => {
+  it('draws the weeks it has, leaves a gap at the withheld one, and posts no notice', () => {
+    // The per-point decision, which is what E5-10 reconciled these props to
+    // (ADR 0171). Week 2 is withheld by §4.1 item 7 and weeks 1 and 3 are not,
+    // so the line is drawn in two runs with a hole between them — and no notice,
+    // because the series is on the panel and a reader can see where it stops.
+    // The alternative the ADR rejects is a notice whenever any week is withheld,
+    // which would put "no line this week" under a line.
+    const { container } = render(
+      <PulseTrendChart
+        points={SECTION}
+        label={INSTRUCTOR}
+        lengthWeeks={SECTION_WEEKS}
+        comparison={PARTLY_WITHHELD}
+        showLegend
+      />,
+    );
+
+    const drawn = coordinatesOf(container, COMPARISON_LINE);
+    expect(drawn.filter((point) => point.command === 'M')).toHaveLength(2);
+    expect(new Set(drawn.map((point) => point.x)).size).toBe(2);
+    expect(screen.queryByTestId(TREND_SUPPRESSION_COMPARISON_TESTID)).toBeNull();
+    expect(screen.getByTestId(TREND_LEGEND_COMPARISON_TESTID)).toBeTruthy();
+
+    // And the withheld week's own number is nowhere: neither on the path nor in
+    // the table beside it, which reads it as an absence like any other.
+    const table = screen.getByRole('table', {
+      name: `Weekly ratings: Instructor, ${COMPARISON_LEGEND}`,
+    });
+    expect(
+      within(table)
+        .getAllByRole('cell')
+        .map((cell) => cell.textContent),
+    ).toEqual(['3.9', 'No figure that week', '3.7']);
+  });
+
+  it('posts the notice once every week of it is withheld, and not before', () => {
+    // The boundary, both sides of it, one week apart: a series with a single
+    // drawable week draws, and the same series with that week withheld too says
+    // so in words. Without the first half, a component that posted the notice
+    // whenever *any* week was withheld would pass the second.
+    const oneWeekLeft: OverlaySeries = {
+      points: [withheld(1), withheld(2), reported(3, 3.7)],
+    };
+
+    const { container: drawing } = render(
+      <PulseTrendChart
+        points={SECTION}
+        label={INSTRUCTOR}
+        lengthWeeks={SECTION_WEEKS}
+        comparison={oneWeekLeft}
+        showLegend
+      />,
+    );
+    expect(drawing.querySelectorAll(`[data-testid="${TREND_LINE_COMPARISON_TESTID}"]`)).toHaveLength(1);
+    expect(drawing.querySelectorAll('.pulse-trend-suppression')).toHaveLength(0);
+
+    const { container: silent } = render(
+      <PulseTrendChart
+        points={SECTION}
+        label={INSTRUCTOR}
+        lengthWeeks={SECTION_WEEKS}
+        comparison={SUPPRESSED}
+        showLegend
+      />,
+    );
+    expect(silent.querySelectorAll(`[data-testid="${TREND_LINE_COMPARISON_TESTID}"]`)).toHaveLength(0);
+    expect(silent.querySelectorAll('.pulse-trend-suppression')).toHaveLength(1);
+  });
+});
+
+describe('a member the payload sent without its weeks', () => {
+  /**
+   * The shapes a `points` that is not an array of weeks arrives in.
+   *
+   * `points` is required by the schema, so each of these is a malformed
+   * first-party payload — the same class as an unreadable seal, and it takes the
+   * same treatment. **Before E5-10 the first of them crashed the panel**: the
+   * reader returned `undefined` for a member whose flag said `false` and whose
+   * `points` key was missing, and the spread that builds the week axis threw, so
+   * the whole report's render failed. `docs/tickets/e5/deferred.md` carried it
+   * as E5-10's, and this is the pin its done-when asks for.
+   */
+  const WITHOUT_WEEKS: readonly { readonly what: string; readonly series: unknown }[] = [
+    { what: 'there is no points key at all', series: { reason: 'below-minimum' } },
+    { what: 'points arrived null', series: { points: null } },
+    { what: 'points arrived as an object', series: { points: { 1: 3.9 } } },
+    { what: 'the member itself arrived null', series: null },
+  ];
+
+  for (const { what, series } of WITHOUT_WEEKS) {
+    it(`renders the suppressed treatment when ${what}`, () => {
+      const { container } = render(
+        <PulseTrendChart
+          points={SECTION}
+          label={INSTRUCTOR}
+          lengthWeeks={SECTION_WEEKS}
+          comparison={series as OverlaySeries}
+          showLegend
+        />,
+      );
+
+      // The panel rendered at all, which is the half the crash took away: the
+      // section's own line and its table are on the page.
+      expect(container.querySelectorAll('.pulse-trend-line')).toHaveLength(1);
+      expect(screen.getAllByRole('table')).toHaveLength(1);
+
+      // And the member said something, because it was there.
+      expect(screen.queryByTestId(TREND_LINE_COMPARISON_TESTID)).toBeNull();
+      expect(screen.getByTestId(TREND_SUPPRESSION_COMPARISON_TESTID).textContent).toBe(
+        'Comparable 12-week courses: no line this week. The set behind it is too small to report on.',
+      );
+    });
+  }
+
+  it('still draws the axis over the section’s own term', () => {
+    // The crash was in the week-axis calculation, so the near miss is a panel
+    // that renders and draws a shorter axis. Twelve ticks is `lengthWeeks`,
+    // which is what the axis is (E4-21).
+    const { container } = render(
+      <PulseTrendChart
+        points={SECTION}
+        label={INSTRUCTOR}
+        lengthWeeks={SECTION_WEEKS}
+        comparison={{ reason: 'below-minimum' } as unknown as OverlaySeries}
+      />,
+    );
+
+    expect(container.querySelectorAll('.pulse-trend-tick-label')).toHaveLength(SECTION_WEEKS);
   });
 });
 

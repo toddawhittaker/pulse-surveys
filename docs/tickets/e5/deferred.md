@@ -75,6 +75,19 @@ malformed first-party payload becomes possible.
 (or another stated treatment) rather than throwing, pinned by a test beside
 the malformed-flag pair.
 
+**Resolution, 2026-09-14 (E5-10) — closed.** The reader that returned
+`undefined` is gone. E5-10 respelled the overlay props as the wire spells them
+(ADR 0171), and the week list a series contributes is now built by one function
+that asks whether the payload sent an array at all before reading it: anything
+that is not one — a missing `points` key, a `null`, an object, a member that is
+itself `null` — yields no drawable week, and a series with no drawable week
+renders E5-07's suppression notice. The panel draws its own line and its axis
+over the section's whole term either way, which is the half the crash took away.
+Pinned in `PulseTrendChart.overlays.test.tsx` under "a member the payload sent
+without its weeks": the four malformed shapes, and the axis assertion that says
+the panel rendered rather than merely not throwing. The guard was verified by
+mutation — removing the array check reds those four and thirteen others.
+
 ## The benchmark definer's reach has no pinned equality (E5-03)
 
 `pulse_benchmark_definer` owns the two benchmark set functions and holds

@@ -350,10 +350,17 @@ function ReportWeek({ report }: { readonly report: InstructorReportView }): JSX.
   return (
     <>
       <h2 className="pulse-report-heading">{copy('instructor_report_page.trend_heading')}</h2>
+      {/* The benchmark members go through as the payload carries them (E5-10).
+          Nothing is mapped or defaulted on the way: the component props are the
+          wire's own shape, and a member the payload did not send arrives
+          `undefined`, which draws nothing at all — SPEC §4.1 item 1, and the
+          state an older cached answer read mid-deploy lands in. */}
       <TrendPair
         instructor={trendOf(streams.instructor.trend)}
         course={trendOf(streams.course.trend)}
         lengthWeeks={report.section.length_weeks}
+        instructorBenchmark={streams.instructor.benchmark}
+        courseBenchmark={streams.course.benchmark}
       />
 
       <h2 className="pulse-report-heading">{copy('instructor_report_page.ratings_heading')}</h2>
@@ -373,7 +380,11 @@ function ReportWeek({ report }: { readonly report: InstructorReportView }): JSX.
       </div>
 
       <h2 className="pulse-report-heading">{copy('instructor_report_page.workload_heading')}</h2>
-      <StatPair median={report.workload.median} mean={report.workload.mean} />
+      <StatPair
+        median={report.workload.median}
+        mean={report.workload.mean}
+        benchmark={report.workload_benchmark}
+      />
 
       <h2 className="pulse-report-heading">
         {copy('instructor_report_page.participation_heading')}

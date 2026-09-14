@@ -26,62 +26,90 @@ export interface TrendPoint {
 }
 
 /**
- * One week of one comparison series — ticket E5-07, shaped by the payload
- * sketch in `docs/tickets/e5/README.md`.
+ * One benchmark number as the report payload carries it — the wire's
+ * `ComparisonFigure`, reconciled to the schema by ticket E5-10.
  *
- * The field names are {@link TrendPoint}'s, because they are the same two
- * facts: which course week, and what the mean was. **There is no `termWeek`,
- * and that is the sketch's shape rather than an omission.** A benchmark is
- * past-referencing (SPEC §5.1): week N of this section is compared against week
- * N of matching sections in the current *and prior* terms, so the figure behind
- * one point belongs to several terms at once and has no single term week to
- * carry. The axis's term-week sub-labels stay the section's own, which is the
- * only stream that has them.
+ * **This is the shape the server sends and not a shape of this component's
+ * choosing.** E5-07 built the overlays against the README's payload sketch,
+ * where a point's `mean` was a bare number and a whole series carried one
+ * `suppressed` flag. The shipped schema (`app/schemas/report_benchmark.py`)
+ * seals every single figure on its own instead, and E5-10 is the named
+ * reconciliation point: the field names below are the wire's, so the page hands
+ * this component the payload member whole and nothing maps on the way.
  *
- * `mean` is `null` for a week the series has no reportable figure in. The line
- * breaks there, exactly as the section's line breaks at a week nobody answered:
- * drawing across it would be a claim about a week that was not reported.
+ * `figure` is `null` wherever `suppressed` is true — a value carrying both would
+ * be a suppressed figure on the wire, which SPEC §4.1 item 7 is exactly about —
+ * and it is `null` again for a week the population reported nothing in, which is
+ * a different fact the notice below tells apart.
+ *
+ * `reason` is the payload's one-word token (`"below-minimum"`) and **nothing
+ * renders it**: a wire token is not a governed string, and the words a reader
+ * sees come from `instructorReportTrendCopy.ts` like every other sentence on
+ * this surface.
+ *
+ * Both optional members are optional **and** nullable because this is a
+ * TypeScript shape over JSON the client casts rather than parses. See
+ * {@link isDrawable} for why that is read fail-closed.
  */
-export interface OverlayPoint {
-  readonly courseWeek: number;
-  readonly mean: number | null;
+export interface OverlayFigure {
+  readonly suppressed: boolean;
+  readonly reason?: string | null;
+  readonly figure?: number | null;
 }
 
 /**
- * One comparison series as the report payload carries it: either its weeks, or
- * the fact that it is suppressed.
+ * One week of one comparison series — the wire's `BenchmarkSeriesPoint`.
  *
- * SPEC §4.1 item 7 suppresses every figure computed from a comparison set below
- * the benchmark minimums, and E5's breakdown decision 2 puts the decision in
- * `comparison_after_suppression` on the server. **Nothing in this component
- * decides it** — the flag is read, never computed, and a suppressed series
- * arrives carrying no points to draw even if a caller passed some.
+ * **Every week the report publishes is a point here, suppressed weeks
+ * included.** The server says so in as many words: "a suppressed week is a point
+ * that is present and whose `mean` says it is suppressed". A series that dropped
+ * its suppressed weeks would draw a chart with no gap where a week was withheld,
+ * and a reader could subtract the section's own published weeks to find which
+ * weeks the comparison population answered in.
  *
- * **`suppressed` has to say `false` for a line to be drawn.** This is a shape
- * over JSON the client casts rather than parses, so anything else the flag
- * turns out to hold — missing, renamed, null — is read as suppressed. See
- * {@link isSuppressed} for why the check fails in that direction.
+ * **There is no `termWeek`, and that is the schema's shape rather than an
+ * omission.** A benchmark is past-referencing (SPEC §5.1): week N of this
+ * section is compared against week N of matching sections in the current *and
+ * prior* terms, so the figure behind one point belongs to several terms at once
+ * and has no single term week to carry. The axis's term-week sub-labels stay the
+ * section's own, which is the only stream that has them.
+ */
+export interface OverlayPoint {
+  readonly course_week: number;
+  readonly mean: OverlayFigure;
+}
+
+/**
+ * One comparison series as the report payload carries it — the wire's
+ * `BenchmarkSeries`, which is its weeks and nothing else.
  *
- * `reason` is the payload's one-word token (`"below-minimum"` in the sketch) and
- * **nothing renders it**: a wire token is not a governed string, and the words a
- * reader sees come from `instructorReportTrendCopy.ts` like every other sentence
- * on this surface. It is carried so the payload can reach this component whole
- * in E5-10 rather than being trimmed on the way.
+ * **There is no series-level `suppressed` flag**, and the server's schema says
+ * why: a flag over a whole series is a statistic about a comparison set, and one
+ * assembled outside the chokepoint is a figure no minimum was applied to. So the
+ * question this component asks is per week, and "this series is suppressed"
+ * means "no week of it is drawable" — see {@link drawnPoints}.
+ *
+ * Nothing here decides a suppression. SPEC §4.1 item 7 and the benchmark
+ * minimums behind it are the server's (`comparison_after_suppression`, E5's
+ * breakdown decision 2); every flag below is read, never computed.
  */
 export interface OverlaySeries {
-  readonly suppressed: boolean;
-  readonly reason?: string;
   readonly points: readonly OverlayPoint[];
 }
 
 /**
- * The two comparison series of one stream, as `streams.<stream>.benchmark` in
- * the payload sketch. Either member may be absent, and an absent member draws
- * nothing at all.
+ * The two comparison series of one stream, as `streams.<stream>.benchmark` on
+ * the wire. Either member may be absent, and an absent member draws nothing at
+ * all.
+ *
+ * Both members are optional here though the schema makes both required, because
+ * the payload reaching this component is cast rather than parsed: a member the
+ * server stopped sending has to arrive somewhere, and the absent case is already
+ * the one §4.1 item 1 governs.
  */
 export interface StreamBenchmark {
-  readonly comparison?: OverlaySeries;
-  readonly university?: OverlaySeries;
+  readonly comparison?: OverlaySeries | null;
+  readonly university?: OverlaySeries | null;
 }
 
 /** The comparison line, addressable from a test and from the end-to-end suite. */
@@ -156,7 +184,7 @@ function xFor(courseWeek: number, weeks: number): number {
  * payload disagreeing with itself; drawing the axis short would put those weeks
  * off the right-hand edge, where nobody would see that anything was wrong.
  */
-function axisWeeks(lengthWeeks: number, points: readonly OverlayPoint[]): number {
+function axisWeeks(lengthWeeks: number, points: readonly DrawnPoint[]): number {
   return Math.max(lengthWeeks, ...points.map((point) => point.courseWeek), 1);
 }
 
@@ -175,8 +203,22 @@ interface PlottedPoint {
   readonly y: number;
 }
 
+/**
+ * One week of any line on this chart, once the payload's shape has been read
+ * off it: which course week, and the figure to draw there or `null`.
+ *
+ * The section's own {@link TrendPoint} already is one of these and reaches the
+ * drawing unchanged; a comparison week becomes one in {@link drawnPoints}, which
+ * is the single place the wire's per-point seal is read. Every function below
+ * this line draws, and none of them asks whether a figure may be shown.
+ */
+interface DrawnPoint {
+  readonly courseWeek: number;
+  readonly mean: number | null;
+}
+
 /** Each week's place on the plot, or `null` for a week with no rating. */
-function plot(points: readonly OverlayPoint[], weeks: number): readonly (PlottedPoint | null)[] {
+function plot(points: readonly DrawnPoint[], weeks: number): readonly (PlottedPoint | null)[] {
   return points.map((point) =>
     point.mean === null ? null : { x: xFor(point.courseWeek, weeks), y: yFor(point.mean) },
   );
@@ -280,10 +322,12 @@ function axisTicks(weeks: number, points: readonly TrendPoint[]): readonly AxisT
  *
  * **Nothing here decides whether a comparison may be shown.** §4.1 item 7 and
  * the benchmark minimums behind it are the server's (`comparison_after_suppression`,
- * E5's breakdown decision 2). A series arrives either with points or marked
- * suppressed, and this renders what it was handed: a suppressed series draws no
- * line, contributes no legend entry, publishes no table, and says in words that
- * it is not there.
+ * E5's breakdown decision 2). **The decision arrives per week** (E5-10, ADR
+ * 0171): every published week is a point and each point's own figure says
+ * whether it may be drawn. A series with no drawable week at all draws no line,
+ * contributes no legend entry, publishes no table, and says in words that it is
+ * not there; a series with some draws those and leaves a gap at each withheld
+ * week, exactly as it leaves one at a week the population reported nothing in.
  *
  * **The three lines are told apart without colour.** The section's is solid and
  * 2.5px with its terminal dot; the comparison set's is dashed; the university's
@@ -350,9 +394,9 @@ export function PulseTrendChart({
    * then exactly the single-line chart E4 shipped. See this component's
    * docstring on why that is §4.1 item 1 rather than a convenience.
    */
-  readonly comparison?: OverlaySeries;
+  readonly comparison?: OverlaySeries | null;
   /** This stream's university-wide series, on the same terms as `comparison`. */
-  readonly university?: OverlaySeries;
+  readonly university?: OverlaySeries | null;
   /** Whether this panel draws the week axis. A stacked pair draws it once. */
   readonly showTicks?: boolean;
   /** Whether this panel carries the legend. A stacked pair carries it once. */
@@ -513,17 +557,21 @@ export function PulseTrendChart({
       {universityPoints.length > 0 && (
         <OverlayTable stream={label} series={universityLabel} points={universityPoints} />
       )}
-      {/* The notice and the line are decided by one question asked one way
-          (`isSuppressed`), so there is no gap between them for a malformed flag
-          to fall into: a series that draws no line always says why. */}
-      {comparison !== undefined && isSuppressed(comparison) && (
+      {/* The notice and the line are decided by one list (`drawnPoints`), so
+          there is no gap between them for a malformed payload to fall into: a
+          series that is there and draws no line always says why, and a series
+          that was never sent says nothing. A series with *some* drawable weeks
+          draws them with a gap at each withheld week and gets no notice — the
+          picture already shows the break, and a notice would be saying the line
+          is missing while a reader is looking at it. */}
+      {comparison !== undefined && comparisonPoints.length === 0 && (
         <p className="pulse-trend-suppression" data-testid={TREND_SUPPRESSION_COMPARISON_TESTID}>
           {fillCopy('instructor_report_trend.comparison_suppressed', {
             weeks: String(lengthWeeks),
           })}
         </p>
       )}
-      {university !== undefined && isSuppressed(university) && (
+      {university !== undefined && universityPoints.length === 0 && (
         <p className="pulse-trend-suppression" data-testid={TREND_SUPPRESSION_UNIVERSITY_TESTID}>
           {copy('instructor_report_trend.university_suppressed')}
         </p>
@@ -564,48 +612,80 @@ export function PulseTrendChart({
 }
 
 /**
- * Whether a series the payload sent may be drawn — **only if its flag says
- * exactly `false`**.
+ * Whether one benchmark week may be drawn — **only if its own flag says exactly
+ * `false` and its own figure is a number**.
  *
- * This is the one question in the file that fails closed, and the comparison is
- * `=== false` rather than a truthiness test on purpose. `OverlaySeries` is a
- * TypeScript shape over JSON the client casts without parsing at runtime, so the
- * type is a description of what the server is expected to send and not a check
- * that it did. A flag that arrived renamed, misspelled, or missing is
- * `undefined` here, and `undefined` is falsy: a truthiness test would read a
- * dropped `suppressed` as "not suppressed" and draw a line SPEC §4.1 item 7 had
- * suppressed, with no notice to say anything was withheld. The whole class of
- * payload slip resolves to "show the figure", which is the wrong direction for a
- * confidentiality rule to fail in.
+ * This is the one question in the file that fails closed, and both halves of it
+ * are written the strict way on purpose. {@link OverlayFigure} is a TypeScript
+ * shape over JSON the client casts without parsing at runtime, so the type is a
+ * description of what the server is expected to send and not a check that it
+ * did. A flag that arrived renamed, misspelled, or missing is `undefined` here,
+ * and `undefined` is falsy: a truthiness test would read a dropped `suppressed`
+ * as "not suppressed" and draw a figure SPEC §4.1 item 7 had suppressed. The
+ * whole class of payload slip resolves to "show the figure", which is the wrong
+ * direction for a confidentiality rule to fail in.
  *
- * So anything that is not literally `false` is treated as suppressed. The cost,
- * named: a payload that stopped sending the flag would show suppression notices
- * on every panel rather than drawing lines — loud, visible, and withholding
- * nothing a reader was entitled to.
+ * The second half is the same argument about the number. The server's rule is
+ * that `figure` is `null` wherever `suppressed` is true, so a figure beside a
+ * raised flag is a payload contradicting itself — and `typeof === 'number'`
+ * refuses a string, a `null` and an absent member together, none of which can be
+ * plotted without becoming `NaN` somewhere down the file.
  *
- * **An absent prop is not this question.** `comparison === undefined` means the
- * payload carried no comparison member at all, which is §4.1 item 1's case and
- * renders nothing whatsoever — no line and no notice. This function is only ever
- * asked about a series that is there.
+ * So anything that is not literally `false` beside a real number is treated as a
+ * week with nothing to draw. The cost, named: a payload that stopped sending the
+ * flag would show suppression notices on every panel rather than drawing lines —
+ * loud, visible, and withholding nothing a reader was entitled to.
  */
-function isSuppressed(series: OverlaySeries): boolean {
-  return series.suppressed !== false;
+function isDrawable(figure: OverlayFigure | null | undefined): boolean {
+  // `!= null` rather than `!== undefined`: a JSON `null` in the `mean` position
+  // is a member that was sent and cannot be read, and reading `suppressed` off
+  // it throws.
+  return figure != null && figure.suppressed === false && typeof figure.figure === 'number';
 }
 
 /**
- * The weeks one comparison series carries, or an empty list.
+ * The weeks one comparison series has something to draw, or an empty list.
  *
- * Absent and suppressed both come out empty, and the caller is what tells them
- * apart. A suppressed series is emptied here rather than trusted to arrive with
- * no points: the payload sketch says a suppressed member carries `points: []`
- * and nothing else, and a chart that drew whatever it was handed would put a
- * line under a suppression notice the first time that contract slipped. That is
- * the same defence as {@link isSuppressed}, pointed at the other half of the
- * member — the flag and the points each stop the other being believed alone.
+ * **Empty means "this series says nothing", and the caller is what turns that
+ * into either silence or a notice.** An absent member renders nothing at all
+ * (SPEC §4.1 item 1); a member that is present and has no drawable week renders
+ * the suppression notice, which is §4.1 item 7's case and is what a series every
+ * one of whose weeks the server withheld actually looks like on the wire.
+ *
+ * **A week that is present and not drawable stays in the list as a gap**, so the
+ * line breaks there and the table beside it says there is no figure — the same
+ * treatment a week the population simply did not report in gets, because from
+ * the reader's side they are the same absence and the notice is what names a
+ * suppression. Dropping those weeks instead would join the line across them,
+ * which is a claim about weeks that were withheld.
+ *
+ * **A member with no `points` array is "nothing to draw" rather than a crash.**
+ * `points` is required by the schema, so a member arriving without it is a
+ * malformed first-party payload — the same class as an unreadable flag — and it
+ * takes the same treatment. Before E5-10 this function returned `undefined`
+ * there and the spread in {@link axisWeeks} threw, taking the whole panel's
+ * render down with it (`docs/tickets/e5/deferred.md`).
  */
-function drawnPoints(series: OverlaySeries | undefined): readonly OverlayPoint[] {
-  if (series === undefined || isSuppressed(series)) return [];
-  return series.points;
+function drawnPoints(series: OverlaySeries | null | undefined): readonly DrawnPoint[] {
+  const weeks = sentWeeks(series?.points).map((point) => ({
+    courseWeek: point.course_week,
+    mean: isDrawable(point.mean) ? (point.mean.figure ?? null) : null,
+  }));
+  return weeks.some((week) => week.mean !== null) ? weeks : [];
+}
+
+/**
+ * The weeks a member actually carried, or none.
+ *
+ * Written over `unknown` rather than over {@link OverlaySeries}'s own member,
+ * because the question is whether the payload sent an array at all: the type
+ * says it did and the type is a description of the server rather than a check on
+ * it. The cast on the other side of the test is what that costs, and it is
+ * bounded — every field read off a point afterwards goes back through
+ * {@link isDrawable}, which answers for a malformed one.
+ */
+function sentWeeks(points: unknown): readonly OverlayPoint[] {
+  return Array.isArray(points) ? (points as readonly OverlayPoint[]) : [];
 }
 
 /**
@@ -630,7 +710,7 @@ function OverlayTable({
   readonly stream: string;
   /** This series' name, in the same words the legend gives it. */
   readonly series: string;
-  readonly points: readonly OverlayPoint[];
+  readonly points: readonly DrawnPoint[];
 }): JSX.Element {
   return (
     <table className="sr-only">

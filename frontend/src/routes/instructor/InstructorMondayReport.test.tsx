@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { SECTIONS_PATH, publishedWeeksPath, reportPath } from '../../api/instructor';
 import { InstructorMondayReport } from './InstructorMondayReport';
 import {
   A_PUBLISHED_WEEK,
+  A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS,
   A_SMALL_N_WEEK,
+  A_WEEK_WHOSE_TOP_LEVEL_COMPARISON_DIVERGES,
+  A_WEEK_WITH_THE_BENCHMARKS_WITHHELD,
   A_WEEK_NOBODY_ANSWERED,
   A_WEEK_WITH_A_HELD_COMMENT,
   A_WEEK_WITH_A_RELEASE,
@@ -20,6 +23,7 @@ import {
   RELEASED_INSTRUCTOR_COMMENT,
   SECTION_ID,
   SMALL_N_THRESHOLD,
+  THE_TOP_LEVEL_COMPARISON_ONLY,
 } from './instructorReportFixtures';
 
 /**
@@ -54,6 +58,15 @@ const RELEASED_HEADING = 'Comments from earlier weeks';
  */
 const CREDIT_NOTE_ARITHMETIC = 'completed items out of total items';
 const CREDIT_NOTE_CAN_LOWER = 'lower a score that has already posted';
+
+/** Copy the benchmark surfaces ship, transcribed from their own copy modules. */
+const COMPARISON_SERIES = 'Comparable 12-week courses';
+const UNIVERSITY_SERIES = 'University';
+const WITHHELD = 'Not shown';
+const TOO_SMALL = 'The set behind this figure is too small to report on.';
+
+/** The comparison set's workload mean, as this fixture's 8.96 renders. */
+const COMPARISON_WORKLOAD_MEAN = '9.0 h';
 
 /** Copy the components ship, transcribed the same way. */
 const ABSENT_SUMMARY = 'No summary was written for this week.';
@@ -162,8 +175,20 @@ describe('a published week with data in it', () => {
     }
 
     // The stacked pair, read through the accessible tables E4-08 gives it: one
-    // per panel, so two.
-    expect(screen.getAllByRole('table')).toHaveLength(2);
+    // per panel, so two — **and one per drawn comparison series since E5-10
+    // wired the benchmark members through**, which is two more per panel. Six
+    // is the count of a page whose payload carries both series for both
+    // streams; the captions below are what says which is which.
+    expect(
+      screen.getAllByRole('table').map((table) => within(table).getByRole('caption').textContent),
+    ).toEqual([
+      'Weekly ratings: Instructor',
+      `Weekly ratings: Instructor, ${COMPARISON_SERIES}`,
+      `Weekly ratings: Instructor, ${UNIVERSITY_SERIES}`,
+      'Weekly ratings: Course',
+      `Weekly ratings: Course, ${COMPARISON_SERIES}`,
+      `Weekly ratings: Course, ${UNIVERSITY_SERIES}`,
+    ]);
 
     // The two distributions, the workload pair and both rates. Each figure is
     // asserted as the string the payload's number formats to, so a member read
@@ -260,21 +285,154 @@ describe('a published week with data in it', () => {
     ).toEqual(['TERM 05', '07']);
   });
 
-  it('names no comparison anywhere, though the payload carries the member', async () => {
-    // SPEC §4.1 item 7 and E4's breakdown: the `comparison` member is on the
-    // wire from day one so E5's benchmarks have a chokepoint to pass through,
-    // and nothing in E4 may render a figure from one. The fixture carries the
-    // member — suppressed, with its reason — so this is a fact about a payload
-    // that had one rather than about a payload that did not.
+  it('reads the benchmark members and never the top-level comparison', async () => {
+    // **What this assertion was, and why it changed.** Through E4 it read "names
+    // no comparison anywhere, though the payload carries the member": SPEC §4.1
+    // item 7's `comparison` was on the wire from day one so E5's benchmarks had
+    // a chokepoint to pass through, and nothing in E4 might render a figure from
+    // one. E5-10 is the ticket that wires the benchmarks, so the first half of
+    // that sentence is no longer true and the second half is the whole of what
+    // survives — rewritten rather than deleted, because it is still the only
+    // thing holding the top-level member unread.
+    //
+    // The fixture makes the two disagree on purpose. On the wire the top-level
+    // `comparison` is the same figure `workload_benchmark.comparison.mean`
+    // carries, so a page reading the wrong one renders the right number; here it
+    // carries a figure that appears nowhere else, so this is a statement about a
+    // number that would be visible if anything read it.
+    servingWeeks({ 4: A_WEEK_WHOSE_TOP_LEVEL_COMPARISON_DIVERGES });
+    const { container } = open(4);
+    await screen.findByRole('heading', { level: 2, name: 'Rating trend' });
+
+    // The canary (`docs/MISTAKES.md` entry 3): the page certainly renders
+    // benchmark figures, so the absence below is about this one member rather
+    // than about a page that rendered nothing.
+    expect(
+      screen.getAllByRole('definition').map((value) => value.textContent),
+      'no comparison figure is on the page, so the absence below is about a page with nothing on it',
+    ).toContain(COMPARISON_WORKLOAD_MEAN);
+
+    expect(A_WEEK_WHOSE_TOP_LEVEL_COMPARISON_DIVERGES.comparison.figure).toBe(
+      THE_TOP_LEVEL_COMPARISON_ONLY,
+    );
+    // Both spellings a workload figure reaches this page in: the raw number,
+    // and the one decimal every figure on the pair is formatted to. The bare
+    // integer is deliberately not one of them — "17" is a substring of numbers
+    // the page legitimately writes, and a probe that matched those would be red
+    // whatever the page read.
+    for (const spelling of ['17.83', '17.8']) {
+      expect(
+        container.textContent,
+        `the top-level comparison figure reached the page as ${spelling}`,
+      ).not.toContain(spelling);
+    }
+    // And the wire's own token stays a wire token: the words a reader sees come
+    // from the copy modules.
+    expect(container.innerHTML).not.toContain('below-minimum');
+  });
+
+  it('draws three lines per panel and six workload figures from the payload', async () => {
+    // E5-10's first criterion, on the page: the members the payload carries
+    // reach the components that draw them, each panel gets its own stream's
+    // series, and the workload pair grows from two figures to six.
     servingWeeks({ 4: A_PUBLISHED_WEEK });
     const { container } = open(4);
     await screen.findByRole('heading', { level: 2, name: 'Rating trend' });
 
-    expect(A_PUBLISHED_WEEK.comparison.suppressed).toBe(true);
-    const markup = container.innerHTML;
-    for (const word of ['comparable', 'benchmark', 'university', 'below-minimum', 'suppressed']) {
-      expect(markup.toLowerCase()).not.toContain(word);
+    // Three paths per panel, in one drawing order: the university line, the
+    // comparison set's, then the section's own on top.
+    const panels = [...container.querySelectorAll('.pulse-trend')];
+    expect(panels, 'the page did not render the stacked pair').toHaveLength(2);
+    for (const panel of panels) {
+      expect([...panel.querySelectorAll('path')].map((path) => path.getAttribute('class'))).toEqual([
+        'pulse-trend-line-university',
+        'pulse-trend-line-comparison',
+        'pulse-trend-line',
+      ]);
     }
+
+    // Each panel reads its own stream's member. The mutation this kills is one
+    // stream's benchmark reaching both panels, which draws two entirely
+    // plausible charts out of the wrong numbers.
+    const valuesOf = (stream: string, seriesName: string): (string | null)[] =>
+      within(screen.getByRole('table', { name: `Weekly ratings: ${stream}, ${seriesName}` }))
+        .getAllByRole('cell')
+        .map((cell) => cell.textContent);
+    expect(valuesOf('Instructor', COMPARISON_SERIES)).toEqual(['3.9', '3.5', '3.0']);
+    expect(valuesOf('Instructor', UNIVERSITY_SERIES)).toEqual(['2.9', '2.5', '2.0']);
+    expect(valuesOf('Course', COMPARISON_SERIES)).toEqual(['3.7', '3.2', '2.8']);
+    expect(valuesOf('Course', UNIVERSITY_SERIES)).toEqual(['2.7', '2.4', '2.1']);
+
+    // And the workload pair, six labelled figures with the section's own first
+    // in each row — the payload's numbers, not the section's repeated.
+    expect(screen.getAllByRole('definition').map((value) => value.textContent)).toEqual([
+      '8.0 h',
+      '7.0 h',
+      '8.1 h',
+      '9.5 h',
+      COMPARISON_WORKLOAD_MEAN,
+      '10.5 h',
+    ]);
+  });
+
+  it('renders every withheld treatment when the payload suppresses', async () => {
+    // The other direction, which is what makes the test above mean something
+    // (`docs/MISTAKES.md` entry 3's pairing): the same page, the same members,
+    // every figure sealed shut. No line, a notice per series per panel, and both
+    // workload columns in words.
+    servingWeeks({ 4: A_WEEK_WITH_THE_BENCHMARKS_WITHHELD });
+    const { container } = open(4);
+    await screen.findByRole('heading', { level: 2, name: 'Rating trend' });
+
+    // Two panels, each with its own line and nothing else drawn.
+    expect(container.querySelectorAll('.pulse-trend-line-comparison')).toHaveLength(0);
+    expect(container.querySelectorAll('.pulse-trend-line-university')).toHaveLength(0);
+    expect(container.querySelectorAll('.pulse-trend-line')).toHaveLength(2);
+
+    // Four notices: two series, two panels.
+    expect(container.querySelectorAll('.pulse-trend-suppression')).toHaveLength(4);
+
+    // And four withheld workload cells, each saying the set is too small rather
+    // than printing a dash or a nought.
+    const cells = [
+      ...screen.getAllByTestId('stat-cell-comparison'),
+      ...screen.getAllByTestId('stat-cell-university'),
+    ];
+    expect(cells).toHaveLength(4);
+    for (const cell of cells) {
+      expect(within(cell).getByText(WITHHELD)).toBeTruthy();
+      expect(within(cell).getByText(TOO_SMALL)).toBeTruthy();
+      expect(cell.textContent).not.toMatch(/\d/);
+    }
+  });
+
+  it('is exactly E4’s page when the payload carries no benchmark member', async () => {
+    // E5-10's fourth criterion. An older cached answer read mid-deploy has no
+    // `workload_benchmark` and no stream `benchmark`, and SPEC §4.1 item 1 says
+    // an absent member renders nothing at all — not an empty comparison, not a
+    // withheld notice, and not a crash.
+    servingWeeks({ 4: A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS });
+    const { container } = open(4);
+    await screen.findByRole('heading', { level: 2, name: 'Rating trend' });
+
+    // The fixture is the one the absence is claimed of.
+    expect('workload_benchmark' in A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS).toBe(false);
+    expect('benchmark' in A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS.streams.instructor).toBe(false);
+
+    // The page E4 shipped: one line per panel, two workload figures, and no
+    // comparison word in the DOM at all.
+    expect(container.querySelectorAll('.pulse-trend-line')).toHaveLength(2);
+    expect(container.querySelectorAll('.pulse-trend-line-comparison')).toHaveLength(0);
+    expect(container.querySelectorAll('.pulse-trend-line-university')).toHaveLength(0);
+    expect(container.querySelectorAll('.pulse-trend-suppression')).toHaveLength(0);
+    // Two tables, which is one per panel: an overlay series that drew nothing
+    // publishes none.
+    expect(screen.getAllByRole('table')).toHaveLength(2);
+    expect(screen.getAllByRole('definition').map((value) => value.textContent)).toEqual([
+      '8.0 h',
+      '9.5 h',
+    ]);
+    expect(screen.queryByText(/comparable|university|not shown/i)).toBeNull();
   });
 
   it('offers exactly the published weeks the API answered, holes included', async () => {
@@ -465,8 +623,10 @@ describe('a week whose summary was never written', () => {
     expect(screen.getAllByText(ABSENT_SUMMARY)).toHaveLength(2);
     expect(screen.queryByRole('region', { name: 'AI summary — instructor comments' })).toBeNull();
 
-    // The rest: the charts, the figures, and both comments.
-    expect(screen.getAllByRole('table')).toHaveLength(2);
+    // The rest: the charts, the figures, and both comments. Six tables since
+    // E5-10 — one per panel and one per drawn comparison series, the fixture
+    // carrying both series for both streams.
+    expect(screen.getAllByRole('table')).toHaveLength(6);
     expect(screen.getByText(INSTRUCTOR_COMMENT)).toBeTruthy();
     expect(screen.getByText(COURSE_COMMENT)).toBeTruthy();
   });
