@@ -692,6 +692,226 @@ def test_each_definer_holds_exactly_the_column_privileges_its_job_needs(
 
 
 # ---------------------------------------------------------------------------
+# E5-03's definer owner, whose reach had no pinned equality until E5-04 — the
+# entry in `docs/tickets/e5/deferred.md` that ticket carries.
+# ---------------------------------------------------------------------------
+
+# The fourth NOLOGIN definer owner, created by E5-03's migration and owning the
+# two benchmark set functions.
+BENCHMARK_DEFINER = "pulse_benchmark_definer"
+
+# **What it may read, and the whole of it — from ADR 0165's amendment of
+# 2026-09-13**, never from `benchmark_definer_v001.sql`. That is the rule the
+# equality above states and `docs/MISTAKES.md` entry 19 records: a constant
+# copied out of the migration asserts that the SQL equals itself. The amendment
+# exists because this list had nowhere else to live, and it says so itself —
+# "the sentence goes here, where a reviewer weighs it as a claim about what the
+# owner may reach, and the equality is derived from it".
+#
+# Quoted: "`pulse_benchmark_definer` holds `SELECT` on these eighteen columns of
+# these six relations, and on nothing else — no seventh relation, no other verb,
+# and no privilege at the grain of a whole relation", followed by the six
+# bulleted lists transcribed below in that order.
+#
+# The one entry to read twice is `response.user_id`, which the amendment names
+# as "the only column in the list that reaches a person at all": it is the key
+# the distinct count of *people* is computed over, it is grouped away inside both
+# function bodies, and it never leaves either function's row. No column of
+# `user`, `user_identity` or `person` is here, which is the property
+# `docs/tickets/e5/deferred.md` deferred and this constant closes.
+BENCHMARK_DEFINER_PRIVILEGES = frozenset(
+    {
+        ("response", "id", "SELECT"),
+        ("response", "user_id", "SELECT"),
+        ("response", "section_id", "SELECT"),
+        ("response", "week_id", "SELECT"),
+        ("answer", "response_id", "SELECT"),
+        ("answer", "question_id", "SELECT"),
+        ("answer", "rating", "SELECT"),
+        ("answer", "workload_hours", "SELECT"),
+        ("question", "id", "SELECT"),
+        ("question", "kind", "SELECT"),
+        ("question", "stream", "SELECT"),
+        ("section", "id", "SELECT"),
+        ("section", "term_id", "SELECT"),
+        ("section", "start_date", "SELECT"),
+        ("term", "id", "SELECT"),
+        ("term", "start_date", "SELECT"),
+        ("week", "id", "SELECT"),
+        ("week", "number", "SELECT"),
+    }
+)
+
+# The six relations, derived from the eighteen pairs rather than written a second
+# time — one source, so a relation cannot be added to one list and forgotten in
+# the other. The relation-grain assertion survives the column equality landing
+# beside it because the two fail differently: "this owner can reach `enrollment`
+# now" is a sentence a reader acts on, and a diff of eighteen tuples is not.
+BENCHMARK_DEFINER_RELATIONS = frozenset(
+    relation for relation, _column, _privilege in BENCHMARK_DEFINER_PRIVILEGES
+)
+
+# The three relations the deferred entry requires to be absent by name. Each is a
+# relation from which a person can be read or identified, and a counting body has
+# no use for any of them.
+NO_COLUMN_OF_THESE = ("user", "user_identity", "person")
+
+# Whether a role holds a privilege on a whole relation. Asked separately from the
+# column sweep because the two are different grants: a column grant leaves this
+# false, and ADR 0165 rejected table-wide `SELECT` for this owner by name.
+WHOLE_TABLE_PRIVILEGE = """
+    SELECT c.relname, p.privilege
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'REFERENCES']) AS p(privilege)
+    WHERE n.nspname = 'public'
+      AND c.relkind IN ('r', 'p')
+      AND has_table_privilege(:role, c.oid, p.privilege)
+    ORDER BY 1, 2
+"""
+
+
+@pytest.mark.invariant
+def test_the_benchmark_definer_holds_exactly_the_columns_its_two_counting_bodies_read(
+    db_session: Any,
+) -> None:
+    """The deferred equality E5-04 owed, closed at every grain the records settle.
+
+    `docs/tickets/e5/deferred.md`, "The benchmark definer's reach has no pinned
+    equality (E5-03)": the other three definer owners each have a test asserting
+    their grants as an equality, "so a later ticket widening one of those owners
+    is a red rather than a diff", and this owner had none. A `SECURITY DEFINER`
+    function spends its **owner's** privileges, so the owner's grant list is the
+    blast radius of a door `pulse_app` may open.
+
+    **The equality is over `(relation, column, privilege)` in both directions**,
+    against `BENCHMARK_DEFINER_PRIVILEGES` above, which is transcribed from ADR
+    0165's amendment of 2026-09-13. The amendment exists because the columns were
+    written down nowhere a test could honestly read them: transcribing them from
+    `benchmark_definer_v001.sql` would assert that the SQL equals itself
+    (`docs/MISTAKES.md` entry 19), which the sibling equality in this file
+    refuses in its own docstring. So the record carries the claim, a reviewer
+    weighs it there, and this is the gate derived from it. Moving one without the
+    other is the failure both exist to prevent, and it is the amendment's own
+    closing sentence.
+
+    **Four assertions stand beside it**, three of them run first because each
+    names one decision and fails with a sentence a reader can act on, and the
+    fourth because the equality does not imply it:
+
+    - the relations it can reach, so a seventh one is a sentence rather than a
+      diff of eighteen tuples;
+    - every privilege it holds is `SELECT` — a counting body writes nothing, and
+      `INSERT` or `UPDATE` on `answer` would be an owner that can rewrite a
+      comment;
+    - no column of `user`, `user_identity` or `person` is among them, which
+      `docs/tickets/e5/deferred.md` requires by name and which stays asserted in
+      its own words even though the equality now implies it: it is the property
+      the deferral was about, and a reader looking for it should find it said;
+    - and it holds no *whole relation*, because ADR 0165 settles column-grain
+      `SELECT` and rejects table-wide `SELECT` for this owner explicitly. This
+      one is not implied by the equality: `has_column_privilege` answers true for
+      every column of a table granted whole, so a table-wide grant would satisfy
+      the equality on the eighteen and quietly carry the rest.
+
+    **The mutation it kills:** a nineteenth column added to the owner — the
+    natural edit when a later body needs one more field, and one that reaches
+    `answer`'s comment text with no test anywhere else noticing — the substitution
+    the verifier's battery made, which this equality killed. Also a seventh
+    relation, a write verb beside the reads, and the
+    column grants replaced by a table-wide `SELECT`, which is the tidying edit
+    that changes no answer any test reads and hands every column of `response`
+    and `answer` to a function family that needs eight of them.
+
+    **The near miss it must not fire on:** a privilege the role holds by owning
+    something, which `has_column_privilege` reports and an `attacl` read would
+    not — the reason both sweeps here ask through the functions.
+    """
+    present = db_session.execute(
+        text(ROLE_EXISTS), {"role": BENCHMARK_DEFINER}
+    ).scalar_one_or_none()
+    assert present is not None, (
+        f"There is no `{BENCHMARK_DEFINER}` role in this cluster. E5-03's migration creates it as "
+        "a NOLOGIN role owning `benchmark_set_week` and `benchmark_set_rating_week` (ADR 0165), "
+        "and every assertion below is about what that role may read."
+    )
+
+    held = held_columns(db_session, BENCHMARK_DEFINER)
+    assert held, (
+        f"`{BENCHMARK_DEFINER}` holds no column privilege anywhere in `public`. E5-03 creates the "
+        "role and grants it the reads its two set functions spend, so an empty answer here means "
+        "the grants are gone and every benchmark in the product is empty — the consequence ADR "
+        "0165 names — or that this sweep is asking the wrong question."
+    )
+
+    relations = {relation for relation, _column, _privilege in held}
+    assert relations == BENCHMARK_DEFINER_RELATIONS, (
+        f"`{BENCHMARK_DEFINER}` can reach {sorted(relations)} and the records say "
+        f"{sorted(BENCHMARK_DEFINER_RELATIONS)}.\n\n"
+        "A `SECURITY DEFINER` function runs as its owner, so every relation in that set is one the "
+        "function's callers can be made to reach — `pulse_app`, the connection every screen runs "
+        "on. ADR 0165's amendment names the six and `docs/tickets/e5/deferred.md` named them "
+        "first; ADR 0165 refuses the reuse of `pulse_resolve_definer` on exactly this ground: 'a "
+        "body whose whole job is counting has no use for that reach'. If a seventh is legitimate, "
+        "the amendment is where it is argued and this constant follows it."
+    )
+
+    verbs = sorted({privilege for _relation, _column, privilege in held})
+    assert verbs == ["SELECT"], (
+        f"`{BENCHMARK_DEFINER}` holds {verbs} on the relations it can reach. ADR 0165 gives it "
+        "'column-grain `SELECT` … and nothing else': the two bodies it owns count rows and write "
+        "none, and a write verb here is an owner that can alter the responses it is counting."
+    )
+
+    identity = sorted(
+        (relation, column)
+        for relation, column, _privilege in held
+        if relation in NO_COLUMN_OF_THESE
+    )
+    assert not identity, (
+        f"`{BENCHMARK_DEFINER}` holds {identity}. The deferred entry this test closes asks for "
+        "'no column of `user`, `user_identity` or `person` among them': a benchmark is a number "
+        "about a cohort, and an owner that can reach a person is a door towards one behind a "
+        "function `pulse_app` may execute."
+    )
+
+    # The equality, last of the four column assertions on purpose: the three
+    # above name a decision each and fail with a sentence, and this one is the
+    # exhaustive gate they cannot be — a nineteenth column on a relation already
+    # in the list, carrying `SELECT` and belonging to nobody, passes all three.
+    assert held == BENCHMARK_DEFINER_PRIVILEGES, (
+        f"`{BENCHMARK_DEFINER}` holds {sorted(held)} and ADR 0165's amendment says "
+        f"{sorted(BENCHMARK_DEFINER_PRIVILEGES)}.\n\n"
+        "A `SECURITY DEFINER` function runs as its owner, so every column in that set is a column "
+        "the function's callers can be made to reach — `pulse_app`, the connection every screen in "
+        "this product runs on. An equality rather than a ceiling, for the reason "
+        "`ROSTER_DEFINER_PRIVILEGES` next door is one: a `>=` is satisfied by an owner that also "
+        "holds `SELECT` on `answer`'s comment text, which would make a counting function one "
+        "revision away from returning a student's own words, with every behavioural test in this "
+        "repository still green.\n\n"
+        "If a grant here is legitimate, the amendment in "
+        "`docs/adr/0165-the-benchmark-set-figures-are-computed-behind-a-definer-of-their-own.md` "
+        "is what moves first — it is the reviewable claim about what this owner may reach — and "
+        "this constant follows it in the same pull request. That order is the amendment's own "
+        "closing sentence: 'moving either without the other is the failure both exist to prevent'."
+    )
+
+    whole_tables = sorted(
+        (row[0], row[1])
+        for row in db_session.execute(
+            text(WHOLE_TABLE_PRIVILEGE), {"role": BENCHMARK_DEFINER}
+        ).tuples()
+    )
+    assert not whole_tables, (
+        f"`{BENCHMARK_DEFINER}` holds {whole_tables} at the grain of a whole relation. ADR 0165 "
+        "settles column-grain `SELECT` for this owner and rejects table-wide `SELECT` by name — "
+        "the cheaper spelling that 'gives up the property the decision was taken for'. A table "
+        "grant also silently widens as the table gains columns, which is the widening no reviewer "
+        "ever sees."
+    )
+
+
+# ---------------------------------------------------------------------------
 # F2 — the teaching instructor's row, written by a definer because a grant
 # cannot bound a column's value.
 # ---------------------------------------------------------------------------

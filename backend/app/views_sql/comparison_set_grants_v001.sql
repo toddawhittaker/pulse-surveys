@@ -1,0 +1,63 @@
+-- What the application may do with a named comparison set — ticket E5-04,
+-- SPEC §5.1, §4.1 items 1 and 7, §8, ADR 0001, ADR 0164.
+--
+-- E5-01 created public.comparison_set and public.comparison_set_member and
+-- granted nothing on either on purpose, naming the two tickets that would each
+-- spend a privilege in its own change: E5-04 reads a set to resolve it, and
+-- E5-06 writes one. This is the read half, and it follows E4-02's precedent
+-- exactly — the shape weekly_summary_grants_v001.sql models, a privilege landing
+-- in the change that spends it.
+--
+-- **SELECT, and nothing else.** app.services.benchmarks turns a named set into
+-- the sections its figures are computed over: the declared length off the set
+-- row (ADR 0164 makes it half of what a set *is*, not a label on one) and the
+-- member courses off the membership table. That runs on the connection every
+-- request in the product runs on, so without this file every named-set benchmark
+-- is refused by Postgres with 42501 rather than by anything E5-04 is about.
+--
+-- **The withheld verbs are the assertion, and each one is withheld for its own
+-- reason.**
+--
+--   - INSERT and UPDATE are E5-06's. A connection able to write a set could
+--     define the cohort every instructor in the institution is measured
+--     against, from any request path, without passing the leadership scoping
+--     that ticket builds. A benchmark nobody chose is the same defect as a
+--     benchmark computed over the wrong population, reached one step earlier.
+--   - DELETE is nobody's yet. A set that vanishes takes a benchmark with it, and
+--     because benchmarks are past-referencing (SPEC §5.1: week N against prior
+--     terms) the change reaches figures that were already published — ADR 0164
+--     calls that "a benchmark that changes without anybody deciding it".
+--   - TRUNCATE, REFERENCES and TRIGGER stay withheld too, which is the shape
+--     classification, grade_sync, ags_call and weekly_summary already have.
+--
+-- **Base tables rather than a read view**, the same exception every grants file
+-- before this one takes for a table holding no person. The columns here are a
+-- name, a declared length, a level, a creator `person` key, two timestamps and a
+-- list of courses. SPEC §4.1 routes an *identity* read path through a view, and
+-- a view over these two would select every one of their columns and exist only
+-- to satisfy the shape of that rule. The creator key resolves to nobody through
+-- this connection in any case: pulse_app holds SELECT (id) on public."user" and
+-- no read of a person's name at all.
+--
+-- **pulse_care is granted nothing.** SPEC §6.2 isolates the Care role to the
+-- safety path; a benchmark cohort is no part of it, and a role gets no privilege
+-- it has no use for.
+--
+-- **USAGE ON SCHEMA public is not granted again here.** identity_grants_v001.sql
+-- grants it to pulse_app and identity_grants_v002.sql restates it; an ACL entry
+-- records no history, so a third grant would be indistinguishable from those and
+-- any matching revoke would remove all of them.
+--
+-- **This widens what pulse_app can reach, and it is meant to be visible.**
+-- RUNTIME_BASE_TABLE_PRIVILEGES in tests/integration/test_identity_grants.py is
+-- the hand-written record every base-table grant is compared against as an
+-- equality in both directions, so these two reads are recorded there in the same
+-- change — deliberately not derived from this file, so that a widening cannot
+-- justify itself.
+--
+-- **The downgrade revokes rather than dropping anything.** Both tables belong to
+-- b4d7e2a91c58 and outlive this revision, so the revision that executes this
+-- file writes the matching REVOKE by hand, naming the verb rather than ALL.
+
+GRANT SELECT ON public.comparison_set TO pulse_app;
+GRANT SELECT ON public.comparison_set_member TO pulse_app;

@@ -139,10 +139,19 @@ def section_enrollment_counts(
 # argument in full, and the amendment on `docs/disputes/E5-03-01.md` records the
 # wider claim the ruling first made and withdrew.
 #
-# Written here rather than in the service that will call them so that E5-04 has
-# no reason to spell a statement of its own — which is the state
-# `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` exists to
-# prevent, and which here would put this ticket's arithmetic in a second place.
+# Written here because this module is where the read statements in this package
+# live. **The sentence that used to stand here was false and is corrected rather
+# than softened**: it said they were written here "so that E5-04 has no reason to
+# spell a statement of its own — which is the state
+# `test_the_org_views_are_read_only_through_the_grant.py` exists to prevent". That
+# sweep does the opposite. Its import half excuses exactly one importer of this
+# module, `backend/app/services/authz.py`, and reds every other module under
+# `backend/app/` that imports it — so `app.services.benchmarks` could not reach
+# these wrappers, and it spells the same two statements itself, the way
+# `backend/app/api/dev.py` spells its own read of `section_enrollment_count`.
+# Neither benchmark set function is a relation that sweep polices, so no
+# exemption is involved on either side. The duplication that leaves is recorded
+# in `docs/tickets/e5/deferred.md` with an owner.
 #
 # The array is bound and cast rather than interpolated, and the ids are passed as
 # text: the function takes `uuid[]`, and a list of literals spliced into the
