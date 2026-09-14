@@ -29,6 +29,15 @@ choose the calendar on the ticket's behalf. So the prior term here is *any* term
 whose own dates end before Fall 2026 begins, and Fall 2026 is found by the start
 date SPEC §3.1 and `tests/fixtures/survey_windows.py` already hold.
 
+**How these rows are reached is a composite key, not a column.** ADR 0018 gives
+`week` and `start_letter_map` one foreign key into `term` and it is
+`(term_id, term_length_weeks) → term (id, length_weeks)`. The first draft of this
+module followed that link with a helper that answers only for *single-column*
+foreign keys, so all three tests failed on the route rather than on the rows —
+`docs/disputes/E5-12-01.md`, upheld, and the reason `term_link_column` below
+filters on the referenced column being a primary key. Nothing any of the three
+tests asserts changed in the repair.
+
 **Guards are in the test bodies** (`docs/MISTAKES.md` entry 44): while the seed has
 no second term, each test below fails on a sentence saying which criterion it was
 going to check.
@@ -38,7 +47,6 @@ from datetime import date, timedelta
 from typing import Any
 
 import pytest
-from fixtures.grading import single_column_link
 from fixtures.provisioning import (
     LETTER_COLUMN,
     LETTER_LENGTH_COLUMNS,
@@ -67,6 +75,48 @@ START_LETTER_MAP_TABLE = "start_letter_map"
 SPEC_COURSE_LENGTHS = (3, 6, 8, 10, 12, 15, 16, 18)
 
 MONDAY = 0
+
+
+def term_link_column(tables: dict[str, Any], name: str) -> str:
+    """The column on `name` that names a `term` row's **primary key**.
+
+    **The primary-key half is not tidiness**, and getting it wrong is what
+    `docs/disputes/E5-12-01.md` is about. ADR 0018 gives `week` and
+    `start_letter_map` one *composite* key into `term` — `(term_id,
+    term_length_weeks) → term (id, length_weeks)` — so both of those columns
+    reference `term`. A helper that asks for a *single-column* link finds none and
+    answers `None` on every database at head, which is how the first draft of this
+    module failed three correct assertions for a reason that had nothing to do with
+    the rows they are about; and a helper that merely counted references would find
+    two links where there is one relationship. Filtering on the referenced column
+    being a primary key leaves the one column this module means to follow.
+
+    Copied in shape from `one_foreign_key_column` in
+    `tests/integration/test_demo_seed_script.py`, whose own comment records this
+    trap against these same two tables. A third copy rather than a shared helper is
+    deliberate: `fixtures.grading.single_column_link` is pinned by other tests for
+    its strictness about composite keys, and widening it to serve this module would
+    move a rule those tests depend on (`docs/MISTAKES.md` entry 13's exception — two
+    callers asking genuinely different questions).
+    """
+    table = require_table(tables, name)
+    found = sorted(
+        {
+            key.parent.name
+            for key in table.foreign_keys
+            if key.column.table.name == TERM_TABLE and key.column.primary_key
+        }
+    )
+    if len(found) != 1:
+        pytest.fail(
+            f"`{name}` names `{TERM_TABLE}`'s primary key through {len(found)} columns ({found}); "
+            f"it has {[column.name for column in table.columns]}. SPEC §2.2 makes the weeks and "
+            "the start-letter map per-term data and E0-06 gives both tables that link, so without "
+            "exactly one such column there is no such thing as 'the prior term's map' and this "
+            "module is unaskable. A fork here is a schema question rather than something to pick a "
+            "side of in a test."
+        )
+    return found[0]
 
 
 def rows_of(demo: Any, tables: dict[str, Any], name: str) -> list[dict[str, Any]]:
@@ -138,15 +188,7 @@ def prior_term(demo: Any, tables: dict[str, Any], seeded: Any) -> dict[str, Any]
 
 def map_rows_for(demo: Any, tables: dict[str, Any], term: dict[str, Any]) -> list[dict[str, Any]]:
     """Every `start_letter_map` row belonging to one term."""
-    table = require_table(tables, START_LETTER_MAP_TABLE)
-    link = single_column_link(table, TERM_TABLE)
-    if link is None:
-        pytest.fail(
-            f"`{START_LETTER_MAP_TABLE}` does not name a `{TERM_TABLE}` row through exactly one "
-            f"column; it has {[column.name for column in table.columns]}. SPEC §2.2 makes the map "
-            "per-term data, and E0-06 gives the table that link — without it there is no such "
-            "thing as 'the prior term's map' and this whole module is unaskable."
-        )
+    link = term_link_column(tables, START_LETTER_MAP_TABLE)
     key, _start, _end, _length = term_columns(tables)
     return [row for row in rows_of(demo, tables, START_LETTER_MAP_TABLE) if row[link] == term[key]]
 
@@ -187,13 +229,7 @@ def test_the_seed_calendar_holds_a_term_before_fall_2026_with_week_rows_of_its_o
         "is a finding to raise rather than something to build on."
     )
 
-    weeks_table = require_table(metadata_tables, WEEK_TABLE)
-    week_link = single_column_link(weeks_table, TERM_TABLE)
-    assert week_link is not None, (
-        f"`{WEEK_TABLE}` does not name a `{TERM_TABLE}` row through exactly one column; it has "
-        f"{[column.name for column in weeks_table.columns]}. E0-06 gives it that link and the "
-        "whole two-week-axes model of SPEC §2.2 rests on it."
-    )
+    week_link = term_link_column(metadata_tables, WEEK_TABLE)
     term_key = single_primary_key(require_table(metadata_tables, TERM_TABLE))
     numbered = {
         row[WEEK_NUMBER_COLUMN]
