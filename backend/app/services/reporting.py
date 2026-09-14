@@ -105,6 +105,13 @@ if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
     # report, `_stored_summaries` under it, and `taught_sections` — imports it
     # inside the function. See `_payload`'s docstring.
     from app.schemas.report import CommentView, InstructorReport, SummaryView, TaughtSection
+    from app.schemas.report_benchmark import (
+        BenchmarkSeries,
+        StreamBenchmark,
+        WorkloadBenchmarkFigures,
+        WorkloadBenchmarkView,
+    )
+    from app.services.benchmarks import BenchmarkPoint, WorkloadComparison
 
 logger = logging.getLogger(__name__)
 
@@ -631,9 +638,13 @@ WORKLOAD_VIEW = table(
 # between a chart with no bars and a chart of a quiet week.
 LIKERT_VALUES = (1, 2, 3, 4, 5)
 
-# What a suppressed comparison says about itself. One word for one reason, because
-# E4 has exactly one: no comparison set exists until E5 builds them, so every
-# figure over one is below the minimum by construction.
+# What a suppressed comparison says about itself. One word, and one word only: a
+# figure is withheld because the population behind it is below a configured
+# minimum, and this system has no second reason to give. E5-05 is where that
+# became a statement about real comparison sets rather than about a member with
+# nothing behind it, and it did not add a reason — a population nobody could
+# resolve arrives here as counts of zero and is suppressed by the same
+# comparison.
 BELOW_MINIMUM = "below-minimum"
 
 # **The token SPEC §4.1 item 7's chokepoint is made of.** A module-level object
@@ -697,9 +708,12 @@ class ComparisonFigure(BaseModel):
     walked past by every entry point that does not call `__init__`, and pydantic
     has several.
 
-    **E5 fills this, and it fills it through the same helper.** Until then every
-    report carries a suppressed value with no number in it, which is what gives
-    the invariant something to stand on before there is any data to suppress.
+    **Every figure the report shows is built here, through the one helper**, and
+    since E5-05 there are several of them: the two comparison lines per panel, the
+    reported week's workload mean and median against each population, and the
+    top-level `comparison` member. `app.services.benchmarks` is the only caller
+    that resolves a population, and it reaches this type through
+    `comparison_after_suppression` like everything else.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -866,11 +880,11 @@ def comparison_after_suppression(
     "computed from fewer than the configured number of sections", so the configured
     number itself passes and `n - 1` does not.
 
-    **`figure` may be `None`, and that is E4's own case.** No comparison set exists
-    until E5 builds them, so the report calls this with no figure over no sections
-    and no respondents and gets back the suppressed value the payload carries. E5
-    calls the same function with real numbers, and gets suppression or passage from
-    the same two comparisons.
+    **`figure` may be `None`, and that is an ordinary case rather than an error.**
+    A cohort week that carries responses but no hours has a null statistic, and a
+    population that resolves to nothing answers with nulls over counts of zero —
+    both come here and both come back suppressed, from the same two comparisons
+    that pass a real number.
 
     The minimums are read from `Settings` here rather than taken as parameters, the
     way `visible_comments` reads the n-threshold: the promise §4.1 item 7 makes is
@@ -1219,6 +1233,123 @@ def _served_question_texts(session: Session, *, section_id: UUID, week_id: UUID)
     return served
 
 
+def _benchmark_members(
+    session: Session, *, section_id: UUID, course_week: int, weeks: Sequence[int]
+) -> tuple[dict[str, "StreamBenchmark"], "WorkloadBenchmarkView"]:
+    """SPEC §5.1's comparison and university figures for one report — assembled, never computed.
+
+    Six reads of `app.services.benchmarks`: a trend per panel per population, and
+    the reported week's workload pair per population. Every number and every
+    suppression decision in what comes back was made there, over each figure's own
+    contributors and both configured minimums, and sealed by
+    `comparison_after_suppression` before this function ever sees it. What happens
+    here is placement: a service result becomes a payload model and nothing else.
+
+    **`weeks` is the report's own published course weeks, and passing it is a
+    confidentiality rule rather than an optimisation.** It is the axis the
+    section's own trend line above is drawn on — the same list `week.
+    published_weeks` carries — and the comparison lines are drawn on exactly it,
+    one point per week, shown or suppressed. A series that also carried the weeks
+    the *comparison population* answered in would let a reader subtract their own
+    published weeks and read off which weeks other sections answered in; over a
+    thin population that is an existence oracle about people §4.1 item 7 means to
+    say nothing about, and it is readable from a series where every single figure
+    is withheld. It shipped that way in this ticket's first round and a security
+    review found it.
+
+    **Nothing in this function counts, averages, compares or derives.** A figure
+    born in the assembly layer is a figure no minimum was applied to, which is the
+    exact defect the seal exists to make loud — and the natural-looking version of
+    it is not an average but a summary: an "all suppressed" flag over a series, or
+    one flag over the workload pair. Both are statistics about a comparison set,
+    both would be computed here, and neither exists on the wire for that reason
+    (`app.schemas.report_benchmark`'s docstring carries the argument).
+
+    **The imports are inside the function, and both have their own reason.**
+    `app.schemas.report_benchmark` is the schema importing this module back, which
+    is `_payload`'s cycle exactly. `app.services.benchmarks` is a cycle of its own:
+    that module imports `ComparisonFigure` and the suppression helper from here,
+    because the token they are built on is private to this file, so a module-level
+    import of it here would close the loop at import time.
+    """
+    from app.schemas import report_benchmark as benchmark_schema
+    from app.services import benchmarks
+
+    by_stream = {
+        token: benchmark_schema.StreamBenchmark(
+            comparison=_benchmark_series(
+                benchmarks.benchmark_trend(
+                    session,
+                    section_id=section_id,
+                    population=benchmarks.BenchmarkPopulation.DEFAULT_SET,
+                    stream=token,
+                    weeks=weeks,
+                )
+            ),
+            university=_benchmark_series(
+                benchmarks.benchmark_trend(
+                    session,
+                    section_id=section_id,
+                    population=benchmarks.BenchmarkPopulation.UNIVERSITY,
+                    stream=token,
+                    weeks=weeks,
+                )
+            ),
+        )
+        for token in REPORT_STREAMS
+    }
+    workload = benchmark_schema.WorkloadBenchmarkView(
+        comparison=_workload_benchmark_figures(
+            benchmarks.benchmark_workload(
+                session,
+                section_id=section_id,
+                population=benchmarks.BenchmarkPopulation.DEFAULT_SET,
+                course_week=course_week,
+            )
+        ),
+        university=_workload_benchmark_figures(
+            benchmarks.benchmark_workload(
+                session,
+                section_id=section_id,
+                population=benchmarks.BenchmarkPopulation.UNIVERSITY,
+                course_week=course_week,
+            )
+        ),
+    )
+    return by_stream, workload
+
+
+def _benchmark_series(points: Sequence["BenchmarkPoint"]) -> "BenchmarkSeries":
+    """One population's trend, point for point, in the order the service returned it.
+
+    **Every point the service answered with is on the wire, suppressed ones
+    included** (E5-04 criterion 7). Filtering a suppressed week out here is the
+    one edit that looks like tidying and is not: a missing point is a gap in a
+    chart, which says nothing happened that week, and a suppressed point is the
+    notice §4.1 item 5 governs.
+    """
+    from app.schemas import report_benchmark as benchmark_schema
+
+    return benchmark_schema.BenchmarkSeries(
+        points=[
+            benchmark_schema.BenchmarkSeriesPoint(course_week=point.course_week, mean=point.figure)
+            for point in points
+        ]
+    )
+
+
+def _workload_benchmark_figures(comparison: "WorkloadComparison") -> "WorkloadBenchmarkFigures":
+    """One population's workload mean and median for the reported week, as they were sealed.
+
+    Two figures, each carrying its own suppression decision, because §4.1 item 7
+    names "a mean, a median, or any other statistic" separately and E5-04 seals
+    them separately.
+    """
+    from app.schemas import report_benchmark as benchmark_schema
+
+    return benchmark_schema.WorkloadBenchmarkFigures(mean=comparison.mean, median=comparison.median)
+
+
 def _payload(
     session: Session,
     *,
@@ -1266,6 +1397,14 @@ def _payload(
     # `app.services.report_comments.n_threshold` carries the argument.
     threshold = n_threshold()
     question_texts = _served_question_texts(session, section_id=section.id, week_id=week.week_id)
+    benchmarks_by_stream, workload_benchmark = _benchmark_members(
+        session,
+        section_id=section.id,
+        course_week=week.course_week,
+        # The published axis, which is the list `week.published_weeks` below
+        # carries and the one the streams' own trend lines are drawn on.
+        weeks=[other.course_week for other in published],
+    )
 
     streams = {
         token: schema.StreamReport(
@@ -1286,6 +1425,7 @@ def _payload(
                 visible_comments(session, section_id=section.id, week_id=week.week_id, stream=token)
             ),
             question_text=question_texts[token],
+            benchmark=benchmarks_by_stream[token],
         )
         for token in REPORT_STREAMS
     }
@@ -1318,10 +1458,15 @@ def _payload(
             course=streams["COURSE"],
         ),
         workload=schema.WorkloadView(mean=workload_mean, median=workload_median),
-        # E4 computes no comparison set, so the figure is asked for over nothing —
-        # and it is asked for through the same helper E5 will use, because there is
-        # no other way to build this member (SPEC §4.1 item 7).
-        comparison=comparison_after_suppression(None, sections=0, respondents=0),
+        workload_benchmark=workload_benchmark,
+        # The member E4 shipped, now carrying what it was always for: the default
+        # comparison set's workload mean for this week. It is the *same object*
+        # `workload_benchmark.comparison.mean` carries — assigned twice, computed
+        # once — so the payload cannot say two things about one statistic. E5-05's
+        # decision 5 keeps it rather than retiring it, because every E4 reader and
+        # E4-07's own reconciliation test names it; a later ticket may retire it
+        # once nothing reads it.
+        comparison=workload_benchmark.comparison.mean,
         small_n=schema.SmallNView(suppressed=responses < threshold, threshold=threshold),
         released_from_earlier_weeks=_comment_views(released),
         institution_timezone=settings.institution_timezone,

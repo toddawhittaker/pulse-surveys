@@ -43,6 +43,17 @@ ticket's members sit at three different depths: `institution_timezone` at the to
 reason E4-19's did — the top-level equality cannot see a member one object down,
 and a sketch that stops describing the streams is a set of frontend fixtures
 describing a payload that does not arrive.
+
+**E5-05 adds two, and they are the first divergences from E4's sketch that no
+sketch of E4's could have carried**: E4 computed no comparison set at all, so the
+benchmark members had nowhere to be described. `workload_benchmark` sits at the
+top level and joins `DECLARED_DIVERGENCES`; `benchmark` sits inside each stream
+and joins `STREAM_DIVERGENCES`, which is a set for that reason rather than the
+single name E5-02 left it as. Both are additive in E5-05's criterion 6 sense —
+every member E4 shipped is untouched, which is what the two equalities here go on
+holding. What those members *are* is reconciled against E5's own sketch, in
+`test_the_benchmark_payload_sketch_and_the_schema_are_reconciled.py`; this module
+is the register of the departures from E4's.
 """
 
 import json
@@ -76,7 +87,17 @@ SCHEMA_PATH = "backend/app/schemas/report.py"
 # It is a divergence rather than a sketch edit because the sketch is E4's frozen
 # record and E5-02's work order (decision 1) names this test's own documented
 # escape as where the member is declared.
-DECLARED_DIVERGENCES = frozenset({"released_from_earlier_weeks", "institution_timezone"})
+#
+# `workload_benchmark` is E5-05's, and is here for the same reason one member
+# down: SPEC §5.1 puts the workload mean and median "against comparison-set and
+# university figures" on the report, and E5-05's work order (decision 2) puts
+# them on the payload's top level as two populations of sealed figures. E4's
+# sketch predates any comparison set — E4 computed none — so the member cannot be
+# in it, and E5's own breakdown carries the sketch that does describe it. The
+# addition is additive in criterion 6's sense: no E4 member moves.
+DECLARED_DIVERGENCES = frozenset(
+    {"released_from_earlier_weeks", "institution_timezone", "workload_benchmark"}
+)
 
 # Where the first of those two sits, since it is not a top-level member.
 RATES_MEMBER = "rates"
@@ -89,7 +110,17 @@ RATES_DIVERGENCE = "valid_responses"
 WEEK_MEMBER = "week"
 WEEK_DIVERGENCE = "closes_at"
 STREAMS_MEMBER = "streams"
-STREAM_DIVERGENCE = "question_text"
+
+# The stream object's own divergence register, held as a set because a second
+# member has arrived. `question_text` is E5-02's — the served wording of that
+# stream's rating question, which the mockup quotes as the histogram's title.
+# `benchmark` is E5-05's: SPEC §5.1 gives each panel "three lines — this section
+# (hero), the **comparison set**, and **university-wide**", and the second and
+# third of those are a member on the stream the sketch's `trend` sits beside.
+# E4's sketch describes neither, because E4 computed no comparison figures at all.
+# Widening this set is the deliberate act this module's own rule asks for, never a
+# repair for a red: each name here has a record behind it.
+STREAM_DIVERGENCES = frozenset({"question_text", "benchmark"})
 
 FENCED_JSON = re.compile(r"```json\n(.*?)\n```", re.DOTALL)
 
@@ -389,29 +420,38 @@ def test_the_week_member_gains_the_close_instant_and_nothing_else(
     )
 
 
-def test_each_stream_member_gains_the_question_text_and_nothing_else(
+def test_each_stream_member_gains_the_declared_members_and_nothing_else(
     report_api_contract: Any,
 ) -> None:
-    """E5-02's stream-level divergence, at the same depth as the trend list's holder.
+    """The stream-level divergences, at the same depth as the trend list's holder.
 
     The sketch's `streams.instructor` is `{"trend", "distribution", "summary",
     "comments"}` and spells `streams.course` as "same shape", so one model answers
-    for both. E5-02 adds that stream's rating-question wording to it.
+    for both. E5-02 adds that stream's rating-question wording to it, and E5-05
+    adds the stream's `benchmark` member — the comparison and university series
+    §5.1's second and third lines are drawn from. Both are in
+    `STREAM_DIVERGENCES`, with the record behind each written beside it.
 
-    **The mutation this kills:** the wording added to only one stream's model, or
-    hung off the top level as a pair of texts — either of which would leave the
-    sketch describing a stream object the payload no longer matches, and the
-    second of which puts the two texts somewhere a histogram component cannot
-    reach them from its own props.
+    **The mutation this kills:** a member added to only one stream's model, or
+    hung off the top level — either of which would leave the sketch describing a
+    stream object the payload no longer matches, and the second of which puts the
+    wording, or a panel's own two lines, somewhere the component that draws them
+    cannot reach from its own props.
+
+    **The near miss:** a member renamed rather than added, which the equality
+    catches from both sides at once.
     """
     sketched_stream = set(
         sketched_payload()[STREAMS_MEMBER][
             report_api_contract.payload_stream_key[report_api_contract.instructor_stream]
         ]
     )
-    assert STREAM_DIVERGENCE not in sketched_stream, (
-        f"The sketch's instructor stream already carries `{STREAM_DIVERGENCE}` "
-        f"({sorted(sketched_stream)}), so it is not a divergence and this test is about nothing."
+    already = sorted(STREAM_DIVERGENCES & sketched_stream)
+    assert not already, (
+        f"The sketch's instructor stream already carries {already} "
+        f"({sorted(sketched_stream)}), so those are not divergences and this test is about less "
+        "than it says. If the sketch has been updated, `STREAM_DIVERGENCES` and this test move "
+        "together."
     )
 
     schema = report_api_contract.schema()
@@ -420,10 +460,12 @@ def test_each_stream_member_gains_the_question_text_and_nothing_else(
     )
     declared = set(stream_model.model_fields)
 
-    assert declared == sketched_stream | {STREAM_DIVERGENCE}, (
+    assert declared == sketched_stream | STREAM_DIVERGENCES, (
         f"`{stream_model.__name__}` declares {sorted(declared)}; the sketch's stream object "
-        f"describes {sorted(sketched_stream)} and E5-02 adds `{STREAM_DIVERGENCE}` to it — the "
-        "served text of that stream's rating question, which the mockup uses as the histogram's "
-        f"title. Unaccounted for: {sorted(declared - sketched_stream - {STREAM_DIVERGENCE})}; "
-        f"missing: {sorted((sketched_stream | {STREAM_DIVERGENCE}) - declared)}."
+        f"describes {sorted(sketched_stream)} and {sorted(STREAM_DIVERGENCES)} are the declared "
+        "divergences — E5-02's served rating-question text, which the mockup uses as the "
+        "histogram's title, and E5-05's per-stream benchmark member, which carries the comparison "
+        "and university series. Unaccounted for: "
+        f"{sorted(declared - sketched_stream - STREAM_DIVERGENCES)}; missing: "
+        f"{sorted((sketched_stream | STREAM_DIVERGENCES) - declared)}."
     )

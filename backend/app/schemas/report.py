@@ -10,7 +10,7 @@ describe is a payload the frontend fixtures do not know about, and a member the
 sketch describes and this does not is a fixture built against something that will
 never arrive.
 
-**Three members diverge from the sketch deliberately**, and each is recorded in
+**Five members diverge from E4's sketch deliberately**, and each is recorded in
 its own ticket's pull request rather than only here:
 
   - `rates.valid_responses` — E4-09's components render the count beside the
@@ -23,10 +23,17 @@ its own ticket's pull request rather than only here:
     says E4-07 places. Present in every report as a list, populated only in the
     latest published week's report, and carrying no week anywhere
     ([ADR 0153](../../../docs/adr/0153-a-release-drops-its-week-because-the-gradebook-ledger-would-otherwise-name-the-author.md)).
-  - `institution_timezone` — E5-02's, and the first of the three no E4 record
-    settles. The week's close instant is rendered as a weekday and a wall-clock
-    time, which is a statement in one named zone, and that zone is configuration
-    the server holds and the browser does not.
+  - `institution_timezone` — E5-02's, and the first that no E4 record settles.
+    The week's close instant is rendered as a weekday and a wall-clock time,
+    which is a statement in one named zone, and that zone is configuration the
+    server holds and the browser does not.
+  - `streams.<stream>.benchmark` and `workload_benchmark` — E5-05's, and they
+    could not have been in E4's sketch at all: nothing in E4 resolved a
+    comparison population, so there were no figures for the sketch to describe. They are SPEC §5.1's
+    second and third lines per panel and its workload statistics "against
+    comparison-set and university figures". Their own models are in
+    `app.schemas.report_benchmark`, which says why they are not here, and E5's
+    breakdown carries the sketch that does describe them.
 
 **A comment carries three fields and no fourth.** `ReportComment` — what
 `app.services.report_comments` answers with — is `(text, status, stream)`, and
@@ -38,9 +45,11 @@ to guarantee.
 
 **`comparison` is typed with a class this module cannot construct, and it is
 re-checked here anyway.** SPEC §4.1 item 7 suppresses any figure computed from a
-comparison set below the configured minimums, and E4's breakdown decision 4 puts
-the member on the wire from day one so that chokepoint has somewhere to stand
-before E5 fills it. `app.services.reporting.ComparisonFigure`'s constructor
+comparison set below the configured minimums, and E4's breakdown decision 4 put
+the member on the wire from day one so that chokepoint had somewhere to stand
+before there were figures to put through it. E5-05 filled it: it carries the
+default comparison set's workload mean for the reported week, which is the same
+sealed value `workload_benchmark.comparison.mean` carries. `app.services.reporting.ComparisonFigure`'s constructor
 demands a token private to that module — but a constructor is not the only way to
 produce a pydantic instance, and E4-07's security round demonstrated two that skip
 it: `model_construct`, which runs neither validation nor `__init__`, and
@@ -81,6 +90,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas import report_benchmark
 from app.services.reporting import ComparisonFigure, refuse_an_unsealed_comparison
 
 __all__ = [
@@ -235,7 +245,13 @@ class CommentView(BaseModel):
 class StreamReport(BaseModel):
     """One of SPEC §5.1's two comment groups: its numbers, its summary and its words."""
 
-    model_config = ConfigDict(frozen=True)
+    # `revalidate_instances="always"` for the reason `InstructorReport` below gives,
+    # one level down: this model holds the benchmark members, and pydantic accepts
+    # an instance of a nested model without re-validating it unless that model asks
+    # to be. Without this line the seal on a series point is a validator that
+    # `model_construct` on a *stream* walks past, which is E4-07's defeat one level
+    # out (`docs/MISTAKES.md` entry 22) at a new depth.
+    model_config = ConfigDict(frozen=True, revalidate_instances="always")
 
     trend: list[TrendPoint]
     # A count per Likert value, keyed by the value as a string, with a zero for
@@ -257,12 +273,22 @@ class StreamReport(BaseModel):
     # is one a read can leave empty while the histogram quietly keeps its stream
     # label.
     question_text: str
+    # SPEC §5.1's second and third lines for this panel — the comparison set's
+    # series and the university-wide one, beside the section's own `trend` above.
+    # Every figure in them is sealed by the item-7 chokepoint and re-checked by
+    # the models in `app.schemas.report_benchmark`, which is also where the reason
+    # those models are not declared in this file is written down.
+    benchmark: report_benchmark.StreamBenchmark
 
 
 class StreamsView(BaseModel):
     """The two groups §5.1 heads separately, never pooled into one."""
 
-    model_config = ConfigDict(frozen=True)
+    # `revalidate_instances="always"`, for the reason `StreamReport` above gives:
+    # this object sits between the report and the benchmark figures, and a level
+    # on that path that does not ask to be re-validated is a level a caller can
+    # build with `model_construct` to stop every validator below it running.
+    model_config = ConfigDict(frozen=True, revalidate_instances="always")
 
     instructor: StreamReport
     course: StreamReport
@@ -312,6 +338,10 @@ class InstructorReport(BaseModel):
     rates: RatesView
     streams: StreamsView
     workload: WorkloadView
+    # §5.1's workload mean and median "against comparison-set and university
+    # figures", beside the section's own pair above. Four sealed figures, each
+    # suppressed on its own by the chokepoint.
+    workload_benchmark: report_benchmark.WorkloadBenchmarkView
     # SPEC §4.1 item 7's chokepoint. The type is
     # `app.services.reporting.ComparisonFigure`, whose constructor demands a token
     # private to that module — which closes the direct door and, on its own, only
