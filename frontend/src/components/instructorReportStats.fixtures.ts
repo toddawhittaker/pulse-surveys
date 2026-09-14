@@ -151,6 +151,25 @@ export const A_BENCHMARK_WITH_NO_FIGURE_THIS_WEEK: WorkloadBenchmark = {
 };
 
 /**
+ * A member the payload sent as `null`.
+ *
+ * The shape a server written in Python produces when a comparison figure comes
+ * out as `None`: `json.dumps` writes `null`, and a JSON `null` is a member that
+ * **was** sent and cannot be read, not a member that was left out. One character
+ * from the absent case and a different fact — so it takes the withheld treatment
+ * the other unreadable members take, and the component has to reach that branch
+ * without reading a property off `null` on the way.
+ *
+ * Typed rather than cast, because `null` is a value the wire genuinely carries:
+ * the security review's finding of 2026-09-13 was that the shape said otherwise
+ * and the component crashed on it.
+ */
+export const A_BENCHMARK_WITH_A_NULL_MEMBER: WorkloadBenchmark = {
+  comparison: null,
+  university: { suppressed: false, mean: 10.46, median: 8.06 },
+};
+
+/**
  * A payload whose flag cannot be read.
  *
  * The comparison member lost its `suppressed` on the way and carries figures;

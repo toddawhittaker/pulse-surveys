@@ -10,6 +10,7 @@ import {
 import {
   AN_ORDINARY_WEEK,
   A_BENCHMARK_BOTH_REPORTING,
+  A_BENCHMARK_WITH_A_NULL_MEMBER,
   A_BENCHMARK_WITH_AN_UNREADABLE_FLAG,
   A_BENCHMARK_WITH_NO_FIGURE_THIS_WEEK,
   A_BENCHMARK_WITH_THE_COMPARISON_SUPPRESSED,
@@ -213,6 +214,37 @@ describe('StatPair with a comparison member that reports nothing this week', () 
       expect(cell.textContent).not.toMatch(/\d/);
     }
     expect(screen.getByText(`Median hours, university`)).toBeTruthy();
+  });
+});
+
+describe('StatPair with a member the payload sent as null', () => {
+  it('withholds that column rather than throwing on the way to it', () => {
+    // A JSON `null` is what a server written in Python sends when the figure
+    // came out as `None`, and it is a member that **was** sent: it takes the
+    // withheld treatment rather than the absent-column treatment, because the
+    // payload made the comparison and could not answer it. Reading `suppressed`
+    // off it throws a TypeError, and a guard that throws takes the whole
+    // report's render down with it — the security review's finding of
+    // 2026-09-13, reproduced here before it was fixed.
+    const { container } = render(<StatPair {...WEEK} benchmark={A_BENCHMARK_WITH_A_NULL_MEMBER} />);
+
+    for (const cell of cellsOf(STAT_CELL_COMPARISON_TESTID)) {
+      expect(within(cell).getByText(WITHHELD)).toBeTruthy();
+      expect(within(cell).getByText(TOO_SMALL)).toBeTruthy();
+      expect(cell.textContent).not.toMatch(/\d/);
+    }
+
+    // And the rest of the report still renders: the section's own pair, and the
+    // member that arrived whole.
+    expect(values()).toEqual([
+      SECTION_MEDIAN,
+      `${WITHHELD}${TOO_SMALL}`,
+      UNIVERSITY_MEDIAN,
+      SECTION_MEAN,
+      `${WITHHELD}${TOO_SMALL}`,
+      UNIVERSITY_MEAN,
+    ]);
+    expect(container.textContent).not.toContain('null');
   });
 });
 

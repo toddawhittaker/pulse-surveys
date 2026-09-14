@@ -44,10 +44,18 @@ export interface WorkloadBenchmarkFigure {
  * payload sketch. Either member may be absent, and an absent member draws no
  * column at all — not a figure and not a notice, which is SPEC §4.1 item 1's
  * case rather than item 7's.
+ *
+ * **A member may also arrive as `null`, and that is not the absent case.** A
+ * server written in Python sends `null` for a member it computed as `None`, so
+ * the difference between `undefined` and `null` here is the difference between
+ * a comparison the payload never made and one it made and could not answer. The
+ * second sent a member, so it draws a column — a withheld one. The type says
+ * `null` because the wire carries it; a shape that denied it is what let the
+ * component read `suppressed` off nothing and throw.
  */
 export interface WorkloadBenchmark {
-  readonly comparison?: WorkloadBenchmarkFigure;
-  readonly university?: WorkloadBenchmarkFigure;
+  readonly comparison?: WorkloadBenchmarkFigure | null;
+  readonly university?: WorkloadBenchmarkFigure | null;
 }
 
 /** The comparison-set column's cells, addressable from a test and from E5-14's run. */
@@ -127,7 +135,9 @@ export function StatPair({
   const absent = !isMeasured(median) && !isMeasured(mean);
 
   // Only the members the payload actually sent, in the order the brief reads
-  // them: the section, then the comparison set, then the university.
+  // them: the section, then the comparison set, then the university. A member
+  // sent as `null` was sent, so it keeps its column and the column is withheld;
+  // only a member that is not there at all draws nothing.
   const columns = BENCHMARK_COLUMNS.filter((column) => benchmark?.[column.member] !== undefined);
 
   return (
@@ -238,7 +248,7 @@ function BenchmarkFigure({
 }: {
   readonly labelKey: InstructorReportStatsCopyKey;
   readonly testId: string;
-  readonly figure: WorkloadBenchmarkFigure | undefined;
+  readonly figure: WorkloadBenchmarkFigure | null | undefined;
   readonly value: number | null | undefined;
 }): JSX.Element {
   const reportable = isReportable(figure) && isMeasured(value);
@@ -296,8 +306,10 @@ function BenchmarkFigure({
  * member that is there, and answers `false` for one that is not so that a slip
  * in the caller cannot open a figure either.
  */
-function isReportable(figure: WorkloadBenchmarkFigure | undefined): boolean {
-  return figure !== undefined && figure.suppressed === false;
+function isReportable(figure: WorkloadBenchmarkFigure | null | undefined): boolean {
+  // `!= null` rather than `!== undefined`: a member sent as JSON `null` is one
+  // this function must answer about, and reading `suppressed` off it throws.
+  return figure != null && figure.suppressed === false;
 }
 
 /**
