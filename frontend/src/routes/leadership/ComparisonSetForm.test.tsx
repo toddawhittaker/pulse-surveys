@@ -13,7 +13,7 @@ import {
   A_SECOND_GRADUATE_COURSE,
   A_SET_THIS_READER_DEFINED,
   THE_OPTIONS,
-} from '../../api/comparisonSetFixtures';
+} from './comparisonSetFixtures';
 import {
   COMPARISON_SET_REFUSAL_TESTID,
   COMPARISON_SET_REMOVED_TESTID,

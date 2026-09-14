@@ -21,7 +21,7 @@ import {
   A_SET_SUMMARY,
   THE_OPTIONS,
   THREE_SETS,
-} from '../../api/comparisonSetFixtures';
+} from './comparisonSetFixtures';
 import { routeTree } from '../../router';
 import { COMPARISON_SET_DELETE_CONFIRM_TESTID, COMPARISON_SET_LIST_TESTID } from './ComparisonSets';
 import { COMPARISON_SET_FORM_TESTID, LEADERSHIP_SETS_TESTID } from './ComparisonSetForm';

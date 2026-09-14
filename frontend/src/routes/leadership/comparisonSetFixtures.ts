@@ -3,7 +3,7 @@ import type {
   ComparisonSetOptionsView,
   ComparisonSetPreviewView,
   ComparisonSetSummaryView,
-} from './leadership';
+} from '../../api/leadership';
 
 /**
  * The comparison-set answers this screen's tests render — ticket E5-09.
@@ -24,14 +24,15 @@ import type {
  * fixture stands in for the server: this file is the server's answer, not the
  * screen's opinion.
  *
- * **It sits in `api/` rather than beside the route it serves.** The strings in
- * it — course labels, set names — would otherwise be read as shipped copy by
- * `tests/unit/test_the_component_and_route_trees_ship_no_ungoverned_string.py`,
- * which sweeps `components/` and `routes/` and steps over test-support modules
- * only by name in a list this ticket's lane may not edit. Beside the client
- * whose contract it mirrors is an honest home for it, and the cost is disclosed
- * in `docs/tickets/e5/deferred.md`: a fixture module in `api/` is outside every
- * sweep either way, which is a gap that file names with an owner.
+ * **It sits beside the route it serves**, where
+ * `routes/instructor/instructorReportFixtures.ts` sits beside the instructor
+ * route (ADR 0151's placement convention). The strings in it — course labels,
+ * set names, the API's own refusal sentences — are inside the tree
+ * `tests/unit/test_the_component_and_route_trees_ship_no_ungoverned_string.py`
+ * sweeps, and that sweep steps over this module by name, in
+ * `EXCLUDED_SUPPORT_MODULES`. The exclusion is a claim rather than a licence:
+ * the rule module requires this file to exist and requires nothing shipped to
+ * import it, so the day a component reads these fixtures the sweep says so.
  *
  * **The numbers are chosen so a wrong member renders a different string.** The
  * member counts, the section counts, the lengths and the level codes are all

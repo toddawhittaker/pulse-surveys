@@ -15,7 +15,7 @@ import {
   A_SET_SUMMARY,
   A_SET_THIS_READER_DEFINED,
   THE_OPTIONS,
-} from '../../api/comparisonSetFixtures';
+} from './comparisonSetFixtures';
 import { routeTree } from '../../router';
 import { COMPARISON_SET_LIST_TESTID } from './ComparisonSets';
 import { COMPARISON_SET_FORM_TESTID } from './ComparisonSetForm';
