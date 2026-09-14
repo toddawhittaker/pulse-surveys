@@ -1234,7 +1234,7 @@ def _served_question_texts(session: Session, *, section_id: UUID, week_id: UUID)
 
 
 def _benchmark_members(
-    session: Session, *, section_id: UUID, course_week: int
+    session: Session, *, section_id: UUID, course_week: int, weeks: Sequence[int]
 ) -> tuple[dict[str, "StreamBenchmark"], "WorkloadBenchmarkView"]:
     """SPEC §5.1's comparison and university figures for one report — assembled, never computed.
 
@@ -1244,6 +1244,18 @@ def _benchmark_members(
     contributors and both configured minimums, and sealed by
     `comparison_after_suppression` before this function ever sees it. What happens
     here is placement: a service result becomes a payload model and nothing else.
+
+    **`weeks` is the report's own published course weeks, and passing it is a
+    confidentiality rule rather than an optimisation.** It is the axis the
+    section's own trend line above is drawn on — the same list `week.
+    published_weeks` carries — and the comparison lines are drawn on exactly it,
+    one point per week, shown or suppressed. A series that also carried the weeks
+    the *comparison population* answered in would let a reader subtract their own
+    published weeks and read off which weeks other sections answered in; over a
+    thin population that is an existence oracle about people §4.1 item 7 means to
+    say nothing about, and it is readable from a series where every single figure
+    is withheld. It shipped that way in this ticket's first round and a security
+    review found it.
 
     **Nothing in this function counts, averages, compares or derives.** A figure
     born in the assembly layer is a figure no minimum was applied to, which is the
@@ -1271,6 +1283,7 @@ def _benchmark_members(
                     section_id=section_id,
                     population=benchmarks.BenchmarkPopulation.DEFAULT_SET,
                     stream=token,
+                    weeks=weeks,
                 )
             ),
             university=_benchmark_series(
@@ -1279,6 +1292,7 @@ def _benchmark_members(
                     section_id=section_id,
                     population=benchmarks.BenchmarkPopulation.UNIVERSITY,
                     stream=token,
+                    weeks=weeks,
                 )
             ),
         )
@@ -1384,7 +1398,12 @@ def _payload(
     threshold = n_threshold()
     question_texts = _served_question_texts(session, section_id=section.id, week_id=week.week_id)
     benchmarks_by_stream, workload_benchmark = _benchmark_members(
-        session, section_id=section.id, course_week=week.course_week
+        session,
+        section_id=section.id,
+        course_week=week.course_week,
+        # The published axis, which is the list `week.published_weeks` below
+        # carries and the one the streams' own trend lines are drawn on.
+        weeks=[other.course_week for other in published],
     )
 
     streams = {

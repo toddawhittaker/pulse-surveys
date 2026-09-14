@@ -483,7 +483,7 @@ def _ratings_of(
 
 
 def _trend_over(
-    session: Session, section_ids: Sequence[UUID], *, stream: str, also_weeks: Sequence[int] = ()
+    session: Session, section_ids: Sequence[UUID], *, stream: str, axis: Sequence[int] | None = None
 ) -> list[BenchmarkPoint]:
     """A comparison trend over one section set, suppressed week by week.
 
@@ -493,18 +493,32 @@ def _trend_over(
     did, and the second is a comparison figure about one person on an instructor's
     chart.
 
-    `also_weeks` are weeks the *caller* has to be able to draw whether or not the
-    comparison set answered in them; they come back as suppressed points, because
-    a gap in a chart and a withheld number are different statements to a reader.
+    **`axis` is the caller's own week axis, and when it is given it is the whole
+    series** — one point per week named, in ascending order, and no others. A
+    caller that draws a comparison line beside somebody's own chart passes the
+    weeks that chart has, because the *set of weeks a series carries* is itself a
+    statement about the comparison population: a point for a week the reader's
+    own section has not reached says that other sections answered in it, which is
+    a cohort's week-by-week activity read off a series where every figure is
+    withheld. A week the population answered nothing in comes back as a
+    suppressed point, because a gap in a chart and a withheld number are
+    different statements to a reader.
+
+    With no axis the series is the weeks this population itself answered in,
+    which is what a caller asking about a set on its own — `named_set_trend` —
+    wants and is nobody's disclosure, because there is no reader's own term to
+    subtract.
 
     **The workload read is asked here only for the weeks it names**, never for
     its counts: a week the set answered something in has a point on this stream's
     line even when nobody answered this stream, and that point is suppressed
     because its own contributors are nobody.
     """
-    answered_weeks = _weeks_of(session, section_ids)
     ratings = _ratings_of(session, section_ids, stream=stream)
-    weeks = sorted(set(answered_weeks) | set(ratings) | set(also_weeks))
+    if axis is None:
+        weeks = sorted(set(_weeks_of(session, section_ids)) | set(ratings))
+    else:
+        weeks = sorted(set(axis))
     points: list[BenchmarkPoint] = []
     for week in weeks:
         rated = ratings.get(week)
@@ -547,17 +561,28 @@ def benchmark_trend(
     section_id: UUID,
     population: BenchmarkPopulation,
     stream: str,
+    weeks: Sequence[int] | None = None,
 ) -> list[BenchmarkPoint]:
-    """One section's comparison trend against a population, week by week.
+    """One section's comparison trend against a population, over the weeks the caller names.
 
-    Every course week the hero section itself carries responses in appears in the
-    series, whether or not the comparison population answered in it, so a report
-    drawing the hero's own line has a comparison point — shown or suppressed — at
-    every week of it.
+    **The series is exactly `weeks`, one point each, shown or suppressed.** That
+    is a confidentiality rule and not a convenience: a series whose weeks were
+    the *union* of this section's and the comparison population's lets a reader
+    subtract their own weeks and read off which weeks other sections answered in,
+    which over a thin population is an existence oracle for people §4.1 item 7
+    means to say nothing about. It shipped that way in E5-05's first round and a
+    security review found it; ADR 0170's consequences carry the rule.
+
+    A caller serving a report passes the course weeks that report has published —
+    the same axis the section's own trend line is drawn on — so the comparison
+    line covers the reader's own term and says nothing about anybody else's. With
+    no axis the series is the weeks this section itself answered in, which is
+    what it always was and is the honest default for a caller that has no axis of
+    its own to offer.
     """
     section_ids = _population(session, section_id=section_id, population=population)
-    hero_weeks = sorted(_weeks_of(session, [section_id]))
-    return _trend_over(session, section_ids, stream=stream, also_weeks=hero_weeks)
+    axis = sorted(_weeks_of(session, [section_id])) if weeks is None else list(weeks)
+    return _trend_over(session, section_ids, stream=stream, axis=axis)
 
 
 def benchmark_workload(
