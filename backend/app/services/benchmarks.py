@@ -34,8 +34,10 @@ people who had reported no hours, both of which are larger than the figure's own
 population and so both of which show figures §4.1 item 7 means to withhold
 (`docs/MISTAKES.md` entry 50's class). `_Contributors` below is the pair, read
 off the same row as the number it describes so that no caller can hand over a
-count it merely had to hand. ADR 0166's consequences carry the rule and the one
-instance of it this branch could not close.
+count it merely had to hand. ADR 0166's consequences carry the rule, and the
+term axis — the third place it was broken — carries it through
+`benchmark_cohort_term_axis`'s `_v002` body, which
+`docs/disputes/E5-04-01.md`'s ruling settled.
 
 **A benchmark figure counts every stored response, exactly as the section's own
 report figures do; `response.is_valid` is not filtered.** SPEC §3.3 classifies a

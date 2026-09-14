@@ -171,14 +171,25 @@ over-suppression tests were written to forbid it — a workload comparison whose
 contributors stand exactly at both minimums is shown, and a world where nothing
 diverges shows all four of its figures.
 
-**One instance of this defect is not fixed on this branch.**
-`named_set_term_axis` reads `benchmark_cohort_term_axis`, which carries a cohort
-week's overall counts and no contributor counts, so its workload figures are
-still sealed against a population no smaller than their own. Every route to
-fixing it changes an expected set that lives behind the test wall — widening the
-view adds two columns to the surface SPEC §4.1 item 1 enumerates as an equality;
-a third definer function needs a ninth name in the executable-function
-inventory; and computing the axis from the set's own sections would reverse the
+**The third instance was the term axis, and closing it needed a decision rather
+than a patch.** `named_set_term_axis` reads `benchmark_cohort_term_axis`, which
+carried a cohort week's overall counts and no contributor counts. Every route to
+correcting that changed an expected set behind the test wall: widening the view
+adds two columns to the surface SPEC §4.1 item 1 enumerates as an equality; a
+third definer function needs a ninth name in the executable-function inventory;
+and computing the axis from the set's own sections would have reversed the
 rejected alternative recorded above. `docs/disputes/E5-04-01.md` carries the
-measurement and the two options, and the choice of which relation this door reads
-is the decision that is actually owed. Nothing renders the term axis yet.
+measurements and the two real options, and it was ruled the first way.
+
+So `benchmark_cohort_term_axis` gained the same two contributor counts in a
+`_v002` body, and **the sanctioned read surface grew by two columns, argued in a
+record before it was built.** That is the trade this decision now carries: the
+axis keeps the meaning recorded above — the declared cohort, not the set's
+membership — and the two added columns are aggregate counts of the class the view
+already exposed, neither a key nor a person, admitted in both column equalities
+with the sentence that says why. The alternative that would have cost nothing on
+that surface is the one that reverses this record's own rejected alternative, and
+it stays rejected; if E5-06's preview later needs a per-set axis, that is its
+ticket's question rather than a quiet change to this one. Nothing renders the
+term axis yet, which is why the question could be settled on its merits rather
+than under a deadline.
