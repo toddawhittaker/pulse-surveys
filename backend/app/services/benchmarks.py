@@ -103,15 +103,24 @@ _COHORT_TERM_AXIS = table(
 # E5-03's two set functions. The array is bound and cast rather than
 # interpolated: each function takes `uuid[]`, and a list of literals spliced into
 # the statement would be a caller's value reaching the SQL.
+# **Each figure's own counts are what is selected here**, which is what E5-04's
+# fix round corrected. `workload_respondent_count` and `workload_section_count`
+# describe the responses that carried hours — the population the mean and the
+# median are computed from — and the rating read's two counts describe the people
+# and the sections that answered *that stream*. The week's overall
+# `respondent_count`, `response_count` and `section_count` are deliberately not
+# selected: nothing in this module may seal a figure with them, and a column
+# nobody reads is a column nobody reaches for by mistake.
 _SET_WEEK = text(
     "SELECT course_week, workload_mean, workload_median,"
-    " respondent_count, section_count"
+    " workload_respondent_count, workload_section_count"
     " FROM public.benchmark_set_week(CAST(:section_ids AS uuid[]))"
     " ORDER BY course_week"
 )
 
 _SET_RATING_WEEK = text(
-    "SELECT course_week, stream, rating_mean"
+    "SELECT course_week, stream, rating_mean,"
+    " rating_respondent_count, rating_section_count"
     " FROM public.benchmark_set_rating_week(CAST(:section_ids AS uuid[]))"
     " ORDER BY course_week"
 )
@@ -321,49 +330,85 @@ def _population(
 # ---------------------------------------------------------------------------
 
 
-def _sealed(figure: Decimal | None, *, sections: int, respondents: int) -> ComparisonFigure:
+@dataclass(frozen=True, slots=True)
+class _Contributors:
+    """How many people, and how many of their sections, one figure was computed from.
+
+    **The unit of both numbers is stated because getting it wrong is this
+    module's recorded defect.** `respondents` counts distinct **people** — never
+    responses, never ratings — and `sections` counts the distinct **sections**
+    those people's answers came from. Each figure carries its own pair, and a
+    pair that belongs to a different population is the thing E5-04's fix round
+    removed.
+    """
+
+    respondents: int
+    sections: int
+
+
+# What a figure computed from nothing is measured against. Zero in both
+# currencies, which suppresses under any configured minimum.
+NOBODY = _Contributors(respondents=0, sections=0)
+
+
+def _sealed(figure: Decimal | None, contributors: _Contributors) -> ComparisonFigure:
     """The one place this module turns a number into a comparison figure.
 
     Every caller below reaches a figure through here, and here reaches
     `comparison_after_suppression` — which reads both configured minimums from
-    `Settings`, compares them against the counts of the population the figure was
-    computed over, and is the only thing in this system that can seal a value
-    (ADR 0155). A figure of `None` with counts that clear both minimums is a
-    cohort week that had responses and no hours: E5-03's views carry null rather
-    than nought there deliberately, and a zero would be a claim about how long
-    those students worked that nobody made.
+    `Settings`, compares them against the counts it is given, and is the only
+    thing in this system that can seal a value (ADR 0155). A figure of `None`
+    whose contributors clear both minimums is a cohort week that had responses
+    and no hours: E5-03's views carry null rather than nought there deliberately,
+    and a zero would be a claim about how long those students worked that nobody
+    made.
 
-    `respondents` is a count of **people**, never of responses: the two sit beside
-    each other in the set function's row and one of them is always the larger
-    (`docs/MISTAKES.md` entry 50). `sections` is the count of sections that
-    actually carried rows in the week, which is not the length of the resolved id
-    list — a section nobody answered in contributes to no figure and must not
-    carry a thin cohort over the minimum.
+    **The contributors are the figure's own, and that is the whole of what this
+    signature is for.** It takes one `_Contributors` rather than two loose
+    integers precisely so that a caller cannot hand over a count it happened to
+    have: the pair is read off the same row as the number it describes. A
+    security review of this ticket found the earlier version sealing a rating
+    mean with the week's overall counts and a workload mean with counts of people
+    who reported no hours — `docs/MISTAKES.md` entry 50's class, and in the
+    disclosing direction both times, because a figure's own population is always
+    the smaller one.
     """
     return comparison_after_suppression(
         None if figure is None else float(figure),
-        sections=sections,
-        respondents=respondents,
+        sections=contributors.sections,
+        respondents=contributors.respondents,
     )
 
 
 @dataclass(frozen=True, slots=True)
-class _WeekCounts:
-    """One course week's workload figures and the two counts they are suppressed against."""
+class _WorkloadWeek:
+    """One course week's workload statistics and the contributors *they* were computed from."""
 
     workload_mean: Decimal | None
     workload_median: Decimal | None
-    respondent_count: int
-    section_count: int
+    contributors: _Contributors
 
 
-_NOTHING_ANSWERED = _WeekCounts(
-    workload_mean=None, workload_median=None, respondent_count=0, section_count=0
-)
+@dataclass(frozen=True, slots=True)
+class _RatingWeek:
+    """One course week and stream's rating mean, and the contributors it was computed from."""
+
+    rating_mean: Decimal
+    contributors: _Contributors
 
 
-def _weeks_of(session: Session, section_ids: Sequence[UUID]) -> dict[int, _WeekCounts]:
+_NOTHING_ANSWERED = _WorkloadWeek(workload_mean=None, workload_median=None, contributors=NOBODY)
+
+
+def _weeks_of(session: Session, section_ids: Sequence[UUID]) -> dict[int, _WorkloadWeek]:
     """`benchmark_set_week` over these sections, by course week.
+
+    The counts taken are `workload_respondent_count` and
+    `workload_section_count`, which describe the responses that carried hours —
+    the rows the mean and the median are computed over. ADR 0165 keeps a week's
+    row when nobody reported any hours, so the week's overall counts and the
+    hours' own counts diverge whenever a responder leaves the question blank, and
+    the figures belong to the smaller pair.
 
     **An empty section list is answered here rather than by the database.** A set
     under construction has no members and a default set may be empty once the
@@ -377,11 +422,13 @@ def _weeks_of(session: Session, section_ids: Sequence[UUID]) -> dict[int, _WeekC
     parameters = {"section_ids": [str(section_id) for section_id in section_ids]}
     rows = session.execute(_SET_WEEK, parameters).mappings()
     return {
-        int(row["course_week"]): _WeekCounts(
+        int(row["course_week"]): _WorkloadWeek(
             workload_mean=row["workload_mean"],
             workload_median=row["workload_median"],
-            respondent_count=int(row["respondent_count"]),
-            section_count=int(row["section_count"]),
+            contributors=_Contributors(
+                respondents=int(row["workload_respondent_count"]),
+                sections=int(row["workload_section_count"]),
+            ),
         )
         for row in rows
     }
@@ -389,20 +436,32 @@ def _weeks_of(session: Session, section_ids: Sequence[UUID]) -> dict[int, _WeekC
 
 def _ratings_of(
     session: Session, section_ids: Sequence[UUID], *, stream: str
-) -> dict[int, Decimal]:
+) -> dict[int, _RatingWeek]:
     """`benchmark_set_rating_week` over these sections, one stream, by course week.
 
-    The rating row carries `rating_count`, which counts ratings rather than
-    people, so it is not what either minimum is compared against; the counts come
-    from the workload row for the same week, which is where the distinct count of
-    people is computed. The empty list is short-circuited for `_weeks_of`'s reason.
+    **The counts come from the rating row itself**, per stream, because the mean
+    does. `rating_count` counts ratings and is not read here at all: it is not a
+    count of people, so neither minimum can be measured against it. The row's
+    `rating_respondent_count` and `rating_section_count` are the people who
+    answered *this* question and the sections they answered it in, which is what
+    a point on this stream's line is a statement about.
+
+    The empty list is short-circuited for `_weeks_of`'s reason.
     """
     if not section_ids:
         return {}
     parameters = {"section_ids": [str(section_id) for section_id in section_ids]}
     rows = session.execute(_SET_RATING_WEEK, parameters).mappings()
     return {
-        int(row["course_week"]): row["rating_mean"] for row in rows if str(row["stream"]) == stream
+        int(row["course_week"]): _RatingWeek(
+            rating_mean=row["rating_mean"],
+            contributors=_Contributors(
+                respondents=int(row["rating_respondent_count"]),
+                sections=int(row["rating_section_count"]),
+            ),
+        )
+        for row in rows
+        if str(row["stream"]) == stream
     }
 
 
@@ -420,20 +479,24 @@ def _trend_over(
     `also_weeks` are weeks the *caller* has to be able to draw whether or not the
     comparison set answered in them; they come back as suppressed points, because
     a gap in a chart and a withheld number are different statements to a reader.
+
+    **The workload read is asked here only for the weeks it names**, never for
+    its counts: a week the set answered something in has a point on this stream's
+    line even when nobody answered this stream, and that point is suppressed
+    because its own contributors are nobody.
     """
-    counts = _weeks_of(session, section_ids)
+    answered_weeks = _weeks_of(session, section_ids)
     ratings = _ratings_of(session, section_ids, stream=stream)
-    weeks = sorted(set(counts) | set(ratings) | set(also_weeks))
+    weeks = sorted(set(answered_weeks) | set(ratings) | set(also_weeks))
     points: list[BenchmarkPoint] = []
     for week in weeks:
-        answered = counts.get(week, _NOTHING_ANSWERED)
+        rated = ratings.get(week)
         points.append(
             BenchmarkPoint(
                 course_week=week,
                 figure=_sealed(
-                    ratings.get(week),
-                    sections=answered.section_count,
-                    respondents=answered.respondent_count,
+                    rated.rating_mean if rated else None,
+                    rated.contributors if rated else NOBODY,
                 ),
             )
         )
@@ -451,16 +514,8 @@ def _workload_over(
     """
     answered = _weeks_of(session, section_ids).get(course_week, _NOTHING_ANSWERED)
     return WorkloadComparison(
-        mean=_sealed(
-            answered.workload_mean,
-            sections=answered.section_count,
-            respondents=answered.respondent_count,
-        ),
-        median=_sealed(
-            answered.workload_median,
-            sections=answered.section_count,
-            respondents=answered.respondent_count,
-        ),
+        mean=_sealed(answered.workload_mean, answered.contributors),
+        median=_sealed(answered.workload_median, answered.contributors),
     )
 
 
@@ -556,18 +611,25 @@ def named_set_term_axis(session: Session, *, set_id: UUID) -> list[TermAxisPoint
     )
     points: list[TermAxisPoint] = []
     for row in session.execute(statement).mappings():
-        sections = int(row["section_count"])
-        respondents = int(row["respondent_count"])
+        # **These are the cohort week's overall counts, not the hours' own, and
+        # that is the open defect this branch could not close.** The two set
+        # functions now answer each figure's contributors;
+        # `benchmark_cohort_term_axis` does not, and it cannot be widened from
+        # this branch — see `docs/disputes/E5-04-01.md`. Until that is settled,
+        # a term-axis workload figure is sealed against a population that is
+        # never smaller than its own, so it can be shown where it should have
+        # been suppressed. Nothing renders this door yet.
+        cohort = _Contributors(
+            respondents=int(row["respondent_count"]), sections=int(row["section_count"])
+        )
         points.append(
             TermAxisPoint(
                 term_id=row["term_id"],
                 section_start_date=row["section_start_date"],
                 term_week=int(row["term_week"]),
                 workload=WorkloadComparison(
-                    mean=_sealed(row["workload_mean"], sections=sections, respondents=respondents),
-                    median=_sealed(
-                        row["workload_median"], sections=sections, respondents=respondents
-                    ),
+                    mean=_sealed(row["workload_mean"], cohort),
+                    median=_sealed(row["workload_median"], cohort),
                 ),
             )
         )
