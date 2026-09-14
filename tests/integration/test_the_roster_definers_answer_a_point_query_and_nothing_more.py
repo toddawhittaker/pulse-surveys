@@ -816,8 +816,9 @@ def test_the_benchmark_definer_holds_exactly_the_columns_its_two_counting_bodies
 
     **The mutation it kills:** a nineteenth column added to the owner — the
     natural edit when a later body needs one more field, and one that reaches
-    `answer.comment_text` or `response.submitted_at` with no test anywhere else
-    noticing. Also a seventh relation, a write verb beside the reads, and the
+    `answer`'s comment text with no test anywhere else noticing — the substitution
+    the verifier's battery made, which this equality killed. Also a seventh
+    relation, a write verb beside the reads, and the
     column grants replaced by a table-wide `SELECT`, which is the tidying edit
     that changes no answer any test reads and hands every column of `response`
     and `answer` to a function family that needs eight of them.

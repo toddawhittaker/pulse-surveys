@@ -75,7 +75,16 @@ LEVEL = UG
 TWELVE_WEEKS = 12
 THE_COURSE_WEEK = 2
 
-HOURS = Decimal("2.5")
+# **The hours are a spread rather than one value, and the mutation battery is why.**
+# Every respondent here used to report 2.5, so the cohort's mean and its median
+# were both 2.5 — and a mutation that copied one of the two figures over the
+# other changed nothing observable in this world. Two thirds report `LOW_HOURS`
+# and one third `HIGH_HOURS`, which puts the median on the majority value and the
+# mean above it, so the two figures are distinguishable by construction. Nothing
+# in this module asserts either number; what the spread buys is that a *later*
+# battery run against these doors cannot be undetectable by arithmetic accident.
+LOW_HOURS = Decimal("2.5")
+HIGH_HOURS = Decimal("8.5")
 A_RATING = Decimal("4")
 
 
@@ -90,6 +99,11 @@ def a_world_every_door_answers_over(
     a rating in both streams, so no door is empty for want of a value. A door
     that answered nothing would make this module vacuous, which is why the world
     is built to satisfy all of them at once and each test says so out loud.
+
+    The hours are split two ways (see `LOW_HOURS`), and the split is taken off
+    the plan's own subjects, which `spread` has already dealt round-robin across
+    the sections — so every section carries both values and no section's own
+    figures are a single number either.
     """
     labels = tuple(f"set-{index}" for index in range(sections))
     world.build()
@@ -99,18 +113,25 @@ def a_world_every_door_answers_over(
     world.lead(THE_LEAD, HERO, *labels)
     world.comparison_set("named", length_weeks=TWELVE_WEEKS, level=LEVEL, courses_of=labels)
 
-    world.answer_the_plan(
-        dict(spread(labels, respondents=respondents, subject_prefix="e5-04-sealed")),
-        course_week=THE_COURSE_WEEK,
-        workload=HOURS,
-        instructor_rating=A_RATING,
-        course_rating=A_RATING,
-    )
+    plan = dict(spread(labels, respondents=respondents, subject_prefix="e5-04-sealed"))
+    subjects = sorted(plan)
+    reporting_high = max(1, len(subjects) // 3)
+    for hours, group in (
+        (HIGH_HOURS, subjects[:reporting_high]),
+        (LOW_HOURS, subjects[reporting_high:]),
+    ):
+        world.answer_the_plan(
+            {subject: plan[subject] for subject in group},
+            course_week=THE_COURSE_WEEK,
+            workload=hours,
+            instructor_rating=A_RATING,
+            course_rating=A_RATING,
+        )
     world.respond(
         HERO,
         course_week=THE_COURSE_WEEK,
         subject="e5-04-sealed-hero",
-        workload=HOURS,
+        workload=LOW_HOURS,
         instructor_rating=A_RATING,
         course_rating=A_RATING,
     )
