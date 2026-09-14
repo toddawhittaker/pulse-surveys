@@ -120,3 +120,65 @@ that owner, and its 2026-09-13 amendment now names every column it holds.
 `named_set_term_axis` answers a cohort rather than a membership, which is a
 limit E5-06 and E9 inherit; it is written in the function's docstring so that the
 next reader meets it before a chart does.
+
+### The counts a figure is sealed against are its own contributors
+
+Added 2026-09-14, after a security review of this ticket found two HIGH defects
+with one cause. Recorded here rather than in a new record because it is the
+missing half of decision 1 above, and decision 1 as first written was not enough
+to prevent it.
+
+Decision 1 says every figure passes both minimums. It did not say **which
+population those minimums are measured over**, and the first implementation used
+whichever counts were at hand. Two consequences, both in the disclosing
+direction:
+
+- A rating trend point's mean is per stream, and the per-stream read answered no
+  count of people and no count of sections at all — so each point was sealed with
+  the *week's* counts: everybody who answered anything, in every section anybody
+  answered in. A stream answered by three students inside one section could be
+  shown as a figure over fifteen students across five sections.
+- The workload mean and median are computed over the responses carrying hours,
+  because ADR 0165 deliberately keeps a cohort week's row when nobody reports
+  any. They were sealed with counts of every responder, so two students' hours
+  could be shown as a figure over fifteen people.
+
+A figure's own population is never larger than the week's, so the error always
+ran towards showing a figure that should have been withheld. This is
+`docs/MISTAKES.md` entry 50's class — a threshold crossed by a count of
+something else — and it is the second time in this epic that a number's *unit*
+was the defect rather than its value.
+
+**The rule, stated so it cannot be satisfied by whatever count is nearest.**
+Every comparison figure is sealed against the counts of its own contributors:
+the distinct **people** whose answers that figure aggregates, and the distinct
+**sections** those answers came from. Both currencies, because a guard is named
+in every currency the thing it guards is held in. The mechanism is that the two
+set functions now answer those counts beside each figure —
+`benchmark_set_week` gained `workload_respondent_count` and
+`workload_section_count`, `benchmark_set_rating_week` gained
+`rating_respondent_count` and `rating_section_count` — and the service reads the
+pair off the same row as the number it describes rather than being handed two
+loose integers. The commit is "e5/benchmark-service: the set functions answer
+each figure's own contributor counts". No privilege changed: every new count is
+computed from columns `pulse_benchmark_definer` already held, which the
+column-equality test pins rather than this sentence.
+
+The rejected alternative is the one to name, because it is the cheap fix and it
+is wrong: sealing every figure against the smallest count in sight. That
+satisfies every suppression test and empties half the report, so two
+over-suppression tests were written to forbid it — a workload comparison whose
+contributors stand exactly at both minimums is shown, and a world where nothing
+diverges shows all four of its figures.
+
+**One instance of this defect is not fixed on this branch.**
+`named_set_term_axis` reads `benchmark_cohort_term_axis`, which carries a cohort
+week's overall counts and no contributor counts, so its workload figures are
+still sealed against a population no smaller than their own. Every route to
+fixing it changes an expected set that lives behind the test wall — widening the
+view adds two columns to the surface SPEC §4.1 item 1 enumerates as an equality;
+a third definer function needs a ninth name in the executable-function
+inventory; and computing the axis from the set's own sections would reverse the
+rejected alternative recorded above. `docs/disputes/E5-04-01.md` carries the
+measurement and the two options, and the choice of which relation this door reads
+is the decision that is actually owed. Nothing renders the term axis yet.

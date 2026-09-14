@@ -19,12 +19,23 @@ and there is no second route to one.** SPEC §4.1 item 7 suppresses "a mean, a
 median, or any other statistic" computed from a comparison set below either
 configured minimum, and E4-07 made that decision the only way a `ComparisonFigure`
 can be built (ADR 0155). This module is a caller of that chokepoint and adds
-nothing to it: `_sealed` below is the single place a figure is constructed, it
-takes the counts from the row the figure came from, and it is reached once per
-figure — per week of a trend, and separately for a workload mean and its median.
-A week the cohort answered nothing in is a *suppressed* point rather than an
-absent one, because a gap in a chart and a withheld number say different things
-to a reader.
+nothing to it: `_sealed` below is the single place a figure is constructed, and
+it is reached once per figure — per week of a trend, and separately for a
+workload mean and its median. A week the cohort answered nothing in is a
+*suppressed* point rather than an absent one, because a gap in a chart and a
+withheld number say different things to a reader.
+
+**And every figure is sealed against the counts of its own contributors** — the
+distinct people whose answers that figure aggregates, and the distinct sections
+those answers came from. That sentence is the whole of what a security review of
+this ticket added, and it was not obvious: the first version sealed a per-stream
+rating mean with the week's overall counts and a workload mean with counts of
+people who had reported no hours, both of which are larger than the figure's own
+population and so both of which show figures §4.1 item 7 means to withhold
+(`docs/MISTAKES.md` entry 50's class). `_Contributors` below is the pair, read
+off the same row as the number it describes so that no caller can hand over a
+count it merely had to hand. ADR 0166's consequences carry the rule and the one
+instance of it this branch could not close.
 
 **A benchmark figure counts every stored response, exactly as the section's own
 report figures do; `response.is_valid` is not filtered.** SPEC §3.3 classifies a
