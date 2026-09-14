@@ -177,3 +177,27 @@ when** either a database constraint makes a mid-week section start unstorable,
 or a sentence records that the derivation rounds and that this is the intended
 answer. Owner: E5-14 at the epic exit, unless a roster ticket writes a start
 date from a platform first.
+
+## Three cohort views still pair whole-week counts with subset figures (E5-04)
+
+**What is not enforced.** The contributor-count rule E5-04's fix round
+established — a figure is sealed against counts of its own contributors —
+is applied everywhere the service reads: the two set functions and
+`benchmark_cohort_term_axis`, all in `_v002` bodies. The three sibling
+views (`benchmark_cohort_week`, `benchmark_cohort_rating_week`,
+`benchmark_cohort_rating_term_axis`) still carry the week's overall
+`respondent_count`/`section_count` beside figures computed over a subset
+(rating rows per stream; workload rows over hours-carrying responses).
+Nothing under `backend/app/` reads any of the three today, so no live path
+can seal a figure with the wrong counts.
+
+**Why it was left.** The fix round's declared stopping rule covered the
+reviewed findings, all on read paths that exist; widening three unread
+views would have been new surface with no consumer and no test to prove it
+against.
+
+**Owner:** the first ticket that reads one of the three (E5-05 reads
+through the service, so in practice E5-06's preview or E9's dashboards);
+E5-14 re-checks at exit. **Done when** any consumer of these views seals
+figures only against contributor counts the view itself carries (a `_v002`
+per view, the established shape), or the views are retired unread.
