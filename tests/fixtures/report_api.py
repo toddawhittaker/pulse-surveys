@@ -189,6 +189,26 @@ COURSE_WEEK_FIELD = "course_week"
 TERM_WEEK_FIELD = "term_week"
 PUBLISHED_WEEKS_FIELD = "published_weeks"
 
+# E5-02's three members, spelled here rather than in the modules that read them.
+#
+#   - `week.closes_at` — the reported week's survey window close instant, which
+#     the mockup's eyebrow renders as "responses closed Sun 11:59 PM"
+#     (`design/InstructorMondayReport.dc.html:227`).
+#   - `streams.<stream>.question_text` — the served text of that stream's rating
+#     question, which the mockup quotes as each histogram's title (lines 30-31).
+#     SPEC §3.2 versions that wording server-side, so it is served rather than
+#     copied into the frontend.
+#   - a top-level `institution_timezone` — the IANA name the close instant is
+#     rendered in, mirroring the student payload's own member. It is a top-level
+#     addition, so `tests/unit/test_the_payload_sketch_and_the_schema_are_
+#     reconciled.py`'s `DECLARED_DIVERGENCES` carries it.
+#
+# All three are settled by E5-02's work order; none is discovered, because a
+# spelling invented here would be this suite choosing the wire format.
+CLOSES_AT_FIELD = "closes_at"
+QUESTION_TEXT_FIELD = "question_text"
+INSTITUTION_TIMEZONE_MEMBER = "institution_timezone"
+
 RESPONSE_RATE_FIELD = "response_rate"
 VALIDITY_RATE_FIELD = "validity_rate"
 RESPONSES_FIELD = "responses"
@@ -1567,6 +1587,9 @@ def report_api_contract() -> Any:
         course_week_field = COURSE_WEEK_FIELD
         term_week_field = TERM_WEEK_FIELD
         published_weeks_field = PUBLISHED_WEEKS_FIELD
+        closes_at_field = CLOSES_AT_FIELD
+        question_text_field = QUESTION_TEXT_FIELD
+        institution_timezone_member = INSTITUTION_TIMEZONE_MEMBER
         response_rate_field = RESPONSE_RATE_FIELD
         validity_rate_field = VALIDITY_RATE_FIELD
         responses_field = RESPONSES_FIELD
