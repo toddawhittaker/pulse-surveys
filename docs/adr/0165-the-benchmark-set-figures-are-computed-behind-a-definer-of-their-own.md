@@ -35,20 +35,37 @@ letter map is admin-configured per term.
 **The building block is a pair of `SECURITY DEFINER` functions**,
 `benchmark_set_week(section_ids uuid[])` and
 `benchmark_set_rating_week(section_ids uuid[])`, in the versioned `views_sql/`
-shape ADR 0041 sets and following ADR 0139's precedent: the section set goes in,
-numbers come out, and no row keyed to a student is selectable by `pulse_app`.
-Typed wrappers of the same names live in `views_sql/queries.py`, so E5-04 has no
-reason to spell a statement of its own. ADR 0150 prefers a plain grant wherever
-one would do, and this is the case where one cannot: counting **distinct
-students** across an arbitrary set requires reading rows that say which student
-answered where, and any relation wide enough for the application to do that
-arithmetic itself is the person-week index the dispute withdrew.
+shape ADR 0041 sets and following ADR 0139's precedent: the section set goes in
+and numbers come out. Typed wrappers of the same names live in
+`views_sql/queries.py`, so E5-04 has no reason to spell a statement of its own.
+
+**What that buys, stated accurately.** The ruling's own first answer — that
+`pulse_app` "may not select the rows they aggregate" — was false, and the
+amendment on `docs/disputes/E5-03-01.md` records it: that connection has held
+table-wide `SELECT` on `response` and `answer` since the E2 submission path, so
+it can already read which student answered where. What it cannot read is a
+**person**; its `SELECT` on `public."user"` is `(id)` only, so `response.user_id`
+joins to nothing nameable. Three things survive, and each is checkable. The
+functions add **zero new privilege** to `pulse_app`: an `EXECUTE` on two bodies
+that answer in aggregates and have nowhere to put a row. They answer in numbers
+**by construction** rather than by a convention about callers, which is the
+difference SPEC §8's "enforced in the database, not just the application" is
+asking for. And they keep a person-keyed relation off the sanctioned read
+surface, where the withdrawn view would have put one — with the precedent for
+the next one behind it. ADR 0150 prefers a plain grant wherever one would do,
+and what a plain grant cannot do here is that third thing: the grant *is* the
+person-keyed relation.
 
 **The functions are owned by `pulse_benchmark_definer`**, a new NOLOGIN role
 created by this ticket's migration, holding column-grain `SELECT` on the six
 relations the two bodies name and nothing else. Reusing `pulse_resolve_definer`
-was refused: its column grants on `user` and `person` would give a body whose
-job is to count students an owner that can read their names.
+was refused, and the reason is blast radius rather than names: that role cannot
+read a name either — it holds `user(id, lti_platform_id, lms_user_id)`,
+`person(id, user_id)` and `web_login_subject`, which are cross-platform
+identifier columns — but it exists to resolve one identifier to another, and a
+body whose whole job is counting has no use for that reach. Disjoint owners are
+what keep each function family's reach readable against the bodies that spend
+it, and a later widening of either then widens one family rather than two.
 
 **The term-axis cohort key is `section_start_date`.** A start letter is per-term
 admin data, so a key on the letter compares two unrelated cohorts across two
@@ -77,9 +94,13 @@ E5-05 renders that figure beside an instructor's own.
   couples policy review with SQL review and breaks the wave's migration
   partition.
 - **The person-keyed view the work order asked for.** Rejected by the ruling on
-  `docs/disputes/E5-03-01.md`; the analogy with `section_roster` fails because
-  that view is one section's key handed to a reader already inside it, while a
-  cohort-spanning person-week key is a de-anonymization primitive.
+  `docs/disputes/E5-03-01.md`. Its cost is a standing granted relation keyed to
+  a student on the surface `SANCTIONED_VIEW_COLUMNS` enumerates, and the
+  precedent for the next one — rather than a new capability, since the
+  connection can already read the rows underneath. The analogy with
+  `section_roster` fails for a second reason: that view is one section's key
+  handed to a reader already inside it, while this one spans every section of a
+  cohort across terms.
 - **A key on the start letter** for the term axis, and **table-wide `SELECT`**
   for the definer owner: each is the cheaper spelling of a decision above and
   each gives up the property that decision was taken for.

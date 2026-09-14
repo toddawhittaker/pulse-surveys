@@ -136,10 +136,13 @@ def test_each_typed_wrapper_answers_what_its_sql_function_answers(
     before the comparison happens.
 
     **The mutation it exists to survive**: a wrapper that issues its own
-    `SELECT` over the base tables instead of calling the function — which is
-    what makes it a third implementation, and which would also be a read of
-    person-keyed rows from the application connection, the thing the ruling
-    withdrew a whole view to prevent.
+    `SELECT` over the base tables instead of calling the function. That is a
+    third implementation of one arithmetic, and it also puts the benchmark read
+    back on the application role's own privileges — which is not a disclosure
+    (`pulse_app` may select `response` and `answer`, as the amendment to
+    `docs/disputes/E5-03-01.md` records) but is the whole of what routing
+    through a definer buys: a reporting path whose reach is a named owner's
+    rather than whatever the runtime role happens to hold next year.
     """
     world = a_two_section_set(benchmark_world)
     require_benchmark_function(world.session, name)
@@ -176,6 +179,6 @@ def test_each_typed_wrapper_answers_what_its_sql_function_answers(
         f"Through the wrapper: {answered}\nThrough the function: {expected}\n\n"
         "The wrapper is a typed way to reach one arithmetic, not a second one. A wrapper that "
         "issues its own statement over the base tables would produce exactly this failure — and "
-        "would also be reading person-keyed rows on the application connection, which is what the "
-        "ruling on `docs/disputes/E5-03-01.md` withdrew a view to prevent."
+        "would put the benchmark read back on whatever privileges the application role holds, "
+        "which is the thing routing it through a definer is for."
     )

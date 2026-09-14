@@ -9,15 +9,25 @@
 -- Those are subsets of a cohort that the database has no column for, so the set
 -- is the argument and the answer is a row per course week.
 --
--- **Why a function rather than a grant, which is the whole of the dispute.**
--- Counting distinct *students* across a set requires reading the rows that say
--- which student answered where, and any relation wide enough for the
--- application to do that arithmetic itself is a person-week index spanning
--- every section of a cohort across terms. E5-03's scope forbids exactly that —
--- "section id and numbers, never a person" — and SPEC §8 requires the
--- separation to be structural rather than a convention about callers. So the
--- arithmetic happens here, under an owner the application is not, and numbers
--- come back. A per-section pre-aggregate the caller sums was rejected for the
+-- **Why a function rather than a view, which is what the dispute settled — and
+-- the claim is narrower than the ruling first made it.** It is *not* that this
+-- keeps pulse_app away from the rows underneath. That connection has held
+-- table-wide SELECT on response and on answer since the E2 submission path
+-- (student_read_grants_v001.sql, survey_submission_grants_v001.sql), so it can
+-- already read which student answered where; what it cannot read is a person,
+-- because its SELECT on public."user" is (id) only and that key joins to
+-- nothing nameable. Three things are bought instead, and each of them is true.
+-- These functions add **zero new privilege** to pulse_app: an EXECUTE on two
+-- bodies that answer in aggregates and have nowhere to put a row. They answer
+-- in numbers **by construction** rather than by a convention about callers,
+-- which is the difference SPEC §8's "enforced in the database" asks for. And
+-- they keep a person-keyed relation off the sanctioned read surface, where the
+-- withdrawn view would have put one and set the precedent for the next —
+-- E5-03's scope forbids exactly that, in five words: "section id and numbers,
+-- never a person". The amendment on docs/disputes/E5-03-01.md records the
+-- sentence this paragraph replaces and why it was false.
+--
+-- A per-section pre-aggregate the caller sums was rejected for the
 -- arithmetic it gets wrong: sums of distincts are not distinct sums, and the
 -- over-count runs in the direction that lets a thin set past a threshold that
 -- exists to protect people (docs/MISTAKES.md entry 50). ADR 0165 carries the

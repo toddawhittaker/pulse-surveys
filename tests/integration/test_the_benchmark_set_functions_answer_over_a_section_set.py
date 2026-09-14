@@ -1,15 +1,26 @@
 """E5-03's building block — figures over an arbitrary section set, computed where the rows live.
 
 The ruling on `docs/disputes/E5-03-01.md` replaced the work order's person-keyed
-view with two `SECURITY DEFINER` functions:
+view with two `SECURITY DEFINER` functions in the `views_sql/` versioned shape,
+on the `resolve_subject_for_user` precedent (ADR 0139): the section-id set goes
+in and numbers come out.
 
-> **Shape 2 is ruled in.** The building block is a pair of `SECURITY DEFINER`
-> functions in the `views_sql/` versioned shape, the `resolve_subject_for_user`
-> precedent (ADR 0139): the section-id set goes in, numbers come out, and no row
-> keyed to a student is ever selectable by `pulse_app`. ADR 0150's plain-grant
-> preference is answered head-on: a plain grant *cannot* do this — any grant wide
-> enough to let the application count distinct respondents across an arbitrary
-> section set is a grant on person-keyed rows, which is the thing being refused.
+**Read that ruling with its amendment, which this module is written against.**
+The ruling's stated reason was that "`pulse_app` … may not select the rows they
+aggregate" and that a plain grant therefore could not do the job. Both halves
+were false, and the security review of the built diff found it: this role has
+held table-wide `SELECT` on `public.response` and `public.answer` since E2's
+submission path, so it can count distinct respondents over any set of sections
+without either function. **Nothing in this module tests that claim, and none of
+it depended on it** — every test below is about what the functions *answer*,
+which is the half that was always the subject.
+
+What survives, and is the reason these are functions rather than a view: the
+benchmark read path adds **zero new privilege** and no new person-keyed relation
+to the sanctioned surface. The withdrawn alternative added a granted view keyed
+to a student, spanning every section of a cohort across terms — and a precedent
+for the next one. What `pulse_app` cannot read either way is a *person*: its
+`SELECT` on `public."user"` is column-scoped to `(id)`.
 
 E5-04 is the caller (default set, university line, named set — none of which is
 a cohort key, because each is a list of sections chosen by a rule the database
@@ -442,13 +453,17 @@ def test_an_empty_section_set_answers_no_rows(benchmark_world: BenchmarkWorld) -
 def test_both_set_functions_are_security_definer_owned_by_the_benchmark_definer(
     db_session: Any,
 ) -> None:
-    """The mechanism and its owner — together they are the whole of the ruling.
+    """The mechanism and its owner — together they bound what this path can reach.
 
-    "The section-id set goes in, numbers come out, and no row keyed to a student
-    is ever selectable by `pulse_app`." That property is bought by the function
-    running as its **owner** rather than as its caller: a `SECURITY INVOKER`
-    function is a view with parentheses, and whatever the application role may
-    not read inside it, it may not read through it either.
+    A `SECURITY DEFINER` function runs with its owner's privileges, so the owner
+    is what these two bodies can reach and the pair of assertions below is the
+    statement of it. **What that buys here is a narrow, separately enumerable
+    surface rather than a reach the caller lacks** — `pulse_app` can already
+    select `response` and `answer`, which the amendment to
+    `docs/disputes/E5-03-01.md` records and this module's own docstring
+    explains. A `SECURITY INVOKER` function would work today for exactly that
+    reason, and would silently tie the reporting path's reach to whatever the
+    application role happens to hold next year.
 
     ADR 0139's `resolve_subject_for_user` is the precedent this follows, and
     `test_identity_grants.py` already sweeps every definer in `public` for an
@@ -478,10 +493,11 @@ def test_both_set_functions_are_security_definer_owned_by_the_benchmark_definer(
             f"`public.{name}` is not `SECURITY DEFINER` — the catalog reports "
             f"{shape['security_definer']!r} for `prosecdef`, and its signature is "
             f"{shape['signature']}. The ruling on `docs/disputes/E5-03-01.md` makes these two "
-            "definers on purpose: 'a plain grant *cannot* do this — any grant wide enough to let "
-            "the application count distinct respondents across an arbitrary section set is a grant "
-            "on person-keyed rows, which is the thing being refused'. A `SECURITY INVOKER` "
-            "function answers with the caller's own reach and buys none of that."
+            "definers on purpose, and its amendment says why in the accurate version: a "
+            "`SECURITY INVOKER` function answers with whatever reach its caller happens to hold, "
+            "so the reporting path's privileges would be `pulse_app`'s privileges — today's and "
+            "every later ticket's — rather than a narrow set an owner holds and this file can "
+            "enumerate. It works today, which is exactly what makes the omission invisible."
         )
         assert shape["owner"] == BENCHMARK_DEFINER_ROLE, (
             f"`public.{name}` is owned by `{shape['owner']}` rather than by "
@@ -550,11 +566,15 @@ def test_the_person_keyed_benchmark_view_the_dispute_withdrew_is_not_readable(
         f"`{APPLICATION_ROLE}` read `public.{WITHDRAWN_VIEW}` and got {len(rows)} rows back. That "
         "relation is the person-keyed view this ticket's work order asked for and the ruling on "
         "`docs/disputes/E5-03-01.md` withdrew, on E5-03's own 'section id and numbers, never a "
-        "person' and on SPEC §8's 'enforced in the database, not just the application'. It spans "
-        "every section of a cohort across terms and keys each row to a student, which is a "
-        "de-anonymization primitive rather than a join key. The figures it was meant to feed are "
-        f"`{SET_FUNCTION}` and `{SET_RATING_FUNCTION}`, which compute them where the person rows "
-        "live and return numbers."
+        "person'.\n\n"
+        "What its absence buys, stated as the amendment to that dispute states it rather than as "
+        "the ruling first did: a granted view keyed to a student would enter the sanctioned read "
+        "surface `SANCTIONED_VIEW_COLUMNS` enumerates, and it would be the precedent the next "
+        "reporting shape cites. It is not a new capability — this role can already select "
+        "`response` — which is precisely why a reviewer would have waved it through, and why the "
+        "line is drawn at what the reporting path is *granted* rather than at what it could "
+        f"contrive. The figures it was meant to feed are `{SET_FUNCTION}` and "
+        f"`{SET_RATING_FUNCTION}`, which return numbers and add no relation at all."
     )
     state = getattr(getattr(refused, "orig", None), "sqlstate", None)
     assert state in (UNDEFINED_RELATION, INSUFFICIENT_PRIVILEGE, None), (

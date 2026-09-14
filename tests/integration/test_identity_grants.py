@@ -388,6 +388,58 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 #     stay unreachable, the owner gains no column privilege for this (its five stay
 #     exactly five), and enumeration of subjects the caller holds no row id for is
 #     still refused. ADR 0139.
+#   - `benchmark_set_week(section_ids uuid[])` and
+#     `benchmark_set_rating_week(section_ids uuid[])` — E5-03's, and the two
+#     whose admitting sentence had to be rewritten before it was a week old.
+#     Each takes one `uuid[]` of section ids and answers rows of numbers: a
+#     course week, a stream on the rating one, the rating or workload
+#     statistics, and the counts a benchmark's minimum is compared against.
+#     Neither has anywhere to put a person and neither can be asked for one.
+#
+#     **The sentence they were first admitted with was false, and correcting it
+#     is most of what this entry is for.** It read: "`pulse_app` may execute the
+#     two benchmark set functions and may not select the rows they aggregate."
+#     It may. This role has held table-wide `SELECT` on `public.response` and
+#     `public.answer` since E2's submission path, and
+#     `RUNTIME_BASE_TABLE_PRIVILEGES` below has recorded exactly that all along
+#     — so `pulse_app` could count distinct `response.user_id` values across any
+#     set of sections itself, with no function and no new grant. The security
+#     review of the built diff found it; the amendment at the foot of
+#     `docs/disputes/E5-03-01.md` records the correction and why the ruling
+#     stands on the surviving argument.
+#
+#     **What is true, and what these two are actually for: the read path adds
+#     zero new privilege and no new person-keyed relation.** Nothing arrives
+#     with them but `EXECUTE` on two functions that return aggregates by
+#     construction. The alternative they replaced did add something — a *view*
+#     keyed to a student, spanning every section of a cohort across the current
+#     and every retained prior term, entering the sanctioned read surface
+#     `SANCTIONED_VIEW_COLUMNS` enumerates. That is a standing, granted,
+#     person-keyed relation built for reporting, where today there is a table
+#     the application already reads because it writes to it; and it is a
+#     precedent, which is the half that costs most, because the next benchmark
+#     that wants a convenient shape would cite it. The figures are computed
+#     where the rows are and leave as numbers, so the granted surface is exactly
+#     what it was before this ticket.
+#
+#     **What `pulse_app` genuinely cannot read is a person**, and that is
+#     unchanged in both directions by these entries: its `SELECT` on
+#     `public."user"` is column-scoped to `(id)`, so `response.user_id` joins to
+#     nothing nameable, and `user_identity` is refused outright. Every rule in
+#     this file rests on that, and none of it rests on the sentence that was
+#     wrong.
+#
+#     **ADR 0150 answered rather than dodged.** Its preference for a plain grant
+#     over a definer holds wherever a grant would do the job, and here one
+#     already does — that is the honest position and it is the opposite of what
+#     the first version of this entry claimed. The definer is chosen not because
+#     it is the only mechanism that works but because it is the only one that
+#     leaves the sanctioned surface unchanged, and two `EXECUTE` entries are the
+#     whole of what E5-03 spends.
+#
+#     **The count moves from six to eight, and that is the argument for it.**
+#     Two entries, one ticket, one ruling and its amendment — which is the
+#     standard the six above were held to.
 #
 # What is *not* here is the point of the list: the functions of the Care door.
 # `pulse_app` is refused those by name in an `invariant`-marked test below, and a
@@ -401,32 +453,6 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 # why it is stated as "one more than what is here" rather than as a count in a
 # docstring somewhere else (`docs/MISTAKES.md` entry 1). The tuple below is the
 # record; this paragraph is the rule.
-#   - `benchmark_set_week(section_ids uuid[])` and
-#     `benchmark_set_rating_week(section_ids uuid[])` — E5-03's, and the first
-#     entries here that read *no* person key out and exist precisely so that none
-#     can be read. The sentence the ruling on `docs/disputes/E5-03-01.md` writes
-#     for them, quoted: *"A benchmark figure over an arbitrary section set is
-#     computed where the person rows live and leaves the database as numbers:
-#     `pulse_app` may execute the two benchmark set functions and may not select
-#     the rows they aggregate (§4.1 items 1 and 7, §8's structural-separation
-#     constraint, dispute E5-03-01)."*
-#
-#     **Why a function rather than a grant, answered rather than assumed.** ADR
-#     0150 prefers a plain grant wherever one would do, and here one cannot: a
-#     benchmark over an arbitrary section set has to count *distinct students*
-#     across the whole set (SPEC §5.1's comparison sets, and
-#     `docs/MISTAKES.md` entry 50 on why the unit has to be people), and any
-#     relation wide enough to let the application do that arithmetic is a
-#     relation keyed to a student, spanning every section of a cohort in the
-#     current and every retained prior term. That is the read E5-03's own scope
-#     forbids in five words — "section id and numbers, never a person" — and the
-#     work order that asked for it as a view was overruled. Each function takes
-#     one `uuid[]` and answers rows of numbers; neither has anywhere to put a
-#     person, and neither can be asked for one.
-#
-#     **The count moves from six to eight and that is the argument for it.** Two
-#     entries, one ticket, one ruling, one sentence — which is the standard the
-#     six above were held to.
 SANCTIONED_APPLICATION_EXECUTE = (
     "resolve_platform_user",
     "resolve_person_for_user",
@@ -690,11 +716,14 @@ THE_CARE_DOOR = (RECORD_FUNCTION, REVEAL_FUNCTION, SUBJECT_RESOLVER_FUNCTION)
 # grants would be a role to audit rather than a boundary), `pulse_roster_definer`
 # the email write, and `pulse_instructor_definer` the teaching-instructor write the
 # security round's F2 moved off a table grant. **`pulse_benchmark_definer` owns
-# E5-03's two benchmark set functions**: they exist so that a cohort figure over
-# an arbitrary section set is computed where the person rows live, so their SQL
-# has to run with an owner's read on `response` while `pulse_app` holds `EXECUTE`
-# and no `SELECT` on what they aggregate (the ruling on
-# `docs/disputes/E5-03-01.md`). It is a **new** role rather than a reuse of
+# E5-03's two benchmark set functions**, which compute a cohort figure over an
+# arbitrary section set and return numbers. The owner is what bounds what those
+# bodies can reach, and bounding it is the point: `pulse_app` can already select
+# `response` and `answer` for itself (see the amendment to
+# `docs/disputes/E5-03-01.md`, which corrects the ruling's claim to the
+# contrary), so the reason for a definer here is not to reach past the caller
+# but to keep the reporting path's own privileges narrow and separately
+# enumerable. It is a **new** role rather than a reuse of
 # `pulse_resolve_definer`, and the refusal is the whole point: that owner holds
 # column grants on `user` and `person`, so hanging benchmark SQL off it would
 # hand a body that counts students an owner that can read their names — widening

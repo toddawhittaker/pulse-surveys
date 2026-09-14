@@ -8,25 +8,29 @@
 -- those two bodies (ADR 0043's pattern). Nothing connects as it and no
 -- mechanism in this repository gives it a password.
 --
--- **A new role rather than a reuse of pulse_resolve_definer**, and the reason
--- is the whole of what this owner is for. That role holds column grants on the
--- `user` and `person` tables, so a body whose job is to count students would
--- have had an owner that can read their names. The two owners' grants stay
--- disjoint, and this one reaches no identity column of any kind: what it may
--- read is listed below in full, at column grain, and there is not a name or an
--- address among them.
+-- **A new role rather than a reuse of pulse_resolve_definer, and the reason is
+-- blast radius rather than names.** That role cannot read a name either: it
+-- holds `user`(id, lti_platform_id, lms_user_id), `person`(id, user_id) and
+-- `web_login_subject` (identity_resolution_v001.sql,
+-- web_identity_resolution_v001.sql), which are cross-platform identifier
+-- columns. What it is *for* is resolving one identifier to another, and a body
+-- whose whole job is counting has no use for that reach. Keeping the two owners
+-- disjoint is what makes "the definer's privileges" readable against the bodies
+-- that spend them, and it runs both ways: a later widening of either owner then
+-- widens one function family rather than two. What this one may read is listed
+-- below in full, at column grain, and there is not a name or an address among
+-- them.
 --
--- **Why an owner with these reads exists at all.** A benchmark over an
--- arbitrary section set has to count *distinct students* across the whole set
--- (SPEC §5.1's comparison sets; docs/MISTAKES.md entry 50 on why the unit has
--- to be people), and any relation wide enough to let the application do that
--- arithmetic for itself is a relation keyed to a student, spanning every
--- section of a cohort in the current and every retained prior term. E5-03's own
--- scope forbids that in five words — "section id and numbers, never a person" —
--- and the ruling on docs/disputes/E5-03-01.md withdrew the view that would have
--- carried it. So the arithmetic happens where the person rows live, under this
--- owner, and only numbers come back. ADR 0150's preference for a plain grant is
--- answered head-on in ADR 0165: a plain grant cannot do this.
+-- **Why an owner with these reads exists at all**, said accurately rather than
+-- as a wall it is not. pulse_app can already read `response` and `answer`
+-- table-wide (the E2 submission path), so nothing here is keeping the
+-- application away from rows it is otherwise refused. This owner exists so that
+-- the counting happens inside bodies that answer in aggregates: the alternative
+-- the work order asked for was a person-keyed **view** on the sanctioned read
+-- surface, which E5-03's scope forbids in five words — "section id and numbers,
+-- never a person" — and which the ruling on docs/disputes/E5-03-01.md withdrew.
+-- ADR 0165 carries the argument, and that file's amendment records the claim
+-- this paragraph no longer makes.
 --
 -- **Column grain, and the columns are the ones the two bodies name.** A
 -- table-wide SELECT would hand this owner every column those tables ever grow,

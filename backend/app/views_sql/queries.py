@@ -129,17 +129,20 @@ def section_enrollment_counts(
 
 # E5-03's two benchmark set functions, reached the way every read in this package
 # is reached. They are functions rather than views because the comparison set
-# E5-04 resolves is a list of sections rather than a key, and counting distinct
-# students across such a list requires reading rows keyed to a student — which
-# `pulse_app` may not do and, after the ruling on `docs/disputes/E5-03-01.md`,
-# never will. The arithmetic happens under the functions' own owner and numbers
-# come back; the SQL files carry the argument in full.
+# E5-04 resolves is a list of sections rather than a key, and because a cohort
+# figure over such a list is computed where the rows are and comes back as
+# numbers: the application holds `EXECUTE` on two aggregate-returning bodies
+# rather than `SELECT` on a relation keyed to a student. That is a statement
+# about what joins the sanctioned read surface rather than about what this
+# connection can reach — it has read `response` and `answer` since the E2
+# submission path, and what it cannot read is a person. The SQL files carry the
+# argument in full, and the amendment on `docs/disputes/E5-03-01.md` records the
+# wider claim the ruling first made and withdrew.
 #
 # Written here rather than in the service that will call them so that E5-04 has
 # no reason to spell a statement of its own — which is the state
 # `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` exists to
-# prevent, and which in this case would also be a person-keyed read on the
-# application connection.
+# prevent, and which here would put this ticket's arithmetic in a second place.
 #
 # The array is bound and cast rather than interpolated, and the ids are passed as
 # text: the function takes `uuid[]`, and a list of literals spliced into the

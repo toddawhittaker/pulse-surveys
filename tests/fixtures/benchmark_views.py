@@ -412,8 +412,8 @@ def require_benchmark_function(connection: Any, name: str) -> dict[str, Any]:
             f"`SECURITY DEFINER` function `{signature}` "
             f"returning rows {list(BENCHMARK_FUNCTIONS[name])}, executed by this ticket's "
             "migration. It replaces the person-keyed view the work order asked for, which that "
-            "dispute withdrew: the section set goes in, numbers come out, and no row keyed to a "
-            "student is ever selectable by the application role."
+            "dispute withdrew: the section set goes in and numbers come out, so the benchmark "
+            "read path adds no granted relation keyed to a student and no new privilege at all."
         )
     if len(found) > 1:
         pytest.fail(
