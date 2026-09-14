@@ -192,18 +192,29 @@ def test_no_benchmark_view_names_a_person_in_any_currency(db_session: Any, view:
 
 
 def test_the_four_benchmark_views_are_the_four_this_ticket_ships(db_session: Any) -> None:
-    """The set of views, so a fifth is a decision and a missing one is not a silent skip.
+    """All four named views exist — an existence check, and deliberately nothing more.
 
     The parametrised tests above are written over `BENCHMARK_VIEWS`, so deleting
-    an entry from that constant deletes its own cases and the suite passes at the
-    smaller size — the shape `test_identity_grants.py`'s controls carry a comment
-    about, and the reason this one names the four outright rather than iterating
-    the constant.
+    an entry from that constant deletes its own cases and the module passes at
+    the smaller size — the shape `test_identity_grants.py`'s controls carry a
+    comment about, and the reason this one names the four outright rather than
+    iterating the constant.
 
-    It is not an inventory of every view in `public`:
-    `test_identity_separated_views.py` compares the whole catalog against the
-    `views_sql/` files. This asks only that E5-03's four exist under the names
-    the ruling settles.
+    **It does not catch a fifth view, and an earlier version of this docstring
+    claimed it did.** The mutation battery planted one and this file stayed
+    green, correctly: the body asks whether four names are present, and a fifth
+    name is not a thing it looks at. Nothing in this module is a closed set.
+
+    **The closed set lives in `tests/integration/test_identity_grants.py`**, in
+    `SANCTIONED_VIEW_COLUMNS`, read as a two-directional equality by
+    `test_the_columns_the_application_role_may_read_from_a_view_are_exactly_the_enumerated_set`
+    — `invariant`-marked, and red on a fifth *granted* view as well as on a
+    column added to any of these four. That is where a new view's admitting
+    sentence has to be written. `test_identity_separated_views.py` owns the
+    other half of the inventory question, comparing the whole catalog against
+    the `views_sql/` files. This test and those two are separate facts: "the
+    deliverables are here" and "nothing else is", and a module that tried to own
+    both would own neither well.
 
     **The mutation it exists to survive**: three views shipped instead of four —
     the rating pair folded into the workload pair, or the term axis dropped as

@@ -77,6 +77,17 @@ THE_COURSE_WEEK = 2
 # that "it was built anyway" is a red rather than a thing nobody looks for.
 WITHDRAWN_VIEW = "benchmark_respondent_week"
 
+# A relation every migrated database has and `pulse_app` is certainly granted
+# `SELECT` on — E0-10's roster view, whose whole column list sits in
+# `SANCTIONED_VIEW_COLUMNS` in `test_identity_grants.py` with the sentence that
+# admits it. It is the positive control for the refusal below: a read that
+# succeeds proves the connection is looking at a migrated schema and that this
+# role can read *something*, which is the premise a refusal needs and which the
+# first version of that test never established. Spelled here rather than
+# imported from the sibling module that also names it, for the reason
+# `test_identity_grants.py` gives about its own copies.
+A_CERTAINLY_READABLE_VIEW = "public.section_roster"
+
 # Postgres reports an insufficient privilege as 42501 and an undefined relation
 # as 42P01. Both are refusals of the withdrawn read and either satisfies the
 # test below; what must not happen is rows coming back.
@@ -522,6 +533,7 @@ def test_both_set_functions_are_security_definer_owned_by_the_benchmark_definer(
 
 @pytest.mark.invariant
 def test_the_person_keyed_benchmark_view_the_dispute_withdrew_is_not_readable(
+    migrated_database: Any,
     application_engine: Any,
 ) -> None:
     """The withdrawn deliverable, asserted as a refusal rather than as an absence.
@@ -537,17 +549,35 @@ def test_the_person_keyed_benchmark_view_the_dispute_withdrew_is_not_readable(
     written down in a work order, and a later reader finding that sentence
     without the ruling beside it would build it.
 
-    **The read is required to be refused, not merely empty.** An empty result is
-    what an unpopulated view returns, what a view over an empty world returns,
-    and what a mis-typed relation name returns from a `to_regclass` check — so
-    this drives the read as `pulse_app` and requires the driver to raise, with
-    an undefined relation (`42P01`) and a denied privilege (`42501`) both
-    counting as the refusal. Rows coming back is the failure whatever they hold.
+    **The read is required to be refused, not merely empty**, so this drives it
+    as `pulse_app` and requires the driver to raise: an undefined relation
+    (`42P01`) and a denied privilege (`42501`) both count, and rows coming back
+    are the failure whatever they hold.
 
-    **The control is `current_user`**, so a fixture handing back a superuser
-    connection cannot satisfy this by refusing for the wrong reason — or, worse,
-    by reading it successfully and being counted as a refusal because something
-    else raised.
+    **But a refusal is only worth something over a schema that exists**, and the
+    first version of this test did not establish that — which the mutation
+    battery caught by planting the withdrawn view *with its grant* and watching
+    a single-test run report a pass. `application_engine` is built from
+    `provisioned_database`, the state **before** any migration, so at
+    single-test scope there was no `public` schema to speak of and every
+    relation answered `42P01`: the test read "the whole database is absent" as
+    "this view is refused". It went green against the exact defect it exists to
+    catch. `application_session` in `tests/fixtures/authz_data.py` carries the
+    warning in its own docstring, and this test did not take it.
+
+    Two things fix it, and both are needed. **`migrated_database` is depended on
+    and not used**, which is that fixture's own convention: it is what
+    guarantees the migration has run before the engine opens. And the **positive
+    control runs first** — `pulse_app` must successfully read a relation the
+    migration certainly ships and certainly grants, on the same connection, in
+    the same transaction. Without it the refusal below is still satisfied by any
+    state in which this role can read nothing at all. `docs/MISTAKES.md` entry 3
+    on a test passing for an unrelated reason, and entry 9 on citing a guard
+    nobody has watched discriminate.
+
+    **The control is `current_user`** as well, so a fixture handing back a
+    superuser connection cannot satisfy this by refusing for the wrong reason —
+    or, worse, by reading the view successfully while something else raises.
     """
     with application_engine.connect() as connection:
         role = connection.execute(text("SELECT current_user")).scalar_one()
@@ -555,6 +585,23 @@ def test_the_person_keyed_benchmark_view_the_dispute_withdrew_is_not_readable(
             f"This connection reports itself as {role!r} rather than as {APPLICATION_ROLE!r}, so a "
             "refusal below would be a statement about the wrong role."
         )
+
+        readable: DatabaseError | None = None
+        try:
+            connection.execute(text(f"SELECT * FROM {A_CERTAINLY_READABLE_VIEW} LIMIT 1"))  # noqa: S608
+        except DatabaseError as failure:
+            readable = failure
+        if readable is not None:
+            connection.rollback()
+            pytest.fail(
+                f"`{APPLICATION_ROLE}` cannot read `{A_CERTAINLY_READABLE_VIEW}`: {readable}\n\n"
+                "That is E0-10's roster view, which every migrated database has and which this "
+                "role is granted `SELECT` on — so this connection is looking at a database with "
+                "no schema in it, or at a role that may read nothing. Either way the refusal "
+                "asserted below would be satisfied by the absence of everything rather than by "
+                "the absence of one view, which is how this test passed against a planted copy of "
+                "the very relation it exists to forbid."
+            )
 
         refused: DatabaseError | None = None
         rows: list[Any] = []
@@ -583,22 +630,33 @@ def test_the_person_keyed_benchmark_view_the_dispute_withdrew_is_not_readable(
         f"Reading `public.{WITHDRAWN_VIEW}` as `{APPLICATION_ROLE}` failed with SQLSTATE {state!r}: "
         f"{refused}. A refusal is what this test wants, but not any refusal: `42P01` is the "
         "relation not existing and `42501` is the grant withheld, and anything else means the "
-        "statement failed for a reason that says nothing about either."
+        "statement failed for a reason that says nothing about either. `42P01` means *this* "
+        f"relation is absent rather than all of them, because `{A_CERTAINLY_READABLE_VIEW}` was "
+        "read successfully on this connection a moment ago."
     )
 
 
 def test_the_two_set_functions_are_the_two_this_ticket_ships(db_session: Any) -> None:
-    """The inventory, so a third function is a decision and a missing one is not a silent skip.
+    """Both named functions exist — an existence check, and deliberately nothing more.
 
     Every other test here iterates `BENCHMARK_FUNCTIONS`, so deleting an entry
-    deletes its own cases and the suite passes at the smaller size. This names
-    both outright.
+    from that constant deletes its own cases and the module passes at the
+    smaller size. This names both outright, which is the half that catches a
+    missing deliverable hiding as a shrunken parametrisation.
 
-    A third definer arriving in this ticket's name would also be a seventh entry
-    in `SANCTIONED_APPLICATION_EXECUTE`, whose comment says what that means: "a
-    new door into identity that some later ticket opened without arguing for
-    it". Two is what the ruling admits and two is what the sentence in that
-    constant covers.
+    **It does not catch a third function, and an earlier version of this
+    docstring claimed it did.** The mutation battery planted one and this file
+    stayed green, correctly: the body asks whether two names are present and a
+    third name is not a thing it looks at. Nothing here is a closed set.
+
+    **The closed set lives in `tests/integration/test_identity_grants.py`**, in
+    `SANCTIONED_APPLICATION_EXECUTE`, read as an equality in both directions by
+    `test_the_application_role_may_execute_only_the_point_resolvers` — which is
+    `invariant`-marked, and which reds on a third definer this role may execute.
+    That is where the sentence admitting each entry lives, and where the
+    argument for a third one has to be written. This test and that equality are
+    two facts: "the deliverables are here" and "nothing else is", and a file
+    that tried to own both would own neither well.
     """
     for name in (SET_FUNCTION, SET_RATING_FUNCTION):
         assert function_shape(db_session, name), (
