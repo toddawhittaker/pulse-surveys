@@ -46,7 +46,8 @@ table-wide `SELECT` on `response` and `answer` since the E2 submission path, so
 it can already read which student answered where. What it cannot read is a
 **person**; its `SELECT` on `public."user"` is `(id)` only, so `response.user_id`
 joins to nothing nameable. Three things survive, and each is checkable. The
-functions add **zero new privilege** to `pulse_app`: an `EXECUTE` on two bodies
+functions add **no new reach** to `pulse_app` — an `EXECUTE` grant on two bodies
+is the only new privilege:
 that answer in aggregates and have nowhere to put a row. They answer in numbers
 **by construction** rather than by a convention about callers, which is the
 difference SPEC §8's "enforced in the database, not just the application" is

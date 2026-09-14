@@ -409,7 +409,8 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 #     stands on the surviving argument.
 #
 #     **What is true, and what these two are actually for: the read path adds
-#     zero new privilege and no new person-keyed relation.** Nothing arrives
+#     no new reach and no new person-keyed relation.** One `EXECUTE` grant is
+#     the only new privilege, and nothing else arrives
 #     with them but `EXECUTE` on two functions that return aggregates by
 #     construction. The alternative they replaced did add something — a *view*
 #     keyed to a student, spanning every section of a cohort across the current
@@ -724,11 +725,12 @@ THE_CARE_DOOR = (RECORD_FUNCTION, REVEAL_FUNCTION, SUBJECT_RESOLVER_FUNCTION)
 # contrary), so the reason for a definer here is not to reach past the caller
 # but to keep the reporting path's own privileges narrow and separately
 # enumerable. It is a **new** role rather than a reuse of
-# `pulse_resolve_definer`, and the refusal is the whole point: that owner holds
-# column grants on `user` and `person`, so hanging benchmark SQL off it would
-# hand a body that counts students an owner that can read their names — widening
-# exactly what the dispute narrowed, and doing it in the place the dispute was
-# about. The rule the fourth role does not break is the one stated for E3-06
+# `pulse_resolve_definer`, and the refusal is blast radius, not names — that
+# owner cannot read a name either: it holds `user(id, lti_platform_id,
+# lms_user_id)`, `person(id, user_id)` and `web_login_subject`, identifier
+# columns for resolving one identity to another. A body that counts students
+# has no use for identifier-resolution reach, and disjoint owners keep each
+# function family's reach readable against the bodies that spend it. The rule the fourth role does not break is the one stated for E3-06
 # above: a new NOLOGIN role is refused where it would hold a *subset* of an
 # existing one's grants, and this one holds a disjoint set.
 #

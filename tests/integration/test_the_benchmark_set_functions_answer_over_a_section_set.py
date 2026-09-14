@@ -59,9 +59,11 @@ pytestmark = pytest.mark.integration
 APPLICATION_ROLE = "pulse_app"
 
 # The NOLOGIN role that owns the two functions, ruled after the dispute: a new
-# role rather than a reuse of `pulse_resolve_definer`, because that one holds
-# column grants on `user` and `person` and a benchmark body that counts students
-# must not have an owner that can read their names. Spelled here rather than
+# role rather than a reuse of `pulse_resolve_definer`, refused on blast radius
+# rather than names (that owner holds identifier columns only — `user(id,
+# lti_platform_id, lms_user_id)`, `person(id, user_id)`, `web_login_subject`):
+# a counting body has no use for identifier-resolution reach, and disjoint
+# owners keep each family's reach readable against the bodies that spend it. Spelled here rather than
 # discovered, for the reason `test_identity_grants.py` spells the Care door's two
 # functions: an owner settled by a ruling is a name a test may assert, and a
 # fixture that went looking for "whichever role happens to own it" would pass
@@ -474,9 +476,10 @@ def test_both_set_functions_are_security_definer_owned_by_the_benchmark_definer(
 
     **The owner is asserted by name because a ruling settled it**, after the
     dispute rather than in it: `pulse_benchmark_definer`, a new NOLOGIN role,
-    with the reuse of `pulse_resolve_definer` refused on the ground that its
-    column grants on `user` and `person` would give a body that counts students
-    an owner that can read their names.
+    with the reuse of `pulse_resolve_definer` refused on blast radius: that
+    owner holds identifier columns (`user(id, lti_platform_id, lms_user_id)`,
+    `person(id, user_id)`, `web_login_subject`), not names, and a body that
+    counts students has no use for identifier-resolution reach.
 
     **The mutations it exists to survive**: `SECURITY DEFINER` left off either
     file — which on a tree where the application role happens to hold the reads
@@ -506,11 +509,10 @@ def test_both_set_functions_are_security_definer_owned_by_the_benchmark_definer(
             "assertion that says what these two can reach. Owned by "
             f"`{APPLICATION_ROLE}` a definer runs with exactly its caller's reach and is one in "
             "name only. Owned by `pulse_resolve_definer` — the reuse that was refused — it runs "
-            "with that role's column grants on `user` and `person`, so a body whose job is to "
-            "count students would have an owner that can read their names: the widening the "
-            "ruling on `docs/disputes/E5-03-01.md` narrowed, reintroduced in the place the "
-            "dispute was about. Owned by the migration identity it runs as a superuser and the "
-            "scheme is moot.\n\n"
+            "with that role's identifier-column grants on `user` and `person` — reach a "
+            "counting body has no use for, handed to it in the place the ruling on "
+            "`docs/disputes/E5-03-01.md` kept narrow. Owned by the migration identity it runs "
+            "as a superuser and the scheme is moot.\n\n"
             f"`{BENCHMARK_DEFINER_ROLE}` is a NOLOGIN role that exists for nothing but these two "
             "functions, and it is in `IDENTITY_DEFINER_ROLES` in "
             "tests/integration/test_identity_grants.py with the sentence that admits it. What it "
