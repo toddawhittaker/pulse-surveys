@@ -26,10 +26,11 @@ rewording the survey does not redden this module (`docs/MISTAKES.md` entry 19).
 The one exception is item 5's recognizer, whose subject *is* the sentence's
 vocabulary, and it is written from item 5 and §4 rather than from what shipped.
 
-**The surface model, as E4-12 leaves it.** A surface is a governed body of
-shipped strings. There were three prefixes and one surface until E4-12 — the
-survey, arriving as `student_survey` from the frontend and `submit` and `student`
-from the backend — and there are four surfaces now:
+**The surface model, as E4-12 leaves it and E5-09 extends it.** A surface is a
+governed body of shipped strings. There were three prefixes and one surface until
+E4-12 — the survey, arriving as `student_survey` from the frontend and `submit`
+and `student` from the backend — E4-12 made it four, and E5-09's comparison-set
+screen makes it five:
 
   - `survey`, unchanged;
   - `report`, the instructor Monday report, arriving under five prefixes for one
@@ -42,7 +43,14 @@ from the backend — and there are four surfaces now:
     than the source;
   - `gradebook`, the two strings Pulse ships into an LMS gradebook (SPEC §3.4's
     line item label and its per-week ledger line);
-  - `unknown_address`, the fallback screen a wrong address lands on.
+  - `unknown_address`, the fallback screen a wrong address lands on;
+  - `comparison_sets`, the leadership screen that lists, creates, edits and
+    deletes SPEC §5.1's named sets, arriving as the frontend copy module
+    `leadership_comparison_sets`. Nothing on it is anybody's response: a set is a
+    list of courses with a declared length and level, and the preview's two
+    numbers are a count of courses and a count of sections. It owes item 5 no
+    line, for the same shape of reason the gradebook and the unknown-address
+    screen owe none.
 
 `GOVERNED_SURFACES` is the whole of that governance, asserted in both directions:
 a key whose prefix no surface governs is red, and a governed prefix that collects
@@ -51,11 +59,13 @@ nothing is red.
 **And a surface either carries item 5's line or is named as owing none.** The
 survey and the report carry one, and `CONFIDENTIALITY_KEY_OF_SURFACE` says which
 entry it is. The gradebook is rendered by another product and says only what a
-score is made of; the unknown-address screen shows nobody's data at all. Neither
-promises a student anything about identity, so item 5's "exactly once" would be
-demanding a sentence with no subject — they sit in
+score is made of; the unknown-address screen shows nobody's data at all; the
+comparison-set screen shows the definitions of sets and two counts, and no
+response of anybody's. None of the three promises a student anything about
+identity, so item 5's "exactly once" would be demanding a sentence with no
+subject — they sit in
 `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with the reason written down, and the
-rules require **one** line on the first pair and **none** on the second. A
+rules require **one** line on the first group and **none** on the second. A
 surface in neither map, or in both, is red: the point of two explicit maps is
 that the next surface is placed deliberately rather than defaulting into whatever
 the code happens to do (ADR 0158).
@@ -176,6 +186,7 @@ SURVEY = "survey"
 REPORT = "report"
 GRADEBOOK = "gradebook"
 UNKNOWN_ADDRESS = "unknown_address"
+COMPARISON_SETS = "comparison_sets"
 
 # `student_survey` is E2-10's frontend copy module; `submit` and `student` are
 # E2-08's and E2-09's registry modules, whose strings are the refusals and the
@@ -211,6 +222,12 @@ GOVERNED_SURFACES = {
     "instructor_report": REPORT,
     "gradebook": GRADEBOOK,
     "unknown_address": UNKNOWN_ADDRESS,
+    # E5-09's leadership comparison-set screen: the list, the create and edit
+    # form, the preview counts and the delete confirmation, all reading one
+    # frontend copy module. One prefix, one surface, and no backend half — the
+    # API's refusals arrive as `detail` sentences the screen renders verbatim,
+    # so they are E5-06's strings and not this surface's.
+    "leadership_comparison_sets": COMPARISON_SETS,
 }
 
 # Item 5: "Confidentiality copy appears exactly once per surface (survey: once
@@ -251,6 +268,14 @@ SURFACES_WITH_NO_CONFIDENTIALITY_LINE = {
     UNKNOWN_ADDRESS: (
         "The fallback screen for an address that resolves to nothing. It shows "
         "nobody's data, so there is nothing about anybody's identity to promise."
+    ),
+    COMPARISON_SETS: (
+        "SPEC §5.1's named-set management screen. Everything on it is a set "
+        "definition — a name, a length in weeks, a level, and the courses in it — "
+        "plus a preview of two counts, one of courses and one of sections. No "
+        "response, comment or rating of anybody's is rendered here, so item 5's "
+        "sentence would have no subject: there is no student whose identity this "
+        "screen could promise anything about."
     ),
 }
 

@@ -500,7 +500,7 @@ def test_the_walk_refuses_a_tree_with_no_source_file(tmp_path: Path) -> None:
 def test_the_import_reader_finds_every_shape_and_leaves_an_ordinary_string() -> None:
     """The instrument behind the support-module rule, both directions.
 
-    The rule below says three modules are imported only by tests. A reader that
+    The rule below says every excluded module is imported only by tests. A reader that
     found no imports at all would say exactly the same thing, in green, over a
     tree that imported them everywhere.
 
@@ -630,7 +630,7 @@ def test_no_shipped_component_or_route_writes_a_user_visible_string_of_its_own()
 def test_every_excluded_support_module_exists_and_ships_to_nobody() -> None:
     """The exclusions this sweep rests on are claims, and this is where they are checked.
 
-    Three test-support modules live inside the swept trees and are excused from
+    Several test-support modules live inside the swept trees and are excused from
     the rule above. Both halves of that excuse can rot without anything noticing.
     An exclusion naming a file that has been renamed excuses nothing and goes on
     reading like coverage (`docs/MISTAKES.md` entry 14 — an enumeration reported

@@ -1,0 +1,250 @@
+/* The comparison-set management screen — ticket E5-09.
+ *
+ * It sits beside the two components it dresses rather than in
+ * `frontend/src/styles.css`, which is the arrangement the report's four
+ * stylesheets already use: that file is the application's, and a screen's own
+ * rules are a group of their own.
+ *
+ * Tokens only, as SPEC §7.6 requires: every colour, face, size, space, radius
+ * and shadow below is a `var(--*)` reference into `design/tokens.css`, which
+ * `src/styles.css` imports once for the whole application. There is no raw hex
+ * here for `tests/unit/test_the_frontend_source_uses_tokens_only.py` to find.
+ *
+ * The register is `docs/DESIGN_BRIEF.md`'s leadership one: this is a full
+ * browser page rather than an LMS iframe, density is allowed, and the print-
+ * adjacent squareness holds — 4px on inputs and buttons, 8px on the page card,
+ * one barely-there shadow, no other decoration.
+ *
+ * **Nothing here animates.** The brief allows one signature moment per screen
+ * and this screen's is the pulse line `StateNotice` draws in its empty and
+ * refused states, which is that component's own CSS. There is no second one.
+ */
+
+/* ---- The page, as a card on the chalk ground ----------------------------- */
+
+.pulse-set-page {
+  box-sizing: border-box;
+  width: min(860px, 100% - var(--space-7));
+  margin: var(--space-6) auto;
+  padding: var(--space-6) var(--space-7);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  color: var(--spruce);
+  font-family: var(--font-body);
+  font-size: var(--text-2);
+}
+
+.pulse-set-title {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--text-4);
+  font-weight: 600;
+}
+
+.pulse-set-intro {
+  margin: 0 0 var(--space-3);
+  color: var(--spruce-60);
+  font-size: var(--text-1);
+}
+
+.pulse-set-status {
+  margin: var(--space-5) 0;
+  color: var(--spruce-60);
+}
+
+/* ---- The list of sets ----------------------------------------------------- */
+
+.pulse-set-list {
+  margin: var(--space-5) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pulse-set-row {
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.pulse-set-row:last-child {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.pulse-set-name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-3);
+  font-weight: 600;
+}
+
+/* The two declared facts and the two counts are measurement, so they take the
+   data face — `design/Usage Rules.md` §5's mono treatment for section codes,
+   week markers and figures of any kind. */
+.pulse-set-facts,
+.pulse-set-preview {
+  margin: var(--space-1) 0 0;
+  color: var(--spruce-60);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+}
+
+.pulse-set-row-actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  margin: var(--space-3) 0 0;
+  color: var(--spruce-60);
+  font-size: var(--text-1);
+}
+
+.pulse-set-link {
+  color: var(--marigold-deep);
+}
+
+/* ---- Deleting, which states what it will change --------------------------- */
+
+.pulse-set-confirm {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--chalk);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+}
+
+.pulse-set-confirm-title {
+  margin: 0;
+  font-weight: 500;
+}
+
+.pulse-set-confirm-body {
+  margin: var(--space-1) 0 var(--space-3);
+  color: var(--spruce-60);
+  font-size: var(--text-1);
+}
+
+/* ---- The form ------------------------------------------------------------- */
+
+.pulse-set-form {
+  margin: var(--space-5) 0 0;
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  background: var(--chalk);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+}
+
+.pulse-set-form-heading {
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-display);
+  font-size: var(--text-3);
+  font-weight: 600;
+}
+
+.pulse-set-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-4);
+}
+
+.pulse-set-label {
+  color: var(--spruce-60);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pulse-set-input {
+  padding: var(--space-2) var(--space-3);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+  color: var(--spruce);
+  font-family: var(--font-body);
+  font-size: var(--text-2);
+}
+
+.pulse-set-members {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+}
+
+.pulse-set-member-list {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pulse-set-member {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: var(--space-1) 0;
+}
+
+.pulse-set-help {
+  margin: var(--space-2) 0 0;
+  color: var(--spruce-60);
+  font-size: var(--text-1);
+}
+
+/* The courses a level change took away. Marigold is the accent that marks a
+   change the reader should see (`design/Usage Rules.md` §2); madder is reserved
+   for "attend to this", and a removal the form performed is not an error. */
+.pulse-set-removed {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--paper);
+  border-left: 2px solid var(--marigold);
+  border-radius: var(--radius-input);
+}
+
+.pulse-set-removed-body {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-1);
+}
+
+/* A sentence the API refused with. Madder, because a refusal is exactly the
+   "attend to this" the token is reserved for. */
+.pulse-set-refusal {
+  margin: var(--space-3) 0 0;
+  color: var(--madder);
+  font-size: var(--text-1);
+}
+
+/* ---- Controls ------------------------------------------------------------- */
+
+.pulse-set-actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  margin: var(--space-4) 0 0;
+}
+
+.pulse-set-button {
+  padding: var(--space-2) var(--space-4);
+  background: var(--spruce);
+  border: 1px solid var(--spruce);
+  border-radius: var(--radius-input);
+  color: var(--chalk);
+  font-family: var(--font-body);
+  font-size: var(--text-2);
+}
+
+.pulse-set-button[disabled] {
+  background: var(--mist);
+  border-color: var(--mist);
+}
+
+.pulse-set-plain-button {
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+  color: var(--spruce);
+  font-family: var(--font-body);
+  font-size: var(--text-1);
+}

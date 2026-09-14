@@ -1,14 +1,17 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 21**
+**Caught: 22**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*24 instances recorded; the 3 most recent are below (E4-06, E4-18, E4-17),
-each after the "What happened" section. The overdue trim the previous header
-owed was taken on 2026-09-08 with the E4-17 bump, removing the E3-04, E4-01,
-E4-05 and E4-04 paragraphs; they are in this file's git history and in the
-pull requests they cite. The E0-18 PR 2 paragraph stays where it sits, beside
+*25 instances recorded; the 3 most recent are below (E4-18, E4-17, E5-06),
+each after the "What happened" section. The E4-06 paragraph sits with them and
+is not counted among the three: like the E0-18 note below, it carries a rule
+sentence of its own — that a closed set written earlier in the same branch is
+as much on the other side of the test wall as one written in E0 — rather than
+only an instance. The trim the previous header owed was taken on 2026-09-08
+with the E4-17 bump, removing the E3-04, E4-01, E4-05 and E4-04 paragraphs;
+they are in this file's git history and in the pull requests they cite. The E0-18 PR 2 paragraph stays where it sits, beside
 the consequence it illustrates: it carries a rule sentence of its own — that
 any instruction to remove or rename a thing is a claim nothing asserts on it —
 rather than only an instance.*
@@ -172,3 +175,24 @@ the pull request, and the standing fix is the owed process change to the hook
 pair. Counted as a catch per the pull request's own wording: without the
 entry, the round would have dispatched an agent into a denial and read the
 refusal as a defect.
+
+**Instance, 2026-09-14 (E5-06, caught while writing the ticket's red).** E3-07's
+sweep `tests/unit/test_every_mutating_route_carries_the_csrf_check.py` requires
+every mutating route to hold `app.api.deps.csrf_verified_student` — matched as
+the **object**, which is right — or to be named in an exemption ledger with a
+sentence. E5-06's three writing routes carry `csrf_verified_leadership`, the
+same mechanism bound to the leadership role gate, so a correctly built ticket
+turns that sweep red on three paths, and both repairs available to the
+implementer are wrong: edit a test they may not edit, or add three exemptions to
+a ledger whose entries are arguments that a route *cannot* hold the check. The
+collision was found by asking, before any test was written, which existing
+sweeps a new route file walks into — the same question this entry's rule asks of
+a new write-time rule, put to a new dependency. The repair shipped with the
+ticket's tests: currency 1 became the `csrf_verified_*` family, read off
+`app.api.deps` by prefix so the next role's pair is swept the day it lands, with
+both known members required by name so a prefix matching nothing is a failure
+rather than a guard with nothing to look for. **The clause it adds:** a new
+*dependency* is as much a new rule as a new constraint — before adding one that
+an existing sweep enumerates by object, grep the read-only suite for the
+enumeration and widen it deliberately, in the tests-first commit, rather than
+leaving the implementer a red they cannot fix.

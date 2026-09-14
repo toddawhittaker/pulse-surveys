@@ -77,3 +77,62 @@ export function authorizationHeader(): Record<string, string> {
   const token = sessionToken();
   return token === null ? {} : { Authorization: `Bearer ${token}` };
 }
+
+/**
+ * The cookie the double-submit token rides in, and the header it is echoed in.
+ *
+ * `csrf_verified_student` (`app.api.deps`) requires the header from any request
+ * whose session rides the cookie, and exempts the Bearer carrier — a Bearer header is not something a cross-site form can be tricked
+ * into sending, so there is nothing there for a double submit to protect. The
+ * cookie is deliberately not `HttpOnly` (ADR 0089) for exactly this reason: the
+ * SPA has to read it.
+ *
+ * **That dependency is the only one on this branch today.** `api/deps.py`
+ * carries one such check, the student's; E5-06 adds `csrf_verified_leadership`
+ * for the comparison-set routes `api/leadership.ts` writes to, and this branch
+ * merges after it. The cookie and the header are the same on both, which is why
+ * one helper serves both clients — but until E5-06 lands, the leadership writes
+ * echo a token no dependency on this branch is checking.
+ */
+const CSRF_COOKIE = 'pulse_csrf';
+const CSRF_HEADER = 'X-Pulse-CSRF';
+
+/**
+ * One cookie's value as this document can read it, or `null`.
+ *
+ * Written out rather than pattern-matched: a name is compared whole, so
+ * `pulse_csrf` is not answered by a cookie called `not_pulse_csrf`, and a value
+ * carrying `=` keeps everything after the first one.
+ */
+function readCookie(name: string): string | null {
+  for (const pair of document.cookie.split(';')) {
+    const at = pair.indexOf('=');
+    if (at < 0) continue;
+    if (pair.slice(0, at).trim() !== name) continue;
+    return decodeURIComponent(pair.slice(at + 1).trim());
+  }
+  return null;
+}
+
+/**
+ * The double-submit header a write carries when the cookie is readable, and an
+ * empty object when it is not — so a caller can spread it unconditionally.
+ *
+ * **Every write, whenever the cookie is readable, and no write when it is
+ * not.** Sending a value the cookie did not supply would be worse than sending
+ * nothing, because a double submit the server cannot compare is a check that
+ * verifies nothing; and withholding the request itself would lock out every
+ * reader whose session rides the Bearer header, where the browser refuses the
+ * tool's cookies anyway.
+ *
+ * **It lives here rather than in one client.** E2-17 wrote this reader inside
+ * `api/student.ts`, where it was the only write path in the application;
+ * E5-09's leadership client is the second, and two readers answering one
+ * question about one cookie is `docs/MISTAKES.md` entry 13. So the reader moved
+ * up beside `authorizationHeader`, which is the header the same requests carry
+ * for the same session, and both clients call it.
+ */
+export function csrfHeader(): Record<string, string> {
+  const token = readCookie(CSRF_COOKIE);
+  return token === null ? {} : { [CSRF_HEADER]: token };
+}
