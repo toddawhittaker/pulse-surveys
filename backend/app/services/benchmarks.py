@@ -95,9 +95,13 @@ _LEAD_FACULTY_COURSE = table(
 )
 
 # E5-03's term-axis cohort view, keyed by a length, a level, a term and the start
-# date of the cohort inside it (ADR 0165). The four column names this module
-# reads off it are the ruling's own, and the two counts are what its figures are
-# suppressed against.
+# date of the cohort inside it (ADR 0165). The key columns are that ruling's own;
+# the two counts read here are `workload_respondent_count` and
+# `workload_section_count`, which E5-04's `_v002` body added and which describe
+# the responses that carried hours — the population the workload figures on this
+# axis are computed from. The cohort week's overall `respondent_count` and
+# `section_count` are deliberately not named: on this axis as on the other, a
+# figure is sealed against its own contributors and against nothing else.
 _COHORT_TERM_AXIS = table(
     "benchmark_cohort_term_axis",
     column("length_weeks"),
@@ -107,8 +111,8 @@ _COHORT_TERM_AXIS = table(
     column("term_week"),
     column("workload_mean"),
     column("workload_median"),
-    column("respondent_count"),
-    column("section_count"),
+    column("workload_respondent_count"),
+    column("workload_section_count"),
 )
 
 # E5-03's two set functions. The array is bound and cast rather than
@@ -622,16 +626,14 @@ def named_set_term_axis(session: Session, *, set_id: UUID) -> list[TermAxisPoint
     )
     points: list[TermAxisPoint] = []
     for row in session.execute(statement).mappings():
-        # **These are the cohort week's overall counts, not the hours' own, and
-        # that is the open defect this branch could not close.** The two set
-        # functions now answer each figure's contributors;
-        # `benchmark_cohort_term_axis` does not, and it cannot be widened from
-        # this branch — see `docs/disputes/E5-04-01.md`. Until that is settled,
-        # a term-axis workload figure is sealed against a population that is
-        # never smaller than its own, so it can be shown where it should have
-        # been suppressed. Nothing renders this door yet.
-        cohort = _Contributors(
-            respondents=int(row["respondent_count"]), sections=int(row["section_count"])
+        # The hours' own contributors, not the cohort week's — the same rule the
+        # course-week axis follows, reached through this view's `_v002` body. The
+        # widening that made this possible is argued in the ruling appended to
+        # `docs/disputes/E5-04-01.md` and admitted by the two column equalities
+        # SPEC §4.1 item 1 is enforced through.
+        reported_hours = _Contributors(
+            respondents=int(row["workload_respondent_count"]),
+            sections=int(row["workload_section_count"]),
         )
         points.append(
             TermAxisPoint(
@@ -639,8 +641,8 @@ def named_set_term_axis(session: Session, *, set_id: UUID) -> list[TermAxisPoint
                 section_start_date=row["section_start_date"],
                 term_week=int(row["term_week"]),
                 workload=WorkloadComparison(
-                    mean=_sealed(row["workload_mean"], cohort),
-                    median=_sealed(row["workload_median"], cohort),
+                    mean=_sealed(row["workload_mean"], reported_hours),
+                    median=_sealed(row["workload_median"], reported_hours),
                 ),
             )
         )
