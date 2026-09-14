@@ -1289,10 +1289,29 @@ def seed_rows(db_session: Any, metadata_tables: dict[str, Any]) -> Callable[...,
     restarts them: a course number is drawn from a 700-wide band, and a counter
     that climbed across the session would eventually fail somebody else's test
     inside its own seeding.
+
+    **The closure carries `seed_row`'s positional-only marker, and dropping it is
+    a defect rather than a tidy-up** (`docs/disputes/E5-01-01.md`). `name` is a
+    column on `institution`, `college`, `department` and `comparison_set`, so a
+    wrapper without the `/` answers `seed("comparison_set", {}, name="…")` with
+    `TypeError: got multiple values for argument 'name'` — the exact collision the
+    marker on `seed_row` exists to prevent, reintroduced one screen below the
+    paragraph that explains it. It went unnoticed for four epics because no test
+    had yet named a row on one of those tables; E5-01's uniqueness pairs are the
+    first that do, and three of them could not execute at all. Every wrapper that
+    forwards to `seed_row` carries the marker for this reason —
+    `AuthzWorld.seed` in `tests/fixtures/authz_data.py` and the round-trip
+    closure in
+    `tests/integration/test_the_comparison_set_schema_survives_a_downgrade.py`
+    are the other two (`docs/MISTAKES.md` entry 13: one hazard, worked around in
+    every place that faces it).
     """
     _GRAPH_INTEGER_COUNTERS.clear()
 
-    def seed(name: str, chain: dict[str, Any] | None = None, **overrides: Any) -> Any:
+    # `/` because `name` is also a column name — see the docstring above and
+    # `seed_row`'s. Without it this wrapper cannot write to any table with a
+    # `name` column.
+    def seed(name: str, chain: dict[str, Any] | None = None, /, **overrides: Any) -> Any:
         return seed_row(db_session, metadata_tables, name, chain, **overrides)
 
     return seed
