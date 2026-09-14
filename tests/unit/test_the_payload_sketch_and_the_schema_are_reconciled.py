@@ -35,10 +35,19 @@ the top-level test nor the rates test below it reads — so criterion 3's own
 claim, "the reconciliation test holds the two to each other in both directions,
 so neither may move alone," has nowhere to stand without a third test reaching
 that depth.
+
+**E5-02 adds two more of the same shape, and one top-level divergence.** That
+ticket's members sit at three different depths: `institution_timezone` at the top
+(so it joins `DECLARED_DIVERGENCES`), `closes_at` inside `week`, and
+`question_text` inside each stream. The two nested ones get a test each, for the
+reason E4-19's did — the top-level equality cannot see a member one object down,
+and a sketch that stops describing the streams is a set of frontend fixtures
+describing a payload that does not arrive.
 """
 
 import json
 import re
+import typing
 from pathlib import Path
 from typing import Any
 
@@ -59,11 +68,28 @@ SCHEMA_PATH = "backend/app/schemas/report.py"
 # sketch, with its own reasons: `valid_responses` because E4-09's components
 # consume the count and the sketch omitted it, and the released list because
 # ADR 0152 says E4-07 places it and the sketch predates that record.
-DECLARED_DIVERGENCES = frozenset({"released_from_earlier_weeks"})
+#
+# `institution_timezone` is E5-02's, and is the first entry here that no E4
+# record settles: that ticket puts the IANA name of the institution's zone on the
+# payload's top level, mirroring the student payload, because the week's close
+# instant is rendered in the institution's zone and never in the browser's guess.
+# It is a divergence rather than a sketch edit because the sketch is E4's frozen
+# record and E5-02's work order (decision 1) names this test's own documented
+# escape as where the member is declared.
+DECLARED_DIVERGENCES = frozenset({"released_from_earlier_weeks", "institution_timezone"})
 
 # Where the first of those two sits, since it is not a top-level member.
 RATES_MEMBER = "rates"
 RATES_DIVERGENCE = "valid_responses"
+
+# E5-02's other two members, each one level down from the top: the reported
+# week's own close instant on the `week` member, and the served text of a
+# stream's rating question on each stream. Neither is visible to the top-level
+# equality above, which is the same gap E4-19's `term_week` had.
+WEEK_MEMBER = "week"
+WEEK_DIVERGENCE = "closes_at"
+STREAMS_MEMBER = "streams"
+STREAM_DIVERGENCE = "question_text"
 
 FENCED_JSON = re.compile(r"```json\n(.*?)\n```", re.DOTALL)
 
@@ -278,4 +304,126 @@ def test_the_rates_member_gains_the_count_the_work_order_adds_to_the_sketch(
         f"describes {sorted(sketched_rates)} and the work order adds `{RATES_DIVERGENCE}` to it. "
         f"Unaccounted for: {sorted(declared - sketched_rates - {RATES_DIVERGENCE})}; missing: "
         f"{sorted((sketched_rates | {RATES_DIVERGENCE}) - declared)}."
+    )
+
+
+def model_carrying(schema: Any, field: str, report_api_contract: Any) -> Any:
+    """The one model in the schema module declaring `field`, or a failure naming the count."""
+    models = [
+        value
+        for name, value in vars(schema).items()
+        if not name.startswith("_")
+        and isinstance(value, type)
+        and field in (getattr(value, "model_fields", None) or {})
+    ]
+    assert len(models) == 1, (
+        f"`{report_api_contract.schema_module_name}` declares {len(models)} models carrying "
+        f"`{field}` ({[model.__name__ for model in models]}); this test reads the one that does."
+    )
+    return models[0]
+
+
+def model_behind_member(schema: Any, member: str, report_api_contract: Any) -> Any:
+    """The model the report payload's `member` is annotated with.
+
+    **The payload's own annotation, not a field the model happens to carry.** Two
+    models on this tree declare `course_week` — the week member's and the trend
+    point's, which carries the course week it plots — so a selector demanding one
+    model with that field fails in the selector rather than on its assertion, and
+    goes on failing however the schema is built. `X | None` and `Annotated[X, …]`
+    are peeled, because either is a legitimate spelling for the same model.
+    """
+    payload = model_carrying(schema, report_api_contract.streams_member, report_api_contract)
+    field = (getattr(payload, "model_fields", None) or {}).get(member)
+    assert (
+        field is not None
+    ), f"`{payload.__name__}` declares {sorted(payload.model_fields)}, with no `{member}` member."
+    annotation = field.annotation
+    while True:
+        arguments = [
+            argument for argument in typing.get_args(annotation) if argument is not type(None)
+        ]
+        if typing.get_origin(annotation) is None or not arguments:
+            break
+        annotation = arguments[0]
+    assert isinstance(annotation, type) and getattr(annotation, "model_fields", None) is not None, (
+        f"`{payload.__name__}.{member}` is annotated {field.annotation!r}, which is not a single "
+        "model this test can ask for its fields."
+    )
+    return annotation
+
+
+def test_the_week_member_gains_the_close_instant_and_nothing_else(
+    report_api_contract: Any,
+) -> None:
+    """E5-02's week-level divergence, one level down from the top.
+
+    The sketch's `week` is `{"course_week", "term_week", "published_weeks"}`, and
+    E5-02 adds the reported week's own survey-window close to it. The top-level
+    equality above cannot see this member, because `week` is one object down —
+    the same blind spot E4-19 found for the trend point.
+
+    **The mutation this kills:** the close instant added to the schema with the
+    sketch and this divergence list both untouched, so the frontend fixtures go on
+    describing a week object that has no close time and the absent-field path is
+    the only one anybody exercises. **The near miss:** a second member added to
+    the week object in the same change — a `closed`, an `opens_at` — which the
+    equality catches by name rather than by count.
+    """
+    sketched_week = set(sketched_payload()[WEEK_MEMBER])
+    assert WEEK_DIVERGENCE not in sketched_week, (
+        f"The sketch's `{WEEK_MEMBER}` already carries `{WEEK_DIVERGENCE}` "
+        f"({sorted(sketched_week)}), so it is not a divergence and this test is about nothing."
+    )
+
+    schema = report_api_contract.schema()
+    week_model = model_behind_member(schema, WEEK_MEMBER, report_api_contract)
+    declared = set(week_model.model_fields)
+
+    assert declared == sketched_week | {WEEK_DIVERGENCE}, (
+        f"`{week_model.__name__}` declares {sorted(declared)}; the sketch's `{WEEK_MEMBER}` "
+        f"describes {sorted(sketched_week)} and E5-02 adds `{WEEK_DIVERGENCE}` to it — the reported "
+        "week's `survey_window.closes_at`, which the mockup's eyebrow renders as 'responses closed "
+        f"Sun 11:59 PM'. Unaccounted for: {sorted(declared - sketched_week - {WEEK_DIVERGENCE})}; "
+        f"missing: {sorted((sketched_week | {WEEK_DIVERGENCE}) - declared)}."
+    )
+
+
+def test_each_stream_member_gains_the_question_text_and_nothing_else(
+    report_api_contract: Any,
+) -> None:
+    """E5-02's stream-level divergence, at the same depth as the trend list's holder.
+
+    The sketch's `streams.instructor` is `{"trend", "distribution", "summary",
+    "comments"}` and spells `streams.course` as "same shape", so one model answers
+    for both. E5-02 adds that stream's rating-question wording to it.
+
+    **The mutation this kills:** the wording added to only one stream's model, or
+    hung off the top level as a pair of texts — either of which would leave the
+    sketch describing a stream object the payload no longer matches, and the
+    second of which puts the two texts somewhere a histogram component cannot
+    reach them from its own props.
+    """
+    sketched_stream = set(
+        sketched_payload()[STREAMS_MEMBER][
+            report_api_contract.payload_stream_key[report_api_contract.instructor_stream]
+        ]
+    )
+    assert STREAM_DIVERGENCE not in sketched_stream, (
+        f"The sketch's instructor stream already carries `{STREAM_DIVERGENCE}` "
+        f"({sorted(sketched_stream)}), so it is not a divergence and this test is about nothing."
+    )
+
+    schema = report_api_contract.schema()
+    stream_model = model_carrying(
+        schema, report_api_contract.distribution_field, report_api_contract
+    )
+    declared = set(stream_model.model_fields)
+
+    assert declared == sketched_stream | {STREAM_DIVERGENCE}, (
+        f"`{stream_model.__name__}` declares {sorted(declared)}; the sketch's stream object "
+        f"describes {sorted(sketched_stream)} and E5-02 adds `{STREAM_DIVERGENCE}` to it — the "
+        "served text of that stream's rating question, which the mockup uses as the histogram's "
+        f"title. Unaccounted for: {sorted(declared - sketched_stream - {STREAM_DIVERGENCE})}; "
+        f"missing: {sorted((sketched_stream | {STREAM_DIVERGENCE}) - declared)}."
     )

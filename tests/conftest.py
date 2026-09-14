@@ -142,6 +142,13 @@ boundary: `metadata_tables` is asked for by both.
     through with a session a real launch issued. The item-7 suppression helper and
     the type of the `comparison` member are found by annotation, because the work
     order settles the mechanism and no spelling.
+  - `fixtures/report_question_text.py` — E5-02: the question wording a week's
+    report serves, planted so a test can recognise it. One distinct string per
+    question-set version and position, written into every free-text column the
+    `question` table carries out of a named candidate set — because E5-02's work
+    order leaves the source column (`name` or `prompt`) to the implementer and a
+    fixture that planted into one of them would decide it. Also the further
+    versions criterion 2's proof plants, answered in the weeks the test names.
   - `fixtures/instructor_sections.py` — E4-18: the route that ticket settles, the
     instructor who teaches two sections and the other instructor who teaches a
     third, her second section under a second course so that the declared order is
@@ -230,6 +237,7 @@ pytest_plugins = (
     "fixtures.report_comments",
     "fixtures.summary_job",
     "fixtures.report_api",
+    "fixtures.report_question_text",
     "fixtures.instructor_sections",
     "fixtures.benchmark_views",
 )
