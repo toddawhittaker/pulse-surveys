@@ -51,6 +51,19 @@ the lesson — verify a seeded world's claim through the reader the claim is abo
 for "the same lead's courses, matched length+level", which is a correct
 requirement that the build missed; it is not a false record of what was achieved.
 
-**Gates.** Recorded in the report to the coordinator. The Compose seed run was
-dropped from the brief mid-session — another build was driving that stack — so
-idempotency was proved against a throwaway migrated database instead.
+**Gates, all foreground and all exit 0.** The two ticket modules: 4 failed / 65
+passed before the change, exactly as the manifest predicted, and 69 passed after.
+`-m invariant`: 418 passed, 3349 deselected. The whole backend suite under
+`-n 4`: 3767 passed in 6m41. `ruff format --check`, `ruff check` and `mypy
+backend` clean.
+
+**Idempotency was proved without touching the Compose stack.** The brief's
+instruction to run the seeder against the development database was withdrawn
+mid-session, because another build was driving that stack's browser suite. The
+proof is stronger anyway and it was already there:
+`test_demo_seed_script.py`'s module-scoped machinery migrates a database of its
+own, seeds it, seeds it a second time, and compares every row of every table by
+label either side. Those three tests pass. The second run exits 0 and prints
+"17 courses, 18 sections, 18 people, 22 assignments, 8 lead-faculty mappings" —
+read out of the captured run by a throwaway read-only pytest plugin, which
+asserted nothing and was never added to the repository.
