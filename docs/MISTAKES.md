@@ -553,3 +553,18 @@ worker drew which file, and pointing at whichever ticket is newest. Read the
 connection out of the traceback before believing any of that — the database name in
 `psycopg`'s message names the test that did the binding, and a throwaway database
 that no longer exists names it exactly.
+
+## 58. A seeded world's claim was verified by the writer that made it
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/58-a-seeded-worlds-claim-was-verified-by-the-writer-that-made-it.md)
+
+**Rule.** Verify a seeded world's claim through the reader the claim is about, not
+through the writer that made it. A seeder's self-check answers "did I write what I
+meant to write"; it never answers "can the thing this world exists for read it",
+and those two come apart exactly where a filter the seeder does not model does the
+excluding. If the claim is "the hero's comparison set is populated", the sentence
+names a function — call it. A recount by the writer's own key is not a weaker
+version of that read but a different query: it asserts the narrowings it happens to
+reproduce and is silent about the rest, while looking like coverage. And where a
+world is built by several files, no one file's docstring is entitled to state the
+result: say what that file contributes and point at what else has to hold.
