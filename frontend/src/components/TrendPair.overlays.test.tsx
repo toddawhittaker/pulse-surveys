@@ -9,6 +9,7 @@ import {
   TREND_LINE_UNIVERSITY_TESTID,
   TREND_SUPPRESSION_COMPARISON_TESTID,
   TREND_SUPPRESSION_UNIVERSITY_TESTID,
+  type OverlaySeries as BenchmarkSeries,
   type StreamBenchmark,
   type TrendPoint,
 } from './PulseTrendChart';
@@ -21,7 +22,7 @@ import {
  * wiring: each panel gets its **own** stream's figures, and a pair given none
  * is the pair E4 shipped.
  *
- * **The four benchmark series carry twelve values and no value repeats.** The
+ * **The four benchmark series carry eight values and no value repeats.** The
  * two panels' comparison sets are different numbers, and so are their
  * university lines, because a pair that handed one panel's benchmark to the
  * other would draw a perfectly plausible chart out of fixtures that shared
@@ -40,38 +41,36 @@ const COURSE_WEEKS: readonly TrendPoint[] = [
   { courseWeek: 2, termWeek: 8, mean: 2.6 },
 ];
 
+/**
+ * Two weeks of one series, in the wire's shape — `report_benchmark`'s, which
+ * E5-10 reconciled these props to. A series is its weeks; each week's `mean` is
+ * a figure sealed on its own.
+ */
+function reporting(first: number, second: number): BenchmarkSeries {
+  return {
+    points: [
+      { course_week: 1, mean: { suppressed: false, reason: null, figure: first } },
+      { course_week: 2, mean: { suppressed: false, reason: null, figure: second } },
+    ],
+  };
+}
+
+/** The same two weeks, both withheld by SPEC §4.1 item 7 — no figure on either. */
+const WITHHELD: BenchmarkSeries = {
+  points: [1, 2].map((courseWeek) => ({
+    course_week: courseWeek,
+    mean: { suppressed: true, reason: 'below-minimum', figure: null },
+  })),
+};
+
 const INSTRUCTOR_BENCHMARK: StreamBenchmark = {
-  comparison: {
-    suppressed: false,
-    points: [
-      { courseWeek: 1, mean: 3.9 },
-      { courseWeek: 2, mean: 3.7 },
-    ],
-  },
-  university: {
-    suppressed: false,
-    points: [
-      { courseWeek: 1, mean: 3.5 },
-      { courseWeek: 2, mean: 3.3 },
-    ],
-  },
+  comparison: reporting(3.9, 3.7),
+  university: reporting(3.5, 3.3),
 };
 
 const COURSE_BENCHMARK: StreamBenchmark = {
-  comparison: {
-    suppressed: false,
-    points: [
-      { courseWeek: 1, mean: 3.1 },
-      { courseWeek: 2, mean: 2.9 },
-    ],
-  },
-  university: {
-    suppressed: false,
-    points: [
-      { courseWeek: 1, mean: 2.8 },
-      { courseWeek: 2, mean: 2.4 },
-    ],
-  },
+  comparison: reporting(3.1, 2.9),
+  university: reporting(2.8, 2.4),
 };
 
 const COMPARISON_LEGEND = 'Comparable 12-week courses';
@@ -212,7 +211,12 @@ describe('TrendPair carries a malformed flag through unchanged', () => {
     // of the boundary at once: a member that cannot be read says so, a member
     // that was never sent says nothing.
     const flagless = {
-      comparison: { reason: 'below-minimum', points: INSTRUCTOR_BENCHMARK.comparison?.points },
+      comparison: {
+        points: INSTRUCTOR_BENCHMARK.comparison?.points.map((point) => ({
+          course_week: point.course_week,
+          mean: { reason: 'below-minimum', figure: point.mean.figure },
+        })),
+      },
     } as unknown as StreamBenchmark;
 
     const { container } = render(
@@ -248,13 +252,10 @@ describe('TrendPair carries a malformed flag through unchanged', () => {
 describe('TrendPair when the payload suppresses', () => {
   it('says so under each panel, and keeps the series that was not suppressed', () => {
     const suppressedComparison: StreamBenchmark = {
-      comparison: { suppressed: true, reason: 'below-minimum', points: [] },
+      comparison: WITHHELD,
       university: INSTRUCTOR_BENCHMARK.university,
     };
-    const suppressedBoth: StreamBenchmark = {
-      comparison: { suppressed: true, reason: 'below-minimum', points: [] },
-      university: { suppressed: true, reason: 'below-minimum', points: [] },
-    };
+    const suppressedBoth: StreamBenchmark = { comparison: WITHHELD, university: WITHHELD };
 
     const { container } = render(
       <TrendPair

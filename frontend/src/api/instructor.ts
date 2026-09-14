@@ -32,11 +32,17 @@
  * this screen's choosing. Two departures from "mirror it field for field", both
  * deliberate:
  *
- *   - **`comparison` is not here.** SPEC §4.1 item 7's member exists on the wire
- *     from day one so E5's benchmarks have a chokepoint to pass through, and
- *     nothing in E4 may render a comparison figure. A type with no member for it
- *     is the structural version of that rule — the same move `CommentCard` makes
- *     by having no prop for a timestamp — so no future edit can start reading it
+ *   - **The top-level `comparison` is not here, and the benchmark members are**
+ *     — ticket E5-10. SPEC §4.1 item 7's `comparison` member exists on the wire
+ *     from day one so E5's benchmarks have a chokepoint to pass through, and the
+ *     report page renders the benchmarks through `workload_benchmark` and the
+ *     per-stream `benchmark` members below. The top-level member carries the
+ *     same sealed figure `workload_benchmark.comparison.mean` carries
+ *     (`app.schemas.report.InstructorReport`'s own docstring says so), so
+ *     nothing reads it: a second reader of one figure is two places for one
+ *     number to be rendered differently. A type with no member for it is the
+ *     structural version of that rule — the same move `CommentCard` makes by
+ *     having no prop for a timestamp — so no future edit can start reading it
  *     without saying so in this file.
  *   - **`term_week` is on `TrendPointView` before the wire carries it.** SPEC
  *     §2.2 puts both week axes on every course-level chart and `PulseTrendChart`
@@ -142,6 +148,83 @@ export interface TrendPointView {
   readonly mean: number | null;
 }
 
+/**
+ * One benchmark number, sealed — `app.services.reporting.ComparisonFigure`.
+ *
+ * **Every single benchmark figure on the wire is one of these**, and that is the
+ * shape rather than a wrapper: SPEC §4.1 item 7 suppresses each figure computed
+ * from a comparison set below the benchmark minimums, and the server decides it
+ * per figure. `figure` is `None` on the server — `null` here — whenever
+ * `suppressed` is true, because a value carrying both would be a suppressed
+ * figure on the wire.
+ *
+ * `reason` is the server's one-word token (`"below-minimum"`) and nothing
+ * renders it: a wire token is not a governed string, and the words a reader sees
+ * come from the copy modules.
+ *
+ * Both `reason` and `figure` are optional here as well as nullable, because this
+ * is a shape over JSON the client casts rather than parses — see
+ * `PulseTrendChart`'s `isSuppressed` and `StatPair`'s `isReportable` on why
+ * every reader of `suppressed` asks for exactly `false`.
+ */
+export interface ComparisonFigureView {
+  readonly suppressed: boolean;
+  readonly reason?: string | null;
+  readonly figure?: number | null;
+}
+
+/**
+ * One course week of one comparison series — `report_benchmark.BenchmarkSeriesPoint`.
+ *
+ * **A suppressed week is a point, not an absence.** Every course week the report
+ * publishes is present here, and whether that week has a figure is what its own
+ * `mean` says. There is no term week: a benchmark is past-referencing (SPEC
+ * §5.1), so the figure behind one point spans several terms and has no single
+ * term week to carry.
+ */
+export interface BenchmarkSeriesPointView {
+  readonly course_week: number;
+  readonly mean: ComparisonFigureView;
+}
+
+/**
+ * One comparison population's trend — `report_benchmark.BenchmarkSeries`.
+ *
+ * **There is no series-level `suppressed` flag, and that is deliberate on the
+ * server's side** (`app.schemas.report_benchmark`'s docstring carries the
+ * argument): a flag over a series would be a statistic about a comparison set,
+ * computed in the assembly layer, which is the one place no minimum was applied.
+ * A series every one of whose weeks is suppressed is exactly that and nothing
+ * more.
+ */
+export interface BenchmarkSeriesView {
+  readonly points: readonly BenchmarkSeriesPointView[];
+}
+
+/** One stream's two comparison series — `report_benchmark.StreamBenchmark`. */
+export interface StreamBenchmarkView {
+  readonly comparison: BenchmarkSeriesView;
+  readonly university: BenchmarkSeriesView;
+}
+
+/**
+ * One comparison population's workload pair — `report_benchmark.WorkloadBenchmarkFigures`.
+ *
+ * **The mean and the median are sealed independently and neither rides on the
+ * other's decision**, which is the server's rule and the reason there is no flag
+ * over the pair.
+ */
+export interface WorkloadBenchmarkFiguresView {
+  readonly mean: ComparisonFigureView;
+  readonly median: ComparisonFigureView;
+}
+
+/** The workload pair's two comparison columns — `report_benchmark.WorkloadBenchmarkView`. */
+export interface WorkloadBenchmarkView {
+  readonly comparison: WorkloadBenchmarkFiguresView;
+  readonly university: WorkloadBenchmarkFiguresView;
+}
+
 /** §5.1's generated summary for one stream of one week, or absent on the stream. */
 export interface SummaryView {
   readonly text: string;
@@ -188,6 +271,16 @@ export interface StreamReportView {
    * keeps its stream-label title.
    */
   readonly question_text?: string;
+  /**
+   * This stream's comparison-set and university series (E5-05), or nothing.
+   *
+   * Optional for the reason `WeekView.closes_at` gives, and here that reason has
+   * a second half: SPEC §4.1 item 1 is why an absent member has to render
+   * nothing at all rather than an empty comparison. A payload built before the
+   * benchmarks existed — a cached answer read mid-deploy — renders the page E4
+   * shipped.
+   */
+  readonly benchmark?: StreamBenchmarkView;
 }
 
 /** The two groups §5.1 heads separately, never pooled into one. */
@@ -215,6 +308,11 @@ export interface InstructorReportView {
   readonly rates: RatesView;
   readonly streams: StreamsView;
   readonly workload: WorkloadView;
+  /**
+   * The workload pair's two comparison columns (E5-05), or nothing — optional on
+   * the same terms as `StreamReportView.benchmark`.
+   */
+  readonly workload_benchmark?: WorkloadBenchmarkView;
   readonly small_n: SmallNView;
   /**
    * ADR 0152's release: comments from earlier weeks that crossed the cumulative
