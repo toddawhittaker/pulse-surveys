@@ -348,13 +348,15 @@ def require_student(request: Request) -> SessionClaims:
 NOT_AN_INSTRUCTOR_STATUS = 401
 NOT_AN_INSTRUCTOR_CHALLENGE = {"WWW-Authenticate": BEARER_SCHEME}
 
-# What such a request is told. **Not in `app.copy`, and that is a gap this ticket
-# records rather than closes.** E2-11's inventory governs a key by its surface
-# prefix, and the instructor report is not a governed surface yet — adding a copy
-# module under a prefix no surface claims reds that inventory. E4-12 owns the
-# report surface's copy, `docs/tickets/e4/deferred.md` carries the entry with its
-# done-when, and until then this sits beside the two gradebook strings already in
-# that position rather than inventing a surface for the inventory to police.
+# What such a request is told. **Not in `app.copy`, and still a gap.** The reason
+# it was written here has expired: E2-11's inventory governs a key by its surface
+# prefix, and the report was not a governed surface when E4-07 shipped this, so a
+# copy module for it would have landed under a prefix no surface claimed. E4-12
+# made the report a governed surface (ADR 0158) and moved the router's two
+# refusals into `app.copy.instructor_report`, and this third sentence was not in
+# that entry's scope — so it is a literal on a governed surface's road rather
+# than a sentence with nowhere to live. `docs/tickets/e5/deferred.md` carries it
+# with an owner and a done-when.
 #
 # It names nobody and nothing: no section, no role, no subject. A refusal answered
 # to anybody who can make a request is a refusal that may describe only itself.

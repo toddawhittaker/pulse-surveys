@@ -55,6 +55,15 @@ file a week earlier.
 two-module split is recorded as deliberate with the rule that says which pin goes
 where.
 
+**Closed by E5-13.** Four of the five pins read `instructorReportTrend.css` and
+nothing else, and they are now in `reportContrastTokens.test.ts` with the rest of
+the report's measured corrections, unchanged in what they assert. The fifth
+stayed in `PulseTrendChart.overlays.test.tsx`, because it asserts that each series
+carries a different class *and* that the class draws a different dash pattern, and
+the first half needs a rendered chart. Both files carry the rule the split
+follows: a pin that reads only the stylesheet goes to the pin module, a pin that
+reads a rendering stays beside the tests that build one.
+
 ## A member that says `suppressed: false` and carries no `points` crashes the panel
 
 **What happens.** `drawnPoints` returns `undefined` for a series whose flag is
@@ -259,6 +268,44 @@ their raise sites.
 the eight are published as `CopyEntry` values under a prefix the inventory's
 governance map claims, with the surface placed in one of its two maps — the one
 that carries item 5's line or the one that records why it owes none.
+
+**Closed by E5-13.** All eight are `CopyEntry` values under
+`leadership_comparison_sets.`, the prefix the screen's own copy module publishes
+under: one surface from two sources, as ADR 0158 reads the report's two refusals
+and as ADR 0176 now records for this screen. The texts are unchanged and each
+public constant is its entry's own `text`, so the routes and the service go on
+serving a sentence by name. The surface sits in
+`SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with its reason written out — nothing on
+the screen is anybody's response, so item 5's line would have no subject — and
+all eight are swept for item 4's vocabulary with everything else. One thing came
+with it: the sentences name what they refuse, so they carry the words "comparison
+set" into the backend registry, which the registry-wide item 1 sweep forbids;
+`docs/disputes/E5-13-01.md` carries the objection.
+
+## The instructor role gate's 401 sentence is still a literal in `app.api.deps` (E4-07)
+
+**What is not enforced.** `NOT_AN_INSTRUCTOR` — what a request that is not an
+instructor session is answered with — is a module constant in
+`backend/app/api/deps.py` rather than an entry in `app.copy`, so SPEC §4.1 items
+4 and 5 are asserted over none of its words. Its comment argued that the report
+was not a governed surface yet, which stopped being true when E4-12 made it one
+(ADR 0158) and moved the router's two refusals into
+`app.copy.instructor_report`; this third sentence was outside that entry's scope
+and stayed behind. E5-13 found the stale claim while sweeping the records and
+corrected it, leaving the gap itself, which is not an E5 surface.
+
+**Why it was left.** E5-13 governs the comparison-set screen, and its ticket's
+scope is E5's surfaces. Moving a sentence on the instructor road is a change to
+what another epic's role gate serves, with that gate's own tests to re-read; it
+is small, and it is not this ticket's.
+
+**Owner:** whichever ticket next works on the instructor report's copy or on
+`app.api.deps`; E9 opens the report to leadership and is the likely one.
+
+**Done when:** the sentence is an entry under the `instructor_report` prefix the
+governance map already claims, the dependency reads it the way
+`app.api.instructor` reads its two, and the vocabulary gate has been seen running
+over it.
 
 ## A deleted comparison set leaves no trace anywhere (E5-06)
 

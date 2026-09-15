@@ -1,5 +1,7 @@
 # 0158 — The copy inventory grows over four surfaces, and two of them owe no confidentiality line
 
+**Extended by [0176](0176-the-comparison-set-screen-is-one-surface-from-two-sources-and-owes-no-line.md)** — E5-13 adds the comparison-set screen on the same one-surface-two-sources reading, so the inventory holds five governed surfaces and three of them owe item 5 no line. The title's counts are E4-12's and are left as written.
+
 ## Context
 
 SPEC §4.1 items 4 and 5 are asserted over the copy inventory: item 4 sweeps
@@ -131,8 +133,9 @@ be a second copy of the product's promise that no count could see.
 
 ## Consequences
 
-The inventory holds four surfaces and ten prefixes, and every collected string
-is swept for item 4's vocabulary — the report's included, which is what E4-12
+The inventory holds four surfaces and ten prefixes — **five and fifteen since
+E5-13**, which added the comparison-set screen on this record's own reading
+(ADR 0176) — and every collected string is swept for item 4's vocabulary — the report's included, which is what E4-12
 existed to achieve. The report's copy modules had to move into
 `frontend/src/copy/` for that, and moving them cost one thing the ticket did not
 anticipate: the copy parser refuses a quotation mark outside a copy file's object
