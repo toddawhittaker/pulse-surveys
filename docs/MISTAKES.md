@@ -171,7 +171,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 22** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 23** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 16. A mutation harness reported kills it had not made
 
@@ -531,7 +531,7 @@ difference small enough to attribute.
 
 ## 53. A closed-set guard is defeated one level out
 
-**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/53-a-closed-set-guard-is-defeated-one-level-out.md)
+**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/53-a-closed-set-guard-is-defeated-one-level-out.md)
 
 **Rule.** When you build or review a closed-set or inventory guard, attack the
 whole class in the first pass: name what encloses the set — the directory above

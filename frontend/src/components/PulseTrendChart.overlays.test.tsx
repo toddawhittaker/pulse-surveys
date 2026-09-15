@@ -821,13 +821,22 @@ describe('the legend', () => {
 });
 
 /**
- * The stroke treatments, read out of the stylesheet.
+ * The one stroke pin that needs a rendered chart to mean anything.
  *
  * jsdom applies no CSS, so what a rendered chart can be asked is which class
- * each line carries; what that class draws is a property of the file, and this
- * is where it is read — the shape `reportContrastTokens.test.ts` and
- * `reportMockupFidelity.test.ts` already use for the E4 rulings. Those two are
- * left alone: this ticket's pins live beside this ticket's tests.
+ * each line carries; what that class draws is a property of the file. The test
+ * below asks both halves in one breath, which is why it is here and not with
+ * the rest of the report's measured corrections: a class that styled nothing
+ * would satisfy the class half on its own, and the render it needs is this
+ * file's.
+ *
+ * **E5-07's other four stroke pins moved to `reportContrastTokens.test.ts`**
+ * (E5-13, closing `docs/tickets/e5/deferred.md`'s entry on the split). Every
+ * pin that reads only `instructorReportTrend.css` is there now, with the rest
+ * of the report's stylesheet rulings, so "every contrast correction on the
+ * report" is one file to open. The rule the split follows: a pin that reads
+ * only the stylesheet goes to the pin module; a pin that reads a rendering
+ * stays beside the tests that build one.
  */
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STYLESHEET = readFileSync(join(HERE, 'instructorReportTrend.css'), 'utf8');
@@ -880,56 +889,5 @@ describe('the lines are told apart without colour', () => {
     expect(ruleFor('.pulse-trend-line')).toContain('stroke-dasharray: 1;');
     expect(comparison).not.toBe('1');
     expect(university).not.toBe('1');
-  });
-
-  it('draws each legend swatch the way the line it names is drawn', () => {
-    // A legend in a pattern the plot does not use names a line nobody can find.
-    expect(dashOf('.pulse-trend-legend-line-comparison')).toBe(
-      dashOf('.pulse-trend-line-comparison'),
-    );
-    expect(dashOf('.pulse-trend-legend-line-university')).toBe(
-      dashOf('.pulse-trend-line-university'),
-    );
-  });
-
-  it('keeps both comparison lines under the hero’s weight and off the accent', () => {
-    for (const selector of ['.pulse-trend-line-comparison', '.pulse-trend-line-university']) {
-      const rule = ruleFor(selector);
-      // Ink, and the measured one: mist is 2.58:1 against paper, under SC
-      // 1.4.11's 3:1 for a graphical object that carries meaning. The file's
-      // colour paragraph has the reading and the departure from the brief it is.
-      expect(rule, `${selector} is not on a measured token`).toContain('stroke: var(--spruce-60)');
-      expect(rule, `${selector} is drawn in mist`).not.toContain('var(--mist)');
-      // And the hero keeps the accent to itself.
-      expect(rule, `${selector} borrows the hero's colour`).not.toContain('var(--marigold');
-      expect(rule, `${selector} is drawn at the hero's weight`).toContain('stroke-width: 1.5');
-    }
-    expect(ruleFor('.pulse-trend-line')).toContain('stroke-width: 2.5');
-  });
-
-  it('gives the suppression notice the quiet register and no raw colour', () => {
-    const rule = ruleFor('.pulse-trend-suppression');
-    expect(rule).toContain('color: var(--spruce-60)');
-    expect(rule, 'a suppression is not a warning').not.toContain('var(--madder)');
-  });
-
-  it('writes no raw hex anywhere in the stylesheet', () => {
-    // The brief's hard rule, and the one this ticket could most easily break by
-    // reaching for the mockup's inline styles. Exercised on both sides first.
-    //
-    // The positive sample is **composed rather than written out**, and has to
-    // stay that way: it must be a real raw hex for the pattern to be proven
-    // against one, and a real raw hex spelled as a literal anywhere under
-    // `frontend/src` is exactly what
-    // `tests/unit/test_the_frontend_source_uses_tokens_only.py` refuses — this
-    // file included, because that sweep carries no exception list on purpose.
-    // Joining the parts puts the value in the running test rather than in the
-    // source the sweep reads. Do not simplify it back into one string.
-    const sample = ['#', '93', 'A5', 'A0'].join('');
-    const hex = /#[0-9a-f]{3,8}\b/i;
-    expect(hex.test(`stroke: ${sample};`)).toBe(true);
-    expect(hex.test('stroke: var(--spruce-60);')).toBe(false);
-    expect(STYLESHEET.length).toBeGreaterThan(0);
-    expect(STYLESHEET).not.toMatch(hex);
   });
 });
