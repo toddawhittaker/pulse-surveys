@@ -191,7 +191,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 19. A test held its expectation in a copy of the thing it was checking
 
-**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/19-a-test-held-its-expectation-in-a-copy-of.md)
+**Caught: 8** · [the incidents, the root cause, and the whole rule](mistakes/19-a-test-held-its-expectation-in-a-copy-of.md)
 
 ## 14. An enumeration was reported as an impossibility
 
@@ -514,7 +514,7 @@ open question for the owner rather than editing the promise in passing.
 
 ## 51. A confidentiality property held in every payload and failed across the sequence of them
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/51-an-attribution-channel-lived-in-the-sequence-of-reports.md)
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/51-an-attribution-channel-lived-in-the-sequence-of-reports.md)
 
 **Rule.** A guarantee proven over one response, one report or one export is a
 guarantee about one payload, and a reader who keeps the previous one is subtracting
@@ -531,7 +531,7 @@ difference small enough to attribute.
 
 ## 53. A closed-set guard is defeated one level out
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/53-a-closed-set-guard-is-defeated-one-level-out.md)
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/53-a-closed-set-guard-is-defeated-one-level-out.md)
 
 **Rule.** When you build or review a closed-set or inventory guard, attack the
 whole class in the first pass: name what encloses the set — the directory above
