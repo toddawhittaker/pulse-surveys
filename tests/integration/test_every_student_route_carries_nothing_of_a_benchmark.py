@@ -48,13 +48,18 @@ naming the section she is enrolled in — a refusal carries no benchmark key
 either.
 
 **Values as well as key names.** A figure can travel without its member name, so
-one comparison statistic is read *off the instructor's own response* — never
+four benchmark statistics are read *off the instructor's own response* — never
 computed here — and searched for in the student's payload, in the spellings that
-were shown to hit on the instructor's. The statistic is required to be a value
-nothing in a student payload could equal for another reason before it is searched
-for, because a needle that collides with a legitimate number would be a red
-nobody can act on, and one that collides by luck is entry 3 wearing a decimal
-point.
+were shown to hit on the instructor's. Four rather than one because a sweep over
+the comparison set's workload mean says nothing about the university
+population's figure or about either rating series, and a leak under an unstemmed
+member name could travel in any of them: the set is the workload mean of each
+population and the reported week's rating point of each. Each statistic is
+required to be a value nothing in a student payload could equal for another
+reason before it is searched for, because a needle that collides with a
+legitimate number would be a red nobody can act on, and one that collides by
+luck is entry 3 wearing a decimal point. A figure this world suppressed fails
+loudly rather than being skipped — the world is the fixture's job.
 
 **Sequence, not one payload** (`docs/MISTAKES.md` entry 51). A student meets this
 surface repeatedly, and what one view withholds a pair of views can still hand
@@ -73,17 +78,20 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from fixtures.report_api import ReportDoor, StudentInTheReportWorld
+from fixtures.report_api import PAYLOAD_STREAM_KEY, ReportDoor, StudentInTheReportWorld
 from fixtures.report_benchmarks import (
     BENCHMARK_MEMBER,
     COMPARISON_POPULATION,
     HERO_WORKLOAD_HOURS,
     MEAN_FIELD,
+    UNIVERSITY_POPULATION,
     WEEK_CLEAR,
     WORKLOAD_BENCHMARK_MEMBER,
     numbers_of,
+    points_of,
     workload_figures,
 )
+from fixtures.report_views import INSTRUCTOR_STREAM
 from fixtures.routing import every_route, paths_of, student_visible_routes
 from fixtures.student_read import (
     STUDENT_READ_PATH,
@@ -201,6 +209,86 @@ def numbers_carried_by(body: Any) -> list[float]:
         except (TypeError, ValueError):
             continue
     return found
+
+
+def the_benchmark_statistics_the_instructor_is_served(
+    body: Any, answered: Any = None
+) -> list[tuple[str, Any]]:
+    """Four served comparison figures, each with the member path it sits at.
+
+    **Four rather than one.** The first version of the value sweep searched a
+    student payload for a single statistic — the comparison set's workload mean —
+    and a payload carrying any *other* benchmark figure under a member name no
+    stem catches would have passed it. One statistic proved the method; this is
+    the class of statistic this world actually serves: the workload mean of each
+    population, and one point of each of the instructor stream's two rating
+    series. §4.1 item 7's own words are "a mean, a median, or any other
+    statistic", and the university population is a comparison set too — SPEC
+    §5.1: "the university-wide line is all same-length+level sections
+    institution-wide".
+
+    **Nothing here is computed.** Every value is read off the instructor's own
+    served answer (`docs/MISTAKES.md` entry 19), and a member that is missing or
+    malformed is a named failure inside `workload_figures` and `points_of` rather
+    than a needle this function invented.
+    """
+    stream = PAYLOAD_STREAM_KEY[INSTRUCTOR_STREAM]
+    found: list[tuple[str, Any]] = [
+        (
+            f"`{WORKLOAD_BENCHMARK_MEMBER}.{population}.{MEAN_FIELD}` at week {REPORTED_WEEK}",
+            workload_figures(body, population, answered=answered)[MEAN_FIELD],
+        )
+        for population in (COMPARISON_POPULATION, UNIVERSITY_POPULATION)
+    ]
+    for population in (COMPARISON_POPULATION, UNIVERSITY_POPULATION):
+        series = points_of(body, INSTRUCTOR_STREAM, population, answered=answered)
+        where = f"`streams.{stream}.{BENCHMARK_MEMBER}.{population}` at week {REPORTED_WEEK}"
+        if REPORTED_WEEK not in series:
+            pytest.fail(
+                f"{where} is not in the payload; the series carries course weeks "
+                f"{sorted(series)}. That week is the one planted at both configured minimums "
+                "exactly, so a series without it is a world this test cannot take a needle from."
+            )
+        found.append((where, series[REPORTED_WEEK]))
+    return found
+
+
+def one_statistic_of(figure: Any, where: str) -> float:
+    """The one number a served figure carries, refused unless it can be a needle.
+
+    A statistic that happened to equal a week number, a count, a rating or one of
+    the hero section's own reported workloads would be found in a clean payload,
+    or would be absent from a leaking one by luck — `docs/MISTAKES.md` entry 3
+    wearing a decimal point. So each of the four is held to the same rules before
+    it is searched for, and a figure that cannot meet them is a **failure naming
+    the world**, never a needle quietly skipped: the world is the fixture's job,
+    and `benchmark_cohort` plants a cohort clearing both minimums at this week
+    precisely so that every one of these figures is shown rather than suppressed.
+    """
+    values = sorted(set(numbers_of(figure)))
+    assert len(values) == 1, (
+        f"{where} is {figure!r}, which carries {values} rather than exactly one number. An empty "
+        "list is a member this world suppressed, and a suppressed figure is not a needle — "
+        "`benchmark_cohort` plants this week at both configured minimums so that every figure "
+        "here is served. More than one number is a member carrying something beside its "
+        "statistic, which this test cannot tell apart from the statistic."
+    )
+    needle = values[0]
+    assert needle != int(needle), (
+        f"{where} is {needle}, a whole number. Every week number, length, count, rating and "
+        "threshold a student payload carries is a whole number too, so a whole number is a needle "
+        "that would be found in a clean payload — the plans this world plants have to make each "
+        "of these statistics a value nothing else can equal (E5-11 work order, decision 5)."
+    )
+    collisions = sorted(
+        hours for hours in (float(value) for value in HERO_WORKLOAD_HOURS) if hours == needle
+    )
+    assert not collisions, (
+        f"{where} is {needle}, which is also {collisions} — the hours the hero section's own "
+        "respondents reported. A student payload could legitimately carry her section's own "
+        "figure one day, so this needle cannot tell a comparison from an answer."
+    )
+    return needle
 
 
 def the_student_reads_her_own_sections(student: StudentInTheReportWorld) -> tuple[Any, Any]:
@@ -490,28 +578,42 @@ def test_no_student_payload_carries_a_comparison_figure_the_instructor_is_served
     benchmark_cohort: Callable[..., Any],
     student_session_in: Callable[..., StudentInTheReportWorld],
 ) -> None:
-    """The value, not only the member name: the statistic itself is absent.
+    """The values, not only the member names: the statistics themselves are absent.
 
     A member name can be renamed and a figure can travel without one — under a
-    generic `figures` list, inside a string, beside a label. So one comparison
-    statistic is taken **off the instructor's own answer** rather than computed
-    here (computing it would be holding the expectation in a second copy of the
-    thing under test, `docs/MISTAKES.md` entry 19) and then searched for in the
-    payload the student of that same section is served, as a number and as text.
+    generic `figures` list, inside a string, beside a label. So the statistics are
+    taken **off the instructor's own answer** rather than computed here
+    (computing them would be holding the expectation in a second copy of the thing
+    under test, `docs/MISTAKES.md` entry 19) and then searched for in the payload
+    the student of that same section is served, as numbers and as text.
 
-    **The needle is required to be distinctive before it is searched for.** A
-    statistic that happened to equal a week number, a count, a rating or one of
-    the hero section's own reported workloads would be found in a clean payload,
-    or would be absent from a leaking one by luck — entry 3 with a decimal point.
-    So it is asserted to be non-integral and unequal to the hero's own hours
-    before anything is scanned.
+    **Four statistics rather than one**, which is the round 1 security note's
+    repair. A sweep over the comparison set's workload mean alone says nothing
+    about the university population's figure, or about a point of either rating
+    series, and a figure reaching a student under a member name no stem catches
+    would have travelled in any of those. The four are the workload mean of each
+    population and the reported week's rating point of each — the class of
+    statistic this world serves, run through one loop so that a fifth is a line in
+    `the_benchmark_statistics_the_instructor_is_served` rather than a second test.
 
-    **The canary comes first.** The spellings searched for are the ones that
-    actually appear in the instructor's response text; if none of them appears
-    there, the search is blind and this test says so rather than reporting the
-    student's payload clean.
+    **Each needle is required to be distinctive before it is searched for**, and
+    the guards are per needle rather than for the set: a statistic that happened
+    to equal a week number, a count, a rating or one of the hero section's own
+    reported workloads would be found in a clean payload, or would be absent from
+    a leaking one by luck — entry 3 with a decimal point.
 
-    **The mutation this kills:** a comparison figure reaching a student payload
+    **A figure this world suppressed fails here rather than being skipped.** The
+    world is the fixture's job: `benchmark_cohort` plants a cohort clearing both
+    configured minimums at this week, so every one of these four is served. A
+    needle quietly dropped because it came back empty is a sweep that shrinks to
+    fit whatever the world happens to hold.
+
+    **The canary comes first, per needle.** The spellings searched for are the
+    ones that actually appear in the instructor's response text; if none of them
+    appears there, that search is blind and this test says so rather than
+    reporting the student's payload clean.
+
+    **The mutation this kills:** any benchmark figure reaching a student payload
     under a member name no stem catches — the sweep beside this one would pass and
     this one would not.
 
@@ -522,61 +624,46 @@ def test_no_student_payload_carries_a_comparison_figure_the_instructor_is_served
     """
     benchmark_cohort(report_door, minimums=report_api_contract.minimums())
     body, answered = report_door.payload(course_week=REPORTED_WEEK)
-
-    figure = workload_figures(body, COMPARISON_POPULATION, answered=answered)[MEAN_FIELD]
-    values = sorted(set(numbers_of(figure)))
-    assert len(values) == 1, (
-        f"The comparison workload mean for course week {REPORTED_WEEK} is {figure!r}, which carries "
-        f"{values} rather than one number. This test searches a student payload for a statistic, "
-        "and it cannot do that until there is exactly one to search for."
-    )
-    needle = values[0]
-
-    assert needle != int(needle), (
-        f"The comparison workload mean is {needle}, a whole number. Every week number, length, "
-        "count, rating and threshold a student payload carries is a whole number too, so a whole "
-        "number is a needle that would be found in a clean payload — the plans this world plants "
-        "have to make this statistic a value nothing else can equal (E5-11 work order, decision 5)."
-    )
-    collisions = sorted(
-        hours for hours in (float(value) for value in HERO_WORKLOAD_HOURS) if hours == needle
-    )
-    assert not collisions, (
-        f"The comparison workload mean is {needle}, which is also {collisions} — the hours the hero "
-        "section's own respondents reported. A student payload could legitimately carry her "
-        "section's own figure one day, so this needle cannot tell a comparison from an answer."
-    )
-
-    instructor_text = answered.text
-    hitting = [spelling for spelling in spellings_of(needle) if spelling in instructor_text]
-    assert hitting, (
-        f"None of the spellings {spellings_of(needle)} appears in the instructor's own response "
-        "text, which is the body this statistic was read out of. The search is therefore blind, "
-        "and a clean student payload below would mean nothing (`docs/MISTAKES.md` entry 3's canary "
-        f"rule). The response begins {instructor_text[:300]!r}."
+    statistics = the_benchmark_statistics_the_instructor_is_served(body, answered)
+    assert statistics, (
+        "The instructor's report answered no benchmark statistic at all for course week "
+        f"{REPORTED_WEEK}, so this test searched the student's payload for nothing and its silence "
+        "means nothing."
     )
 
     student = student_session_in(report_door)
     student_body, read = the_student_reads_her_own_sections(student)
     surface = response_surface(read)
+    carried = numbers_carried_by(student_body)
 
-    found = [spelling for spelling in hitting if spelling in surface]
-    assert not found, (
-        f"The student's own read carries {found}, which is the comparison set's workload mean "
-        f"({needle}) as it is spelled in the instructor's report. First occurrence: "
-        f"{around(surface, found[0])!r}.\n\n"
-        "SPEC §4.1 item 1 and §5.4: a student never sees a comparison-set figure. The statistic is "
-        "the thing the rule is about — a member name is only how it usually travels."
-    )
-    numeric = [
-        number for number in numbers_carried_by(student_body) if number == pytest.approx(needle)
-    ]
-    assert not numeric, (
-        f"The student's own read carries the number {needle} as a value rather than as text: "
-        f"{numeric}. That is the comparison set's workload mean, read off the instructor's answer "
-        "in this same world. A figure that arrives as a bare number under an innocent member name "
-        "is exactly what a key-name sweep alone would miss."
-    )
+    for where, figure in statistics:
+        needle = one_statistic_of(figure, where)
+
+        instructor_text = answered.text
+        hitting = [spelling for spelling in spellings_of(needle) if spelling in instructor_text]
+        assert hitting, (
+            f"None of the spellings {spellings_of(needle)} of {where} appears in the instructor's "
+            "own response text, which is the body this statistic was read out of. The search is "
+            "therefore blind, and a clean student payload would mean nothing "
+            f"(`docs/MISTAKES.md` entry 3's canary rule). The response begins "
+            f"{instructor_text[:300]!r}."
+        )
+
+        found = [spelling for spelling in hitting if spelling in surface]
+        assert not found, (
+            f"The student's own read carries {found}, which is {where} ({needle}) as it is spelled "
+            f"in the instructor's report. First occurrence: {around(surface, found[0])!r}.\n\n"
+            "SPEC §4.1 item 1 and §5.4: a student never sees a comparison-set or university "
+            "figure. The statistic is the thing the rule is about — a member name is only how it "
+            "usually travels."
+        )
+        numeric = [number for number in carried if number == pytest.approx(needle)]
+        assert not numeric, (
+            f"The student's own read carries the number {needle} as a value rather than as text: "
+            f"{numeric}. That is {where}, read off the instructor's answer in this same world. A "
+            "figure that arrives as a bare number under an innocent member name is exactly what a "
+            "key-name sweep alone would miss."
+        )
 
 
 # ---------------------------------------------------------------------------
