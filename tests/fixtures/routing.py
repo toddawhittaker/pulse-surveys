@@ -144,6 +144,48 @@ def dependencies_of(dependant: Any, seen: set[int] | None = None) -> list[Any]:
     return found
 
 
+def student_visible_routes(application: Any, dependency: Any) -> list[Any]:
+    """Every route on `application` a student session can reach.
+
+    The inventory SPEC §4.1 item 1 is swept over, and the whole of why it is
+    derived rather than listed: its source is the application object, which is the
+    thing that decides what is served. A route added without this dependency is
+    not student-visible and is not swept; a route added with it is swept the day
+    it is registered, with nothing to remember to update.
+
+    **Written for E2-09 and shared from E5-11**, unchanged. Two §4.1 item 1 sweeps
+    now ask the same question of the same kind of object: `tests/integration/
+    test_the_student_read_path_names_nothing_outside_the_enrollment.py` asks which
+    student-visible routes name another section, and `tests/integration/
+    test_every_student_route_carries_nothing_of_a_benchmark.py` asks which of them
+    carry a benchmark-shaped key. Two copies of this filter is
+    `docs/MISTAKES.md` entry 13 — one of them would learn about a new way a route
+    declares its dependency and the other would go on reporting a clean
+    application. The planted-route control that has guarded it since E2-09 stays
+    in that module and guards it here (it registers two routes on a throwaway
+    application, one carrying the dependency and one not, and requires this to
+    return exactly the first).
+
+    The `dependency` is matched as an **object**, through `dependencies_of`, and
+    never by name: see that function for why.
+    """
+    return [
+        route
+        for route in every_route(application)
+        if getattr(route, "dependant", None) is not None
+        and dependency in dependencies_of(route.dependant)
+    ]
+
+
+def paths_of(routes: list[Any]) -> set[str]:
+    """The paths of a set of routes, for a message a reader can act on.
+
+    Moved here from the E2-09 module with `student_visible_routes`, which is the
+    only thing it is ever called on, and for the same reason.
+    """
+    return {path for path in (getattr(route, "path", None) for route in routes) if path}
+
+
 def registered_paths(application: Any) -> set[str]:
     """Every path `application` has a route for, at any depth of inclusion.
 

@@ -303,6 +303,26 @@ another's paragraph; the correction is recorded here instead.
 **Owner:** unchanged — the first ticket that reads one of the three. **Done
 when** that entry's own done-when is met.
 
+## The student benchmark sweep runs over one week, because that is all there is (E5-11)
+
+**What is not enforced.** SPEC §5.4 gives the student a closing-the-loop view
+that pages "back through published weeks only", and `docs/MISTAKES.md` entry 51
+asks a confidentiality property to be driven across consecutive views rather
+than proven over one payload. E5-11 drives the sequence a student can actually
+meet today — the survey read before submitting, the submit's own answer, the
+read after — because the student side has two routes and neither pages across
+weeks. Nothing asserts that a student paging from one published week to the next
+sees no comparison figure, because there is no page to drive.
+
+**Why it was left.** The results view and its two-line chart are E8's surface
+(the E5 breakdown's decision 9). Asserting over a paging path that does not
+exist would be a test written against an invented interface.
+
+**Owner:** E8, the epic that builds the student results view; E5-14 records it
+at the epic exit. **Done when** the benchmark key sweep is driven across
+consecutive published weeks of that view, with the instructor's own page as the
+canary that the sweep still hits.
+
 ## The length half of §5.1's matching has no test that fails without it (E5-04)
 
 **What is not enforced.** `app.services.benchmarks._matching_sections` filters
