@@ -15,9 +15,9 @@ Sweeping every entry was a faithful reading of the item while every string in th
 registry was a string a student could be served. E5-13 ends that. The named-set
 API answers eight refusals, and seven of them are answered only behind
 `require_leadership` — the 404, the 403, the 409 and the four 422s of
-`app.api.leadership` and `app.services.comparison_sets`. Each has to name the
-thing it refuses to be any use to the leader reading it, so each says "comparison
-set", and the sweep reds on all seven. The eighth,
+`app.api.leadership` and `app.services.comparison_sets`. Each has to name the thing
+it refuses to be any use to the leader reading it, so six of them say "comparison
+set" and the sweep reds on those six. The eighth,
 `leadership_comparison_sets.not_leadership`, is the sentence
 `app.api.deps.require_leadership` answers to any session that is *not* a
 leadership session — a student's included.
@@ -35,9 +35,12 @@ foreign and wrong-role session alike — never needed the words it lost.
 
 **The sweep gains an exemption by key**, in the shape
 [0158](0158-the-copy-inventory-grows-over-four-surfaces-and-two-of-them-owe-no-confidentiality-line.md)
-gave the small-N body: a named tuple of the seven registry keys answered only
-behind `require_leadership`, each with the gate and the route that guards it
-written beside it, and the sweep skips exactly those keys. By key and not by
+gave the small-N body: a named tuple of the registry keys answered only behind
+`require_leadership`, each with the gate and the route that guards it written
+beside it, and the sweep skips exactly those keys. Seven refusals sit behind that
+gate; six of them need the exemption, because
+`leadership_comparison_sets.member_not_a_course` names the courses and not the
+set and so carries none of the swept words in the first place. By key and not by
 surface, because the surface has one key a student can be served and that key
 stays inside the sweep. The module keeps its controls — a synthetic entry
 carrying a forbidden word under a student prefix is still caught, the
@@ -71,10 +74,12 @@ route moved out from behind `require_leadership`, a sentence reused on a student
 surface — the change that does it has to take that key out of the tuple in the
 same change, and the sweep then holds the sentence to item 1 like any other.
 
-The coverage given up is seven sentences no student can be served. Everything
-else in the registry is swept exactly as before, and the exempt keys are still
-swept for item 4's vocabulary with the rest of the inventory.
+The coverage given up is six sentences no student can be served. Everything else
+in the registry is swept exactly as before, and the exempt keys are still swept
+for item 4's vocabulary with the rest of the inventory.
 
-The tuple is small and its rows carry their own reasons, so what is excused is
-seven strings a reader of that file can weigh, rather than a hole in the sweep's
-vocabulary that nobody can see.
+The tuple is small and its rows carry their own reasons, so what is excused is a
+handful of strings a reader of that file can weigh, rather than a hole in the
+sweep's vocabulary that nobody can see. A row that excuses nothing is the same
+kind of blind spot in miniature, so a key whose sentence the sweep would not
+catch anyway does not belong in it.
