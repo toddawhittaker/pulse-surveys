@@ -67,12 +67,13 @@ __all__ = [
 # who also holds a leadership assignment. One sentence for all of them, because
 # the difference between "not signed in" and "signed in as somebody else" is a
 # fact about who holds the token.
+#
+# It is the one refusal here a student can be served, so it names no comparison
+# set: SPEC §4.1 item 1 forbids that vocabulary in anything a student reads, and
+# the sentence does its job without it (ADR 0177).
 _NOT_LEADERSHIP = CopyEntry(
     key="leadership_comparison_sets.not_leadership",
-    text=(
-        "Comparison sets are defined by leadership, and this request does not carry a leadership "
-        "session."
-    ),
+    text="This request does not carry a leadership session.",
 )
 
 # The 404 for a set id nothing defined — on the read, the preview, the edit and
