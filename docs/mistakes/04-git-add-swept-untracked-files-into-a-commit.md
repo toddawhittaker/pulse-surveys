@@ -20,4 +20,20 @@ that gets through review. Fixing it meant rewriting two commits.
 against the subject line. If a fix leaves the cause in place, fix the cause —
 here, a `.gitignore` entry.
 
+**What happened, again — 2026-09-15, E5-13, commit 37ec568.** A different cause,
+the same shape. The implementer ran `git add -A` for a records-only commit in a
+checkout where the test author was working in parallel, and swept that author's
+half-written module into it. Nothing was untracked this time: the file was
+tracked and someone else was editing it, which no `.gitignore` entry can prevent.
+The stray file was found by running `git show --stat` against the subject line,
+which is this entry's rule, and the message was amended to say whose the file was
+and that it was neither read for the commit nor edited. On the heavy lane that is
+a sharper problem than a message that disagrees with its diff: the implementer
+may not change a test, so a commit of theirs carrying one looks exactly like a
+breach of the wall.
+
+**The rule this adds.** In a checkout somebody else is working in, stage by path.
+`git add -A` and `git add .` collect whatever the other person has half-finished,
+and "I only edited my own files" is not a claim about what the index holds.
+
 ---
