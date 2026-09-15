@@ -272,15 +272,19 @@ that carries item 5's line or the one that records why it owes none.
 **Closed by E5-13.** All eight are `CopyEntry` values under
 `leadership_comparison_sets.`, the prefix the screen's own copy module publishes
 under: one surface from two sources, as ADR 0158 reads the report's two refusals
-and as ADR 0176 now records for this screen. The texts are unchanged and each
-public constant is its entry's own `text`, so the routes and the service go on
-serving a sentence by name. The surface sits in
+and as ADR 0176 now records for this screen. Seven of the texts are unchanged
+and each public constant is its entry's own `text`, so the routes and the service
+go on serving a sentence by name. The surface sits in
 `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with its reason written out — nothing on
 the screen is anybody's response, so item 5's line would have no subject — and
 all eight are swept for item 4's vocabulary with everything else. One thing came
 with it: the sentences name what they refuse, so they carry the words "comparison
-set" into the backend registry, which the registry-wide item 1 sweep forbids;
-`docs/disputes/E5-13-01.md` carries the objection.
+set" into the backend registry, which the registry-wide item 1 sweep forbids.
+That was disputed (`docs/disputes/E5-13-01.md`) and settled in ADR 0177: the
+seven answered only behind `require_leadership` are exempt from that sweep by
+key, and the eighth — the sentence the gate answers a session that is not a
+leadership session, a student's included — was reworded to "This request does not
+carry a leadership session."
 
 ## The instructor role gate's 401 sentence is still a literal in `app.api.deps` (E4-07)
 

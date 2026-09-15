@@ -76,11 +76,12 @@ in their own currency before it believes the zero
 (`test_the_comparison_set_surface_owes_no_line_and_collects_from_both_its_sources`).
 
 The eight sentences name the thing they refuse, so they carry the words
-"comparison set" into the backend registry for the first time. The registry-wide
-SPEC §4.1 item 1 sweep,
-`test_no_shipped_copy_string_shows_a_student_a_comparison`, forbids that phrase
-in any entry — it reads "is in the backend registry" as "is read by a student",
-which stopped being the same thing with this surface. The same words already
-ship to the same reader through the screen's frontend copy module, which that
-sweep does not read. `docs/disputes/E5-13-01.md` carries the objection and the
-argument; until it is ruled on, that test is red on this branch.
+"comparison set" into the backend registry for the first time, and the
+registry-wide SPEC §4.1 item 1 sweep forbids that phrase in any entry. That
+collision was disputed (`docs/disputes/E5-13-01.md`) and is settled in
+[0177](0177-the-item-1-registry-sweep-exempts-the-refusals-only-a-leader-can-be-served.md):
+seven of the eight are answered only behind `require_leadership` and are exempted
+from the sweep by key, and the eighth — the sentence that gate answers a session
+that is not a leadership session, a student's included — was reworded to name no
+comparison set. So the entry count on this surface is unchanged; one of its texts
+is not the text this record was written against.
