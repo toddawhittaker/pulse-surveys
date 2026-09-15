@@ -415,9 +415,10 @@ def require_instructor(request: Request) -> SessionClaims:
 # The sentence is `app.copy.leadership_sets.NOT_LEADERSHIP` — in the copy package
 # from the day it is written, unlike the instructor refusal above, which is a
 # module constant here because the report surface was not a governed one when
-# E4-07 shipped. `docs/tickets/e5/deferred.md` records what is still owed on the
-# E5 side of that: the leadership sentences are in the package and E5-13 brings
-# them into the inventory the package publishes.
+# E4-07 shipped. Since E5-13 it is a registry entry's own text, published under
+# the `leadership_comparison_sets.` prefix with the comparison-set screen's other
+# words, so SPEC §4.1 items 4 and 5 are asserted over what this gate answers
+# (ADR 0176).
 NOT_LEADERSHIP_STATUS = 401
 NOT_LEADERSHIP_CHALLENGE = {"WWW-Authenticate": BEARER_SCHEME}
 
