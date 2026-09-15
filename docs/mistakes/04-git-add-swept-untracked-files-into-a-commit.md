@@ -20,7 +20,7 @@ that gets through review. Fixing it meant rewriting two commits.
 against the subject line. If a fix leaves the cause in place, fix the cause —
 here, a `.gitignore` entry.
 
-**What happened, again — 2026-09-15, E5-13, commit 37ec568.** A different cause,
+**What happened, again — 2026-09-15, E5-13, a records commit later rewritten as 99f4b09 before anything was pushed, so the branch's history no longer carries the stray file.** A different cause,
 the same shape. The implementer ran `git add -A` for a records-only commit in a
 checkout where the test author was working in parallel, and swept that author's
 half-written module into it. Nothing was untracked this time: the file was

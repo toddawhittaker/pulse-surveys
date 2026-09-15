@@ -281,7 +281,7 @@ all eight are swept for item 4's vocabulary with everything else. One thing came
 with it: the sentences name what they refuse, so they carry the words "comparison
 set" into the backend registry, which the registry-wide item 1 sweep forbids.
 That was disputed (`docs/disputes/E5-13-01.md`) and settled in ADR 0177: the
-seven answered only behind `require_leadership` are exempt from that sweep by
+six of the seven answered only behind `require_leadership` are exempt from that sweep by
 key, and the eighth — the sentence the gate answers a session that is not a
 leadership session, a student's included — was reworded to "This request does not
 carry a leadership session."

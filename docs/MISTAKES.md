@@ -531,7 +531,7 @@ difference small enough to attribute.
 
 ## 53. A closed-set guard is defeated one level out
 
-**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/53-a-closed-set-guard-is-defeated-one-level-out.md)
+**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/53-a-closed-set-guard-is-defeated-one-level-out.md)
 
 **Rule.** When you build or review a closed-set or inventory guard, attack the
 whole class in the first pass: name what encloses the set — the directory above
