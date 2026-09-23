@@ -57,9 +57,9 @@ session-read sweep's limits.
 
 **From `../e5/deferred.md`:** ten entries closed inside E5, each with its
 closing note in the file. Five are still open and re-listed below: the three
-unread cohort views (with E5-06's correction to its owner line folded in),
-the instructor gate's 401 literal, the untraced set delete, and the student
-sweep over one week.
+unread cohort views; E5-06's correction to that entry's owner line (folded
+into the same entry); the instructor gate's 401 literal; the untraced set
+delete; and the student sweep over one week.
 
 **From the E5 boundary** (`../e5/boundary-review.md`), including the passes
 over E5-14's own fix rounds: every finding not fixed inside the epic is an
@@ -395,7 +395,7 @@ Every source entry, in its source file's order, with what happened to it.
 | Frontend round: the hero line's scaling stroke | Carried (the trend chart's next ticket, E8 first) |
 | Frontend round: the test-edit hook misses its exemption in a worktree | Carried (a `process/` pull request) |
 | epic-exit (bf729fc) HIGH: the university line equalled the comparison line on the seeded world | Closed by E5-14 (cb5f05f seeds BIOL-215-U8FF; the drive asserts different, SQL-measured university figures) |
-| epic-exit LOW: a local `.env` written before the ruling keeps `BENCHMARK_MIN_RESPONDENTS_DEFAULT=15` | Carried as a note: any developer's `.env` copied before 2026-09-22 should set 10; `.env.example` already does |
+| epic-exit LOW: a local `.env` written before the ruling keeps `BENCHMARK_MIN_RESPONDENTS_DEFAULT=15` | Carried. **Owner:** E6's first ticket. **Done when** a developer's stack warns when `.env` and `.env.example` disagree on the benchmark minimums, or the dev runbook tells every developer to set 10. `.env.example` already says 10 |
 | epic-exit LOW: no university-only withholding is driven | Carried (already listed above) |
 | Gate run: `test_the_submit_path_follows_adr_0056s_taxonomy.py::test_a_submission_is_prompt_while_the_broker_is_unreachable` measured 2.95 s against its 2.5 s budget once, under a load average near 3, then passed alone and on a full rerun | Carried: E6's first ticket touching the submit path decides whether the budget measures the code or the machine. Done when the test cannot fail on load alone, or a record says why its budget is right |
 | The per-PR security review of E5-14 (`app-security` on ce9df73) | Nothing found; nothing carried |

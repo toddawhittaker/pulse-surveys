@@ -51,9 +51,10 @@ clock in a `finally`.
   and a week-6 workload mean of 9.375 and median of 9.5, compared within
   5e-5 because they are rounded to four places. With the prior term
   excluded, the set would hold 0 sections and every one of those figures would
-  be withheld. The university member is asserted present and not withheld, and
-  not as a literal, because CI's earlier specs write into other current-term
-  sections. The page draws three lines in each panel.
+  be withheld. The university member must equal literals measured the same way over
+  the four Spring 2026 12-week sections (U5FF, U6WW, R5FF and U8FF) and must
+  differ from the comparison member at every week, which holds under the
+  premise the drive's `beforeAll` checks (below). The page draws three lines in each panel.
 - **When the university line shows on the seeded stack.** Under the sealing
   rule (ADR 0179), the hero's university line shows only while no current-term
   12-week undergraduate section outside the hero instructor's own sections
