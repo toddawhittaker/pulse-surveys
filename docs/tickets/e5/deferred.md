@@ -33,6 +33,16 @@ surface and can carry the edit if it is ruled.
 3:1 on paper for both lines, or the ruling is recorded that mist stands and this
 ticket's substitution is reverted with the measurement stated as accepted.
 
+**Closed by E5-14 (2026-09-22).** The owner ruled for the brief edit, the
+first of the two ways this entry's done-when allows. `docs/DESIGN_BRIEF.md`'s
+`--mist` row no longer names the comparison lines, and its chart mapping now
+reads `--spruce-60` for both, dashed and dotted, with the reason: spruce-60
+measures 5.18:1 on paper and 4.85:1 on chalk, and mist measures 2.58:1, under
+WCAG 2.2 SC 1.4.11's 3:1 for a graphical object that carries meaning. The code
+did not change; the brief now agrees with it, and so do `design/tokens.css`'s
+comments on `--spruce-60` and `--mist`. `design/PulseTrendChart.dc.html` is a
+prototype and is left as drawn.
+
 ## E5-07's stroke pins live beside E5-07's tests rather than in the report's two pin modules
 
 **What is not enforced.** `reportContrastTokens.test.ts` and
@@ -158,6 +168,22 @@ the opposite has been corrected in place; the duplication itself is named here.
 the sweep accept, or a record states that two copies is the intended answer and
 says which file is authoritative.
 
+**Closed by E5-14 (2026-09-22).** The two statements have one home, the first
+of this entry's two answers. The wrappers `benchmark_set_week` and
+`benchmark_set_rating_week` and their dataclasses are deleted from
+`views_sql/queries.py`, with
+`tests/integration/test_the_query_module_exposes_the_two_benchmark_set_helpers.py`,
+which pinned their existence. They were not a true second copy in any case:
+the boundary's data-model review found them unused and selecting whole-week
+counts, where the service reads each figure's own contributor counts (ADR
+0166's amendment), so a caller that reached for them would have sealed with the
+wrong population. `app/services/benchmarks.py` is now the only module under
+`backend/app/` that may name either set function or any of the four cohort
+views, and a marked sweep enforces it:
+`tests/unit/test_only_the_benchmark_service_names_the_benchmark_relations.py`,
+with planted-offender and near-miss controls, run in the job a
+documentation-only diff cannot switch off.
+
 ## The benchmark views do not filter a response's validity (E5-03)
 
 SPEC §3.3 classifies a submission as valid or not, and `response.is_valid`
@@ -200,6 +226,19 @@ or a sentence records that the derivation rounds and that this is the intended
 answer. Owner: E5-14 at the epic exit, unless a roster ticket writes a start
 date from a platform first.
 
+**Closed by E5-14 (2026-09-22), by a sentence.** The derivation rounds down,
+and that is the intended answer: a section whose start fell mid-week would be
+keyed to the week its start rounds down to. It cannot happen through a path
+that exists. `app.services.section_codes.apply_section_code` is the only
+writer of `section.start_date`, and it copies the start date of the
+start-letter map row the section's code names. Every row seeded today is a
+Monday a whole number of weeks after its term's first day. A `CHECK` cannot
+enforce the rule, because it would have to read `term.start_date` from another
+table (ADR 0018); a trigger or a check on the start-letter map could, and it
+belongs to whichever ticket first lets an operator edit that map (E11's
+configuration surface, SPEC §6.3), which is the first place a mid-week date
+could enter.
+
 ## Three cohort views still pair whole-week counts with subset figures (E5-04)
 
 **What is not enforced.** The contributor-count rule E5-04's fix round
@@ -224,6 +263,13 @@ E5-14 re-checks at exit. **Done when** any consumer of these views seals
 figures only against contributor counts the view itself carries (a `_v002`
 per view, the established shape), or the views are retired unread.
 
+**Carried by E5-14 to `../e6/carried-from-e5.md`**, as "The rating term-axis
+read and three cohort views are unread", owner E9. The boundary found the
+same three views granted and read by nothing, and found that the rating term
+axis has no service read at all, which amends breakdown decision 7. Since
+E5-14 a marked sweep lets only `app/services/benchmarks.py` name these views,
+so their first reader has one place to be.
+
 ## The benchmark-history self-check scopes on section codes without a term filter (E5-12)
 
 **What is not enforced.** `the_cohort_recount(session, section_codes)` counts
@@ -243,6 +289,18 @@ it corrects today.
 a code. **Done when** the recount resolves sections the way the seeder itself
 does — by `(course, term, code)` — or a sentence records that the dev worlds
 keep codes unique and why that is acceptable.
+
+**Closed by E5-14 (2026-09-22), by a sentence.** The development worlds keep
+section codes unique across both terms, and that is why the recount's contract
+stands. The prior term's four codes (`U5FF`, `U6WW`, `R5FF`, `E5WW`) carry
+ordinals no other seeded section uses, as `mock-lms/app/seed.py` says where it
+declares them, and no seeded current-term section shares one; the recount is
+handed only this file's own codes. That is acceptable for what the recount is:
+a development self-check that reports, and never a figure anybody reads. The
+seeder itself still resolves every section by course, term and code before
+writing anything. If a later seed reuses one of those codes in another term,
+this entry's first answer — resolve by `(course, term, code)` — is the change
+to make, in that seed's ticket.
 
 ## The named-set API's eight refusal sentences sit outside the copy inventory (E5-06)
 
@@ -311,6 +369,10 @@ governance map already claims, the dependency reads it the way
 `app.api.instructor` reads its two, and the vocabulary gate has been seen running
 over it.
 
+**Carried by E5-14 to `../e6/carried-from-e5.md`**, unchanged. Owner: whichever
+ticket next works on the instructor report's copy or on `app.api.deps`; E9 is
+the likely one.
+
 ## A deleted comparison set leaves no trace anywhere (E5-06)
 
 **What is not enforced.** E5-06 writes no `audit_log` row (ADR 0174), so what
@@ -338,6 +400,10 @@ non-reveal action family with a nullable subject and a sanctioned writer for it,
 and the named-set writes use it — or a record states that set definitions are not
 audited events and amends the criterion.
 
+**Carried by E5-14 to `../e6/carried-from-e5.md`**, as "A named-set write
+leaves no audit record", owner E10's audit review surface. The boundary's
+spec-conformance review raised it again.
+
 ## E5-06's preview reads none of the three unread cohort views (E5-04)
 
 **What is not enforced.** Nothing new. This is a correction to the owner line of
@@ -353,6 +419,10 @@ another's paragraph; the correction is recorded here instead.
 
 **Owner:** unchanged — the first ticket that reads one of the three. **Done
 when** that entry's own done-when is met.
+
+**Carried by E5-14 to `../e6/carried-from-e5.md`**, folded into the carry of
+"Three cohort views still pair whole-week counts with subset figures" above,
+whose owner is now E9.
 
 ## The student benchmark sweep runs over one week, because that is all there is (E5-11)
 
@@ -374,6 +444,12 @@ at the epic exit. **Done when** the benchmark key sweep is driven across
 consecutive published weeks of that view, with the instructor's own page as the
 canary that the sweep still hits.
 
+**Carried by E5-14 to `../e6/carried-from-e5.md`**, as "E8's first
+obligation", joined to the literal two-line TrendDuo walk (breakdown decision
+9). E8's results view had not merged at E5's exit, so the exit recorded the
+structural proof, and the drive walked a student seat across the two
+consecutive weeks the existing routes allow.
+
 ## The length half of §5.1's matching has no test that fails without it (E5-04)
 
 **What is not enforced.** `app.services.benchmarks._matching_sections` filters
@@ -393,3 +469,15 @@ first. **Done when** a test plants a led course with a section of another
 length and asserts, in both directions, that it is excluded from the default
 set and from the university population while a same-length section is
 included.
+
+**Closed by E5-14 (2026-09-22).**
+`tests/integration/test_a_comparison_population_matches_length_and_level_inside_one_leads_courses.py`
+plants one lead who leads every course, including one course with a 12-week
+and an 8-week section, and runs each test over both `resolve_default_set` and
+`resolve_university`. A 12-week reader's population leaves out the lead's
+8-week sections and an 8-week reader's leaves out the 12-week ones, with a
+same-length section included each time as the control. Two sibling tests do
+the same for level (UG against UGGR), so dropping either predicate from
+`_matching_sections` reds its own pair. The module arrived green, since the
+code already filtered, so it is a pin proven by mutation rather than a red;
+each test's docstring names the mutation it kills and its near miss.
