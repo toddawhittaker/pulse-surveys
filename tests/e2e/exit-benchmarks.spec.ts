@@ -13,7 +13,13 @@
 //     legend: the default set is exactly the three Spring 2026 `BIOL-310`
 //     sections, and its current-term part is **empty** — so with the prior term
 //     excluded, SPEC §5.1's default set would hold 0 sections, every figure below
-//     would be withheld, and none of these literals could be served;
+//     would be withheld, and none of these literals could be served. **Three
+//     lines means three different lines**: at every stop the university point
+//     and the university workload mean are also required to differ from the
+//     comparison ones, because a university line drawn exactly on top of the
+//     comparison line is counted as a line and read as two (the epic-exit
+//     review on bf729fc measured that collapse on the seeded world; the seed's
+//     `BIOL-215-U8FF` is the repair);
 //   - **every suppression treatment**, on `BIOL-215-R3WW`, whose default set is
 //     empty: every default-set point and both workload figures are withheld in
 //     the payload, and then the page shows the withheld treatments;
@@ -336,7 +342,7 @@ const CANARY_ON_THE_HERO: readonly string[] = [
   UNIVERSITY_CELL,
 ];
 
-// Budgets. The world is four prior-term launches, two current-term launches, two
+// Budgets. The world is five prior-term launches, two current-term launches, two
 // seeders and a window derivation; the student case adds two instructor reads,
 // two student landings, two submissions and two reloads.
 const WORLD_TIMEOUT_MS = 600_000;
@@ -575,15 +581,30 @@ test('the hero report shows the prior-term default set on every week from 6 down
         ).toBeCloseTo(earlier[stream], MEASURED_PLACES);
       }
 
-      // The university member: present and not withheld. Not a literal — the
-      // university population is every twelve-week undergraduate section, and
-      // other specs answer current-term ones.
+      // The university member: served, and **a different line from the
+      // comparison one**. Counting lines cannot see two lines drawn on top of
+      // each other, and the epic-exit review on bf729fc measured exactly that:
+      // the freeze's earliest-close cutoff (set by the answerless U1WW/U2WW
+      // cohort) counts no current-term answer, so without a prior-term section
+      // outside the default set the university reduced to the same three
+      // `BIOL-310` sections and equalled the comparison at every week. The
+      // exit-demo fix adds `BIOL-215-U8FF` (no lead: university, not default
+      // set). Not yet a literal: the university figures are measured by SQL
+      // after the seed lands, and are asserted in a second pass.
       const university = pointFor(benchmark?.university, week);
       expect(
         university !== undefined && reportable(university.mean),
         `Course week ${String(week)}'s university point for the ${stream} stream is ` +
           `${JSON.stringify(university)}; three lines per panel needs it served.`,
       ).toBe(true);
+      expect(
+        university?.mean.figure,
+        `Course week ${String(week)}'s university ${stream} mean equals the default-set mean ` +
+          `(${String(comparison?.mean.figure)}), so the page draws the university line on top of ` +
+          'the comparison line and shows two lines where it claims three. The university ' +
+          "population must reach a prior-term section outside the default set (BIOL-215-U8FF, " +
+          "launched by `support/benchmarkWorld.ts`) that the freeze counts.",
+      ).not.toBeCloseTo(comparison?.mean.figure ?? Number.NaN, MEASURED_PLACES);
     }
 
     const workload = payload.workload_benchmark;
@@ -601,6 +622,12 @@ test('the hero report shows the prior-term default set on every week from 6 down
       `Course week ${String(week)}'s university workload mean is ` +
         `${JSON.stringify(workload?.university.mean)}.`,
     ).toBe(true);
+    expect(
+      workload?.university.mean.figure,
+      `Course week ${String(week)}'s university workload mean equals the default-set workload ` +
+        'mean, so the two columns report one population under two names — the same collapse the ' +
+        'trend assertion above names.',
+    ).not.toBeCloseTo(workload?.comparison.mean.figure ?? Number.NaN, MEASURED_PLACES);
 
     // Then the page: three lines per panel, no notice, and this week's figures
     // in the comparison cells — which is what ties the page to the week.

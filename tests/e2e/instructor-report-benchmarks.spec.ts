@@ -119,7 +119,7 @@ const UNIVERSITY_NOTICE = 'trend-suppression-university';
 const COMPARISON_CELL = 'stat-cell-comparison';
 const UNIVERSITY_CELL = 'stat-cell-university';
 
-// Budgets. The world is four prior-term launches, a roster sync each, two
+// Budgets. The world is five prior-term launches, a roster sync each, two
 // seeders and a window derivation — minutes rather than seconds, and a hook that
 // ran out of harness rather than out of patience would read as a flake.
 const WORLD_TIMEOUT_MS = 600_000;
@@ -368,7 +368,7 @@ test('a section alone in its cohort shows the withheld treatments instead', asyn
  *
  * The menu is the page an instructor who teaches more than one section lands on,
  * and the seed gives this persona every section in both terms — including the
- * four prior-term ones this file's own world stood up — so the report is reached
+ * five prior-term ones this file's own world stood up — so the report is reached
  * by the link naming this section in full.
  */
 async function openTheReport(page: Page, section: typeof HERO): Promise<Locator> {
@@ -384,7 +384,7 @@ async function openTheReport(page: Page, section: typeof HERO): Promise<Locator>
   // **Named by prefix, number and §2.2 code, which is what makes it one link.**
   // The menu writes the server's governed label ("BIOL 310 R7FF — Molecular
   // Genetics, Fall 2026"), and this persona now teaches four `BIOL 310` sections
-  // and two `BIOL 215` ones — the prior term's, which this file's own world
+  // and three `BIOL 215` ones — two of them the prior term's, which this file's own world
   // provisions. A locator naming only the course resolves to several links and
   // Playwright's strict mode refuses it.
   await menu.getByRole('link', { name: new RegExp(section.menuName) }).click();

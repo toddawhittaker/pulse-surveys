@@ -271,7 +271,7 @@ const SECTIONS_MENU = "pulse-instructor-sections";
 // transcribes it, and for that file's reason.
 const SUBMITTED_TITLE = "Your pulse is in";
 
-// Budgets. The world is four prior-term launches, two current-term launches, two
+// Budgets. The world is five prior-term launches, two current-term launches, two
 // seeders and a window derivation; each case then makes two instructor launches,
 // a student launch and (twice) a submission. A case that ran out of harness
 // rather than out of patience would read as a flake.
@@ -757,7 +757,7 @@ async function openTheReport(
     "The instructor did not land on the section menu, so there is no link to open a report from.",
   ).toBeVisible();
   // **Named by prefix, number and §2.2 code**: this persona teaches four
-  // `BIOL 310` sections and two `BIOL 215` ones once the prior term exists, and
+  // `BIOL 310` sections and three `BIOL 215` ones once the prior term exists, and
   // a locator naming only the course resolves to several links.
   await menu.getByRole("link", { name: new RegExp(section.menuName) }).click();
   const report = page.getByTestId(REPORT);
