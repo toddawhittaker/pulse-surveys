@@ -106,8 +106,10 @@ security-relevant diff.
    gh pr create --base epic/e1-entering-the-app --fill
    ```
 
-5. **Stop there** and wait for the repository owner. Do not merge because the
-   ticket looks finished to you.
+5. **Merge only as the table below allows.** An ordinary ticket PR is merged by
+   the merger agent once the merge conditions hold; a ticket on a ⚠ epic or a
+   heavy-lane path waits for the repository owner's written approval. Do not
+   merge because the ticket looks finished to you.
 
 ## Who may merge what
 
@@ -265,7 +267,7 @@ separate test author.
 What never varies by lane: CI green with nothing skipped or weakened, the
 §4.1 invariant suite, the independent security review on every pull request
 (SPEC §14.2 item 3), ADRs for contestable construction decisions, and the
-owner's written approval to merge. A light ticket whose diff turns out to
+merge conditions in "Who may merge what" below. A light ticket whose diff turns out to
 reach a heavy surface stops and re-lanes, and the pull request records the
 switch.
 

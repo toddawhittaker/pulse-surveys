@@ -1,7 +1,7 @@
 # 0004 — Agent roster mechanism
 
-**Status:** Accepted — roster split amended 2026-08-28; the fifteen-agent
-mechanism and computed gating are unchanged
+**Status:** Accepted — roster split amended 2026-08-28; the `merger` agent
+added 2026-09-22; the mechanism and computed gating are unchanged
 **Date:** 2026-08-12
 **Intent:** `docs/AGENTS_INTENT.md`
 
@@ -33,6 +33,13 @@ per-PR review, four epic-boundary — invoked by three skills: `/build-ticket`,
 > `threat-model`, plus the four moved). Fifteen agents total, unchanged. The
 > mechanism this record decides — hooks, computed gating, session-scoped
 > warmth — is unchanged.
+
+> **2026-09-22:** A sixteenth agent, `merger`, lands ordinary ticket PRs
+> into their epic branch once the conditions in `CLAUDE.md` hold, and refuses
+> `process/` PRs, ⚠-epic tickets, and heavy-lane-path tickets, which still wait
+> for the owner. It is a merge clerk, not a reviewer: it verifies
+> preconditions and runs `gh`, and it judges no code. The mechanism above is
+> unchanged.
 
 **Warmth comes from `SendMessage`, scoped to a session.** The implementer is
 spawned once per ticket and re-addressed by name; a send resumes it from its
