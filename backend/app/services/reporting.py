@@ -54,7 +54,7 @@ section and the classes of what was raised, and nothing else.
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -83,6 +83,7 @@ from app.models.survey import (
 from app.models.term import SurveyWindow, Term, Week
 from app.services import clock, enrollment_windows
 from app.services.authz import (
+    reader_group_section_ids,
     section_scoped_assignees,
     taught_section_ids,
     teaching_instructor_assigned,
@@ -1233,8 +1234,47 @@ def _served_question_texts(session: Session, *, section_id: UUID, week_id: UUID)
     return served
 
 
+def _reader_group_cutoffs(
+    session: Session,
+    *,
+    section: Section,
+    reader_group: Collection[UUID],
+    published: Sequence[_SectionWeek],
+) -> dict[int, datetime]:
+    """Each published course week's benchmark cutoff: the reader group's earliest close that week.
+
+    E5-14's one-cutoff-per-reader-group ruling. For course week *w*, the cutoff
+    is the earliest week-*w* `survey_window.closes_at` among the reader group's
+    sections **in this section's term** that have a week-*w* window. This
+    section is one of them, so the cutoff is never later than its own close and
+    a figure is fixed from the moment this section's week publishes. And every
+    section one instructor teaches in a term gets the same cutoff for the same
+    course week, so two of her reports cannot be two snapshots of one
+    population frozen at two instants — whose difference would be whatever
+    answered in between.
+
+    The group's sections in other terms set no cutoff: their weeks close months
+    apart, and comparing snapshots across terms is a residual the ruling
+    carries rather than closes. The course week of every window is read through
+    `_section_weeks`, this module's one reading of §2.2's two axes.
+    """
+    cutoffs = {week.course_week: week.closes_at for week in published}
+    in_this_term = session.scalars(
+        select(Section).where(
+            Section.id.in_(reader_group),
+            Section.term_id == section.term_id,
+            Section.id != section.id,
+        )
+    ).all()
+    for other in in_this_term:
+        for week in _section_weeks(session, other):
+            if week.course_week in cutoffs and week.closes_at < cutoffs[week.course_week]:
+                cutoffs[week.course_week] = week.closes_at
+    return cutoffs
+
+
 def _benchmark_members(
-    session: Session, *, section_id: UUID, course_week: int, published: Sequence[_SectionWeek]
+    session: Session, *, section: Section, course_week: int, published: Sequence[_SectionWeek]
 ) -> tuple[dict[str, "StreamBenchmark"], "WorkloadBenchmarkView"]:
     """SPEC §5.1's comparison and university figures for one report — assembled, never computed.
 
@@ -1252,11 +1292,11 @@ def _benchmark_members(
     series that also carried the weeks the *comparison population* answered in
     would let a reader subtract their own published weeks and read off which
     weeks other sections answered in, which is an existence oracle readable from
-    a series where every figure is withheld (ADR 0170). And each week's window
-    close is that week's **cutoff** — the owner's freeze-at-close ruling: a
-    comparison figure for a published week counts only answers fixed when this
-    section's own window for that week closed, so no later answer moves it and two
-    reads of it cannot be subtracted into one student's answer.
+    a series where every figure is withheld (ADR 0170). And each week has a
+    **cutoff** — the owner's freeze-at-close ruling, as E5-14's round 3 shares it
+    across the reader group (`_reader_group_cutoffs`): a comparison figure for a
+    published week counts only answers fixed by then, so no later answer moves it
+    and two reads of it cannot be subtracted into one student's answer.
 
     **Nothing in this function counts, averages, compares or derives.** A figure
     born in the assembly layer is a figure no minimum was applied to, which is the
@@ -1276,12 +1316,18 @@ def _benchmark_members(
     from app.schemas import report_benchmark as benchmark_schema
     from app.services import benchmarks
 
+    # Resolved once, and used twice: for the shared cutoffs here, and for the
+    # sealing inside the service.
+    reader_group = reader_group_section_ids(session, section_id=section.id)
     read = benchmarks.section_benchmarks(
         session,
-        section_id=section_id,
+        section_id=section.id,
         course_week=course_week,
         streams=REPORT_STREAMS,
-        cutoffs={week.course_week: week.closes_at for week in published},
+        reader_group=reader_group,
+        cutoffs=_reader_group_cutoffs(
+            session, section=section, reader_group=reader_group, published=published
+        ),
     )
     default_set = benchmarks.BenchmarkPopulation.DEFAULT_SET
     university = benchmarks.BenchmarkPopulation.UNIVERSITY
@@ -1380,10 +1426,10 @@ def _payload(
     question_texts = _served_question_texts(session, section_id=section.id, week_id=week.week_id)
     benchmarks_by_stream, workload_benchmark = _benchmark_members(
         session,
-        section_id=section.id,
+        section=section,
         course_week=week.course_week,
         # The published weeks: their course weeks are the axis `week.published_weeks`
-        # below carries, and their window closes are the comparison's cutoffs.
+        # below carries, and each one's cutoff is the reader group's earliest close.
         published=published,
     )
 

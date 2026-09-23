@@ -144,6 +144,7 @@ __all__ = [
     "leadership_grant_covers",
     "own_grant",
     "raw_comments_permitted",
+    "reader_group_section_ids",
     "resolve_landing",
     "resolve_scope",
     "sanction_for",
@@ -460,6 +461,24 @@ _TEACHING_INSTRUCTOR_SECTIONS = text(
     " WHERE granted.person_id = :person_id"
     " AND granted.role = CAST(:role AS public.assignment_role)"
     " AND granted.section_id IS NOT NULL"
+)
+
+# Every section taught by anybody who teaches one given section — E5-14's reader
+# group. The inner select is `_HOLDS_THE_TEACHING_INSTRUCTOR_GRANT`'s three
+# conditions with the person left open; the outer one is
+# `_TEACHING_INSTRUCTOR_SECTIONS`'s three with the person drawn from it, so the
+# group is exactly the union of `taught_section_ids` over the section's
+# instructors, in any term.
+_READER_GROUP_SECTIONS = text(
+    "SELECT DISTINCT taught.section_id"
+    " FROM public.assignment_scope AS taught"
+    " WHERE taught.role = CAST(:role AS public.assignment_role)"
+    " AND taught.section_id IS NOT NULL"
+    " AND taught.person_id IN ("
+    " SELECT held.person_id FROM public.assignment_scope AS held"
+    " WHERE held.role = CAST(:role AS public.assignment_role)"
+    " AND held.section_id = :section_id"
+    ")"
 )
 
 # Everybody holding an assignment whose scope names one section — the staff of that
@@ -996,6 +1015,39 @@ def taught_section_ids(session: Session, *, person_id: UUID) -> set[UUID]:
             {"person_id": person_id, "role": LMS_OWNED_ASSIGNMENT_ROLE.value},
         ).scalars()
     )
+
+
+def reader_group_section_ids(session: Session, *, section_id: UUID) -> set[UUID]:
+    """Every section, in any term, taught by anybody holding the `INSTRUCTOR` grant here (E5-14).
+
+    The set form beside `taught_section_ids`, widened from one person to every
+    teaching instructor of one section. `app.services.benchmarks` and the report
+    ask it for a report's reader group: whoever can open this section's report
+    can open each of these sections' reports too. So a comparison figure is
+    withheld when what is left of its population after the group is thin, and
+    the group shares one cutoff per course week — otherwise two of her own
+    reports, frozen at two different closes, could be subtracted into whatever
+    answered in between.
+
+    **The section itself is always in the group**, whether or not anybody holds
+    the grant over it yet: the report's reader knows her own section's answers
+    either way.
+
+    **It lives here because the view does** — E0-41's rule that
+    `public.assignment_scope` is read through this module and nowhere else.
+
+    **Not an authorization decision.** It opens nothing: it only widens what a
+    benchmark figure is withheld over, so a false *yes* withholds more, and a
+    false *no* is the disclosure the group exists to prevent.
+    """
+    group = set(
+        session.execute(
+            _READER_GROUP_SECTIONS,
+            {"role": LMS_OWNED_ASSIGNMENT_ROLE.value, "section_id": section_id},
+        ).scalars()
+    )
+    group.add(section_id)
+    return group
 
 
 def section_scoped_assignees(session: Session, *, section_id: UUID) -> set[UUID]:
