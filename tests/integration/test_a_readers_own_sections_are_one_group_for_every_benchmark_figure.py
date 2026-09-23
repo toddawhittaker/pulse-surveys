@@ -46,7 +46,13 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from fixtures.benchmark_views import PRIOR_TERM
+from fixtures.benchmark_views import (
+    COURSE_NUMBER_COLUMN,
+    COURSE_NUMBER_FOR_LEVEL,
+    COURSE_TABLE,
+    PRIOR_TERM,
+    UGGR,
+)
 from fixtures.report_api import ReportDoor
 from fixtures.report_benchmarks import (
     COMPARISON_POPULATION,
@@ -82,6 +88,8 @@ REPORTED_WEEK = WEEK_CLEAR
 SAME_LETTER = "F"
 EARLY_LETTER = "E"
 PRIOR_LETTER = "E"
+# An eight-week letter starting in term week 1: another length, closing week 2 early.
+ANOTHER_LENGTH_LETTER = "X"
 
 AN_HOUR = timedelta(hours=1)
 A_DAY = timedelta(days=1)
@@ -434,19 +442,30 @@ def test_a_prior_term_section_of_the_same_length_and_level_never_moves_the_cutof
     benchmark_cohort: Callable[..., Any],
     stream: str,
 ) -> None:
-    """C3: the cutoff is taken in A's term only — a current-term figure's value, pinned.
+    """C3: a value pin — with a prior-term peer present, the week-2 figure is the cohort's own.
 
     One of the lead's prior-term six-week sections, at the hero's level, with its
-    windows seeded (its week 2 closed in January). The term filter keeps it out
-    of the cutoff, so the week-2 comparison stays the round-1 cohort's own:
-    3.6 and 2.8 for the two panels and 8.3 hours (hand arithmetic at the top of
-    this module).
+    windows seeded (its week 2 closed in January). The week-2 comparison stays the
+    round-1 cohort's own: 3.6 and 2.8 for the two panels and 8.3 hours (hand
+    arithmetic at the top of this module).
 
-    **The mutation it kills:** the term filter dropped from the cutoff — the
-    battery's C3 survivor — under which the January close becomes the cutoff,
-    every current-term row falls out, and the figure is withheld. **Its near
-    miss** is the test below, where an earlier close *in* A's term does move the
-    cutoff.
+    **What this test is, corrected after the round-4 battery.** It is a pin on the
+    figure's value, not a killer for the term filter. The verifier showed that,
+    with the term filter dropped, a prior-term window maps to a course week
+    offset by the gap between the two terms' starts — seven months here, far past
+    any section's length — so the January close lands on no course week A has,
+    and this figure does not move.
+
+    **What the term filter protects against** is two terms whose starts fall
+    within one section length of each other (a short summer term beside a fall
+    term, say): a section of the other term would then land on A's course weeks,
+    and its earlier close would become A's cutoff. This suite's worlds carry two
+    hand-written terms seven months apart and no machinery for a third, so that
+    case is recorded as equivalent in practice for these tests (E5-14 manifest,
+    Round 5) rather than planted.
+
+    **Its near miss** is the test below, where an earlier close *in* A's term
+    does move the cutoff.
     """
     cohort = a_cohort(report_door, report_api_contract, benchmark_cohort)
     plant_a_section_beside(cohort, "prior", letter=PRIOR_LETTER, term=PRIOR_TERM)
@@ -495,6 +514,140 @@ def test_an_earlier_closing_section_in_the_same_term_does_move_the_cutoff(
         f"The {stream} comparison point at week {REPORTED_WEEK} still carries the cohort's "
         f"{COMPARISON_AT_WEEK_TWO[stream]}: {point!r}. A six-week section of this level in A's term "
         "closes week 2 in term week 2, and that is the population's cutoff."
+    )
+
+
+def how_the_week_two_figure_differs(door: ReportDoor, stream: str) -> list[str]:
+    """Every way the week-2 comparison differs from the cohort's own hand-computed figures."""
+    point = the_comparison_point(door, stream)
+    mean = the_comparison_workload(door)[MEAN_FIELD]
+    wrong = []
+    if not (is_shown(point) and carries_number(point, COMPARISON_AT_WEEK_TWO[stream])):
+        wrong.append(f"the {stream} point is {point!r}, not {COMPARISON_AT_WEEK_TWO[stream]}")
+    if not carries_number(mean, WORKLOAD_MEAN_AT_WEEK_TWO):
+        wrong.append(f"the workload mean is {mean!r}, not {WORKLOAD_MEAN_AT_WEEK_TWO}")
+    return wrong
+
+
+@pytest.mark.parametrize("stream", STREAMS, ids=list(STREAMS))
+def test_an_earlier_closing_section_of_another_length_never_moves_the_cutoff(
+    report_door: ReportDoor,
+    report_api_contract: Any,
+    benchmark_cohort: Callable[..., Any],
+    stream: str,
+) -> None:
+    """C4: an eight-week section at the hero's level, week 2 closing in term week 2 — no effect.
+
+    It is in A's term, at A's level, and its week-2 window closes six weeks before
+    A's. It is not A's length, so it is not in A's population and not in the
+    cutoff: the week-2 comparison keeps the cohort's hand-computed 3.6 / 2.8 and
+    8.3 hours.
+
+    **The mutation it kills:** the length filter dropped from the cutoff (the
+    round-4 battery's C4 survivor), under which this close becomes the cutoff and
+    the cohort's rows fall out. **Its near miss** is
+    `test_an_earlier_closing_section_in_the_same_term_does_move_the_cutoff`, the
+    same early close at A's length.
+    """
+    cohort = a_cohort(report_door, report_api_contract, benchmark_cohort)
+    plant_a_section_beside(cohort, "eight-weeks", letter=ANOTHER_LENGTH_LETTER)
+    publish_every_week(cohort.world, "eight-weeks")
+    report_door.commit()
+
+    wrong = how_the_week_two_figure_differs(report_door, stream)
+    assert not wrong, (
+        f"An eight-week section's earlier week-2 close changed the six-week comparison: {wrong}. "
+        "The cutoff is taken among sections of A's length and level only."
+    )
+
+
+@pytest.mark.parametrize("stream", STREAMS, ids=list(STREAMS))
+def test_an_earlier_closing_section_at_another_level_never_moves_the_cutoff(
+    report_door: ReportDoor,
+    report_api_contract: Any,
+    benchmark_cohort: Callable[..., Any],
+    stream: str,
+) -> None:
+    """C5: a six-week `UGGR` section, week 2 closing in term week 2 — no effect.
+
+    A's length, A's term, an earlier close, and another level: not A's population
+    and not in the cutoff. The week-2 comparison keeps the cohort's figures.
+
+    **The mutation it kills:** the level filter dropped from the cutoff (the
+    battery's C5 survivor). **Its near miss** is the same-level twin,
+    `test_an_earlier_closing_section_in_the_same_term_does_move_the_cutoff`.
+    """
+    cohort = a_cohort(report_door, report_api_contract, benchmark_cohort)
+    other_level_course = cohort.world.seed(
+        COURSE_TABLE,
+        dict(cohort.spine),
+        **{COURSE_NUMBER_COLUMN: COURSE_NUMBER_FOR_LEVEL[UGGR]},
+    )
+    plant_a_section_beside(cohort, "uggr-early", letter=EARLY_LETTER, course=other_level_course)
+    publish_every_week(cohort.world, "uggr-early")
+    report_door.commit()
+
+    wrong = how_the_week_two_figure_differs(report_door, stream)
+    assert not wrong, (
+        f"A `UGGR` section's earlier week-2 close changed the `UG` comparison: {wrong}. The "
+        "cutoff is taken among sections of A's length and level only; levels match exactly."
+    )
+
+
+def test_the_cutoff_is_the_reported_sections_own_close_when_it_is_the_earliest(
+    report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
+) -> None:
+    """C6b: A counts in its own minimum — when A closes strictly first, the cutoff is A's close.
+
+    The cohort's set is planted with **no answers at all** (an empty plan), so its
+    sections have no windows and take no part in the cutoff. A's only current-term
+    peer with a week-2 window is B, a section of the hero's course starting a week
+    later, whose week-2 window closes a week after A's (*T_B*). The figures come
+    from three of the lead's prior-term sections (ten people, counted in full), so
+    they are shown whatever the current-term cutoff.
+
+    A response in B, inside B's week-2 window (after *T_A*, before *T_B*), is
+    then counted only by a cutoff later than A's own close. The correct cutoff is
+    min(*T_A*, *T_B*) = *T_A*, so it moves nothing.
+
+    **The mutation it kills:** A left out of the minimum (the battery's C6b
+    survivor) — the minimum taken over A's peers only, which is *T_B* here and
+    counts the response. **Its near miss** is the same world read before the
+    response: identical figures by construction; and the two-section test above,
+    where a peer closing at A's instant hides the mutation.
+    """
+    cohort = benchmark_cohort(report_door, minimums=report_api_contract.minimums(), plans={})
+    world = cohort.world
+    plant_a_section_beside(
+        cohort, "b", letter=SAME_LETTER, course=cohort.hero_course, weeks_later=1, ordinal="7"
+    )
+    publish_every_week(world, "b")
+    led_sections(cohort, prefix="prior-set", sections=3, people=10, term=PRIOR_TERM)
+    report_door.commit()
+
+    t_a = hero_window_close(world, report_door, REPORTED_WEEK)
+    b_opens, t_b = WINDOWS_BY_TERM_WEEK[world.term_week_of("b", REPORTED_WEEK)]
+    assert t_a < b_opens < t_b, (
+        f"B's week-{REPORTED_WEEK} window runs {b_opens.isoformat()} to {t_b.isoformat()}, and "
+        f"A's closes {t_a.isoformat()}; this test needs A to close strictly first."
+    )
+    unshown = not_shown_at_the_week(report_door)
+    assert not unshown, f"The control failed: these figures are not shown: {unshown}."
+    before = members(report_door)
+
+    answer_once(
+        cohort,
+        "b",
+        subject="e5-14-r5-c6b",
+        course_week=REPORTED_WEEK,
+        last_submitted_at=b_opens + AN_HOUR,
+    )
+    report_door.commit()
+
+    assert not moved(before, members(report_door)), (
+        f"A response in B's week-{REPORTED_WEEK} window, which closes a week after A's, moved "
+        f"{moved(before, members(report_door))} on A's report. A closes first in its population, "
+        "so the cutoff is A's own close; a later one means A was left out of the minimum."
     )
 
 
