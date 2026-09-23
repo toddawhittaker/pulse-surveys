@@ -85,8 +85,34 @@ clock in a `finally`.
 
 The drive's result is the CI run on the exit head, cited below.
 
-The `epic-exit` review's own re-run and recomputation: <<EPIC-EXIT: its
-verdict, findings or "nothing found" with its checked list>>.
+The `epic-exit` review ran on bf729fc against a stack rebuilt from that code
+and migrated to head. It re-ran the exit drive (3 of 3 passed). It recomputed
+every default-set figure by its own SQL over the raw answer rows of U5FF,
+U6WW and R5FF, and each matched the drive's literals and the served payload to
+four places. It drove the named-set refusals as the dean: a wrong-level
+member, a zero length, a malformed level and a blank name each got a 422, and a
+seven-week set was accepted under the length-is-data ruling. It found no stale
+CI tolerance.
+
+**Its one finding that needed code was HIGH: the three lines were two.** On
+the seeded world the university line equalled the comparison line at every
+week. The freeze's earliest-close cutoff is set by the U1WW and U2WW cohort,
+which has no answers, so no current-term answer counts. The university then
+reduced to the same three Spring 2026 BIOL-310 sections that make up the
+default set. The drive only counted university lines, so it could not see
+this. The rules were right and the world was too thin. A fifth prior-term
+section, `BIOL-215-U8FF`, was seeded (cb5f05f). It is a 12-week undergraduate
+section on BIOL 215, which has no lead, so it joins the hero's university but
+not its default set. The drive now requires, at every week, a university
+figure that differs from the comparison figure and equals a value measured by
+SQL over the raw rows of the four Spring 2026 12-week sections. The rebuilt
+stack passed it 3 of 3.
+
+Its other findings: SPEC, the boundary record and the hand-off were not in a
+commit at bf729fc (they landed after it, so this is resolved at the exit
+head); CI on the exit head (see below); the Merged column (filled); a local
+`.env` written before the ruling still sets 15 respondents (carried as a note
+in the hand-off); and no university-only withholding is driven (carried).
 
 **One trap for anybody driving the demo by hand**, from the `lti-oidc` review.
 Launching a prior-term placement without first setting the development clock

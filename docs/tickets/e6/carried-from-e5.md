@@ -394,5 +394,8 @@ Every source entry, in its source file's order, with what happened to it.
 | Battery on ce9df73: survivors FE09a, X1, X2 | Closed by E5-14 round 3 (each pinned) |
 | Frontend round: the hero line's scaling stroke | Carried (the trend chart's next ticket, E8 first) |
 | Frontend round: the test-edit hook misses its exemption in a worktree | Carried (a `process/` pull request) |
-| epic-exit | <<EPIC-EXIT: findings not fixed, or "none">> |
+| epic-exit (bf729fc) HIGH: the university line equalled the comparison line on the seeded world | Closed by E5-14 (cb5f05f seeds BIOL-215-U8FF; the drive asserts different, SQL-measured university figures) |
+| epic-exit LOW: a local `.env` written before the ruling keeps `BENCHMARK_MIN_RESPONDENTS_DEFAULT=15` | Carried as a note: any developer's `.env` copied before 2026-09-22 should set 10; `.env.example` already does |
+| epic-exit LOW: no university-only withholding is driven | Carried (already listed above) |
+| Gate run: `test_the_submit_path_follows_adr_0056s_taxonomy.py::test_a_submission_is_prompt_while_the_broker_is_unreachable` measured 2.95 s against its 2.5 s budget once, under a load average near 3, then passed alone and on a full rerun | Carried: E6's first ticket touching the submit path decides whether the budget measures the code or the machine. Done when the test cannot fail on load alone, or a record says why its budget is right |
 | The per-PR security review of E5-14 (`app-security` on ce9df73) | Nothing found; nothing carried |
