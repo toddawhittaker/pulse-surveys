@@ -384,7 +384,7 @@ Every source entry, in its source file's order, with what happened to it.
 | privacy-authz (final check on b2579f9): two readers pooling | Recorded as out of scope (one-reader threat model); owner confirms at the epic review |
 | Round-3 battery (22 rows; C3, B7, A3a real) | Closed by E5-14 round 4 (each pinned or recorded) |
 | Round-4 battery (22 rows; C4, C5, C6b real; C3 equivalent in practice) | Closed by E5-14 round 5; C3 recorded |
-| Round-5 battery | <<BATTERY: survivors carried, or "none" — still running>> |
+| Round-5 battery (6 rows; the term, length and level filters in `_alike_in_this_term` survived, fail-closed) | Closed by E5-14 (ea2230e pins all three); nothing carried |
 | privacy-authz (check on 0361fb3, aimed at the closure argument) HIGH: an unchecked lead atom | Closed by E5-14 round 6 (bf729fc; ADR 0179) |
 | privacy-authz (pass over round 2) MEDIUM: membership resolved live | Docstring corrected; carried, widened on b2579f9 (owner ruling, then E9) |
 | privacy-authz (pass over round 2): snapshots across terms | Carried (owner ruling at the epic review, then E9) |

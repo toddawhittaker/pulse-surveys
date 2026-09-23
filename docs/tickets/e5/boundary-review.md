@@ -440,8 +440,11 @@ the orchestrator's rulings made while the owner was away.
 
 ## The verification, in kind
 
-- The exit head: CI run <<RUN: id, status, conclusion and head SHA on the exit
-  head, with the Playwright total>>, resolved by id.
+- The exit head: a record cannot name the CI run of the commit that carries
+  it, so the run on the final exit head is resolved by id (status, conclusion
+  and head SHA) and recorded in PR #249's body. The last run before the
+  records landed, 35828315690 on e0483a9, was green in every job, the exit
+  drive included.
 - Local gates after round 6, from the attempt log: the backend suite 3902
   passed and 0 failed; the invariant pass 542 passed, with
   `check_invariants.py` and `check_invariant_assertions.py` (389) both OK;
@@ -450,8 +453,14 @@ the orchestrator's rulings made while the owner was away.
 - Batteries: ce9df73, 76 rows, 73 killed, 3 survivors (FE09a, X1, X2), all
   pinned; round 3 (d7b4561), 22 rows, 16 killed, 3 equivalent, 3 real
   survivors fed into round 4; round 4 (b2579f9), 22 rows, with C4, C5 and C6b
-  fed into round 5 and C3 recorded as equivalent in practice. Round 5:
-  <<BATTERY: rows, killed, survivors — still running>>.
+  fed into round 5 and C3 recorded as equivalent in practice. Round 5
+  (0361fb3), 6 rows: 3 killed (one only by the full suite) and 3 survivors,
+  the term, length and level filters in `_alike_in_this_term`. Each
+  survivor could only withhold more. All three are now pinned by tests in
+  `test_the_university_remainder_removes_every_default_set_its_reader_sees.py`
+  (ea2230e), and each mutation was seen killed by its own test and no other.
+  Round 6's named mutation, lead atoms unchecked, was killed by the
+  implementer's pre-fix restore: 2 red, then all 7 green.
 
 **Invariant counts, in both currencies, never compared across them.** The
 isolated CI pass's run count: **358 at the merge-base → 441 at the epic's last
