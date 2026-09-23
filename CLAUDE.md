@@ -59,20 +59,13 @@ commit in small coherent steps, subject naming the ticket (`e1/launch-flow:
 validate state and nonce on LTI launch`); open a PR into the epic branch using
 the template; then merge it as the paragraph below says.
 
-**Never merge an epic branch into `main`** — Todd's call, always, and his
-review happens at that boundary. A ticket PR merges into its epic branch
-without waiting for him, once all of the following hold: its CI run is
-completed and successful and its head SHA equals the PR's final commit; the
-PR's independent security review is recorded in the body with its findings
-resolved; and nothing about the PR is in dispute. The `merger` agent
-(`.claude/agents/merger.md`) does the mechanical merging, as a merge commit,
-one PR at a time. Two kinds of PR still wait for Todd's written approval, and
-the merger refuses them: a `process/` PR into `main`, and a ticket PR on a ⚠
-epic or touching a path in `.claude/heavy-lane-paths.md` — that is where SPEC
-§14.2's line-by-line human review happens. Never use
-an admin override, never merge while CI is failing or red, never retarget a
-PR across epics — close it and re-cut the branch. (Ticket merges were
-Todd-gated until 2026-09-22; he moved his review to the epic boundary.)
+**Never merge an epic branch into `main`** — Todd's call, always; his review
+now happens at that boundary (since 2026-09-22). A ticket PR merges into its
+epic without him under the three conditions `.claude/agents/merger.md`
+verifies; the merger refuses what still waits for Todd in writing:
+`process/` PRs, and ⚠-epic or heavy-lane-path tickets, where SPEC §14.2's
+line-by-line review lives. Never an admin override, a merge on red CI, or a
+retargeted PR — close it and re-cut the branch.
 
 ## How a ticket is built: two lanes
 
@@ -111,24 +104,15 @@ pass and treats a skip, an xfail, or an empty collection as a failure;
 deliberate PR whose subject is moving them. The threat and self-harm recall
 floor (§9.3) is a hard gate; lowering it is a safety decision and Todd's call.
 
-**Reviews are tiered so tokens go where the risk is (2026-09-22).** Four
-rules. (1) Every PR gets exactly two passes before it is marked ready:
-`spec-conformance`, and one security-shaped pass from a context that watched
-none of the work, briefed with the diff and nothing else, reading the diff
-before the ticket — `privacy-authz` when the diff touches its §4.1 surfaces,
-else `app-security` when it touches its surfaces, else one generic
-sonnet-sized security pass. (2) The other specialists (`data-model`,
-`lti-oidc`, `prompt-eval`, `a11y-copy`) fire per-PR only on a heavy-lane diff
-touching their surface. (3) The epic boundary always runs the full battery on
-Opus — `threat-model`, `epic-exit`, `invariant-coverage`,
-`adr-docs-completeness`, the four specialists, and both security passes over
-the epic head. (4) One review round plus one fix-check per PR, the stopping
-rule declared before any round two; deeper rounds wait for the boundary.
-Record findings and resolutions in the PR body, naming the head SHA the pass
-covered. A review pass goes stale the moment a fix lands on top of it: run
-the pass over the fixes, or say plainly that you stopped and why. On a ⚠
-epic agent review supplements line-by-line human review; it never replaces
-it.
+**Reviews are tiered (2026-09-22).** Every PR: `spec-conformance` plus one
+diff-picked security pass (`privacy-authz` on §4.1 surfaces, else
+`app-security` on its, else a generic sonnet-sized pass) from a fresh
+context, reading the diff before the ticket. The other specialists fire on
+heavy-lane diffs and at the epic boundary only; the boundary always runs the
+full Opus battery, both security passes included. One round plus one
+fix-check per PR; findings go in the PR body naming the head SHA covered; a
+pass a fix lands on is re-run over the fixes, or say plainly you stopped.
+On a ⚠ epic agent review supplements human review, never replaces it.
 
 **Pin dependency versions and commit lockfiles.** No floating ranges, no
 unpinned tool versions in CI. Dependabot proposes upgrades through the same
