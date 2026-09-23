@@ -65,7 +65,14 @@
 // 2026 sections (`BIOL-310-U5FF`, `-U6WW`, `-R5FF`) on the seeded stack at the
 // epic tip — not through the benchmark views, the set functions or the report
 // API — and they are transcribed here (the E5-14 boundary ledger's
-// measurements). The section codes, weeks and clocks are transcribed from the
+// measurements). **The university literals** were derived the same way, on the
+// seed at cb5f05f: SQL over the raw `answer`, `response` and `survey_window`
+// rows of the four Spring 2026 twelve-week undergraduate sections (`U5FF`,
+// `U6WW`, `R5FF` and `BIOL-215-U8FF`), taking each section's course week as the
+// order of its own windows, independent of the views, the set functions and the
+// API. They hold only while the freeze's earliest-close cutoff admits no
+// current-term answer on the seeded world, which `beforeAll`'s premise guards.
+// The section codes, weeks and clocks are transcribed from the
 // seeded calendar; the governed words from the copy modules, as
 // `instructor-report-benchmarks.spec.ts` transcribes them.
 //
@@ -243,6 +250,39 @@ const DEFAULT_SET: Readonly<
     workloadMedian: 9.5,
     workloadOnPage: ['9.5 h', '9.4 h'],
   },
+};
+
+/**
+ * `BIOL-310-R7FF`'s **university** figures at `READ_CLOCK`, by course week.
+ *
+ * **Measured, not computed here or by the code under test**, on the seed at
+ * cb5f05f: SQL over the raw `answer`, `response` and `survey_window` rows of the
+ * four Spring 2026 twelve-week undergraduate sections `BIOL-310-U5FF`, `-U6WW`,
+ * `-R5FF` and `BIOL-215-U8FF` (4 sections, 73 to 77 people each week), with the
+ * course week taken as the order of each section's own windows — independent of
+ * the benchmark views, the set functions and the report API. That population is
+ * the whole university on the seeded world only because the freeze's
+ * earliest-close cutoff admits no current-term answer there, which `beforeAll`'s
+ * premise guards. Rounded to four places and compared to four places, like the
+ * default set.
+ */
+const UNIVERSITY: Readonly<
+  Record<
+    number,
+    {
+      readonly instructor: number;
+      readonly course: number;
+      readonly workloadMean: number;
+      readonly workloadMedian: number;
+    }
+  >
+> = {
+  1: { instructor: 4.1316, course: 3.9737, workloadMean: 8.7632, workloadMedian: 9 },
+  2: { instructor: 4.0, course: 3.8219, workloadMean: 9.274, workloadMedian: 9.5 },
+  3: { instructor: 4.2329, course: 4.0548, workloadMean: 9.2603, workloadMedian: 9.5 },
+  4: { instructor: 4.0667, course: 4.1467, workloadMean: 8.94, workloadMedian: 9 },
+  5: { instructor: 3.961, course: 3.8052, workloadMean: 8.974, workloadMedian: 9.5 },
+  6: { instructor: 3.9474, course: 3.8816, workloadMean: 9.4276, workloadMedian: 9.5 },
 };
 
 // Four decimal places: the precision the figures above were measured to.
@@ -546,8 +586,9 @@ test('the hero report shows the prior-term default set on every week from 6 down
       await expect(page).toHaveURL(new RegExp(`[?&]week=${String(week)}(&|$)`));
     }
     const expected = DEFAULT_SET[week];
-    if (expected === undefined) {
-      throw new Error(`No measured default-set figures for course week ${String(week)}.`);
+    const universityExpected = UNIVERSITY[week];
+    if (expected === undefined || universityExpected === undefined) {
+      throw new Error(`No measured figures for course week ${String(week)}.`);
     }
 
     // The payload first.
@@ -589,14 +630,31 @@ test('the hero report shows the prior-term default set on every week from 6 down
       // outside the default set the university reduced to the same three
       // `BIOL-310` sections and equalled the comparison at every week. The
       // exit-demo fix adds `BIOL-215-U8FF` (no lead: university, not default
-      // set). Not yet a literal: the university figures are measured by SQL
-      // after the seed lands, and are asserted in a second pass.
+      // set). The university figures are literals measured by SQL on the seed
+      // (`UNIVERSITY`), and the "differs" assertion is kept beside them: it says
+      // what went wrong in words when the literal alone would say only "wrong".
       const university = pointFor(benchmark?.university, week);
       expect(
         university !== undefined && reportable(university.mean),
         `Course week ${String(week)}'s university point for the ${stream} stream is ` +
           `${JSON.stringify(university)}; three lines per panel needs it served.`,
       ).toBe(true);
+      expect(
+        university?.mean.figure,
+        `Course week ${String(week)}'s university ${stream} mean is not the figure measured over ` +
+          'the four Spring 2026 twelve-week undergraduate sections. A different number means the ' +
+          'university population is not exactly U5FF, U6WW, R5FF and U8FF at this cutoff — a ' +
+          'current-term answer counted, or a prior-term section fell out.',
+      ).toBeCloseTo(universityExpected[stream], MEASURED_PLACES);
+      for (const point of benchmark?.university.points ?? []) {
+        const earlier = UNIVERSITY[point.course_week];
+        if (earlier === undefined || point.course_week > week) continue;
+        expect(
+          point.mean.figure,
+          `On course week ${String(week)}'s report, the ${stream} university point for course ` +
+            `week ${String(point.course_week)} is not that week's measured figure.`,
+        ).toBeCloseTo(earlier[stream], MEASURED_PLACES);
+      }
       expect(
         university?.mean.figure,
         `Course week ${String(week)}'s university ${stream} mean equals the default-set mean ` +
@@ -618,10 +676,20 @@ test('the hero report shows the prior-term default set on every week from 6 down
     expect(workload?.comparison.mean.figure).toBeCloseTo(expected.workloadMean, MEASURED_PLACES);
     expect(workload?.comparison.median.figure).toBeCloseTo(expected.workloadMedian, MEASURED_PLACES);
     expect(
-      workload !== undefined && reportable(workload.university.mean),
-      `Course week ${String(week)}'s university workload mean is ` +
-        `${JSON.stringify(workload?.university.mean)}.`,
+      workload !== undefined &&
+        reportable(workload.university.mean) &&
+        reportable(workload.university.median),
+      `Course week ${String(week)}'s university workload is ` +
+        `${JSON.stringify(workload?.university)}.`,
     ).toBe(true);
+    expect(workload?.university.mean.figure).toBeCloseTo(
+      universityExpected.workloadMean,
+      MEASURED_PLACES,
+    );
+    expect(workload?.university.median.figure).toBeCloseTo(
+      universityExpected.workloadMedian,
+      MEASURED_PLACES,
+    );
     expect(
       workload?.university.mean.figure,
       `Course week ${String(week)}'s university workload mean equals the default-set workload ` +
