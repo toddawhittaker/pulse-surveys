@@ -1,9 +1,15 @@
 # 0165 — The benchmark set figures are computed behind a definer of their own, the term axis is keyed by a start date, and a cohort week keeps its row when nobody reports hours
 
 **Status:** Accepted — E5-03; amended 2026-09-13 (E5-04); amended 2026-09-22 (E5-14).
+Since E5-14 the two set functions take per-week cutoffs (`_v003`,
+[ADR 0178](0178-a-published-benchmark-week-is-frozen-at-the-earliest-close-in-its-population.md)), and
+the typed wrappers in `views_sql/queries.py` are deleted:
+`app/services/benchmarks.py` is the only module that names the set functions,
+and a marked sweep keeps it so.
 
 > **Amendment, 2026-09-22 (E5-14).** The owner ruled that a published comparison
-> figure freezes at the close of the reported section's own week (ADR 0178). A
+> figure freezes at its week's close (ADR 0178; the cutoff E5-14 settled on is
+> the earliest close among the sections alike in the reported term). A
 > set function can only apply that cutoff if it can see two more facts: when each
 > response's own survey window closed, and when the response was last submitted.
 > So `pulse_benchmark_definer` gains four `SELECT` pairs, column-grain, in

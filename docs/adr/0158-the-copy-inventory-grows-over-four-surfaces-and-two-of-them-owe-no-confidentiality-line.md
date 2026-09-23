@@ -133,7 +133,7 @@ be a second copy of the product's promise that no count could see.
 
 ## Consequences
 
-The inventory holds four surfaces and ten prefixes — **five and fifteen since
+The inventory holds four surfaces and ten prefixes — **five and eleven since
 E5-13**, which added the comparison-set screen on this record's own reading
 (ADR 0176) — and every collected string is swept for item 4's vocabulary — the report's included, which is what E4-12
 existed to achieve. The report's copy modules had to move into
