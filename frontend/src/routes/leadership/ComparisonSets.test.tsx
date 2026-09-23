@@ -65,6 +65,7 @@ const SAVE = 'Save this set';
 const COUNTING = 'Counting what this set reaches…';
 const PREVIEW_UNAVAILABLE = 'What this set reaches could not be counted just now.';
 const SET_SAVED = 'Set saved.';
+const PREVIEW_BOTH = '3 courses, 11 sections across retained terms';
 const SET_DELETED = 'Set deleted.';
 const FORM_HEADING = 'Define a comparison set';
 const CANCEL = 'Cancel';
@@ -607,6 +608,57 @@ describe('focus and status when controls come and go', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: CANCEL }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: DEFINE }));
+    });
+  });
+
+  it('puts focus back on "Define a set" even when another render lands just before the cancel', async () => {
+    // The cause of a flaky run of the case above. A preview answer arriving
+    // re-renders the page; if the reader cancels after that render committed
+    // and before its effects ran, React runs those stale effects first. A focus
+    // request read by an after-every-render passive effect was consumed there,
+    // while the form still stood and "Define a set" did not exist, and the
+    // render that brought the button back found no request: focus fell to the
+    // body. This case lands the preview's render and cancels in the gap.
+    let answerPreview: (answer: Response) => void = () => undefined;
+    serving({
+      [COMPARISON_SETS_PATH]: () => json(200, { sets: [A_SET_SUMMARY] }),
+      [COMPARISON_SET_OPTIONS_PATH]: () => json(200, THE_OPTIONS),
+      [comparisonSetPreviewPath(A_SET_SUMMARY.id)]: () =>
+        new Promise<Response>((resolve) => {
+          answerPreview = resolve;
+        }) as unknown as Response,
+    });
+    mountAt('/app/leadership/comparison-sets');
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+
+    fireEvent.click(screen.getByRole('button', { name: DEFINE }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole('heading', { level: 2, name: FORM_HEADING }),
+      );
+    });
+
+    // The preview lands, and the click comes in the gap. A MutationObserver
+    // answers as a microtask straight after the commit's DOM mutation, before
+    // React's scheduler runs that commit's passive effects in a later task.
+    // `findByText` would not do: it drains a timer before returning, and
+    // whether that timer runs before or after the scheduler's task is exactly
+    // the ordering that made the case above flaky.
+    const previewCommitted = new Promise<void>((resolve) => {
+      const watcher = new MutationObserver(() => {
+        if (document.body.textContent.includes(PREVIEW_BOTH)) {
+          watcher.disconnect();
+          resolve();
+        }
+      });
+      watcher.observe(document.body, { childList: true, subtree: true, characterData: true });
+    });
+    answerPreview(json(200, A_PREVIEW_WITH_BOTH_COUNTS));
+    await previewCommitted;
+    fireEvent.click(screen.getByRole('button', { name: CANCEL }));
+
     await waitFor(() => {
       expect(document.activeElement).toBe(screen.getByRole('button', { name: DEFINE }));
     });
