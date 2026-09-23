@@ -1,6 +1,6 @@
 ---
 name: prompt-eval
-description: Guards the eval gate. Were eval cases added for changed behavior, and were floors quietly lowered? Fires on ai/prompts, ai/contracts.py, and tests/evals. Always run before an epic merges to main.
+description: Guards the eval gate. Were eval cases added for changed behavior, and were floors quietly lowered? Fires per-PR only on a heavy-lane diff touching ai/prompts, ai/contracts.py, or tests/evals (CLAUDE.md review tiers, 2026-09-22). Always run before an epic merges to main.
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, Bash
