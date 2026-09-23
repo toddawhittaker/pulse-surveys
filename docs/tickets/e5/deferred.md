@@ -292,7 +292,8 @@ keep codes unique and why that is acceptable.
 
 **Closed by E5-14 (2026-09-22), by a sentence.** The development worlds keep
 section codes unique across both terms, and that is why the recount's contract
-stands. The prior term's four codes (`U5FF`, `U6WW`, `R5FF`, `E5WW`) carry
+stands. The prior term's five codes (`U5FF`, `U6WW`, `R5FF`, `E5WW`, and
+`U8FF` since E5-14's exit fix) carry
 ordinals no other seeded section uses, as `mock-lms/app/seed.py` says where it
 declares them, and no seeded current-term section shares one; the recount is
 handed only this file's own codes. That is acceptable for what the recount is:

@@ -244,8 +244,8 @@ Two things about it are worth knowing before debugging anything:
 
 ### What it is seeded with
 
-Eight sections, each with a roster of its own: four in the current term, Fall
-2026, and four in the term before it, Spring 2026. Small on purpose: the full
+Nine sections, each with a roster of its own: four in the current term, Fall
+2026, and five in the term before it, Spring 2026. Small on purpose: the full
 demo institution is E0-17's and lives in Pulse's own database.
 
 | Section | Term | Course | Modality | Roster |
@@ -258,12 +258,16 @@ demo institution is E0-17's and lives in Pulse's own database.
 | `BIOL-310-U6WW` | Spring 2026 | Molecular Genetics | online, 12 weeks | 21 members |
 | `BIOL-310-R5FF` | Spring 2026 | Molecular Genetics | face-to-face, 12 weeks | 21 members |
 | `BIOL-215-E5WW` | Spring 2026 | Cell Biology | online, 6 weeks | 13 members — the instructor and twelve students |
+| `BIOL-215-U8FF` | Spring 2026 | Cell Biology | face-to-face, 12 weeks | 21 members |
 
 `BIOL-310-R7FF` is the section big enough for a week of answers to read like a
-real week (E4-20); `scripts/seed_demo_story.py` writes its answers. The four
+real week (E4-20); `scripts/seed_demo_story.py` writes its answers. The five
 Spring 2026 sections are the benchmark world (E5-12, ADR 0167): the three
-12-week `BIOL-310` sections are `BIOL-310-R7FF`'s comparison set, and the lone
-6-week section is a cohort too thin to show. The runbook that fills them is
+12-week `BIOL-310` sections are `BIOL-310-R7FF`'s comparison set;
+`BIOL-215-U8FF` is a 12-week section on BIOL 215, which has no lead, so it is in
+`BIOL-310-R7FF`'s university line and not its comparison set, and it is why the
+two lines differ (E5-14); and the lone 6-week section is a cohort too thin to
+show. The runbook that fills them is
 the last subsection of "The demo institution" below, "A prior term with survey
 answers".
 
@@ -278,14 +282,14 @@ launch that works:
 
 | Launch as | Role | Sections | What they are for |
 |---|---|---|---|
-| `mock-lms-user-instructor` | Instructor | all eight | every instructor surface |
+| `mock-lms-user-instructor` | Instructor | all nine | every instructor surface |
 | `mock-lms-user-learner` | Learner | the first three | every student surface |
 | `mock-lms-user-dean` | no Instructor role | `MATH-140-E1FF` | SPEC §7.3's leadership limb, which is authorized by the launching person's own role in Pulse and never by a claim |
 
 The dean is in one section rather than all three because `NURS-8100-Q2FF`'s five
 members are exactly one page, and that boundary is what a paging test is written
 against. He is a launchable person and not a roster fixture. The shared learner
-is in none of the other five: a fourth open section would collide with the
+is in none of the other six: a fourth open section would collide with the
 student-survey suites, and a prior term's sections are nobody's current work.
 
 **Before launching a Spring 2026 section, set the development clock to that
@@ -574,7 +578,7 @@ whole classes of bug look like correct answers.
 - **Spring 2026 before it, with a start-letter map of its own.** Benchmarks
   compare against prior terms (§5.1), so there has to be one. Its dates are its
   own Mondays, not Fall's copied back. The seed writes no Spring section; the
-  mock platform's four arrive by launch.
+  mock platform's five arrive by launch.
 - **An assistant dean between chairs and a dean.** Scoped to the same college
   node as the dean, with two chairs reporting through them, a third reporting
   straight to the dean, and a course of their own in the one department they do
@@ -618,7 +622,7 @@ an address that resolves nowhere, so that nothing in this repository trusts
 
 ### A prior term with survey answers, for benchmarks
 
-`scripts/seed_benchmark_history.py` fills the four Spring 2026 sections with a
+`scripts/seed_benchmark_history.py` fills the five Spring 2026 sections with a
 term of survey answers, so that `BIOL-310-R7FF`'s comparison lines have
 something to draw and the thin 6-week cohort has too little (ADR 0167). The
 order matters, and step 2 cannot move: the roster sync stamps each enrollment
@@ -628,7 +632,7 @@ at today's date enrolls its students after their term ended.
 1. `make up`, `make migrate` and `make seed`.
 2. For each Spring 2026 section, set the development clock (the `/dev`
    console) to that section's own first day, then launch it from the mock LMS
-   as `mock-lms-user-instructor`. The two `U` sections and the `E` section
+   as `mock-lms-user-instructor`. The three `U` sections and the `E` section
    begin on the term's first Monday and the `R` section three weeks later; read
    the dates off `/dev` or the `start_letter_map` table.
 3. Derive the survey windows, which are a scheduled job's output:
