@@ -107,9 +107,8 @@ floor (§9.3) is a hard gate; lowering it is a safety decision and Todd's call.
 diff-picked security pass (`privacy-authz` on §4.1 surfaces, else
 `app-security` on its, else a generic sonnet-sized pass) from a fresh
 context, diff before ticket. Other specialists: heavy-lane diffs and the
-epic boundary only; the boundary runs the full Opus battery. One round and
-one fix-check per PR; findings in the PR body name the head SHA; a pass a
-fix lands on is re-run. On ⚠ epics it supplements, never replaces, humans.
+epic boundary only, which runs the full Opus battery. One round and one
+fix-check per PR; findings name the head SHA; a fixed-over pass re-runs.
 
 **Pin dependency versions and commit lockfiles.** No floating ranges, no
 unpinned tool versions in CI. Dependabot proposes upgrades through the same
