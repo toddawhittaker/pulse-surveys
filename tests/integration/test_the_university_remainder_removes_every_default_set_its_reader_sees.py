@@ -151,12 +151,16 @@ def the_reviewers_world(
     *,
     z_sections: int,
     z_people: int,
+    l2_sections: int | None = None,
+    l2_people: int | None = None,
 ) -> Any:
-    """A (L1), S2 (L2) both taught by p; L2's three sections and ten people; Z unled.
+    """A (L1), S2 (L2) both taught by p; L2's other sections; Z unled.
 
     L1's other sections are the round-1 cohort set (three sections, ten people
-    at week 2). `z_sections` and `z_people` size the unled remainder; zero of
-    each leaves it out. Answers S2's section id.
+    at week 2). L2's other sections default to both minimums; `l2_sections` and
+    `l2_people` size them otherwise (round 6's lead atom). `z_sections` and
+    `z_people` size the unled remainder; zero of each leaves it out. Answers S2's
+    section id.
     """
     cohort = plant(door, minimums=contract.minimums())
     world = cohort.world
@@ -167,8 +171,8 @@ def the_reviewers_world(
     second_lead_sections = answered_sections(
         cohort,
         prefix="l2",
-        sections=minimums[contract.minimum_sections],
-        people=minimums[contract.minimum_respondents],
+        sections=minimums[contract.minimum_sections] if l2_sections is None else l2_sections,
+        people=minimums[contract.minimum_respondents] if l2_people is None else l2_people,
         led=False,
     )
     world.lead(SECOND_LEAD, S2, *second_lead_sections)
@@ -302,4 +306,120 @@ def test_an_unled_remainder_at_both_minimums_keeps_the_line(
     assert not unshown, (
         f"These university members are not shown: {unshown}. The remainder after the reader's "
         "own sections and both default sets is three sections and ten people."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Round 6: every lead atom is itself a university remainder.
+#
+# The privacy-authz closure-argument check on 0361fb3 found, and verified, that
+# the university seal never checked the lead atoms themselves. The world: p
+# teaches A (L1's other sections: three and ten people) and S2 (L2's other
+# section: one, with one student), and nothing else of this length and level has
+# answers. S2's default set is withheld — (b_p) sees to that — but the
+# university line is shown on both reports, and U - p's own sections - D(A) is
+# L2's lone student. The closure argument's atoms of kind (ii) — each lead's
+# sections minus p's own — have to be empty or meet both minimums for the
+# *university* figure too, not only for their own default-set figure.
+# ---------------------------------------------------------------------------
+
+
+def a_thin_second_lead(door: ReportDoor, contract: Any, plant: Callable[..., Any]) -> Any:
+    """The round-6 world: L2's other sections are one section with one student; no Z."""
+    return the_reviewers_world(
+        door, contract, plant, z_sections=0, z_people=0, l2_sections=1, l2_people=1
+    )
+
+
+def test_a_thin_lead_atom_withholds_the_university_line_on_the_first_report(
+    report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
+) -> None:
+    """A's report: L2's atom is one student, and U - own - D(A) is that student — withheld.
+
+    **The control, in the same payload:** A's own default-set figures (L1's
+    three sections, ten people) are shown.
+
+    **The mutation it kills:** the lead atoms not checked as university
+    remainders — the round-5 code, under which (c_p) finds U - own - D(A) - D(S2)
+    empty and shows the line. **Its near misses** are the two twins below: L2's
+    atom at both minimums, and L2's atom with no answers at all.
+    """
+    a_thin_second_lead(report_door, report_api_contract, benchmark_cohort)
+
+    comparison = figures_of(report_door, COMPARISON_POPULATION)
+    university = figures_of(report_door, UNIVERSITY_POPULATION)
+
+    unshown = [where for where, figure in comparison.items() if not is_shown(figure)]
+    assert not unshown, f"The control failed: A's default-set figures are not shown: {unshown}."
+    leaked = {where: figure for where, figure in university.items() if not is_withheld(figure)}
+    assert not leaked, (
+        f"A's university members are shown: {leaked}. The reader sees A's default set on this "
+        "report, and the university minus her own sections and that set is L2's one student."
+    )
+
+
+def test_a_thin_lead_atom_withholds_the_university_line_on_the_second_report(
+    report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
+) -> None:
+    """S2's report, the same session: withheld too — the same atom is recoverable from here.
+
+    **The control, in the same payload:** S2's own default-set figures are
+    withheld — L2's atom is one student, so (b_p) refuses them — which is the
+    proof the thin atom is in this world as described. Its twins below are what
+    rule out a route that withholds everything.
+
+    **The mutation it kills:** the same.
+    """
+    s2_id = a_thin_second_lead(report_door, report_api_contract, benchmark_cohort)
+
+    comparison = figures_of(report_door, COMPARISON_POPULATION, section_id=s2_id)
+    university = figures_of(report_door, UNIVERSITY_POPULATION, section_id=s2_id)
+
+    shown = [where for where, figure in comparison.items() if not is_withheld(figure)]
+    assert not shown, (
+        f"The control failed: S2's default-set figures are not withheld: {shown}. L2's other "
+        "sections hold one student, so this world is not the one this test describes."
+    )
+    leaked = {where: figure for where, figure in university.items() if not is_withheld(figure)}
+    assert not leaked, (
+        f"S2's university members are shown: {leaked}. Read beside A's report's default set, "
+        "the university minus the reader's own sections isolates L2's one student."
+    )
+
+
+def test_an_empty_lead_atom_leaves_the_university_line_shown(
+    report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
+) -> None:
+    """Twin: L2's other section has no answers — an empty atom passes — shown on both reports.
+
+    The twin with L2's atom at both minimums is
+    `test_without_the_unled_section_the_remainder_is_empty_and_the_line_is_shown`
+    above, which is exactly that world (L2 at both minimums, no Z) and is not
+    duplicated here.
+
+    **Green on 0361fb3 and after.** **The mutation it kills:** an atom check that
+    treats an empty atom as below the minimums, which withholds the university
+    line from every reader whose second lead has not had a week answered yet.
+    """
+    s2_id = the_reviewers_world(
+        report_door,
+        report_api_contract,
+        benchmark_cohort,
+        z_sections=0,
+        z_people=0,
+        l2_sections=1,
+        l2_people=0,
+    )
+
+    unshown = [
+        f"{report}: {where}"
+        for report, section_id in (("A", None), ("S2", s2_id))
+        for where, figure in figures_of(
+            report_door, UNIVERSITY_POPULATION, section_id=section_id
+        ).items()
+        if not is_shown(figure)
+    ]
+    assert not unshown, (
+        f"These university members are not shown: {unshown}. L2's other section has no answers, "
+        "so its atom is empty, and the rest of the university is L1's three sections and ten people."
     )
