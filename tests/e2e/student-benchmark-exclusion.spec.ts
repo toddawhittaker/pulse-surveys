@@ -22,7 +22,8 @@
 //     report for `BIOL-215-R3WW`, which is a section the seeded learner is
 //     enrolled in. So the same section, in the same world, at the same minute,
 //     shows its instructor the comparison vocabulary (as suppression notices —
-//     its cohort is too thin for a line) and shows its student none of it. That
+//     its default set is empty, because `BIOL 215` has no lead in
+//     `scripts/seed.py`) and shows its student none of it. That
 //     is the ticket's "the same world that shows an instructor three lines shows
 //     the student two" at the grain of one section;
 //   - **the value**: one comparison figure is read off the hero report's own
@@ -108,8 +109,10 @@ const HERO = {
 };
 
 // **The section that is both an instructor report and a student screen.**
-// `BIOL-215-R3WW` is alone in its cohort, so its instructor report carries the
-// comparison members as suppression notices rather than lines — and the seeded
+// `BIOL-215-R3WW`'s default comparison set is empty — its course, `BIOL 215`,
+// has no lead in `scripts/seed.py`, and SPEC §5.1 draws the set from "the same
+// Lead Faculty's courses" — so its instructor report carries the comparison
+// members as suppression notices rather than lines — and the seeded
 // learner is enrolled in it. It is the second control and one of the two
 // surfaces swept.
 const ALONE = {
@@ -186,7 +189,7 @@ const SWEPT_TERMS: readonly string[] = [
   // The trend legend and its two suppression sentences —
   // `frontend/src/copy/instructorReportTrendCopy.ts`.
   COMPARISON_LEGEND,
-  "no line this week",
+  "no line on this chart",
   "The set behind it is too small to report on",
   // The workload columns and their withheld treatment —
   // `frontend/src/copy/instructorReportStatCopy.ts` and
@@ -238,7 +241,7 @@ const CANARY_ON_THE_HERO: readonly string[] = [
 /**
  * What the suppressed report must render — the other half of the vocabulary.
  *
- * `BIOL-215-R3WW` is alone in its cohort, so SPEC §4.1 item 7's treatments are
+ * `BIOL-215-R3WW`'s default set is empty, so SPEC §4.1 item 7's treatments are
  * what its comparison members become. Between this list and the hero's, every
  * phrase in `SWEPT_TERMS` is shown to be findable except three: `Median hours,
  * university` (the cells are asserted as a pair, and the mean is enough to prove
@@ -251,7 +254,7 @@ const CANARY_ON_THE_HERO: readonly string[] = [
  */
 const CANARY_ON_THE_SUPPRESSED: readonly string[] = [
   COMPARISON_LEGEND,
-  "no line this week",
+  "no line on this chart",
   "The set behind it is too small to report on",
   "Not shown",
   "The set behind this figure is too small to report on",
@@ -563,11 +566,12 @@ async function theInstructorsBenchmarkPages(
   expect(
     withheld,
     `The sweep did not find ${JSON.stringify(withheld)} in ${ALONE.label}'s instructor report. ` +
-      "That section is alone in its cohort, so SPEC §4.1 item 7 has its comparison members " +
-      "rendered as the withheld treatments — and it is the section the learner swept below is " +
+      "That section's default set is empty (its course has no lead), so SPEC §4.1 item 7 has " +
+      "its comparison members rendered as the withheld treatments — and it is the section the " +
+      "learner swept below is " +
       'enrolled in, which is what makes "this instructor sees it, this student does not" a ' +
       "statement about one section rather than about two different ones. **A red here is this " +
-      "file or the world**: either the cohort is no longer thin, or the copy has been respelled.",
+      "file or the world**: either the default set is no longer empty, or the copy has been respelled.",
   ).toEqual([]);
 
   return { needle, spellings };
