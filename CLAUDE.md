@@ -57,13 +57,14 @@ For every unit of work, in order: confirm the epic branch (create from `main`
 if absent); cut the ticket branch from it — never work on the epic branch;
 commit in small coherent steps, subject naming the ticket (`e1/launch-flow:
 validate state and nonce on LTI launch`); open a PR into the epic branch using
-the template; stop and wait for Todd.
+the template; then merge it as the paragraph below says.
 
-**Never merge an epic branch into `main`** — Todd's call, always. A ticket PR
-may be merged into its epic branch only after Todd approves it in writing in
-the conversation; his approval is the trigger, never your own assessment. Never
-use an admin override, never merge while CI is failing or red, never retarget a
-PR across epics — close it and re-cut the branch.
+**Never merge an epic branch into `main`** — Todd's call, always; his review
+now happens at that boundary (2026-09-22). A ticket PR merges into its epic
+without him under the three conditions `.claude/agents/merger.md` verifies;
+the merger refuses what still waits for Todd: `process/` PRs, and ⚠-epic or
+heavy-lane-path tickets, where SPEC §14.2's line-by-line review lives. Never
+an admin override, a red-CI merge, or a retargeted PR — close and re-cut.
 
 ## How a ticket is built: two lanes
 
@@ -102,13 +103,12 @@ pass and treats a skip, an xfail, or an empty collection as a failure;
 deliberate PR whose subject is moving them. The threat and self-harm recall
 floor (§9.3) is a hard gate; lowering it is a safety decision and Todd's call.
 
-**Every pull request gets an independent security review before it is marked
-ready** (§14.2 item 3), from a context that watched none of the work — an
-`app-security` subagent briefed with the diff and nothing else, reading the
-diff before the ticket. Record the findings and their resolutions in the PR
-body. A review pass goes stale the moment a fix lands on top of it: run the
-pass over the fixes, or say plainly that you stopped and why. On a ⚠ epic it
-supplements line-by-line human review; it never replaces it.
+**Reviews are tiered (2026-09-22).** Every PR: `spec-conformance` plus one
+diff-picked security pass (`privacy-authz` on §4.1 surfaces, else
+`app-security` on its, else a generic sonnet-sized pass) from a fresh
+context, diff before ticket. Other specialists: heavy-lane diffs and the
+epic boundary only, which runs the full Opus battery. One round and one
+fix-check per PR; findings name the head SHA; a fixed-over pass re-runs.
 
 **Pin dependency versions and commit lockfiles.** No floating ranges, no
 unpinned tool versions in CI. Dependabot proposes upgrades through the same
