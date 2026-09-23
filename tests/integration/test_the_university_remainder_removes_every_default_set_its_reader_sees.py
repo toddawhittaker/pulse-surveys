@@ -52,6 +52,13 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from fixtures.benchmark_views import (
+    COURSE_NUMBER_COLUMN,
+    COURSE_NUMBER_FOR_LEVEL,
+    COURSE_TABLE,
+    PRIOR_TERM,
+    UGGR,
+)
 from fixtures.report_api import ReportDoor
 from fixtures.report_benchmarks import (
     COMPARISON_POPULATION,
@@ -153,14 +160,16 @@ def the_reviewers_world(
     z_people: int,
     l2_sections: int | None = None,
     l2_people: int | None = None,
+    also: Callable[[PlantedBenchmarkCohort], None] | None = None,
 ) -> Any:
     """A (L1), S2 (L2) both taught by p; L2's other sections; Z unled.
 
     L1's other sections are the round-1 cohort set (three sections, ten people
     at week 2). L2's other sections default to both minimums; `l2_sections` and
     `l2_people` size them otherwise (round 6's lead atom). `z_sections` and
-    `z_people` size the unled remainder; zero of each leaves it out. Answers S2's
-    section id.
+    `z_people` size the unled remainder; zero of each leaves it out. `also`, when
+    given, plants more of the world before the commit (the round-6 addendum's
+    unlike second section). Answers S2's section id.
     """
     cohort = plant(door, minimums=contract.minimums())
     world = cohort.world
@@ -180,6 +189,8 @@ def the_reviewers_world(
 
     if z_sections:
         answered_sections(cohort, prefix="z", sections=z_sections, people=z_people, led=False)
+    if also is not None:
+        also(cohort)
     door.commit()
     return world.section_id(S2)
 
@@ -421,5 +432,145 @@ def test_an_empty_lead_atom_leaves_the_university_line_shown(
     ]
     assert not unshown, (
         f"These university members are not shown: {unshown}. L2's other section has no answers, "
-        "so its atom is empty, and the rest of the university is L1's three sections and ten people."
+        "so its atom is empty, and the rest of the university is L1's three sections and ten "
+        "people."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Round 6 addendum: a section of p's that is *not* alike A brings no atom.
+#
+# The round-5 battery on 0361fb3 found three survivors in
+# `benchmarks._alike_in_this_term` — the sections of p's that count as alike A for
+# the university remainders: dropping its term filter, its length filter, or its
+# level filter each survived. Each only withholds more, so none leaks, but each is
+# untested over-withholding. In each world below p also teaches S', which differs
+# from A in exactly one way, in a course led by L3 whose other section T is S''s
+# kind and has one student — a thin atom. S' is not alike A, so L3's atom is not
+# one of A's university remainders, and A's university line stays shown. With the
+# filter dropped, S' counts as alike, L3's thin atom is checked, and the line is
+# withheld.
+#
+# The rest of each world is the round-5 twin whose line is shown with an unled
+# remainder at both minimums (`test_an_unled_remainder_at_both_minimums_keeps_the_line`):
+# in the other-term world, T is A's length and level and so *is* in A's university
+# population, and that remainder is what keeps U - own - D(A) - D(S2) above the
+# minimums once T's student is in it.
+# ---------------------------------------------------------------------------
+
+THIRD_LEAD = "third-lead"
+
+
+def an_unlike_second_section(
+    door: ReportDoor, *, letter: str, term: str | None = None, level: str | None = None
+) -> Callable[[PlantedBenchmarkCohort], None]:
+    """S' (taught by p) and T (one student), both of one kind, on courses led by L3.
+
+    `letter` and `term` set the kind's length and term (the start-letter map of
+    that term); `level` puts both on courses at another level, seeded here under
+    the cohort's spine. Everything not named stays A's.
+    """
+
+    def plant(cohort: PlantedBenchmarkCohort) -> None:
+        world = cohort.world
+        where = {} if term is None else {"term": term}
+
+        def a_course() -> Any:
+            if level is None:
+                return None
+            return world.seed(
+                COURSE_TABLE,
+                dict(cohort.spine),
+                **{COURSE_NUMBER_COLUMN: COURSE_NUMBER_FOR_LEVEL[level]},
+            )
+
+        for label in ("s-prime", "t"):
+            course = a_course()
+            plant_a_section_beside(cohort, label, letter=letter, led=False, course=course, **where)
+        world.lead(THIRD_LEAD, "s-prime", "t")
+        teach(door, world.section_id("s-prime"))
+        answer_once(cohort, "t", subject="e5-14-r6-thin-atom", course_week=REPORTED_WEEK)
+
+    return plant
+
+
+def the_first_reports_unshown_university_members(
+    door: ReportDoor, contract: Any, plant: Callable[..., Any], also: Any
+) -> list[str]:
+    """Build the world with `also` and answer A's university members that are not shown."""
+    minimums = contract.minimums()
+    the_reviewers_world(
+        door,
+        contract,
+        plant,
+        z_sections=minimums[contract.minimum_sections],
+        z_people=minimums[contract.minimum_respondents],
+        also=also,
+    )
+    return [
+        where
+        for where, figure in figures_of(door, UNIVERSITY_POPULATION).items()
+        if not is_shown(figure)
+    ]
+
+
+def test_a_section_of_another_term_brings_no_lead_atom_to_the_university_line(
+    report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
+) -> None:
+    """(1) S' is a prior-term six-week section at A's level; L3's other one has one student.
+
+    "Alike" is taken in A's term. **The mutation it kills:** the term filter
+    dropped from `_alike_in_this_term` (a round-5 battery survivor), under which
+    L3's thin atom is checked and A's university line withheld.
+    """
+    unshown = the_first_reports_unshown_university_members(
+        report_door,
+        report_api_contract,
+        benchmark_cohort,
+        an_unlike_second_section(report_door, letter="E", term=PRIOR_TERM),
+    )
+    assert not unshown, (
+        f"A's university members {unshown} are not shown. The reader's other section S' is in "
+        "another term, so it is not alike A, and its lead's one-student atom is not one of A's "
+        "university remainders."
+    )
+
+
+def test_a_section_of_another_length_brings_no_lead_atom_to_the_university_line(
+    report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
+) -> None:
+    """(2) S' is an eight-week section in A's term at A's level; L3's other has one student.
+
+    **The mutation it kills:** the length filter dropped from `_alike_in_this_term`.
+    """
+    unshown = the_first_reports_unshown_university_members(
+        report_door,
+        report_api_contract,
+        benchmark_cohort,
+        an_unlike_second_section(report_door, letter="X"),
+    )
+    assert not unshown, (
+        f"A's university members {unshown} are not shown. The reader's other section S' runs "
+        "eight weeks, so it is not alike A, and its lead's one-student atom is not one of A's "
+        "university remainders."
+    )
+
+
+def test_a_section_at_another_level_brings_no_lead_atom_to_the_university_line(
+    report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
+) -> None:
+    """(3) S' is a six-week `UGGR` section in A's term; L3's other `UGGR` one has one student.
+
+    **The mutation it kills:** the level filter dropped from `_alike_in_this_term`.
+    """
+    unshown = the_first_reports_unshown_university_members(
+        report_door,
+        report_api_contract,
+        benchmark_cohort,
+        an_unlike_second_section(report_door, letter=SAME_LETTER, level=UGGR),
+    )
+    assert not unshown, (
+        f"A's university members {unshown} are not shown. The reader's other section S' is "
+        "`UGGR`, so it is not alike A, and its lead's one-student atom is not one of A's "
+        "university remainders."
     )
