@@ -60,12 +60,11 @@ validate state and nonce on LTI launch`); open a PR into the epic branch using
 the template; then merge it as the paragraph below says.
 
 **Never merge an epic branch into `main`** — Todd's call, always; his review
-now happens at that boundary (since 2026-09-22). A ticket PR merges into its
-epic without him under the three conditions `.claude/agents/merger.md`
-verifies; the merger refuses what still waits for Todd in writing:
-`process/` PRs, and ⚠-epic or heavy-lane-path tickets, where SPEC §14.2's
-line-by-line review lives. Never an admin override, a merge on red CI, or a
-retargeted PR — close it and re-cut the branch.
+now happens at that boundary (2026-09-22). A ticket PR merges into its epic
+without him under the three conditions `.claude/agents/merger.md` verifies;
+the merger refuses what still waits for Todd: `process/` PRs, and ⚠-epic or
+heavy-lane-path tickets, where SPEC §14.2's line-by-line review lives. Never
+an admin override, a red-CI merge, or a retargeted PR — close and re-cut.
 
 ## How a ticket is built: two lanes
 
@@ -107,12 +106,10 @@ floor (§9.3) is a hard gate; lowering it is a safety decision and Todd's call.
 **Reviews are tiered (2026-09-22).** Every PR: `spec-conformance` plus one
 diff-picked security pass (`privacy-authz` on §4.1 surfaces, else
 `app-security` on its, else a generic sonnet-sized pass) from a fresh
-context, reading the diff before the ticket. The other specialists fire on
-heavy-lane diffs and at the epic boundary only; the boundary always runs the
-full Opus battery, both security passes included. One round plus one
-fix-check per PR; findings go in the PR body naming the head SHA covered; a
-pass a fix lands on is re-run over the fixes, or say plainly you stopped.
-On a ⚠ epic agent review supplements human review, never replaces it.
+context, diff before ticket. Other specialists: heavy-lane diffs and the
+epic boundary only; the boundary runs the full Opus battery. One round and
+one fix-check per PR; findings in the PR body name the head SHA; a pass a
+fix lands on is re-run. On ⚠ epics it supplements, never replaces, humans.
 
 **Pin dependency versions and commit lockfiles.** No floating ranges, no
 unpinned tool versions in CI. Dependabot proposes upgrades through the same
