@@ -402,14 +402,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # No pip cache here, deliberately, and the same is true of
-      # `supply-chain`: these are the two jobs whose installs carry no
-      # `--require-hashes` (the pinned-tools line below), so a cache entry is
-      # the one thing standing between a poisoned wheel and the run — and a
-      # key built from the two lockfiles buys a tools-only install little
-      # anyway. PR #246's security review is the record. The four hash-pinned
-      # jobs carry the cache; the comment on `migration-drift`'s setup step
-      # says why that is safe.
+      # No pip cache here, deliberately, and none on `supply-chain`: their
+      # tool installs (the pinned-tools line below) carry no
+      # `--require-hashes`, so a wheel restored from a cache would be
+      # installed unchecked, with only GitHub's cache scoping to stop a
+      # poisoned one — and a key built from the two lockfiles buys a tool
+      # install little anyway. PR #246's security review is the record. The
+      # four jobs whose every download is hash-checked carry the cache; the
+      # comment on `migration-drift`'s setup step says why that is safe.
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
