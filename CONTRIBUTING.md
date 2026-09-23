@@ -115,19 +115,23 @@ Merge authority splits by target branch.
 
 | Pull request | Who merges |
 |---|---|
-| ticket branch → epic branch | the owner, or an agent **after** the owner approves it in writing |
+| ticket branch → epic branch | the merger agent, once the CLAUDE.md merge conditions hold — except on a ⚠ epic or a heavy-lane path, which wait for the owner's written approval |
 | epic branch → `main` | the owner, always, without exception |
+| `process/` branch → `main` | the owner, always |
 
-An agent may never merge an epic branch into `main`. An agent may merge its own
-ticket pull request into an epic branch, but only once the owner has approved it
-in conversation — the owner's approval is the trigger, never the agent's own
-judgment that the work is done.
+An agent may never merge an epic branch into `main`. Since 2026-09-22 the
+owner's per-ticket approval is gone for ordinary tickets: a ticket PR merges
+into its epic branch once its CI run is completed, successful, and resolved
+against the PR's final head commit, its security review is recorded in the
+body against that same commit, and nothing is in dispute. The owner's review
+happens at the epic boundary. Tickets on a ⚠ epic, or touching a path named
+in `.claude/heavy-lane-paths.md`, still wait for the owner in writing —
+that is where the line-by-line human review lives.
 
-The reasoning: `main` is the branch worth protecting, and an epic landing there
-is the decision that deserves a human every time. A ticket landing on an epic
-branch is a smaller, more reversible step, and it is still gated on a human
-saying yes. What the rule forbids is an agent deciding on its own that
-something is ready.
+The reasoning: `main` is the branch worth protecting, and an epic landing
+there is the decision that deserves a human every time. A ticket landing on
+an epic branch is a smaller, more reversible step, gated on verified CI and
+a recorded security review rather than on a human saying yes each time.
 
 ## Rules that hold for everyone, including AI agents
 
