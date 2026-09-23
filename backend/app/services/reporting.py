@@ -56,7 +56,7 @@ import logging
 import time
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -1094,6 +1094,17 @@ def _readable_section(session: Session, *, person_id: UUID | None, section_id: U
     return section
 
 
+def _course_week_of(term_week: int, *, section_start: date, term_start: date) -> int:
+    """The course week a term week is, for a section starting on `section_start`.
+
+    `week_of_the_term` is this codebase's one reading of §2.2's two axes; this
+    is the one place a report turns a stored term week back into a course week
+    with it. Course weeks count from 1, which is the inclusive `+ 1`.
+    """
+    first_term_week = week_of_the_term(1, section_start=section_start, term_start=term_start)
+    return term_week - first_term_week + 1
+
+
 def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
     """Every week this section has a survey window for, on both of §2.2's axes.
 
@@ -1113,9 +1124,6 @@ def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
     term = session.get(Term, section.term_id)
     if term is None:  # pragma: no cover - `section.term_id` is a non-null foreign key
         raise SectionUnavailableError
-    first_term_week = week_of_the_term(
-        1, section_start=section.start_date, term_start=term.start_date
-    )
     rows = session.execute(
         select(
             SurveyWindow.week_id,
@@ -1131,7 +1139,9 @@ def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
         _SectionWeek(
             week_id=week_id,
             term_week=number,
-            course_week=number - first_term_week + 1,
+            course_week=_course_week_of(
+                number, section_start=section.start_date, term_start=term.start_date
+            ),
             opens_at=opens_at,
             closes_at=closes_at,
         )
