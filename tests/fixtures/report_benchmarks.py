@@ -683,14 +683,16 @@ def answer_once(
     *,
     subject: str,
     course_week: int,
-    workload: Decimal = Decimal("30.0"),
+    workload: Decimal | None = Decimal("30.0"),
     rating: int = 1,
     last_submitted_at: datetime | None = None,
 ) -> None:
     """One new student in `label` answers one course week, every question.
 
     The defaults sit far from every value the cohort plants (hours 3.5-12.5), so
-    a row that is counted moves the means it reaches.
+    a row that is counted moves the means it reaches. `workload=None` answers the
+    two ratings and leaves the hours unanswered (no `answer` row), which is a
+    response with a week row and no hour-reporter.
     """
     world = cohort.world
     student = world.student(subject, enrolled_in=(label,))
