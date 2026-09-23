@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 
-import { Link } from '@tanstack/react-router';
+import { Link, useRouter } from '@tanstack/react-router';
 
 import {
   createComparisonSet,
@@ -22,6 +22,7 @@ import {
 } from '../../copy/leadershipComparisonSetCopy';
 import {
   COMPARISON_SET_EDIT_ROUTE,
+  COMPARISON_SETS_ROUTE,
   ComparisonSetForm,
   LEADERSHIP_SETS_TESTID,
   PAGE_HEADING_ID,
@@ -103,6 +104,25 @@ export function ComparisonSetsRoute(): JSX.Element {
   // reader starts another, so the line never describes a write before the one
   // in hand.
   const [announcement, setAnnouncement] = useState<string | null>(null);
+
+  // **A save made on the edit page is said here, once.** That page hands this
+  // one `pulseSetSaved` in the navigation state. It is consumed by replacing the
+  // history entry with one that does not carry it, and only once the
+  // replacement has landed does the line say "Set saved.": a reload, or a
+  // return to this entry, finds nothing to replay. The sentence arrives after
+  // the first render on purpose, so the status region is already in the page
+  // when it changes and a screen reader announces it.
+  const router = useRouter();
+  useEffect(() => {
+    if (router.state.location.state.pulseSetSaved !== true) return;
+    let live = true;
+    void router.navigate({ to: COMPARISON_SETS_ROUTE, replace: true, state: {} }).then(() => {
+      if (live) setAnnouncement(copy('leadership_comparison_sets.set_saved'));
+    });
+    return () => {
+      live = false;
+    };
+  }, [router]);
 
   // Where focus goes once the render that took a control away has landed. A
   // request rather than a focus call in the handler, because the element it

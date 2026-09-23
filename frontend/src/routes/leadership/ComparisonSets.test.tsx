@@ -649,6 +649,73 @@ describe('focus and status when controls come and go', () => {
   });
 });
 
+describe('a status line that never outlives its write', () => {
+  // The verifier's survivor FE09a: nothing failed when opening a delete
+  // confirmation stopped clearing the line. A delete asked is a new write in
+  // hand, so the sentence about the last one goes.
+  it('clears "Set saved." when a delete confirmation opens', async () => {
+    let created = false;
+    serving({
+      [`GET ${COMPARISON_SETS_PATH}`]: () =>
+        json(200, { sets: created ? [A_SET_SUMMARY] : [] }),
+      [`POST ${COMPARISON_SETS_PATH}`]: () => {
+        created = true;
+        return json(201, A_NEW_SET);
+      },
+      [COMPARISON_SET_OPTIONS_PATH]: () => json(200, THE_OPTIONS),
+      [comparisonSetPreviewPath(A_SET_SUMMARY.id)]: () => json(200, A_PREVIEW_WITH_BOTH_COUNTS),
+    });
+    mountAt('/app/leadership/comparison-sets');
+    await screen.findByText(EMPTY_TITLE);
+
+    fireEvent.click(screen.getByRole('button', { name: DEFINE }));
+    const form = screen.getByTestId(COMPARISON_SET_FORM_TESTID);
+    fireEvent.change(within(form).getByLabelText('Set name'), {
+      target: { value: A_NEW_SET.name },
+    });
+    fireEvent.change(within(form).getByLabelText('Course length'), { target: { value: '8' } });
+    fireEvent.change(within(form).getByLabelText('Course level'), { target: { value: 'GR' } });
+    fireEvent.click(within(form).getByRole('button', { name: SAVE }));
+    await screen.findByRole('heading', { name: A_SET_SUMMARY.name });
+    expect(screen.getByRole('status').textContent).toBe(SET_SAVED);
+
+    fireEvent.click(within(rowOf(A_SET_SUMMARY.name)).getByRole('button', { name: DELETE }));
+    expect(screen.getByTestId(COMPARISON_SET_DELETE_CONFIRM_TESTID)).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toBe('');
+  });
+
+  it('clears "Set deleted." when the next delete confirmation opens', async () => {
+    let deleted = false;
+    serving({
+      [COMPARISON_SETS_PATH]: () =>
+        json(200, { sets: deleted ? [A_GRADUATE_SET] : THREE_SETS }),
+      [COMPARISON_SET_OPTIONS_PATH]: () => json(200, THE_OPTIONS),
+      [comparisonSetPath(A_SET_SUMMARY.id)]: () => {
+        deleted = true;
+        return noContent();
+      },
+      [comparisonSetPreviewPath(A_SET_SOMEBODY_ELSE_DEFINED.id)]: () =>
+        json(200, A_PREVIEW_WITH_BOTH_COUNTS),
+      [comparisonSetPreviewPath(A_SET_SUMMARY.id)]: () =>
+        json(200, A_PREVIEW_WITHOUT_A_SECTION_COUNT),
+      [comparisonSetPreviewPath(A_GRADUATE_SET.id)]: () => json(500, {}),
+    });
+    mountAt('/app/leadership/comparison-sets');
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+
+    fireEvent.click(within(rowOf(A_SET_SUMMARY.name)).getByRole('button', { name: DELETE }));
+    fireEvent.click(screen.getByRole('button', { name: DELETE_CONFIRM }));
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: A_SET_SUMMARY.name })).toBeNull();
+    });
+    expect(screen.getByRole('status').textContent).toBe(SET_DELETED);
+
+    fireEvent.click(within(rowOf(A_GRADUATE_SET.name)).getByRole('button', { name: DELETE }));
+    expect(screen.getByTestId(COMPARISON_SET_DELETE_CONFIRM_TESTID)).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toBe('');
+  });
+});
+
 describe('what this surface never renders', () => {
   it('says out loud that no report shows a named set yet', async () => {
     servingThreeSets();

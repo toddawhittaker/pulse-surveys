@@ -51,6 +51,14 @@ const FORM_LOADING = 'Opening this set…';
 const SAVE = 'Save this set';
 const CANCEL = 'Cancel';
 const SESSION_ENDED = 'This page is not signed in';
+const SET_SAVED = 'Set saved.';
+
+/** The list page's status line: the status region that is not inside a form. */
+function pageStatusLine(): HTMLElement {
+  const line = screen.getAllByRole('status').find((region) => region.closest('form') === null);
+  if (line === undefined) throw new Error('The page carries no status line.');
+  return line;
+}
 
 interface Ask {
   readonly path: string;
@@ -261,6 +269,58 @@ describe('leaving the edit address', () => {
         screen.getByRole('heading', { level: 1, name: SETS_LINK }),
       );
     });
+    // A cancel saved nothing, so the list says nothing.
+    expect(pageStatusLine().textContent).toBe('');
+  });
+
+  // The spec-conformance pass's MEDIUM: a save on the edit page said nothing
+  // on the list it returned to. The mutation these kill is the edit page's
+  // navigation state (or the list's reading of it) removed; the near miss is
+  // the list announcing from state it never consumes, which a reload replays.
+  it('says "Set saved." on the list after a save on the edit page', async () => {
+    servingOneSet();
+    const router = mountAt(`/app/leadership/comparison-sets/${A_SET_THIS_READER_DEFINED.id}`);
+
+    const form = await screen.findByTestId(COMPARISON_SET_FORM_TESTID);
+    fireEvent.click(within(form).getByRole('button', { name: SAVE }));
+
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+    await waitFor(() => {
+      expect(pageStatusLine().textContent).toBe(SET_SAVED);
+    });
+    // Consumed: the history entry the list now stands on no longer carries it.
+    expect(router.history.location.state.pulseSetSaved).toBeUndefined();
+  });
+
+  it('does not say it again when that history entry is loaded afresh', async () => {
+    servingOneSet();
+    const history = createMemoryHistory({
+      initialEntries: [`/app/leadership/comparison-sets/${A_SET_THIS_READER_DEFINED.id}`],
+    });
+    render(<RouterProvider router={createRouter({ routeTree, basepath: '/app', history })} />);
+
+    const form = await screen.findByTestId(COMPARISON_SET_FORM_TESTID);
+    fireEvent.click(within(form).getByRole('button', { name: SAVE }));
+    await waitFor(() => {
+      expect(pageStatusLine().textContent).toBe(SET_SAVED);
+    });
+
+    // A reload: the page is torn down and a new application starts on the
+    // very same history entry. Nothing on it may replay the save.
+    cleanup();
+    render(<RouterProvider router={createRouter({ routeTree, basepath: '/app', history })} />);
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+    await screen.findByText(A_SET_SUMMARY.name);
+    expect(pageStatusLine().textContent).toBe('');
+  });
+
+  it('says nothing on a fresh load of the list', async () => {
+    servingOneSet();
+    mountAt('/app/leadership/comparison-sets');
+
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+    await screen.findByText(A_SET_SUMMARY.name);
+    expect(pageStatusLine().textContent).toBe('');
   });
 });
 

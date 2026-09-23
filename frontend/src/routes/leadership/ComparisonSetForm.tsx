@@ -465,8 +465,13 @@ export function ComparisonSetEditRoute(): JSX.Element {
 
   // Leaving for the list takes every control on this page away, so focus goes
   // to the heading of the page that arrives: it names where the reader now is.
-  function toTheList(): void {
-    void navigate({ to: COMPARISON_SETS_ROUTE }).then(() => {
+  // A save also hands the list one piece of navigation state, so the list's
+  // status line can say the save landed; the list consumes it once.
+  function toTheList(saved: boolean): void {
+    void navigate({
+      to: COMPARISON_SETS_ROUTE,
+      state: saved ? { pulseSetSaved: true } : {},
+    }).then(() => {
       document.getElementById(PAGE_HEADING_ID)?.focus();
     });
   }
@@ -501,10 +506,12 @@ export function ComparisonSetEditRoute(): JSX.Element {
           initial={load.set}
           onSave={async (write) => {
             const outcome = await updateComparisonSet(load.set.id, write);
-            if (outcome.kind === 'saved') toTheList();
+            if (outcome.kind === 'saved') toTheList(true);
             return outcome;
           }}
-          onCancel={toTheList}
+          onCancel={() => {
+            toTheList(false);
+          }}
         />
       )}
     </main>
