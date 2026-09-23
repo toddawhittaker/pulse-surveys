@@ -53,12 +53,32 @@
 // inside a `finally`, so a failing assertion cannot leave the stack in October
 // 2026 for whatever runs next.
 //
-// **Every expectation is a literal** (`docs/MISTAKES.md` entry 19). The default
-// set's figures were measured off the seeded world on the epic tip (the E5-14
-// boundary ledger's measurements) and are transcribed here, not computed by the
-// code under test; the section codes, weeks and clocks are transcribed from the
+// **Every expectation is a literal** (`docs/MISTAKES.md` entry 19). **How the
+// default-set literals were derived:** independently of the code under test, by
+// a measurement pass that ran SQL over the raw `answer` rows of the three Spring
+// 2026 sections (`BIOL-310-U5FF`, `-U6WW`, `-R5FF`) on the seeded stack at the
+// epic tip — not through the benchmark views, the set functions or the report
+// API — and they are transcribed here (the E5-14 boundary ledger's
+// measurements). The section codes, weeks and clocks are transcribed from the
 // seeded calendar; the governed words from the copy modules, as
 // `instructor-report-benchmarks.spec.ts` transcribes them.
+//
+// **Reach is proved by value, not by the legend.** A legend reading "Comparable
+// 12-week courses" is drawn whatever the set holds; a served figure equal to a
+// number computed from prior-term rows alone can only come from a set that
+// reaches the prior term, because the set's current-term part is empty.
+//
+// **What the thin-cohort drive covers, and what it does not.** `BIOL-215-R3WW`'s
+// drive exercises the **default-set** treatments only — the trend notices and the
+// withheld workload cells. Its university population clears the minimums in this
+// world, so the university-withheld treatment is not driven here; it is asserted
+// by E5-10's `instructor-report-benchmarks.spec.ts` only in whichever direction
+// the stack happens to go, and the exit record names the gap.
+//
+// **The university premise.** Test 1 reads the hero's university member as
+// present. Under E5-14's sealing rule that holds only while the university
+// complement holds no answers in course weeks 1 to 6, so `beforeAll` asserts
+// that premise by name and a dirty stack fails there, not as a missing line.
 //
 // This spec cannot be run without a seeded, running Compose stack; its green is
 // the stack-up run and CI.
@@ -68,7 +88,7 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 import { seedTheBenchmarkHistory } from './support/benchmarkWorld';
 import { clearTheClock, setTheClockTo } from './support/clock';
 import { TOOL_ORIGIN, launchAs, placementInto } from './support/doors';
-import { deriveSurveyWindows, seedTheDemoStory } from './support/stack';
+import { databaseStatement, deriveSurveyWindows, seedTheDemoStory } from './support/stack';
 import {
   INSTRUCTOR_SUBJECT,
   LEARNER_SUBJECT,
@@ -322,6 +342,12 @@ const CANARY_ON_THE_HERO: readonly string[] = [
 const WORLD_TIMEOUT_MS = 600_000;
 const CASE_TIMEOUT_MS = 240_000;
 
+// How long one captured response body may take to be handed over before the
+// sweep records it as unread, and how long the submission's own response is
+// waited for. Both bounded, so no read in this file can outlast the case budget.
+const BODY_READ_MS = 5_000;
+const SUBMIT_WAIT_MS = 30_000;
+
 /** The placement each section launches through, discovered in `beforeAll`. */
 const placements: Record<string, string> = {};
 
@@ -405,6 +431,55 @@ test.beforeAll(async ({ browser }) => {
         'its own the hero draws no line of its own, and "three lines per panel" would be asserted ' +
         'against a chart that has two.',
     ).toContain(HERO.label);
+
+    // **The university premise, stated rather than discovered as a missing
+    // line.** Under E5-14's sealing rule (as revised in round 3) the hero's
+    // university figure is shown only if, among other conditions, the complement
+    // — the university population minus R minus the default set, where R is
+    // every section, in any term, taught by any instructor of `BIOL-310-R7FF` —
+    // is empty or itself clears both minimums. The default set is all Spring
+    // 2026 and R takes every section the hero's instructor teaches, which in the
+    // seeded world is all of them this persona launches into (`BIOL-215-R3WW`,
+    // `NURS-8100-Q2FF` and the three Spring 2026 sections among them, measured).
+    // So the complement's part that can hold answers is the current term's other
+    // sections of the hero's length and level that **no instructor of the hero
+    // teaches**. A response in one of those, in a window that closed by the
+    // hero's course-week-6 close (the latest cutoff this file reads), makes the
+    // complement one or two thin sections and correctly withholds the university
+    // line on every week test 1 walks. E4's exit story in R3WW no longer bears on
+    // this: R3WW is in R. This names that premise before any test reads a
+    // report, so a stack that breaks it fails here and not as a missing line.
+    //
+    // The teaching grant is `role_assignment` with role `INSTRUCTOR` on a
+    // section; any such row counts, ended or not, which can only take a section
+    // out of the complement — the premise errs towards asking for less.
+    const complementAnswers = databaseStatement(
+      "select s.lms_section_code || ' holds ' || count(r.id) || ' responses' " +
+        'from response r ' +
+        'join section s on s.id = r.section_id ' +
+        'join course c on c.id = s.course_id ' +
+        'join survey_window sw on sw.section_id = r.section_id and sw.week_id = r.week_id ' +
+        `join section h on h.lms_section_code = '${HERO.code}' ` +
+        'join course hc on hc.id = h.course_id ' +
+        'where s.term_id = h.term_id and s.length_weeks = h.length_weeks ' +
+        'and c.level = hc.level and s.id <> h.id ' +
+        'and not exists (select 1 from role_assignment theirs ' +
+        'join role_assignment ours on ours.person_id = theirs.person_id ' +
+        "where theirs.section_id = s.id and theirs.role = 'INSTRUCTOR' " +
+        "and ours.section_id = h.id and ours.role = 'INSTRUCTOR') " +
+        'and sw.closes_at <= (select w.closes_at from survey_window w ' +
+        'where w.section_id = h.id order by w.closes_at offset 5 limit 1) ' +
+        'group by s.lms_section_code order by s.lms_section_code;',
+    );
+    expect(
+      complementAnswers,
+      `PREMISE, not a defect: the hero's university complement must hold no answers in course ` +
+        `weeks 1 to 6, and it holds: ${complementAnswers}. These are current-term sections of ` +
+        `${HERO.label}'s length and level that none of its instructors teaches. Under the ` +
+        'university sealing rule they are a thin complement, so the university line is correctly ' +
+        'withheld and test 1 cannot show three lines. Some other drive wrote those responses; run ' +
+        'on a freshly seeded stack rather than deleting another drive\'s rows from here.',
+    ).toBe('');
 
     // The learner's door. Discovery only: the enrollments she is read through
     // are `00-enrollment-anchor.spec.ts`'s, dated at each section's start.
@@ -640,7 +715,8 @@ test('a student seat on two consecutive weeks carries no benchmark on the wire o
   await setTheClockTo(page, READ_CLOCK);
   const instructorWire = captureJsonResponses(page);
   const report = await openTheReport(page, HERO);
-  await page.waitForLoadState('networkidle');
+  // No wait for "network idle": a page may never go idle. The report region is
+  // visible, so the report read has arrived, and every body read is bounded.
   await instructorWire.settle();
   const found = instructorWire.bodies.flatMap((body) => benchmarkKeysIn(body));
   expect(
@@ -693,12 +769,25 @@ test('a student seat on two consecutive weeks carries no benchmark on the wire o
       await chooseRating(block, 0, '4');
       await chooseRating(block, 1, '5');
       await setSlider(block, STUDENT_HOURS);
+      // The submission's own response, waited for by name and started before
+      // the click, so the premise "the sweep saw the write" is a response in
+      // hand rather than a page that went quiet.
+      const submitted = student.waitForResponse(
+        (response) =>
+          response.url().startsWith(TOOL_ORIGIN) && response.request().method() !== 'GET',
+        { timeout: SUBMIT_WAIT_MS },
+      );
       await block.getByTestId(SUBMIT).click();
+      const write = await submitted;
+      expect(
+        write.status(),
+        `The submission for ${when} answered ${String(write.status())} at ${write.url()}.`,
+      ).toBeLessThan(400);
       await expect(
         block.getByText(SUBMITTED_TITLE, { exact: true }),
         `The submission for ${when} was not accepted, so the state swept below was never reached.`,
       ).toBeVisible();
-      await expectNothingOfABenchmark(student, wire, { mustWrite: true });
+      await expectNothingOfABenchmark(student, wire, {});
 
       wire.begin(`the read after submitting, ${when}`);
       await student.reload();
@@ -728,9 +817,11 @@ interface CapturedBody {
 /** A capture of every tool-origin JSON response one page receives. */
 interface JsonCapture {
   readonly bodies: CapturedBody[];
-  /** Tool-origin requests other than GET, by stage — the submission's evidence. */
-  readonly writes: { readonly stage: string; readonly url: string }[];
-  /** Bodies the browser would not hand over, which would make the sweep blind. */
+  /**
+   * JSON responses whose body could not be read within `BODY_READ_MS`, as
+   * "stage: METHOD url". The sweep vouches only for what it read, so each of
+   * these is a named failure rather than a clean result.
+   */
   readonly unread: string[];
   begin(stage: string): void;
   settle(): Promise<void>;
@@ -739,19 +830,24 @@ interface JsonCapture {
 
 /**
  * Capture every JSON response from the tool that this page's own traffic
- * receives.
+ * receives, reading each body the moment the response arrives.
  *
  * `page.request` reads go through a separate request context and are **not**
- * captured, so what is swept is exactly what the student's browser was sent. A
- * body that cannot be read is recorded rather than dropped: a sweep that quietly
- * skipped the bodies it could not read would report them clean.
+ * captured, so what is swept is exactly what the student's browser was sent.
+ *
+ * **Every body read is bounded, and that is the repair for a measured hang.** CI
+ * run 35818899760 on ce9df73 showed a body read after the submission that never
+ * returned, followed by a wait for network idle that never came, until the
+ * test's budget ran out. So nothing here waits for the page to go quiet, and a
+ * body the browser will not hand over within `BODY_READ_MS` is recorded in
+ * `unread` — which the sweep then fails on by name. Recording it keeps the
+ * sweep's promise honest: it never reports a body it did not read as clean.
  */
 function captureJsonResponses(page: Page): JsonCapture {
   let current = 'before any stage';
   const pending: Promise<void>[] = [];
   const capture: JsonCapture = {
     bodies: [],
-    writes: [],
     unread: [],
     begin(stage: string): void {
       current = stage;
@@ -766,22 +862,35 @@ function captureJsonResponses(page: Page): JsonCapture {
   page.on('response', (response) => {
     const url = response.url();
     if (!url.startsWith(TOOL_ORIGIN)) return;
-    const stage = current;
-    if (response.request().method() !== 'GET') capture.writes.push({ stage, url });
     const type = response.headers()['content-type'] ?? '';
     if (!type.includes('application/json')) return;
+    const stage = current;
+    const method = response.request().method();
     pending.push(
-      response.text().then(
-        (text) => {
-          capture.bodies.push({ stage, url, text });
-        },
-        () => {
-          capture.unread.push(`${stage}: ${url}`);
-        },
-      ),
+      bodyWithin(response.text(), BODY_READ_MS).then((text) => {
+        if (text === null) capture.unread.push(`${stage}: ${method} ${url}`);
+        else capture.bodies.push({ stage, url, text });
+      }),
     );
   });
   return capture;
+}
+
+/** A body read that answers `null` if it fails or does not finish in time. */
+function bodyWithin(read: Promise<string>, milliseconds: number): Promise<string | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((answer) => {
+    timer = setTimeout(() => {
+      answer(null);
+    }, milliseconds);
+  });
+  const reading = read.then(
+    (text) => text,
+    () => null,
+  );
+  return Promise.race([reading, late]).finally(() => {
+    clearTimeout(timer);
+  });
 }
 
 /**
@@ -790,22 +899,27 @@ function captureJsonResponses(page: Page): JsonCapture {
  *
  * The wire before the screen, and each with its own premise: a stage that
  * captured nothing has proven nothing, so the landing and the read after are
- * required to have received a body naming the section they show, and the
- * submission to have sent a write.
+ * required to have received a body naming the section they show. The
+ * submission's premise is its own response, waited for by name in the test.
+ *
+ * Called only once the page shows the state the stage is about, so the reads
+ * that state depends on have arrived; `settle` then waits for their bodies, each
+ * bounded by `BODY_READ_MS`. Nothing waits for the network to go idle.
  */
 async function expectNothingOfABenchmark(
   page: Page,
   wire: JsonCapture,
-  premise: { readonly mustMention?: string; readonly mustWrite?: boolean },
+  premise: { readonly mustMention?: string },
 ): Promise<void> {
-  await page.waitForLoadState('networkidle');
   await wire.settle();
   const stage = wire.stage();
   const bodies = wire.bodies.filter((body) => body.stage === stage);
 
   expect(
     wire.unread,
-    'The browser would not hand over these response bodies, so the sweep cannot vouch for them.',
+    `The browser did not hand over these JSON response bodies within ${String(BODY_READ_MS)}ms, ` +
+      'so the sweep cannot vouch for them and refuses to call them clean. The request that ' +
+      'answered each is named; a body that cannot be read is a finding, not a pass.',
   ).toEqual([]);
   if (premise.mustMention !== undefined) {
     const code = premise.mustMention;
@@ -815,13 +929,6 @@ async function expectNothingOfABenchmark(
         `screen. Captured: ${JSON.stringify(bodies.map((body) => body.url))}. A sweep over traffic ` +
         'that does not include the survey read reports a clean wire about nothing.',
     ).toBe(true);
-  }
-  if (premise.mustWrite === true) {
-    expect(
-      wire.writes.filter((write) => write.stage === stage).length,
-      `${stage}: the capture saw no write to the tool, so the submission's response was not ` +
-        'among what was swept.',
-    ).toBeGreaterThan(0);
   }
 
   for (const body of bodies) {
