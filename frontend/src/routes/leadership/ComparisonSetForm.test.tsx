@@ -144,12 +144,11 @@ describe('the form cannot express an invalid combination', () => {
 
   it('offers whatever the options answer carried, and nothing of its own', () => {
     // **The test above cannot prove this and this one can.** `THE_OPTIONS`
-    // carries the real lengths and the real levels, so a form holding its own
-    // copy of SPEC §2.2 and §8 would render exactly what that fixture serves
-    // and pass — the fixture would be supplying the value under test
-    // (`docs/MISTAKES.md` entry 30). This answer carries two lengths that are
-    // not course lengths, one level that is not one of the five bands, and no
-    // courses at all.
+    // carries realistic lengths and the real levels, so a form holding its own
+    // list of either would render exactly what that fixture serves and pass —
+    // the fixture would be supplying the value under test (`docs/MISTAKES.md`
+    // entry 30). This answer carries two lengths `THE_OPTIONS` does not, one
+    // level that is not one of the five bands, and no courses at all.
     renderForm(undefined, null, OPTIONS_NO_INSTITUTION_WOULD_SEND);
 
     expect(
