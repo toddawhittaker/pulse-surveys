@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type JSX } from 'react';
 
 import { Link, useRouter } from '@tanstack/react-router';
 
@@ -131,10 +131,20 @@ export function ComparisonSetsRoute(): JSX.Element {
   // something the page draws, and every handler that asks also changes state,
   // so the render that answers it follows anyway. The effect runs after every
   // render and does nothing unless a request is waiting.
+  //
+  // **A layout effect, not a passive one, and that is load-bearing.** A passive
+  // effect from an earlier, unrelated render (a preview answer landing) can
+  // still be pending when the reader clicks. React runs it before the click's
+  // render, and a passive effect here would consume the new request there,
+  // while the form still stood and "Define a set" did not exist. Focus then
+  // fell to the body. A layout effect runs inside its own commit, so the only
+  // run that can see a request is the one in the commit the handler caused.
+  // The row's effect below is a layout effect for the same reason, and so that
+  // the row's move and this one keep their order (child first, then page).
   const focusNext = useRef<'heading' | 'define' | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const defineRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (focusNext.current === null) return;
     (focusNext.current === 'heading' ? headingRef : defineRef).current?.focus();
     focusNext.current = null;
@@ -365,7 +375,7 @@ function SetRow({
   const confirmRef = useRef<HTMLDivElement>(null);
   const deleteRef = useRef<HTMLButtonElement>(null);
   const wasConfirming = useRef(confirming);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (confirming === wasConfirming.current) return;
     wasConfirming.current = confirming;
     (confirming ? confirmRef : deleteRef).current?.focus();
