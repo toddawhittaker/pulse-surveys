@@ -50,7 +50,10 @@ Postgres (E5-01, ADR 0164, E5-14); the service attempts the write and maps the c
 fired to one sentence. So a 422 from here carries a sentence out of
 `app.copy.leadership_sets` rather than a list of field errors, and a body that
 carried field errors would mean the wire model had refused the value before the
-database saw it.
+database saw it. **One refusal is the wire model's by design:** a set name that is
+empty once its spaces are stripped is refused by `SetWrite` itself (E5-14's
+ruling), so its 422 carries the framework's standard field errors and no sentence
+from the copy registry — the one 422 here whose body is a list of field errors.
 
 **The preview answers two counts and nothing else.** SPEC §4.1 item 7 suppresses
 statistics computed over a comparison set below the configured minimums; a count

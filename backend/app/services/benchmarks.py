@@ -47,12 +47,17 @@ it are computed over the same rows. Ruled in the open at E5's wave-2 launch and
 recorded here because this is where comparison policy lives; the question came
 from E5-03 and is closed in `docs/tickets/e5/deferred.md`.
 
-**A published week never moves** (the owner's freeze-at-close ruling, E5-14).
-Each figure for course week *w* counts a response only if the window it was
-given in closed by *w*'s cutoff and it was last submitted by then, and a report's
-cutoff for *w* is the instant its own section's window for *w* closed. So a
-figure shown for a published week is a function of rows fixed before it was
-first shown, and two reads of it cannot be subtracted into one student's answer.
+**A published week's answers are frozen** (the owner's freeze-at-close ruling,
+E5-14). Each figure for course week *w* counts a response only if the window it
+was given in closed by *w*'s cutoff and it was last submitted by then, and a
+report's cutoff for *w* is at or before its own section's window for *w* closed.
+So new or revised answers cannot move a figure already shown. **That is not the
+same as the figure depending only on rows fixed before it was shown**, and an
+earlier version of this paragraph said it was: which sections a population holds
+is resolved at read time, so the figure also depends on the lead mapping, on
+each section's length and start date, and on the teaching grants, as they stand
+when the report is read. A change to any of those after publication moves the
+figure; freezing membership is carried to a later epic for the owner's ruling.
 
 **The university line is sealed on everyone but the reader** (E5-14). Its figure
 is the whole institution's, the reported section included, but it is shown only
@@ -732,7 +737,8 @@ def section_benchmarks(
 
     `cutoffs` is the report's published course weeks, each mapped to the instant
     its **own section's** window for that week closed (the owner's freeze-at-close
-    ruling), so a figure shown for a published week never moves again.
+    ruling), so no answer given or revised later moves a figure already shown.
+    Membership is still resolved at read time; see the module docstring.
     """
     _the_weeks_cutoff(cutoffs, course_week)  # the reported week must be among those read
     default_set = resolve_default_set(session, section_id=section_id)

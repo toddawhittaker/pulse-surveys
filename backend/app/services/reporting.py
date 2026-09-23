@@ -1255,7 +1255,7 @@ def _benchmark_members(
     a series where every figure is withheld (ADR 0170). And each week's window
     close is that week's **cutoff** — the owner's freeze-at-close ruling: a
     comparison figure for a published week counts only answers fixed when this
-    section's own window for that week closed, so it never moves again and two
+    section's own window for that week closed, so no later answer moves it and two
     reads of it cannot be subtracted into one student's answer.
 
     **Nothing in this function counts, averages, compares or derives.** A figure
