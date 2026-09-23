@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { RouterProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
@@ -48,6 +51,14 @@ const FORM_LOADING = 'Opening this set…';
 const SAVE = 'Save this set';
 const CANCEL = 'Cancel';
 const SESSION_ENDED = 'This page is not signed in';
+const SET_SAVED = 'Set saved.';
+
+/** The list page's status line: the status region that is not inside a form. */
+function pageStatusLine(): HTMLElement {
+  const line = screen.getAllByRole('status').find((region) => region.closest('form') === null);
+  if (line === undefined) throw new Error('The page carries no status line.');
+  return line;
+}
 
 interface Ask {
   readonly path: string;
@@ -129,6 +140,30 @@ describe('/leadership, the landing', () => {
     await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
     expect(addressOf(router)).toBe('/leadership/comparison-sets');
   });
+
+  it('dresses the link as a link, not as one more line of text', async () => {
+    // The E5 boundary round's finding: the reset strips the browser's link
+    // colour and underline, so the bare link read as the landing's muted text.
+    // jsdom applies no stylesheet, so the pin is in two halves: the link wears
+    // the set screen's link class, and that rule underlines it in the brief's
+    // text-safe link colour. Dropping either half reddens here.
+    servingOneSet();
+    mountAt('/app/leadership');
+
+    const landing = await screen.findByTestId(LANDING_TESTID);
+    const link = within(landing).getByRole('link', { name: SETS_LINK });
+    expect(link.classList.contains('pulse-set-link')).toBe(true);
+
+    const css = readFileSync(
+      resolve(process.cwd(), 'src/routes/leadership/leadershipComparisonSets.css'),
+      'utf8',
+    );
+    const at = css.indexOf('.pulse-set-link {');
+    expect(at).toBeGreaterThanOrEqual(0);
+    const rule = css.slice(at, css.indexOf('}', at));
+    expect(rule).toContain('color: var(--marigold-deep)');
+    expect(rule).toContain('text-decoration: underline');
+  });
 });
 
 describe('/leadership/comparison-sets/$setId, one set in the form', () => {
@@ -199,6 +234,93 @@ describe('/leadership/comparison-sets/$setId, one set in the form', () => {
 
     await screen.findByText(SESSION_ENDED);
     expect(screen.queryByTestId(COMPARISON_SET_FORM_TESTID)).toBeNull();
+  });
+});
+
+describe('leaving the edit address', () => {
+  // The edit page's controls all go when it hands back to the list, so focus
+  // goes to the heading of the page that arrives. The near miss is focus left
+  // on `document.body`, where a vanished control drops it.
+  it('puts focus on the list’s heading after a save', async () => {
+    servingOneSet();
+    mountAt(`/app/leadership/comparison-sets/${A_SET_THIS_READER_DEFINED.id}`);
+
+    const form = await screen.findByTestId(COMPARISON_SET_FORM_TESTID);
+    fireEvent.click(within(form).getByRole('button', { name: SAVE }));
+
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole('heading', { level: 1, name: SETS_LINK }),
+      );
+    });
+  });
+
+  it('puts focus on the list’s heading after a cancel', async () => {
+    servingOneSet();
+    mountAt(`/app/leadership/comparison-sets/${A_SET_THIS_READER_DEFINED.id}`);
+
+    const form = await screen.findByTestId(COMPARISON_SET_FORM_TESTID);
+    fireEvent.click(within(form).getByRole('button', { name: CANCEL }));
+
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole('heading', { level: 1, name: SETS_LINK }),
+      );
+    });
+    // A cancel saved nothing, so the list says nothing.
+    expect(pageStatusLine().textContent).toBe('');
+  });
+
+  // The spec-conformance pass's MEDIUM: a save on the edit page said nothing
+  // on the list it returned to. The mutation these kill is the edit page's
+  // navigation state (or the list's reading of it) removed; the near miss is
+  // the list announcing from state it never consumes, which a reload replays.
+  it('says "Set saved." on the list after a save on the edit page', async () => {
+    servingOneSet();
+    const router = mountAt(`/app/leadership/comparison-sets/${A_SET_THIS_READER_DEFINED.id}`);
+
+    const form = await screen.findByTestId(COMPARISON_SET_FORM_TESTID);
+    fireEvent.click(within(form).getByRole('button', { name: SAVE }));
+
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+    await waitFor(() => {
+      expect(pageStatusLine().textContent).toBe(SET_SAVED);
+    });
+    // Consumed: the history entry the list now stands on no longer carries it.
+    expect(router.history.location.state.pulseSetSaved).toBeUndefined();
+  });
+
+  it('does not say it again when that history entry is loaded afresh', async () => {
+    servingOneSet();
+    const history = createMemoryHistory({
+      initialEntries: [`/app/leadership/comparison-sets/${A_SET_THIS_READER_DEFINED.id}`],
+    });
+    render(<RouterProvider router={createRouter({ routeTree, basepath: '/app', history })} />);
+
+    const form = await screen.findByTestId(COMPARISON_SET_FORM_TESTID);
+    fireEvent.click(within(form).getByRole('button', { name: SAVE }));
+    await waitFor(() => {
+      expect(pageStatusLine().textContent).toBe(SET_SAVED);
+    });
+
+    // A reload: the page is torn down and a new application starts on the
+    // very same history entry. Nothing on it may replay the save.
+    cleanup();
+    render(<RouterProvider router={createRouter({ routeTree, basepath: '/app', history })} />);
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+    await screen.findByText(A_SET_SUMMARY.name);
+    expect(pageStatusLine().textContent).toBe('');
+  });
+
+  it('says nothing on a fresh load of the list', async () => {
+    servingOneSet();
+    mountAt('/app/leadership/comparison-sets');
+
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+    await screen.findByText(A_SET_SUMMARY.name);
+    expect(pageStatusLine().textContent).toBe('');
   });
 });
 

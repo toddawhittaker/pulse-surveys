@@ -56,7 +56,7 @@ E4-22 anchor rule.
    first day before launching it.** The `/dev` console's clock control (E2-04,
    ADR 0109) sets a pretended now. The dates are the prior term's own
    start-letter map rows, read off `/dev` or out of the `start_letter_map` table
-   rather than copied from here — the two `U` sections and the `E` section begin
+   rather than copied from here — the three `U` sections and the `E` section begin
    on the term's first Monday and the `R` section three weeks later.
 3. **One staff launch per section, as the instructor persona, at that clock.**
    The launch is what provisions the section (SPEC §7.3) and what stores the
@@ -195,15 +195,23 @@ class PriorSection:
         return f"mock-lms-user-{self.label.lower()}-student-"
 
 
-# The four sections `mock-lms/app/seed.py` publishes in the prior term. Three of
-# them are twelve-week undergraduate sections, which is `BIOL-310-R7FF`'s own
-# length and level and therefore its comparison set; the fourth is a six-week
-# section on its own.
+# The five sections `mock-lms/app/seed.py` publishes in the prior term. Four of
+# them are twelve-week undergraduate sections, `BIOL-310-R7FF`'s own length and
+# level: the three BIOL-310 sections are its comparison set, and `BIOL-215-U8FF`
+# is on BIOL 215, which has no lead, so it is in the hero's university line and
+# not its comparison set. The fifth is a six-week section on its own.
+#
+# `BIOL-215-U8FF` is `must_pass=True` because `must_pass` is declared per
+# cohort — a length and a level — and not per section: it is a twelve-week
+# undergraduate section, in the cohort that has to clear both minimums, and
+# `the_intended_cohorts` refuses a cohort whose sections are declared for
+# opposite demonstrations.
 PRIOR_SECTIONS: tuple[PriorSection, ...] = (
     PriorSection("BIOL-310-U5FF", "BIOL", "310", "U5FF", must_pass=True),
     PriorSection("BIOL-310-U6WW", "BIOL", "310", "U6WW", must_pass=True),
     PriorSection("BIOL-310-R5FF", "BIOL", "310", "R5FF", must_pass=True),
     PriorSection("BIOL-215-E5WW", "BIOL", "215", "E5WW", must_pass=False),
+    PriorSection("BIOL-215-U8FF", "BIOL", "215", "U8FF", must_pass=True),
 )
 
 # ---------------------------------------------------------------------------
@@ -853,7 +861,7 @@ def check_the_cohorts(
     """Every way the counted world falls short of what it was seeded to demonstrate.
 
     The two minimums are `app.config.Settings`'s, handed in by the caller: SPEC
-    §11 leaves the numbers open and they are configuration, so a copy of either
+    §11 settles their defaults and they stay configuration, so a copy of either
     here would be a second place for them to be wrong.
     """
     faults: list[str] = []

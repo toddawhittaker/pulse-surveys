@@ -22,18 +22,19 @@ every term and leadership would rebuild it each time; a set of courses keeps
 meaning as terms come and go. ADR 0164 records the choice and what it costs.
 
 **Every rule here is a database rule, and that is the ticket's point.** The
-length is one of SPEC §2.2's eight, the level is one of SPEC §8's five, and a
-member course's level equals the set's declared level — all three refused by
+length is at least one week, the level is one of SPEC §8's five, and a member
+course's level equals the set's declared level — all three refused by
 Postgres rather than by a route, because a route is one caller among the several
 that will exist by the time E5-06 and E5-09 are built. The level agreement is
 held the way `response` and `release_batch` hold theirs: a composite foreign key,
 because a `CHECK` cannot read another table (ADR 0018).
 
-**`pulse_app` is granted nothing on either table.** The first reader is E5-04 and
-the first writer is E5-06, and each grants what it spends in its own change —
-E4-02's precedent. `tests/integration/test_the_comparison_set_tables_are_refused_
-to_the_application_connection.py` proves the absence on the connection production
-opens.
+**Each grant on these tables arrived with the ticket that spends it** — E4-02's
+precedent. E5-01 granted `pulse_app` nothing; E5-04 granted the read and E5-06
+the writes, and E5-14 narrowed `UPDATE` on the set table to the four columns an
+edit writes. `tests/integration/test_the_comparison_set_tables_are_refused_
+to_the_application_connection.py` drives each grant, and each withheld one, on
+the connection production opens.
 """
 
 from datetime import datetime
@@ -55,22 +56,18 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import AwareDateTime, Base, UuidPrimaryKey
 from app.models.org import CourseLevel
 
-# SPEC §2.2: "Course lengths in weeks: 3, 6, 8, 10, 12, 15, 16 (plus an 18-week
-# dissertation length)." All eight, written out rather than expressed as a range,
-# because the set has interior gaps — 17 weeks is not a length this institution
-# runs and a range would accept it.
-#
-# **Hard-coded here rather than read from the per-term start-letter map**, which
-# is where a section's length is actually derived from. The map is term data: it
-# changes when the calendar does, and a set outlives the term it was created in.
-# A set validated against this term's letters would become invalid the moment the
-# next term's map dropped a length nobody ran, and the row would be a benchmark
-# an operator could not save. ADR 0164 records the alternative.
-CALENDAR_LENGTHS = (3, 6, 8, 10, 12, 15, 16, 18)
+# A declared length is any whole number of weeks from one up, the rule
+# `section.length_weeks` is held to. It was SPEC §2.2's eight calendar lengths
+# written out until E5-14: the owner ruled that a set's length is data, because
+# §2.2 makes the calendar configuration, so a length a section can have is a
+# length a set can declare. `definition_options` offers the lengths sections
+# actually have. ADR 0164's length paragraph is superseded on this point.
+LENGTH_IS_AT_LEAST_ONE_WEEK = "length_weeks >= 1"
 
-LENGTH_IS_A_CALENDAR_LENGTH = "length_weeks IN ({})".format(
-    ", ".join(str(weeks) for weeks in CALENDAR_LENGTHS)
-)
+# A name is what a set is chosen by on every later surface, so one that is empty
+# once its spaces are trimmed is a set nobody can pick out of a list. The request
+# schema strips the spaces before the write; this is the rule underneath it.
+NAME_IS_NOT_BLANK = "btrim(name) <> ''"
 
 
 class ComparisonSet(UuidPrimaryKey, Base):
@@ -105,7 +102,8 @@ class ComparisonSet(UuidPrimaryKey, Base):
         # Referenced by `comparison_set_member`'s composite key. See the class
         # docstring: `id` is already unique, so this forbids nothing.
         UniqueConstraint("id", "level"),
-        CheckConstraint(LENGTH_IS_A_CALENDAR_LENGTH, name="length_is_a_calendar_length"),
+        CheckConstraint(LENGTH_IS_AT_LEAST_ONE_WEEK, name="length_weeks_is_at_least_one"),
+        CheckConstraint(NAME_IS_NOT_BLANK, name="name_is_not_blank"),
     )
 
     # What leadership calls the cohort — "College of Nursing, 6-week

@@ -713,6 +713,15 @@ BENCHMARK_DEFINER = "pulse_benchmark_definer"
 # and no privilege at the grain of a whole relation", followed by the six
 # bulleted lists transcribed below in that order.
 #
+# **Amended 2026-09-22 (E5-14), and the constant follows the amendment**, as the
+# ruling on `docs/disputes/E5-14-01.md` orders: the owner's freeze-at-close ruling
+# (ADR 0178) needs the set functions to see when a response was last submitted
+# and when its window closed, so the owner "gains four `SELECT` pairs,
+# column-grain … `response.last_submitted_at`, and `survey_window.section_id`,
+# `survey_window.week_id` and `survey_window.closes_at`. Its reach grows from
+# eighteen pairs over six tables to twenty-two pairs over seven. None of the four
+# names a person." `survey_window` is the seventh relation.
+#
 # The one entry to read twice is `response.user_id`, which the amendment names
 # as "the only column in the list that reaches a person at all": it is the key
 # the distinct count of *people* is computed over, it is grouped away inside both
@@ -725,6 +734,7 @@ BENCHMARK_DEFINER_PRIVILEGES = frozenset(
         ("response", "user_id", "SELECT"),
         ("response", "section_id", "SELECT"),
         ("response", "week_id", "SELECT"),
+        ("response", "last_submitted_at", "SELECT"),
         ("answer", "response_id", "SELECT"),
         ("answer", "question_id", "SELECT"),
         ("answer", "rating", "SELECT"),
@@ -739,14 +749,18 @@ BENCHMARK_DEFINER_PRIVILEGES = frozenset(
         ("term", "start_date", "SELECT"),
         ("week", "id", "SELECT"),
         ("week", "number", "SELECT"),
+        ("survey_window", "section_id", "SELECT"),
+        ("survey_window", "week_id", "SELECT"),
+        ("survey_window", "closes_at", "SELECT"),
     }
 )
 
-# The six relations, derived from the eighteen pairs rather than written a second
-# time — one source, so a relation cannot be added to one list and forgotten in
-# the other. The relation-grain assertion survives the column equality landing
-# beside it because the two fail differently: "this owner can reach `enrollment`
-# now" is a sentence a reader acts on, and a diff of eighteen tuples is not.
+# The seven relations, derived from the twenty-two pairs rather than written a
+# second time — one source, so a relation cannot be added to one list and
+# forgotten in the other. The relation-grain assertion survives the column
+# equality landing beside it because the two fail differently: "this owner can
+# reach `enrollment` now" is a sentence a reader acts on, and a diff of
+# twenty-two tuples is not.
 BENCHMARK_DEFINER_RELATIONS = frozenset(
     relation for relation, _column, _privilege in BENCHMARK_DEFINER_PRIVILEGES
 )
@@ -786,7 +800,8 @@ def test_the_benchmark_definer_holds_exactly_the_columns_its_two_counting_bodies
 
     **The equality is over `(relation, column, privilege)` in both directions**,
     against `BENCHMARK_DEFINER_PRIVILEGES` above, which is transcribed from ADR
-    0165's amendment of 2026-09-13. The amendment exists because the columns were
+    0165's amendments of 2026-09-13 and 2026-09-22 (the second adds the four
+    freeze-at-close pairs and `survey_window`). The first amendment exists because the columns were
     written down nowhere a test could honestly read them: transcribing them from
     `benchmark_definer_v001.sql` would assert that the SQL equals itself
     (`docs/MISTAKES.md` entry 19), which the sibling equality in this file
@@ -799,8 +814,8 @@ def test_the_benchmark_definer_holds_exactly_the_columns_its_two_counting_bodies
     names one decision and fails with a sentence a reader can act on, and the
     fourth because the equality does not imply it:
 
-    - the relations it can reach, so a seventh one is a sentence rather than a
-      diff of eighteen tuples;
+    - the relations it can reach, so an eighth one is a sentence rather than a
+      diff of twenty-two tuples;
     - every privilege it holds is `SELECT` — a counting body writes nothing, and
       `INSERT` or `UPDATE` on `answer` would be an owner that can rewrite a
       comment;
@@ -812,16 +827,16 @@ def test_the_benchmark_definer_holds_exactly_the_columns_its_two_counting_bodies
       `SELECT` and rejects table-wide `SELECT` for this owner explicitly. This
       one is not implied by the equality: `has_column_privilege` answers true for
       every column of a table granted whole, so a table-wide grant would satisfy
-      the equality on the eighteen and quietly carry the rest.
+      the equality on the twenty-two and quietly carry the rest.
 
-    **The mutation it kills:** a nineteenth column added to the owner — the
+    **The mutation it kills:** a twenty-third column added to the owner — the
     natural edit when a later body needs one more field, and one that reaches
     `answer`'s comment text with no test anywhere else noticing — the substitution
-    the verifier's battery made, which this equality killed. Also a seventh
+    the verifier's battery made, which this equality killed. Also an eighth
     relation, a write verb beside the reads, and the
     column grants replaced by a table-wide `SELECT`, which is the tidying edit
     that changes no answer any test reads and hands every column of `response`
-    and `answer` to a function family that needs eight of them.
+    and `answer` to a function family that needs nine of them.
 
     **The near miss it must not fire on:** a privilege the role holds by owning
     something, which `has_column_privilege` reports and an `attacl` read would
@@ -850,10 +865,11 @@ def test_the_benchmark_definer_holds_exactly_the_columns_its_two_counting_bodies
         f"{sorted(BENCHMARK_DEFINER_RELATIONS)}.\n\n"
         "A `SECURITY DEFINER` function runs as its owner, so every relation in that set is one the "
         "function's callers can be made to reach — `pulse_app`, the connection every screen runs "
-        "on. ADR 0165's amendment names the six and `docs/tickets/e5/deferred.md` named them "
-        "first; ADR 0165 refuses the reuse of `pulse_resolve_definer` on exactly this ground: 'a "
-        "body whose whole job is counting has no use for that reach'. If a seventh is legitimate, "
-        "the amendment is where it is argued and this constant follows it."
+        "on. ADR 0165's amendments name the seven (`survey_window` since 2026-09-22) and "
+        "`docs/tickets/e5/deferred.md` named the first six; ADR 0165 refuses the reuse of "
+        "`pulse_resolve_definer` on exactly this ground: 'a body whose whole job is counting has "
+        "no use for that reach'. If an eighth is legitimate, an amendment is where it is argued "
+        "and this constant follows it."
     )
 
     verbs = sorted({privilege for _relation, _column, privilege in held})
@@ -877,7 +893,7 @@ def test_the_benchmark_definer_holds_exactly_the_columns_its_two_counting_bodies
 
     # The equality, last of the four column assertions on purpose: the three
     # above name a decision each and fail with a sentence, and this one is the
-    # exhaustive gate they cannot be — a nineteenth column on a relation already
+    # exhaustive gate they cannot be — a twenty-third column on a relation already
     # in the list, carrying `SELECT` and belonging to nobody, passes all three.
     assert held == BENCHMARK_DEFINER_PRIVILEGES, (
         f"`{BENCHMARK_DEFINER}` holds {sorted(held)} and ADR 0165's amendment says "

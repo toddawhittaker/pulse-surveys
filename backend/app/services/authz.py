@@ -150,6 +150,7 @@ __all__ = [
     "scoped_reader",
     "taught_section_ids",
     "teaching_instructor_assigned",
+    "teaching_instructors_of",
     "transitive_purview",
 ]
 
@@ -460,6 +461,17 @@ _TEACHING_INSTRUCTOR_SECTIONS = text(
     " WHERE granted.person_id = :person_id"
     " AND granted.role = CAST(:role AS public.assignment_role)"
     " AND granted.section_id IS NOT NULL"
+)
+
+# Everybody holding the teaching-instructor grant over one section — the people
+# column of `_HOLDS_THE_TEACHING_INSTRUCTOR_GRANT`'s three conditions, with the
+# person left open. E5-14's round-4 sealing asks it: each of them can read this
+# section's report, and each knows the sections they teach.
+_TEACHING_INSTRUCTORS_OF_A_SECTION = text(
+    "SELECT DISTINCT granted.person_id"
+    " FROM public.assignment_scope AS granted"
+    " WHERE granted.role = CAST(:role AS public.assignment_role)"
+    " AND granted.section_id = :section_id"
 )
 
 # Everybody holding an assignment whose scope names one section — the staff of that
@@ -994,6 +1006,32 @@ def taught_section_ids(session: Session, *, person_id: UUID) -> set[UUID]:
         session.execute(
             _TEACHING_INSTRUCTOR_SECTIONS,
             {"person_id": person_id, "role": LMS_OWNED_ASSIGNMENT_ROLE.value},
+        ).scalars()
+    )
+
+
+def teaching_instructors_of(session: Session, *, section_id: UUID) -> set[UUID]:
+    """Who holds the `INSTRUCTOR` grant over this section? (E5-14)
+
+    The people form of `teaching_instructor_assigned`: the same three conditions,
+    with the person left open. `app.services.benchmarks` asks it to seal a
+    section's comparison figures once for each person who can read that
+    section's report, against the sections that person teaches
+    (`taught_section_ids`) — each of them knows their own sections' answers and
+    can subtract them, and no one of them knows a co-instructor's.
+
+    **It lives here because the view does** — E0-41's rule that
+    `public.assignment_scope` is read through this module and nowhere else.
+
+    **Not an authorization decision.** It opens nothing: the report route still
+    decides who may read. A section nobody teaches answers the empty set, and its
+    figures are then sealed on their own population alone — which nobody can
+    read, because every report route requires the teaching grant.
+    """
+    return set(
+        session.execute(
+            _TEACHING_INSTRUCTORS_OF_A_SECTION,
+            {"role": LMS_OWNED_ASSIGNMENT_ROLE.value, "section_id": section_id},
         ).scalars()
     )
 

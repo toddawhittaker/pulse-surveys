@@ -17,8 +17,8 @@ schema.
 **The counts are read back through E5-03's own set function**, which is the row
 the benchmark minimums are compared against: `respondent_count` is distinct
 students and `section_count` is distinct sections, per course week, over exactly
-the sections the default set resolves to. A planter that dealt fifteen responses
-to twelve people would satisfy every sentence in this ticket's docstrings and
+the sections the default set resolves to. A planter that dealt ten responses to
+eight people would satisfy every sentence in this ticket's docstrings and
 fail here, which is `docs/MISTAKES.md` entry 50's shape — a threshold that
 protects people crossed by a count of something else.
 
@@ -219,7 +219,7 @@ def test_the_hero_reports_its_own_workload_hours_at_the_reported_week(
 
     The university population keeps the hero and the comparison set excludes it
     (E5 breakdown decision 5), so on the workload axis the two members differ by
-    exactly these values. Without them the union is the set — the same fifteen
+    exactly these values. Without them the union is the set — the same ten
     hours, the same mean, the same median — and swapping the two populations in
     the assembler is a change no test can see. Two mutation battery survivors
     lived in that world.

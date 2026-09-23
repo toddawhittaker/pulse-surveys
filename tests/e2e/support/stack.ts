@@ -241,13 +241,13 @@ function pipeTheSeeder(relativePath: string): string {
 }
 
 /**
- * Write E5-12's prior-term world — a term of answers for each of the four
+ * Write E5-12's prior-term world — a term of answers for each of the five
  * sections the mock platform publishes in the term before this one — and answer
  * what the seeder printed.
  *
  * The seeder reads every date it writes off a row and asks the clock nothing, so
  * this is the one step of E5-12's runbook that does not care what the clock says.
- * What it does care about is that the four sections have been launched, their
+ * What it does care about is that the five sections have been launched, their
  * rosters synced and their windows derived, which is the caller's job: see
  * `benchmarkWorld.ts`, which is the only caller and does all of it.
  *

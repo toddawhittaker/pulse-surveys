@@ -1085,6 +1085,35 @@ def _section(world: Any, chain: dict[str, Any], course: Any, letter: str, ordina
     )
 
 
+def plant_a_section_of_length(world: NamedSetWorld, length_weeks: int, *, ordinal: str) -> Any:
+    """One more committed section, under the outsider course, of a length no letter carries.
+
+    For E5-14's options test: the owner ruled that `definition_options` offers the
+    distinct `section.length_weeks` values that exist, so a 4-week section has to
+    exist for "4 is offered" to be a statement about the database rather than a
+    list. The code is the six-week letter `E` with a fresh ordinal — the letter
+    only keeps the code's shape; the length written is `length_weeks`, and the end
+    date follows from it (ADR 0020's inclusive convention).
+    """
+    inner = world.world
+    chain = dict(inner.calendar.chain)
+    for level in (SECTION_TABLE, COURSE_TABLE):
+        chain.pop(level, None)
+    _length, _first_term_week, start = SEEDED_COHORTS["E"]
+    row = inner.seed(
+        SECTION_TABLE,
+        {**chain, COURSE_TABLE: world.courses["outsider"]},
+        **{
+            SECTION_CODE_COLUMN: f"E{ordinal}{COHORT_SECTION_MODALITY}",
+            SECTION_LENGTH_COLUMN: length_weeks,
+            SECTION_START_COLUMN: start,
+            SECTION_END_COLUMN: start + timedelta(days=length_weeks * 7 - 1),
+        },
+    )
+    world.rows.commit()
+    return row
+
+
 def _plant_set(
     world: NamedSetWorld,
     *,

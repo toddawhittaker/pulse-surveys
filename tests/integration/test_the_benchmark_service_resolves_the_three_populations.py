@@ -61,6 +61,7 @@ from fixtures.benchmark_views import (
     a_population,
     benchmarks_api,
     carries,
+    cutoffs_after_every_window,
     figures_in,
     mean_and_median,
     reporting_symbol,
@@ -70,6 +71,7 @@ from fixtures.benchmark_views import (
 from fixtures.benchmark_views import (
     COMPARISON_FIGURE_TYPE as FIGURE_TYPE_NAME,
 )
+from fixtures.report_benchmarks import FIGURE_FIELD, REASON_FIELD, SUPPRESSED_FIELD
 
 pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 
@@ -94,6 +96,12 @@ EARLY_COHORT = "U"
 
 THE_COURSE_WEEK = 2
 
+# E5-14's freeze at close makes a cutoff per course week a required argument of
+# every figure door (the assumed interface is stated beside `CUTOFFS_PARAMETER` in
+# `tests/fixtures/benchmark_views.py`). This module is about populations, not the
+# freeze, so the one week it reads is cut off after every window both terms seed.
+THE_CUTOFFS = cutoffs_after_every_window((THE_COURSE_WEEK,))
+
 # What the comparison population answered, and what everybody outside it
 # answered. Two values far apart, so a figure carrying one of them says which
 # population it was computed over — and the arithmetic that distinguishes them is
@@ -102,26 +110,73 @@ SET_HOURS = Decimal("2.5")
 OUTSIDE_HOURS = Decimal("9.0")
 A_RATING = Decimal("4")
 
-# How many people answer outside the comparison set in the two-lines world: the
-# hero's own three and a sibling lead's two, all of them reporting
-# `OUTSIDE_HOURS`. Both counts are small on purpose — the university line's
-# minimums are cleared by the set's own respondents, so these five are what move
-# the *figure* and nothing else.
+# How many people answer in the hero's own section in the two-lines world, all
+# reporting `OUTSIDE_HOURS`.
 HERO_RESPONDENTS = 3
-SIBLING_RESPONDENTS = 2
+
+# The sibling lead's sections and people, in the two-lines world, **stand at both
+# configured minimums** — the sections count and the respondent count each equal
+# the minimum, read from `Settings` at the call site. Until E5-14 the sibling was
+# one section and two people. The orchestrator's university-sealing ruling then
+# withholds a university figure whenever the complement — the university minus
+# the reported section minus its default set, which is exactly the sibling's
+# sections here — is non-empty and below either minimum, because the default set
+# is shown beside the university line and subtracting the two would isolate that
+# complement. So the sibling grew to the minimums; everyone in it reports
+# `OUTSIDE_HOURS`, and the arithmetic below says so.
 
 
 def the_university_mean(respondents: int) -> Decimal:
-    """The mean of the two-lines world's twenty responses, by hand.
+    """The mean of the two-lines world's responses, by hand.
 
-    `(respondents x 2.5 + 5 x 9.0) / (respondents + 5)` — arithmetic over values
-    this module supplied, never a number read back from anything
-    (`docs/MISTAKES.md` entries 19 and 30). Written as a function rather than as
-    a literal because the set's size is the configured respondent minimum, and a
-    literal would be this file's copy of a value `.env.example` may move.
+    The set's `respondents` answer 2.5 hours; the hero's three and the sibling
+    lead's `respondents` answer 9.0. So
+    `(respondents x 2.5 + (3 + respondents) x 9.0) / (2 x respondents + 3)` —
+    arithmetic over values this module supplied, never a number read back from
+    anything (`docs/MISTAKES.md` entries 19 and 30). A function rather than a
+    literal because the counts are the configured respondent minimum, which a
+    literal would copy. At the settled minimum of 10 it is 142 / 23.
     """
-    outside = HERO_RESPONDENTS + SIBLING_RESPONDENTS
+    outside = HERO_RESPONDENTS + respondents
     return (respondents * SET_HOURS + outside * OUTSIDE_HOURS) / (respondents + outside)
+
+
+# A number handed to the suppression helper by hand, below both minimums, to read
+# the one reason it gives. The E5-05 device
+# (`test_the_benchmark_payload_plants_both_sides_of_both_minimums.py`): the reason
+# is read from the chokepoint rather than written here, so a copy of the string
+# cannot go on agreeing with a service that drifted (`docs/MISTAKES.md` entry 19).
+A_FIGURE_OVER_NOTHING = 4.25
+
+
+def the_chokepoints_reason(contract: Any) -> Any:
+    """The reason `comparison_after_suppression` gives for a figure over nothing."""
+    reason = serialized_figure(
+        contract.call_helper(A_FIGURE_OVER_NOTHING, sections=0, respondents=0)
+    ).get(REASON_FIELD)
+    assert reason, (
+        "The suppression helper gave no reason for a figure over no sections and no people, so "
+        "there is nothing to hold the service's suppressed figures to. E4-07's helper carries one "
+        "reason and E5-05's decision 6 keeps it the only one."
+    )
+    return reason
+
+
+def assert_suppressed_by_the_chokepoint(figure: Any, what: str, reason: Any) -> None:
+    """One figure in the chokepoint's suppressed state: the flag, its reason, and no number."""
+    held = serialized_figure(figure)
+    assert held.get(SUPPRESSED_FIELD) is True, (
+        f"{what} is {held}, which does not say it is suppressed. A figure over no sections is "
+        "suppressed exactly as a thin one is (ADR 0164, E5-04 criterion 6) — and a figure that "
+        "is merely not the populated set's number could be any other number."
+    )
+    assert held.get(REASON_FIELD) == reason, (
+        f"{what} gives the reason {held.get(REASON_FIELD)!r}; the chokepoint's own reason for a "
+        f"figure below the minimums is {reason!r}, and E5-05's decision 6 leaves it the only one."
+    )
+    assert (
+        held.get(FIGURE_FIELD) is None
+    ), f"{what} says it is suppressed and carries the figure {held.get(FIGURE_FIELD)!r}."
 
 
 def resolved(world: BenchmarkWorld, name: str, **arguments: Any) -> list[Any]:
@@ -140,6 +195,7 @@ def the_workload(
         section_id=world.section_id(HERO),
         population=a_population(population),
         course_week=course_week,
+        cutoffs=THE_CUTOFFS,
     )
 
 
@@ -148,29 +204,36 @@ def set_labels(sections: int) -> tuple[str, ...]:
     return tuple(f"set-{index}" for index in range(sections))
 
 
+def sibling_labels(sections: int) -> tuple[str, ...]:
+    """The labels of the sibling lead's sections, nameable before the world is built."""
+    return tuple(f"siblings-{index}" for index in range(sections))
+
+
 def a_hero_and_a_lead_with_more_courses(
     world: BenchmarkWorld, *, sections: int, respondents: int
 ) -> tuple[str, ...]:
-    """The hero, `sections` more sections under its own lead, and one under a sibling lead.
+    """The hero, `sections` more sections under its own lead, and `sections` under a sibling lead.
 
-    The sibling's section is what makes "the lead's courses" a *subset* of the
+    The sibling's sections are what make "the lead's courses" a *subset* of the
     university rather than the same thing minus the hero, which is criterion 5's
     world in one sentence. §4.1 item 2 is the reason the sibling is a second lead
-    rather than a second course under the first.
+    rather than more courses under the first.
 
-    `sections` is the configured section minimum at every call site, so the
-    default set here stands exactly at it and the figures below are about the
-    population rather than about the threshold.
+    `sections` and `respondents` are the configured minimums at every call site,
+    so the default set stands exactly at them, and so does the sibling's
+    population — the complement E5-14's university-sealing ruling requires to be
+    empty or at both minimums before the university line may be shown (see
+    `the_university_mean`).
     """
     labels = set_labels(sections)
+    siblings = sibling_labels(sections)
     world.build()
     world.plant_section(HERO, cohort=EARLY_COHORT, level=LEVEL)
-    for label in labels:
+    for label in (*labels, *siblings):
         world.plant_section(label, cohort=EARLY_COHORT, level=LEVEL)
-    world.plant_section("siblings", cohort=EARLY_COHORT, level=LEVEL)
 
     world.lead(THE_LEAD, HERO, *labels)
-    world.lead(A_SIBLING_LEAD, "siblings")
+    world.lead(A_SIBLING_LEAD, *siblings)
 
     world.answer_the_plan(
         dict(
@@ -193,8 +256,8 @@ def a_hero_and_a_lead_with_more_courses(
     world.answer_the_plan(
         dict(
             spread(
-                ("siblings",),
-                respondents=SIBLING_RESPONDENTS,
+                siblings,
+                respondents=respondents,
                 subject_prefix="e5-04-population-sibling",
             )
         ),
@@ -228,10 +291,9 @@ def test_the_default_set_leaves_the_hero_out_and_the_university_line_takes_it_in
     """
     minimums = report_api_contract.minimums()
     respondents = minimums[report_api_contract.minimum_respondents]
+    sections = minimums[report_api_contract.minimum_sections]
     labels = a_hero_and_a_lead_with_more_courses(
-        benchmark_world,
-        sections=minimums[report_api_contract.minimum_sections],
-        respondents=respondents,
+        benchmark_world, sections=sections, respondents=respondents
     )
 
     hero_id = benchmark_world.section_id(HERO)
@@ -239,13 +301,14 @@ def test_the_default_set_leaves_the_hero_out_and_the_university_line_takes_it_in
     university = resolved(benchmark_world, RESOLVE_UNIVERSITY, section_id=hero_id)
 
     lead_sections = {benchmark_world.section_id(label) for label in labels}
-    sibling_section = benchmark_world.section_id("siblings")
+    sibling_sections = set(benchmark_world.section_ids(*sibling_labels(sections)))
 
     assert set(default_set) == lead_sections, (
         f"The default set resolves to {sorted(map(str, default_set))}; the lead's other "
         f"{len(lead_sections)} courses are {sorted(map(str, lead_sections))}. The hero section is "
-        f"{hero_id} and the sibling lead's section is {sibling_section}: the first is excluded by "
-        "decision 5, and the second was never this lead's to be compared against."
+        f"{hero_id} and the sibling lead's sections are {sorted(map(str, sibling_sections))}: the "
+        "first is excluded by decision 5, and the others were never this lead's to be compared "
+        "against."
     )
     assert hero_id in university, (
         f"The university line resolves to {sorted(map(str, university))}, which does not include "
@@ -253,7 +316,7 @@ def test_the_default_set_leaves_the_hero_out_and_the_university_line_takes_it_in
         "and takes it out of its own set; a line that excluded it from both would be two "
         "exclusions where the record has one."
     )
-    assert lead_sections | {hero_id, sibling_section} == set(university), (
+    assert lead_sections | {hero_id} | sibling_sections == set(university), (
         f"The university line resolves to {sorted(map(str, university))}. Every section in this "
         "world is the same length and the same level, so §5.1's 'all same-length+level sections "
         "institution-wide' is every section this world holds — the lead's, the hero's and the "
@@ -267,7 +330,9 @@ def test_the_two_lines_answer_two_different_figures_over_one_world(
     """Criteria 3 and 5 at the figure grain: the populations differ, so the numbers do.
 
     The lead's own sections reported 2.5 hours each; the hero's three
-    respondents and the sibling lead's two reported 9.0. So the comparison line
+    respondents and the sibling lead's people (as many as the respondent
+    minimum, since E5-14 — see `the_university_mean`) reported 9.0. So the
+    comparison line
     is exactly 2.5 and the university line is `the_university_mean` above —
     arithmetic this module writes out over values it supplied, never read back
     from anything (`docs/MISTAKES.md` entry 30).
@@ -314,8 +379,8 @@ def test_the_two_lines_answer_two_different_figures_over_one_world(
         f"The university workload mean is {serialized_figure(university_mean)} and does not carry "
         f"{expected_university_mean}. {respondents} responses at {SET_HOURS} from the lead's "
         "sections, "
-        f"{HERO_RESPONDENTS} at {OUTSIDE_HOURS} from the hero and {SIBLING_RESPONDENTS} at "
-        f"{OUTSIDE_HOURS} from a sibling lead's section. A mean of {SET_HOURS} is the university "
+        f"{HERO_RESPONDENTS} at {OUTSIDE_HOURS} from the hero and {respondents} at "
+        f"{OUTSIDE_HOURS} from a sibling lead's sections. A mean of {SET_HOURS} is the university "
         "line computed over the comparison set, which draws §5.1's two lines from one population."
     )
 
@@ -359,12 +424,19 @@ def test_a_cohort_thin_in_this_term_is_a_benchmark_once_prior_terms_are_counted(
     world.plant_section("last-term-a", cohort=PRIOR_COHORT, level=LEVEL, term=PRIOR_TERM)
     world.plant_section("last-term-b", cohort=PRIOR_COHORT, level=LEVEL, term=PRIOR_TERM)
 
-    labels = (HERO, "this-term", "last-term-a", "last-term-b")
-    plan = dict(spread(labels, respondents=respondents, subject_prefix="e5-04-terms"))
-    assert len({label for entry in plan.values() for label in entry}) == len(labels), (
-        "The plan does not reach all four sections, so the section count this world plants is not "
-        "the one it was written for."
+    # The three sections other than the hero carry the configured respondent
+    # minimum between them, and the hero one respondent of its own. Until E5-14
+    # the minimum was dealt over all four, hero included; the university-sealing
+    # ruling then withholds a university figure whose contributors *other than the
+    # reported section* fall short, so the others now meet it on their own. The
+    # current term still holds only two of the four sections, which is the point.
+    others = ("this-term", "last-term-a", "last-term-b")
+    plan = dict(spread(others, respondents=respondents, subject_prefix="e5-04-terms"))
+    assert len({label for entry in plan.values() for label in entry}) == len(others), (
+        "The plan does not reach all three sections beside the hero, so the section count this "
+        "world plants is not the one it was written for."
     )
+    plan["e5-04-terms-hero"] = (HERO,)
     world.answer_the_plan(
         plan, course_week=THE_COURSE_WEEK, workload=SET_HOURS, instructor_rating=A_RATING
     )
@@ -472,7 +544,10 @@ def test_an_empty_named_set_answers_suppressed_figures_rather_than_an_error(
     )
 
     control = api[NAMED_SET_WORKLOAD](
-        benchmark_world.session, set_id=resolvable_id, course_week=THE_COURSE_WEEK
+        benchmark_world.session,
+        set_id=resolvable_id,
+        course_week=THE_COURSE_WEEK,
+        cutoffs=THE_CUTOFFS,
     )
     control_mean, _control_median = mean_and_median(control)
     assert carries(control_mean, SET_HOURS), (
@@ -482,7 +557,10 @@ def test_an_empty_named_set_answers_suppressed_figures_rather_than_an_error(
     )
 
     empty_workload = api[NAMED_SET_WORKLOAD](
-        benchmark_world.session, set_id=empty_id, course_week=THE_COURSE_WEEK
+        benchmark_world.session,
+        set_id=empty_id,
+        course_week=THE_COURSE_WEEK,
+        cutoffs=THE_CUTOFFS,
     )
     empty_mean, empty_median = mean_and_median(empty_workload)
     assert not carries(empty_mean, SET_HOURS), (
@@ -494,6 +572,15 @@ def test_an_empty_named_set_answers_suppressed_figures_rather_than_an_error(
     assert not carries(empty_median, SET_HOURS), (
         f"The median over an empty comparison set carries {SET_HOURS}: "
         f"{serialized_figure(empty_median)}."
+    )
+
+    # The boundary's spec-conformance LOW (E5-14): "not 2.5" is satisfied by a
+    # figure carrying any *other* number, so each of the two is also required to
+    # be the chokepoint's own suppressed state, with the chokepoint's own reason.
+    reason = the_chokepoints_reason(report_api_contract)
+    assert_suppressed_by_the_chokepoint(empty_mean, "The workload mean over an empty set", reason)
+    assert_suppressed_by_the_chokepoint(
+        empty_median, "The workload median over an empty set", reason
     )
 
 
@@ -543,12 +630,18 @@ def test_a_named_set_declaring_a_length_none_of_its_courses_runs_is_suppressed(
 
     mean, median = mean_and_median(
         api[NAMED_SET_WORKLOAD](
-            benchmark_world.session, set_id=wrong_length, course_week=THE_COURSE_WEEK
+            benchmark_world.session,
+            set_id=wrong_length,
+            course_week=THE_COURSE_WEEK,
+            cutoffs=THE_CUTOFFS,
         )
     )
     control_mean, _control_median = mean_and_median(
         api[NAMED_SET_WORKLOAD](
-            benchmark_world.session, set_id=resolvable, course_week=THE_COURSE_WEEK
+            benchmark_world.session,
+            set_id=resolvable,
+            course_week=THE_COURSE_WEEK,
+            cutoffs=THE_CUTOFFS,
         )
     )
 
@@ -602,6 +695,7 @@ def test_a_named_sets_trend_over_an_empty_set_answers_suppressed_points_without_
         benchmark_world.session,
         set_id=benchmark_world.comparison_set_id("resolvable"),
         stream=INSTRUCTOR_STREAM,
+        cutoffs=THE_CUTOFFS,
     )
     shown = [figure for figure in figures_in(control, figure_type) if carries(figure, A_RATING)]
     assert shown, (
@@ -614,6 +708,7 @@ def test_a_named_sets_trend_over_an_empty_set_answers_suppressed_points_without_
         benchmark_world.session,
         set_id=benchmark_world.comparison_set_id("empty"),
         stream=INSTRUCTOR_STREAM,
+        cutoffs=THE_CUTOFFS,
     )
     leaked = [figure for figure in figures_in(empty, figure_type) if carries(figure, A_RATING)]
     assert not leaked, (
@@ -621,3 +716,17 @@ def test_a_named_sets_trend_over_an_empty_set_answers_suppressed_points_without_
         f"{len(leaked)} of its figures: {empty!r}. A set with no members has no sections, and "
         "every figure over it is suppressed rather than borrowed."
     )
+
+    # The boundary's spec-conformance LOW (E5-14), on the trend door: asked for one
+    # course week, the series answers one point for it (the assumed `cutoffs`
+    # interface: one point per week named), and that point is the chokepoint's own
+    # suppressed state with the chokepoint's own reason — not merely "not 4".
+    points = figures_in(empty, figure_type)
+    assert len(points) == len(THE_CUTOFFS), (
+        f"The trend over an empty set, asked for course weeks {sorted(THE_CUTOFFS)}, answered "
+        f"{len(points)} figures: {empty!r}. A week asked for is a point shown or suppressed, never "
+        "an absent one — 'never an error and never an absent member'."
+    )
+    reason = the_chokepoints_reason(report_api_contract)
+    for point in points:
+        assert_suppressed_by_the_chokepoint(point, "A trend point over an empty set", reason)

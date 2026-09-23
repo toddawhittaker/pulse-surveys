@@ -462,10 +462,11 @@ test('an instructor launches, chooses a section, and reads its week', async ({ p
   // one.** Through E4 this read "nothing anywhere names a comparison: E5 has not
   // run" — true while the report carried no benchmark member at all. E5-10 wires
   // those members through, so the assertion is rewritten to the world it drives
-  // rather than deleted: `BIOL-215-R3WW` is a twelve-week level-200 section and
-  // the prior term holds no other of its length and level, so its comparison set
-  // cannot clear SPEC §11's section minimum and every figure from it is withheld
-  // (§4.1 item 7). The words are the copy modules' own, transcribed.
+  // rather than deleted: `BIOL-215-R3WW`'s course, `BIOL 215`, has no lead in
+  // `scripts/seed.py`, and SPEC §5.1 draws the default set from "the same Lead
+  // Faculty's courses", so its comparison set holds 0 sections, cannot clear SPEC
+  // §11's section minimum, and every figure from it is withheld (§4.1 item 7).
+  // The words are the copy modules' own, transcribed.
   //
   // The comparison *word* is therefore on the page now, in the notice that says
   // the line is not there — so the absence asserted here is the thing that
@@ -476,7 +477,7 @@ test('an instructor launches, chooses a section, and reads its week', async ({ p
     'The report names no comparison at all. Since E5-10 the payload carries the benchmark ' +
       'members and this section’s comparison set is below the section minimum, so each panel ' +
       'should say the line is not there rather than say nothing.',
-  ).toContain('no line this week. The set behind it is too small to report on.');
+  ).toContain('no line on this chart. The set behind it is too small to report on.');
   for (const cell of await report.getByTestId('stat-cell-comparison').all()) {
     await expect(cell).toContainText('Not shown');
     await expect(cell).toContainText('The set behind this figure is too small to report on.');

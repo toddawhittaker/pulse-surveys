@@ -97,14 +97,14 @@ Cool paper and botanical ink — deliberately outside both the warm-cream AI clu
 | `--chalk` | `#F6F8F4` | App background (faint green-white; also visually seams the iframe against Canvas's pure white) |
 | `--paper` | `#FFFFFF` | Cards and input surfaces |
 | `--spruce` | `#1E3932` | Ink: body text, primary buttons, chart axes |
-| `--spruce-60` | `#5B7269` | Secondary text, muted labels |
+| `--spruce-60` | `#5B7269` | Secondary text, muted labels, the benchmark and university chart lines |
 | `--hairline` | `#DCE4DD` | 1px borders, dividers |
 | `--marigold` | `#DFA320` | Signature accent: the section pulse line, selected states (never body text on white, never the focus ring — 2.2:1 against paper, under the 3:1 non-text floor) |
 | `--marigold-deep` | `#8F6A10` | Text-safe marigold (links, small accents, the focus ring — 4.6:1 on chalk, 5.0:1 on paper) |
 | `--madder` | `#A93F32` | Flags, destructive, required-state — reserved so it always means "attend to this" |
-| `--mist` | `#93A5A0` | Benchmark + university lines, disabled states |
+| `--mist` | `#93A5A0` | Disabled states (never a chart line: 2.58:1 against paper, under the 3:1 non-text floor) |
 
-Semantic mapping in charts: section line = marigold, solid, 2.5px, rounded caps, small dot on current week. Benchmark = mist, dashed. University = mist at 50%, dotted. The hero is unmistakable at a glance; context recedes.
+Semantic mapping in charts: section line = marigold, solid, 2.5px, rounded caps, small dot on current week. Benchmark = spruce-60, dashed, 1.5px. University = spruce-60, dotted, 1.5px. The two comparison lines are `--spruce-60` rather than `--mist` because a reader compares her line against them, so they carry meaning, and WCAG 2.2 SC 1.4.11 asks 3:1 of that: spruce-60 measures 5.18:1 on paper and 4.85:1 on chalk, and mist 2.58:1 (mist at 50% nearer 1.6:1). They recede by weight, dash and the absence of a dot rather than by fading, and they are told apart from each other by dash pattern alone. The hero is unmistakable at a glance; context recedes.
 
 ### Typography
 

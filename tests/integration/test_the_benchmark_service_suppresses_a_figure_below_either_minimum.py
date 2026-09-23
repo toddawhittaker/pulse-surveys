@@ -29,8 +29,9 @@ promise is about the *configured* minimum.
 
 **Every suppression assertion sits beside a passing control in the same world**
 (`docs/MISTAKES.md` entry 3). Each near-miss world is asked a second question it
-must answer with a figure — the university line over the same sections plus the
-hero, or another course week of the same set — so "no figure came back" cannot
+must answer with a figure — another course week of the same set, at both
+minimums (the university line served this until E5-14's sealing ruling withheld
+it over exactly these worlds) — so "no figure came back" cannot
 be satisfied by a service that answers nothing to everything, by an empty world,
 or by a resolution that found no sections at all.
 
@@ -55,11 +56,11 @@ from fixtures.benchmark_views import (
     DEFAULT_SET_POPULATION,
     INSTRUCTOR_STREAM,
     UG,
-    UNIVERSITY_POPULATION,
     BenchmarkWorld,
     a_population,
     benchmarks_api,
     carries,
+    cutoffs_after_every_window,
     mean_and_median,
     points_by_week,
     serialized_figure,
@@ -105,6 +106,10 @@ HERO_RATING = Decimal("3")
 # One below a minimum, and one above nothing. Named rather than written inline so
 # that "one below" is legible at every call site.
 ONE = 1
+
+# The section the section-minimum test's control adds to the lead's set, answering
+# only at the second week.
+AN_EXTRA_SECTION = "set-extra"
 
 
 def set_labels(sections: int) -> tuple[str, ...]:
@@ -178,6 +183,8 @@ def the_workload(world: BenchmarkWorld, population: str, *, course_week: int = F
         section_id=world.section_id(HERO),
         population=a_population(population),
         course_week=course_week,
+        # E5-14's freeze makes cutoffs required; nothing here is about the freeze.
+        cutoffs=cutoffs_after_every_window((course_week,)),
     )
 
 
@@ -237,16 +244,26 @@ def test_a_default_set_one_section_below_the_minimum_suppresses_both_figures(
     names: `benchmark_min_sections_default` and
     `benchmark_min_respondents_default`.
 
-    **The control in the same world is the university line**, which includes the
-    hero section (decision 5) and therefore stands at exactly the minimum over
-    the same rows. So "nothing came back" cannot be a resolution that found no
+    **The control in the same world is the same set one course week later**,
+    where one more of the lead's sections answers, so that week stands at both
+    minimums. So "nothing came back" cannot be a resolution that found no
     sections, a world that was never planted, or a service that answers nothing
-    to everything — the same world answers one of the two questions with a
+    to everything — the same lead's set answers one of the two questions with a
     figure.
+
+    **Why the control moved (E5-14).** It was the university line, which adds the
+    hero and stood at exactly the section minimum over these rows. The
+    orchestrator's university-sealing ruling withholds a university figure whose
+    contributors *other than the reported section* fall below either minimum,
+    because the reader knows her own section's count and sum and can subtract
+    them — so over this world the university line is now correctly withheld and
+    cannot be a control.
 
     **The mutation it kills:** the section count never compared, or compared
     against the respondent minimum; and a section count taken from the number of
-    *ids resolved* rather than from the sections that actually carry rows.
+    *ids resolved* rather than from the sections that actually carry rows — the
+    extra section is resolved into the set at both weeks and answers only in the
+    second.
     """
     minimums = report_api_contract.minimums()
     sections = minimums[report_api_contract.minimum_sections]
@@ -256,27 +273,39 @@ def test_a_default_set_one_section_below_the_minimum_suppresses_both_figures(
         "that is still a comparison set and this pair cannot be driven."
     )
 
-    plan = dict(
-        spread(
-            set_labels(sections - ONE),
-            respondents=respondents,
-            subject_prefix="e5-04-thin-sections",
-        )
-    )
+    labels = set_labels(sections - ONE)
+    plan = dict(spread(labels, respondents=respondents, subject_prefix="e5-04-thin-sections"))
     assert_the_plan_holds(plan, sections=sections - ONE, respondents=respondents)
     a_default_set_world(benchmark_world, plan=plan, subject_prefix="e5-04-thin-sections")
 
+    # The control: one more of the lead's sections, answering only at the second
+    # week, which puts that week at both minimums over the same lead's set.
+    benchmark_world.plant_section(AN_EXTRA_SECTION, cohort=COHORT, level=LEVEL)
+    benchmark_world.lead(THE_LEAD, AN_EXTRA_SECTION)
+    control_plan = dict(
+        spread(
+            (*labels, AN_EXTRA_SECTION),
+            respondents=respondents,
+            subject_prefix="e5-04-thin-sections-control",
+        )
+    )
+    assert_the_plan_holds(control_plan, sections=sections, respondents=respondents)
+    benchmark_world.answer_the_plan(
+        control_plan, course_week=SECOND_WEEK, workload=HOURS, instructor_rating=A_FULL_WEEK_RATING
+    )
+    benchmark_world.session.flush()
+
     mean, median = mean_and_median(the_workload(benchmark_world, DEFAULT_SET_POPULATION))
     control_mean, _control_median = mean_and_median(
-        the_workload(benchmark_world, UNIVERSITY_POPULATION)
+        the_workload(benchmark_world, DEFAULT_SET_POPULATION, course_week=SECOND_WEEK)
     )
 
     assert carries(control_mean, HOURS), (
-        f"The control failed before the assertion it protects: the university line over the same "
-        f"world — {sections - ONE} set sections plus the hero, which decision 5 includes — does "
-        f"not carry {HOURS}: {serialized_figure(control_mean)}. Until it does, the suppression "
-        "asserted below is satisfied by a world nobody planted or by a service that answers "
-        "nothing at all (`docs/MISTAKES.md` entry 3)."
+        f"The control failed before the assertion it protects: course week {SECOND_WEEK} of the "
+        f"same lead's set — {sections} sections and {respondents} people, both minimums exactly — "
+        f"does not carry {HOURS}: {serialized_figure(control_mean)}. Until it does, the "
+        "suppression asserted below is satisfied by a world nobody planted or by a service that "
+        "answers nothing at all (`docs/MISTAKES.md` entry 3)."
     )
     assert not carries(mean, HOURS), (
         f"A comparison workload mean over {sections - ONE} sections — one below the configured "
@@ -303,11 +332,12 @@ def test_a_default_set_one_respondent_below_the_minimum_suppresses_both_figures(
     cleared, so neither can stand in for the other and a service enforcing one of
     the two is red on exactly one of these tests.
 
-    **The control in the same world** is again the university line, which adds
-    the hero's own respondent and its section, putting the population at exactly
-    both minimums over the same rows. It is the sharpest control available here:
-    the two calls differ by one person and one section, so a service that answers
-    a figure to the first and not the second is measuring what it should be.
+    **The control in the same world** is the same set one course week later,
+    answered by exactly the minimum number of people. It was the university line
+    until E5-14 — the same rows plus the hero's own respondent — and the
+    university-sealing ruling now withholds that line whenever the contributors
+    other than the reported section fall short, which they do here by
+    construction. See the section-minimum test above for the ruling's reason.
 
     **The mutation it kills:** the respondent minimum never compared, and the
     respondent count taken from the number of responses — which this world's
@@ -331,15 +361,29 @@ def test_a_default_set_one_respondent_below_the_minimum_suppresses_both_figures(
     assert_the_plan_holds(plan, sections=sections, respondents=respondents - ONE)
     a_default_set_world(benchmark_world, plan=plan, subject_prefix="e5-04-thin-people")
 
+    benchmark_world.answer_the_plan(
+        dict(
+            spread(
+                set_labels(sections),
+                respondents=respondents,
+                subject_prefix="e5-04-thin-people-control",
+            )
+        ),
+        course_week=SECOND_WEEK,
+        workload=HOURS,
+        instructor_rating=A_FULL_WEEK_RATING,
+    )
+    benchmark_world.session.flush()
+
     mean, median = mean_and_median(the_workload(benchmark_world, DEFAULT_SET_POPULATION))
     control_mean, _control_median = mean_and_median(
-        the_workload(benchmark_world, UNIVERSITY_POPULATION)
+        the_workload(benchmark_world, DEFAULT_SET_POPULATION, course_week=SECOND_WEEK)
     )
 
     assert carries(control_mean, HOURS), (
-        f"The control failed before the assertion it protects: the university line over the same "
-        f"world — the same {sections} sections plus the hero, and the hero's own respondent, which "
-        f"is {respondents} people — does not carry {HOURS}: {serialized_figure(control_mean)}."
+        f"The control failed before the assertion it protects: course week {SECOND_WEEK} of the "
+        f"same {sections} sections, answered by {respondents} people, does not carry {HOURS}: "
+        f"{serialized_figure(control_mean)}."
     )
     assert not carries(mean, HOURS), (
         f"A comparison workload mean over {respondents - ONE} respondents — one below the "
@@ -489,6 +533,7 @@ def test_a_trend_series_suppresses_the_thin_week_and_shows_the_full_one(
         section_id=benchmark_world.section_id(HERO),
         population=a_population(DEFAULT_SET_POPULATION),
         stream=INSTRUCTOR_STREAM,
+        cutoffs=cutoffs_after_every_window((FULL_WEEK, SECOND_WEEK)),
     )
     weeks = points_by_week(trend)
 

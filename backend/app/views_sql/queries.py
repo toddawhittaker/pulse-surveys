@@ -39,19 +39,14 @@ helpers take the keys they are given.
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 __all__ = [
-    "BenchmarkSetRatingWeekRow",
-    "BenchmarkSetWeekRow",
     "SectionEnrollmentCount",
     "SectionRosterRow",
-    "benchmark_set_rating_week",
-    "benchmark_set_week",
     "section_enrollment_counts",
     "section_roster",
 ]
@@ -125,103 +120,3 @@ def section_enrollment_counts(
     """One count per section of `course_id`, including the sections holding nobody."""
     rows = session.execute(_SECTION_ENROLLMENT_COUNTS, {"course_id": course_id}).mappings()
     return [SectionEnrollmentCount(**row) for row in rows]
-
-
-# E5-03's two benchmark set functions, reached the way every read in this package
-# is reached. They are functions rather than views because the comparison set
-# E5-04 resolves is a list of sections rather than a key, and because a cohort
-# figure over such a list is computed where the rows are and comes back as
-# numbers: the application holds `EXECUTE` on two aggregate-returning bodies
-# rather than `SELECT` on a relation keyed to a student. That is a statement
-# about what joins the sanctioned read surface rather than about what this
-# connection can reach — it has read `response` and `answer` since the E2
-# submission path, and what it cannot read is a person. The SQL files carry the
-# argument in full, and the amendment on `docs/disputes/E5-03-01.md` records the
-# wider claim the ruling first made and withdrew.
-#
-# Written here because this module is where the read statements in this package
-# live. **The sentence that used to stand here was false and is corrected rather
-# than softened**: it said they were written here "so that E5-04 has no reason to
-# spell a statement of its own — which is the state
-# `test_the_org_views_are_read_only_through_the_grant.py` exists to prevent". That
-# sweep does the opposite. Its import half excuses exactly one importer of this
-# module, `backend/app/services/authz.py`, and reds every other module under
-# `backend/app/` that imports it — so `app.services.benchmarks` could not reach
-# these wrappers, and it spells the same two statements itself, the way
-# `backend/app/api/dev.py` spells its own read of `section_enrollment_count`.
-# Neither benchmark set function is a relation that sweep polices, so no
-# exemption is involved on either side. The duplication that leaves is recorded
-# in `docs/tickets/e5/deferred.md` with an owner.
-#
-# The array is bound and cast rather than interpolated, and the ids are passed as
-# text: the function takes `uuid[]`, and a list of literals spliced into the
-# statement would be a caller's value reaching the SQL.
-_BENCHMARK_SET_WEEK = text(
-    "SELECT course_week, workload_mean, workload_median,"
-    " response_count, respondent_count, section_count"
-    " FROM public.benchmark_set_week(CAST(:section_ids AS uuid[]))"
-    " ORDER BY course_week"
-)
-
-_BENCHMARK_SET_RATING_WEEK = text(
-    "SELECT course_week, stream, rating_mean, rating_count"
-    " FROM public.benchmark_set_rating_week(CAST(:section_ids AS uuid[]))"
-    " ORDER BY course_week, stream"
-)
-
-
-@dataclass(frozen=True, slots=True)
-class BenchmarkSetWeekRow:
-    """One course week's workload statistics and counts over a set of sections.
-
-    `workload_mean` and `workload_median` are `None` for a course week whose
-    responses carry no hours: the week had data and this particular figure did
-    not, and a zero would be a statement about how long those students worked
-    that none of them made. The three counts are always real, and
-    `respondent_count` is a count of **people** — the figure E5-04 compares
-    against its minimum.
-    """
-
-    course_week: int
-    workload_mean: Decimal | None
-    workload_median: Decimal | None
-    response_count: int
-    respondent_count: int
-    section_count: int
-
-
-@dataclass(frozen=True, slots=True)
-class BenchmarkSetRatingWeekRow:
-    """One course week and stream's rating figures over a set of sections.
-
-    `rating_count` counts ratings, not people. A stream nobody answered has no
-    row rather than a row with a null mean.
-    """
-
-    course_week: int
-    stream: str
-    rating_mean: Decimal
-    rating_count: int
-
-
-def benchmark_set_week(
-    session: Session, *, section_ids: Sequence[UUID]
-) -> Sequence[BenchmarkSetWeekRow]:
-    """The workload statistics and counts of each answered course week, over `section_ids`.
-
-    An empty set answers no rows: a named set may have no members and a default
-    set may be empty once the hero section is taken out of it, so it is an
-    ordinary input rather than a programming error.
-    """
-    parameters = {"section_ids": [str(section_id) for section_id in section_ids]}
-    rows = session.execute(_BENCHMARK_SET_WEEK, parameters).mappings()
-    return [BenchmarkSetWeekRow(**row) for row in rows]
-
-
-def benchmark_set_rating_week(
-    session: Session, *, section_ids: Sequence[UUID]
-) -> Sequence[BenchmarkSetRatingWeekRow]:
-    """The per-stream rating figures of each answered course week, over `section_ids`."""
-    parameters = {"section_ids": [str(section_id) for section_id in section_ids]}
-    rows = session.execute(_BENCHMARK_SET_RATING_WEEK, parameters).mappings()
-    return [BenchmarkSetRatingWeekRow(**row) for row in rows]

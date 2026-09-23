@@ -6,8 +6,8 @@ sections. This is the write half and the scope around it — everything
 `app.api.leadership`'s seven routes do once the session has been established.
 
 **A module of its own, because neither of the two candidates fits** (ADR 0173).
-`app.services.benchmarks` is the read and figure module and its own docstring
-says nothing in it writes; `app.services.authz` is SPEC §13's one authorization
+`app.services.benchmarks` resolves populations and seals figures, and nothing
+in it writes; `app.services.authz` is SPEC §13's one authorization
 chokepoint, and a write path living inside it would make that module the place
 where writes happen as well as the place where permission is decided.
 
@@ -21,8 +21,8 @@ Purview over the supervision graph is E9's (E5's breakdown decision 4); nothing
 here computes one.
 
 **Every rule about what a set may be is the database's, and this module
-translates.** SPEC §2.2's eight lengths are a `CHECK`, SPEC §8's five levels are
-a Postgres enum type, and the rule that a member course sits at the set's
+translates.** A declared length of at least one week and a name that is not
+blank are `CHECK`s, SPEC §8's five levels are a Postgres enum type, and the rule that a member course sits at the set's
 declared level is a composite foreign key with a `CHECK` over the two columns of
 one row (E5-01, ADR 0164, ADR 0018). So a write here is *attempted*: the
 statement runs, Postgres refuses it, and `_refusal` maps the constraint that
@@ -89,8 +89,8 @@ from app.copy.leadership_sets import (
     MEMBER_NOT_AT_THE_SETS_LEVEL,
     NAME_ALREADY_USED,
 )
-from app.models.benchmark import CALENDAR_LENGTHS, ComparisonSet, ComparisonSetMember
-from app.models.org import Course, CourseLevel, Prefix
+from app.models.benchmark import ComparisonSet, ComparisonSetMember
+from app.models.org import Course, CourseLevel, Prefix, Section
 from app.schemas.comparison_sets import (
     CourseOption,
     SetDetail,
@@ -204,7 +204,7 @@ _SET_TABLE = ComparisonSet.metadata.tables[ComparisonSet.__tablename__]
 _MEMBER_TABLE = ComparisonSetMember.metadata.tables[ComparisonSetMember.__tablename__]
 
 REFUSAL_BY_CONSTRAINT = {
-    _check_ending(_SET_TABLE, "length_is_a_calendar_length"): (
+    _check_ending(_SET_TABLE, "length_weeks_is_at_least_one"): (
         REFUSED_VALUE_STATUS,
         LENGTH_NOT_A_CALENDAR_LENGTH,
     ),
@@ -494,13 +494,20 @@ def delete_set(session: Session, *, set_id: UUID, person_id: UUID | None) -> Non
 
 
 def definition_options(session: Session) -> SetOptions:
-    """The closed choices a set is defined out of: SPEC §2.2's lengths, §8's levels, the courses.
+    """The choices a set is defined out of: the section lengths, §8's levels, the courses.
 
-    **Both closed sets come from where they are held** — `CALENDAR_LENGTHS` and
-    `CourseLevel` — rather than being written out again here. The levels are
-    answered in the enum's declaration order, which is SPEC §8's band order, and
-    not alphabetically: an order that said nothing about the bands would be an
-    order E5-09 has to invent a meaning for.
+    **The lengths are the distinct `section.length_weeks` values in the
+    database, ascending** — the owner's E5-14 ruling that a set's length is data.
+    SPEC §2.2 makes the calendar configuration, so the lengths a set can usefully
+    declare are the ones sections have; a length no section runs would be a set
+    that resolves to nothing. The table's own rule is only "at least one week",
+    so an API caller may still declare another length, and gets a set that is
+    suppressed everywhere until a section of that length exists.
+
+    **The levels come from where they are held**, `CourseLevel`, in the enum's
+    declaration order, which is SPEC §8's band order, and not alphabetically: an
+    order that said nothing about the bands would be an order E5-09 has to invent
+    a meaning for.
 
     **Every course, not only the ones some set already names**, because the form
     is where a new cohort is built. Each is labelled the way the report labels a
@@ -525,8 +532,11 @@ def definition_options(session: Session) -> SetOptions:
         )
         for course_id, lms_number, lms_title, level, prefix_code in rows
     ]
+    lengths = session.scalars(
+        select(Section.length_weeks).distinct().order_by(Section.length_weeks)
+    ).all()
     return SetOptions(
-        lengths=list(CALENDAR_LENGTHS),
+        lengths=list(lengths),
         levels=[level.value for level in CourseLevel],
         courses=sorted(offered, key=lambda option: (option.label, str(option.id))),
     )

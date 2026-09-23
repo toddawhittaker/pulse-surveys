@@ -117,8 +117,8 @@ export const STAT_CELL_UNIVERSITY_TESTID = 'stat-cell-university';
  * label bound to its own value.
  *
  * **Optional, with no default anywhere.** A caller that passes no `benchmark` —
- * which is every caller until E5-10 joins the real payload — renders exactly the
- * pair E4-09 shipped: no third column, no notice, and no comparison word in the
+ * which is what the report does when the payload carries no
+ * `workload_benchmark` — renders exactly the pair E4-09 shipped: no third column, no notice, and no comparison word in the
  * DOM at all. SPEC §4.1 item 1 is why that has to be a property of the component
  * rather than of its callers: a default that drew a column would put comparison
  * language one careless render away from a surface that must never carry it.

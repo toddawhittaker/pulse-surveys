@@ -11,13 +11,10 @@ import type {
  * **Shaped as the wire shapes them**, snake_case members and all, because these
  * describe E5-06's schemas rather than anything of this screen's choosing: a
  * divergence between the API and what the screen maps shows up as a compile
- * error here rather than as a list rendering the wrong member. E5-06 builds in
- * parallel and is not merged, so these are written from the contract both
- * tickets were handed (the epic's breakdown decision 8) and are the fixtures the
- * reconciliation reads when it lands.
+ * error here rather than as a list rendering the wrong member.
  *
- * **This module is the only place in `frontend/src` where SPEC §2.2's lengths
- * and §8's five levels are written.** The form reads them from
+ * **This module is the only place in `frontend/src` where course lengths and
+ * §8's five levels are written.** The form reads them from
  * `GET /leadership/comparison-sets/options` and never from a literal, and a
  * second list inside a component is the two-currencies defect this ticket's
  * trap section names. That the closed sets appear here at all is because a
@@ -26,12 +23,12 @@ import type {
  *
  * **`THE_OPTIONS` cannot prove that, and the first version of this paragraph
  * said it could.** Its lengths and levels are the real ones, so a form carrying
- * its own copy of §2.2 and §8 would render exactly what this fixture serves and
- * every test over it would stay green — a fixture that supplies the value under
- * test (`docs/MISTAKES.md` entry 30). `OPTIONS_NO_INSTITUTION_WOULD_SEND` below
- * is what settles the question: values no spec anywhere in this repository
- * contains, so a select offering anything else is offering something it did not
- * read from its options.
+ * its own list of lengths and levels would render exactly what this fixture
+ * serves and every test over it would stay green — a fixture that supplies the
+ * value under test (`docs/MISTAKES.md` entry 30).
+ * `OPTIONS_NO_INSTITUTION_WOULD_SEND` below is what settles the question: values
+ * nothing else in `frontend/src` carries, so a select offering anything else is
+ * offering something it did not read from its options.
  *
  * **It sits beside the route it serves**, where
  * `routes/instructor/instructorReportFixtures.ts` sits beside the instructor
@@ -90,9 +87,10 @@ export const A_SECOND_GRADUATE_COURSE = {
 /**
  * The closed choice lists, as `GET .../options` answers them.
  *
- * The eight lengths are SPEC §2.2's course lengths plus the dissertation length,
- * and the five levels are §8's bands in the order that section lists them. Both
- * are the server's data; they are written once, here.
+ * The server offers the distinct lengths its sections actually run; the eight
+ * here stand for such an answer (SPEC §2.2's calendar lengths plus the
+ * dissertation length). The five levels are §8's bands in the order that
+ * section lists them. Both are the server's data; they are written once, here.
  */
 export const THE_OPTIONS: ComparisonSetOptionsView = {
   lengths: [3, 6, 8, 10, 12, 15, 16, 18],
@@ -203,8 +201,8 @@ export const A_NEW_SET: ComparisonSetDetailView = {
 /**
  * A choice list no institution would send, for the provenance test.
  *
- * Four and seven are not course lengths in SPEC §2.2 and `ZZ` is not one of
- * §8's five bands, so nothing in this repository could supply them by accident:
+ * Four and seven are not in `THE_OPTIONS` and `ZZ` is not one of §8's five
+ * bands, so nothing else in `frontend/src` could supply them by accident:
  * a form that offers them offers them because this answer carried them, and a
  * form that offers 12 weeks or `UG` while holding this answer is reading a list
  * of its own. The course list is empty, which is the other half of the same
@@ -290,10 +288,14 @@ export const A_SET_WITH_A_CROSS_LEVEL_MEMBER: ComparisonSetDetailView = {
 /**
  * The refusals the routes answer with, as sentences on the wire.
  *
- * Written here as the server's words rather than imported from anywhere: they
- * are `api/leadership.py`'s copy, this screen renders whichever one it is sent,
+ * Transcribed from `backend/app/copy/leadership_sets.py` rather than imported:
+ * they are the server's words, this screen renders whichever one it is sent,
  * and a test that asked the screen for its own sentence would prove nothing.
+ * They match the server word for word so a test reads the sentence a reader
+ * would actually see.
  */
-export const A_DUPLICATE_NAME_REFUSAL = 'A comparison set with that name already exists.';
-export const A_NOT_THE_DEFINER_REFUSAL = 'This comparison set belongs to somebody else to change.';
-export const AN_UNKNOWN_SET_REFUSAL = 'There is no comparison set here for you to read.';
+export const A_DUPLICATE_NAME_REFUSAL =
+  'Another comparison set already uses this name, and a set is named once.';
+export const A_NOT_THE_DEFINER_REFUSAL =
+  'A comparison set is edited and deleted by the leader who defined it, and this one was defined by somebody else.';
+export const AN_UNKNOWN_SET_REFUSAL = 'There is no comparison set here.';

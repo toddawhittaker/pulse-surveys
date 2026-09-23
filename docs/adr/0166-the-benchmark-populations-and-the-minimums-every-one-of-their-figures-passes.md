@@ -1,6 +1,11 @@
 # 0166 — The benchmark populations, the minimums every one of their figures passes, and why the figures are computed over resolved section ids
 
-**Status:** Accepted — E5-04.
+**Status:** Accepted — E5-04. Decision 1 amended by
+[ADR 0179](0179-a-benchmark-figure-is-sealed-against-what-its-reader-can-subtract.md),
+and decision 4's set functions take per-week cutoffs since
+[ADR 0178](0178-a-published-benchmark-week-is-frozen-at-the-earliest-close-in-its-population.md)
+(both E5-14). Three rules the service already followed are recorded at the end
+(2026-09-22).
 
 ## Context
 
@@ -193,3 +198,29 @@ it stays rejected; if E5-06's preview later needs a per-set axis, that is its
 ticket's question rather than a quiet change to this one. Nothing renders the
 term axis yet, which is why the question could be settled on its merits rather
 than under a deadline.
+
+### Three rules the service follows that no record held
+
+Added 2026-09-22 by E5-14, after the boundary's adr-docs-completeness review
+found each written only in code or a docstring. None changes behavior.
+
+**A course with no lead-faculty mapping has no default comparison set.** It
+resolves to nothing, so every default-set figure on its report is withheld.
+It does not fall back to the department chair's courses. SPEC §2.1's fallback
+says who an unmapped course's reports go to; §5.1 draws the default set from
+"the same Lead Faculty's courses", and a course with no lead has none. Falling
+back to the chair's courses would compare the section against a department,
+a population §5.1 does not name. `BIOL-215-R3WW` in the seeded world is this
+case, and the exit drive reads it.
+
+**A course with two or more leads takes the union of every lead's courses.**
+The default set is every matching section of any course led by any of the
+hero course's leads. Choosing one lead would need a rule for which, and the
+spec gives none; an intersection would usually be empty.
+
+**A comparison figure counts every stored response, valid or not**, exactly as
+the section's own figures do. `response.is_valid` is not filtered, because a
+comparison figure and the section figure beside it must be computed over the
+same kind of rows. Ruled at E5's wave-2 launch and closed in
+`docs/tickets/e5/deferred.md`; until now the only statement of it was the
+module docstring of `app/services/benchmarks.py`.

@@ -10,7 +10,8 @@
   --chalk: #F6F8F4;         /* App/page background; also AiPanel inset fill. Cool paper, never pure white. */
   --paper: #FFFFFF;         /* Card and reading-surface background (reports, comments, responses). */
   --spruce: #1E3932;        /* Primary ink: body text, headings, filled bars, the Course line in TrendDuo. */
-  --spruce-60: #5B7269;     /* Secondary ink: labels, helpers, meta, mono eyebrows, axis text. */
+  --spruce-60: #5B7269;     /* Secondary ink: labels, helpers, meta, mono eyebrows, axis text,
+                               benchmark/university comparison lines (dashed/dotted). */
   --hairline: #DCE4DD;      /* Borders, dividers, table rules, chart gridlines. Never for text. */
   --marigold: #DFA320;      /* The hero accent: current-section trend line + terminal dot,
                                selected/active states, validity coaching (never an error red). */
@@ -18,8 +19,8 @@
                                focus ring. */
   --madder: #A93F32;        /* Reserved: "attend to this." Flag chips, Care classification labels,
                                breached thresholds in the admin strip. Never decoration, never headers. */
-  --mist: #93A5A0;          /* De-emphasis: benchmark/university comparison lines (dashed/dotted),
-                               excluded-comment text, flat pulse-line in empty states. */
+  --mist: #93A5A0;          /* De-emphasis: excluded-comment text, flat pulse-line in empty states.
+                               Never a chart line: 2.58:1 on paper, under the 3:1 non-text floor. */
 
   /* ---- Type — three faces, three jobs ---- */
   --font-display: 'Literata', Georgia, serif;                      /* Report titles, section heads, and a person's own words at reading size (cases, instructor responses). Ruled 2026-09-13: student comments take --font-body instead. */
