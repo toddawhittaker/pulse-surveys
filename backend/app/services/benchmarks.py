@@ -49,9 +49,16 @@ from E5-03 and is closed in `docs/tickets/e5/deferred.md`.
 
 **A published week's answers are frozen** (the owner's freeze-at-close ruling,
 E5-14). Each figure for course week *w* counts a response only if the window it
-was given in closed by *w*'s cutoff and it was last submitted by then, and a
-report's cutoff for *w* is at or before its own section's window for *w* closed.
-So new or revised answers cannot move a figure already shown. **That is not the
+was given in closed by *w*'s cutoff and it was last submitted by then. A
+report's cutoff for *w* is the earliest week-*w* close among every section in
+its term with its length and level (round 4), which is at or before its own
+section's close and **depends on no reader**: every report over one population
+and week shares one snapshot, so the within-term class — two reports of one
+population frozen at two instants, whose difference is whatever closed between
+— is gone. So new or revised answers cannot move a figure already shown.
+Three residuals are carried rather than closed: snapshots compared across terms
+(a reader's prior-term report against a current one), membership resolved at
+read time (below), and the race at a window's close in the submit path. **That is not the
 same as the figure depending only on rows fixed before it was shown**, and an
 earlier version of this paragraph said it was: which sections a population holds
 is resolved at read time, so the figure also depends on the lead mapping, on
@@ -59,16 +66,16 @@ each section's length and start date, and on the teaching grants, as they stand
 when the report is read. A change to any of those after publication moves the
 figure; freezing membership is carried to a later epic for the owner's ruling.
 
-**A figure is sealed on what is left after the reader's own sections** (E5-14).
-The reader group is every section, in any term, taught by anybody who teaches
-the reported one (`app.services.authz.reader_group_section_ids`); she can read
-each of their reports, so she can subtract them. A figure is shown only if its
-population clears both minimums and the population less the reader group is
-empty or clears them; the university line also needs the university less the
-reader group and less the default set to be empty or clear them.
-`_university_population` and `_narrowest` carry the argument. The populations
-themselves are unchanged: the default set leaves out only the reported section,
-and the university includes it.
+**A figure is sealed on what each of its readers would have left** (E5-14,
+round 4). A section's report is read by each person holding its teaching grant,
+and each knows the counts and sums of every section she teaches, in any term, so
+she can subtract them. A figure is shown only if its population clears both
+minimums and, for each such person, the population less her sections is empty or
+clears them; the university line also needs the university less her sections and
+less the default set to be empty or clear them. Per person, never over the union
+of co-instructors: none of them knows another's sections. `_university_population`
+and `_tightest` carry the argument. The populations themselves are unchanged: the
+default set leaves out only the reported section, and the university includes it.
 
 **The arithmetic is not here.** Every mean, median and count comes from E5-03's
 two `SECURITY DEFINER` set functions, which take a section-id array and the
@@ -104,7 +111,7 @@ from sqlalchemy.orm import Session
 
 from app.models.benchmark import ComparisonSet, ComparisonSetMember
 from app.models.org import Course, CourseLevel, Section
-from app.services.authz import reader_group_section_ids
+from app.services.authz import taught_section_ids, teaching_instructors_of
 from app.services.reporting import ComparisonFigure, comparison_after_suppression
 
 # ---------------------------------------------------------------------------
@@ -536,8 +543,8 @@ class _Population:
 
     For a named set the two are the same rows: every figure is sealed against
     its own contributors. A section-keyed population — the default set or the
-    university — is sealed against the narrowest of its remainders that holds
-    anybody; see `_sealed_through`.
+    university — is sealed against the tightest of its own contributors and its
+    non-empty remainders; see `_tightest`.
     """
 
     figures: _Answered
@@ -554,30 +561,38 @@ def _sealed_by_its_own(answered: _Answered) -> _Population:
     )
 
 
-def _narrowest(chain: Sequence[_Contributors | None]) -> _Contributors:
-    """The contributors one figure is sealed against, out of its population and its remainders.
+def _tightest(
+    own: _Contributors | None, remainders: Sequence[_Contributors | None]
+) -> _Contributors:
+    """The one pair a figure is sealed against, out of its population and its remainders.
 
-    `chain` is the population's own contributors first, then each remainder,
-    each a subset of the one before it. The E5-14 ruling shows a figure only if
-    the population clears both minimums and every remainder is empty or clears
-    them too. Distinct people and distinct sections can only shrink from a set
-    to its subset, so the narrowest remainder that holds anybody clearing both
-    minimums means every wider one does: that one pair, handed to
-    `comparison_after_suppression`, is the whole of the rule, and the decision
-    stays the chokepoint's. With no remainder holding anybody, the population's
-    own pair decides.
+    The E5-14 round-4 ruling shows a figure only if (a) its population clears
+    both minimums and every remainder is **empty or** clears them too. A
+    remainder is empty when nobody contributed to *this figure* at this week
+    under this week's cutoff — no respondent and no section; a workload
+    remainder whose week has responses but nobody who reported hours is empty.
+
+    "Every pair clears both minimums" is the same statement as "the smallest
+    count of sections and the smallest count of people among them clear both",
+    so the pair handed to `comparison_after_suppression` is the component-wise
+    minimum over the population's own contributors and each non-empty
+    remainder's. The decision itself stays the chokepoint's; this only decides
+    which counts it is asked about.
     """
-    chosen = chain[0] if chain[0] is not None else NOBODY
-    for remainder in chain[1:]:
-        # A remainder is empty when nobody in it contributed at this week under
-        # this week's cutoff — no respondent and no section.
-        if remainder is not None and (remainder.respondents > 0 or remainder.sections > 0):
-            chosen = remainder
-    return chosen
+    counted = [own if own is not None else NOBODY]
+    counted += [
+        remainder
+        for remainder in remainders
+        if remainder is not None and (remainder.respondents > 0 or remainder.sections > 0)
+    ]
+    return _Contributors(
+        respondents=min(pair.respondents for pair in counted),
+        sections=min(pair.sections for pair in counted),
+    )
 
 
 def _sealed_through(figures: _Answered, remainders: Sequence[_Answered]) -> _Population:
-    """A population's figures, each sealed against the narrowest of its remainders holding anybody.
+    """A population's figures, each sealed against `_tightest` of its own and its remainders' counts.
 
     Each figure is sealed on its own contributors in every population: a
     stream's raters for a rating point, the people who reported hours for a
@@ -595,15 +610,13 @@ def _sealed_through(figures: _Answered, remainders: Sequence[_Answered]) -> _Pop
     return _Population(
         figures=figures,
         workload_seal={
-            week: _narrowest(
-                [workload_of(figures, week), *(workload_of(rest, week) for rest in remainders)]
+            week: _tightest(
+                workload_of(figures, week), [workload_of(rest, week) for rest in remainders]
             )
             for week in figures.workload
         },
         rating_seal={
-            key: _narrowest(
-                [rating_of(figures, key), *(rating_of(rest, key) for rest in remainders)]
-            )
+            key: _tightest(rating_of(figures, key), [rating_of(rest, key) for rest in remainders])
             for key in figures.ratings
         },
     )
@@ -613,7 +626,7 @@ class _Reads:
     """The two set functions over each distinct section set, asked at most once per report read.
 
     A population and one of its remainders are often the same list — a default
-    set nobody in the reader group teaches has nothing taken out of it — and
+    set none of the section's instructors teaches has nothing taken out of it — and
     asking the database twice for the same answer is the cost the E5 boundary
     review measured and this replaces.
     """
@@ -631,17 +644,22 @@ class _Reads:
 
 
 def _default_population(
-    reads: _Reads, *, default_set: Sequence[UUID], reader_group: AbstractSet[UUID]
+    reads: _Reads, *, default_set: Sequence[UUID], taught: Sequence[AbstractSet[UUID]]
 ) -> _Population:
-    """The default set's figures, sealed on the set and on what is left of it after the reader group.
+    """The default set's figures, sealed on the set and on what each instructor would have left.
 
-    E5-14's round-3 ruling, condition (b). The reader's own sections — every
-    section anybody teaching the reported one also teaches, in any term — are
-    readable to her report by report, so she can subtract them: what is left
-    must be empty or clear both minimums. The figure is still the whole set's.
+    E5-14's round-4 ruling, condition (b_p). Each person p who holds the
+    teaching grant on the reported section reads its report, and knows the
+    count and the sum of every section she teaches herself, in any term — so she
+    can subtract them. What is left for her, the set less `taught[p]`, must be
+    empty or clear both minimums. Per person, and never over the union of the
+    section's instructors: no co-instructor knows another's sections. The figure
+    is still the whole set's.
     """
-    remainder = [section for section in default_set if section not in reader_group]
-    return _sealed_through(reads.of(default_set), [reads.of(remainder)])
+    remainders = [
+        reads.of(section for section in default_set if section not in hers) for hers in taught
+    ]
+    return _sealed_through(reads.of(default_set), remainders)
 
 
 def _university_population(
@@ -649,28 +667,31 @@ def _university_population(
     *,
     university: Sequence[UUID],
     default_set: Sequence[UUID],
-    reader_group: AbstractSet[UUID],
+    taught: Sequence[AbstractSet[UUID]],
 ) -> _Population:
-    """The university line's figures, sealed so that no subtraction isolates a thin population.
+    """The university line's figures, sealed so that no reader's subtraction isolates a thin population.
 
     The figure is the whole institution's, the reported section included (ADR
-    0166, decision 5). A university point is shown only if (E5-14, the round-3
-    ruling):
+    0166, decision 5). A university point is shown only if (E5-14, the round-4
+    ruling), for every person p holding the teaching grant on the reported
+    section:
 
       (a) its population clears both minimums;
-      (b) the university less the reader group is empty or clears them; and
-      (c) the university less the reader group and less the default set — which
-          is shown beside this line and so can be subtracted too — is empty or
-          clears them.
+      (b_p) the university less the sections p teaches is empty or clears them;
+      (c_p) the university less the sections p teaches and less the default set
+            — which is shown beside this line and so can be subtracted too — is
+            empty or clears them.
 
-    "Empty" means no contributor at that week under that week's cutoff.
+    A section nobody teaches has no p, so (a) alone applies; nobody can read its
+    report, because every report route requires the teaching grant.
     """
     in_default_set = set(default_set)
-    beyond_the_readers = [section for section in university if section not in reader_group]
-    beyond_both = [section for section in beyond_the_readers if section not in in_default_set]
-    return _sealed_through(
-        reads.of(university), [reads.of(beyond_the_readers), reads.of(beyond_both)]
-    )
+    remainders: list[_Answered] = []
+    for hers in taught:
+        beyond_hers = [section for section in university if section not in hers]
+        remainders.append(reads.of(beyond_hers))
+        remainders.append(reads.of(s for s in beyond_hers if s not in in_default_set))
+    return _sealed_through(reads.of(university), remainders)
 
 
 def _trend(
@@ -741,24 +762,31 @@ def _section_populations(
     session: Session,
     *,
     section_id: UUID,
-    reader_group: AbstractSet[UUID],
     cutoffs: Mapping[int, datetime],
     wanted: Collection[BenchmarkPopulation],
 ) -> dict[BenchmarkPopulation, _Population]:
-    """The section-keyed populations asked for, each resolved once and read through one `_Reads`."""
+    """The section-keyed populations asked for, each resolved once and read through one `_Reads`.
+
+    Each teaching instructor's sections are read once, through
+    `app.services.authz`, which is where `assignment_scope` is read.
+    """
     reads = _Reads(session, cutoffs)
     default_set = resolve_default_set(session, section_id=section_id)
+    taught = [
+        taught_section_ids(session, person_id=person)
+        for person in sorted(teaching_instructors_of(session, section_id=section_id))
+    ]
     populations: dict[BenchmarkPopulation, _Population] = {}
     if BenchmarkPopulation.DEFAULT_SET in wanted:
         populations[BenchmarkPopulation.DEFAULT_SET] = _default_population(
-            reads, default_set=default_set, reader_group=reader_group
+            reads, default_set=default_set, taught=taught
         )
     if BenchmarkPopulation.UNIVERSITY in wanted:
         populations[BenchmarkPopulation.UNIVERSITY] = _university_population(
             reads,
             university=resolve_university(session, section_id=section_id),
             default_set=default_set,
-            reader_group=reader_group,
+            taught=taught,
         )
     return populations
 
@@ -786,7 +814,6 @@ def section_benchmarks(
     section_id: UUID,
     course_week: int,
     streams: Sequence[str],
-    reader_group: AbstractSet[UUID],
     cutoffs: Mapping[int, datetime],
 ) -> SectionBenchmarks:
     """SPEC §5.1's comparison and university figures for one report, each population read once.
@@ -796,12 +823,10 @@ def section_benchmarks(
     — the two populations and their remainders — with every published week's
     cutoff; the rating rows serve every stream.
 
-    `reader_group` is `app.services.authz.reader_group_section_ids` for the
-    reported section, which the report has already resolved to compute
-    `cutoffs`: each published course week mapped to the **earliest** close of
-    that week's window among the group's sections in the reported section's term
-    (the one-cutoff-per-reader-group ruling). So two sections one instructor
-    teaches in a term get the same figures for the same course week, and no
+    `cutoffs` is each published course week mapped to the **earliest** close of
+    that week's window among every section in the reported section's term with
+    its length and level (E5-14's round-4 ruling). It depends on no reader, so
+    every report over one population and week shares one snapshot, and no
     answer given or revised later moves a figure already shown. Membership is
     still resolved at read time; see the module docstring.
     """
@@ -809,7 +834,6 @@ def section_benchmarks(
     by_population = _section_populations(
         session,
         section_id=section_id,
-        reader_group=reader_group,
         cutoffs=cutoffs,
         wanted=tuple(BenchmarkPopulation),
     )
@@ -841,14 +865,13 @@ def benchmark_trend(
     whose weeks were the *union* of this section's and the comparison
     population's lets a reader subtract their own weeks and read off which weeks
     other sections answered in (ADR 0170). **Each week counts only what was
-    fixed by its own cutoff**, and each figure is sealed on the section's reader
-    group exactly as the report's are. `section_benchmarks` is the report's door
+    fixed by its own cutoff**, and each figure is sealed per teaching instructor
+    exactly as the report's are. `section_benchmarks` is the report's door
     and reads both populations at once; this one reads one.
     """
     populations = _section_populations(
         session,
         section_id=section_id,
-        reader_group=reader_group_section_ids(session, section_id=section_id),
         cutoffs=cutoffs,
         wanted=(population,),
     )
@@ -868,7 +891,6 @@ def benchmark_workload(
     populations = _section_populations(
         session,
         section_id=section_id,
-        reader_group=reader_group_section_ids(session, section_id=section_id),
         cutoffs=week_cutoff,
         wanted=(population,),
     )
