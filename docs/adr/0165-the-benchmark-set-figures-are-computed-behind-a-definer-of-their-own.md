@@ -1,6 +1,20 @@
 # 0165 — The benchmark set figures are computed behind a definer of their own, the term axis is keyed by a start date, and a cohort week keeps its row when nobody reports hours
 
-**Status:** Accepted — E5-03; amended 2026-09-13 (E5-04).
+**Status:** Accepted — E5-03; amended 2026-09-13 (E5-04); amended 2026-09-22 (E5-14).
+
+> **Amendment, 2026-09-22 (E5-14).** The owner ruled that a published comparison
+> figure freezes at the close of the reported section's own week (ADR 0178). A
+> set function can only apply that cutoff if it can see two more facts: when each
+> response's own survey window closed, and when the response was last submitted.
+> So `pulse_benchmark_definer` gains four `SELECT` pairs, column-grain, in
+> `benchmark_definer_v002.sql`: `response.last_submitted_at`, and
+> `survey_window.section_id`, `survey_window.week_id` and
+> `survey_window.closes_at`. Its reach grows from eighteen pairs over six tables
+> to twenty-two pairs over seven. None of the four names a person: two are
+> instants, and two are keys to a section and a week. The functions still return
+> only aggregates. The cheaper alternative was rejected: the caller could compute
+> which responses were fixed and pass their ids in, but that is a second
+> implementation of a benchmark figure, which this record exists to prevent.
 
 > **Amendment, 2026-09-13.** The decision below is unchanged. What it left
 > unstated is the thing this record was the only place to state: **exactly which
