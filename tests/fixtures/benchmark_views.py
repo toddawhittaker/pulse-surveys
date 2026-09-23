@@ -39,12 +39,19 @@ broken one.
 
 **The clock is never read.** These views are aggregates over stored rows: they
 take no `now`, so no test here moves the development clock and no answer
-depends on the date CI runs on. Window rows are seeded because `response` may
-reference one, not because anything reads their instants — the same standing
-E4-03's fixture has, and the reason ADR 0142's hazard does not arise. A view
-that filtered to "the current term" would have to read a clock, and
+depends on the date CI runs on. A view that filtered to "the current term"
+would have to read a clock, and
 `test_a_prior_term_section_has_its_own_row_at_the_same_course_week` is where
 that shows up.
+
+**Window instants *are* read since E5-14, by the set functions.** The owner's
+freeze-at-close ruling counts a response toward course week *w* only if its
+window's `closes_at` and its own `last_submitted_at` are at or before the
+cutoff the caller passes for *w*. So the hand-written instants are inputs to a
+comparison now, not decoration: `window_closing_at` moves one close,
+`respond(..., last_submitted_at=...)` states a stamp, and
+`cutoffs_after_every_window` is the cutoff a test that is not about the freeze
+passes, after every window either term's worlds seed.
 
 **What E5-04 added, and what it refuses to decide.** The service that reads
 these functions needs three things this file did not have: a lead-faculty
@@ -109,9 +116,12 @@ from fixtures.report_views import (
     ReportWorld,
 )
 from fixtures.submit import (
+    ANSWER_TABLE,
     QUESTION_SET_TABLE,
+    QUESTION_TABLE,
     RESPONSE_TABLE,
     USER_TABLE,
+    WORKLOAD_HOURS_COLUMN,
 )
 from fixtures.supervision import require_table, single_primary_key
 from fixtures.survey_windows import (
@@ -260,24 +270,79 @@ BENCHMARK_FUNCTIONS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-# The argument, spelled by the ruling: one `uuid[]`, named `section_ids`.
-SET_FUNCTION_ARGUMENT = "section_ids"
-SET_FUNCTION_ARGUMENT_TYPE = "uuid[]"
+# The rows each function answers **in full** since E5-04's security round, which
+# gave every figure the counts of its own contributors (ADR 0166;
+# `docs/disputes/E5-04-01.md`). `BENCHMARK_FUNCTIONS` above is what this suite
+# *selects* and stays the E5-03 list; this is what the functions *return*, in
+# order, and it is what the `_v003` signature test compares the catalog against.
+# Names only: no record this suite may read spells the column types, so the
+# types are not pinned here (the E5-14 manifest names that gap).
+SET_FUNCTION_RESULT_COLUMNS: dict[str, tuple[str, ...]] = {
+    SET_RATING_FUNCTION: (
+        "course_week",
+        "stream",
+        "rating_mean",
+        "rating_count",
+        "rating_respondent_count",
+        "rating_section_count",
+    ),
+    SET_FUNCTION: (
+        "course_week",
+        "workload_mean",
+        "workload_median",
+        "response_count",
+        "respondent_count",
+        "section_count",
+        "workload_respondent_count",
+        "workload_section_count",
+    ),
+}
 
-# The typed wrappers, which the ruling puts in `views_sql/queries.py` under "the
-# same two names". The module is the one the org-views sweep already excuses as
-# the place statements live (`tests/unit/test_the_org_views_are_read_only_
-# through_the_grant.py` names it).
-QUERY_MODULE = "app.views_sql.queries"
+# The arguments, as E5-14's orchestrator ruling on the owner's "freeze at close"
+# spells them for `_v003`: "`public.benchmark_set_week(section_ids uuid[],
+# course_weeks integer[], closed_by timestamptz[])` … `course_weeks[i]` pairs with
+# `closed_by[i]`; each function returns rows only for the course weeks asked,
+# applying that week's cutoff." The type names are the ones `format_type` and
+# `pg_get_function_arguments` render, which is how the catalog is compared.
+SET_FUNCTION_ARGUMENTS: tuple[tuple[str, str], ...] = (
+    ("section_ids", "uuid[]"),
+    ("course_weeks", "integer[]"),
+    ("closed_by", "timestamp with time zone[]"),
+)
+SET_FUNCTION_ARGUMENT_TYPES = tuple(kind for _name, kind in SET_FUNCTION_ARGUMENTS)
+SET_FUNCTION_SIGNATURE = ", ".join(f"{name} {kind}" for name, kind in SET_FUNCTION_ARGUMENTS)
 
-# How the wrapper is handed its two inputs. **Bound by name, because no record
-# settles the signature** — the ruling names the functions and their SQL
-# arguments and stops there. This is the device `tests/fixtures/report_views.py`
-# uses for `recompute_response_validity` and for the same reason: an interface a
-# ruling leaves open is a question for the ticket, and a guess written into a
-# fixture answers it silently.
-WRAPPER_SESSION_PARAMETERS = ("session", "db", "db_session", "connection")
-WRAPPER_SECTION_PARAMETERS = ("section_ids", "sections", "section_id_list", "ids")
+# The course weeks a caller asks for when a test is not about the cutoff at all:
+# every course week any section length in SPEC §2.2 runs, the 18-week
+# dissertation length included. Paired with `PINNED_NOW` (below) as the cutoff —
+# an instant after every window either term's worlds seed — so every row a world
+# plants counts, which is the behaviour every pre-E5-14 test was written against.
+EVERY_COURSE_WEEK = tuple(range(1, 19))
+
+# ---------------------------------------------------------------------------
+# E5-14's freeze-at-close ruling, as the service is asked for it.
+#
+# **Assumed interface** (the E5-14 work order leaves the Python spelling open and
+# says to choose the smallest one and write it down): `benchmark_trend`,
+# `benchmark_workload`, `named_set_trend` and `named_set_workload` each take a
+# required keyword argument `cutoffs`, a mapping from course week to an aware
+# instant. A response contributes to course week *w* only if its window closed at
+# or before `cutoffs[w]` and it was last submitted at or before `cutoffs[w]`. A
+# trend answers one point for exactly each course week the mapping names; a
+# workload comparison reads `cutoffs[course_week]`. The report computes the
+# mapping from its own section's windows (T(w) = that section's week-w
+# `survey_window.closes_at`) — that half is asserted through the route, not here.
+# ---------------------------------------------------------------------------
+
+CUTOFFS_PARAMETER = "cutoffs"
+
+# `response`'s two submission stamps (E2-05; `tests/integration/test_survey_schema.py`
+# names them). The freeze reads the second; both are written when a world states
+# one, because a `last_submitted_at` earlier than `first_submitted_at` is a row
+# that schema refuses.
+FIRST_SUBMITTED_COLUMN = "first_submitted_at"
+LAST_SUBMITTED_COLUMN = "last_submitted_at"
+SUBMISSION_STAMP_COLUMNS = (FIRST_SUBMITTED_COLUMN, LAST_SUBMITTED_COLUMN)
 
 # ---------------------------------------------------------------------------
 # E5-04's service, by the names its work order settles. A change to any of them
@@ -506,12 +571,14 @@ def require_benchmark_function(connection: Any, name: str) -> dict[str, Any]:
 
     In a test body, never a fixture, for `require_benchmark_view`'s reason. The
     argument list is checked here as well as the name, because a function of the
-    right name taking something other than one `uuid[]` fails the call with
-    `UndefinedFunction`, which reads as "the function is missing" and is not.
+    right name taking other arguments fails the call with `UndefinedFunction`,
+    which reads as "the function is missing" and is not. Since E5-14 the list is
+    `_v003`'s three arrays (`SET_FUNCTION_ARGUMENTS`); a tree still carrying the
+    one-argument `_v002` is a failure here naming the freeze-at-close signature.
     """
     found = function_shape(connection, name)
     if not found:
-        signature = f"{name}({SET_FUNCTION_ARGUMENT} {SET_FUNCTION_ARGUMENT_TYPE})"
+        signature = f"{name}({SET_FUNCTION_SIGNATURE})"
         pytest.fail(
             f"There is no function `public.{name}` in the migrated database. The ruling on "
             f"`docs/disputes/E5-03-01.md` puts it in `backend/app/views_sql/{name}_v001.sql` as a "
@@ -530,11 +597,11 @@ def require_benchmark_function(connection: Any, name: str) -> dict[str, Any]:
         )
     shape = found[0]
     types = [str(value) for value in shape["argument_types"]]
-    if types != [SET_FUNCTION_ARGUMENT_TYPE]:
+    if types != list(SET_FUNCTION_ARGUMENT_TYPES):
         pytest.fail(
-            f"`public.{name}` takes {types}; the ruling settles it as one "
-            f"`{SET_FUNCTION_ARGUMENT_TYPE}` called `{SET_FUNCTION_ARGUMENT}`. Its signature is "
-            f"{shape['signature']}."
+            f"`public.{name}` takes {types}; E5-14's freeze-at-close ruling settles `_v003` as "
+            f"`{name}({SET_FUNCTION_SIGNATURE})` — the section set, the course weeks asked for, "
+            f"and one cutoff per week. Its signature is {shape['signature']}."
         )
     return shape
 
@@ -584,98 +651,75 @@ def one_benchmark_row(connection: Any, view: str, **filters: Any) -> dict[str, A
     return rows[0] if rows else None
 
 
-def set_function_rows(
-    connection: Any, name: str, section_ids: Sequence[Any]
-) -> list[dict[str, Any]]:
-    """Every row one benchmark set function answers for a section set.
+def cutoffs_after_every_window(
+    course_weeks: Sequence[int] = EVERY_COURSE_WEEK,
+) -> dict[int, datetime]:
+    """One cutoff per course week, each after every window these worlds seed.
 
-    The ids are bound as text and cast, rather than interpolated: the function
-    takes `uuid[]`, and an array of literals spliced into the statement would be
-    a caller's string reaching the SQL. The empty set is deliberately *not*
-    routed through here — `EMPTY_SET_CALL` below is a separate statement,
-    because an empty Python list gives the driver no element type to infer and
-    the resulting error would look like a defect in the function.
+    For the tests whose subject is not the freeze: every response a world plants
+    counts, which is what they were written against before E5-14. `PINNED_NOW`
+    is after Fall 2026's last window and the prior term's, and every
+    `last_submitted_at` these fixtures write is earlier than it.
+    """
+    return {int(week): PINNED_NOW for week in course_weeks}
+
+
+def set_function_rows(
+    connection: Any,
+    name: str,
+    section_ids: Sequence[Any],
+    cutoffs: Mapping[int, datetime] | None = None,
+) -> list[dict[str, Any]]:
+    """Every row one benchmark set function answers for a section set and its cutoffs.
+
+    `cutoffs` maps each course week asked for to that week's cutoff, and is
+    passed as `_v003`'s two parallel arrays in ascending week order. Left out, it
+    is `cutoffs_after_every_window()` — every course week, nothing excluded.
+
+    The ids, weeks and instants are bound and cast rather than interpolated: an
+    array of literals spliced into the statement would be a caller's string
+    reaching the SQL. The empty *section* set is deliberately not routed through
+    here — `empty_set_call` below is a separate statement, because an empty
+    Python list gives the driver no element type to infer and the resulting
+    error would look like a defect in the function.
     """
     require_benchmark_function(connection, name)
+    asked = dict(cutoffs if cutoffs is not None else cutoffs_after_every_window())
+    weeks = sorted(asked)
     selected = ", ".join(BENCHMARK_FUNCTIONS[name])
     statement = text(
-        f"SELECT {selected} FROM public.{name}(CAST(:ids AS uuid[]))"  # noqa: S608
+        f"SELECT {selected} FROM public.{name}("  # noqa: S608
+        "CAST(:ids AS uuid[]), CAST(:weeks AS integer[]), CAST(:closed_by AS timestamptz[]))"
     )
-    parameters = {"ids": [str(value) for value in section_ids]}
+    parameters = {
+        "ids": [str(value) for value in section_ids],
+        "weeks": weeks,
+        "closed_by": [asked[week] for week in weeks],
+    }
     return [dict(row) for row in connection.execute(statement, parameters).mappings()]
 
 
 def empty_set_call(name: str) -> Any:
-    """The same call over an empty section set, with the array written as a literal."""
-    selected = ", ".join(BENCHMARK_FUNCTIONS[name])
-    return text(f"SELECT {selected} FROM public.{name}(ARRAY[]::uuid[])")  # noqa: S608
+    """The same call over an empty section set, with the arrays written as literals.
 
-
-def query_module() -> Any:
-    """`app.views_sql.queries`, imported where a test can fail on it rather than error."""
-    try:
-        return import_module(QUERY_MODULE)
-    except ModuleNotFoundError as missing:  # pragma: no cover - a red, not a branch
-        absent = missing.name
-        if absent is not None and not (
-            absent == QUERY_MODULE or QUERY_MODULE.startswith(f"{absent}.")
-        ):
-            raise
-        pytest.fail(
-            f"`{QUERY_MODULE}` does not exist. It is the module the org-views sweep already "
-            "excuses as the place read statements live, and the ruling on "
-            "`docs/disputes/E5-03-01.md` puts this ticket's two typed wrappers there under the "
-            f"same names as the SQL functions: `{SET_RATING_FUNCTION}` and `{SET_FUNCTION}`."
-        )
-
-
-def query_wrapper(name: str) -> Any:
-    """One typed wrapper off that module, or a failure saying it is missing."""
-    module = query_module()
-    found = getattr(module, name, None)
-    if not callable(found):
-        defined = sorted(entry for entry in vars(module) if not entry.startswith("_"))
-        pytest.fail(
-            f"`{QUERY_MODULE}` exposes no callable `{name}`; it exposes {defined}. The ruling on "
-            "`docs/disputes/E5-03-01.md` settles that the typed wrappers carry the same two names "
-            "as the SQL functions, so this is a missing deliverable rather than a rename to "
-            "accommodate here. If it is genuinely spelled some other way, the constant in "
-            "tests/fixtures/benchmark_views.py is the one line that changes."
-        )
-    return found
-
-
-def call_wrapper(name: str, session: Any, section_ids: Sequence[Any]) -> Any:
-    """Call one typed wrapper, binding its parameters by name.
-
-    **Bound by name because the ruling settles the wrapper's name and not its
-    signature**, which is the same standing `recompute_validity` has in
-    `tests/fixtures/report_views.py`. A required parameter this cannot fill
-    stops with a message naming it — an interface question for the ticket rather
-    than a guess written into a fixture.
+    The weeks and cutoffs are *not* empty — two course weeks, each cut off at
+    `PINNED_NOW` — so an empty answer is about the section set and nothing else.
     """
-    import inspect
+    selected = ", ".join(BENCHMARK_FUNCTIONS[name])
+    instant = PINNED_NOW.isoformat()
+    return text(
+        f"SELECT {selected} FROM public.{name}("  # noqa: S608
+        "ARRAY[]::uuid[], ARRAY[1, 2]::integer[], "
+        f"ARRAY['{instant}', '{instant}']::timestamptz[])"
+    )
 
-    wrapper = query_wrapper(name)
-    available = {
-        **{parameter: session for parameter in WRAPPER_SESSION_PARAMETERS},
-        **{parameter: list(section_ids) for parameter in WRAPPER_SECTION_PARAMETERS},
-    }
-    values: dict[str, Any] = {}
-    for parameter in inspect.signature(wrapper).parameters.values():
-        if parameter.kind in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD):
-            continue
-        if parameter.name in available:
-            values[parameter.name] = available[parameter.name]
-        elif parameter.default is parameter.empty:
-            pytest.fail(
-                f"`{name}` requires a parameter `{parameter.name}` this fixture has nothing to "
-                f"fill from; it offers a session under {list(WRAPPER_SESSION_PARAMETERS)} and a "
-                f"section-id sequence under {list(WRAPPER_SECTION_PARAMETERS)}. A third required "
-                "input is an interface question for the ticket — `WRAPPER_SECTION_PARAMETERS` in "
-                "tests/fixtures/benchmark_views.py is where a spelling is taught."
-            )
-    return wrapper(**values)
+
+# E5-14 deleted `views_sql/queries.py`'s two benchmark wrappers and the test that
+# pinned them (the orchestrator's ruling on the data-model LOW: "`services/
+# benchmarks.py` is the single home"), and with them the three helpers that
+# reached them from here. `tests/unit/test_only_the_benchmark_service_names_the_
+# benchmark_relations.py` now holds the other side: no module but the service may
+# name either function.
 
 
 # ---------------------------------------------------------------------------
@@ -1175,6 +1219,75 @@ class BenchmarkWorld:
         planted.windows[term_week] = window
         return window
 
+    def window_closing_at(self, label: str, course_week: int, closes_at: datetime) -> Any:
+        """One section's window for one course week, closing at `closes_at` rather than Sunday.
+
+        For the freeze-at-close boundary (E5-14): a response counts toward course
+        week *w* only if its own window closed by the cutoff, so a test needs a
+        window whose close sits exactly on a cutoff, or one microsecond past it.
+        The window opens at the hand-written Friday instant; only the close moves.
+        Seeded before any response in that week, and cached where `respond` looks,
+        so every response in that section's week hangs on this window.
+        """
+        planted = self.section(label)
+        term_week = self.term_week_of(label, course_week)
+        if term_week in planted.windows:
+            pytest.fail(
+                f"Section {label!r} already has a window for term week {term_week}; a moved close "
+                "has to be planted before the first response in that week."
+            )
+        opens_at, _closes_at = WINDOWS_BY_TERM[planted.term][term_week]
+        window = self.seed(
+            SURVEY_WINDOW_TABLE,
+            {},
+            **{
+                WINDOW_SECTION_COLUMN: self.section_id(label),
+                WINDOW_WEEK_COLUMN: self.week_id(term_week, planted.term),
+                WINDOW_TERM_COLUMN: self.term_id(planted.term),
+                WINDOW_OPENS_COLUMN: opens_at,
+                WINDOW_CLOSES_COLUMN: closes_at,
+            },
+        )
+        planted.windows[term_week] = window
+        return window
+
+    def revise(self, response: Any, *, workload: Decimal, last_submitted_at: datetime) -> None:
+        """A resubmission of an existing response: new hours, and a later last-submitted stamp.
+
+        Written the way the submit path records a revision — the `answer` row's
+        value changes in place and `response.last_submitted_at` moves; the first
+        stamp stays — so the freeze test can ask whether a revision after the
+        cutoff reaches a published figure.
+        """
+        from sqlalchemy import update
+
+        answers = require_table(self.tables, ANSWER_TABLE)
+        responses = require_table(self.tables, RESPONSE_TABLE)
+        response_column = self.report.link(ANSWER_TABLE, RESPONSE_TABLE)
+        question_column = self.report.link(ANSWER_TABLE, QUESTION_TABLE)
+        question = self.report.questions[FIRST_VERSION][WORKLOAD_POSITION]
+        response_key = self.key_of(RESPONSE_TABLE)
+        changed = self.session.execute(
+            update(answers)
+            .where(
+                answers.c[response_column] == response[response_key],
+                answers.c[question_column] == question[self.key_of(QUESTION_TABLE)],
+            )
+            .values(**{WORKLOAD_HOURS_COLUMN: workload})
+        )
+        if changed.rowcount != 1:
+            pytest.fail(
+                f"Revising the hours of response {response[response_key]} changed "
+                f"{changed.rowcount} answer rows; the response has to carry exactly one workload "
+                "answer for a revision to be one."
+            )
+        self.session.execute(
+            update(responses)
+            .where(responses.c[response_key] == response[response_key])
+            .values(**{LAST_SUBMITTED_COLUMN: last_submitted_at})
+        )
+        self.session.flush()
+
     # -- the populations a service resolves ------------------------------------
 
     def lead(self, name: str, *labels: str) -> Mapping[str, Any]:
@@ -1345,8 +1458,14 @@ class BenchmarkWorld:
         workload: Decimal | None = None,
         instructor_rating: Decimal | None = None,
         course_rating: Decimal | None = None,
+        last_submitted_at: datetime | None = None,
     ) -> Any:
         """One `response` in one section's course week, carrying the answers given.
+
+        **`last_submitted_at`, when given, is written to both submission stamps**
+        (E5-14's freeze-at-close ruling counts a response only if it was last
+        submitted by the cutoff). Left out, both stamps are the seeding walker's
+        invented instant, as they were for every world written before E5-14.
 
         A position left out gets no `answer` row at all, which is the faithful
         record of a question that was not answered: E2-05 refuses an `answer`
@@ -1383,6 +1502,15 @@ class BenchmarkWorld:
         }
         if self.report.has_column(RESPONSE_TABLE, "submitted_at"):
             values["submitted_at"] = closes_at - SUBMITTED_BEFORE_CLOSE
+        if last_submitted_at is not None:
+            for stamp in SUBMISSION_STAMP_COLUMNS:
+                if not self.report.has_column(RESPONSE_TABLE, stamp):
+                    pytest.fail(
+                        f"`{RESPONSE_TABLE}` has no `{stamp}` column, so this world cannot say "
+                        "when a response was last submitted. E2-05 ships both submission stamps "
+                        "and E5-14's freeze-at-close ruling reads the second."
+                    )
+                values[stamp] = last_submitted_at
         response_table = require_table(self.tables, RESPONSE_TABLE)
         window_column = single_column_link(response_table, SURVEY_WINDOW_TABLE)
         if window_column is not None:
@@ -1465,15 +1593,21 @@ class BenchmarkWorld:
             section_start_date=section_start_date,
         )
 
-    def set_week(self, *labels: str) -> list[dict[str, Any]]:
+    def set_week(
+        self, *labels: str, cutoffs: Mapping[int, datetime] | None = None
+    ) -> list[dict[str, Any]]:
         """`benchmark_set_week` over exactly the labelled sections."""
         self.session.flush()
-        return set_function_rows(self.session, SET_FUNCTION, self.section_ids(*labels))
+        return set_function_rows(self.session, SET_FUNCTION, self.section_ids(*labels), cutoffs)
 
-    def set_rating_week(self, *labels: str) -> list[dict[str, Any]]:
+    def set_rating_week(
+        self, *labels: str, cutoffs: Mapping[int, datetime] | None = None
+    ) -> list[dict[str, Any]]:
         """`benchmark_set_rating_week` over exactly the labelled sections."""
         self.session.flush()
-        return set_function_rows(self.session, SET_RATING_FUNCTION, self.section_ids(*labels))
+        return set_function_rows(
+            self.session, SET_RATING_FUNCTION, self.section_ids(*labels), cutoffs
+        )
 
 
 def spread(
@@ -1583,7 +1717,9 @@ __all__ = [
     "COURSE_STREAM",
     "COURSE_WEEK_VIEWS",
     "CURRENT_TERM",
+    "CUTOFFS_PARAMETER",
     "DEFAULT_SET_POPULATION",
+    "EVERY_COURSE_WEEK",
     "GR",
     "INSTRUCTOR_RATING_POSITION",
     "INSTRUCTOR_STREAM",
@@ -1591,6 +1727,7 @@ __all__ = [
     "NAMED_SET_TERM_AXIS",
     "NAMED_SET_TREND",
     "NAMED_SET_WORKLOAD",
+    "PINNED_NOW",
     "POPULATION_ENUM",
     "PRIOR_TERM",
     "PRIOR_TERM_COHORTS",
@@ -1604,6 +1741,9 @@ __all__ = [
     "RESOLVE_NAMED_SET",
     "RESOLVE_UNIVERSITY",
     "SET_FUNCTION",
+    "SET_FUNCTION_ARGUMENTS",
+    "SET_FUNCTION_RESULT_COLUMNS",
+    "SET_FUNCTION_SIGNATURE",
     "SET_RATING_FUNCTION",
     "TERM_AXIS_VIEWS",
     "UG",
@@ -1619,8 +1759,8 @@ __all__ = [
     "benchmark_view_columns",
     "benchmarks_api",
     "benchmarks_module",
-    "call_wrapper",
     "carries",
+    "cutoffs_after_every_window",
     "empty_set_call",
     "figures_in",
     "function_shape",
@@ -1628,8 +1768,6 @@ __all__ = [
     "numbers_in",
     "one_benchmark_row",
     "points_by_week",
-    "query_module",
-    "query_wrapper",
     "reporting_symbol",
     "require_benchmark_function",
     "require_benchmark_view",

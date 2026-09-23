@@ -18,6 +18,12 @@ because membership is replaced wholesale on a `PUT` — the rows not in the new
 list are deleted and the new ones inserted — so nothing in this product edits a
 membership row in place.
 
+**E5-14 narrowed the set table's `UPDATE` to four columns** — `name`,
+`length_weeks`, `level`, `updated_at` — after the data-model review found the
+table-wide grant let this role rewrite a set's creator, which is what E5-06's
+edit and delete scoping reads. So the set table's `UPDATE` is asserted per
+column, both sides, below.
+
 **The withheld verb is the whole assertion here**, and the granted ones are what
 make it mean something. A role that could do nothing would be refused `UPDATE`
 on the membership table too, and a module asserting only that refusal would be
@@ -66,6 +72,7 @@ from fixtures.comparison_sets import (
     EXPECTED_MEMBERSHIP_TABLE,
     INSUFFICIENT_PRIVILEGE,
     a_write_of,
+    an_update_of_column,
     refusal_of_statement,
 )
 from fixtures.supervision import sqlstate_of
@@ -89,13 +96,27 @@ THE_TABLES = (COMPARISON_SET_TABLE, EXPECTED_MEMBERSHIP_TABLE)
 # than derived from the SQL file this polices (`docs/MISTAKES.md` entry 19): an
 # expectation read out of the thing under test agrees with a grants file that
 # says the wrong thing.
+#
+# **`UPDATE` on `comparison_set` left this tuple at E5-14.** The data-model review
+# found the table-wide grant let `pulse_app` rewrite a set's `created_by_person_id`
+# — the column E5-06's edit and delete scoping reads to decide *whose* set it is —
+# and its `created_at` and `id`. The orchestrator's ruling makes the grant
+# column-grain, `GRANT UPDATE (name, length_weeks, level, updated_at)`, with a new
+# `comparison_set_write_grants_v002.sql`; the two tuples below it hold each side.
 GRANTED = (
     (COMPARISON_SET_TABLE, "INSERT"),
-    (COMPARISON_SET_TABLE, "UPDATE"),
     (COMPARISON_SET_TABLE, "DELETE"),
     (EXPECTED_MEMBERSHIP_TABLE, "INSERT"),
     (EXPECTED_MEMBERSHIP_TABLE, "DELETE"),
 )
+
+# The four columns a set edit writes, and the only four `pulse_app` may update.
+UPDATABLE_SET_COLUMNS = ("name", "length_weeks", "level", "updated_at")
+
+# The columns it may not, each a fact a leader's edit never changes. The creator is
+# the one the ruling names, because it is what decides who may edit or delete a
+# set; the key and the creation instant are the other two the review named.
+WITHHELD_SET_COLUMNS = ("created_by_person_id", "id", "created_at")
 
 # The one write verb decision 6 withholds, and the sentence it comes from.
 WITHHELD = (EXPECTED_MEMBERSHIP_TABLE, "UPDATE")
@@ -254,6 +275,78 @@ def test_a_granted_write_reaches_the_comparison_set_tables_on_the_application_co
     assert state != INSUFFICIENT_PRIVILEGE, (
         f"`{APPLICATION_ROLE}` was refused a {verb} on `public.{relation}` for want of the "
         f"privilege ({state}): {refused}\n\n{GRANTS_ARE_OWED}"
+    )
+
+
+@pytest.mark.parametrize("column", UPDATABLE_SET_COLUMNS, ids=list(UPDATABLE_SET_COLUMNS))
+def test_an_update_of_a_set_column_an_edit_writes_is_granted(
+    migrated_database: Any,
+    application_engine: Any,
+    metadata_tables: dict[str, Any],
+    column: str,
+) -> None:
+    """E5-14's column-grain grant, the granted side: each column a set edit writes.
+
+    `PUT /leadership/comparison-sets/{id}` rewrites a set's name, declared length
+    and level and stamps `updated_at`; each is executed here as `pulse_app` and
+    must not be refused for want of the privilege.
+
+    **The mutation it kills:** the column list written short — `updated_at` left
+    out, say — which fails every edit at its last statement with a privilege error
+    no route translates. **Its pair** is the withheld-column test below.
+    """
+    require_the_table_exists(application_engine, COMPARISON_SET_TABLE)
+
+    refused = refusal_of_statement(
+        application_engine, an_update_of_column(COMPARISON_SET_TABLE, column, metadata_tables)
+    )
+    state = None if refused is None else sqlstate_of(refused)
+
+    granted = ", ".join(UPDATABLE_SET_COLUMNS)
+    assert state != INSUFFICIENT_PRIVILEGE, (
+        f"`{APPLICATION_ROLE}` was refused an UPDATE of `{COMPARISON_SET_TABLE}.{column}` for want "  # noqa: S608 — an assertion message, not a statement
+        f"of the privilege: {refused}\n\nE5-14's ruling grants `UPDATE ({granted})` on the set "
+        "table, in `comparison_set_write_grants_v002.sql`."
+    )
+
+
+@pytest.mark.parametrize("column", WITHHELD_SET_COLUMNS, ids=list(WITHHELD_SET_COLUMNS))
+def test_an_update_of_a_set_column_no_edit_writes_is_refused(
+    migrated_database: Any,
+    application_engine: Any,
+    metadata_tables: dict[str, Any],
+    column: str,
+) -> None:
+    """E5-14's column-grain grant, the withheld side: the creator, the key, the creation time.
+
+    `created_by_person_id` is what E5-06's edit and delete scoping reads to decide
+    whose set a request may change; a connection able to rewrite it can hand any
+    set to any leader. The data-model review found the table-wide `UPDATE` allowed
+    exactly that. Among the granted column updates above, this refusal is about
+    the column, not about a connection that can write nothing.
+
+    **The SQLSTATE is pinned exactly**, because anything else — a constraint
+    refusing the row — would mean the privilege is there.
+
+    **The mutation it kills:** the table-wide `UPDATE` left in place (or not
+    revoked when the column grant is added — Postgres keeps both, and the
+    table-level one wins); and a column list that includes the creator.
+    """
+    require_the_table_exists(application_engine, COMPARISON_SET_TABLE)
+
+    refused = refusal_of_statement(
+        application_engine, an_update_of_column(COMPARISON_SET_TABLE, column, metadata_tables)
+    )
+
+    assert refused is not None, (
+        f"`{APPLICATION_ROLE}` ran an UPDATE of `{COMPARISON_SET_TABLE}.{column}`. E5-14's ruling "
+        f"grants `UPDATE` on {list(UPDATABLE_SET_COLUMNS)} only, and revokes the table-wide grant."
+    )
+    state = sqlstate_of(refused)
+    assert state == INSUFFICIENT_PRIVILEGE, (
+        f"The UPDATE of `{COMPARISON_SET_TABLE}.{column}` was refused with SQLSTATE {state!r} "
+        f"rather than {INSUFFICIENT_PRIVILEGE!r}: {refused}. Anything else means the role holds "
+        "the privilege and something else refused the statement."
     )
 
 

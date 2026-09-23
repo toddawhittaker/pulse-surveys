@@ -23,8 +23,11 @@ is about the *configured* number.
 
 **Every suppression sits beside a figure that arrived.** In each test the control
 is asserted first and in the same payload: the passing weeks of the same series,
-or the university line over the same rows plus the hero — which E5's breakdown
-decision 5 keeps in the population the comparison set excludes. A suppression
+and the university line at a passing week. (Until E5-14 the university line at
+the *thin* week served, as the same rows plus the hero; the university-sealing
+ruling withholds it there now, and
+`test_the_university_line_is_sealed_on_everyone_but_the_reported_section.py`
+asserts that.) A suppression
 asserted where no figure could have arrived is emptiness wearing a green tick
 (`docs/MISTAKES.md` entries 3 and 9), and in this ticket that is the whole risk:
 before the implementation lands, every one of these members is absent.
@@ -185,9 +188,17 @@ def test_the_week_one_respondent_short_is_suppressed_beside_its_passing_twin(
     settled minimum of ten, nine people who were promised ten).
 
     **The two controls, both in this payload.** The same series' two passing weeks
-    carry their own means, and the university line over the same rows *plus the
-    hero's own respondents* is shown at this very week — so "no figure" here is
-    neither an empty series nor a route that answers nothing to everybody.
+    carry their own means, and the university line is shown at the passing week —
+    so "no figure" here is neither an empty series nor a route that answers
+    nothing to everybody.
+
+    **The university line is not a control at this week any more (E5-14).** It
+    was, as "the same rows plus the hero's own respondents". The orchestrator's
+    university-sealing ruling withholds a university figure whose contributors
+    other than the reported section fall below either minimum — the reader knows
+    her own section's count and sum and could subtract them — and at this week
+    they do by one person. That withholding is asserted in
+    `test_the_university_line_is_sealed_on_everyone_but_the_reported_section.py`.
 
     **The mutation this kills:** the respondent minimum dropped from the figures
     the route assembles, or a series-level suppression decision that reads the
@@ -202,12 +213,10 @@ def test_the_week_one_respondent_short_is_suppressed_beside_its_passing_twin(
     university = points_of(body, stream, UNIVERSITY_POPULATION, answered=answered)
 
     assert_the_passing_weeks_are_shown(comparison, stream)
-    assert WEEK_THIN_PEOPLE in university and numbers_of(university[WEEK_THIN_PEOPLE]), (
+    assert WEEK_CLEAR in university and numbers_of(university[WEEK_CLEAR]), (
         f"The control failed before the assertion it protects: the university line at course week "
-        f"{WEEK_THIN_PEOPLE} — the same people plus the hero's own respondents, which is above "
-        f"`{report_api_contract.minimum_respondents}` of "
-        f"{minimums[report_api_contract.minimum_respondents]} — carries no figure: "
-        f"{university.get(WEEK_THIN_PEOPLE)!r}."
+        f"{WEEK_CLEAR} — the set at both minimums plus the hero — carries no figure: "
+        f"{university.get(WEEK_CLEAR)!r}."
     )
 
     assert WEEK_THIN_PEOPLE in comparison, (
@@ -231,7 +240,7 @@ def test_the_week_one_respondent_short_is_suppressed_beside_its_passing_twin(
 
 
 @pytest.mark.parametrize("stream", STREAMS, ids=list(STREAMS))
-def test_the_week_one_section_short_is_suppressed_while_the_university_line_is_shown(
+def test_the_week_one_section_short_is_suppressed_beside_its_passing_twins(
     report_door: ReportDoor,
     report_api_contract: Any,
     benchmark_cohort: Callable[..., Any],
@@ -245,15 +254,19 @@ def test_the_week_one_section_short_is_suppressed_while_the_university_line_is_s
     is red on exactly one of these tests. §5.1's sentence is about this week: "a
     mean over one or two sections is a number about those sections".
 
-    **The sharpest control available**, and it is in the same payload at the same
-    week: the university line keeps the hero's own section (breakdown decision 5),
-    so over these same rows it stands at exactly the section minimum and is shown.
-    The two lines differ by one section, and a route that answered nothing to
-    both, or copied one member into the other, is red here.
+    **Renamed at E5-14, and the control moved with the name.** It was "…while the
+    university line is shown": the university line kept the hero's own section
+    and stood at exactly the section minimum here. The orchestrator's
+    university-sealing ruling withholds it now — its contributors other than the
+    reported section are one section short — which
+    `test_the_university_line_is_sealed_on_everyone_but_the_reported_section.py`
+    asserts. The control here is the same series' two passing weeks, and the
+    university line at the passing week.
 
     **The mutation this kills:** the section count never compared, or compared
-    against the respondent minimum; and the university series assembled as a copy
-    of the comparison series.
+    against the respondent minimum. (The university series assembled as a copy of
+    the comparison series, which this test used to catch, is caught in the
+    sealing module, where the two are compared at the passing week.)
     """
     benchmark_cohort(report_door, minimums=report_api_contract.minimums())
     minimums = report_api_contract.minimums()
@@ -264,12 +277,10 @@ def test_the_week_one_section_short_is_suppressed_while_the_university_line_is_s
     university = points_of(body, stream, UNIVERSITY_POPULATION, answered=answered)
 
     assert_the_passing_weeks_are_shown(comparison, stream)
-    assert WEEK_THIN_SECTIONS in university and numbers_of(university[WEEK_THIN_SECTIONS]), (
-        f"The control failed before the assertion it protects: at course week "
-        f"{WEEK_THIN_SECTIONS} the university line covers the set's {sections - 1} sections plus "
-        f"the hero's own, which is exactly `{report_api_contract.minimum_sections}` of {sections}, "
-        f"and it carries no figure: {university.get(WEEK_THIN_SECTIONS)!r}. Until it does, the "
-        "suppression below is satisfied by a payload with no university line at all."
+    assert WEEK_CLEAR in university and numbers_of(university[WEEK_CLEAR]), (
+        f"The control failed before the assertion it protects: the university line at course week "
+        f"{WEEK_CLEAR} carries no figure: {university.get(WEEK_CLEAR)!r}. Until it does, the "
+        "suppression below is satisfied by a payload with no benchmark lines at all."
     )
 
     assert WEEK_THIN_SECTIONS in comparison, (

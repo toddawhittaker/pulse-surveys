@@ -388,13 +388,14 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 #     stay unreachable, the owner gains no column privilege for this (its five stay
 #     exactly five), and enumeration of subjects the caller holds no row id for is
 #     still refused. ADR 0139.
-#   - `benchmark_set_week(section_ids uuid[])` and
-#     `benchmark_set_rating_week(section_ids uuid[])` — E5-03's, and the two
+#   - `benchmark_set_week` and `benchmark_set_rating_week` — E5-03's, and the two
 #     whose admitting sentence had to be rewritten before it was a week old.
-#     Each takes one `uuid[]` of section ids and answers rows of numbers: a
-#     course week, a stream on the rating one, the rating or workload
-#     statistics, and the counts a benchmark's minimum is compared against.
-#     Neither has anywhere to put a person and neither can be asked for one.
+#     Since E5-14's `_v003` each takes `(section_ids uuid[], course_weeks
+#     integer[], closed_by timestamptz[])` — the freeze-at-close cutoffs — and
+#     answers rows of numbers: a course week, a stream on the rating one, the
+#     rating or workload statistics, and the counts a benchmark's minimum is
+#     compared against. None of the three arguments has anywhere to put a person
+#     and neither function can be asked for one.
 #
 #     **The sentence they were first admitted with was false, and correcting it
 #     is most of what this entry is for.** It read: "`pulse_app` may execute the
@@ -4214,7 +4215,8 @@ MEMBER_OF_ROLES = """
 #     `public."user"` is `(id)` only, so the key resolves to nobody through it.
 #     Decided and spent in E5-04.
 
-#   - `pulse_app` **writes** `comparison_set` (`INSERT`, `UPDATE`, `DELETE`) and
+#   - `pulse_app` **writes** `comparison_set` (`INSERT`, `DELETE`, and since E5-14
+#     `UPDATE` on four columns only — see `RUNTIME_COLUMN_PRIVILEGES` below) and
 #     `comparison_set_member` (`INSERT`, `DELETE`), beside the reads above.
 #     **E5-06 is the writer E5-01's tables were waiting for**, and the second and
 #     last ticket that ticket named. SPEC §5.1: "leadership can define named
@@ -4291,7 +4293,6 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "release_batch_member", "INSERT"),
         (APPLICATION_ROLE, "comparison_set", "SELECT"),
         (APPLICATION_ROLE, "comparison_set", "INSERT"),
-        (APPLICATION_ROLE, "comparison_set", "UPDATE"),
         (APPLICATION_ROLE, "comparison_set", "DELETE"),
         (APPLICATION_ROLE, "comparison_set_member", "SELECT"),
         (APPLICATION_ROLE, "comparison_set_member", "INSERT"),
@@ -4418,6 +4419,23 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
 #     and nothing else — `nonce` itself stays refused, table-wide and at column
 #     grain alike, which is what the negative control beside this file's
 #     `user(id)` / `lms_user_id` pair measures for this table too.
+#
+# **E5-14 narrows one table-wide grant into four column entries, on
+# `comparison_set`.** E5-06 had spent `UPDATE` on the whole table; the E5 boundary
+# review's data-model MEDIUM found that let this connection rewrite a set's
+# `created_by_person_id` — the column E5-06's scoping reads to decide which leader
+# may edit or delete the set — along with its `id` and `created_at`. A set edit
+# writes four columns and no more:
+#
+#   - `comparison_set(name)`, `(length_weeks)`, `(level)` — the definition a
+#     leader edits.
+#   - `comparison_set(updated_at)` — the edit's own stamp.
+#
+# The table-wide `UPDATE` is revoked in the same revision
+# (`comparison_set_write_grants_v002.sql`), so it is gone from
+# `RUNTIME_BASE_TABLE_PRIVILEGES` above; the withheld columns are asserted refused
+# on the connection production opens in
+# `test_the_comparison_set_tables_are_refused_to_the_application_connection.py`.
 RUNTIME_COLUMN_PRIVILEGES = frozenset(
     {
         (APPLICATION_ROLE, "course", "lms_title", "UPDATE"),
@@ -4430,6 +4448,10 @@ RUNTIME_COLUMN_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "enrollment", "ended_on", "UPDATE"),
         (APPLICATION_ROLE, "enrollment", "lms_window_start", "UPDATE"),
         (APPLICATION_ROLE, "enrollment", "lms_window_end", "UPDATE"),
+        (APPLICATION_ROLE, "comparison_set", "name", "UPDATE"),
+        (APPLICATION_ROLE, "comparison_set", "length_weeks", "UPDATE"),
+        (APPLICATION_ROLE, "comparison_set", "level", "UPDATE"),
+        (APPLICATION_ROLE, "comparison_set", "updated_at", "UPDATE"),
     }
 )
 

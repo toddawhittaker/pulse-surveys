@@ -61,6 +61,7 @@ from fixtures.benchmark_views import (
     a_population,
     benchmarks_api,
     carries,
+    cutoffs_after_every_window,
     figures_in,
     mean_and_median,
     points_by_week,
@@ -152,6 +153,9 @@ def the_trend(world: BenchmarkWorld, stream: str) -> dict[int, Any]:
             section_id=world.section_id(HERO),
             population=a_population(DEFAULT_SET_POPULATION),
             stream=stream,
+            # E5-14's freeze makes cutoffs required; this module is not about the
+            # freeze, so the one week it reads is cut off after every window.
+            cutoffs=cutoffs_after_every_window((THE_COURSE_WEEK,)),
         )
     )
 
@@ -164,6 +168,7 @@ def the_workload(world: BenchmarkWorld, *, course_week: int = THE_COURSE_WEEK) -
         section_id=world.section_id(HERO),
         population=a_population(DEFAULT_SET_POPULATION),
         course_week=course_week,
+        cutoffs=cutoffs_after_every_window((course_week,)),
     )
 
 

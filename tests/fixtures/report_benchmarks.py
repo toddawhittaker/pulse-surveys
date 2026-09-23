@@ -68,6 +68,7 @@ import pytest
 from sqlalchemy import select, update
 
 from fixtures.benchmark_views import (
+    COHORTS_BY_TERM,
     COURSE_NUMBER_COLUMN,
     COURSE_NUMBER_FOR_LEVEL,
     COURSE_RATING_POSITION,
@@ -112,7 +113,11 @@ from fixtures.survey_windows import (
     SECTION_START_COLUMN,
     SECTION_TABLE,
     SEEDED_COHORTS,
+    SURVEY_WINDOW_TABLE,
     TERM_TABLE,
+    WINDOW_CLOSES_COLUMN,
+    WINDOW_SECTION_COLUMN,
+    WINDOW_WEEK_COLUMN,
     WINDOWS_BY_TERM_WEEK,
 )
 
@@ -340,6 +345,10 @@ class PlantedBenchmarkCohort:
     sections_by_week: dict[int, tuple[str, ...]]
     respondents_by_week: dict[int, tuple[str, ...]]
     plans: Mapping[int, WeekPlan]
+    # The containment rows E4-07's world already seeded, down to the department.
+    # Kept so a test can hang a further course beside the set's without a second
+    # institution (SPEC §8 permits one; see `_door_chain`).
+    spine: Mapping[str, Any]
 
     def set_section_ids(self) -> list[Any]:
         """Every section of the default set, in label order."""
@@ -522,7 +531,97 @@ def plant_the_benchmark_cohort(
         sections_by_week=sections_by_week,
         respondents_by_week=respondents_by_week,
         plans=plans,
+        spine=dict(spine),
     )
+
+
+def plant_a_section_beside(
+    cohort: PlantedBenchmarkCohort,
+    label: str,
+    *,
+    letter: str,
+    term: str = CURRENT_TERM,
+    led: bool = True,
+) -> PlantedSection:
+    """One more section at the set's level, on a course of its own, answered by nobody yet.
+
+    For E5-14's two report-level modules, which need sections the cohort does not
+    have: a later-starting cohort of the same length, a prior-term section, and
+    sections outside the default set. The course carries the set's number, so its
+    level is the set's by construction (ADR 0015); `letter` is looked up in the
+    start-letter map of `term`, so the length and the start date are the seed's
+    facts rather than this helper's.
+
+    `led` maps the cohort's lead to the new course, which puts the section in the
+    hero's default set; left false, the course has no lead at all, so the section
+    is in the university population and outside the default set — the
+    complement E5-14's university-sealing ruling is about.
+
+    A prior-term section builds the prior term on first use, under the same world.
+    """
+    world = cohort.world
+    if term not in world.terms:
+        world.build_prior_term()
+    letters = COHORTS_BY_TERM[term]
+    if letter not in letters:
+        pytest.fail(
+            f"The {term} term's start-letter map has no {letter!r}; it has {sorted(letters)}."
+        )
+    length_weeks, first_term_week, start = letters[letter]
+    course_chain = dict(cohort.spine)
+    course = world.seed(COURSE_TABLE, course_chain, **{COURSE_NUMBER_COLUMN: SHARED_COURSE_NUMBER})
+    course_chain[TERM_TABLE] = world.term_row(term)
+    row = world.seed(
+        SECTION_TABLE,
+        course_chain,
+        **{
+            SECTION_CODE_COLUMN: f"{letter}{COHORT_SECTION_ORDINAL}{COHORT_SECTION_MODALITY}",
+            SECTION_LENGTH_COLUMN: length_weeks,
+            SECTION_START_COLUMN: start,
+            SECTION_END_COLUMN: start + timedelta(days=length_weeks * 7 - 1),
+        },
+    )
+    planted = PlantedSection(
+        label=label,
+        row=row,
+        term=term,
+        cohort=letter,
+        level=cohort.level,
+        length_weeks=length_weeks,
+        first_term_week=first_term_week,
+        start_date=start,
+        course=course,
+    )
+    world.sections[label] = planted
+    if led:
+        world.seed(LEAD_FACULTY_MAPPING_TABLE, {PERSON_TABLE: cohort.lead, COURSE_TABLE: course})
+    return planted
+
+
+def hero_window_close(world: BenchmarkWorld, door: ReportDoor, course_week: int) -> datetime:
+    """*T(w)*: the hero section's own `survey_window.closes_at` for one course week, read back.
+
+    Read from the database rather than from the hand-written calendar, because
+    the owner's freeze-at-close ruling defines the cutoff as *that row's* close —
+    which instant E4-07's world gave it is that fixture's business.
+    """
+    table = require_table(world.tables, SURVEY_WINDOW_TABLE)
+    world.session.flush()
+    found = list(
+        world.session.execute(
+            select(table.c[WINDOW_CLOSES_COLUMN]).where(
+                table.c[WINDOW_SECTION_COLUMN] == door.rows.taught_section_id,
+                table.c[WINDOW_WEEK_COLUMN] == door.rows.week_id(course_week),
+            )
+        ).scalars()
+    )
+    if len(found) != 1:
+        pytest.fail(
+            f"The hero section has {len(found)} survey windows for course week {course_week}; the "
+            "freeze-at-close cutoff is its one window's close, so this world cannot say what "
+            "T(w) is."
+        )
+    return found[0]
 
 
 def hero_responses(

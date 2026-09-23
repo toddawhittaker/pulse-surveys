@@ -197,11 +197,11 @@ def test_each_panel_serves_a_university_line_beside_the_comparison_one(
 
     **The mutation this kills:** the university series never assembled — one line
     per panel where §5.1 asks for three. That the two series are not one member
-    copied twice is asserted where the two populations genuinely diverge, in the
-    section-minimum test of
-    `test_the_benchmark_payload_plants_both_sides_of_both_minimums.py`: there the
-    comparison line is suppressed and the university line over the same rows plus
-    the hero is shown.
+    copied twice is asserted in
+    `test_the_university_line_is_sealed_on_everyone_but_the_reported_section.py`,
+    which compares the two at this week. (Until E5-14 it was asserted where the
+    comparison line was suppressed and the university line shown; the
+    university-sealing ruling withholds both there now.)
     """
     benchmark_cohort(report_door, minimums=report_api_contract.minimums())
 
