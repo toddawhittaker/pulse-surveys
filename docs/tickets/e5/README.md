@@ -48,7 +48,7 @@ ones get their ADR in the ticket that builds them, and the rest are defaults a
 ticket may depart from only by saying so.
 
 1. **Benchmark figures are computed at read time; only named sets are
-   stored.** SPEC §13 settles the storage half ("the default per section …
+   stored.** SPEC §8 settles the storage half ("the default per section …
    is computed, not stored"), and read-time computation extends E4's decision
    1 to the comparison views: a benchmark is a view over responses that
    already exist, keyed by length, level, term and week, carrying no identity
@@ -80,8 +80,8 @@ ticket may depart from only by saying so.
    which are E9's roll-ups, so the surface that lets a viewer choose a named
    set is E9's. The cost, named: until E9, a named set can be created,
    edited and resolved but no report renders it — the management UI and the
-   resolution service are proven by their own tests and the set-preview
-   figures in E5-06/E5-09.
+   resolution service are proven by their own tests and by the set preview's
+   two counts (member courses and resolved sections) in E5-06/E5-09.
 5. **The hero section is excluded from its own comparison-set line;
    the university line includes every matching section.** A section compared
    against a set containing itself dampens exactly the divergence the chart
@@ -99,6 +99,12 @@ ticket may depart from only by saying so.
    test, so E9 consumes a proven read rather than building one inside a ⚠
    epic. The cost, named: term-axis output is test-proven only until E9
    draws it.
+   **Amended at the exit (E5-14):** only half of this landed. The term-axis
+   views exist, and `named_set_term_axis` reads `benchmark_cohort_term_axis`,
+   but nothing calls it, and the rating term axis
+   (`benchmark_cohort_rating_term_axis`) has no service read at all. E9 owns
+   that read, together with the three cohort views nothing reads
+   (`../e6/carried-from-e5.md`).
 8. **The report payload contract for benchmarks is sketched in this file and
    frozen enough to build against.** The frontend tickets (E5-07 through
    E5-10) build against fixtures shaped like the sketch below and never wait
@@ -125,6 +131,9 @@ ticket may depart from only by saying so.
    sizes the seeded worlds produce, records the ruling, and updates SPEC §11
    and §5.1 in the same PR. No ticket before E5-14 treats the defaults as
    settled.
+   **Settled 2026-09-22 (E5-14):** 3 sections and 10 distinct respondents,
+   both still configuration. SPEC §11 question 1 and §5.1 record it, and
+   `backend/app/config.py` and `.env.example` default to 10.
 
 ## Build order
 
@@ -139,11 +148,18 @@ ticket may depart from only by saying so.
 | 07 | [The TrendPair overlays](E5-07-trend-overlays.md) | `e5/trend-overlays` | light | none | PulseTrendChart and TrendPair gain the comparison and university series against fixture data: three lines per panel, one legend, suppressed-line states, distinguishable without color alone. | #224 as 6c68748, 2026-09-13 |
 | 08 | [The workload comparison stats](E5-08-workload-comparison-stats.md) | `e5/workload-comparison-stats` | light | none | StatPair grows the §5.1 comparison columns against fixture data: section beside comparison-set beside university, mean and median, each column independently suppressible. | #227 as df85e37, 2026-09-14 |
 | 09 | [The named-set management UI](E5-09-named-set-ui.md) | `e5/named-set-ui` | light | 06 (merge order only) | The leadership route: list, create, edit, delete; the form offers only valid choices (decision 3) so an invalid length/level combination cannot be expressed, not merely erroring. | #236 as 661462d, 2026-09-14 |
-| 10 | [The report page joins the benchmark payload](E5-10-report-benchmark-join.md) | `e5/report-benchmark-join` | light | 05, 07, 08 | InstructorMondayReport wires E5-05's real payload into the overlay and stat components, reconciles fixtures with the shipped schema (decision 8), and extends the in-slice e2e. | |
-| 11 | [Students never see a benchmark, asserted](E5-11-student-benchmark-exclusion.md) | `e5/student-benchmark-exclusion` | heavy | 05 | §4.1 item 1 grows its benchmark-era teeth: the student payload structurally carries no comparison member, student routes are swept, and the exclusion is proven non-vacuous — the same world that shows an instructor three lines shows every student surface clean (decision 9 governs the literal two-line walk). | |
+| 10 | [The report page joins the benchmark payload](E5-10-report-benchmark-join.md) | `e5/report-benchmark-join` | light | 05, 07, 08 | InstructorMondayReport wires E5-05's real payload into the overlay and stat components, reconciles fixtures with the shipped schema (decision 8), and extends the in-slice e2e. | #240 as bfa5f61, 2026-09-14 |
+| 11 | [Students never see a benchmark, asserted](E5-11-student-benchmark-exclusion.md) | `e5/student-benchmark-exclusion` | heavy | 05 | §4.1 item 1 grows its benchmark-era teeth: the student payload structurally carries no comparison member, student routes are swept, and the exclusion is proven non-vacuous — the same world that shows an instructor three lines shows every student surface clean (decision 9 governs the literal two-line walk). | #239 as 31c076c, 2026-09-14 |
 | 12 | [The prior-term benchmark world](E5-12-prior-term-world.md) | `e5/prior-term-world` | heavy | none | Mock-LMS sections in one or more prior terms with seeded responses, so past-referencing has real data behind it: cohorts thick enough to pass both minimums and one deliberately thin cohort that must suppress. | #230 as d252db6, 2026-09-14 |
-| 13 | [The copy inventory grows over the benchmark surfaces](E5-13-benchmark-copy-inventory.md) | `e5/benchmark-copy-inventory` | heavy | 09, 10 | §4.1 items 4 and 5 over everything E5 ships: legends, suppression notices, set-management copy — comparison language that counts sections and never ranks. | |
-| 14 | [E5 exit](E5-14-e5-exit.md) | `e5/e5-exit` | heavy | all | §14.3's exit clause driven against the running stack: three lines per panel benchmarked against prior terms, a student provably seeing two; §11 question 1 settled and recorded (decision 10); boundary reviews; `../e6/carried-from-e5.md`. | |
+| 13 | [The copy inventory grows over the benchmark surfaces](E5-13-benchmark-copy-inventory.md) | `e5/benchmark-copy-inventory` | heavy | 09, 10 | §4.1 items 4 and 5 over everything E5 ships: legends, suppression notices, set-management copy — comparison language that counts sections and never ranks. | #242 as d1eaeff, 2026-09-22 |
+| 14 | [E5 exit](E5-14-e5-exit.md) | `e5/e5-exit` | heavy | all | §14.3's exit clause driven against the running stack: three lines per panel benchmarked against prior terms, a student provably seeing two; §11 question 1 settled and recorded (decision 10); boundary reviews; `../e6/carried-from-e5.md`. | #249 |
+
+**Not a ticket, and merged all the same:** `e5/seed-hero-lead`, #241 as
+fae58fa, 2026-09-14. Found while driving E5-10's e2e: `scripts/seed.py` gave
+`BIOL 310` no lead, so the hero section's default comparison set resolved
+empty however many prior-term sections were filled. It seeds `BIOL 215` and
+`BIOL 310` and maps a lead to `BIOL 310` only (`docs/MISTAKES.md` entry 58).
+It merged before E5-10 and E5-11.
 
 ## Dependency graph
 
@@ -262,9 +278,9 @@ Named so scope creep has something to push against. Each item has an owner.
   manages and resolves sets; nothing selects one for viewing yet.
 - **The min-N configuration surface** — E11's console (§6.3). E5 reads the
   configuration values; nobody edits them in a UI yet.
-- **Purview over the full supervision DAG** — E9. E5-06's scoping uses the
-  authorization machinery that exists today (`lead_faculty_mapping` and the
-  existing scope reads), not a new purview computation.
+- **Purview over the full supervision DAG** — E9. E5-06 scopes a set's writes
+  to the leader who defined it and leaves reads open to every leadership
+  session (ADR 0173); it computes no purview.
 - **The student results view** — E8. E5-11 asserts the student's existing
   surfaces; it builds no new one.
 - **Benchmark performance work** — E13's load test (decision 1 names
