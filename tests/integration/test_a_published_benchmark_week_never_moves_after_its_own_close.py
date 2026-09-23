@@ -51,7 +51,6 @@ their comparison — the report recomputes over open windows and late rows — a
 the two "moved" tests pass (they are the controls, and must stay green).
 """
 
-import json
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -59,15 +58,15 @@ from typing import Any
 
 import pytest
 from fixtures.benchmark_views import PRIOR_TERM
-from fixtures.report_api import PAYLOAD_STREAM_KEY, STREAMS_MEMBER, ReportDoor, member
+from fixtures.report_api import ReportDoor
 from fixtures.report_benchmarks import (
-    BENCHMARK_MEMBER,
     COMPARISON_POPULATION,
     MEAN_FIELD,
     UNIVERSITY_POPULATION,
     WEEK_CLEAR,
     WORKLOAD_BENCHMARK_MEMBER,
     PlantedBenchmarkCohort,
+    benchmark_members_of,
     hero_window_close,
     numbers_of,
     plant_a_section_beside,
@@ -156,15 +155,7 @@ def benchmark_members(door: ReportDoor) -> dict[str, str]:
     each as canonical JSON — so "unmoved" means unmoved in every figure, every
     point and every flag, not only in the one number a test chose to look at.
     """
-    body, answered = door.payload(course_week=REPORTED_WEEK)
-    found = {
-        f"streams.{key}.{BENCHMARK_MEMBER}": member(
-            body, STREAMS_MEMBER, key, BENCHMARK_MEMBER, answered=answered
-        )
-        for key in PAYLOAD_STREAM_KEY.values()
-    }
-    found[WORKLOAD_BENCHMARK_MEMBER] = member(body, WORKLOAD_BENCHMARK_MEMBER, answered=answered)
-    return {where: json.dumps(held, sort_keys=True) for where, held in found.items()}
+    return benchmark_members_of(door, course_week=REPORTED_WEEK)
 
 
 def assert_the_reported_week_is_shown(door: ReportDoor) -> None:

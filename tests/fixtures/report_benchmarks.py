@@ -87,6 +87,7 @@ from fixtures.report_api import (
     BENCHMARK_MIN_RESPONDENTS,
     BENCHMARK_MIN_SECTIONS,
     EITHER_SIDE_OF_A_CLOSE,
+    INSTRUCTOR_ROLE,
     PAYLOAD_STREAM_KEY,
     PUBLISHED_WEEKS_FIELD,
     STREAMS_MEMBER,
@@ -542,6 +543,9 @@ def plant_a_section_beside(
     letter: str,
     term: str = CURRENT_TERM,
     led: bool = True,
+    course: Mapping[str, Any] | None = None,
+    weeks_later: int = 0,
+    ordinal: str = COHORT_SECTION_ORDINAL,
 ) -> PlantedSection:
     """One more section at the set's level, on a course of its own, answered by nobody yet.
 
@@ -558,6 +562,16 @@ def plant_a_section_beside(
     complement E5-14's university-sealing ruling is about.
 
     A prior-term section builds the prior term on first use, under the same world.
+
+    **Round 3 (E5-14) adds three knobs**, for the reader-group worlds:
+    - `course` hangs the section on an existing course (the hero's, for a
+      second section of the same course) instead of a new one; `led` is then
+      ignored, because whoever leads that course already does.
+    - `weeks_later` starts the section that many weeks after its letter's start
+      date, so two sections of one length can close the same course week a week
+      apart. Only the stored start date and this world's week arithmetic move;
+      the code keeps the letter's shape.
+    - `ordinal` keeps two codes on one course and term distinct.
     """
     world = cohort.world
     if term not in world.terms:
@@ -568,14 +582,22 @@ def plant_a_section_beside(
             f"The {term} term's start-letter map has no {letter!r}; it has {sorted(letters)}."
         )
     length_weeks, first_term_week, start = letters[letter]
+    first_term_week += weeks_later
+    start += timedelta(days=7 * weeks_later)
     course_chain = dict(cohort.spine)
-    course = world.seed(COURSE_TABLE, course_chain, **{COURSE_NUMBER_COLUMN: SHARED_COURSE_NUMBER})
+    if course is None:
+        course = world.seed(
+            COURSE_TABLE, course_chain, **{COURSE_NUMBER_COLUMN: SHARED_COURSE_NUMBER}
+        )
+    else:
+        course_chain[COURSE_TABLE] = course
+        led = False
     course_chain[TERM_TABLE] = world.term_row(term)
     row = world.seed(
         SECTION_TABLE,
         course_chain,
         **{
-            SECTION_CODE_COLUMN: f"{letter}{COHORT_SECTION_ORDINAL}{COHORT_SECTION_MODALITY}",
+            SECTION_CODE_COLUMN: f"{letter}{ordinal}{COHORT_SECTION_MODALITY}",
             SECTION_LENGTH_COLUMN: length_weeks,
             SECTION_START_COLUMN: start,
             SECTION_END_COLUMN: start + timedelta(days=length_weeks * 7 - 1),
@@ -622,6 +644,87 @@ def hero_window_close(world: BenchmarkWorld, door: ReportDoor, course_week: int)
             "T(w) is."
         )
     return found[0]
+
+
+def teach(door: ReportDoor, section_id: Any, *, person: Any = None) -> Any:
+    """Give `person` (the door's own instructor by default) a teaching grant on one section.
+
+    The same row `plant_a_second_taught_section` in `tests/fixtures/report_api.py`
+    writes, for the same reason that fixture gives: E4-07 resolves a request's
+    section scope from the `teaching_instructor` view on every read, so a grant
+    committed after the launch is in scope for the next request. It is also the
+    row E5-14's reader group *R* is resolved from. Answers the person's key.
+    """
+    who = door.person_id if person is None else person
+    if who is None or door.graph is None:
+        pytest.fail(
+            "This door holds no instructor person, so there is nobody to grant a teaching "
+            "scope to."
+        )
+    door.graph.assign(INSTRUCTOR_ROLE, scope=section_id, person=who)
+    return who
+
+
+def publish_every_week(world: BenchmarkWorld, label: str) -> None:
+    """Seed one section's window for every course week it runs, at the hand-written instants.
+
+    A section's report publishes the weeks whose windows have closed, and a
+    section nobody answered has no window rows until something seeds them — so
+    a section whose *own report* a test reads needs them, answered or not.
+    """
+    planted = world.section(label)
+    for course_week in range(1, planted.length_weeks + 1):
+        world.window(label, world.term_week_of(label, course_week))
+
+
+def answer_once(
+    cohort: PlantedBenchmarkCohort,
+    label: str,
+    *,
+    subject: str,
+    course_week: int,
+    workload: Decimal = Decimal("30.0"),
+    rating: int = 1,
+    last_submitted_at: datetime | None = None,
+) -> None:
+    """One new student in `label` answers one course week, every question.
+
+    The defaults sit far from every value the cohort plants (hours 3.5-12.5), so
+    a row that is counted moves the means it reaches.
+    """
+    world = cohort.world
+    student = world.student(subject, enrolled_in=(label,))
+    world.respond(
+        label,
+        course_week=course_week,
+        student=student,
+        workload=workload,
+        instructor_rating=rating,
+        course_rating=rating,
+        last_submitted_at=last_submitted_at,
+    )
+
+
+def benchmark_members_of(
+    door: ReportDoor, *, course_week: int, section_id: Any = None
+) -> dict[str, str]:
+    """Every benchmark member of one report's payload, as canonical JSON, for byte comparison.
+
+    Both streams' `benchmark` member and the top-level `workload_benchmark`. Read
+    for the door's own section unless `section_id` names another the door's
+    instructor teaches.
+    """
+    import json
+
+    body, answered = door.payload(course_week=course_week, section_id=section_id)
+    found = {
+        f"streams.{key}.{BENCHMARK_MEMBER}": member(
+            body, STREAMS_MEMBER, key, BENCHMARK_MEMBER, answered=answered
+        )
+        for key in PAYLOAD_STREAM_KEY.values()
+    }
+    found[WORKLOAD_BENCHMARK_MEMBER] = member(body, WORKLOAD_BENCHMARK_MEMBER, answered=answered)
+    return {where: json.dumps(held, sort_keys=True) for where, held in found.items()}
 
 
 def hero_responses(
