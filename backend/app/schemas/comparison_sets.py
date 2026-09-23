@@ -66,15 +66,19 @@ class SetWrite(BaseModel):
     docstring: the database holds both rules and this route translates what it
     refuses.
 
-    **The name's surrounding spaces are stripped** (E5-14), so " Nursing" and
-    "Nursing" are one name to the unique constraint and a name of only spaces
-    arrives as the empty string, which the table's `name_is_not_blank` check
-    refuses. Stripping is the only thing done to it here.
+    **The name's surrounding spaces are stripped, and a name empty after that
+    is refused here** (E5-14), so " Nursing" and "Nursing" are one name to the
+    unique constraint, and a name of only spaces is answered with the framework's
+    standard 422 before any statement runs. That is the one rule this model
+    holds itself, and it is the ruling's choice over a new refusal sentence: the
+    table's `name_is_not_blank` check stays underneath it for every other writer,
+    but the translator names no sentence for it, so a blank name reaching the
+    table from this route would be a 500.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    name: Annotated[str, StringConstraints(strip_whitespace=True)]
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     length_weeks: int
     level: str
     member_course_ids: list[UUID]
