@@ -1,4 +1,4 @@
-"""The named-set management API as it goes over the wire (SPEC §5.1, §2.2, §8).
+"""The named-set management API as it goes over the wire (SPEC §5.1, §8).
 
 `app.api.leadership` serves seven routes over four shapes: what a set looks like
 in a list, what it looks like on its own, what a client sends to create or edit
@@ -6,11 +6,11 @@ one, and what the definition form is offered as choices. E5-09 renders all four.
 
 **`SetWrite` types the length as a plain `int` and the level as a plain `str`,
 and that is a decision rather than laziness.** SPEC §5.1's rules about a set —
-one of §2.2's eight lengths, one of §8's five levels, every member course at the
-declared level — are held by Postgres, in a `CHECK`, an enum type and a composite
-foreign key (E5-01, ADR 0164). E5-06's job is to *translate* what the database
-refuses, not to refuse it a second time here: a constrained type on this model
-would answer `17` and `"ug"` with Pydantic's own validation error before any
+a length of at least one week, one of §8's five levels, every member course at
+the declared level — are held by Postgres, in a `CHECK`, an enum type and a
+composite foreign key (E5-01, ADR 0164). E5-06's job is to *translate* what the
+database refuses, not to refuse it a second time here: a constrained type on this
+model would answer `0` and `"ug"` with Pydantic's own validation error before any
 statement ran, which is a different layer, a different body, and a claim about
 the wire model rather than about the constraint. `app.services.comparison_sets`
 attempts the write and maps the constraint that fired to one sentence.
@@ -38,9 +38,10 @@ one moment and serialized at another is a payload those two can disagree about.
 """
 
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StringConstraints
 
 __all__ = [
     "CourseOption",
@@ -64,11 +65,16 @@ class SetWrite(BaseModel):
     `length_weeks` and `level` are deliberately unconstrained here. See the module
     docstring: the database holds both rules and this route translates what it
     refuses.
+
+    **The name's surrounding spaces are stripped** (E5-14), so " Nursing" and
+    "Nursing" are one name to the unique constraint and a name of only spaces
+    arrives as the empty string, which the table's `name_is_not_blank` check
+    refuses. Stripping is the only thing done to it here.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    name: str
+    name: Annotated[str, StringConstraints(strip_whitespace=True)]
     length_weeks: int
     level: str
     member_course_ids: list[UUID]

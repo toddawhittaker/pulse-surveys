@@ -1234,28 +1234,29 @@ def _served_question_texts(session: Session, *, section_id: UUID, week_id: UUID)
 
 
 def _benchmark_members(
-    session: Session, *, section_id: UUID, course_week: int, weeks: Sequence[int]
+    session: Session, *, section_id: UUID, course_week: int, published: Sequence[_SectionWeek]
 ) -> tuple[dict[str, "StreamBenchmark"], "WorkloadBenchmarkView"]:
     """SPEC §5.1's comparison and university figures for one report — assembled, never computed.
 
-    Six reads of `app.services.benchmarks`: a trend per panel per population, and
-    the reported week's workload pair per population. Every number and every
-    suppression decision in what comes back was made there, over each figure's own
-    contributors and both configured minimums, and sealed by
-    `comparison_after_suppression` before this function ever sees it. What happens
-    here is placement: a service result becomes a payload model and nothing else.
+    One read of `app.services.benchmarks.section_benchmarks`, which resolves each
+    population once and asks each set function once per population. Every number
+    and every suppression decision in what comes back was made there, over each
+    figure's sealing contributors and both configured minimums, and sealed by
+    `comparison_after_suppression` before this function ever sees it. What
+    happens here is placement: a service result becomes a payload model and
+    nothing else.
 
-    **`weeks` is the report's own published course weeks, and passing it is a
-    confidentiality rule rather than an optimisation.** It is the axis the
-    section's own trend line above is drawn on — the same list `week.
-    published_weeks` carries — and the comparison lines are drawn on exactly it,
-    one point per week, shown or suppressed. A series that also carried the weeks
-    the *comparison population* answered in would let a reader subtract their own
-    published weeks and read off which weeks other sections answered in; over a
-    thin population that is an existence oracle about people §4.1 item 7 means to
-    say nothing about, and it is readable from a series where every single figure
-    is withheld. It shipped that way in this ticket's first round and a security
-    review found it.
+    **`published` is the report's own published weeks, and it decides two things.**
+    Its course weeks are the axis the comparison lines are drawn on — the same list
+    `week.published_weeks` carries, one point per week, shown or suppressed. A
+    series that also carried the weeks the *comparison population* answered in
+    would let a reader subtract their own published weeks and read off which
+    weeks other sections answered in, which is an existence oracle readable from
+    a series where every figure is withheld (ADR 0170). And each week's window
+    close is that week's **cutoff** — the owner's freeze-at-close ruling: a
+    comparison figure for a published week counts only answers fixed when this
+    section's own window for that week closed, so it never moves again and two
+    reads of it cannot be subtracted into one student's answer.
 
     **Nothing in this function counts, averages, compares or derives.** A figure
     born in the assembly layer is a figure no minimum was applied to, which is the
@@ -1275,46 +1276,26 @@ def _benchmark_members(
     from app.schemas import report_benchmark as benchmark_schema
     from app.services import benchmarks
 
+    read = benchmarks.section_benchmarks(
+        session,
+        section_id=section_id,
+        course_week=course_week,
+        streams=REPORT_STREAMS,
+        cutoffs={week.course_week: week.closes_at for week in published},
+    )
+    default_set = benchmarks.BenchmarkPopulation.DEFAULT_SET
+    university = benchmarks.BenchmarkPopulation.UNIVERSITY
+
     by_stream = {
         token: benchmark_schema.StreamBenchmark(
-            comparison=_benchmark_series(
-                benchmarks.benchmark_trend(
-                    session,
-                    section_id=section_id,
-                    population=benchmarks.BenchmarkPopulation.DEFAULT_SET,
-                    stream=token,
-                    weeks=weeks,
-                )
-            ),
-            university=_benchmark_series(
-                benchmarks.benchmark_trend(
-                    session,
-                    section_id=section_id,
-                    population=benchmarks.BenchmarkPopulation.UNIVERSITY,
-                    stream=token,
-                    weeks=weeks,
-                )
-            ),
+            comparison=_benchmark_series(read.trends[(default_set, token)]),
+            university=_benchmark_series(read.trends[(university, token)]),
         )
         for token in REPORT_STREAMS
     }
     workload = benchmark_schema.WorkloadBenchmarkView(
-        comparison=_workload_benchmark_figures(
-            benchmarks.benchmark_workload(
-                session,
-                section_id=section_id,
-                population=benchmarks.BenchmarkPopulation.DEFAULT_SET,
-                course_week=course_week,
-            )
-        ),
-        university=_workload_benchmark_figures(
-            benchmarks.benchmark_workload(
-                session,
-                section_id=section_id,
-                population=benchmarks.BenchmarkPopulation.UNIVERSITY,
-                course_week=course_week,
-            )
-        ),
+        comparison=_workload_benchmark_figures(read.workloads[default_set]),
+        university=_workload_benchmark_figures(read.workloads[university]),
     )
     return by_stream, workload
 
@@ -1401,9 +1382,9 @@ def _payload(
         session,
         section_id=section.id,
         course_week=week.course_week,
-        # The published axis, which is the list `week.published_weeks` below
-        # carries and the one the streams' own trend lines are drawn on.
-        weeks=[other.course_week for other in published],
+        # The published weeks: their course weeks are the axis `week.published_weeks`
+        # below carries, and their window closes are the comparison's cutoffs.
+        published=published,
     )
 
     streams = {
