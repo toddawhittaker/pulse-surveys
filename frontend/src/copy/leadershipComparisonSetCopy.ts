@@ -16,9 +16,9 @@
  * would be a second statement of a rule that is the API's to make, and the two
  * would drift the first time either changed.
  *
- * **The lengths and the levels.** SPEC §2.2's length set and §8's five levels
- * reach the form from `GET /leadership/comparison-sets/options` and from
- * nowhere else, so no entry below names one. `length_option` is the treatment
+ * **The lengths and the levels.** The lengths sections actually run and §8's
+ * five levels reach the form from `GET /leadership/comparison-sets/options` and
+ * from nowhere else, so no entry below names one. `length_option` is the treatment
  * given to a number the server sent, not a list of the numbers it may send.
  *
  * **Any comparison figure.** This surface manages sets; it never shows what a
@@ -88,11 +88,18 @@ export const LEADERSHIP_COMPARISON_SET_COPY = {
   // the set whose section count did not arrive — E5-06's scope note allows a
   // preview to answer the member count and not the resolved section count, and
   // a zero printed in that case would state something the server did not say.
+  //
+  // `{courses}` and `{sections}` are filled with one of the four counted
+  // phrases below rather than a bare number, for the reason the removal notice
+  // has two entries: "1 courses" is a phrase nobody wrote on purpose.
   'leadership_comparison_sets.preview_counting': 'Counting what this set reaches…',
-  'leadership_comparison_sets.preview_counts':
-    '{courses} courses, {sections} sections across retained terms',
+  'leadership_comparison_sets.preview_counts': '{courses}, {sections} across retained terms',
   'leadership_comparison_sets.preview_courses_only':
-    '{courses} courses. The number of sections they reach is not available just now.',
+    '{courses}. The number of sections this set reaches is not available just now.',
+  'leadership_comparison_sets.count_courses_one': '1 course',
+  'leadership_comparison_sets.count_courses_many': '{count} courses',
+  'leadership_comparison_sets.count_sections_one': '1 section',
+  'leadership_comparison_sets.count_sections_many': '{count} sections',
   'leadership_comparison_sets.preview_unavailable':
     'What this set reaches could not be counted just now.',
 
@@ -106,6 +113,12 @@ export const LEADERSHIP_COMPARISON_SET_COPY = {
   'leadership_comparison_sets.delete_cancel': 'Keep it',
   'leadership_comparison_sets.delete_unavailable':
     'This set could not be deleted just now. Try again in a moment.',
+
+  // The status line a write that landed is said in, once. A row appearing or
+  // vanishing is the whole of the visible change, and a reader whose attention
+  // is elsewhere on the page, or who is listening to it, is owed the sentence.
+  'leadership_comparison_sets.set_saved': 'Set saved.',
+  'leadership_comparison_sets.set_deleted': 'Set deleted.',
 
   // The form, in both of its jobs.
   'leadership_comparison_sets.form_create_heading': 'Define a comparison set',
@@ -126,7 +139,8 @@ export const LEADERSHIP_COMPARISON_SET_COPY = {
 
   // Changing the level with courses already chosen. The ones that match the new
   // level stay; the rest leave, and they leave visibly — named, counted and on
-  // screen until the reader dismisses the notice or changes the level again.
+  // screen until the reader dismisses the notice. A second change that removes
+  // more adds its own sentence under the first.
   // Two entries rather than one with a number in it, because "1 courses" is a
   // sentence nobody wrote on purpose.
   'leadership_comparison_sets.members_removed_one':

@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { RouterProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
@@ -129,6 +132,30 @@ describe('/leadership, the landing', () => {
     await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
     expect(addressOf(router)).toBe('/leadership/comparison-sets');
   });
+
+  it('dresses the link as a link, not as one more line of text', async () => {
+    // The E5 boundary round's finding: the reset strips the browser's link
+    // colour and underline, so the bare link read as the landing's muted text.
+    // jsdom applies no stylesheet, so the pin is in two halves: the link wears
+    // the set screen's link class, and that rule underlines it in the brief's
+    // text-safe link colour. Dropping either half reddens here.
+    servingOneSet();
+    mountAt('/app/leadership');
+
+    const landing = await screen.findByTestId(LANDING_TESTID);
+    const link = within(landing).getByRole('link', { name: SETS_LINK });
+    expect(link.classList.contains('pulse-set-link')).toBe(true);
+
+    const css = readFileSync(
+      resolve(process.cwd(), 'src/routes/leadership/leadershipComparisonSets.css'),
+      'utf8',
+    );
+    const at = css.indexOf('.pulse-set-link {');
+    expect(at).toBeGreaterThanOrEqual(0);
+    const rule = css.slice(at, css.indexOf('}', at));
+    expect(rule).toContain('color: var(--marigold-deep)');
+    expect(rule).toContain('text-decoration: underline');
+  });
 });
 
 describe('/leadership/comparison-sets/$setId, one set in the form', () => {
@@ -199,6 +226,41 @@ describe('/leadership/comparison-sets/$setId, one set in the form', () => {
 
     await screen.findByText(SESSION_ENDED);
     expect(screen.queryByTestId(COMPARISON_SET_FORM_TESTID)).toBeNull();
+  });
+});
+
+describe('leaving the edit address', () => {
+  // The edit page's controls all go when it hands back to the list, so focus
+  // goes to the heading of the page that arrives. The near miss is focus left
+  // on `document.body`, where a vanished control drops it.
+  it('puts focus on the list’s heading after a save', async () => {
+    servingOneSet();
+    mountAt(`/app/leadership/comparison-sets/${A_SET_THIS_READER_DEFINED.id}`);
+
+    const form = await screen.findByTestId(COMPARISON_SET_FORM_TESTID);
+    fireEvent.click(within(form).getByRole('button', { name: SAVE }));
+
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole('heading', { level: 1, name: SETS_LINK }),
+      );
+    });
+  });
+
+  it('puts focus on the list’s heading after a cancel', async () => {
+    servingOneSet();
+    mountAt(`/app/leadership/comparison-sets/${A_SET_THIS_READER_DEFINED.id}`);
+
+    const form = await screen.findByTestId(COMPARISON_SET_FORM_TESTID);
+    fireEvent.click(within(form).getByRole('button', { name: CANCEL }));
+
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole('heading', { level: 1, name: SETS_LINK }),
+      );
+    });
   });
 });
 

@@ -327,20 +327,80 @@ describe('changing the level in front of chosen courses', () => {
     expect(writes[0]?.level).toBe('GR');
   });
 
-  it('takes the notice away when it is dismissed, and again on a change that removes nothing', () => {
+  it('keeps every removal on screen until it is dismissed', () => {
+    // The E5 boundary round's finding. A reader arrowing through the level
+    // list changes the level once per keypress; the notice used to be replaced
+    // on each change, so the next keypress (which removed nothing) wiped the
+    // sentence naming what the first one removed before anybody read it. This
+    // case replaces the one that pinned that clearing.
     renderForm();
 
     type(levelField(), 'UG');
     fireEvent.click(screen.getByLabelText(A_BIOLOGY_COURSE.label));
     type(levelField(), 'GR');
+    fireEvent.click(screen.getByLabelText(A_NURSING_COURSE.label));
+    type(levelField(), 'DEV');
+    // Nothing is chosen at this level, so this change removes nothing, and
+    // both earlier sentences stay: each is still true of the set.
+    type(levelField(), 'UG');
+
+    const notice = screen.getByTestId(COMPARISON_SET_REMOVED_TESTID);
+    expect(
+      [...notice.querySelectorAll('p')].map((sentence) => sentence.textContent),
+    ).toEqual([ONE_REMOVED(A_BIOLOGY_COURSE.label), ONE_REMOVED(A_NURSING_COURSE.label)]);
+
     fireEvent.click(screen.getByRole('button', { name: DISMISS }));
     expect(screen.queryByTestId(COMPARISON_SET_REMOVED_TESTID)).toBeNull();
 
-    // A second change with nothing chosen removes nothing, so no notice
-    // returns — a notice that accumulated would stand over a form it is no
-    // longer true of.
-    type(levelField(), 'UG');
+    // And a change that removes nothing brings nothing back.
+    type(levelField(), 'GR');
     expect(screen.queryByTestId(COMPARISON_SET_REMOVED_TESTID)).toBeNull();
+  });
+
+  it('tells the notice through a live region that is there before anything is removed', () => {
+    renderForm();
+
+    // The region exists, empty, from the first render: one that arrived with
+    // its first sentence is one most screen readers never announce.
+    const region = within(screen.getByRole('group', { name: MEMBERS_LABEL })).getByRole('status');
+    expect(region.textContent).toBe('');
+
+    type(levelField(), 'UG');
+    fireEvent.click(screen.getByLabelText(A_BIOLOGY_COURSE.label));
+    type(levelField(), 'GR');
+
+    expect(region.contains(screen.getByTestId(COMPARISON_SET_REMOVED_TESTID))).toBe(true);
+    expect(region.textContent).toContain(ONE_REMOVED(A_BIOLOGY_COURSE.label));
+  });
+});
+
+describe('what a keyboard or screen-reader user is told', () => {
+  it('puts focus on the form’s own heading as it opens', () => {
+    renderForm();
+
+    expect(document.activeElement).toBe(
+      screen.getByRole('heading', { level: 2, name: 'Define a comparison set' }),
+    );
+  });
+
+  it('describes the disabled save by the sentence saying what is missing', () => {
+    renderForm();
+
+    const save = screen.getByRole('button', { name: SAVE });
+    const describedBy = save.getAttribute('aria-describedby');
+    expect(describedBy).not.toBeNull();
+    expect(document.getElementById(describedBy ?? '')?.textContent).toBe(INCOMPLETE);
+  });
+
+  it('drops the description once the set is complete and the sentence is gone', () => {
+    renderForm();
+
+    type(nameField(), 'Graduate nursing');
+    type(lengthField(), '8');
+    type(levelField(), 'GR');
+
+    expect(screen.queryByText(INCOMPLETE)).toBeNull();
+    expect(screen.getByRole('button', { name: SAVE }).getAttribute('aria-describedby')).toBeNull();
   });
 });
 
