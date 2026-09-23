@@ -60,37 +60,38 @@ pytestmark = [pytest.mark.integration]
 # test beside it.
 REPORTED_WEEK = WEEK_CLEAR
 
-# What the fifteen people who answered that week reported, as multisets. Written
-# out here and checked against the planter's tables before anything is read, so
-# that the four expectations below rest on values this module can see rather than
-# on a fixture's promise (`docs/MISTAKES.md` entry 19).
-PLANTED_HOURS = (*(Decimal("7.5"),) * 8, *(Decimal("10.5"),) * 7)
-PLANTED_INSTRUCTOR_RATINGS = (*(4,) * 12, *(2,) * 3)
-PLANTED_COURSE_RATINGS = (*(1,) * 6, *(4,) * 9)
+# What the ten people who answered that week reported, as multisets — ten because
+# the week is planted at the respondent minimum and SPEC §11 question 1 settles
+# that minimum at 10. Written out here and checked against the planter's tables
+# before anything is read, so that the four expectations below rest on values this
+# module can see rather than on a fixture's promise (`docs/MISTAKES.md` entry 19).
+PLANTED_HOURS = (*(Decimal("7.5"),) * 6, *(Decimal("9.5"),) * 4)
+PLANTED_INSTRUCTOR_RATINGS = (*(4,) * 8, *(2,) * 2)
+PLANTED_COURSE_RATINGS = (*(1,) * 4, *(4,) * 6)
 
 # The arithmetic, by hand:
-#   hours   8 x 7.5 + 7 x 10.5 = 133.5, over 15 responses -> 8.9; sorted, the
-#           eighth of fifteen is 7.5.
-#   ratings 12 x 4 + 3 x 2 = 54 over 15 -> 3.6, and 6 x 1 + 9 x 4 = 42 over 15
+#   hours   6 x 7.5 + 4 x 9.5 = 45 + 38 = 83, over 10 responses -> 8.3; sorted,
+#           the fifth and sixth of ten are both 7.5, so the median is 7.5.
+#   ratings 8 x 4 + 2 x 2 = 36 over 10 -> 3.6, and 4 x 1 + 6 x 4 = 28 over 10
 #           -> 2.8.
 # Sixteen distinct numbers across this world's four weeks, none of them a count,
 # a minimum, a rate, or one of E4-07's own hero figures (10, 9, 4, 3).
-COMPARISON_WORKLOAD_MEAN = 8.9
+COMPARISON_WORKLOAD_MEAN = 8.3
 COMPARISON_WORKLOAD_MEDIAN = 7.5
 COMPARISON_RATING_MEAN = {INSTRUCTOR_STREAM: 3.6, COURSE_STREAM: 2.8}
 
 # The hero's own two respondents report these hours in the reported week, and the
 # university population keeps the hero (E5 breakdown decision 5) while the
-# comparison set excludes it. So the university pair is the seventeen values
+# comparison set excludes it. So the university pair is the twelve values
 # together:
-#   mean   133.5 + 13.5 + 14.5 = 161.5, over 17 -> 9.5
-#   median the ninth of the seventeen sorted, which is 10.5 — the eight 7.5s
-#          come first, then seven 10.5s, then the hero's two
+#   mean   83 + 13.5 + 14.5 = 111, over 12 -> 9.25
+#   median the sixth and seventh of the twelve sorted — the six 7.5s come first,
+#          then four 9.5s, then the hero's two — so (7.5 + 9.5) / 2 = 8.5
 # Four different numbers across the two populations, so neither member can be
-# read as the other: a swap shows 8.9 where 9.5 belongs and 7.5 where 10.5 does.
+# read as the other: a swap shows 8.3 where 9.25 belongs and 7.5 where 8.5 does.
 PLANTED_HERO_HOURS = (Decimal("13.5"), Decimal("14.5"))
-UNIVERSITY_WORKLOAD_MEAN = 9.5
-UNIVERSITY_WORKLOAD_MEDIAN = 10.5
+UNIVERSITY_WORKLOAD_MEAN = 9.25
+UNIVERSITY_WORKLOAD_MEDIAN = 8.5
 
 STREAMS = (INSTRUCTOR_STREAM, COURSE_STREAM)
 
@@ -142,7 +143,7 @@ def test_each_panel_serves_the_comparison_sets_own_figure_for_the_reported_week(
     against a single-stream assertion and wrong on the page.
 
     **The value is the set's and nobody else's.** The two streams' means are 3.6
-    and 2.8 over the same fifteen people, so a panel serving the other stream's
+    and 2.8 over the same ten people, so a panel serving the other stream's
     figure is red here rather than plausible; and neither number is the hero's own
     trend mean, which E4-07's world puts at 4 and 3.
 
@@ -232,7 +233,7 @@ def test_the_reported_weeks_workload_comparison_carries_a_mean_and_a_median(
     **Both figures, each asserted on its own**, because §4.1 item 7 covers "a
     mean, a median, or any other statistic, not only a drawn line": a member that
     served one of the two is half the requirement, and the two values here are
-    different numbers (8.9 and 7.5) so neither can stand in for the other.
+    different numbers (8.3 and 7.5) so neither can stand in for the other.
 
     **The mutation this kills:** the workload member assembled with one figure, or
     with the mean assigned to both slots — which reads as a rounding curiosity on
@@ -251,9 +252,9 @@ def test_the_reported_weeks_workload_comparison_carries_a_mean_and_a_median(
     )
     assert carries_number(figures[MEDIAN_FIELD], COMPARISON_WORKLOAD_MEDIAN), (
         f"The comparison workload median is {figures[MEDIAN_FIELD]!r} and does not carry "
-        f"{COMPARISON_WORKLOAD_MEDIAN} — the eighth of the fifteen hours values sorted. §4.1 item 7 "
-        "covers the median as much as the mean, and a member that seals one of the two has half a "
-        "chokepoint."
+        f"{COMPARISON_WORKLOAD_MEDIAN} — the fifth and sixth of the ten hours values sorted, "
+        "which are equal. §4.1 item 7 covers the median as much as the mean, and a member that "
+        "seals one of the two has half a chokepoint."
     )
     assert not carries_number(figures[MEDIAN_FIELD], COMPARISON_WORKLOAD_MEAN), (
         f"The median carries {COMPARISON_WORKLOAD_MEAN}, which is the *mean*: "
@@ -283,7 +284,7 @@ def test_the_reported_weeks_workload_university_figures_are_the_wider_population
 
     **The mutations this kills:** `population=UNIVERSITY` swapped for
     `population=DEFAULT_SET` behind `workload_benchmark.university` — which now
-    shows 8.9 and 7.5 where 9.5 and 10.5 belong — and the university population
+    shows 8.3 and 7.5 where 9.25 and 8.5 belong — and the university population
     never asked for at all, the member built from one call to the service instead
     of two.
     """
@@ -302,7 +303,8 @@ def test_the_reported_weeks_workload_university_figures_are_the_wider_population
     )
     assert carries_number(figures[MEDIAN_FIELD], UNIVERSITY_WORKLOAD_MEDIAN), (
         f"The university workload median is {figures[MEDIAN_FIELD]!r} and does not carry "
-        f"{UNIVERSITY_WORKLOAD_MEDIAN}, the ninth of those seventeen values sorted."
+        f"{UNIVERSITY_WORKLOAD_MEDIAN}, the midpoint of the sixth and seventh of those twelve "
+        "values sorted."
     )
     assert not carries_number(figures[MEAN_FIELD], COMPARISON_WORKLOAD_MEAN), (
         f"The university workload mean carries {COMPARISON_WORKLOAD_MEAN}, which is the "
@@ -324,7 +326,7 @@ def test_the_two_workload_populations_are_different_numbers_in_this_world(
     Every "this member carries the wrong population's number" assertion rests on
     the two populations being distinguishable *in this world at this week*. They
     were not until the hero reported hours here: with no hero hours the union and
-    the set are the same fifteen values, and both members are correct whichever
+    the set are the same ten values, and both members are correct whichever
     population the assembler asked for. A test suite cannot detect a swap in a
     world where the two answers coincide, and this is the assertion that says so
     out loud rather than leaving it to a reader of the fixture.

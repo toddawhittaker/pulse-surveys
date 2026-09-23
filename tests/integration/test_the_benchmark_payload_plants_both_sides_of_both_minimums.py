@@ -106,20 +106,21 @@ HERO_ONLY_WEEK = FULL_WEEK
 # passing weeks' numbers are what a shown figure has to carry; the two near-miss
 # weeks' numbers are what no benchmark member may carry anywhere.
 #
-#   week 2: 12 x 4 + 3 x 2 = 54 over 15 -> 3.6;   6 x 1 + 9 x 4 = 42 over 15 -> 2.8
-#   week 3: 10 x 5 + 4 x 2 = 58 over 14;          10 x 4 + 4 x 1 = 44 over 14
-#   week 4: 11 x 5 + 4 x 1 = 59 over 15;          11 x 4 + 4 x 1 = 48 over 15 -> 3.2
-#   week 5:  9 x 5 + 6 x 1 = 51 over 15 -> 3.4;   3 x 1 + 12 x 3 = 39 over 15 -> 2.6
+#   week 2: 8 x 4 + 2 x 2 = 36 over 10 -> 3.6;   4 x 1 + 6 x 4 = 28 over 10 -> 2.8
+#   week 3: 7 x 5 + 2 x 2 = 39 over 9;           7 x 4 + 2 x 1 = 30 over 9
+#   week 4: 7 x 5 + 3 x 1 = 38 over 10 -> 3.8;   7 x 4 + 3 x 1 = 31 over 10 -> 3.1
+#   week 5: 6 x 5 + 4 x 1 = 34 over 10 -> 3.4;   2 x 1 + 8 x 3 = 26 over 10 -> 2.6
 COMPARISON_RATING_MEAN = {
     WEEK_CLEAR: {INSTRUCTOR_STREAM: 3.6, COURSE_STREAM: 2.8},
-    WEEK_THIN_PEOPLE: {INSTRUCTOR_STREAM: 58 / 14, COURSE_STREAM: 44 / 14},
-    WEEK_THIN_SECTIONS: {INSTRUCTOR_STREAM: 59 / 15, COURSE_STREAM: 48 / 15},
+    WEEK_THIN_PEOPLE: {INSTRUCTOR_STREAM: 39 / 9, COURSE_STREAM: 30 / 9},
+    WEEK_THIN_SECTIONS: {INSTRUCTOR_STREAM: 3.8, COURSE_STREAM: 3.1},
     WEEK_CLEAR_TWIN: {INSTRUCTOR_STREAM: 3.4, COURSE_STREAM: 2.6},
 }
 
 # The workload statistics the thin weeks' hours would produce, which no member
-# may carry: 10 x 4.5 + 4 x 11.5 = 91 over 14 -> 6.5, median 4.5; and
-# 12 x 3.5 + 3 x 12.5 = 79.5 over 15 -> 5.3, median 3.5.
+# may carry: 6 x 4.5 + 3 x 10.5 = 58.5 over 9 -> 6.5, median the fifth of nine,
+# 4.5; and 8 x 3.5 + 2 x 12.5 = 53 over 10 -> 5.3, median 3.5 (the fifth and sixth
+# of ten are both 3.5).
 THIN_WORKLOAD = {
     WEEK_THIN_PEOPLE: {MEAN_FIELD: 6.5, MEDIAN_FIELD: 4.5},
     WEEK_THIN_SECTIONS: {MEAN_FIELD: 5.3, MEDIAN_FIELD: 3.5},
@@ -180,7 +181,8 @@ def test_the_week_one_respondent_short_is_suppressed_beside_its_passing_twin(
     response each, one fewer human being. A route whose figures came from a
     service comparing the respondent minimum against a count of responses, or
     against the section count, shows this figure — and the number it shows is
-    about fourteen people who were promised fifteen.
+    about one person fewer than the configured minimum promised (at SPEC §11's
+    settled minimum of ten, nine people who were promised ten).
 
     **The two controls, both in this payload.** The same series' two passing weeks
     carry their own means, and the university line over the same rows *plus the
@@ -221,7 +223,7 @@ def test_the_week_one_respondent_short_is_suppressed_beside_its_passing_twin(
         comparison[WEEK_THIN_PEOPLE], COMPARISON_RATING_MEAN[WEEK_THIN_PEOPLE][stream]
     ), (
         f"Course week {WEEK_THIN_PEOPLE} of the {stream} comparison line carries "
-        f"{COMPARISON_RATING_MEAN[WEEK_THIN_PEOPLE][stream]}, the mean of what fourteen people "
+        f"{COMPARISON_RATING_MEAN[WEEK_THIN_PEOPLE][stream]}, the mean of what that week's people "
         f"answered — one below the configured `{report_api_contract.minimum_respondents}` of "
         f"{minimums[report_api_contract.minimum_respondents]}, while its "
         f"{minimums[report_api_contract.minimum_sections]} sections clear the other minimum."

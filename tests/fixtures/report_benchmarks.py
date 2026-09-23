@@ -261,46 +261,57 @@ def _repeated(value: Any, times: int) -> tuple[Any, ...]:
 #
 # Every hours value sits on the half-hour, which is the grid SPEC §3.2's workload
 # question is answered on; every rating is an integer on the 1-5 Likert scale.
+#
+# **Written for a respondent minimum of 10**, the value SPEC §11 question 1
+# settles (E5-14, 2026-09-22): a week at the minimum holds ten entries per table
+# and a week one below it nine. Every even-sized table is split unevenly (6 and 4,
+# 8 and 2, 7 and 3), because an even split puts the fifth and sixth values either
+# side of the gap and makes the median the mean — two statistics this world has to
+# keep apart.
 BENCHMARK_WEEKS: dict[int, WeekPlan] = {
-    # 8 x 7.5 + 7 x 10.5 = 133.5 over 15 -> mean 8.9, median 7.5.
-    # 12 x 4 + 3 x 2 = 54 over 15 -> instructor rating mean 3.6.
-    # 6 x 1 + 9 x 4 = 42 over 15 -> course rating mean 2.8.
+    # 6 x 7.5 + 4 x 9.5 = 45 + 38 = 83 over 10 -> mean 8.3; sorted, the fifth and
+    # sixth of ten are both 7.5 -> median 7.5.
+    # 8 x 4 + 2 x 2 = 36 over 10 -> instructor rating mean 3.6.
+    # 4 x 1 + 6 x 4 = 28 over 10 -> course rating mean 2.8.
     WEEK_CLEAR: WeekPlan(
         sections=AT_MINIMUM,
         respondents=AT_MINIMUM,
-        hours=(*_repeated(Decimal("7.5"), 8), *_repeated(Decimal("10.5"), 7)),
-        instructor_ratings=(*_repeated(4, 12), *_repeated(2, 3)),
-        course_ratings=(*_repeated(1, 6), *_repeated(4, 9)),
+        hours=(*_repeated(Decimal("7.5"), 6), *_repeated(Decimal("9.5"), 4)),
+        instructor_ratings=(*_repeated(4, 8), *_repeated(2, 2)),
+        course_ratings=(*_repeated(1, 4), *_repeated(4, 6)),
     ),
-    # 10 x 4.5 + 4 x 11.5 = 91 over 14 -> mean 6.5, median 4.5.
-    # 10 x 5 + 4 x 2 = 58 over 14 -> instructor rating mean 58/14.
-    # 10 x 4 + 4 x 1 = 44 over 14 -> course rating mean 44/14.
+    # 6 x 4.5 + 3 x 10.5 = 27 + 31.5 = 58.5 over 9 -> mean 6.5; sorted, the fifth
+    # of nine is 4.5 -> median 4.5.
+    # 7 x 5 + 2 x 2 = 39 over 9 -> instructor rating mean 39/9.
+    # 7 x 4 + 2 x 1 = 30 over 9 -> course rating mean 30/9.
     WEEK_THIN_PEOPLE: WeekPlan(
         sections=AT_MINIMUM,
         respondents=ONE_BELOW,
-        hours=(*_repeated(Decimal("4.5"), 10), *_repeated(Decimal("11.5"), 4)),
-        instructor_ratings=(*_repeated(5, 10), *_repeated(2, 4)),
-        course_ratings=(*_repeated(4, 10), *_repeated(1, 4)),
+        hours=(*_repeated(Decimal("4.5"), 6), *_repeated(Decimal("10.5"), 3)),
+        instructor_ratings=(*_repeated(5, 7), *_repeated(2, 2)),
+        course_ratings=(*_repeated(4, 7), *_repeated(1, 2)),
     ),
-    # 12 x 3.5 + 3 x 12.5 = 79.5 over 15 -> mean 5.3, median 3.5.
-    # 11 x 5 + 4 x 1 = 59 over 15 -> instructor rating mean 59/15.
-    # 11 x 4 + 4 x 1 = 48 over 15 -> course rating mean 3.2.
+    # 8 x 3.5 + 2 x 12.5 = 28 + 25 = 53 over 10 -> mean 5.3; the fifth and sixth of
+    # ten are both 3.5 -> median 3.5.
+    # 7 x 5 + 3 x 1 = 38 over 10 -> instructor rating mean 3.8.
+    # 7 x 4 + 3 x 1 = 31 over 10 -> course rating mean 3.1.
     WEEK_THIN_SECTIONS: WeekPlan(
         sections=ONE_BELOW,
         respondents=AT_MINIMUM,
-        hours=(*_repeated(Decimal("3.5"), 12), *_repeated(Decimal("12.5"), 3)),
-        instructor_ratings=(*_repeated(5, 11), *_repeated(1, 4)),
-        course_ratings=(*_repeated(4, 11), *_repeated(1, 4)),
+        hours=(*_repeated(Decimal("3.5"), 8), *_repeated(Decimal("12.5"), 2)),
+        instructor_ratings=(*_repeated(5, 7), *_repeated(1, 3)),
+        course_ratings=(*_repeated(4, 7), *_repeated(1, 3)),
     ),
-    # 8 x 5.5 + 7 x 8.5 = 103.5 over 15 -> mean 6.9, median 5.5.
-    # 9 x 5 + 6 x 1 = 51 over 15 -> instructor rating mean 3.4.
-    # 3 x 1 + 12 x 3 = 39 over 15 -> course rating mean 2.6.
+    # 6 x 5.5 + 4 x 8.5 = 33 + 34 = 67 over 10 -> mean 6.7; the fifth and sixth of
+    # ten are both 5.5 -> median 5.5.
+    # 6 x 5 + 4 x 1 = 34 over 10 -> instructor rating mean 3.4.
+    # 2 x 1 + 8 x 3 = 26 over 10 -> course rating mean 2.6.
     WEEK_CLEAR_TWIN: WeekPlan(
         sections=AT_MINIMUM,
         respondents=AT_MINIMUM,
-        hours=(*_repeated(Decimal("5.5"), 8), *_repeated(Decimal("8.5"), 7)),
-        instructor_ratings=(*_repeated(5, 9), *_repeated(1, 6)),
-        course_ratings=(*_repeated(1, 3), *_repeated(3, 12)),
+        hours=(*_repeated(Decimal("5.5"), 6), *_repeated(Decimal("8.5"), 4)),
+        instructor_ratings=(*_repeated(5, 6), *_repeated(1, 4)),
+        course_ratings=(*_repeated(1, 2), *_repeated(3, 8)),
     ),
 }
 

@@ -62,11 +62,19 @@ import pytest
 # tuple exists to refuse, and the mock's is the one setting for which a working
 # default is correct.
 #
-# Benchmark min-N is two numbers, not one: SPEC §11 open question 1 puts the
-# mechanism in §5.1 and leaves the values unsettled, suggesting 3 sections and
-# 15 respondents as starting points. Both are env-driven precisely so settling
-# that question stays cheap, and neither value is asserted anywhere in this
-# suite — a test pinning 3 and 15 would turn settling §11 into a test edit.
+# Benchmark min-N is two numbers, not one: SPEC §5.1 specifies the mechanism and
+# SPEC §11 question 1 settles the values at 3 sections and 10 respondents (E5-14,
+# 2026-09-22; the earlier suggestion was 15 respondents). Both stay env-driven, so
+# a deployment can still configure its own. While the question was open no test
+# here pinned either value, because a pin would have turned settling §11 into a
+# test edit. Now that it is settled, the defaults are pinned once, below, in
+# `test_the_benchmark_minimums_default_to_the_values_spec_11_settles` — see its
+# docstring for why a pin is correct now and was not before.
+SETTLED_BENCHMARK_MINIMUMS = {
+    # (variable, field): the value SPEC §11 question 1 records.
+    ("BENCHMARK_MIN_SECTIONS_DEFAULT", "benchmark_min_sections_default"): 3,
+    ("BENCHMARK_MIN_RESPONDENTS_DEFAULT", "benchmark_min_respondents_default"): 10,
+}
 ENUMERATED_CONFIGURATION_VARIABLES = (
     "DATABASE_URL",
     "REDIS_URL",
@@ -100,7 +108,7 @@ DEPLOYMENT_SPECIFIC_VARIABLES = (
 #   N_THRESHOLD_DEFAULT   SPEC §4 settles it — "threshold value is configurable
 #                         (default 5)". A spec-given default is not a silent
 #                         fallback, so requiring it would contradict the spec.
-#   BENCHMARK_MIN_*       §11 open question 1; defaulted, values unsettled.
+#   BENCHMARK_MIN_*       §11 question 1 settles the defaults (3 and 10).
 #   LOG_LEVEL             not deployment-specific in the sense criterion 2 means.
 DEFAULTED_VARIABLES = (
     "LOG_LEVEL",
@@ -399,12 +407,12 @@ def test_defaulted_variable_is_not_required(
 ) -> None:
     """The other half of criterion 2: a spec-given default is not a silent fallback.
 
-    SPEC §4 makes the n-threshold "configurable (default 5)" and §11 leaves the
-    benchmark values open behind defaults. Requiring any of them would
-    contradict the spec, so this test exists to stop a later tightening. It
-    asserts the variable is optional, never what its default is — the benchmark
-    numbers are unsettled, and pinning them here would turn settling §11 open
-    question 1 into a test edit.
+    SPEC §4 makes the n-threshold "configurable (default 5)" and §11 question 1
+    settles the benchmark defaults while keeping them configurable. Requiring
+    any of them would contradict the spec, so this test exists to stop a later
+    tightening. It asserts the variable is optional; what the benchmark defaults
+    are is `test_the_benchmark_minimums_default_to_the_values_spec_11_settles`'s
+    question, asked separately so each failure names one thing.
     """
     monkeypatch.delenv(defaulted_variable, raising=False)
     settings_cls = load_settings_class()
@@ -412,6 +420,78 @@ def test_defaulted_variable_is_not_required(
     settings = settings_cls()
 
     assert settings is not None
+
+
+@pytest.mark.parametrize(
+    ("variable", "field", "settled"),
+    [(variable, field, value) for (variable, field), value in SETTLED_BENCHMARK_MINIMUMS.items()],
+    ids=[variable for variable, _field in SETTLED_BENCHMARK_MINIMUMS],
+)
+def test_the_benchmark_minimums_default_to_the_values_spec_11_settles(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+    field: str,
+    settled: int,
+) -> None:
+    """With the variable unset, `Settings` answers the value SPEC §11 question 1 records.
+
+    **Why a pin now, when this module refused one before.** While §11 question
+    1 was open, a pin would have made settling it a test edit, and nothing
+    about the numbers was a requirement yet. Once it is settled (E5-14:
+    3 sections and 10 respondents) the default *is* a requirement — E5-14's
+    criterion 2 asks for "config matching" the ruling — and without this test
+    nothing checks `backend/app/config.py` against it. Every other test reads
+    the minimums through `Settings` with `.env.example`'s values laid down by
+    the session baseline, so a tree that moved `.env.example` and left the code
+    default alone would be green everywhere else while a deployment that sets
+    no variable ran at the old value.
+
+    `configured_env` moves the working directory away from any developer `.env`,
+    so deleting the variable leaves the class default as the only answer.
+
+    **The mutation this kills:** the default left at 15 (the value before the
+    ruling). **Its near miss:** a default one either side of the ruling — 9 or
+    11 respondents, 2 or 4 sections — which an equality check refuses and a
+    "not 15" check would pass.
+    """
+    monkeypatch.delenv(variable, raising=False)
+
+    settings = load_settings_class()()
+
+    assert hasattr(settings, field), f"Settings has no `{field}` attribute for {variable}."
+    assert getattr(settings, field) == settled, (
+        f"With {variable} unset, `settings.{field}` is {getattr(settings, field)!r}. SPEC §11 "
+        f"question 1 settles it at {settled}, and E5-14's criterion 2 requires the configuration "
+        "default to match the ruling."
+    )
+
+
+@pytest.mark.parametrize(
+    ("variable", "settled"),
+    [(variable, value) for (variable, _field), value in SETTLED_BENCHMARK_MINIMUMS.items()],
+    ids=[variable for variable, _field in SETTLED_BENCHMARK_MINIMUMS],
+)
+def test_env_example_documents_the_benchmark_minimums_spec_11_settles(
+    documented_env: dict[str, str], variable: str, settled: int
+) -> None:
+    """`.env.example` carries the settled value, not the suggestion it replaced.
+
+    `.env.example` is more than documentation here: the session baseline lays
+    its values down for every test (FIX-03), and CI's e2e job starts the stack
+    from `cp .env.example .env`. A placeholder left at 15 would therefore run
+    the whole suite and every seeded world at a minimum the spec no longer
+    states, while the code default said 10.
+
+    **The mutation this kills:** `BENCHMARK_MIN_RESPONDENTS_DEFAULT=15` left in
+    `.env.example` after the ruling. **Its near miss:** a value one either side
+    of the ruling, refused by the equality.
+    """
+    assert variable in documented_env, f".env.example does not document {variable}."
+    assert documented_env[variable].strip() == str(settled), (
+        f".env.example sets {variable}={documented_env[variable]!r}. SPEC §11 question 1 settles "
+        f"it at {settled}."
+    )
 
 
 @pytest.mark.parametrize("withheld", WITHHELD_CARE_DATABASE_URLS)
@@ -424,7 +504,7 @@ def test_care_database_url_is_optional_and_a_blank_value_reads_as_absent(
 
     A named test rather than a row in `DEFAULTED_VARIABLES`, because that tuple
     groups variables whose optionality has a spec-given reason — a default the
-    spec supplies, or a value §11 has not settled — and this one is optional for
+    spec supplies, in §4 or §11 — and this one is optional for
     a reason of a different kind, which is worth the runner printing rather than
     a set comparison failing (`docs/MISTAKES.md` entry 19).
 
