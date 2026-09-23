@@ -83,7 +83,7 @@
 // This spec cannot be run without a seeded, running Compose stack; its green is
 // the stack-up run and CI.
 
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect, type APIResponse, type Locator, type Page } from '@playwright/test';
 
 import { seedTheBenchmarkHistory } from './support/benchmarkWorld';
 import { clearTheClock, setTheClockTo } from './support/clock';
@@ -713,7 +713,7 @@ test('a student seat on two consecutive weeks carries no benchmark on the wire o
   clearTheWeek([ANSWERED.code]);
 
   await setTheClockTo(page, READ_CLOCK);
-  const instructorWire = captureJsonResponses(page);
+  const instructorWire = await captureJsonResponses(page);
   const report = await openTheReport(page, HERO);
   // No wait for "network idle": a page may never go idle. The report region is
   // visible, so the report read has arrived, and every body read is bounded.
@@ -751,7 +751,7 @@ test('a student seat on two consecutive weeks carries no benchmark on the wire o
   const context = await browser.newContext();
   try {
     const student = await context.newPage();
-    const wire = captureJsonResponses(student);
+    const wire = await captureJsonResponses(student);
     for (const { courseWeek, clock } of STUDENT_WEEKS) {
       const when = `${ANSWERED.label} course week ${String(courseWeek)} (${clock})`;
       // The clock is moved from the instructor's page, so the development
@@ -770,11 +770,11 @@ test('a student seat on two consecutive weeks carries no benchmark on the wire o
       await chooseRating(block, 1, '5');
       await setSlider(block, STUDENT_HOURS);
       // The submission's own response, waited for by name and started before
-      // the click, so the premise "the sweep saw the write" is a response in
-      // hand rather than a page that went quiet.
+      // the click, so its status is a response in hand rather than a page that
+      // went quiet. Its body is read by the capture's route, before the page
+      // receives it (see `captureJsonResponses`).
       const submitted = student.waitForResponse(
-        (response) =>
-          response.url().startsWith(TOOL_ORIGIN) && response.request().method() !== 'GET',
+        (response) => isAStudentWrite(response.request().method(), response.url()),
         { timeout: SUBMIT_WAIT_MS },
       );
       await block.getByTestId(SUBMIT).click();
@@ -787,7 +787,7 @@ test('a student seat on two consecutive weeks carries no benchmark on the wire o
         block.getByText(SUBMITTED_TITLE, { exact: true }),
         `The submission for ${when} was not accepted, so the state swept below was never reached.`,
       ).toBeVisible();
-      await expectNothingOfABenchmark(student, wire, {});
+      await expectNothingOfABenchmark(student, wire, { mustWrite: true });
 
       wire.begin(`the read after submitting, ${when}`);
       await student.reload();
@@ -823,6 +823,13 @@ interface JsonCapture {
    * these is a named failure rather than a clean result.
    */
   readonly unread: string[];
+  /** Every write to the student API the route fetched, with what it answered. */
+  readonly writes: {
+    readonly stage: string;
+    readonly url: string;
+    readonly status: number;
+    readonly type: string;
+  }[];
   begin(stage: string): void;
   settle(): Promise<void>;
   stage(): string;
@@ -843,12 +850,13 @@ interface JsonCapture {
  * `unread` — which the sweep then fails on by name. Recording it keeps the
  * sweep's promise honest: it never reports a body it did not read as clean.
  */
-function captureJsonResponses(page: Page): JsonCapture {
+async function captureJsonResponses(page: Page): Promise<JsonCapture> {
   let current = 'before any stage';
   const pending: Promise<void>[] = [];
   const capture: JsonCapture = {
     bodies: [],
     unread: [],
+    writes: [],
     begin(stage: string): void {
       current = stage;
     },
@@ -859,13 +867,57 @@ function captureJsonResponses(page: Page): JsonCapture {
       return current;
     },
   };
+
+  // **The student's writes are read at the route, not off the response event.**
+  // CI run 35823401653 on d7b4561 showed the submission's body
+  // (`POST /student/submissions`) unreadable off the response event within the
+  // bound — and it was the same body that hung run 35818899760, so it is
+  // reproducible, not flaky: the browser does not keep that body for a reader
+  // that asks after the page has taken it. So every write to the student API is
+  // fetched here, its body read in full, and then handed to the page unchanged
+  // (`route.fulfill` with the fetched response): the text swept is byte for byte
+  // the text the page received, and it is read before the page can move on.
+  // Redirects are not followed, so what the page gets is exactly what the tool
+  // answered. The response-event listener below skips these same requests, so
+  // no body is raced for twice.
+  await page.route(
+    (url) => url.href.startsWith(`${TOOL_ORIGIN}${STUDENT_API_PREFIX}`),
+    async (route) => {
+      const request = route.request();
+      if (!isAStudentWrite(request.method(), request.url())) {
+        await route.continue();
+        return;
+      }
+      const stage = current;
+      const url = request.url();
+      const method = request.method();
+      let fetched: APIResponse;
+      try {
+        fetched = await route.fetch({ maxRedirects: 0 });
+      } catch {
+        capture.unread.push(`${stage}: ${method} ${url} (the route could not fetch it)`);
+        await route.continue();
+        return;
+      }
+      const type = fetched.headers()['content-type'] ?? '';
+      capture.writes.push({ stage, url, status: fetched.status(), type });
+      if (type.includes('application/json')) {
+        const text = await bodyWithin(fetched.text(), BODY_READ_MS);
+        if (text === null) capture.unread.push(`${stage}: ${method} ${url}`);
+        else capture.bodies.push({ stage, url, text });
+      }
+      await route.fulfill({ response: fetched });
+    },
+  );
+
   page.on('response', (response) => {
     const url = response.url();
     if (!url.startsWith(TOOL_ORIGIN)) return;
+    const method = response.request().method();
+    if (isAStudentWrite(method, url)) return;
     const type = response.headers()['content-type'] ?? '';
     if (!type.includes('application/json')) return;
     const stage = current;
-    const method = response.request().method();
     pending.push(
       bodyWithin(response.text(), BODY_READ_MS).then((text) => {
         if (text === null) capture.unread.push(`${stage}: ${method} ${url}`);
@@ -874,6 +926,15 @@ function captureJsonResponses(page: Page): JsonCapture {
     );
   });
   return capture;
+}
+
+// The path the student API lives under, as the CI failure names it
+// (`POST http://localhost:8000/student/submissions`).
+const STUDENT_API_PREFIX = '/student/';
+
+/** Whether one request is a write to the student API, which the route reads. */
+function isAStudentWrite(method: string, url: string): boolean {
+  return method !== 'GET' && url.startsWith(`${TOOL_ORIGIN}${STUDENT_API_PREFIX}`);
 }
 
 /** A body read that answers `null` if it fails or does not finish in time. */
@@ -900,7 +961,8 @@ function bodyWithin(read: Promise<string>, milliseconds: number): Promise<string
  * The wire before the screen, and each with its own premise: a stage that
  * captured nothing has proven nothing, so the landing and the read after are
  * required to have received a body naming the section they show. The
- * submission's premise is its own response, waited for by name in the test.
+ * submission is required to have been fetched by the capture's route, and
+ * every JSON write it fetched to have its body among those swept.
  *
  * Called only once the page shows the state the stage is about, so the reads
  * that state depends on have arrived; `settle` then waits for their bodies, each
@@ -909,7 +971,7 @@ function bodyWithin(read: Promise<string>, milliseconds: number): Promise<string
 async function expectNothingOfABenchmark(
   page: Page,
   wire: JsonCapture,
-  premise: { readonly mustMention?: string },
+  premise: { readonly mustMention?: string; readonly mustWrite?: boolean },
 ): Promise<void> {
   await wire.settle();
   const stage = wire.stage();
@@ -929,6 +991,33 @@ async function expectNothingOfABenchmark(
         `screen. Captured: ${JSON.stringify(bodies.map((body) => body.url))}. A sweep over traffic ` +
         'that does not include the survey read reports a clean wire about nothing.',
     ).toBe(true);
+  }
+
+  if (premise.mustWrite === true) {
+    const writes = wire.writes.filter((write) => write.stage === stage);
+    expect(
+      writes.length,
+      `${stage}: the capture's route fetched no write to the student API, so the submission's ` +
+        'body is not among what was swept.',
+    ).toBeGreaterThan(0);
+    // A write that answers JSON has had its body read (or is in `unread`, which
+    // failed above). One that answers no JSON carries no key to sweep; it is
+    // named here, with its status and type, rather than passed over in silence.
+    for (const write of writes) {
+      if (write.type.includes('application/json')) {
+        expect(
+          bodies.some((body) => body.url === write.url),
+          `${stage}: ${write.url} answered JSON and its body is not among those swept.`,
+        ).toBe(true);
+      } else {
+        expect(
+          write.status,
+          `${stage}: ${write.url} answered ${String(write.status)} with content type ` +
+            `${JSON.stringify(write.type)} — no JSON body, so no key to sweep — and that ` +
+            'status is not a success.',
+        ).toBeLessThan(400);
+      }
+    }
   }
 
   for (const body of bodies) {
