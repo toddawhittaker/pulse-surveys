@@ -1,5 +1,6 @@
 import type { RatingDistribution } from './RatingHistogram';
 import type { RateFigure } from './ResponseRateBar';
+import type { BenchmarkFigure, WorkloadBenchmark, WorkloadBenchmarkFigures } from './StatPair';
 
 /**
  * The report weeks the stat component tests render — ticket E4-09.
@@ -97,6 +98,137 @@ export const A_WEEK_NOBODY_ANSWERED: ReportWeekFixture = {
   },
   workload: { mean: null, median: null },
 };
+
+/**
+ * The workload comparison figures — ticket E5-08, reconciled by E5-10 to the
+ * shipped `workload_benchmark` member of `app/schemas/report_benchmark.py`.
+ *
+ * **A column is two independently sealed figures**, not a flag and two numbers:
+ * the schema seals the mean and the median separately and "neither rides on the
+ * other's decision". The builders below are the only place a figure is written
+ * out, so a fixture cannot drift back into the sketch's flat shape one literal
+ * at a time.
+ *
+ * **No two figures in a fixture render the same string**, and none renders the
+ * same string as the section's own pair (8.0 h and 9.5 h): a component that drew
+ * the university's median where the comparison set's belongs would otherwise
+ * agree with the wrong reading. **Each number is rounding-revealing** in the
+ * E4-09 way — 8.96 is "9.0" rounded and "8.9" truncated, 7.04 is "7.0" rounded
+ * and "7" with trailing zeroes dropped, 10.46 is "10.5" against "10.4", 8.06 is
+ * "8.1" against "8.0" — so a wrong number rule prints a different string rather
+ * than passing.
+ *
+ * **A suppressed figure carries `suppressed` and a reason and no number.** That
+ * is the server's own rule, and it is the shape rather than a convenience: a
+ * value sent beside a suppression is the figure the suppression is withholding.
+ */
+function reported(figure: number): BenchmarkFigure {
+  return { suppressed: false, reason: null, figure };
+}
+
+/** A figure SPEC §4.1 item 7 withheld: sealed shut, with the wire's own token. */
+const WITHHELD: BenchmarkFigure = { suppressed: true, reason: 'below-minimum', figure: null };
+
+/** A figure the population has nothing for this week — unsuppressed and empty. */
+const NO_FIGURE: BenchmarkFigure = { suppressed: false, reason: null, figure: null };
+
+/** One whole column, both of whose figures report. */
+function reporting(mean: number, median: number): WorkloadBenchmarkFigures {
+  return { mean: reported(mean), median: reported(median) };
+}
+
+/** The comparison set's column, and the university's, in the numbers above. */
+const COMPARISON_COLUMN = reporting(8.96, 7.04);
+const UNIVERSITY_COLUMN = reporting(10.46, 8.06);
+
+/** A column the server withheld outright: both figures sealed, neither carrying one. */
+const WITHHELD_COLUMN: WorkloadBenchmarkFigures = { mean: WITHHELD, median: WITHHELD };
+
+export const A_BENCHMARK_BOTH_REPORTING: WorkloadBenchmark = {
+  comparison: COMPARISON_COLUMN,
+  university: UNIVERSITY_COLUMN,
+};
+
+/** The comparison set is below the minimum; the university, computed over every
+ * matching section institution-wide, is not. */
+export const A_BENCHMARK_WITH_THE_COMPARISON_SUPPRESSED: WorkloadBenchmark = {
+  comparison: WITHHELD_COLUMN,
+  university: UNIVERSITY_COLUMN,
+};
+
+/** The other way round. Rare in production and not impossible — a section whose
+ * length and level are unusual institution-wide can have a named comparison set
+ * that clears the minimum while the university's does not. */
+export const A_BENCHMARK_WITH_THE_UNIVERSITY_SUPPRESSED: WorkloadBenchmark = {
+  comparison: COMPARISON_COLUMN,
+  university: WITHHELD_COLUMN,
+};
+
+/**
+ * A week the comparison set reports nothing in, unsuppressed.
+ *
+ * Not the same fact as a suppression: the set is large enough to report on, and
+ * this week has no figure from it — the trend chart's empty overlay week, in the
+ * workload pair's shape. It is here because the two cases say different things
+ * to a reader and the component has to tell them apart.
+ */
+export const A_BENCHMARK_WITH_NO_FIGURE_THIS_WEEK: WorkloadBenchmark = {
+  comparison: { mean: NO_FIGURE, median: NO_FIGURE },
+  university: UNIVERSITY_COLUMN,
+};
+
+/**
+ * A column the server could answer for in one figure and not the other — E5-10.
+ *
+ * **The shape the sketch could not express**, and the reason the reconciliation
+ * was worth doing: `workload_benchmark.comparison.mean` and `.median` are sealed
+ * independently, so a payload may withhold one and report the other. A component
+ * carrying one flag per column would have had to withhold both or show both.
+ */
+export const A_BENCHMARK_WITH_ONLY_THE_MEDIAN_WITHHELD: WorkloadBenchmark = {
+  comparison: { mean: reported(8.96), median: WITHHELD },
+  university: UNIVERSITY_COLUMN,
+};
+
+/**
+ * A member the payload sent as `null`.
+ *
+ * The shape a server written in Python produces when a comparison figure comes
+ * out as `None`: `json.dumps` writes `null`, and a JSON `null` is a member that
+ * **was** sent and cannot be read, not a member that was left out. One character
+ * from the absent case and a different fact — so it takes the withheld treatment
+ * the other unreadable members take, and the component has to reach that branch
+ * without reading a property off `null` on the way.
+ *
+ * Typed rather than cast, because `null` is a value the wire genuinely carries:
+ * the security review's finding of 2026-09-13 was that the shape said otherwise
+ * and the component crashed on it.
+ */
+export const A_BENCHMARK_WITH_A_NULL_MEMBER: WorkloadBenchmark = {
+  comparison: null,
+  university: UNIVERSITY_COLUMN,
+};
+
+/**
+ * A payload whose flags cannot be read.
+ *
+ * The comparison column's figures lost their `suppressed` on the way and carry
+ * numbers; the university column's flags are not booleans at all. Neither is a
+ * shape the server should ever send, and both are shapes a client casting JSON
+ * can be handed — which is the whole reason the component's check is `=== false`
+ * rather than a truthiness test. The cast is deliberate and named: this fixture
+ * exists precisely to be a value the type forbids.
+ */
+export const A_BENCHMARK_WITH_AN_UNREADABLE_FLAG = {
+  comparison: {
+    mean: { reason: 'below-minimum', figure: 8.96 },
+    median: { reason: 'below-minimum', figure: 7.04 },
+  },
+  university: {
+    mean: { suppressed: null, figure: 10.46 },
+    median: { suppressed: null, figure: 8.06 },
+  },
+} as unknown as WorkloadBenchmark;
 
 /** Everyone answered: the end of the range where a fraction is mistaken for a percent. */
 export const A_FULL_RESPONSE_RATE: RateFigure = { rate: 1, numerator: 21, denominator: 21 };

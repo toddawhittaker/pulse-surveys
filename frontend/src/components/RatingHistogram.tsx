@@ -1,5 +1,10 @@
 import type { JSX } from 'react';
 
+// Two copy modules, because the two strings belong to two surfaces. The stream
+// labels below are the stats block's own words; the quoting treatment a served
+// question is titled with is the report page's, and E5-02 puts it in that file
+// so the page's inventory sweeps it beside the rest of the page's sentences.
+import { fillCopy as fillPageCopy } from '../copy/instructorReportPageCopy';
 import { copy, fillCopy } from '../copy/instructorReportStatCopy';
 import { formatStatistic } from './instructorReportFigures';
 import './instructorReportStats.css';
@@ -68,13 +73,29 @@ const STREAM_TITLE = {
  * **No comparison figure.** The prototype's mean line carries a "comparable"
  * benchmark beside the section's own; comparison figures are E5's, gated by §4.1
  * item 7 through E4-07's guarded payload member, and this ticket ships none.
+ *
+ * **`questionText` is the served wording, and it is optional because older
+ * callers have none** (E5-02). The mockup titles each histogram with the question
+ * its bars answer rather than with the name of the stream, and SPEC §3.2 versions
+ * that wording server-side — so it arrives on the payload and is never written
+ * here. Given one, the title is that string in typographic quotes; given none,
+ * the title is the stream label exactly as before, which is what keeps a fixture
+ * built before this member rendering.
+ *
+ * The spoken label keeps the stream label in both cases. It reads a distribution
+ * aloud — "instructor ratings: 13 responses, mean 4.1" — and naming the stream is
+ * how a listener tells the page's two charts apart; the question itself is above
+ * it on the page as text a screen reader reaches in its own right.
  */
 export function RatingHistogram({
   stream,
   distribution,
+  questionText,
 }: {
   readonly stream: RatingStream;
   readonly distribution: RatingDistribution;
+  /** The served wording of this stream's rating question, where the payload has one. */
+  readonly questionText?: string;
 }): JSX.Element {
   const buckets = RATING_VALUES.map((value) => ({ value, count: distribution[value] }));
   const total = buckets.reduce((running, bucket) => running + bucket.count, 0);
@@ -85,6 +106,12 @@ export function RatingHistogram({
   const tallest = Math.max(...buckets.map((bucket) => bucket.count), 1);
 
   const title = copy(STREAM_TITLE[stream]);
+  const heading =
+    questionText === undefined || questionText.trim() === ''
+      ? title
+      : fillPageCopy('instructor_report_page.histogram_question_title', {
+          question: questionText.trim(),
+        });
   const reading =
     mean === null
       ? fillCopy('instructor_report_stats.distribution_reading_absent', { stream: title })
@@ -97,7 +124,7 @@ export function RatingHistogram({
 
   return (
     <div className="pulse-stat-histogram" role="img" aria-label={reading}>
-      <p className="pulse-stat-histogram-title">{title}</p>
+      <p className="pulse-stat-histogram-title">{heading}</p>
       <p className="pulse-stat-histogram-summary">
         {mean === null ? (
           copy('instructor_report_stats.no_responses')

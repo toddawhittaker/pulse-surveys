@@ -61,8 +61,18 @@ class CommittedRows:
         self.tables = tables
         self.graph = SupervisionGraph(session, tables)
 
-    def seed(self, name: str, chain: dict[str, Any] | None = None, **overrides: Any) -> Any:
-        """One row of `name`, with its ancestors. Not visible elsewhere until `commit`."""
+    def seed(self, name: str, chain: dict[str, Any] | None = None, /, **overrides: Any) -> Any:
+        """One row of `name`, with its ancestors. Not visible elsewhere until `commit`.
+
+        The `/` is `seed_row`'s and is load-bearing here for the same reason it is
+        there: `name` is a column on `institution`, `college`, `department` and
+        `comparison_set`, so a wrapper without it answers `seed("college", {},
+        name="…")` with a `TypeError` about two values for one argument. Dropped
+        from the `seed_rows` fixture, that cost E5-01 three tests that could not
+        execute (`docs/disputes/E5-01-01.md`); this copy is latent rather than
+        live, and it is fixed in the same change so the next caller does not find
+        it (`docs/MISTAKES.md` entry 13).
+        """
         return seed_row(self.session, self.tables, name, chain, **overrides)
 
     def commit(self) -> None:

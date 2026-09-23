@@ -51,7 +51,12 @@ from typing import Any
 
 import pytest
 from fixtures.indexes import index_key_columns
-from fixtures.migration_journey import MODEL_SCHEMA, columns_the_database_reports, migrate
+from fixtures.migration_journey import (
+    MODEL_SCHEMA,
+    columns_the_database_reports,
+    migrate,
+    most_steps_a_walk_down_may_take,
+)
 from sqlalchemy import create_engine, text
 
 pytestmark = pytest.mark.integration
@@ -65,12 +70,18 @@ SECTION = "section"
 AGS_ADDRESS_COLUMN = "lms_ags_line_items_url"
 LINE_ITEM_COLUMN = "ags_line_item_url"
 
-# How many revisions the walk down may cross before it is called broken rather
-# than long. E3-02's revision sits at or near the head of a branch with two
-# tickets on it, so anything past this is a downgrade that is not undoing what it
-# is supposed to undo — or a `downgrade()` that does nothing, which is the failure
-# the control in the middle of each test is written against.
-MOST_STEPS_DOWN = 12
+# How far the walk down may go is **derived from the chain** by
+# `most_steps_a_walk_down_may_take`, and this comment is where the constant that
+# used to sit here is accounted for. It read `MOST_STEPS_DOWN = 12` and described
+# itself as generous; it was exact. `grade_sync` is created by `c7e2a41b90f5`,
+# there were eleven revisions above it, and the twelfth step was the downgrade of
+# that revision itself — so the walk succeeded on its last permitted step, and the
+# next migration anybody added exhausted it while reporting "no revision crossed
+# drops it" about a revision one step below where it stopped. E5-01's revision was
+# that next one, and that ticket had done nothing wrong. The old assertion was
+# therefore incorrect rather than merely tight: it measured the length of the
+# migration chain and reported the answer as a property of E3-02's downgrade.
+# `docs/disputes/E5-01-02.md` holds the measurement and the ruling.
 
 # What the schema of one table is read as. `column_default` is included and is not
 # decoration: a server default is the difference between a primary key the database
@@ -125,14 +136,17 @@ def walk_down_until_the_passback_tables_are_gone(config: Any, database: Any) -> 
     before the migration exists. Crossing more than one revision is expected and
     harmless: E3 builds two tickets off one head, so whatever landed above this one
     is undone on the way past, and the comparison afterwards is over the objects
-    E3-02 owns.
+    E3-02 owns — and every later epic adds more revisions above it, which is why
+    the bound is derived from the chain rather than written down.
     """
-    for step in range(1, MOST_STEPS_DOWN + 1):
+    bound = most_steps_a_walk_down_may_take(config)
+    for step in range(1, bound + 1):
         migrate(config, "downgrade", "-1", f"stepping one revision below head, step {step}")
         if not columns_the_database_reports(database, GRADE_SYNC):
             return step
     pytest.fail(
-        f"After {MOST_STEPS_DOWN} downgrade steps `{GRADE_SYNC}` is still in the database, so no "
+        f"After {bound} downgrade steps — the whole revision history — `{GRADE_SYNC}` is still in "
+        "the database, so no "
         "revision crossed drops it. E3-02's migration is required to be reversible, and a "
         "`downgrade()` that leaves its own table behind is the shape E2-16 was written to repair: "
         "an operator who goes down cannot come back up, because the upgrade then meets a table it "

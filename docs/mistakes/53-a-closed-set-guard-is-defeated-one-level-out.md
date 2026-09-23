@@ -1,6 +1,6 @@
 # Entry 53. A closed-set guard is defeated one level out
 
-**Caught: 0**
+**Caught: 3**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -45,3 +45,27 @@ change. A control's inventory must come from somewhere the guarded structure
 cannot shrink, and the check that proves coverage must not be built from the
 guard's own enumeration. For a compose or configuration guard, read the merged
 result, not one file.
+
+*(**Two catches, writing E5-11**, 2026-09-14. The first draft of round 1's
+route sweep listed the student routes by hand and the benchmark keys by name.
+This entry's question — what encloses the set — moved the inventory to the
+application's route table (a student route registered tomorrow is inside the
+sweep, and one the sweep cannot drive fails rather than skips) and the keys to
+substring stems at every depth, with a planted-route control and near-miss keys
+asserted spared. Round 2's DOM sweep took the same shape: beside the exact
+legend sentences, a generic tier of stems over the whole rendered document,
+attributes included, so a future member has to defeat a class rather than an
+enumeration. What would have shipped: `course_benchmark_v2` under a renamed
+member, or a tooltip carrying the word the legend does not, green under an
+exact list.)*
+
+*(**A catch**, writing E5-13's dispute fix, 2026-09-15. The item 1 registry
+sweep had no audience model: every entry in the backend registry was read as a
+student's, which was true until this ticket put a leader's refusals beside the
+survey's strings. This entry's question — what encloses the set — made the
+repair an exemption by key rather than by surface, with the enclosure and its
+re-entry condition written on each row: the one refusal on that surface a
+student can be served stays inside the sweep, and a gated refusal that later
+becomes reachable leaves the tuple in the same change. What would have shipped:
+a sweep scoped to "student surfaces" that let the role gate's 401 sentence, the
+one a student really is answered with, name comparison sets. ADR 0177.)*

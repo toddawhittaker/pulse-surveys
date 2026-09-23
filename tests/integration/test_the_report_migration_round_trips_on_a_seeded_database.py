@@ -53,6 +53,7 @@ from fixtures.migration_journey import (
     MODEL_SCHEMA,
     columns_the_database_reports,
     migrate,
+    most_steps_a_walk_down_may_take,
     require_revision,
     session_on,
 )
@@ -106,11 +107,16 @@ A_SIXTH_POSITION = 6
 A_SEVENTH_POSITION = 7
 AN_EIGHTH_POSITION = 8
 
-# How many revisions a walk down may cross before it is called broken rather than
-# long. E4-02's revision is the first slot off the head this branch was cut from,
-# and two other tickets take the slots beside it, so anything past this is a
-# downgrade that is not undoing what it is supposed to undo.
-MOST_STEPS_DOWN = 12
+# How far a walk down may go is derived from the chain by
+# `most_steps_a_walk_down_may_take`. This module carried
+# `MOST_STEPS_DOWN = 12`, a copy of the constant in
+# `test_the_passback_schema_survives_a_downgrade.py`, where the same value turned
+# out to be the exact distance to the revision being descended towards — so the
+# next migration added anywhere in the tree exhausted it and reported the wrong
+# cause (`docs/disputes/E5-01-02.md`). The copy here was latent rather than live,
+# and it is fixed in the same change because a bound that measures the length of
+# the chain is wrong wherever it is written down, not only where it has already
+# fired (`docs/MISTAKES.md` entry 13).
 
 # The revision E4-02's own chains from — the head this branch was cut from, named
 # by the work order. It is the floor of the seeded trip below, and
@@ -197,14 +203,17 @@ def walk_down_until_the_stream_column_is_gone(config: Any, database: Any) -> int
     The walk stands in for a named revision, since this module is written before
     the migration exists. Crossing more than one revision is expected: E4 builds
     several tickets off one head, so whatever landed above this one is undone on
-    the way past.
+    the way past — and every later epic adds more, which is why the bound comes
+    from the chain rather than from a number written here.
     """
-    for step in range(1, MOST_STEPS_DOWN + 1):
+    bound = most_steps_a_walk_down_may_take(config)
+    for step in range(1, bound + 1):
         migrate(config, "downgrade", "-1", f"stepping one revision below head, step {step}")
         if STREAM_COLUMN not in columns_the_database_reports(database, QUESTION):
             return step
     pytest.fail(
-        f"After {MOST_STEPS_DOWN} downgrade steps `{QUESTION}` still carries `{STREAM_COLUMN}`, so "
+        f"After {bound} downgrade steps — the whole revision history — `{QUESTION}` still carries "
+        f"`{STREAM_COLUMN}`, so "
         "no revision crossed drops it. E4-02's migration is required to be reversible, and a "
         "`downgrade()` that leaves its own column behind is a database an operator cannot come "
         "back up from: the upgrade then meets a column it is about to add."

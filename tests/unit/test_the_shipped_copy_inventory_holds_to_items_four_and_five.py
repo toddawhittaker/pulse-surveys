@@ -26,10 +26,11 @@ rewording the survey does not redden this module (`docs/MISTAKES.md` entry 19).
 The one exception is item 5's recognizer, whose subject *is* the sentence's
 vocabulary, and it is written from item 5 and §4 rather than from what shipped.
 
-**The surface model, as E4-12 leaves it.** A surface is a governed body of
-shipped strings. There were three prefixes and one surface until E4-12 — the
-survey, arriving as `student_survey` from the frontend and `submit` and `student`
-from the backend — and there are four surfaces now:
+**The surface model, as E4-12 leaves it and E5-09 extends it.** A surface is a
+governed body of shipped strings. There were three prefixes and one surface until
+E4-12 — the survey, arriving as `student_survey` from the frontend and `submit`
+and `student` from the backend — E4-12 made it four, and E5-09's comparison-set
+screen makes it five:
 
   - `survey`, unchanged;
   - `report`, the instructor Monday report, arriving under five prefixes for one
@@ -42,7 +43,16 @@ from the backend — and there are four surfaces now:
     than the source;
   - `gradebook`, the two strings Pulse ships into an LMS gradebook (SPEC §3.4's
     line item label and its per-week ledger line);
-  - `unknown_address`, the fallback screen a wrong address lands on.
+  - `unknown_address`, the fallback screen a wrong address lands on;
+  - `comparison_sets`, the leadership screen that lists, creates, edits and
+    deletes SPEC §5.1's named sets, arriving under one prefix from two sources —
+    the frontend copy module `leadership_comparison_sets` and, since E5-13, the
+    eight refusals the named-set API answers, which are registry entries under
+    that same prefix. Nothing on it is anybody's response: a set is a list of
+    courses with a declared length and level, the preview's two numbers are a
+    count of courses and a count of sections, and a refusal says who may act and
+    what is not there to act on. It owes item 5 no line, for the same shape of
+    reason the gradebook and the unknown-address screen owe none (ADR 0176).
 
 `GOVERNED_SURFACES` is the whole of that governance, asserted in both directions:
 a key whose prefix no surface governs is red, and a governed prefix that collects
@@ -51,11 +61,13 @@ nothing is red.
 **And a surface either carries item 5's line or is named as owing none.** The
 survey and the report carry one, and `CONFIDENTIALITY_KEY_OF_SURFACE` says which
 entry it is. The gradebook is rendered by another product and says only what a
-score is made of; the unknown-address screen shows nobody's data at all. Neither
-promises a student anything about identity, so item 5's "exactly once" would be
-demanding a sentence with no subject — they sit in
+score is made of; the unknown-address screen shows nobody's data at all; the
+comparison-set screen shows the definitions of sets and two counts, and no
+response of anybody's. None of the three promises a student anything about
+identity, so item 5's "exactly once" would be demanding a sentence with no
+subject — they sit in
 `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with the reason written down, and the
-rules require **one** line on the first pair and **none** on the second. A
+rules require **one** line on the first group and **none** on the second. A
 surface in neither map, or in both, is red: the point of two explicit maps is
 that the next surface is placed deliberately rather than defaulting into whatever
 the code happens to do (ADR 0158).
@@ -176,6 +188,7 @@ SURVEY = "survey"
 REPORT = "report"
 GRADEBOOK = "gradebook"
 UNKNOWN_ADDRESS = "unknown_address"
+COMPARISON_SETS = "comparison_sets"
 
 # `student_survey` is E2-10's frontend copy module; `submit` and `student` are
 # E2-08's and E2-09's registry modules, whose strings are the refusals and the
@@ -189,8 +202,10 @@ UNKNOWN_ADDRESS = "unknown_address"
 # confidentiality sentences on one page, which is the opposite of what the item
 # says. ADR 0158 records the reading.
 #
-# `gradebook` and `unknown_address` are governed for item 4's vocabulary and owe
-# no line; see `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` below for each reason.
+# `gradebook`, `unknown_address` and `comparison_sets` are governed for item 4's
+# vocabulary and owe no line; see `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` below
+# for each reason. Three of the five surfaces owe none, which is the count E5-13
+# leaves and ADR 0176 records.
 GOVERNED_SURFACES = {
     "student_survey": SURVEY,
     "submit": SURVEY,
@@ -211,6 +226,15 @@ GOVERNED_SURFACES = {
     "instructor_report": REPORT,
     "gradebook": GRADEBOOK,
     "unknown_address": UNKNOWN_ADDRESS,
+    # E5-09's leadership comparison-set screen: the list, the create and edit
+    # form, the preview counts and the delete confirmation, reading one frontend
+    # copy module — and, since E5-13, the eight refusals the API answers, which
+    # arrive as registry entries under this same prefix. One surface, two
+    # sources, exactly as ADR 0158 has the report's `instructor_report.`
+    # refusals on the `report` surface: item 5 counts the screen rather than the
+    # source, and the sentences a reader is refused with are the screen's words
+    # as much as the copy module's are.
+    "leadership_comparison_sets": COMPARISON_SETS,
 }
 
 # Item 5: "Confidentiality copy appears exactly once per surface (survey: once
@@ -251,6 +275,16 @@ SURFACES_WITH_NO_CONFIDENTIALITY_LINE = {
     UNKNOWN_ADDRESS: (
         "The fallback screen for an address that resolves to nothing. It shows "
         "nobody's data, so there is nothing about anybody's identity to promise."
+    ),
+    COMPARISON_SETS: (
+        "SPEC §5.1's named-set management screen. Everything on it is a set "
+        "definition — a name, a length in weeks, a level, and the courses in it — "
+        "plus a preview of two counts, one of courses and one of sections, and "
+        "the eight sentences the API refuses a request with, which say who may "
+        "act and what is not there to act on. No response, comment or rating of "
+        "anybody's is rendered here, so item 5's sentence would have no subject: "
+        "there is no student whose identity this screen could promise anything "
+        "about. E5-13 asserts the answer by name and ADR 0176 records it."
     ),
 }
 
@@ -314,6 +348,77 @@ REPORT_COPY_FILENAMES = (
     "instructorReportStatCopy.ts",
     "instructorReportTrendCopy.ts",
 )
+
+# ---------------------------------------------------------------------------
+# E5's keys, by name. Each pair below is one region the epic shipped, and the
+# canaries that read them are E5-13's criterion 1: the collector's output
+# demonstrably includes strings from each new surface, so growth is a fact
+# rather than a belief (`docs/MISTAKES.md` entry 3's non-emptiness rule — a
+# sweep over an inventory that never grew is green over a whole epic).
+#
+# Keys only, never the sentences. E5-07, E5-08, E5-02 and E5-09 own those
+# wordings and rewording any of them must not redden this inventory
+# (`docs/MISTAKES.md` entry 19).
+# ---------------------------------------------------------------------------
+
+# E5-07's overlay: the legend entry naming the comparison-set line, and the
+# treatment shown in its place when SPEC §4.1 item 7 suppresses that line.
+TREND_LEGEND_KEY = "instructor_report_trend.legend_comparison"
+TREND_SUPPRESSION_KEY = "instructor_report_trend.comparison_suppressed"
+
+# E5-08's workload block: the comparison-set figure beside the section's own,
+# and the treatment shown when the benchmark is withheld.
+STATS_WORKLOAD_COMPARISON_KEY = "instructor_report_stats.workload_mean_comparison"
+STATS_BENCHMARK_WITHHELD_KEY = "instructor_report_stats.benchmark_withheld"
+
+# E5-02's close note on the eyebrow.
+REPORT_CLOSE_NOTE_KEY = "instructor_report_page.responses_closed_note"
+
+# E5-09's named-set route, the frontend half: the screen's own heading, and the
+# preview's two counts.
+COMPARISON_SETS_HEADING_KEY = "leadership_comparison_sets.heading"
+COMPARISON_SETS_PREVIEW_KEY = "leadership_comparison_sets.preview_counts"
+
+# The named-set route's backend half, which E5-13 brings into the registry. The
+# comparison-set screen is one surface from two sources, exactly as the report's
+# `instructor_report.` refusals are part of the `report` surface (ADR 0158): the
+# eight sentences the API answers are the screen's words as much as the copy
+# module's are, and until they are entries under a governed prefix the
+# vocabulary sweeps in this module pass over all eight.
+#
+# The map is from the constant's name to its key, which is the constant's name
+# in snake_case. Named rather than transcribed: what the rule below compares is
+# live objects, and the names are the handle it needs to reach one side.
+COMPARISON_SET_REFUSALS = {
+    "NOT_LEADERSHIP": "leadership_comparison_sets.not_leadership",
+    "SET_UNAVAILABLE": "leadership_comparison_sets.set_unavailable",
+    "NOT_THE_SETS_DEFINER": "leadership_comparison_sets.not_the_sets_definer",
+    "NAME_ALREADY_USED": "leadership_comparison_sets.name_already_used",
+    "LENGTH_NOT_A_CALENDAR_LENGTH": "leadership_comparison_sets.length_not_a_calendar_length",
+    "LEVEL_NOT_A_COURSE_LEVEL": "leadership_comparison_sets.level_not_a_course_level",
+    "MEMBER_NOT_AT_THE_SETS_LEVEL": "leadership_comparison_sets.member_not_at_the_sets_level",
+    "MEMBER_NOT_A_COURSE": "leadership_comparison_sets.member_not_a_course",
+}
+
+# The two of those eight the collector canary reads, chosen because they are the
+# two ends of the surface: one is refused before any set is looked at, one is
+# refused about a set.
+COMPARISON_SETS_NOT_LEADERSHIP_KEY = COMPARISON_SET_REFUSALS["NOT_LEADERSHIP"]
+COMPARISON_SETS_SET_UNAVAILABLE_KEY = COMPARISON_SET_REFUSALS["SET_UNAVAILABLE"]
+
+# The modules that put those sentences in front of a reader. The authorization
+# dependency answers the first; the router and the service answer the rest.
+COMPARISON_SET_REFUSAL_CONSUMERS = (
+    "app.api.deps",
+    "app.api.leadership",
+    "app.services.comparison_sets",
+)
+
+# The one consumer named in this module rather than discovered, so that the
+# comparison below cannot come back empty and call that agreement
+# (`docs/MISTAKES.md` entry 3).
+AUTHORIZATION_DEPENDENCY = "app.api.deps"
+NOT_LEADERSHIP_CONSTANT = "NOT_LEADERSHIP"
 
 SYNTHETIC = "a synthetic inventory built in this module"
 
@@ -379,6 +484,56 @@ INSTRUCTORS_COUNTED = re.compile(
 INSTRUCTORS_MEASURED = re.compile(
     r"\binstructors\b(?:\s+\w+){0,2}\s+"
     r"(?:ranked|counted|compared|sorted|scored|listed|needing\s+attention)\b",
+    re.IGNORECASE,
+)
+
+# **The benchmark register, E5-13's addition to the same clause.** E5 puts a
+# comparison-set figure and a university figure beside a section's own, and that
+# invites "above/below average" phrasing. About a *section* that is ordinary
+# benchmark language and allowed — SPEC §5.1's whole point is that a section is
+# shown against comparable sections. About *instructors* it is item 4's exact
+# target, and it is a shape neither pattern above reads: "Instructors above the
+# university average" carries no counting word and none of the measuring verbs.
+#
+# Two directions, because the sentence can be built from either end, and a stem
+# list rather than an enumeration of the sentences anybody has written so far
+# (`docs/MISTAKES.md` entry 53: the guard has to attack the class, not today's
+# instances):
+#
+#   - the plural noun, then a comparison word within three words of it;
+#   - a comparison phrase, then the plural noun within four words of it.
+#
+# The separator is `[\s-]+` rather than `\s+` on purpose: "Below-average
+# instructors" is the hyphenated spelling of the second direction, and a pattern
+# that read only whitespace would be defeated by a hyphen.
+#
+# **The plural is required here as it is above**, and for the same reason: SPEC
+# §3.2's own first question asks a student about "your instructor", and every
+# sentence comparing one section against its comparison set has to stay green or
+# the rule is unimplementable for the epic that introduced it
+# (`docs/MISTAKES.md` entry 43 — a broad pattern that matches ordinary prose is
+# a guard nobody can keep).
+#
+# **One false positive is known and left in.** "The instructors below teach
+# these sections" uses `below` as a position on a page rather than as a
+# comparison, and this reads it as the register. Nothing ships that sentence
+# today; if something does, it is a dispute about how the clause is checked —
+# and the first question to ask is whether a screen listing instructors is item
+# 4's business anyway — rather than a stem to drop quietly.
+#
+# **The window is a disclosed limit.** A comparison word further away than the
+# window — "Instructors in this college average more hours" — reads as permitted
+# here, exactly as a sentence that counts instructors without naming them does.
+# Widening the window costs ordinary prose; the honest statement is that this
+# reads the noun and its neighbourhood, and the rest is review.
+INSTRUCTORS_COMPARED = re.compile(
+    r"\binstructors\b(?:[\s-]+\w+){0,2}[\s-]+"
+    r"(?:above|below|ahead|behind|outperform(?:s|ing|ed)?|exceed(?:s|ing|ed)?"
+    r"|trail(?:s|ing|ed)?|averag(?:e|es|ing)|outscor\w*|beat(?:s|ing|en)?)\b"
+    r"|"
+    r"\b(?:above|below|behind|ahead\s+of|better\s+than|worse\s+than"
+    r"|compared\s+(?:to|with)|than)[\s-]+"
+    r"(?:\w+[\s-]+){0,3}(?:other\s+)?instructors\b",
     re.IGNORECASE,
 )
 
@@ -481,6 +636,33 @@ A_RANKED_SENTENCE = "Sections are ranked by their composite score, highest rated
 AN_INSTRUCTOR_COUNT_SENTENCE = "Four instructors in this department need attention this week."
 AN_INSTRUCTOR_MEASURE_SENTENCE = "Instructors are ranked by section mean."
 THE_SURVEYS_OWN_QUESTION = "How was your instructor this week?"
+
+# The benchmark register's own pair, one sentence per direction, written here and
+# never quoted from any copy module (`docs/MISTAKES.md` entry 3: a canary copied
+# out of the thing being swept goes blind with it). The first names the plural
+# and then compares it; the second compares first and names the plural after,
+# hyphenated, which is the spelling a whitespace-only pattern misses.
+AN_INSTRUCTORS_ABOVE_SENTENCE = "Instructors above the university average are listed first."
+A_BELOW_AVERAGE_INSTRUCTORS_SENTENCE = "Below-average instructors are flagged for the dean."
+
+# The far edge of each window, which is what says the window is as wide as this
+# module claims. The comparison word is the third word after the noun in the
+# first, and the noun is the fourth word after the phrase in the second.
+AN_INSTRUCTOR_COMPARISON_AT_THE_NOUNS_EDGE = "Instructors this term average more contact hours."
+AN_INSTRUCTOR_COMPARISON_AT_THE_PHRASES_EDGE = (
+    "Scores sit above the three newest instructors this week."
+)
+
+# The near misses, which are the reason the register is written the way it is.
+# Every one of them is language E5 ships or could ship: a section against its
+# comparison set is SPEC §5.1's whole subject, "comparable" is the vocabulary a
+# benchmark label is written in, and the survey's own question is about one
+# instructor. A pattern that reddened any of these would be unimplementable for
+# the epic that introduced it (`docs/MISTAKES.md` entry 43).
+A_SECTION_ABOVE_AVERAGE_SENTENCE = "Sections above the university average need no note."
+A_COMPARABLE_COURSES_LABEL = "Comparable 12-week courses"
+A_COMPARABLE_COURSES_STATISTIC = "Mean hours, comparable courses"
+A_SECTION_COMPARISON_SENTENCE = "This section is above the comparison mean this week."
 A_PLAIN_SENTENCE = "Answer the five questions below and press submit when you are ready."
 A_CONFIDENTIALITY_SENTENCE = "Your instructor sees what you wrote, never your name."
 A_SECOND_CONFIDENTIALITY_SENTENCE = "Your answers are anonymous to everyone in your course."
@@ -747,10 +929,18 @@ def forbidden_in(text: str, vocabulary: tuple[str, ...]) -> list[str]:
 
 
 def instructor_counting_in(text: str) -> list[str]:
-    """Every phrase in `text` that counts or measures instructors."""
+    """Every phrase in `text` that counts, measures or compares instructors.
+
+    One reader, three patterns, called by the controls and by the rule alike, so
+    that what a control proves is what the rule uses (`docs/MISTAKES.md` entry
+    13). `INSTRUCTORS_COMPARED` is E5-13's, and folding it in here rather than
+    into a sweep of its own is deliberate: the shipped-string rule that already
+    reads this function then refuses the benchmark register on the day the
+    pattern lands, with nothing to remember to wire up.
+    """
     return sorted(
         match.group(0)
-        for pattern in (INSTRUCTORS_COUNTED, INSTRUCTORS_MEASURED)
+        for pattern in (INSTRUCTORS_COUNTED, INSTRUCTORS_MEASURED, INSTRUCTORS_COMPARED)
         for match in pattern.finditer(text)
     )
 
@@ -876,6 +1066,20 @@ def without_prefix(inventory: tuple[CopyString, ...], prefix: str) -> tuple[Copy
 def without_key(inventory: tuple[CopyString, ...], key: str) -> tuple[CopyString, ...]:
     """The same inventory with one key removed."""
     return tuple(string for string in inventory if string.key != key)
+
+
+def served_text(value: object) -> str | None:
+    """The sentence a consumer's module constant puts in front of a reader.
+
+    A registry entry and the plain string a consumer used to hold are both
+    readable here — `.text` when the object carries one, the object itself when
+    it is already a string — because what the rule compares is what a reader is
+    told, and this module has no business dictating which of the two shapes the
+    consumer keeps. `None` for anything else, so an attribute that is not a
+    sentence at all is reported rather than compared.
+    """
+    text = getattr(value, "text", value)
+    return text if isinstance(text, str) else None
 
 
 def keys_declared_on_disk() -> dict[str, list[str]]:
@@ -1276,6 +1480,86 @@ def test_the_instructor_counting_sweep_sees_a_count_and_leaves_the_surveys_own_q
     assert not instructor_counting_in(A_NEEDS_ATTENTION_SENTENCE), (
         f"The sweep flagged {A_NEEDS_ATTENTION_SENTENCE!r}, which counts sections — the thing item "
         "4 says aggregate language counts."
+    )
+
+
+def test_the_instructor_sweep_sees_both_benchmark_directions_and_leaves_sections() -> None:
+    """E5-13's criterion 2, as an instrument: the benchmark register, both ways round.
+
+    The line E5 makes newly hot. "Above the university average" about a *section*
+    is SPEC §5.1's own subject and must stay green; the same shape about
+    *instructors* is item 4's exact target and must go red. Neither pattern that
+    was here before E5 reads it — a comparison sentence carries no counting word
+    and none of the measuring verbs — so the register is a third pattern, folded
+    into the reader this module's shipped-string rule already calls.
+
+    Both directions are asserted because the sentence can be built from either
+    end, and the near misses are the ones a benchmark epic actually writes: a
+    section above its comparison mean, a "comparable courses" label, a
+    "comparable courses" statistic, and SPEC §3.2's own first question about one
+    instructor.
+
+    **The mutation it kills:** either direction of `INSTRUCTORS_COMPARED`
+    dropped, emptied or misspelled, which leaves an instructor-comparison
+    sentence swept by nothing while the rule below goes on reporting the tree
+    clean. **The near miss it spares:** the section-shaped comparison — a pattern
+    widened to the comparison word alone would redden every benchmark string E5
+    ships, which is the shape of `docs/MISTAKES.md` entry 43. **A red here means
+    this module is broken, not that the copy is.**
+    """
+    assert instructor_counting_in(AN_INSTRUCTORS_ABOVE_SENTENCE), (
+        f"The sweep found nothing in {AN_INSTRUCTORS_ABOVE_SENTENCE!r}, which puts instructors "
+        "above an average. That is item 4's exact target: aggregate language counts sections, "
+        "never instructors."
+    )
+    assert instructor_counting_in(A_BELOW_AVERAGE_INSTRUCTORS_SENTENCE), (
+        f"The sweep found nothing in {A_BELOW_AVERAGE_INSTRUCTORS_SENTENCE!r}, which makes the "
+        "same comparison from the other end and hyphenates it."
+    )
+
+    permitted = (
+        A_SECTION_ABOVE_AVERAGE_SENTENCE,
+        A_COMPARABLE_COURSES_LABEL,
+        A_COMPARABLE_COURSES_STATISTIC,
+        A_SECTION_COMPARISON_SENTENCE,
+        THE_SURVEYS_OWN_QUESTION,
+    )
+    flagged = {
+        sentence: found for sentence in permitted if (found := instructor_counting_in(sentence))
+    }
+    assert not flagged, (
+        f"The sweep flagged {flagged}. Every one of those compares a *section* against its "
+        "comparison set or asks a student about their own instructor, which is the language SPEC "
+        "§5.1 and §3.2 require. A register that refuses them makes item 4 unimplementable for the "
+        "epic that introduced the benchmark."
+    )
+
+
+def test_the_instructor_sweep_reads_the_far_edge_of_each_benchmark_window() -> None:
+    """The boundary pair: a comparison the register must still reach at each window's edge.
+
+    The register reads the noun and its neighbourhood — a comparison word within
+    three words after the plural, or the plural within four words after a
+    comparison phrase. Adjacency is the easy case and is covered by the control
+    above; this is the far edge of each window, which is what says the window is
+    as wide as the module claims it is.
+
+    **The mutation it kills:** either window shrunk — `{0,2}` to `{0,1}` in the
+    first direction, `{0,3}` to `{0,2}` in the second — which is invisible to an
+    adjacency-only control and lets "Instructors this term average more contact
+    hours" ship. **The near miss it spares:** a comparison word further out than
+    the window, which is a disclosed limit stated beside the pattern rather than
+    a case this claims to catch. **A red here means this module is broken, not
+    that the copy is.**
+    """
+    assert instructor_counting_in(AN_INSTRUCTOR_COMPARISON_AT_THE_NOUNS_EDGE), (
+        f"The sweep found nothing in {AN_INSTRUCTOR_COMPARISON_AT_THE_NOUNS_EDGE!r}, where the "
+        "comparison word is the third word after the plural — the far edge of the window this "
+        "module says it reads."
+    )
+    assert instructor_counting_in(AN_INSTRUCTOR_COMPARISON_AT_THE_PHRASES_EDGE), (
+        f"The sweep found nothing in {AN_INSTRUCTOR_COMPARISON_AT_THE_PHRASES_EDGE!r}, where the "
+        "plural is the fourth word after the comparison phrase."
     )
 
 
@@ -1983,6 +2267,259 @@ def test_the_report_apis_refusal_constants_say_what_the_registry_says() -> None:
 
 
 # ---------------------------------------------------------------------------
+# E5's canaries. One per region the epic shipped, in the currency every rule
+# below reads: `collect_shipped_copy()`, the union the sweeps consume, rather
+# than the half a string happens to arrive through (`docs/MISTAKES.md` entry
+# 35). Presence and non-emptiness only, never the sentence (entry 19) — an empty
+# text satisfies every vocabulary rule in this module, which is why the second
+# assertion in each of these is not ceremony.
+# ---------------------------------------------------------------------------
+
+
+def collected_shipped_texts() -> dict[str, str]:
+    """Every shipped key and its text, in the union the rules below read."""
+    return {string.key: string.text for string in collect_shipped_copy()}
+
+
+def assert_collected(collected: Mapping[str, str], wanted: tuple[str, ...], why: str) -> None:
+    """Require each key to be collected and to carry words, with one message.
+
+    A helper rather than six copies of the same two assertions, because the
+    interesting half of each canary is the sentence in `why` — what shipping
+    that region unswept would mean — and repeating the mechanics around it
+    buries that.
+    """
+    missing = [key for key in wanted if key not in collected]
+    assert not missing, f"The collector read no {missing}. It read {sorted(collected)}.\n\n{why}"
+    blank = [key for key in wanted if not collected[key].strip()]
+    assert not blank, (
+        f"The collector read {blank} as empty strings. An empty text satisfies every vocabulary "
+        f"rule in this module.\n\n{why}"
+    )
+
+
+def test_the_collector_finds_the_two_overlay_keys_the_trend_pair_ships() -> None:
+    """E5-13 criterion 1 over E5-07's overlay: the legend, and the suppressed treatment.
+
+    The comparison line is the first thing SPEC §4.1 item 4 was written about
+    that E5 actually draws, and its legend is where a reader is told what the
+    second line is. The suppression treatment is the other half of the same
+    region: the words shown when item 7 withholds the line. Two keys, because
+    one of them arriving while the other is still written into the component
+    would leave half the overlay's language swept by nothing.
+
+    **The mutation it kills:** `instructor_report_trend.legend_comparison`
+    deleted from `instructorReportTrendCopy.ts`, or renamed without this
+    inventory being told — after which the legend's words ship with items 4 and
+    5 asserted over nothing and every sweep below stays green. **The near miss
+    it spares:** `instructor_report_trend.legend_university`, a key of the same
+    prefix that is not one of these two; this canary says nothing about it, and
+    the surface rules reach it through the prefix. **A red here means E5-07's
+    overlay copy is not collected.**
+    """
+    assert_collected(
+        collected_shipped_texts(),
+        (TREND_LEGEND_KEY, TREND_SUPPRESSION_KEY),
+        "E5-07 draws a comparison line and a university line on the Monday report. Until the "
+        "legend and the suppression treatment are collected, the words a reader is given for "
+        "them are swept by neither vocabulary rule in this module.",
+    )
+
+
+def test_the_collector_finds_the_two_statistic_keys_the_workload_block_ships() -> None:
+    """E5-13 criterion 1 over E5-08's workload comparison block.
+
+    The workload mean against the comparison set is the figure SPEC §5.1 names,
+    and the withheld treatment is what stands in its place below the benchmark
+    minimum. Two keys from the two states the block has, so a figure arriving
+    with its suppressed state left in the component does not satisfy this.
+
+    **The mutation it kills:**
+    `instructor_report_stats.workload_mean_comparison` deleted or renamed in
+    `instructorReportStatCopy.ts`. **The near miss it spares:**
+    `instructor_report_stats.workload_median_comparison`, the same block's other
+    statistic and a key of the same prefix that is not one of these two. **A red
+    here means E5-08's comparison copy is not collected.**
+    """
+    assert_collected(
+        collected_shipped_texts(),
+        (STATS_WORKLOAD_COMPARISON_KEY, STATS_BENCHMARK_WITHHELD_KEY),
+        "E5-08 puts a comparison-set figure beside a section's own and withholds it below the "
+        "benchmark minimum. Both states are words an instructor reads, and a state whose copy "
+        "is not collected is a state items 4 and 5 are not asserted over.",
+    )
+
+
+def test_the_collector_finds_the_close_note_the_eyebrow_ships() -> None:
+    """E5-13 criterion 1 over E5-02's close note, which is one key rather than two.
+
+    **One key, deliberately.** The sibling canaries name two because each is
+    proving a whole file is parsed; this region is one sentence added to a file
+    the report canary above already proves is read, through
+    `instructor_report_page.comments_note`. A second key here would be a second
+    assertion about E4's copy wearing E5's name, and the pairing the work order
+    offers — a title on the same surface — is a key this module would be
+    asserting the existence of without a record saying it exists
+    (`docs/MISTAKES.md` entry 3: a canary has to be a string certainly present).
+
+    **The mutation it kills:**
+    `instructor_report_page.responses_closed_note` deleted from
+    `instructorReportPageCopy.ts`, or written back into the eyebrow component as
+    a literal — which is the shape E5-02's own region arrived in and the state
+    this inventory exists to end. **The near miss it spares:**
+    `instructor_report_page.comments_note`, a key of the same prefix that is the
+    report's confidentiality line and not this note. **A red here means E5-02's
+    close note is not collected.**
+    """
+    assert_collected(
+        collected_shipped_texts(),
+        (REPORT_CLOSE_NOTE_KEY,),
+        "E5-02 tells a reader the week's responses are closed. It is a sentence on the largest "
+        "user-facing surface this product has, and a sentence outside the inventory is a "
+        "sentence §4.1 items 4 and 5 are held over by review alone.",
+    )
+
+
+def test_the_collector_finds_the_two_frontend_keys_the_named_set_route_ships() -> None:
+    """E5-13 criterion 1 over E5-09's named-set route, the frontend half.
+
+    The heading is the screen's own name — the leadership landing renders the
+    same entry for its link — and the preview's counts are the two numbers the
+    route puts in front of a reader. Two keys, one from each region of the
+    screen the epic built.
+
+    **The mutation it kills:** `leadership_comparison_sets.heading` deleted or
+    renamed in `leadershipComparisonSetCopy.ts`, which takes the whole surface
+    out of the inventory while the governance row stays. **The near miss it
+    spares:** `leadership_comparison_sets.intro`, a key of the same prefix that
+    is neither of these two. **A red here means E5-09's route copy is not
+    collected.**
+    """
+    assert_collected(
+        collected_shipped_texts(),
+        (COMPARISON_SETS_HEADING_KEY, COMPARISON_SETS_PREVIEW_KEY),
+        "E5-09's screen is a governed surface with a row in the governance map. A row whose "
+        "named strings are not collected is a surface the vocabulary sweeps pass over in green.",
+    )
+
+
+def test_the_collector_finds_the_two_refusals_the_named_set_api_answers() -> None:
+    """E5-13 criterion 1 over the named-set route's backend half.
+
+    `docs/tickets/e5/deferred.md`'s entry for the eight plain strings in
+    `app/copy/leadership_sets.py`: they are answered to a reader of the
+    comparison-set screen and they are not entries in the registry, so the
+    inventory cannot see them and neither vocabulary rule below reads a word of
+    them. One surface, two sources — the same relationship `instructor_report.`
+    has to the report's four frontend prefixes (ADR 0158), and the same one
+    `submit` and `student` have to `student_survey`.
+
+    **These two are on the comparison-set surface and are not a confidentiality
+    line.** They say who may act and what is not there to act on, not what
+    happens to anybody's identity, so the surface goes on owing item 5 no line
+    and all eight are swept for item 4's vocabulary with everything else.
+
+    Presence and non-emptiness only, never the sentences: the router's own tests
+    hold the transcriptions, and a copy here would be one more place to reword
+    (`docs/MISTAKES.md` entry 19).
+
+    **The mutation it kills:** the eight strings left as plain strings with an
+    empty `COPY`, which is the state this ticket exists to end; or the entries
+    spelled under a `leadership_sets.` prefix of their own, which no row in the
+    governance map claims. **The near miss it spares:**
+    `leadership_comparison_sets.member_not_a_course`, one of the same eight that
+    is not either of these two. **A red here means the API's refusals are not
+    collected.**
+    """
+    assert_collected(
+        collected_shipped_texts(),
+        (COMPARISON_SETS_NOT_LEADERSHIP_KEY, COMPARISON_SETS_SET_UNAVAILABLE_KEY),
+        "Both sentences are answered to a reader of the comparison-set screen. Until they are "
+        "entries under a prefix the governance map claims, the sweeps in this module pass over "
+        "them entirely.",
+    )
+
+
+def test_the_comparison_set_refusal_constants_say_what_the_registry_says() -> None:
+    """The second half of the deferred entry, as far as live objects can carry it.
+
+    The canary above is "the entries exist". This is what stops them arriving as
+    a second copy of eight sentences: the constants the consumers hold and the
+    registry's entries are read as they are, at run time, and required to agree.
+    A registry entry no consumer uses is a governed string nobody serves, and a
+    consumer constant the registry does not match is the ungoverned sentence the
+    entry was opened about, wearing a copy of the right words.
+
+    **Read, never transcribed.** Both sides are live objects, so rewording a
+    refusal is one edit in the registry (`docs/MISTAKES.md` entry 19).
+
+    **The imports are inside the body**, as they are in the report's equivalent:
+    several tests in this module are `invariant`-marked and run in CI's isolated
+    §4.1 pass with no database, and importing a router at module scope would put
+    an application import into that pass for the sake of one unmarked test. This
+    test is unmarked for the same reason — it is the deferral's clause, not a
+    §4.1 rule.
+
+    **What this cannot say, stated rather than implied.** Equal text does not
+    prove a lookup: a constant re-typed by hand is equal to its entry on the day
+    it is written. What it proves is that the two cannot drift apart afterwards,
+    which is the failure the entry describes. And a consumer that reads the
+    registry at its raise site publishes no module constant at all, so it is
+    invisible here — that is a read of the registry either way, which is the
+    property the entry is about. The one consumer this module names,
+    `app.api.deps`, is what keeps the comparison from coming back empty and
+    calling that agreement (`docs/MISTAKES.md` entry 3).
+
+    **The mutations it kills:** a registry entry added beside a consumer that
+    goes on holding its own sentence, which closes the entry on paper and
+    changes nothing; and either side reworded alone. **The near miss it spares:**
+    a consumer that keeps a constant of its own name but reads the entry through
+    it — the shape the change is meant to take, which must stay green whether
+    the constant is the entry or its text. **A red here means a consumer and the
+    registry disagree about what a reader is told, or the entries do not exist
+    yet.**
+    """
+    collected = {string.key: string.text for string in collect_backend_copy()}
+    missing = [key for key in COMPARISON_SET_REFUSALS.values() if key not in collected]
+    assert not missing, (
+        f"The registry publishes no {missing}, so there is nothing for the consumers' constants "
+        f"to agree with. `{COPY_PACKAGE}.leadership_sets` holds those sentences as plain strings "
+        "until the entries exist, which is the state `docs/tickets/e5/deferred.md` records."
+    )
+
+    held: dict[str, dict[str, str]] = {}
+    for module_name in COMPARISON_SET_REFUSAL_CONSUMERS:
+        module = importlib.import_module(module_name)
+        held[module_name] = {
+            name: text
+            for name in COMPARISON_SET_REFUSALS
+            if hasattr(module, name) and (text := served_text(getattr(module, name))) is not None
+        }
+
+    assert NOT_LEADERSHIP_CONSTANT in held[AUTHORIZATION_DEPENDENCY], (
+        f"`{AUTHORIZATION_DEPENDENCY}` publishes no `{NOT_LEADERSHIP_CONSTANT}` carrying a "
+        "sentence. That constant is what a caller outside a leadership role is answered with, "
+        "and it is the one constant this comparison is required to find: without it the "
+        "comparison below can come back empty and be read as agreement."
+    )
+
+    disagreeing = {
+        f"{module_name}.{name}": (text, collected[COMPARISON_SET_REFUSALS[name]])
+        for module_name, constants in held.items()
+        for name, text in constants.items()
+        if text != collected[COMPARISON_SET_REFUSALS[name]]
+    }
+    assert not disagreeing, (
+        f"These consumer constants do not say what their registry entries say: {disagreeing}.\n"
+        "\n"
+        "Two copies of one refusal is the state the deferred entry was opened about: the "
+        "inventory sweeps the entry, the reader is served the constant, and nothing holds them "
+        "together. The repair is for the constant to read the entry, not for the second copy to "
+        "be corrected."
+    )
+
+
+# ---------------------------------------------------------------------------
 # The rules. Every one of these is marked, and every docstring names the item it
 # asserts.
 # ---------------------------------------------------------------------------
@@ -2048,16 +2585,24 @@ def test_no_shipped_string_counts_instructors() -> None:
     > Aggregate language counts sections, never instructors
 
     What is asserted is the noun: no shipped string counts, ranks, sorts or lists
-    *instructors*. What cannot be asserted from text is stated instead — a
-    sentence that counts instructors without naming them ("12 need attention" over
-    a list of people) reads as permitted here, and that half stays a review
-    question.
+    *instructors* — and, since E5-13, none compares them either. The benchmark
+    register is the third pattern `instructor_counting_in` reads: E5 puts a
+    comparison-set figure and a university figure beside a section's own, and
+    "above the university average" about a section is SPEC §5.1's subject while
+    the same shape about instructors is this item's exact target. What cannot be
+    asserted from text is stated instead — a sentence that counts instructors
+    without naming them ("12 need attention" over a list of people) reads as
+    permitted here, and so does a comparison further from the noun than the
+    register's window; both halves stay review questions.
 
-    **The mutation it kills:** an attention line written about instructors rather
-    than about sections. **The near miss that must stay green:** SPEC §3.2's own
+    **The mutations it kills:** an attention line written about instructors
+    rather than about sections, and a benchmark line that puts instructors above
+    or below an average. **The near miss that must stay green:** SPEC §3.2's own
     first question, which asks a student about their instructor and is the reason
-    this sweep reads counts rather than the word. **What makes it non-vacuous:**
-    the sweep's control above, run in both directions.
+    this sweep reads the plural in a neighbourhood rather than the word; and
+    every section-shaped comparison E5 ships. **What makes it non-vacuous:** the
+    sweep's controls above, each run in both directions, including the register's
+    own two and its window's edges.
     """
     inventory = collect_shipped_copy()
     assert inventory, "The inventory is empty, so this rule passed over nothing."
@@ -2162,10 +2707,12 @@ def test_each_line_carrying_surface_carries_exactly_one_confidentiality_line() -
 def test_no_surface_recorded_as_owing_no_confidentiality_line_carries_one() -> None:
     """SPEC §4.1 item 5 over the other half of the surface model.
 
-    Two governed surfaces owe no line, each for a reason written down beside it:
-    the gradebook is a label and an arithmetic ledger rendered inside another
-    product, and the unknown-address screen shows nobody's data. Item 5's sentence
-    would have no subject on either.
+    Three governed surfaces owe no line, each for a reason written down beside
+    it: the gradebook is a label and an arithmetic ledger rendered inside another
+    product, the unknown-address screen shows nobody's data, and the
+    comparison-set screen shows set definitions, two counts and eight refusals —
+    no response, comment or rating of anybody's. Item 5's sentence would have no
+    subject on any of the three.
 
     **Owing none and carrying none are the same requirement here, and that is
     deliberate.** A confidentiality sentence on one of these surfaces is a promise
@@ -2201,6 +2748,88 @@ def test_no_surface_recorded_as_owing_no_confidentiality_line_carries_one() -> N
         "\n"
         "Each is recorded as owing none, with the reason: "
         f"{dict(SURFACES_WITH_NO_CONFIDENTIALITY_LINE)}"
+    )
+
+
+@pytest.mark.invariant
+def test_the_comparison_set_surface_owes_no_line_and_collects_from_both_its_sources() -> None:
+    """SPEC §4.1 item 5's answer for E5's surface, asserted as a named fact.
+
+    E5-13's criterion 3. The brief gives the comparison-set screen no standing
+    confidentiality line, and item 5's parenthetical names only the survey: a set
+    is a name, a length, a level and the courses in it, the preview is two
+    counts, and the API's eight refusals say who may act and what is not there.
+    Nothing on the screen is anybody's response, so item 5's sentence would have
+    no subject. The answer is recorded in
+    `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with its reason and in ADR 0176.
+
+    **The rule above already holds every no-line surface to zero, and that is
+    exactly why this one is here.** "This surface carries no confidentiality
+    string" is satisfied perfectly by a surface that collects nothing at all
+    (`docs/MISTAKES.md` entry 3), and this surface is the one that can: it is the
+    newest, it arrives from two sources, and either source could stop reaching
+    the collector without any other rule in this module changing colour — the
+    frontend half would leave the backend half collecting for the prefix, and the
+    backend half would leave the frontend half doing so, so
+    `test_every_governed_surface_collects_at_least_one_string` stays green with
+    half the surface gone. So the fact is asserted in both halves' own currency
+    before the zero is believed.
+
+    **The mutations it kills:** the surface moved into
+    `CONFIDENTIALITY_KEY_OF_SURFACE`, which would demand an identity promise from
+    a screen that handles nobody's identity; the row's reason emptied, which
+    turns a decision back into an omission; and either source's strings dropping
+    out of the collector, which is what makes the zero meaningless. **The near
+    miss it spares:** a string on this surface that merely mentions a course or a
+    section — nothing here reads the words, only which source they came from and
+    what item 5 counts.
+    """
+    assert COMPARISON_SETS in SURFACES_WITH_NO_CONFIDENTIALITY_LINE, (
+        f"The {COMPARISON_SETS} surface is not recorded as owing item 5 no line. The brief gives "
+        "the comparison-set screen no standing confidentiality sentence, and that answer is a row "
+        "in `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with the reason written out — not an absence "
+        "from the other map."
+    )
+    assert SURFACES_WITH_NO_CONFIDENTIALITY_LINE[COMPARISON_SETS].strip(), (
+        f"The {COMPARISON_SETS} row records no reason. A row with no argument in it is an "
+        "omission that reads like a decision, which is the state two explicit maps exist to make "
+        "impossible (ADR 0158)."
+    )
+    assert COMPARISON_SETS not in CONFIDENTIALITY_KEY_OF_SURFACE, (
+        f"The {COMPARISON_SETS} surface is in both line maps: one demands exactly one "
+        "confidentiality string and the other forbids any."
+    )
+
+    prefix = prefix_of(COMPARISON_SETS_HEADING_KEY)
+    frontend = [
+        string.key
+        for string in collect_frontend_copy(FRONTEND_COPY_DIRECTORY)
+        if prefix_of(string.key) == prefix
+    ]
+    backend = [string.key for string in collect_backend_copy() if prefix_of(string.key) == prefix]
+    assert frontend, (
+        f"No string under `{prefix}.` is collected from {display(FRONTEND_COPY_DIRECTORY)}. The "
+        "screen's own copy module is half of this surface, and a zero counted over a surface that "
+        "collects nothing is not an answer to item 5."
+    )
+    assert backend, (
+        f"No string under `{prefix}.` is collected from `{COPY_PACKAGE}`. The refusals the API "
+        "answers are the other half of this surface — one surface, two sources, as ADR 0158 has "
+        "the report's — and until they are registry entries the zero below is counted over the "
+        "screen's copy module alone."
+    )
+
+    inventory = collect_shipped_copy()
+    assert inventory, "The inventory is empty, so this rule passed over nothing."
+    carrying = sorted(string.key for string in confidentiality_strings(inventory, COMPARISON_SETS))
+    assert not carrying, (
+        f"The {COMPARISON_SETS} surface owes item 5 no line and carries {carrying}.\n"
+        "\n"
+        f"The reason it owes none: {SURFACES_WITH_NO_CONFIDENTIALITY_LINE[COMPARISON_SETS]}\n"
+        "\n"
+        "A confidentiality sentence here is a promise made where nothing keeps it, and a second "
+        "copy of the product's identity promise that the exactly-once rule cannot see. The answer "
+        "is ADR 0176 or a dispute about it, never a quiet reword."
     )
 
 

@@ -118,6 +118,7 @@ from fixtures.student_read import (
     REFUSED_STATUS,
     SESSION_FRAGMENT,
     STUDENT_LANDING,
+    STUDENT_READ_PATH,
     decoded,
     scalars_in,
     session_token_at,
@@ -188,6 +189,26 @@ SECTION_LENGTH_FIELD = "length_weeks"
 COURSE_WEEK_FIELD = "course_week"
 TERM_WEEK_FIELD = "term_week"
 PUBLISHED_WEEKS_FIELD = "published_weeks"
+
+# E5-02's three members, spelled here rather than in the modules that read them.
+#
+#   - `week.closes_at` — the reported week's survey window close instant, which
+#     the mockup's eyebrow renders as "responses closed Sun 11:59 PM"
+#     (`design/InstructorMondayReport.dc.html:227`).
+#   - `streams.<stream>.question_text` — the served text of that stream's rating
+#     question, which the mockup quotes as each histogram's title (lines 30-31).
+#     SPEC §3.2 versions that wording server-side, so it is served rather than
+#     copied into the frontend.
+#   - a top-level `institution_timezone` — the IANA name the close instant is
+#     rendered in, mirroring the student payload's own member. It is a top-level
+#     addition, so `tests/unit/test_the_payload_sketch_and_the_schema_are_
+#     reconciled.py`'s `DECLARED_DIVERGENCES` carries it.
+#
+# All three are settled by E5-02's work order; none is discovered, because a
+# spelling invented here would be this suite choosing the wire format.
+CLOSES_AT_FIELD = "closes_at"
+QUESTION_TEXT_FIELD = "question_text"
+INSTITUTION_TIMEZONE_MEMBER = "institution_timezone"
 
 RESPONSE_RATE_FIELD = "response_rate"
 VALIDITY_RATE_FIELD = "validity_rate"
@@ -1506,19 +1527,30 @@ def report_door_as(
     committed_clock_overrides: Any,
     web_identity: Any,
     landing_ground: Any,
-) -> Callable[[str], ReportDoor]:
+) -> Callable[..., ReportDoor]:
     """The door, stood at as a role the caller names. See `_build_report_door`.
 
     A factory, because criterion 2 is "a student session and a leadership session
     are both refused these routes … driven per role", and a fixture that picked
     one role would make the other's test a copy of this file rather than a drive
     through it.
+
+    **Keyword arguments are environment variable names and values**, passed
+    straight through to `launch_driver_in` so they are set before the application
+    is imported (`docs/MISTAKES.md` entry 40) — `tool_doors` only sees a value that
+    came down that way. The shape is copied from
+    `tests/fixtures/student_read.py::student_read_door_in` rather than reinvented
+    (`docs/MISTAKES.md` entry 37), and it exists for the same reason that fixture
+    grew it: E5-02 serves `institution_timezone` on the report payload, and a test
+    that asserted only the documented default would pass against a member
+    hard-coded to that default. Called with none, this builds exactly what it
+    always built.
     """
 
-    def build(role: str = INSTRUCTOR_ROLE) -> ReportDoor:
+    def build(role: str = INSTRUCTOR_ROLE, **settings: str) -> ReportDoor:
         return _build_report_door(
             role,
-            launch_driver_in(),
+            launch_driver_in(**settings),
             committed_rows,
             metadata_tables,
             committed_clock_overrides,
@@ -1529,9 +1561,126 @@ def report_door_as(
     return build
 
 
+class StudentInTheReportWorld:
+    """A student session at the same door the instructor's report is read through.
+
+    One person, one launch, one token, and reads of the student read path through
+    the tool the `ReportDoor` beside it is already serving. What it exists for is
+    a sentence E5-11 has to be able to assert: *while* the instructor is being
+    served three lines over this world's planted comparison population, the
+    student is served none of them — the same application, the same database, the
+    same moment.
+    """
+
+    def __init__(
+        self,
+        tool: Any,
+        token: str,
+        *,
+        user_id: Any,
+        landing_section_id: Any,
+        taught_section_id: Any,
+    ) -> None:
+        self.tool = tool
+        self.token = token
+        self.user_id = user_id
+        # Where the landing's own enrolment put her (`tests/fixtures/landing.py`
+        # picks the graph's scope section) and this world's taught section, which
+        # she is enrolled in as well so that the section under comparison is one
+        # she can actually read about.
+        self.landing_section_id = landing_section_id
+        self.taught_section_id = taught_section_id
+
+    def credential(self) -> dict[str, str]:
+        """This student's session as a Bearer token, the way the SPA sends it (ADR 0089)."""
+        return {"authorization": f"{AUTHENTICATE_SCHEME} {self.token}"}
+
+    def get(self, path: str = STUDENT_READ_PATH, **params: Any) -> Any:
+        """One read of `path` carrying this student's session."""
+        return self.tool.get(path, params=params or None, headers=self.credential())
+
+
 @pytest.fixture
-def report_door(report_door_as: Callable[[str], ReportDoor]) -> ReportDoor:
-    """The teaching instructor at the door, with her own section and one that is not hers."""
+def student_session_in(
+    metadata_tables: dict[str, Any],
+    landing_ground: Any,
+    enrol: Any,
+) -> Callable[..., StudentInTheReportWorld]:
+    """A student signed in at a `ReportDoor`'s own world, launched through its driver.
+
+    **Why this is not `tests/fixtures/student_read.py`'s door.** That fixture
+    builds a world of its own — its own term, its own sections, and its own
+    question set at the shipped version. Standing it up beside a `ReportDoor`
+    seeds `question_set` version 1 twice and the second one is refused by
+    `uq_question_set_version`, which is a measured fact rather than a prediction:
+    it is what three of E5-11's tests errored on. So the student is made *here*,
+    in the world that already exists, out of the same rows `_build_report_door`
+    makes its refused-role student from — `landing_ground().a_student(...)`, then
+    a real launch through the door's own driver — and no second world is built.
+
+    **She is enrolled in the taught section as well**, which the refused-role
+    student deliberately is not. That student exists to be refused by role, and an
+    enrolment in the section under test would let a 404 stand in for the 401
+    (`a_day_the_student_is_already_enrolled_on` says so). This one is the opposite
+    case: SPEC §4.1 item 1 is about what a student is shown *about her own
+    section*, and the strongest subject for it is a student enrolled in the very
+    section whose comparison figures the instructor is being served. Her enrolment
+    starts on the taught cohort's own first day, from the calendar this world is
+    built on rather than from the wall clock.
+
+    The caller gets the token and the two section keys; reading is
+    `StudentInTheReportWorld.get`.
+    """
+
+    def sign_in(door: ReportDoor) -> StudentInTheReportWorld:
+        driver = door.driver
+        offer = driver.offer_for_role(LEARNER_ROLE_URN)
+        claims = driver.claims_of(offer)
+        subject = claims.get("sub")
+        assert isinstance(subject, str) and subject, (
+            "The learner launch this platform signs carries no `sub`, so there is no subject to "
+            f"seed a `user` row for and no student to read as. The claims it signed: "
+            f"{sorted(claims)}."
+        )
+        platform_id = driver.registration.platform_row[
+            single_primary_key(require_table(metadata_tables, "lti_platform"))
+        ]
+
+        seeded = landing_ground().a_student(
+            platform_id=platform_id,
+            subject=subject,
+            on=a_day_the_student_is_already_enrolled_on(),
+        )
+        _length, _first, section_starts = SEEDED_COHORTS[TAUGHT_COHORT]
+        enrol.enrol(
+            user_id=seeded["user_id"],
+            section_id=door.rows.taught_section_id,
+            started_on=section_starts,
+            ended_on=None,
+        )
+        door.commit()
+
+        landed, _ = driver.launch(offer)
+        token = session_token_at(landed, LANDING_FOR[STUDENT_ROLE], "The seeded student's launch")
+        return StudentInTheReportWorld(
+            door.tool,
+            token,
+            user_id=seeded["user_id"],
+            landing_section_id=seeded["section_id"],
+            taught_section_id=door.rows.taught_section_id,
+        )
+
+    return sign_in
+
+
+@pytest.fixture
+def report_door(report_door_as: Callable[..., ReportDoor]) -> ReportDoor:
+    """The teaching instructor at the door, with her own section and one that is not hers.
+
+    Built with no environment override, so it runs under whatever `configured_env`
+    laid down — which is what every test about the ordinary path wants, and is the
+    default half of E5-02's timezone pair.
+    """
     return report_door_as(INSTRUCTOR_ROLE)
 
 
@@ -1567,6 +1716,9 @@ def report_api_contract() -> Any:
         course_week_field = COURSE_WEEK_FIELD
         term_week_field = TERM_WEEK_FIELD
         published_weeks_field = PUBLISHED_WEEKS_FIELD
+        closes_at_field = CLOSES_AT_FIELD
+        question_text_field = QUESTION_TEXT_FIELD
+        institution_timezone_member = INSTITUTION_TIMEZONE_MEMBER
         response_rate_field = RESPONSE_RATE_FIELD
         validity_rate_field = VALIDITY_RATE_FIELD
         responses_field = RESPONSES_FIELD

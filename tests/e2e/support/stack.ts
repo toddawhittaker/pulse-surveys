@@ -2,11 +2,12 @@
 // specs need — SPEC §9.2.
 //
 // **What is here**, in the order it arrived: the window derivation and the
-// database statement E2-10's spec needed, E4-11's weekly-summary walk, and
-// E4-15's two — the exit story's seeder and the release cutter. Five helpers
-// rather than the two this file opened with, so the count is named rather than
-// left as prose that goes stale on the next addition (`docs/MISTAKES.md`
-// entry 1).
+// database statement E2-10's spec needed, E4-11's weekly-summary walk, E4-15's
+// two — the exit story's seeder and the release cutter — and E5-10's two, which
+// pipe the other two development seeders the repository already ships. Seven
+// helpers rather than the two this file opened with, so the count is named
+// rather than left as prose that goes stale on the next addition
+// (`docs/MISTAKES.md` entry 1).
 //
 // All of them shell out to `docker compose`, which is how this suite's stack is
 // brought up in the first place (`README.md`'s local sequence and the `e2e` job
@@ -193,6 +194,90 @@ export function seedTheExitStory(): string {
     );
   }
   return compose(['exec', '-T', 'api', 'python', '-'], source);
+}
+
+/** Where E5-12's prior-term seeder lives, relative to the repository root. */
+export const BENCHMARK_HISTORY_SEEDER = 'scripts/seed_benchmark_history.py';
+
+/** Where E4-20's demo story for `BIOL-310-R7FF` lives. */
+export const DEMO_STORY_SEEDER = 'scripts/seed_demo_story.py';
+
+/**
+ * Pipe one of the repository's development seeders into the `api` container and
+ * answer what it printed.
+ *
+ * `seedTheExitStory` above is this, written out for one file; E5-10 needs two
+ * more of them, so the shape is said once rather than three times
+ * (`docs/MISTAKES.md` entry 13). **That file is deliberately left holding its
+ * own copy**, for the reason `doors.ts` records about the specs it did not
+ * refactor: `exit-instructor-report.spec.ts` is the proven-green control for the
+ * exit story, and putting a diff on it inside the change that leans on it is
+ * what that record declined to do.
+ *
+ * **Piped rather than executed by path.** `scripts/` is not in the `api` image
+ * and `docker-compose.yml` mounts only `scripts/db-init`, so the file is read
+ * here — on the host, where the repository is — and handed to `python -` on
+ * standard input, which is the currency `databaseStatement` already uses for SQL
+ * and `deriveSurveyWindows` for a job.
+ *
+ * Every seeder reached this way refuses loudly rather than provisioning: none of
+ * them creates a section, a person, an enrollment, a week or a window, and each
+ * exits non-zero with a sentence naming what is missing. A non-zero exit throws
+ * out of `execFileSync`, so a refusal reaches the caller as a failure rather than
+ * as an empty world every later absence assertion would be satisfied by
+ * (`docs/MISTAKES.md` entry 48).
+ */
+function pipeTheSeeder(relativePath: string): string {
+  const path = resolve(process.cwd(), relativePath);
+  let source: string;
+  try {
+    source = readFileSync(path, 'utf8');
+  } catch (unreadable) {
+    throw new Error(`${path} could not be read, so no world was seeded from it.`, {
+      cause: unreadable,
+    });
+  }
+  return compose(['exec', '-T', 'api', 'python', '-'], source);
+}
+
+/**
+ * Write E5-12's prior-term world — a term of answers for each of the four
+ * sections the mock platform publishes in the term before this one — and answer
+ * what the seeder printed.
+ *
+ * The seeder reads every date it writes off a row and asks the clock nothing, so
+ * this is the one step of E5-12's runbook that does not care what the clock says.
+ * What it does care about is that the four sections have been launched, their
+ * rosters synced and their windows derived, which is the caller's job: see
+ * `benchmarkWorld.ts`, which is the only caller and does all of it.
+ *
+ * **The control is the seeder's own recount**, which counts sections and distinct
+ * students per cohort week out of the database and compares them against the
+ * configured minimums. `benchmarkWorld.ts` requires its verdict sentence, so a
+ * run that wrote a world too thin to demonstrate anything is a failure there
+ * rather than a report full of suppression notices three assertions later.
+ */
+export function seedThePriorTermBenchmarks(): string {
+  return pipeTheSeeder(BENCHMARK_HISTORY_SEEDER);
+}
+
+/**
+ * Write E4-20's demo story into `BIOL-310-R7FF` — twenty students answering
+ * every week of that section whose window has closed — and answer what it
+ * printed.
+ *
+ * **This is the hero section's own weeks, and a benchmark drive needs them.** A
+ * section with no responses of its own draws no line of its own, so a report of
+ * it could show two comparison lines and no third: the thing E5-10's first
+ * criterion is about would be missing the line it is a comparison *to*.
+ *
+ * The seeder writes a response for every week whose window has closed **at the
+ * effective clock**, and refuses when none has, so the caller moves the clock
+ * forward before this runs. It is deterministic per section label and course
+ * week and idempotent by natural key.
+ */
+export function seedTheDemoStory(): string {
+  return pipeTheSeeder(DEMO_STORY_SEEDER);
 }
 
 /**

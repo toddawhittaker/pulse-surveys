@@ -1,11 +1,12 @@
 """The people, courses and placements this platform pretends to have.
 
 **Small on purpose.** E0-15: "this seed data belongs to the mock platform and
-stays small". It is four sections in one term, each with a roster of its own —
-enough that a roster pages, that one student joins late and one drops, that both
-modalities and more than one start letter reach a tool, and that one class is
-large enough for a week of its survey answers to read like a real one. The full
-demo institution is
+stays small". It is four sections in the current term, each with a roster of its
+own — enough that a roster pages, that one student joins late and one drops, that
+both modalities and more than one start letter reach a tool, and that one class
+is large enough for a week of its survey answers to read like a real one — and
+four more in the term before it, which are the benchmark world E5-12 builds and
+are described where they are declared. The full demo institution is
 E0-17's, and it is seeded into Pulse's own database rather than into this
 platform.
 
@@ -124,6 +125,24 @@ EASTERN_DAYLIGHT = "-04:00"
 R_SECTIONS_OPEN = f"2026-09-07T00:00:00{EASTERN_DAYLIGHT}"
 E_SECTIONS_OPEN = f"2026-08-17T00:00:00{EASTERN_DAYLIGHT}"
 Q_SECTIONS_OPEN = f"2026-09-28T00:00:00{EASTERN_DAYLIGHT}"
+
+# Spring 2026 in the same zone, which is on eastern *standard* time for every
+# date below — the term runs from January and its last enrollment opens in
+# February, both before daylight time begins on 8 March 2026. A fixed offset
+# again, and a different one, for the reason its neighbour gives: these are seed
+# constants and a mock that resolved a zone at import would answer differently
+# depending on when it started.
+EASTERN_STANDARD = "-05:00"
+
+# When the prior term's sections open (E5-12). `scripts/seed.py` seeds Spring
+# 2026's own start-letter map: `U` and `E` begin on the term's first Monday, 12
+# January, and `R` three weeks later on 2 February. **The platform publishes none
+# of these dates as a calendar** — a section's calendar is derived tool-side from
+# its code and its term's map — so they appear only as the moment an enrollment
+# opens, exactly as the three above do.
+PRIOR_U_SECTIONS_OPEN = f"2026-01-12T00:00:00{EASTERN_STANDARD}"
+PRIOR_E_SECTIONS_OPEN = f"2026-01-12T00:00:00{EASTERN_STANDARD}"
+PRIOR_R_SECTIONS_OPEN = f"2026-02-02T00:00:00{EASTERN_STANDARD}"
 
 # The mid-term add and the mid-term drop E0-15 asks for, both in the 12-week
 # `R3WW` section: one student enrolls three weeks after their classmates, and one
@@ -314,6 +333,67 @@ MOLECULAR_GENETICS = MockContext(
     context_id="mock-lms-context-biol-310-r7ff",
     label="BIOL-310-R7FF",
     title="Molecular Genetics",
+)
+
+# ---------------------------------------------------------------------------
+# The prior term's sections (E5-12).
+#
+# SPEC §5.1 benchmarks a section against every section of its length and level,
+# and the exit line says "benchmarked against prior terms" — so a demonstrable
+# benchmark needs a *populated* cohort in a term that has ended. These four
+# sections are that cohort and its counter-example:
+#
+#   - three 12-week undergraduate sections, the same length and level as
+#     `BIOL-310-R7FF`, so the hero section's own comparison set is the one they
+#     fill. Two start on the term's first Monday (`U`) and one three weeks later
+#     (`R`), because §5.1 aligns a cohort by course week rather than by calendar
+#     week and a set whose sections all began on one day cannot show that.
+#   - one 6-week undergraduate section on its own, which is under the
+#     three-section minimum SPEC §11 leaves configurable and
+#     `app.config.Settings.benchmark_min_sections_default` sets at 3. It exists
+#     to be suppressed: a world that only ever shows figures demonstrates half
+#     of the rule.
+#
+# The course numbers and prefixes are the ones already seeded — `BIOL` is a
+# prefix `scripts/seed.py` holds, and a launch naming a prefix the institution
+# does not hold is refused as an `unknown_prefix` defect that provisions nothing
+# (`docs/MISTAKES.md` entry 48). The section codes carry ordinals no other
+# section in this repository uses, so nothing that resolves a section by its
+# §2.2 code alone can confuse one of these with a current-term section.
+# ---------------------------------------------------------------------------
+
+PRIOR_MOLECULAR_GENETICS_ONE = MockContext(
+    context_id="mock-lms-context-biol-310-u5ff",
+    label="BIOL-310-U5FF",
+    title="Molecular Genetics",
+)
+PRIOR_MOLECULAR_GENETICS_TWO = MockContext(
+    context_id="mock-lms-context-biol-310-u6ww",
+    label="BIOL-310-U6WW",
+    title="Molecular Genetics",
+)
+PRIOR_MOLECULAR_GENETICS_THREE = MockContext(
+    context_id="mock-lms-context-biol-310-r5ff",
+    label="BIOL-310-R5FF",
+    title="Molecular Genetics",
+)
+PRIOR_CELL_BIOLOGY = MockContext(
+    context_id="mock-lms-context-biol-215-e5ww",
+    label="BIOL-215-E5WW",
+    title="Cell Biology",
+)
+
+# The prior term's sections, each with the class it carries and the moment its
+# enrollments open. Twenty students in each section of the passing cohort, which
+# is `BIOL-310-R7FF`'s own class size and well clear of the fifteen respondents
+# `benchmark_min_respondents_default` asks of a cohort week; twelve in the thin
+# cohort, which is `BIOL-215-R3WW`'s size and enough that the section's own
+# report reads normally while its comparison set suppresses.
+PRIOR_TERM_SECTIONS: tuple[tuple[MockContext, int, str], ...] = (
+    (PRIOR_MOLECULAR_GENETICS_ONE, 20, PRIOR_U_SECTIONS_OPEN),
+    (PRIOR_MOLECULAR_GENETICS_TWO, 20, PRIOR_U_SECTIONS_OPEN),
+    (PRIOR_MOLECULAR_GENETICS_THREE, 20, PRIOR_R_SECTIONS_OPEN),
+    (PRIOR_CELL_BIOLOGY, 12, PRIOR_E_SECTIONS_OPEN),
 )
 
 # How many students of its own `BIOL-310-R7FF` carries. Twenty is the owner's
@@ -565,12 +645,22 @@ def seeded_platform() -> SeededPlatform:
         below, because the loop puts the shared learner in every section it
         walks and this is the one section she is deliberately not in.
 
+    The prior term's four sections are assembled separately too, for
+    `the_demo_story_roster`'s reason and its own: none of them holds the shared
+    learner, and each is a straight class of its own size.
+
     Two rewrites are applied over the uniform sections at the end: the late add
     and the drop in `BIOL-215-R3WW`, and the one windowless enrollment in
     `NURS-8100-Q2FF`. Each is a function a reader can check against the rule it
     comes from, rather than a branch inside the loop above.
     """
-    contexts = (CELL_BIOLOGY, COLLEGE_ALGEBRA, NURSING_INQUIRY, MOLECULAR_GENETICS)
+    contexts = (
+        CELL_BIOLOGY,
+        COLLEGE_ALGEBRA,
+        NURSING_INQUIRY,
+        MOLECULAR_GENETICS,
+        *(context for context, _class_size, _opens in PRIOR_TERM_SECTIONS),
+    )
     placements = tuple(
         MockPlacement(
             resource_link_id=f"mock-lms-link-{context.label.lower()}-weekly-pulse",
@@ -611,6 +701,13 @@ def seeded_platform() -> SeededPlatform:
     users.extend(story_students)
     enrollments.extend(story_enrollments)
 
+    # The prior term's four sections, for the same reason and on the same terms:
+    # the shared instructor teaches them, the shared learner and the dean are in
+    # none of them, and each carries a class of its own.
+    prior_students, prior_enrollments = the_prior_term_rosters()
+    users.extend(prior_students)
+    enrollments.extend(prior_enrollments)
+
     return SeededPlatform(
         users=tuple(users),
         contexts=contexts,
@@ -642,6 +739,34 @@ def the_demo_story_roster() -> tuple[list[MockUser], list[MockEnrollment]]:
     enrollments.extend(
         enrolled(person, MOLECULAR_GENETICS, LEARNER_ROLES, R_SECTIONS_OPEN) for person in students
     )
+    return students, enrollments
+
+
+def the_prior_term_rosters() -> tuple[list[MockUser], list[MockEnrollment]]:
+    """The prior term's four sections: the shared instructor, and a class each.
+
+    Written as its own function beside `the_demo_story_roster` rather than as
+    four more rows in `seeded_platform`'s loop, and for that function's reason:
+    the loop's rule is "the instructor, the learner, then this many students",
+    and these sections' rule is "the instructor, then this many students". The
+    shared learner is deliberately in none of them — she would gain four more
+    surveys in every student-survey suite, and a prior term's sections are not
+    somebody's current work.
+
+    Everybody enrols when their section opens, `Active`, with a window. The two
+    enrollment edge cases SPEC §3.4 asks for are seeded in the two current-term
+    sections that already hold them, and repeating either here would give a
+    benchmark cohort a participation denominator that is interesting for a
+    reason that has nothing to do with the benchmark.
+    """
+    students: list[MockUser] = []
+    enrollments: list[MockEnrollment] = []
+    for context, class_size, opens in PRIOR_TERM_SECTIONS:
+        enrollments.append(enrolled(INSTRUCTOR, context, INSTRUCTOR_ROLES, opens))
+        for ordinal in range(1, class_size + 1):
+            person = student(context, ordinal)
+            students.append(person)
+            enrollments.append(enrolled(person, context, LEARNER_ROLES, opens))
     return students, enrollments
 
 

@@ -10,8 +10,8 @@ describe is a payload the frontend fixtures do not know about, and a member the
 sketch describes and this does not is a fixture built against something that will
 never arrive.
 
-**Two members diverge from the sketch deliberately**, and both are recorded in
-this ticket's pull request rather than only here:
+**Five members diverge from E4's sketch deliberately**, and each is recorded in
+its own ticket's pull request rather than only here:
 
   - `rates.valid_responses` — E4-09's components render the count beside the
     ratio, and the sketch omitted it. Its source is `response.is_valid` as
@@ -23,6 +23,17 @@ this ticket's pull request rather than only here:
     says E4-07 places. Present in every report as a list, populated only in the
     latest published week's report, and carrying no week anywhere
     ([ADR 0153](../../../docs/adr/0153-a-release-drops-its-week-because-the-gradebook-ledger-would-otherwise-name-the-author.md)).
+  - `institution_timezone` — E5-02's, and the first that no E4 record settles.
+    The week's close instant is rendered as a weekday and a wall-clock time,
+    which is a statement in one named zone, and that zone is configuration the
+    server holds and the browser does not.
+  - `streams.<stream>.benchmark` and `workload_benchmark` — E5-05's, and they
+    could not have been in E4's sketch at all: nothing in E4 resolved a
+    comparison population, so there were no figures for the sketch to describe. They are SPEC §5.1's
+    second and third lines per panel and its workload statistics "against
+    comparison-set and university figures". Their own models are in
+    `app.schemas.report_benchmark`, which says why they are not here, and E5's
+    breakdown carries the sketch that does describe them.
 
 **A comment carries three fields and no fourth.** `ReportComment` — what
 `app.services.report_comments` answers with — is `(text, status, stream)`, and
@@ -34,9 +45,11 @@ to guarantee.
 
 **`comparison` is typed with a class this module cannot construct, and it is
 re-checked here anyway.** SPEC §4.1 item 7 suppresses any figure computed from a
-comparison set below the configured minimums, and E4's breakdown decision 4 puts
-the member on the wire from day one so that chokepoint has somewhere to stand
-before E5 fills it. `app.services.reporting.ComparisonFigure`'s constructor
+comparison set below the configured minimums, and E4's breakdown decision 4 put
+the member on the wire from day one so that chokepoint had somewhere to stand
+before there were figures to put through it. E5-05 filled it: it carries the
+default comparison set's workload mean for the reported week, which is the same
+sealed value `workload_benchmark.comparison.mean` carries. `app.services.reporting.ComparisonFigure`'s constructor
 demands a token private to that module — but a constructor is not the only way to
 produce a pydantic instance, and E4-07's security round demonstrated two that skip
 it: `model_construct`, which runs neither validation nor `__init__`, and
@@ -72,10 +85,12 @@ absence. The rule is written once, in `app.services.reporting`, and this schema 
 what makes the absent state expressible.
 """
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas import report_benchmark
 from app.services.reporting import ComparisonFigure, refuse_an_unsealed_comparison
 
 __all__ = [
@@ -130,6 +145,18 @@ class WeekView(BaseModel):
     # service (E4's breakdown decision 6). Nothing is stored to make a week
     # published, so this is a comparison rather than a flag.
     published_weeks: list[int]
+    # The reported week's own `survey_window.closes_at` — the row the report read
+    # already holds, so this member costs no query. It travels as an instant
+    # rather than as a string the server has already formatted, because the
+    # weekday and wall clock the eyebrow prints are a statement in one particular
+    # zone and `institution_timezone` below is what names that zone. A read that
+    # formatted here would be deciding the reader's locale on the server.
+    #
+    # The reported week's, never the current one: week navigation pages back
+    # across published weeks (SPEC §5.1), and a close taken from the latest
+    # window is right on the week an instructor opens by default and wrong on
+    # every week she pages back to.
+    closes_at: datetime
 
 
 class RatesView(BaseModel):
@@ -218,7 +245,13 @@ class CommentView(BaseModel):
 class StreamReport(BaseModel):
     """One of SPEC §5.1's two comment groups: its numbers, its summary and its words."""
 
-    model_config = ConfigDict(frozen=True)
+    # `revalidate_instances="always"` for the reason `InstructorReport` below gives,
+    # one level down: this model holds the benchmark members, and pydantic accepts
+    # an instance of a nested model without re-validating it unless that model asks
+    # to be. Without this line the seal on a series point is a validator that
+    # `model_construct` on a *stream* walks past, which is E4-07's defeat one level
+    # out (`docs/MISTAKES.md` entry 22) at a new depth.
+    model_config = ConfigDict(frozen=True, revalidate_instances="always")
 
     trend: list[TrendPoint]
     # A count per Likert value, keyed by the value as a string, with a zero for
@@ -227,12 +260,35 @@ class StreamReport(BaseModel):
     distribution: dict[str, int]
     summary: SummaryView | None
     comments: list[CommentView]
+    # The wording of this stream's rating question, as the student answering it
+    # read it. SPEC §3.2 stores question text in a versioned table, so this is
+    # served rather than copied into the frontend: a second copy in the client is
+    # correct exactly until the first re-versioning and wrong afterwards in a way
+    # nobody looks for. Which version's wording a given week gets is
+    # [ADR 0168](../../../docs/adr/0168-a-weeks-served-question-wording-comes-from-the-rows-its-responses-answered.md).
+    #
+    # Required rather than optional: the read has an answer for every week — the
+    # wording the week's own responses answered, or the newest set's where nobody
+    # answered — so there is no week with nothing to serve, and an optional member
+    # is one a read can leave empty while the histogram quietly keeps its stream
+    # label.
+    question_text: str
+    # SPEC §5.1's second and third lines for this panel — the comparison set's
+    # series and the university-wide one, beside the section's own `trend` above.
+    # Every figure in them is sealed by the item-7 chokepoint and re-checked by
+    # the models in `app.schemas.report_benchmark`, which is also where the reason
+    # those models are not declared in this file is written down.
+    benchmark: report_benchmark.StreamBenchmark
 
 
 class StreamsView(BaseModel):
     """The two groups §5.1 heads separately, never pooled into one."""
 
-    model_config = ConfigDict(frozen=True)
+    # `revalidate_instances="always"`, for the reason `StreamReport` above gives:
+    # this object sits between the report and the benchmark figures, and a level
+    # on that path that does not ask to be re-validated is a level a caller can
+    # build with `model_construct` to stop every validator below it running.
+    model_config = ConfigDict(frozen=True, revalidate_instances="always")
 
     instructor: StreamReport
     course: StreamReport
@@ -282,6 +338,10 @@ class InstructorReport(BaseModel):
     rates: RatesView
     streams: StreamsView
     workload: WorkloadView
+    # §5.1's workload mean and median "against comparison-set and university
+    # figures", beside the section's own pair above. Four sealed figures, each
+    # suppressed on its own by the chokepoint.
+    workload_benchmark: report_benchmark.WorkloadBenchmarkView
     # SPEC §4.1 item 7's chokepoint. The type is
     # `app.services.reporting.ComparisonFigure`, whose constructor demands a token
     # private to that module — which closes the direct door and, on its own, only
@@ -294,6 +354,17 @@ class InstructorReport(BaseModel):
     # ADR 0152's release, placed here and nowhere else: a list in every report,
     # populated only in the latest published week's, and carrying no week.
     released_from_earlier_weeks: list[CommentView]
+    # The IANA name of the institution's zone, from `settings.institution_timezone`
+    # — the same member the student payload carries, for the same reason. The
+    # week's close instant above is rendered as a weekday and a wall-clock time,
+    # which is only meaningful in a named zone; the zone is configuration the
+    # server holds and the browser does not, so a payload carrying the instant
+    # without the name cannot be rendered correctly by any client and would leave
+    # the eyebrow formatting in whatever zone the reader's machine is set to.
+    #
+    # A declared divergence from E4's payload sketch, recorded in
+    # `tests/unit/test_the_payload_sketch_and_the_schema_are_reconciled.py`.
+    institution_timezone: str
 
     @field_validator("comparison")
     @classmethod

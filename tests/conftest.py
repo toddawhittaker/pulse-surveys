@@ -142,14 +142,60 @@ boundary: `metadata_tables` is asked for by both.
     through with a session a real launch issued. The item-7 suppression helper and
     the type of the `comparison` member are found by annotation, because the work
     order settles the mechanism and no spelling.
+  - `fixtures/report_question_text.py` — E5-02: the question wording a week's
+    report serves, planted so a test can recognise it. One distinct string per
+    question-set version and position, written into every free-text column the
+    `question` table carries out of a named candidate set — because E5-02's work
+    order leaves the source column (`name` or `prompt`) to the implementer and a
+    fixture that planted into one of them would decide it. Also the further
+    versions criterion 2's proof plants, answered in the weeks the test names.
   - `fixtures/instructor_sections.py` — E4-18: the route that ticket settles, the
     instructor who teaches two sections and the other instructor who teaches a
     third, her second section under a second course so that the declared order is
     neither the creation order nor the code order, and the two sessions criterion
     3 is about — a person holding no grant, and a session naming no person —
     which no launch can issue and which are therefore minted.
+  - `fixtures/benchmark_views.py` — E5-03: the four benchmark views' column
+    contracts and the two `SECURITY DEFINER` set functions' signatures, both
+    transcribed from the ruling on `docs/disputes/E5-03-01.md` because neither
+    was settled anywhere else; a world of two terms whose sections differ in one
+    thing at a time — length, level, start cohort or term — so every membership
+    rule can be asserted from both sides; and one reader for a row of each view
+    and each function, on `db_session` and on a committed world the application
+    role can reach. Every guard it raises is a `pytest.fail` a test body reaches,
+    never a fixture, so an unbuilt E5-03 is a wall of FAILEDs naming deliverables
+    rather than of setup errors (`docs/MISTAKES.md` entry 44). E5-04 added the
+    three things its service is resolved over — a lead-faculty mapping, a named
+    comparison set with member courses, and a plan of which student answers in
+    which sections, whose two counts the test that writes it states — plus the
+    lookup of `app.services.benchmarks` and the readers that say whether a
+    comparison figure carries a number without asserting the figure's shape.
+  - `fixtures/named_sets.py` — E5-06: the names that ticket's work order settles
+    for the leadership API and the seven paths it fixes outright, with the
+    refusal sentences **discovered** in `app.copy` rather than transcribed,
+    because the work order settles each constant's name and neither its module
+    nor its words; the leadership session E4-07's door launches, the second
+    leader whose set is the out-of-scope half of every edit pair, and the
+    two-hat person whose two sessions are minted because a launch lands her at
+    exactly one of her two views; and four courses and five sections planted so
+    that a set's member count and its resolved section count are two different
+    numbers.
 
-Three modules under `tests/fixtures/` carry **no fixtures** and are therefore not
+  - `fixtures/report_benchmarks.py` — E5-05: the benchmark members the report
+    payload gains, spelled once from that ticket's work order; the comparison
+    population planted around the section E4-07's door already teaches — one Lead
+    Faculty over the hero's course and the set's, every course on one number so
+    the level both sides match on is a stored fact rather than a fixture's
+    choice, and four course weeks planted at and one below each configured
+    minimum as *offsets*, never as transcribed numbers; the readers that take a
+    series or a workload figure off a decoded payload; and the unsealed figure the
+    criterion-2 tests hand to the wire boundary, built past the constructor the
+    way E4-07's security round found it could be. Every value it plants is an
+    input a test writes its own arithmetic over, and its planter is a factory a
+    test calls from its own body so an unbuilt E5-05 is a FAILED naming the
+    missing member.
+
+Five modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
 `seed_row` already is. They are listed here because this docstring is the index
 of that directory and a module missing from it is a record that has stopped being
@@ -163,6 +209,22 @@ complete.
   - `fixtures/migration_journey.py` — E2-16: resolving a revision and the one
     below it, running a step that has to complete, and reading the catalog and
     the stored rows at either end of a downgrade.
+  - `fixtures/comparison_sets.py` — E5-01: the comparison-set tables reached
+    without deciding how they are built — two names spelled, the membership
+    table found by its foreign keys, and the two seeding helpers four modules
+    share.
+  - `fixtures/benchmark_history.py` — E5-12: `scripts/seed_benchmark_history.py`
+    piped into an interpreter the way the runbook pipes it, the row counts a
+    refused run is read by, the SPEC §2.2 reader that says which sections a
+    refusal named, and the self-check's recount — `the_cohort_recount(session,
+    section_codes)`, settled by the ruling of 2026-09-13 — reached by importing
+    the script the way `fixtures/seed.py` imports `scripts/seed.py`. Also the
+    seeded calendar's readers, moved out of the calendar module when a second
+    caller needed them (`term_link_column` among them: ADR 0018's composite key,
+    `docs/disputes/E5-12-01.md`), and the launched prior-term world — the
+    sections, windows, rosters and enrollments four staff launches and a roster
+    sync would have left, planted row by row out of the seeder's own refusals, so
+    that its write path can be executed by a test at all.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -215,7 +277,11 @@ pytest_plugins = (
     "fixtures.report_comments",
     "fixtures.summary_job",
     "fixtures.report_api",
+    "fixtures.report_question_text",
     "fixtures.instructor_sections",
+    "fixtures.benchmark_views",
+    "fixtures.report_benchmarks",
+    "fixtures.named_sets",
 )
 
 

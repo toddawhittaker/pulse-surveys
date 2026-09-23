@@ -1,8 +1,29 @@
 # Entry 24. A test asserted a property no implementation could satisfy
 
-**Caught: 2**
+**Caught: 3**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
+
+*(A sixth instance, E5-06, objected on 2026-09-14 in
+[E5-06-01](../disputes/E5-06-01.md) and not yet ruled. The sub-shape is new and
+is the easiest one to walk past: **two tests in one suite that require opposite
+answers to the same request, because a shared driving helper builds one of them
+out of the wrong actor.** A parametrized role-gate test drives all seven
+named-set routes with a two-hat person's leadership session, expecting each to
+be admitted; its `edit` and `delete` parameters drive at a set a *third* person
+defined, which a sibling module requires to be refused 403 with the row read
+back. Five of the seven parameters are about the role gate and are right; the
+two that also touch creator scoping assert the opposite of the ticket's settled
+scope decision. It hides because the contradiction is between two modules rather
+than inside one, and because the helper that builds the request was correct for
+every other caller of it. What acting on this entry prevented: a scope check
+weakened until every leader could write every set, which turns two red
+parameters green and four others red, and quietly makes the institution's
+benchmark definitions editable by anybody holding any leadership assignment. The
+measurement is in the objection — which tests are red in which of the two
+states — rather than an argument that the test "seems wrong". **Counted as a
+catch on the objection rather than on the ruling**; if the arbitrator finds an
+implementation that satisfies both, this instance and the count come back out.)*
 
 *(A fifth instance, E3-06, caught before the test was written on 2026-09-05, and
 a prevention rather than an incident. The ruling on
