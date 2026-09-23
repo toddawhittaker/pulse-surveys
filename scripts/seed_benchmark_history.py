@@ -853,7 +853,7 @@ def check_the_cohorts(
     """Every way the counted world falls short of what it was seeded to demonstrate.
 
     The two minimums are `app.config.Settings`'s, handed in by the caller: SPEC
-    §11 leaves the numbers open and they are configuration, so a copy of either
+    §11 settles their defaults and they stay configuration, so a copy of either
     here would be a second place for them to be wrong.
     """
     faults: list[str] = []

@@ -349,7 +349,7 @@ MOLECULAR_GENETICS = MockContext(
 #     (`R`), because §5.1 aligns a cohort by course week rather than by calendar
 #     week and a set whose sections all began on one day cannot show that.
 #   - one 6-week undergraduate section on its own, which is under the
-#     three-section minimum SPEC §11 leaves configurable and
+#     three-section minimum SPEC §11 settles and
 #     `app.config.Settings.benchmark_min_sections_default` sets at 3. It exists
 #     to be suppressed: a world that only ever shows figures demonstrates half
 #     of the rule.
@@ -385,7 +385,7 @@ PRIOR_CELL_BIOLOGY = MockContext(
 
 # The prior term's sections, each with the class it carries and the moment its
 # enrollments open. Twenty students in each section of the passing cohort, which
-# is `BIOL-310-R7FF`'s own class size and well clear of the fifteen respondents
+# is `BIOL-310-R7FF`'s own class size and well clear of the ten respondents
 # `benchmark_min_respondents_default` asks of a cohort week; twelve in the thin
 # cohort, which is `BIOL-215-R3WW`'s size and enough that the section's own
 # report reads normally while its comparison set suppresses.
