@@ -71,12 +71,15 @@ round 4). A section's report is read by each person holding its teaching grant,
 and each knows the counts and sums of every section she teaches, in any term, so
 she can subtract them. A figure is shown only if its population clears both
 minimums and, for each such person, the population less her sections is empty or
-clears them; the university line also needs the university less her sections and
-less every default set she sees (her sections' in this term at this length and
-level, round 5) to be empty or clear them. Her visible figures are then
-combinations of disjoint atoms — her own sections, each lead's set less her own,
-and the rest of the university — and every atom but her own is empty or clears
-both minimums. Per person, never over the union
+clears them. Fix one reader, one term, one length and level, one course week
+and its cutoff: every population she can read a figure for is a union of
+disjoint atoms — her own sections, each lead's set less her own (one per lead of
+a course she teaches here), and the rest of the university. **The university
+line is shown only if every atom other than her own sections is empty or clears
+both minimums** (rounds 5 and 6), and **a default-set figure is shown only if
+its own lead atom does** (the per-person remainder above). So every combination
+of figures she can compute is over atoms that clear both minimums. Per person,
+never over the union
 of co-instructors: none of them knows another's sections. `_university_population`
 and `_tightest` carry the argument. The populations themselves are unchanged: the
 default set leaves out only the reported section, and the university includes it.
@@ -671,43 +674,50 @@ def _university_population(
     *,
     university: Sequence[UUID],
     taught: Sequence[AbstractSet[UUID]],
-    defaults_seen: Sequence[AbstractSet[UUID]],
+    lead_sets_seen: Sequence[Sequence[AbstractSet[UUID]]],
 ) -> _Population:
     """The university line's figures, sealed so that no reader's subtraction isolates a thin population.
 
     The figure is the whole institution's, the reported section included (ADR
-    0166, decision 5). A university point is shown only if (E5-14, rounds 4 and
-    5), for every person p holding the teaching grant on the reported section:
+    0166, decision 5). A university point is shown only if (E5-14, rounds 4 to
+    6), for every person p holding the teaching grant on the reported section:
 
       (a) its population clears both minimums;
       (b_p) the university less the sections p teaches is empty or clears them;
-      (c_p) the university less the sections p teaches and less **every default
-            set p sees** — the default set of each section p teaches in this
-            term at this length and level, `defaults_seen[p]` — is empty or
-            clears them.
+      (c_p) **every atom p could isolate** is empty or clears them: each lead
+            atom — the default set of a section p teaches in this term at this
+            length and level, less p's own sections (`lead_sets_seen[p]`) — and
+            the rest of the university, less p's sections and every one of those
+            default sets.
 
-    **Why (c_p) removes every default set p sees, and not only this report's.**
-    Fix one reader, one length and level, one term, one course week and one
-    cutoff. Every population she can read a figure for is a union of disjoint
-    atoms: her own sections, which she knows; each lead's matching sections less
-    her own, one atom per lead of a course she teaches here; and the rest of the
-    university. Every figure she sees is a combination of those atoms'
-    aggregates, so if every atom but her own is empty or clears both minimums,
-    nothing she can compute isolates fewer. The lead atoms are (b_p) on each of
-    her reports' default sets; the rest is (c_p). Removing only this report's
-    default set left a second lead's set inside the rest, and a reader who
-    teaches under two leads could subtract both and isolate what remained. The
-    closure is over one term: comparing figures across terms is a residual
-    carried rather than closed.
+    **Why every atom, and why only these.** Fix one reader, one length and
+    level, one term, one course week and one cutoff. Every population she can
+    read a figure for is a union of disjoint atoms: her own sections, which she
+    knows; one lead atom per lead of a course she teaches here; and the rest of
+    the university. Every figure she sees is a combination of those atoms'
+    aggregates. So the university is shown only if every atom other than her own
+    sections is empty or clears both minimums, and a default-set figure is shown
+    only if its own lead atom does ((b_p) on the default set); every
+    combination she can compute is then over atoms that clear both minimums.
+    Round 5 removed every default set she sees from the rest, and round 6 checks
+    the lead atoms themselves: without that, a university figure over an empty
+    rest was the default set she sees plus a second, thin lead atom, which she
+    could subtract out. The closure is over one term: comparing figures across
+    terms is a residual carried rather than closed.
 
     A section nobody teaches has no p, so (a) alone applies; nobody can read its
     report, because every report route requires the teaching grant.
     """
     remainders: list[_Answered] = []
-    for hers, seen in zip(taught, defaults_seen, strict=True):
+    for hers, lead_sets in zip(taught, lead_sets_seen, strict=True):
         beyond_hers = [section for section in university if section not in hers]
+        seen = {section for lead_set in lead_sets for section in lead_set}
         remainders.append(reads.of(beyond_hers))
         remainders.append(reads.of(section for section in beyond_hers if section not in seen))
+        remainders.extend(
+            reads.of(section for section in lead_set if section not in hers)
+            for lead_set in lead_sets
+        )
     return _sealed_through(reads.of(university), remainders)
 
 
@@ -833,15 +843,14 @@ def _section_populations(
         )
     if BenchmarkPopulation.UNIVERSITY in wanted:
         alike = _alike_in_this_term(session, section_id=section_id)
-        defaults_seen = [
-            {seen for mine in sorted(hers & alike) for seen in default_set_of(mine)}
-            for hers in taught
+        lead_sets_seen = [
+            [set(default_set_of(mine)) for mine in sorted(hers & alike)] for hers in taught
         ]
         populations[BenchmarkPopulation.UNIVERSITY] = _university_population(
             reads,
             university=resolve_university(session, section_id=section_id),
             taught=taught,
-            defaults_seen=defaults_seen,
+            lead_sets_seen=lead_sets_seen,
         )
     return populations
 
