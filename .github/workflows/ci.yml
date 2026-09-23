@@ -402,6 +402,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # No pip cache here, deliberately, and none on `supply-chain`: their
+      # tool installs (the pinned-tools line below) carry no
+      # `--require-hashes`, so a wheel restored from a cache would be
+      # installed unchecked, with only GitHub's cache scoping to stop a
+      # poisoned one — and a key built from the two lockfiles buys a tool
+      # install little anyway. PR #246's security review is the record. The
+      # four jobs whose every download is hash-checked carry the cache; the
+      # comment on `migration-drift`'s setup step says why that is safe.
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -688,9 +696,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # pip's download cache, keyed on the two lockfiles, here and on the
+      # other three jobs whose every install is hash-pinned (`test`, `e2e`,
+      # `evals`). What keeps it safe is GitHub's cache scoping, not pip: a
+      # cache written by a pull-request run is readable only by later runs of
+      # that same pull request, and a run on an epic branch or `main` restores
+      # only caches written by its own branch or by `main` — which push
+      # events write, from code that has already merged. `--require-hashes`
+      # is a second wall with a known gap: pip does not re-hash a wheel it
+      # built locally from a source archive, trusting the origin.json beside
+      # it in the cache. `lint-python` and `supply-chain` install tools with
+      # no hashes at all and so carry no cache; the comment there says so. A
+      # trigger that lets untrusted code write a trusted ref's cache
+      # (`pull_request_target`, `workflow_run`) would break the scoping
+      # argument — PR #246's security review is the record.
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install backend (locked)
         run: |
@@ -811,6 +837,10 @@ jobs:
         if: needs.changed.outputs.inert != 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install backend + test deps (locked)
         if: needs.changed.outputs.inert != 'true'
@@ -910,6 +940,10 @@ jobs:
         if: needs.changed.outputs.inert != 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       # The dev closure plus the app itself, from the committed lockfile with
       # hashes — the shape every other Python job here uses. The dev lock rather
@@ -1026,6 +1060,10 @@ jobs:
         if: needs.changed.outputs.inert != 'true' && (needs.changed.outputs.ai_surface == 'true' || github.event_name == 'workflow_dispatch')
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install backend (locked)
         if: needs.changed.outputs.inert != 'true' && (needs.changed.outputs.ai_surface == 'true' || github.event_name == 'workflow_dispatch')

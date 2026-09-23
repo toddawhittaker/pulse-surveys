@@ -155,8 +155,11 @@ because it already ran once.
   items covered, the security findings and resolutions, the arbitrations, and
   everything deliberately deferred with where it is recorded. Mark it ready
   for review.
-- **Then stop. Do not merge.** Todd's written approval in conversation is the
-  only merge trigger.
+- **Then merge it through the merger agent** once the CLAUDE.md merge
+  conditions hold (verified green CI on the final head commit, the security
+  review recorded against that commit, no open dispute) — unless the ticket
+  is on a ⚠ epic or touches a heavy-lane path, in which case stop: Todd's
+  written approval is still the only trigger there.
 
 ## Light lane
 
