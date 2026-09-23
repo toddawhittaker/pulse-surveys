@@ -40,10 +40,23 @@ that control is deliberately unmarked and a module-level marker would have
 enrolled it in the pass; `FORBIDDEN_COMPARISONS`, `forbidden_in` and
 `every_entry` also stay here and are imported from there, so there is one
 vocabulary rather than two. The shame-state sweep is untouched.
+
+**That sweep's exemption and its controls live here for the same reason.** Since
+`docs/disputes/E5-13-01.md`, the §4.1 item 1 sweep skips six keys by name —
+`LEADERSHIP_ONLY_REFUSAL_KEYS`, the named-set API's refusals that are answered
+only to a request which has already passed the leadership gate and that the
+sweep would otherwise catch — and the reader
+that applies them is `comparisons_offending`. The three controls on that
+exemption are here and unmarked: they measure the instrument rather than what
+ships, and a red in one of them means the exemption is broken rather than that
+the copy is. The one refusal of that surface a student can be served,
+`leadership_comparison_sets.not_leadership`, is asserted here to be published and
+not exempt.
 """
 
 import importlib
 import re
+from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 from types import ModuleType
@@ -119,6 +132,73 @@ FORBIDDEN_SHAMING = (
     "not good enough",
 )
 
+# The §4.1 item 1 sweep's one exemption, spelled as keys rather than as a surface
+# or as a gap in the vocabulary above. The dispute `docs/disputes/E5-13-01.md`
+# ruled it: these sentences are answered only to a request that has already
+# passed the leadership gate, so no student can be served any of them, while
+# `leadership_comparison_sets.not_leadership` — of the same surface — is what
+# `app.api.deps.require_leadership` answers a student with and therefore stays
+# inside the sweep. By key and not by prefix for exactly that reason: the surface
+# holds a key a student can be served.
+#
+# **Six rows, where the ruling said seven.** The ruling counted the refusals that
+# are answered only behind the leadership gate; what an exemption row has to
+# earn is that the sweep would otherwise catch its sentence. The seventh,
+# `leadership_comparison_sets.member_not_a_course`, carries no word in
+# `FORBIDDEN_COMPARISONS` at all — it names courses rather than the set — so a
+# row for it would be excusing nothing, which is `docs/MISTAKES.md` entry 14's
+# shape and what the row-by-row control below measured. It stays inside the
+# sweep, where it passes.
+#
+# Beside each key is the gate that must hold for it to be unreachable and the
+# route that answers it, taken from E5-06's contract as
+# `tests/fixtures/named_sets.py` transcribes it ("reads carry
+# `require_leadership`, writes carry `csrf_verified_leadership`") and from the
+# dispute's ruling, rather than from the implementation. **If one of these
+# refusals ever becomes reachable without a leadership session, its row leaves
+# this tuple in the same change** — that consequence is ADR 0177's.
+#
+# The key spellings are not held to be correct by being written here: every row
+# is required below to be a key the registry actually publishes, and to be a key
+# whose shipped text the sweep would otherwise catch.
+LEADERSHIP_SETS_PREFIX = "leadership_comparison_sets."
+
+LEADERSHIP_ONLY_REFUSAL_KEYS = (
+    # 404, the unknown-or-out-of-scope set, on the set-id routes of
+    # `/leadership/comparison-sets/{set_id}` (and its `/preview`): reads behind
+    # `require_leadership`, the edit and the delete behind
+    # `csrf_verified_leadership`.
+    f"{LEADERSHIP_SETS_PREFIX}set_unavailable",
+    # 403, a set another leader defined, on `PUT` and `DELETE
+    # /leadership/comparison-sets/{set_id}`, behind `csrf_verified_leadership`.
+    f"{LEADERSHIP_SETS_PREFIX}not_the_sets_definer",
+    # 409, the duplicate name, on `POST /leadership/comparison-sets` and `PUT
+    # /leadership/comparison-sets/{set_id}`, behind `csrf_verified_leadership`.
+    f"{LEADERSHIP_SETS_PREFIX}name_already_used",
+    # 422, a length that is not a calendar length, raised by
+    # `app.services.comparison_sets` on the same two write routes, behind
+    # `csrf_verified_leadership`.
+    f"{LEADERSHIP_SETS_PREFIX}length_not_a_calendar_length",
+    # 422, a level that is not a course level, on the same two write routes,
+    # behind `csrf_verified_leadership`.
+    f"{LEADERSHIP_SETS_PREFIX}level_not_a_course_level",
+    # 422, a member course at another level than the set's, on the same two write
+    # routes, behind `csrf_verified_leadership`.
+    f"{LEADERSHIP_SETS_PREFIX}member_not_at_the_sets_level",
+)
+
+# The refusal of that surface a student can actually be served, which is *not*
+# exempt: `require_leadership` answers it to any session that is not a leadership
+# session, a student's included, so §4.1 item 1 governs it exactly as it governs
+# a bounce.
+NOT_LEADERSHIP_KEY = f"{LEADERSHIP_SETS_PREFIX}not_leadership"
+
+# A student-facing prefix and a sentence of this module's own, for the reader's
+# control below. Not quoted from the registry: a canary copied out of the thing
+# being swept goes blind with it.
+A_STUDENT_PREFIXED_KEY = "student.a_probe_this_module_writes"
+A_BENCHMARKING_SENTENCE = "Your section sits below the benchmark for this comparison set."
+
 A_SHAMING_SENTENCE = "That was a bad answer and there will be a penalty."
 A_COACHING_SENTENCE = 'A sentence about this week helps, like "the pacing in week 3 was too fast".'
 
@@ -142,6 +222,29 @@ def forbidden_in(text: str, vocabulary: tuple[str, ...]) -> list[str]:
     """Every member of `vocabulary` that appears in `text`, case-insensitively."""
     lowered = text.lower()
     return sorted(word for word in vocabulary if word in lowered)
+
+
+def comparisons_offending(
+    entries: Mapping[str, Any], exempt: tuple[str, ...] = ()
+) -> dict[str, tuple[str, list[str]]]:
+    """Every entry whose text carries a forbidden comparison, keyed by key.
+
+    Keys in `exempt` are skipped. The exemption is a parameter rather than a
+    constant read inside, so that a control can run the same reader with a row
+    taken away and show that the row is load-bearing — the shape
+    `confidentiality_strings(..., exempt={})` already has next door in
+    `test_the_shipped_copy_inventory_holds_to_items_four_and_five.py`.
+    """
+    skipped = set(exempt)
+    found: dict[str, tuple[str, list[str]]] = {}
+    for key, entry in entries.items():
+        if key in skipped:
+            continue
+        text = str(entry.text)
+        words = forbidden_in(text, FORBIDDEN_COMPARISONS)
+        if words:
+            found[key] = (text, words)
+    return found
 
 
 def imported_copy_package() -> ModuleType:
@@ -472,6 +575,144 @@ def test_the_comparison_sweep_sees_a_comparing_sentence_and_leaves_a_permitted_o
         f"The sweep flagged {A_PERMITTED_SENTENCE!r}, which says only where a student's answers "
         "go. A sweep that refuses permitted copy makes §4.1 item 5's confidentiality line "
         "unwritable."
+    )
+
+
+def a_synthetic_entry(key: str, text: str) -> Any:
+    """One `CopyEntry` of this module's own making, of the registry's real class.
+
+    The real class rather than a stand-in, so that a control over the reader is a
+    control over the reader as the shipped registry feeds it.
+    """
+    package = imported_copy_package()
+    entry_class = getattr(package, COPY_ENTRY_CLASS, None)
+    assert entry_class is not None, (
+        f"`{COPY_PACKAGE}` exposes no `{COPY_ENTRY_CLASS}`, so no synthetic entry can be built of "
+        "the class the registry uses."
+    )
+    return entry_class(key=key, text=text)
+
+
+def test_the_comparison_reader_catches_a_student_key_and_skips_an_exempt_one() -> None:
+    """The control on the exemption (`docs/disputes/E5-13-01.md`, decision 2).
+
+    One sentence, filed twice: under a student prefix, where the sweep has to
+    catch it, and under one of the exempt leadership keys, where the sweep has to
+    let it by. Same words both times, so what is being measured is the key and
+    nothing else.
+
+    **The mutation it kills:** an exemption written as a prefix or as a word
+    dropped from `FORBIDDEN_COMPARISONS`, either of which would let the same
+    sentence through under a student key as well. **The near miss it spares:** the
+    exempt key carrying the very words the vocabulary forbids, which is the whole
+    point of exempting by key.
+
+    **A red here means the reader or the exemption is broken, not that the copy
+    is.** It is deliberately unmarked: it asserts nothing about what ships.
+    """
+    entries = {
+        A_STUDENT_PREFIXED_KEY: a_synthetic_entry(A_STUDENT_PREFIXED_KEY, A_BENCHMARKING_SENTENCE),
+        LEADERSHIP_ONLY_REFUSAL_KEYS[0]: a_synthetic_entry(
+            LEADERSHIP_ONLY_REFUSAL_KEYS[0], A_BENCHMARKING_SENTENCE
+        ),
+    }
+    offending = comparisons_offending(entries, exempt=LEADERSHIP_ONLY_REFUSAL_KEYS)
+    assert sorted(offending) == [A_STUDENT_PREFIXED_KEY], (
+        f"The reader reported {sorted(offending)} over two entries carrying the same sentence, one "
+        f"under {A_STUDENT_PREFIXED_KEY!r} and one under "
+        f"{LEADERSHIP_ONLY_REFUSAL_KEYS[0]!r}. It should report the student-prefixed one only: the "
+        "exemption is by key, and a sweep that misses a student's benchmark sentence is §4.1 item "
+        "1 unenforced."
+    )
+
+
+@pytest.mark.parametrize("key", LEADERSHIP_ONLY_REFUSAL_KEYS)
+def test_removing_an_exemption_row_puts_its_key_back_in_the_offending_set(key: str) -> None:
+    """Each exemption is load-bearing, proven by taking it away rather than by saying so.
+
+    Run over the shipped registry with this one row removed, the sweep must report
+    this key. Two things follow: the row is excusing a real string rather than
+    decorating the tuple, and the sweep can still see the words on the surface the
+    exemption covers.
+
+    **The mutation it kills:** a row added to the tuple for a sentence nothing was
+    catching — an exemption that silences a future red nobody has looked at
+    (`docs/MISTAKES.md` entry 14). **The near miss it spares:** the same key with
+    its row in place, which the sweep must not report.
+
+    **If this reds because the key is not reported even without its row**, that
+    sentence no longer carries any forbidden word and the answer is to delete the
+    row rather than to keep an excuse for a string nothing was excusing. **A red
+    here means the exemption and the copy have come apart, not that the copy is
+    wrong.**
+    """
+    entries = every_entry()
+    without_this_row = tuple(other for other in LEADERSHIP_ONLY_REFUSAL_KEYS if other != key)
+
+    with_every_row = comparisons_offending(entries, exempt=LEADERSHIP_ONLY_REFUSAL_KEYS)
+    assert key not in with_every_row, (
+        f"{key!r} is reported by the sweep while its exemption row is in place: {with_every_row}. "
+        "The row then exempts nothing, and the sweep next door stays red on a sentence the ruling "
+        "released."
+    )
+
+    without_it = comparisons_offending(entries, exempt=without_this_row)
+    assert key in without_it, (
+        f"With {key!r} taken out of the exemption, the sweep reports {sorted(without_it)} and not "
+        f"{key!r}. The row is excusing nothing: either the shipped sentence no longer carries any "
+        f"word in {list(FORBIDDEN_COMPARISONS)}, in which case the row belongs deleted, or the key "
+        "is spelled here in a way the registry does not publish."
+    )
+
+
+def test_every_exempt_key_is_a_key_the_registry_publishes() -> None:
+    """An exemption for a key nobody publishes is a stale row.
+
+    **The mutation it kills:** a refusal renamed or deleted in the registry with
+    its exemption left behind, which leaves the sweep carrying a licence for a
+    string that no longer exists and would silently cover a new entry that took
+    the old spelling. **The near miss it spares:** a published key that is not
+    exempt, which is the ordinary case and must not be reported here.
+
+    **A red here means the exemption and the registry have come apart, not that
+    the copy is wrong.**
+    """
+    published = set(every_entry())
+    unpublished = [key for key in LEADERSHIP_ONLY_REFUSAL_KEYS if key not in published]
+    on_the_surface = sorted(key for key in published if key.startswith(LEADERSHIP_SETS_PREFIX))
+    assert not unpublished, (
+        "These keys are exempted from the §4.1 item 1 sweep and the registry publishes none of "
+        f"them: {unpublished}. It publishes {on_the_surface} under that prefix. An exemption is a "
+        "statement about a shipped sentence; one naming no sentence is a licence waiting for "
+        "whatever is spelled that way next."
+    )
+
+
+def test_the_not_leadership_refusal_is_published_and_is_not_exempt() -> None:
+    """The one refusal of that surface a student can be served stays inside the sweep.
+
+    `app.api.deps.require_leadership` answers this sentence to any session that is
+    not a leadership session, a student's included, which is why
+    `docs/disputes/E5-13-01.md` exempted some of that surface's refusals and not
+    all eight.
+
+    **The mutation it kills:** this key added to the exemption tuple, which would
+    release the one sentence on the surface that §4.1 item 1 actually governs.
+    **The near miss it spares:** the six keys beside it, which are exempt and
+    stay exempt.
+
+    **A red here means the exemption has been widened or the refusal has been
+    unpublished, not that the copy is wrong.**
+    """
+    assert NOT_LEADERSHIP_KEY in every_entry(), (
+        f"The registry publishes no {NOT_LEADERSHIP_KEY!r}. It is the 401 any session that is not "
+        "a leadership session is refused with, so it is a string a student reads and the sweep "
+        "next door has to be reading it."
+    )
+    assert NOT_LEADERSHIP_KEY not in LEADERSHIP_ONLY_REFUSAL_KEYS, (
+        f"{NOT_LEADERSHIP_KEY!r} is in the exemption. The dispute's ruling exempts the "
+        "refusals answered only behind `require_leadership`; this one is answered *by* "
+        "`require_leadership`, to whoever failed it."
     )
 
 

@@ -481,6 +481,78 @@ def test_the_walk_reaches_every_depth_and_leaves_the_test_modules_out(tmp_path: 
     )
 
 
+def test_the_walk_descends_a_symlinked_directory(tmp_path: Path) -> None:
+    """The copy collector's deferred LOW, in the sweep that stands beside it.
+
+    On the pinned Python, `Path.rglob` does not descend a symlinked directory
+    unless it is told to. The copy inventory shipped that gap and closed it in
+    E4-12, and `test_the_copy_file_walk_descends_a_symlinked_directory` pins it
+    there. This walk carries the same `recurse_symlinks=True` and, until now,
+    nothing planted a link to prove it: dropping the flag left this whole module
+    green, which is the silent regression E5-13's criterion 4 names.
+
+    A directory symlink under `frontend/src/components/` or
+    `frontend/src/routes/` pointing at real components ships their strings with
+    §4.1 items 4 and 5 held over them by nothing at all — the same closed-set
+    shape one level out, arriving through the link kind the walk skips rather
+    than through a suffix or a depth (`docs/MISTAKES.md` entry 53).
+
+    What is *judged* follows from what is walked: `findings_in_tree` reads this
+    same list, so a file the walk never names is a file no rule here can refuse.
+
+    **The mutation it kills:** `recurse_symlinks=True` dropped from
+    `every_source_file`, which is the state a tidy-up would restore and which no
+    other test in this module can see. **The near miss beside it:** a symlinked
+    *file*, which `is_file()` resolves and which was never the gap — pinned in
+    the test below, because the other repair for this (refusing symlinks in the
+    swept trees outright) would take that working case with it. **A red here
+    means this module is broken, not that the components are.**
+    """
+    walked = tmp_path / "components"
+    walked.mkdir()
+    (walked / "WeekNav.tsx").write_text("export const A = 1;\n", encoding="utf-8")
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "StatPair.tsx").write_text("export const B = 2;\n", encoding="utf-8")
+    (walked / "report").symlink_to(elsewhere, target_is_directory=True)
+
+    judged = sorted(path.name for path in swept_files((walked,), ()))
+    assert judged == ["StatPair.tsx", "WeekNav.tsx"], (
+        f"The walk judged {judged} over a tree holding one component and a symlink to a directory "
+        "holding another. Strings behind that link reach a reader exactly as the others do, and a "
+        "walk that stops at the link reports the tree clean over components it never opened."
+    )
+
+
+def test_the_walk_still_follows_a_symlinked_file(tmp_path: Path) -> None:
+    """The near miss beside the fix: a symlinked *file* was never the gap.
+
+    `is_file()` resolves a link, so a component reached through a file symlink is
+    swept today and must go on being swept. Pinned because the obvious spelling
+    of "refuse symlinks in the swept trees" — the alternative repair for the
+    directory case above — would quietly drop this working case, and a repair
+    that loses a case is a worse bug than the one it fixes. The copy inventory
+    holds the same pair, in
+    `test_the_copy_file_walk_still_follows_a_symlinked_file`.
+
+    **The mutation it kills:** a walk narrowed to `path.is_file() and not
+    path.is_symlink()`, which stops reading a file whose strings ship. **A red
+    here means this module is broken, not that the components are.**
+    """
+    walked = tmp_path / "components"
+    walked.mkdir()
+    real = tmp_path / "WeekNav.tsx"
+    real.write_text("export const A = 1;\n", encoding="utf-8")
+    (walked / "WeekNav.tsx").symlink_to(real)
+
+    judged = sorted(path.name for path in swept_files((walked,), ()))
+    assert judged == ["WeekNav.tsx"], (
+        f"The walk judged {judged} over a tree whose only entry is a symlink to a component. That "
+        "file's strings reach a reader, so they have to reach this sweep."
+    )
+
+
 def test_the_walk_refuses_a_tree_with_no_source_file(tmp_path: Path) -> None:
     """An empty walk is a failure, never a pass.
 
