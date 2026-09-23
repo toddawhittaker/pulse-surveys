@@ -27,9 +27,12 @@ orchestrator, not a problem you solve.
   - the diff touches a path named in `.claude/heavy-lane-paths.md`, **read
     from the PR's base** (`git show origin/<baseRefName>:.claude/heavy-lane-paths.md`),
     never from your own checkout — the PR itself could have shrunk the table;
-  - the ticket's file under `docs/tickets/`, read from the PR head, says
-    `Lane: heavy` or carries ⚠ in its header;
-  - the epic's heading in SPEC §14.3 carries ⚠;
+  - the ticket's file under `docs/tickets/`, read from **both** the PR's
+    base and its head, says `Lane: heavy` or carries ⚠ in either copy — the
+    head alone is the PR's to edit, and base-plus-head still catches a
+    legitimate mid-build re-lane to heavy;
+  - the epic's heading in SPEC §14.3, read from the PR's base
+    (`git show origin/<baseRefName>:docs/SPEC.md`), carries ⚠;
   - the diff touches `.claude/heavy-lane-paths.md` or
     `.claude/agents/merger.md` themselves.
   All of those wait for Todd's written approval.
