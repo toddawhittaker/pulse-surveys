@@ -330,10 +330,11 @@ def resolve_university(session: Session, *, section_id: UUID) -> list[UUID]:
 
     Decision 5's other half (ADR 0166). The university line is what the whole
     institution looks like, and a line drawn with one section deliberately left
-    out is not that. **Its figures include the hero; its sealing does not** —
-    since E5-14 a university figure is shown only when the sections other than
-    the hero clear both minimums, and the complement beyond the default set is
-    empty or clears them too (`_university_population`).
+    out is not that. **Its figures include the hero; its sealing does not.**
+    Since E5-14 a university figure is shown only when, for every instructor of
+    the reported section, each piece that instructor could isolate by
+    subtraction is empty or clears both minimums. `_university_population`
+    holds the rule and ADR 0179 the argument.
     """
     hero = _hero_of(session, section_id)
     if hero is None:

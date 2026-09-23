@@ -479,7 +479,7 @@ test.beforeAll(async ({ browser }) => {
     ).toContain(HERO.label);
 
     // **The university premise, stated rather than discovered as a missing
-    // line.** Under E5-14's sealing rule (as revised in round 3) the hero's
+    // line.** Under E5-14's sealing rule (ADR 0179) the hero's
     // university figure is shown only if, among other conditions, the complement
     // — the university population minus R minus the default set, where R is
     // every section, in any term, taught by any instructor of `BIOL-310-R7FF` —
