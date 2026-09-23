@@ -57,13 +57,19 @@ For every unit of work, in order: confirm the epic branch (create from `main`
 if absent); cut the ticket branch from it — never work on the epic branch;
 commit in small coherent steps, subject naming the ticket (`e1/launch-flow:
 validate state and nonce on LTI launch`); open a PR into the epic branch using
-the template; stop and wait for Todd.
+the template; then merge it as the paragraph below says.
 
-**Never merge an epic branch into `main`** — Todd's call, always. A ticket PR
-may be merged into its epic branch only after Todd approves it in writing in
-the conversation; his approval is the trigger, never your own assessment. Never
-use an admin override, never merge while CI is failing or red, never retarget a
-PR across epics — close it and re-cut the branch.
+**Never merge an epic branch into `main`** — Todd's call, always, and his
+review happens at that boundary. A ticket PR merges into its epic branch
+without waiting for him, once all of the following hold: its CI run is
+completed and successful and its head SHA equals the PR's final commit; the
+PR's independent security review is recorded in the body with its findings
+resolved; and nothing about the PR is in dispute. The `merger` agent
+(`.claude/agents/merger.md`) does the mechanical merging, as a merge commit,
+one PR at a time. A `process/` PR into `main` still waits for Todd. Never use
+an admin override, never merge while CI is failing or red, never retarget a
+PR across epics — close it and re-cut the branch. (Ticket merges were
+Todd-gated until 2026-09-22; he moved his review to the epic boundary.)
 
 ## How a ticket is built: two lanes
 
