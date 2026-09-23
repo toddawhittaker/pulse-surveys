@@ -402,20 +402,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # pip's download cache, keyed on the two lockfiles, on every
-      # `setup-python` in this file whose job then installs from them. A
-      # convenience for runner time and nothing more: every install from a
-      # lockfile passes `--require-hashes`, so a cached wheel whose hash does
-      # not match the lockfile is refused rather than installed, and a cold
-      # cache costs only the download it would have cost anyway. The
-      # `ci-selftest` job installs nothing and so carries no cache.
+      # No pip cache here, deliberately, and the same is true of
+      # `supply-chain`: these are the two jobs whose installs carry no
+      # `--require-hashes` (the pinned-tools line below), so a cache entry is
+      # the one thing standing between a poisoned wheel and the run — and a
+      # key built from the two lockfiles buys a tools-only install little
+      # anyway. PR #246's security review is the record. The four hash-pinned
+      # jobs carry the cache; the comment on `migration-drift`'s setup step
+      # says why that is safe.
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
 
       - name: Install pinned tools
         run: pip install "ruff==${RUFF_VERSION}" "mypy==${MYPY_VERSION}"
@@ -688,6 +685,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # pip's download cache, keyed on the two lockfiles, here and on the
+      # other three jobs whose every install is hash-pinned (`test`, `e2e`,
+      # `evals`). What keeps it safe is GitHub's cache scoping, not pip: a
+      # cache written by a pull-request run is readable only by later runs of
+      # that same pull request, and a run on an epic branch or `main` restores
+      # only caches written by its own branch or by `main` — which push
+      # events write, from code that has already merged. `--require-hashes`
+      # is a second wall with a known gap: pip does not re-hash a wheel it
+      # built locally from a source archive, trusting the origin.json beside
+      # it in the cache. `lint-python` and `supply-chain` install tools with
+      # no hashes at all and so carry no cache; the comment there says so. A
+      # trigger that lets untrusted code write a trusted ref's cache
+      # (`pull_request_target`, `workflow_run`) would break the scoping
+      # argument — PR #246's security review is the record.
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -1364,10 +1375,6 @@ jobs:
         if: needs.changed.outputs.inert != 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
 
       - name: Install pinned audit tools
         if: needs.changed.outputs.inert != 'true'
