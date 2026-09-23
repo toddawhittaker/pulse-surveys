@@ -107,15 +107,18 @@ export function ComparisonSetsRoute(): JSX.Element {
   // Where focus goes once the render that took a control away has landed. A
   // request rather than a focus call in the handler, because the element it
   // names (the heading, or a "Define a set" button that is not mounted yet)
-  // exists only after that render.
-  const [focusNext, setFocusNext] = useState<'heading' | 'define' | null>(null);
+  // exists only after that render. A ref, not state: asking for focus is not
+  // something the page draws, and every handler that asks also changes state,
+  // so the render that answers it follows anyway. The effect runs after every
+  // render and does nothing unless a request is waiting.
+  const focusNext = useRef<'heading' | 'define' | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const defineRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    if (focusNext === null) return;
-    (focusNext === 'heading' ? headingRef : defineRef).current?.focus();
-    setFocusNext(null);
-  }, [focusNext]);
+    if (focusNext.current === null) return;
+    (focusNext.current === 'heading' ? headingRef : defineRef).current?.focus();
+    focusNext.current = null;
+  });
 
   // **A write asks for the list again by bumping this**, rather than by calling a
   // reading function from an event handler. One effect does every read of the
@@ -233,7 +236,7 @@ export function ComparisonSetsRoute(): JSX.Element {
                         // The row is about to go, and its delete button with
                         // it, so focus goes to the heading rather than back.
                         setAnnouncement(copy('leadership_comparison_sets.set_deleted'));
-                        setFocusNext('heading');
+                        focusNext.current = 'heading';
                         setReads((asked) => asked + 1);
                         return;
                       }
@@ -266,14 +269,14 @@ export function ComparisonSetsRoute(): JSX.Element {
                 if (outcome.kind === 'saved') {
                   setDefining(false);
                   setAnnouncement(copy('leadership_comparison_sets.set_saved'));
-                  setFocusNext('define');
+                  focusNext.current = 'define';
                   setReads((asked) => asked + 1);
                 }
                 return outcome;
               }}
               onCancel={() => {
                 setDefining(false);
-                setFocusNext('define');
+                focusNext.current = 'define';
               }}
             />
           ) : (
