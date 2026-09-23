@@ -49,11 +49,13 @@ spends in its own change — E4-02's precedent, quoted in
 `weekly_summary_grants_v001.sql`. A privilege that arrives before the change that
 uses it is a privilege no reviewer ever weighed.
 
-**The downgrade is a true reversal and preserves nothing, because there is
-nothing here to preserve.** Both tables are created by this revision, so a
-database that goes down and comes back up holds every row it held. The order is
-the upgrade's in reverse: the membership table first, then the set, then the
-unique constraint `course` did not have before. The `course_level` type is
+**The downgrade drops both tables, and every named set with them.** Both
+tables are created by this revision, so going down removes them and their rows,
+and coming back up creates them empty: a database walked down past this revision
+and up again has lost every set leadership defined. Corrected at E5-14 from a
+sentence that called this a true reversal. The order is the upgrade's in
+reverse: the membership table first, then the set, then the unique constraint
+`course` did not have before. The `course_level` type is
 **not** dropped — it is E0-05's and `course.level` is typed against it, so
 dropping it here would take that column with it.
 """

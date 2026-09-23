@@ -187,8 +187,9 @@ class TermAxisPoint:
     """One term week of one start cohort, on SPEC §2.2's other week axis.
 
     The row `benchmark_cohort_term_axis` holds for a `(term, start date, term
-    week)` key, with its workload figures sealed. E5-06's preview of a named set
-    and E9's term-axis rendering are the consumers; nothing in E5 draws it.
+    week)` key, with its workload figures sealed. E9's term-axis rendering is the
+    intended consumer; nothing in E5 reads it. E5-06's preview of a named set
+    answers two counts and never a figure, so it is not a consumer either.
     """
 
     term_id: UUID
@@ -600,10 +601,11 @@ def benchmark_workload(
 def named_set_trend(session: Session, *, set_id: UUID, stream: str) -> list[BenchmarkPoint]:
     """A named set's comparison trend, week by week.
 
-    There is no hero section here — a named set is asked about on its own, for
-    E5-06's preview — so the series holds the weeks the set answered in and
-    nothing else. An empty or unresolvable set answers an empty series rather
-    than raising.
+    There is no hero section here — a named set is asked about on its own — so
+    the series holds the weeks the set answered in and nothing else. Nothing in
+    E5 calls it: E5-06's preview answers two counts and no figure, and E9's
+    leadership surfaces are the intended caller. An empty or unresolvable set
+    answers an empty series rather than raising.
     """
     return _trend_over(session, resolve_named_set(session, set_id=set_id), stream=stream)
 
@@ -628,7 +630,7 @@ def named_set_term_axis(session: Session, *, set_id: UUID) -> list[TermAxisPoint
     term-axis views are keyed by `(length, level, term, start date)` and hold no
     course, so there is no way to narrow one to a membership list. A set's term
     axis is therefore "what sections of this length and level did across the term"
-    — which is what E5-06's preview is for and what E9 draws — and it is not the
+    — which is what E9 is to draw — and it is not the
     population `named_set_trend` and `named_set_workload` answer over. ADR 0166
     records the choice.
 

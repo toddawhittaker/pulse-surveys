@@ -6,8 +6,8 @@ sections. This is the write half and the scope around it — everything
 `app.api.leadership`'s seven routes do once the session has been established.
 
 **A module of its own, because neither of the two candidates fits** (ADR 0173).
-`app.services.benchmarks` is the read and figure module and its own docstring
-says nothing in it writes; `app.services.authz` is SPEC §13's one authorization
+`app.services.benchmarks` resolves populations and seals figures, and nothing
+in it writes; `app.services.authz` is SPEC §13's one authorization
 chokepoint, and a write path living inside it would make that module the place
 where writes happen as well as the place where permission is decided.
 
