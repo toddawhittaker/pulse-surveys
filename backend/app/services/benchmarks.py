@@ -72,7 +72,11 @@ and each knows the counts and sums of every section she teaches, in any term, so
 she can subtract them. A figure is shown only if its population clears both
 minimums and, for each such person, the population less her sections is empty or
 clears them; the university line also needs the university less her sections and
-less the default set to be empty or clear them. Per person, never over the union
+less every default set she sees (her sections' in this term at this length and
+level, round 5) to be empty or clear them. Her visible figures are then
+combinations of disjoint atoms — her own sections, each lead's set less her own,
+and the rest of the university — and every atom but her own is empty or clears
+both minimums. Per person, never over the union
 of co-instructors: none of them knows another's sections. `_university_population`
 and `_tightest` carry the argument. The populations themselves are unchanged: the
 default set leaves out only the reported section, and the university includes it.
@@ -666,31 +670,44 @@ def _university_population(
     reads: _Reads,
     *,
     university: Sequence[UUID],
-    default_set: Sequence[UUID],
     taught: Sequence[AbstractSet[UUID]],
+    defaults_seen: Sequence[AbstractSet[UUID]],
 ) -> _Population:
     """The university line's figures, sealed so that no reader's subtraction isolates a thin population.
 
     The figure is the whole institution's, the reported section included (ADR
-    0166, decision 5). A university point is shown only if (E5-14, the round-4
-    ruling), for every person p holding the teaching grant on the reported
-    section:
+    0166, decision 5). A university point is shown only if (E5-14, rounds 4 and
+    5), for every person p holding the teaching grant on the reported section:
 
       (a) its population clears both minimums;
       (b_p) the university less the sections p teaches is empty or clears them;
-      (c_p) the university less the sections p teaches and less the default set
-            — which is shown beside this line and so can be subtracted too — is
-            empty or clears them.
+      (c_p) the university less the sections p teaches and less **every default
+            set p sees** — the default set of each section p teaches in this
+            term at this length and level, `defaults_seen[p]` — is empty or
+            clears them.
+
+    **Why (c_p) removes every default set p sees, and not only this report's.**
+    Fix one reader, one length and level, one term, one course week and one
+    cutoff. Every population she can read a figure for is a union of disjoint
+    atoms: her own sections, which she knows; each lead's matching sections less
+    her own, one atom per lead of a course she teaches here; and the rest of the
+    university. Every figure she sees is a combination of those atoms'
+    aggregates, so if every atom but her own is empty or clears both minimums,
+    nothing she can compute isolates fewer. The lead atoms are (b_p) on each of
+    her reports' default sets; the rest is (c_p). Removing only this report's
+    default set left a second lead's set inside the rest, and a reader who
+    teaches under two leads could subtract both and isolate what remained. The
+    closure is over one term: comparing figures across terms is a residual
+    carried rather than closed.
 
     A section nobody teaches has no p, so (a) alone applies; nobody can read its
     report, because every report route requires the teaching grant.
     """
-    in_default_set = set(default_set)
     remainders: list[_Answered] = []
-    for hers in taught:
+    for hers, seen in zip(taught, defaults_seen, strict=True):
         beyond_hers = [section for section in university if section not in hers]
         remainders.append(reads.of(beyond_hers))
-        remainders.append(reads.of(s for s in beyond_hers if s not in in_default_set))
+        remainders.append(reads.of(section for section in beyond_hers if section not in seen))
     return _sealed_through(reads.of(university), remainders)
 
 
@@ -758,6 +775,28 @@ def _the_weeks_cutoff(cutoffs: Mapping[int, datetime], course_week: int) -> dict
     return {course_week: cutoffs[course_week]}
 
 
+def _alike_in_this_term(session: Session, *, section_id: UUID) -> set[UUID]:
+    """Every section in this section's term with its length and its course's level, itself included."""
+    reported = (
+        select(Section.term_id, Section.length_weeks, Course.level)
+        .join(Course, Course.id == Section.course_id)
+        .where(Section.id == section_id)
+        .subquery()
+    )
+    return set(
+        session.scalars(
+            select(Section.id)
+            .join(Course, Course.id == Section.course_id)
+            .join(
+                reported,
+                (reported.c.term_id == Section.term_id)
+                & (reported.c.length_weeks == Section.length_weeks)
+                & (reported.c.level == Course.level),
+            )
+        )
+    )
+
+
 def _section_populations(
     session: Session,
     *,
@@ -768,10 +807,21 @@ def _section_populations(
     """The section-keyed populations asked for, each resolved once and read through one `_Reads`.
 
     Each teaching instructor's sections are read once, through
-    `app.services.authz`, which is where `assignment_scope` is read.
+    `app.services.authz`, which is where `assignment_scope` is read. The
+    default set of every section an instructor teaches here — this term, this
+    length and level — is resolved once per read and shared between
+    instructors; `_university_population` says why the university needs them.
     """
     reads = _Reads(session, cutoffs)
-    default_set = resolve_default_set(session, section_id=section_id)
+    default_sets: dict[UUID, list[UUID]] = {
+        section_id: resolve_default_set(session, section_id=section_id)
+    }
+
+    def default_set_of(section: UUID) -> list[UUID]:
+        if section not in default_sets:
+            default_sets[section] = resolve_default_set(session, section_id=section)
+        return default_sets[section]
+
     taught = [
         taught_section_ids(session, person_id=person)
         for person in sorted(teaching_instructors_of(session, section_id=section_id))
@@ -779,14 +829,19 @@ def _section_populations(
     populations: dict[BenchmarkPopulation, _Population] = {}
     if BenchmarkPopulation.DEFAULT_SET in wanted:
         populations[BenchmarkPopulation.DEFAULT_SET] = _default_population(
-            reads, default_set=default_set, taught=taught
+            reads, default_set=default_sets[section_id], taught=taught
         )
     if BenchmarkPopulation.UNIVERSITY in wanted:
+        alike = _alike_in_this_term(session, section_id=section_id)
+        defaults_seen = [
+            {seen for mine in sorted(hers & alike) for seen in default_set_of(mine)}
+            for hers in taught
+        ]
         populations[BenchmarkPopulation.UNIVERSITY] = _university_population(
             reads,
             university=resolve_university(session, section_id=section_id),
-            default_set=default_set,
             taught=taught,
+            defaults_seen=defaults_seen,
         )
     return populations
 
