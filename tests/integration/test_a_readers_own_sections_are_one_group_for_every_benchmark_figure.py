@@ -58,7 +58,6 @@ from fixtures.report_benchmarks import (
     UNIVERSITY_POPULATION,
     WEEK_CLEAR,
     PlantedBenchmarkCohort,
-    a_suppressed_figures_complaint,
     answer_once,
     benchmark_members_of,
     hero_window_close,
@@ -118,22 +117,19 @@ def assert_the_week_is_shown(door: ReportDoor, section_id: Any = None) -> None:
             )
 
 
-def assert_withheld(figure: Any, where: str) -> None:
-    """One member that must be suppressed: the flag, a reason, no figure, and no number."""
-    assert (
-        isinstance(figure, dict) and figure.get(SUPPRESSED_FIELD) is True
-    ), a_suppressed_figures_complaint(figure, where)
-    assert figure.get(REASON_FIELD), a_suppressed_figures_complaint(figure, where)
-    assert figure.get(FIGURE_FIELD) is None, a_suppressed_figures_complaint(figure, where)
-    assert not numbers_of(figure), f"{where} is suppressed and carries numbers: {figure!r}."
-
-
-def assert_shown(figure: Any, where: str) -> None:
-    """One member that must be shown."""
-    assert (
-        isinstance(figure, dict) and figure.get(SUPPRESSED_FIELD) is False
-    ), f"{where} is {figure!r}, which is not a shown figure."
-    assert numbers_of(figure), f"{where} is shown and carries no number: {figure!r}."
+def the_university_figures(door: ReportDoor, section_id: Any = None) -> dict[str, Any]:
+    """One report's university members at the reported week: each panel's point, mean, median."""
+    body, answered = door.payload(course_week=REPORTED_WEEK, section_id=section_id)
+    found: dict[str, Any] = {
+        f"the {stream} university point": points_of(
+            body, stream, UNIVERSITY_POPULATION, answered=answered
+        ).get(REPORTED_WEEK)
+        for stream in STREAMS
+    }
+    workload = workload_figures(body, UNIVERSITY_POPULATION, answered=answered)
+    for name in (MEAN_FIELD, MEDIAN_FIELD):
+        found[f"the university workload {name}"] = workload[name]
+    return found
 
 
 def the_set_is_taught_by(door: ReportDoor, cohort: PlantedBenchmarkCohort, person: Any) -> None:
@@ -160,45 +156,76 @@ def thin_outside_sections(cohort: PlantedBenchmarkCohort, *, sections: int, peop
         )
 
 
-def assert_the_comparison_is_withheld_at_the_week(door: ReportDoor, stream: str, why: str) -> None:
-    """The default-set figures at course week 2 withheld: both panels' point, mean and median.
+def is_withheld(figure: Any) -> bool:
+    """A member in the chokepoint's suppressed state: the flag, a reason, no figure, no number."""
+    return (
+        isinstance(figure, dict)
+        and figure.get(SUPPRESSED_FIELD) is True
+        and bool(figure.get(REASON_FIELD))
+        and figure.get(FIGURE_FIELD) is None
+        and not numbers_of(figure)
+    )
 
-    **The control is each test's twin, not a figure in this payload.** A passing
-    week of the same series would be the natural in-payload control, but in
-    these worlds the thin sections are resolved into the default set at every
-    week and answer only at week 2 — whether a remainder of sections with no
-    rows that week counts as "empty" is a question the ruling does not settle
-    (the E5-14 manifest raises it), so no such week can be asserted shown
-    without deciding it. The twin tests — same world, the remainder at both
-    minimums or absent — are shown, which is what rules out a route that
-    withholds everything.
+
+def is_shown(figure: Any) -> bool:
+    """A member shown: not suppressed, and carrying its statistic."""
+    return (
+        isinstance(figure, dict)
+        and figure.get(SUPPRESSED_FIELD) is False
+        and bool(numbers_of(figure))
+    )
+
+
+def the_comparison_figures_at_the_week(door: ReportDoor, stream: str) -> dict[str, Any]:
+    """The three default-set members at course week 2 — one panel's point, the mean, the median.
+
+    Answered rather than judged, so each test states in its own body whether they
+    must be withheld or shown. A missing point is `None`, which is neither.
+
+    **In the "withheld" tests the control is the twin, not a figure in this
+    payload.** A passing week of the same series would be the natural in-payload
+    control, but in these worlds the thin sections are resolved into the default
+    set at every week and answer only at week 2 — whether a remainder of
+    sections with no rows that week counts as "empty" is a question the ruling
+    does not settle (the E5-14 manifest raises it). The twin tests — same world,
+    the remainder at both minimums or absent — are shown, which is what rules out
+    a route that withholds everything.
     """
     body, answered = door.payload(course_week=REPORTED_WEEK)
     comparison = points_of(body, stream, COMPARISON_POPULATION, answered=answered)
-    assert REPORTED_WEEK in comparison, (
-        f"The {stream} comparison series carries {sorted(comparison)} and not {REPORTED_WEEK}; a "
-        "withheld figure is a suppressed point, never a missing one."
-    )
-    assert_withheld(
-        comparison.get(REPORTED_WEEK),
-        f"The {stream} comparison point at course week {REPORTED_WEEK} — {why} —",
-    )
     workload = workload_figures(body, COMPARISON_POPULATION, answered=answered)
-    for name in (MEAN_FIELD, MEDIAN_FIELD):
-        assert_withheld(workload[name], f"The comparison workload {name} — {why} —")
+    point = comparison.get(REPORTED_WEEK)
+    return {
+        f"the {stream} comparison point at course week {REPORTED_WEEK}": point,
+        f"the comparison workload {MEAN_FIELD}": workload[MEAN_FIELD],
+        f"the comparison workload {MEDIAN_FIELD}": workload[MEDIAN_FIELD],
+    }
 
 
-def assert_the_comparison_is_shown_at_the_week(door: ReportDoor, stream: str, why: str) -> None:
-    """The default-set figures at course week 2 shown."""
-    body, answered = door.payload(course_week=REPORTED_WEEK)
-    comparison = points_of(body, stream, COMPARISON_POPULATION, answered=answered)
-    assert_shown(
-        comparison.get(REPORTED_WEEK),
-        f"The {stream} comparison point at course week {REPORTED_WEEK} — {why} —",
+def not_withheld(figures: dict[str, Any]) -> dict[str, Any]:
+    """The members of `figures` that are not in the suppressed state."""
+    return {where: figure for where, figure in figures.items() if not is_withheld(figure)}
+
+
+def not_shown(figures: dict[str, Any]) -> dict[str, Any]:
+    """The members of `figures` that are not shown."""
+    return {where: figure for where, figure in figures.items() if not is_shown(figure)}
+
+
+def withheld_message(leaked: dict[str, Any], why: str) -> str:
+    return (
+        f"These default-set members are not withheld, and {why}: {leaked}.\n\n"
+        "The revised ruling shows a figure only if its population minus the reader's own sections "
+        "(*R*) is empty or meets both minimums. A suppressed member says `suppressed`, gives a "
+        "reason, and carries no number."
     )
-    workload = workload_figures(body, COMPARISON_POPULATION, answered=answered)
-    for name in (MEAN_FIELD, MEDIAN_FIELD):
-        assert_shown(workload[name], f"The comparison workload {name} — {why} —")
+
+
+def shown_message(missing: dict[str, Any], why: str) -> str:
+    return (
+        f"These default-set members are not shown, and {why}: {missing}. Condition (a) holds and "
+        "the remainder after the reader's sections is empty or at both minimums."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -238,17 +265,27 @@ def a_later_second_section_and_a_section_closing_between(
 def test_two_sections_one_instructor_teaches_share_one_frozen_snapshot(
     report_door: ReportDoor, report_api_contract: Any, benchmark_cohort: Callable[..., Any]
 ) -> None:
-    """Item 1: A and B, taught by one person, answer byte-identical members — and X is in neither.
+    """Item 1: A and B, taught by one person, cut at one instant — X is in neither.
 
     X's course-week-2 window closes a day after A's (*T_A*) and six days before
     B's (*T_B*). A row there, last submitted before X's close, is counted by a
     cutoff of *T_B* and not by one of *T_A*. Under the ruling both reports cut at
-    the earliest week-2 close in the reader group, *T_A*, so X is in neither and
-    A's and B's members are the same bytes.
+    the earliest week-2 close in the reader group, *T_A*, so an answer in X moves
+    neither report — the two "unmoved" assertions.
+
+    **And the university figures are the same.** Both university populations
+    hold A and B, under one cutoff, so A's and B's university members at a course
+    week both have published are identical. The default-set members are *not*
+    compared: by the revised ruling A's default set holds B and B's holds A, two
+    populations that differ only by the reader's own sections, and the two
+    series also cover different published weeks. The ruling on
+    `docs/disputes/E5-14-02.md` dropped the earlier byte-identical assertion over
+    every member for exactly that reason.
 
     **The mutation it kills:** each report cut at its own section's close — the
     ce9df73 behaviour — under which B counts X and A does not, and B minus A is
-    X's student. Also the latest close in the group, which moves A.
+    X's student; the university members then differ too. Also the latest close
+    in the group, which moves A.
     **Its near miss** is
     `test_a_one_section_instructors_figures_are_unchanged_by_the_group_rule`.
     """
@@ -280,10 +317,14 @@ def test_two_sections_one_instructor_teaches_share_one_frozen_snapshot(
         f"The same response moved {moved(a_before, a_after)} on A's report, whose own close is "
         "before X's."
     )
-    assert a_after == b_after, (
-        f"A's and B's reports carry different benchmark members at course week {REPORTED_WEEK}: "
-        f"{moved(a_after, b_after)}. The ruling: 'two sections one instructor teaches in one term "
-        "get byte-identical comparison and university figures for the same course week'."
+    a_university = the_university_figures(report_door)
+    b_university = the_university_figures(report_door, section_id=b_id)
+    differ = sorted(where for where in a_university if a_university[where] != b_university[where])
+    assert not differ, (
+        f"A's and B's university members at course week {REPORTED_WEEK}, which both sections have "
+        f"published, differ in {differ}: A {a_university}, B {b_university}. Both university "
+        "populations hold A and B and are cut at one instant, so they are one figure; two of them "
+        "differ by whatever closed between the two cuts."
     )
 
 
@@ -353,10 +394,9 @@ def test_a_default_set_whose_remainder_after_the_readers_sections_is_thin_is_wit
     thin_outside_sections(cohort, sections=2, people=2)
     report_door.commit()
 
-    assert_the_comparison_is_withheld_at_the_week(
-        report_door,
-        stream,
-        "the default set minus the reader's own sections is two sections and two people",
+    leaked = not_withheld(the_comparison_figures_at_the_week(report_door, stream))
+    assert not leaked, withheld_message(
+        leaked, "the default set minus the reader's own sections is two sections and two people"
     )
 
 
@@ -383,8 +423,9 @@ def test_a_default_set_whose_remainder_after_the_readers_sections_clears_both_mi
     )
     report_door.commit()
 
-    assert_the_comparison_is_shown_at_the_week(
-        report_door, stream, "the remainder after the reader's sections is at both minimums"
+    missing = not_shown(the_comparison_figures_at_the_week(report_door, stream))
+    assert not missing, shown_message(
+        missing, "the remainder after the reader's sections is at both minimums"
     )
 
 
@@ -411,8 +452,9 @@ def test_a_default_set_made_only_of_the_readers_own_sections_is_shown(
     the_set_is_taught_by(report_door, cohort, report_door.person_id)
     report_door.commit()
 
-    assert_the_comparison_is_shown_at_the_week(
-        report_door, stream, "the default set is made only of the reader's own sections"
+    missing = not_shown(the_comparison_figures_at_the_week(report_door, stream))
+    assert not missing, shown_message(
+        missing, "the default set is made only of the reader's own sections"
     )
 
 
@@ -460,10 +502,9 @@ def test_a_prior_term_section_the_reader_taught_is_not_part_of_the_remainder(
         report_door, cohort, prior_taught_by=report_door.person_id, people=PRIOR_PEOPLE
     )
 
-    assert_the_comparison_is_withheld_at_the_week(
-        report_door,
-        stream,
-        "the reader taught the prior-term section too, so the remainder is two people",
+    leaked = not_withheld(the_comparison_figures_at_the_week(report_door, stream))
+    assert not leaked, withheld_message(
+        leaked, "the reader taught the prior-term section too, so the remainder is two people"
     )
 
 
@@ -484,8 +525,9 @@ def test_a_prior_term_section_someone_else_taught_is_part_of_the_remainder(
         report_door, cohort, prior_taught_by=report_door.graph.person(), people=PRIOR_PEOPLE
     )
 
-    assert_the_comparison_is_shown_at_the_week(
-        report_door, stream, "the remainder is the prior section and the two thin ones"
+    missing = not_shown(the_comparison_figures_at_the_week(report_door, stream))
+    assert not missing, shown_message(
+        missing, "the remainder is the prior section and the two thin ones"
     )
 
 
@@ -555,10 +597,9 @@ def test_a_co_instructors_sections_are_in_the_reader_group(
     thin_outside_sections(cohort, sections=2, people=2)
     report_door.commit()
 
-    assert_the_comparison_is_withheld_at_the_week(
-        report_door,
-        stream,
-        "A's co-instructor teaches the set, so the remainder after the group is two people",
+    leaked = not_withheld(the_comparison_figures_at_the_week(report_door, stream))
+    assert not leaked, withheld_message(
+        leaked, "A's co-instructor teaches the set, so the remainder after the group is two people"
     )
 
 
@@ -580,6 +621,5 @@ def test_sections_taught_by_someone_with_no_grant_on_the_section_stay_in_the_rem
     thin_outside_sections(cohort, sections=2, people=2)
     report_door.commit()
 
-    assert_the_comparison_is_shown_at_the_week(
-        report_door, stream, "the set's instructor holds no grant on A"
-    )
+    missing = not_shown(the_comparison_figures_at_the_week(report_door, stream))
+    assert not missing, shown_message(missing, "the set's instructor holds no grant on A")
