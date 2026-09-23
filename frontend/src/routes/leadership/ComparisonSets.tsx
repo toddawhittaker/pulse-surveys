@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 
 import { Link } from '@tanstack/react-router';
 
@@ -15,11 +15,16 @@ import {
   type ComparisonSetsRead,
 } from '../../api/leadership';
 import { StateNotice } from '../../components/StateNotice';
-import { copy, fillCopy } from '../../copy/leadershipComparisonSetCopy';
+import {
+  copy,
+  fillCopy,
+  type LeadershipComparisonSetCopyKey,
+} from '../../copy/leadershipComparisonSetCopy';
 import {
   COMPARISON_SET_EDIT_ROUTE,
   ComparisonSetForm,
   LEADERSHIP_SETS_TESTID,
+  PAGE_HEADING_ID,
 } from './ComparisonSetForm';
 import './leadershipComparisonSets.css';
 
@@ -51,6 +56,15 @@ import './leadershipComparisonSets.css';
  * **Deleting states what it will change.** `design/Usage Rules.md` §4 rules out
  * "Are you sure?" for a wide-effect change and asks for the consequence in
  * words, so the confirmation names the set and says what survives it.
+ *
+ * **Focus never stays on a control that has just gone.** Opening the form or
+ * the delete confirmation takes away the button that opened it, and closing
+ * either takes away the controls inside it, so each move says where focus goes
+ * next: into the confirmation when it opens, back to the row's delete button
+ * when it is kept, to the page heading when the set is gone, and back to
+ * "Define a set" when the form closes. A save or a delete that landed is also
+ * said once, in one status line, because the change it made is otherwise a row
+ * appearing or disappearing somewhere a reader may not be looking.
  */
 
 export { LEADERSHIP_SETS_TESTID };
@@ -60,8 +74,6 @@ export const COMPARISON_SET_LIST_TESTID = 'pulse-leadership-set-list';
 
 /** Where a spec finds the confirmation a delete waits behind. */
 export const COMPARISON_SET_DELETE_CONFIRM_TESTID = 'pulse-leadership-set-delete-confirm';
-
-const PAGE_HEADING_ID = 'pulse-leadership-sets-heading';
 
 /** What the page has been able to read so far. */
 type Load =
@@ -87,6 +99,26 @@ export function ComparisonSetsRoute(): JSX.Element {
   const [defining, setDefining] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [deleteRefusal, setDeleteRefusal] = useState<string | null>(null);
+  // What the last write did, said once in the status line. Cleared when the
+  // reader starts another, so the line never describes a write before the one
+  // in hand.
+  const [announcement, setAnnouncement] = useState<string | null>(null);
+
+  // Where focus goes once the render that took a control away has landed. A
+  // request rather than a focus call in the handler, because the element it
+  // names (the heading, or a "Define a set" button that is not mounted yet)
+  // exists only after that render. A ref, not state: asking for focus is not
+  // something the page draws, and every handler that asks also changes state,
+  // so the render that answers it follows anyway. The effect runs after every
+  // render and does nothing unless a request is waiting.
+  const focusNext = useRef<'heading' | 'define' | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const defineRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (focusNext.current === null) return;
+    (focusNext.current === 'heading' ? headingRef : defineRef).current?.focus();
+    focusNext.current = null;
+  });
 
   // **A write asks for the list again by bumping this**, rather than by calling a
   // reading function from an event handler. One effect does every read of the
@@ -143,11 +175,16 @@ export function ComparisonSetsRoute(): JSX.Element {
       data-testid={LEADERSHIP_SETS_TESTID}
       aria-labelledby={PAGE_HEADING_ID}
     >
-      <h1 className="pulse-set-title" id={PAGE_HEADING_ID}>
+      <h1 className="pulse-set-title" id={PAGE_HEADING_ID} ref={headingRef} tabIndex={-1}>
         {copy('leadership_comparison_sets.heading')}
       </h1>
       <p className="pulse-set-intro">{copy('leadership_comparison_sets.intro')}</p>
       <p className="pulse-set-intro">{copy('leadership_comparison_sets.no_report_yet')}</p>
+      {/* In the page from the first render, so the sentence is announced when
+          it arrives rather than mounted together with its region. */}
+      <p className="pulse-set-announcement" role="status">
+        {announcement}
+      </p>
 
       {load.kind === 'loading' ? (
         <p className="pulse-set-status" role="status">
@@ -186,6 +223,7 @@ export function ComparisonSetsRoute(): JSX.Element {
                   confirming={confirming === set.id}
                   onDeleteAsked={() => {
                     setDeleteRefusal(null);
+                    setAnnouncement(null);
                     setConfirming(set.id);
                   }}
                   onDeleteCancelled={() => {
@@ -195,6 +233,10 @@ export function ComparisonSetsRoute(): JSX.Element {
                     void deleteComparisonSet(set.id).then((outcome) => {
                       setConfirming(null);
                       if (outcome.kind === 'deleted') {
+                        // The row is about to go, and its delete button with
+                        // it, so focus goes to the heading rather than back.
+                        setAnnouncement(copy('leadership_comparison_sets.set_deleted'));
+                        focusNext.current = 'heading';
                         setReads((asked) => asked + 1);
                         return;
                       }
@@ -226,12 +268,15 @@ export function ComparisonSetsRoute(): JSX.Element {
                 const outcome = await createComparisonSet(write);
                 if (outcome.kind === 'saved') {
                   setDefining(false);
+                  setAnnouncement(copy('leadership_comparison_sets.set_saved'));
+                  focusNext.current = 'define';
                   setReads((asked) => asked + 1);
                 }
                 return outcome;
               }}
               onCancel={() => {
                 setDefining(false);
+                focusNext.current = 'define';
               }}
             />
           ) : (
@@ -239,7 +284,9 @@ export function ComparisonSetsRoute(): JSX.Element {
               <button
                 className="pulse-set-button"
                 type="button"
+                ref={defineRef}
                 onClick={() => {
+                  setAnnouncement(null);
                   setDefining(true);
                 }}
               >
@@ -291,6 +338,20 @@ function SetRow({
   readonly onDeleteCancelled: () => void;
   readonly onDeleteConfirmed: () => void;
 }): JSX.Element {
+  // Opening the confirmation takes the delete button away, so focus goes into
+  // the confirmation, which is labelled by its own question. Keeping the set —
+  // or a delete the server refused — brings the button back, and focus with it.
+  // Only a change of `confirming` moves focus; a row's first render never does.
+  const confirmRef = useRef<HTMLDivElement>(null);
+  const deleteRef = useRef<HTMLButtonElement>(null);
+  const wasConfirming = useRef(confirming);
+  useEffect(() => {
+    if (confirming === wasConfirming.current) return;
+    wasConfirming.current = confirming;
+    (confirming ? confirmRef : deleteRef).current?.focus();
+  }, [confirming]);
+  const confirmTitleId = `pulse-leadership-set-delete-title-${set.id}`;
+
   return (
     <li className="pulse-set-row">
       <h2 className="pulse-set-name">{set.name}</h2>
@@ -304,8 +365,15 @@ function SetRow({
       </p>
       <p className="pulse-set-preview">{previewLine(preview)}</p>
       {confirming ? (
-        <div className="pulse-set-confirm" data-testid={COMPARISON_SET_DELETE_CONFIRM_TESTID}>
-          <p className="pulse-set-confirm-title">
+        <div
+          className="pulse-set-confirm"
+          data-testid={COMPARISON_SET_DELETE_CONFIRM_TESTID}
+          role="group"
+          aria-labelledby={confirmTitleId}
+          ref={confirmRef}
+          tabIndex={-1}
+        >
+          <p className="pulse-set-confirm-title" id={confirmTitleId}>
             {fillCopy('leadership_comparison_sets.delete_confirm_title', { name: set.name })}
           </p>
           <p className="pulse-set-confirm-body">
@@ -327,7 +395,12 @@ function SetRow({
           >
             {copy('leadership_comparison_sets.edit')}
           </Link>
-          <button className="pulse-set-plain-button" type="button" onClick={onDeleteAsked}>
+          <button
+            className="pulse-set-plain-button"
+            type="button"
+            ref={deleteRef}
+            onClick={onDeleteAsked}
+          >
             {copy('leadership_comparison_sets.delete')}
           </button>
         </p>
@@ -346,16 +419,32 @@ function previewLine(preview: Preview): string {
   if (preview.kind === 'counting') return copy('leadership_comparison_sets.preview_counting');
   if (preview.kind === 'unavailable') return copy('leadership_comparison_sets.preview_unavailable');
   const sections = preview.preview.section_count;
+  const courses = counted(
+    preview.preview.member_count,
+    'leadership_comparison_sets.count_courses_one',
+    'leadership_comparison_sets.count_courses_many',
+  );
   // `== null` rather than `=== undefined`: the wire carries the absence both as
   // a missing member and as a JSON null, and a guard reading only one of them
   // prints "null sections" for the other.
   if (sections == null) {
-    return fillCopy('leadership_comparison_sets.preview_courses_only', {
-      courses: String(preview.preview.member_count),
-    });
+    return fillCopy('leadership_comparison_sets.preview_courses_only', { courses });
   }
   return fillCopy('leadership_comparison_sets.preview_counts', {
-    courses: String(preview.preview.member_count),
-    sections: String(sections),
+    courses,
+    sections: counted(
+      sections,
+      'leadership_comparison_sets.count_sections_one',
+      'leadership_comparison_sets.count_sections_many',
+    ),
   });
+}
+
+/** A count with its noun, singular for exactly one. */
+function counted(
+  count: number,
+  one: LeadershipComparisonSetCopyKey,
+  many: LeadershipComparisonSetCopyKey,
+): string {
+  return count === 1 ? copy(one) : fillCopy(many, { count: String(count) });
 }

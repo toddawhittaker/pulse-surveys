@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 
 import { useNavigate, useParams } from '@tanstack/react-router';
 
@@ -45,6 +45,18 @@ import './leadershipComparisonSets.css';
  * course this screen cannot offer is one the reader cannot see or uncheck, and a
  * member that survives invisibly into the saved body is a set nobody composed.
  * Dropping either quietly is the failure both notices exist to prevent.
+ *
+ * **The notice keeps every removal until the reader dismisses it.** A reader
+ * arrowing through the level list changes the level once per keypress, and a
+ * notice replaced on each change would lose the courses the first step removed
+ * one keypress later, before anybody had read it. So each removal adds a
+ * sentence and nothing but the dismiss control takes one away. The notice is a
+ * polite live region, so a reader who cannot see it is told as it grows.
+ *
+ * **Focus moves to the form's heading when the form opens.** On the list page
+ * the control that opened it has just vanished, and on the edit address the
+ * form is what the page was waiting for; in both, a focus left where it was is
+ * a focus on nothing.
  */
 
 /** The list this form returns to, and the address that opens one set in it. */
@@ -73,7 +85,13 @@ const NAME_FIELD_ID = 'pulse-leadership-set-name';
 const LENGTH_FIELD_ID = 'pulse-leadership-set-length';
 const LEVEL_FIELD_ID = 'pulse-leadership-set-level';
 const FORM_HEADING_ID = 'pulse-leadership-set-form-heading';
-const PAGE_HEADING_ID = 'pulse-leadership-sets-heading';
+const SAVE_HELP_ID = 'pulse-leadership-set-save-help';
+
+/**
+ * The page heading both leadership set addresses carry, so a move between them
+ * can put focus on the heading of the page it arrives at.
+ */
+export const PAGE_HEADING_ID = 'pulse-leadership-sets-heading';
 
 /** The value a select carries while nothing has been chosen. */
 const UNCHOSEN = '';
@@ -140,13 +158,18 @@ export function ComparisonSetForm({
   const [members, setMembers] = useState<readonly string[]>(() =>
     membersStillOffered(options, editing),
   );
-  const [removal, setRemoval] = useState<Removal | null>(() => {
+  const [removals, setRemovals] = useState<readonly Removal[]>(() => {
     const withdrawn =
       (editing?.member_course_ids.length ?? 0) - membersStillOffered(options, editing).length;
-    return withdrawn === 0 ? null : { kind: 'withdrawn', count: withdrawn };
+    return withdrawn === 0 ? [] : [{ kind: 'withdrawn', count: withdrawn }];
   });
   const [saving, setSaving] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
+
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   // The courses this level leaves available. The filter is the form's whole
   // opinion about membership, and it runs on the level that is chosen now
@@ -163,14 +186,14 @@ export function ComparisonSetForm({
     );
     setLevel(chosen);
     setMembers(staying.map((course) => course.id));
-    // **The notice is replaced on every level change, never accumulated.** A
-    // second change with nothing to remove clears the first change's sentence,
-    // which would otherwise stand over a form it is no longer true of.
-    setRemoval(
-      leaving.length === 0
-        ? null
-        : { kind: 'level-changed', labels: leaving.map((course) => course.label) },
-    );
+    // **A removal adds to the notice; a change that removes nothing leaves it
+    // alone.** Every sentence in it stays true — those courses did leave the
+    // set — so nothing but the reader's dismissal takes one away.
+    if (leaving.length === 0) return;
+    setRemovals((told) => [
+      ...told,
+      { kind: 'level-changed', labels: leaving.map((course) => course.label) },
+    ]);
   }
 
   function toggleMember(courseId: string): void {
@@ -216,7 +239,7 @@ export function ComparisonSetForm({
         submit();
       }}
     >
-      <h2 className="pulse-set-form-heading" id={FORM_HEADING_ID}>
+      <h2 className="pulse-set-form-heading" id={FORM_HEADING_ID} ref={headingRef} tabIndex={-1}>
         {copy(
           editing === null
             ? 'leadership_comparison_sets.form_create_heading'
@@ -286,20 +309,31 @@ export function ComparisonSetForm({
         <legend className="pulse-set-label">
           {copy('leadership_comparison_sets.members_label')}
         </legend>
-        {removal === null ? null : (
-          <div className="pulse-set-removed" data-testid={COMPARISON_SET_REMOVED_TESTID}>
-            <p className="pulse-set-removed-body">{removalSentence(removal)}</p>
-            <button
-              className="pulse-set-plain-button"
-              type="button"
-              onClick={() => {
-                setRemoval(null);
-              }}
-            >
-              {copy('leadership_comparison_sets.members_removed_dismiss')}
-            </button>
-          </div>
-        )}
+        {/* The live region is always in the page, empty or not: a region that
+            arrives together with its first sentence is one most screen readers
+            never announce. */}
+        <div role="status">
+          {removals.length === 0 ? null : (
+            <div className="pulse-set-removed" data-testid={COMPARISON_SET_REMOVED_TESTID}>
+              {removals.map((removal, at) => (
+                // The index is the identity: removals are only ever appended,
+                // and all of them leave together.
+                <p className="pulse-set-removed-body" key={at}>
+                  {removalSentence(removal)}
+                </p>
+              ))}
+              <button
+                className="pulse-set-plain-button"
+                type="button"
+                onClick={() => {
+                  setRemovals([]);
+                }}
+              >
+                {copy('leadership_comparison_sets.members_removed_dismiss')}
+              </button>
+            </div>
+          )}
+        </div>
         {level === null ? (
           <p className="pulse-set-help">{copy('leadership_comparison_sets.members_await_level')}</p>
         ) : offered.length === 0 ? (
@@ -335,11 +369,20 @@ export function ComparisonSetForm({
       )}
 
       {complete ? null : (
-        <p className="pulse-set-help">{copy('leadership_comparison_sets.save_incomplete')}</p>
+        <p className="pulse-set-help" id={SAVE_HELP_ID}>
+          {copy('leadership_comparison_sets.save_incomplete')}
+        </p>
       )}
 
       <p className="pulse-set-actions">
-        <button className="pulse-set-button" type="submit" disabled={!complete || saving}>
+        <button
+          className="pulse-set-button"
+          type="submit"
+          disabled={!complete || saving}
+          // A disabled control says nothing about why; the sentence above does,
+          // so the button points at it for as long as it is there.
+          aria-describedby={complete ? undefined : SAVE_HELP_ID}
+        >
           {copy(
             saving ? 'leadership_comparison_sets.saving' : 'leadership_comparison_sets.save',
           )}
@@ -420,8 +463,12 @@ export function ComparisonSetEditRoute(): JSX.Element {
     };
   }, [setId]);
 
+  // Leaving for the list takes every control on this page away, so focus goes
+  // to the heading of the page that arrives: it names where the reader now is.
   function toTheList(): void {
-    void navigate({ to: COMPARISON_SETS_ROUTE });
+    void navigate({ to: COMPARISON_SETS_ROUTE }).then(() => {
+      document.getElementById(PAGE_HEADING_ID)?.focus();
+    });
   }
 
   return (

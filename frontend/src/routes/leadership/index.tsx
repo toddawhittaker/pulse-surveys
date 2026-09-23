@@ -6,6 +6,7 @@ import { LandingView } from '../../components/LandingView';
 import { copy } from '../../copy/leadershipComparisonSetCopy';
 import { LANDINGS } from '../../lib/landings';
 import { COMPARISON_SETS_ROUTE } from './ComparisonSetForm';
+import './leadershipComparisonSets.css';
 
 /**
  * The leadership area's landing view — SPEC §13's `routes/leadership/`.
@@ -20,12 +21,18 @@ import { COMPARISON_SETS_ROUTE } from './ComparisonSetForm';
  * address. It is a link rather than a menu — there is one destination — and it
  * carries the set screen's own heading as its words, so the two surfaces name
  * the same thing identically.
+ *
+ * **It is dressed as a link.** The application's reset takes the browser's link
+ * colour and underline away, and inside the landing's muted line an unstyled
+ * link reads as one more sentence; it takes the set screen's own link rule.
  */
 export function LeadershipLanding(): JSX.Element {
   return (
     <LandingView landing={LANDINGS.leadership}>
       <p>
-        <Link to={COMPARISON_SETS_ROUTE}>{copy('leadership_comparison_sets.heading')}</Link>
+        <Link className="pulse-set-link" to={COMPARISON_SETS_ROUTE}>
+          {copy('leadership_comparison_sets.heading')}
+        </Link>
       </p>
     </LandingView>
   );

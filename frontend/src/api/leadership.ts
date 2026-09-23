@@ -19,18 +19,13 @@
  * submission, which is why that reader moved out of `student.ts` and up into
  * `lib/session.ts` rather than being copied here (`docs/MISTAKES.md` entry 13).
  *
- * **What checks that echo is E5-06's, and it is not on this branch yet.**
- * `api/deps.py` carries one double-submit dependency today, `csrf_verified_student`;
- * E5-06 adds `csrf_verified_leadership` for the routes below, and this branch
- * merges after it. So the header these writes send is checked by nothing until
- * that ticket lands — the client is ready for the dependency rather than
- * describing one that exists.
+ * **What checks that echo is `csrf_verified_leadership`** (`api/deps.py`,
+ * E5-06), which the three writing routes below declare and the four reading
+ * routes do not.
  *
  * **Every field below is the wire's spelling**, snake case included, because
  * these types describe E5-06's Pydantic schemas rather than a shape of this
- * screen's choosing. The contract they are written from is the one both tickets
- * were given, so a divergence when E5-06 merges is a reconciliation on this
- * branch rather than a surprise (the epic's breakdown decision 8).
+ * screen's choosing.
  *
  * **A refusal is shown, never re-derived.** SPEC §5.1 puts the rules about which
  * length and level may be combined, who may edit a set and what a duplicate name
@@ -72,10 +67,11 @@ export interface ComparisonSetCourseView {
 /**
  * The closed sets the form offers, and nothing else.
  *
- * **This is the only source of the lengths and the levels.** SPEC §2.2 owns the
- * length set and §8 owns the five level bands, and both are institution data on
- * the server's side of the wire. A list written into a component would be a
- * second copy that is right until the first term whose calendar adds a length —
+ * **This is the only source of the lengths and the levels.** The lengths are
+ * the distinct lengths the institution's sections run, read from its data, and
+ * §8 owns the five level bands; both live on the server's side of the wire. A
+ * list written into a component would be a second copy that is right until the
+ * first section that runs a new length —
  * the two-currencies defect this ticket's trap section names — so the form
  * renders what this answer carries and has no opinion about what it should have
  * carried.

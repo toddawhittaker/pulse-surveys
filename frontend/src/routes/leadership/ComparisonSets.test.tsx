@@ -64,6 +64,10 @@ const DEFINE = 'Define a set';
 const SAVE = 'Save this set';
 const COUNTING = 'Counting what this set reaches…';
 const PREVIEW_UNAVAILABLE = 'What this set reaches could not be counted just now.';
+const SET_SAVED = 'Set saved.';
+const SET_DELETED = 'Set deleted.';
+const FORM_HEADING = 'Define a comparison set';
+const CANCEL = 'Cancel';
 
 /**
  * The one element a graphic may sit inside on this surface: `StateNotice`'s
@@ -159,7 +163,10 @@ describe('the states the list can be in', () => {
     vi.stubGlobal('fetch', () => new Promise<Response>(() => undefined));
     mountAt('/app/leadership/comparison-sets');
 
-    expect((await screen.findByRole('status')).textContent).toBe(LOADING);
+    // Found by its words, then asked its role: the page carries a second,
+    // empty status line from its first render (the one a landed write is said
+    // in), so "the status region" is no longer one element.
+    expect((await screen.findByText(LOADING)).getAttribute('role')).toBe('status');
     expect(screen.queryByTestId(COMPARISON_SET_LIST_TESTID)).toBeNull();
   });
 
@@ -261,7 +268,7 @@ describe('the list of sets', () => {
     await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
 
     await within(rowOf(A_SET_SUMMARY.name)).findByText(
-      '7 courses. The number of sections they reach is not available just now.',
+      '7 courses. The number of sections this set reaches is not available just now.',
     );
   });
 
@@ -276,7 +283,35 @@ describe('the list of sets', () => {
 
     // A guard written as `=== undefined` prints "null sections" here.
     await screen.findByText(
-      '9 courses. The number of sections they reach is not available just now.',
+      '9 courses. The number of sections this set reaches is not available just now.',
+    );
+  });
+
+  it('counts one course and one section in the singular', async () => {
+    // The E5 boundary round's copy finding: the preview printed "1 courses".
+    // Both nouns are counted, so both are driven to exactly one here.
+    serving({
+      [COMPARISON_SETS_PATH]: () => json(200, { sets: [A_SET_SUMMARY] }),
+      [COMPARISON_SET_OPTIONS_PATH]: () => json(200, THE_OPTIONS),
+      [comparisonSetPreviewPath(A_SET_SUMMARY.id)]: () =>
+        json(200, { ...A_PREVIEW_WITH_BOTH_COUNTS, member_count: 1, section_count: 1 }),
+    });
+    mountAt('/app/leadership/comparison-sets');
+
+    await screen.findByText('1 course, 1 section across retained terms');
+  });
+
+  it('counts one course in the singular when the section count is missing', async () => {
+    serving({
+      [COMPARISON_SETS_PATH]: () => json(200, { sets: [A_SET_SUMMARY] }),
+      [COMPARISON_SET_OPTIONS_PATH]: () => json(200, THE_OPTIONS),
+      [comparisonSetPreviewPath(A_SET_SUMMARY.id)]: () =>
+        json(200, { ...A_PREVIEW_WITH_A_NULL_SECTION_COUNT, member_count: 1 }),
+    });
+    mountAt('/app/leadership/comparison-sets');
+
+    await screen.findByText(
+      '1 course. The number of sections this set reaches is not available just now.',
     );
   });
 
@@ -457,6 +492,160 @@ describe('defining a set from the list', () => {
       member_course_ids: [A_NURSING_COURSE.id, A_SECOND_GRADUATE_COURSE.id],
     });
     await screen.findByRole('heading', { name: A_GRADUATE_SET.name });
+  });
+});
+
+/**
+ * Where focus goes when a control vanishes, and the one status line a landed
+ * write is said in — the E5 boundary round's accessibility findings.
+ *
+ * Each case reads `document.activeElement` after the move, because what a
+ * keyboard or screen-reader user meets next is exactly where focus landed. The
+ * mutation each kills is the focus call (or the status sentence) removed; the
+ * near miss is focus left on `document.body`, which is where a vanished
+ * control drops it.
+ */
+describe('focus and status when controls come and go', () => {
+  it('starts with an empty status line, so what arrives in it is announced', async () => {
+    servingThreeSets();
+    mountAt('/app/leadership/comparison-sets');
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+
+    const lines = screen.getAllByRole('status');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.textContent).toBe('');
+  });
+
+  it('moves focus into the confirmation when delete is asked, and back when the set is kept', async () => {
+    servingThreeSets();
+    mountAt('/app/leadership/comparison-sets');
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+
+    fireEvent.click(within(rowOf(A_SET_SUMMARY.name)).getByRole('button', { name: DELETE }));
+    const confirm = screen.getByTestId(COMPARISON_SET_DELETE_CONFIRM_TESTID);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(confirm);
+    });
+    // Focus lands on a group named by its own question, so that is what is read.
+    expect(screen.getByRole('group', { name: `Delete “${A_SET_SUMMARY.name}”?` })).toBe(confirm);
+
+    fireEvent.click(screen.getByRole('button', { name: KEEP_IT }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        within(rowOf(A_SET_SUMMARY.name)).getByRole('button', { name: DELETE }),
+      );
+    });
+  });
+
+  it('says the set was deleted and puts focus on the page heading', async () => {
+    let deleted = false;
+    serving({
+      [COMPARISON_SETS_PATH]: () =>
+        json(200, { sets: deleted ? [A_SET_SOMEBODY_ELSE_DEFINED] : THREE_SETS }),
+      [COMPARISON_SET_OPTIONS_PATH]: () => json(200, THE_OPTIONS),
+      [comparisonSetPath(A_SET_SUMMARY.id)]: () => {
+        deleted = true;
+        return noContent();
+      },
+      [comparisonSetPreviewPath(A_SET_SOMEBODY_ELSE_DEFINED.id)]: () =>
+        json(200, A_PREVIEW_WITH_BOTH_COUNTS),
+      [comparisonSetPreviewPath(A_SET_SUMMARY.id)]: () =>
+        json(200, A_PREVIEW_WITHOUT_A_SECTION_COUNT),
+      [comparisonSetPreviewPath(A_GRADUATE_SET.id)]: () => json(500, {}),
+    });
+    mountAt('/app/leadership/comparison-sets');
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+
+    fireEvent.click(within(rowOf(A_SET_SUMMARY.name)).getByRole('button', { name: DELETE }));
+    fireEvent.click(screen.getByRole('button', { name: DELETE_CONFIRM }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: A_SET_SUMMARY.name })).toBeNull();
+    });
+    expect(screen.getByRole('status').textContent).toBe(SET_DELETED);
+    expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: HEADING }));
+  });
+
+  it('puts focus back on the delete button when the delete is refused', async () => {
+    serving({
+      [COMPARISON_SETS_PATH]: () => json(200, { sets: THREE_SETS }),
+      [COMPARISON_SET_OPTIONS_PATH]: () => json(200, THE_OPTIONS),
+      [comparisonSetPath(A_SET_SUMMARY.id)]: () =>
+        json(403, { detail: A_NOT_THE_DEFINER_REFUSAL }),
+      [comparisonSetPreviewPath(A_SET_SOMEBODY_ELSE_DEFINED.id)]: () =>
+        json(200, A_PREVIEW_WITH_BOTH_COUNTS),
+      [comparisonSetPreviewPath(A_SET_SUMMARY.id)]: () =>
+        json(200, A_PREVIEW_WITHOUT_A_SECTION_COUNT),
+      [comparisonSetPreviewPath(A_GRADUATE_SET.id)]: () => json(500, {}),
+    });
+    mountAt('/app/leadership/comparison-sets');
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+
+    fireEvent.click(within(rowOf(A_SET_SUMMARY.name)).getByRole('button', { name: DELETE }));
+    fireEvent.click(screen.getByRole('button', { name: DELETE_CONFIRM }));
+
+    await screen.findByText(A_NOT_THE_DEFINER_REFUSAL);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        within(rowOf(A_SET_SUMMARY.name)).getByRole('button', { name: DELETE }),
+      );
+    });
+    // Nothing landed, so the status line says nothing.
+    expect(screen.getByRole('status').textContent).toBe('');
+  });
+
+  it('moves focus to the form when it opens, and back to "Define a set" when it is cancelled', async () => {
+    servingThreeSets();
+    mountAt('/app/leadership/comparison-sets');
+    await screen.findByTestId(COMPARISON_SET_LIST_TESTID);
+
+    fireEvent.click(screen.getByRole('button', { name: DEFINE }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole('heading', { level: 2, name: FORM_HEADING }),
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: CANCEL }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: DEFINE }));
+    });
+  });
+
+  it('says the set was saved and puts focus back on "Define a set"', async () => {
+    let created = false;
+    serving({
+      [`GET ${COMPARISON_SETS_PATH}`]: () =>
+        json(200, { sets: created ? [A_GRADUATE_SET] : [] }),
+      [`POST ${COMPARISON_SETS_PATH}`]: () => {
+        created = true;
+        return json(201, A_NEW_SET);
+      },
+      [COMPARISON_SET_OPTIONS_PATH]: () => json(200, THE_OPTIONS),
+      [comparisonSetPreviewPath(A_GRADUATE_SET.id)]: () => json(200, A_PREVIEW_WITH_BOTH_COUNTS),
+    });
+    mountAt('/app/leadership/comparison-sets');
+    await screen.findByText(EMPTY_TITLE);
+
+    fireEvent.click(screen.getByRole('button', { name: DEFINE }));
+    const form = screen.getByTestId(COMPARISON_SET_FORM_TESTID);
+    fireEvent.change(within(form).getByLabelText('Set name'), {
+      target: { value: A_NEW_SET.name },
+    });
+    fireEvent.change(within(form).getByLabelText('Course length'), { target: { value: '8' } });
+    fireEvent.change(within(form).getByLabelText('Course level'), { target: { value: 'GR' } });
+    fireEvent.click(within(form).getByRole('button', { name: SAVE }));
+
+    await screen.findByRole('heading', { name: A_GRADUATE_SET.name });
+    expect(screen.getByRole('status').textContent).toBe(SET_SAVED);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: DEFINE }));
+
+    // Opening the form again starts a new write, so the line stops describing
+    // the last one. The form brings a status region of its own (its removal
+    // notice), so the page's line is the one outside the form.
+    fireEvent.click(screen.getByRole('button', { name: DEFINE }));
+    const pageLine = screen.getAllByRole('status').find((line) => line.closest('form') === null);
+    expect(pageLine?.textContent).toBe('');
   });
 });
 
