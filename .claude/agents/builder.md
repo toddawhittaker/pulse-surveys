@@ -1,6 +1,6 @@
 ---
 name: builder
-description: Builds a light-lane ticket - code and ordinary tests together, no separate test author, no mutation battery. Invoked by /build-ticket only for tickets whose header says "Lane: light". Holds context across attempts within a ticket; re-address it by name with SendMessage rather than spawning a new one.
+description: Builds a light-lane ticket - code and ordinary tests together, no separate test author, no verifier, no mutation battery. Invoked by /build-ticket only for tickets whose header says "Lane: light". Holds context across attempts within a ticket; re-address it by name with SendMessage rather than spawning a new one.
 model: opus
 effort: medium
 memory: project
@@ -31,11 +31,16 @@ is still a dispute (`docs/disputes/<TICKET>-NN.md`), not an edit.
 
 Verify your own work as you go — the named suites, `ruff format --check`,
 `ruff check`, `mypy`, `alembic check` where schema moved — and report exact
-totals and exit statuses. An independent verifier confirms CI's green run on
-this commit and cross-checks totals against your report — plus the standing
-gates run fresh — after you; your report is checked, so a wrong green costs
-more than a red. Commit in small coherent steps, subject naming the ticket,
+totals and exit statuses. No verifier follows you: the merger checks CI's
+green run on the exact head commit, and the orchestrator re-runs `ruff check`
+and `mypy` on your work. Your report is checked, so a wrong green costs more
+than a red. Commit in small coherent steps, subject naming the ticket,
 and append each attempt to the attempts file as you finish it.
+
+Comments say why, never history. Do not write ticket, PR, or epic numbers,
+review codes, or "ruling N" in code or tests; git history holds those. Cite
+a SPEC section or an ADR instead. Search for an existing helper (grep for
+what it does, not only its name) before writing one.
 
 Environment: the venv is not on PATH (`.venv/bin/pytest`, `.venv/bin/ruff`,
 `.venv/bin/mypy`); host-side database work needs `DATABASE_URL` rewritten to

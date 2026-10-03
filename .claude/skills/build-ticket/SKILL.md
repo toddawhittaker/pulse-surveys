@@ -1,11 +1,12 @@
 ---
 name: build-ticket
-description: Build one ticket through the lane its header names - heavy rides the orchestrated tests-first loop (test-author writes red, implementer turns green, verifier proves it by battery), light rides builder-writes-code-and-tests with one fresh verifier pass; both get the fresh-context security review. Use when the user says "build E0-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the ticket branch and stops at a PR without merging.
+description: Build one ticket through the lane its header names - heavy rides the orchestrated tests-first loop (test-author writes red, implementer turns green, verifier proves it by battery), light rides builder-writes-code-and-tests checked by CI; both get the fresh-context security review and merge through the merger agent. Use when the user says "build E0-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the ticket branch and ends with the PR merged into its epic branch.
 ---
 
 # Build a ticket
 
-Drives one ticket from `docs/tickets/` to an open pull request. **You are the
+Drives one ticket from `docs/tickets/` to a pull request merged into its epic
+branch. **You are the
 orchestrator: you design, brief, arbitrate, and verify-by-delegation. The
 subagents build.** Your brief is where the leverage is — a design decision
 settled in the brief stays settled; one left open comes back as a review
@@ -16,8 +17,9 @@ If ambiguous, ask — building the wrong ticket wastes a whole loop.
 
 ## 0. The lane
 
-Read the ticket header's `**Lane:**` field first. A missing field, a ⚠
-anywhere on the ticket, or doubt means **heavy** — steps 1 through 7 below.
+Read the ticket header's `**Lane:**` field first. A missing field or a ⚠ on
+the ticket itself means **heavy**. A ⚠ on the epic alone does not; the path
+table decides — steps 1 through 7 below.
 `**Lane:** light` means step 1, then the **Light lane** section at the end of
 this file in place of steps 2–5, then steps 6 and 7 unchanged. If mid-build
 the diff reaches a surface CLAUDE.md's lane rule names as heavy (the path
@@ -153,13 +155,13 @@ because it already ran once.
 - Remove any CI tolerance this ticket owns per its acceptance criteria.
 - Push the final commits; update the draft PR's body: the ticket, the §14.2
   items covered, the security findings and resolutions, the arbitrations, and
-  everything deliberately deferred with where it is recorded. Mark it ready
-  for review.
+  everything deliberately deferred with where it is recorded. A heavy
+  ticket's body also records the verifier's battery result and the commit
+  it ran on, plus any targeted re-mutations after it. Mark it ready for
+  review.
 - **Then merge it through the merger agent** once the CLAUDE.md merge
-  conditions hold (verified green CI on the final head commit, the security
-  review recorded against that commit, no open dispute) — unless the ticket
-  is on a ⚠ epic or touches a heavy-lane path, in which case stop: Todd's
-  written approval is still the only trigger there.
+  conditions hold. This applies to both lanes and to ⚠ epics. No one
+  approves a ticket PR; Todd reviews at the epic boundary.
 
 ## Light lane
 
@@ -177,10 +179,12 @@ names traps, and draws the boundary. Then:
 - Once it reports green, push the ticket branch and open the pull request into
   the epic branch as a draft — same reason as the heavy lane: no CI run
   exists on a ticket branch until a pull request does.
-- Spawn `verifier` for one fresh pass: confirm CI's green run on this commit
-  (totals cross-checked), plus `ruff format --check`, `ruff check`, `mypy`,
-  `alembic check` where schema moved, run locally. No battery. No green is
-  believed on the builder's word in this lane either.
+- No verifier pass. CI runs the same gates (`ruff format --check`, `ruff
+  check`, `mypy`, migration drift, the tests), and the merger checks CI's
+  green run on the exact head commit. That is the check that does not take
+  the builder's word. Before calling the build done, run `ruff check` and
+  `mypy` on the builder's work yourself; a builder's "lint passes" has been
+  wrong before.
 - Steps 6 (security review) and 7 (finish) are identical to the heavy lane.
 
 If a ticket spans sittings, resume the session (`claude --resume`) rather than
