@@ -49,12 +49,12 @@ arriving through the report's own delta.
 
 So a batch is cut only when the volume reaches the threshold **and** the distinct
 people behind the unreleased held comments reach it **and** those comments span at
-least `WEEKS_A_RELEASE_MUST_SPAN` distinct closed weeks. When any leg fails
-nothing is cut. ADR 0152 carries the argument and states plainly that this is a
-reading of §4 rather than §4's own words. It also recorded that the respondent
-leg subsumed the other two; ADR 0182 corrects that for the weeks leg, which
-holding per stream made load-bearing — one week's two held streams can carry
-enough authors between them, and only the weeks leg refuses that batch.
+least `WEEKS_A_RELEASE_MUST_SPAN` distinct closed weeks. When any leg fails for a
+stream, that stream stays held. ADR 0152 carries the argument and states plainly that this is a
+reading of §4 rather than §4's own words. Since ADR 0182 every leg is counted per
+stream: a released comment carries its stream, so each stream's slice of a batch
+must stand on a threshold's worth of its own authors over two weeks of its own,
+and a stream whose legs do not open stays held while its sibling is released.
 
 ## What is deliberately not here
 
@@ -162,7 +162,7 @@ then `response.user_id`, because §4's threshold and the release gate's second l
 are numbers of distinct people, and a gate that could not reach them could not
 enforce either. In the first the column is inside `count(distinct …)` and is
 grouped away; in the second it is a grouping inside one subquery that
-`_sections_whose_release_is_due` reduces to an integer. It is not selected by the
+`_streams_whose_release_is_due` reduces to an integer. It is not selected by the
 membership read, it is not returned by anything, and no `ReportComment` has ever
 carried it. That is the whole of the identity surface in this file, and it is
 stated here so a reviewer can check the claim against four functions rather than
@@ -210,8 +210,9 @@ INITIAL_STATE = MODERATION_STATES[0]
 # unwritable, and this is what says so if it ever stops being true.
 REPORTED_STATUS = {stored: stored.lower() for stored in MODERATION_STATES}
 
-# How many distinct under-threshold closed weeks a release must draw from before
-# it may be cut — the third leg of the gate. Two rather than one, and it is the
+# How many distinct closed weeks one stream's held comments must draw from before
+# that stream may be released — the third leg of the gate, counted per stream
+# (ADR 0182). Two rather than one, and it is the
 # smallest number that does the job: a batch confined to a single week is the week
 # attribution ADR 0153 removed, arriving through the report's own week-to-week
 # delta instead of through a field. Named rather than written inline so the
@@ -463,32 +464,38 @@ def cut_due_release_batches(session: Session) -> int:
     threshold of distinct commenters that week (ADR 0182), its window has closed, and it is in no batch yet; `_held_comments`
     is the one definition and both the gate and the batch are built from it.
 
-    **The gate is three legs and every one of them must open** (ADR 0152, after the
-    security round):
+    **The gate is three legs, evaluated per `(section, term, stream)`, and every
+    one of them must open for a stream** (ADR 0152, after the security round; per
+    stream since ADR 0182):
 
-    a. the section's cumulative comment-answer volume for the term reaches the
+    a. that stream's cumulative comment-answer volume for the term reaches the
        threshold — SPEC §4's literal trigger, counted over every comment the
-       section holds in the term whatever its moderation state and whether or not
-       it has already gone out;
-    b. the **distinct people** behind the unreleased held comments reach the
-       threshold;
-    c. those comments span at least `WEEKS_A_RELEASE_MUST_SPAN` distinct
-       closed weeks — weeks, not stream-weeks.
+       section holds in that stream in the term whatever its moderation state and
+       whether or not it has already gone out;
+    b. the **distinct people** behind that stream's unreleased held comments
+       reach the threshold;
+    c. those comments span at least `WEEKS_A_RELEASE_MUST_SPAN` distinct closed
+       weeks.
 
-    **Leg (c) is load-bearing since E5.1-01** (ADR 0182). While holding was decided
-    per week, a held set inside one week had fewer than the threshold of people and
-    leg (b) refused everything leg (c) did. Held per stream, one week can supply two
-    held streams with up to twice `threshold - 1` distinct authors, so leg (b) can
-    open on a single week and only leg (c) refuses the one-week batch the report's
-    week-to-week delta would date (ADR 0153). Leg (b) still subsumes leg (a). **When any leg
-    fails nothing is cut**, which is the safe direction: a held comment still feeds
-    the summary and is released later, and a released one cannot be un-shown.
+    **Per stream, because each released card carries its stream** and each week's
+    report says which of its streams were held. Pooled across streams, a batch
+    could carry one instructor comment from the only week whose instructor stream
+    was held, beside four course authors, and the card's stream chip would pin it
+    to that week's lone commenter (ADR 0182). Evaluated per stream, each stream's
+    slice of a release stands on at least a threshold's worth of its own authors
+    and at least two weeks of its own. Leg (b) subsumes the other two again — a
+    stream's held set inside one week has fewer than the threshold of authors by
+    definition — and all three are written out anyway, as ADR 0152 argues. **When
+    any leg fails for a stream, that stream stays held**, which is the safe
+    direction: a held comment still feeds the summary and is released later, and a
+    released one cannot be un-shown.
 
-    **One batch per crossing, and all of the held set in it.** ADR 0146 puts the
-    only time in the design on the batch's `cut_at`, so a release split across
-    several batches gives its comments several release times, and the difference
-    between two of them is the per-comment timing §4 batches the release to
-    remove.
+    **At most one batch per section and term per run, holding the due streams'
+    held comments and no others.** ADR 0146 puts the only time in the design on
+    the batch's `cut_at`, so a release split across several batches gives its
+    comments several release times, and the difference between two of them is the
+    per-comment timing §4 batches the release to remove. A stream whose legs did
+    not open stays out of the batch and waits for a later Monday.
 
     **One transaction per section and term, committed here.** A section's batch
     and its whole membership land together or not at all, and a walk that dies on
@@ -519,15 +526,23 @@ def cut_due_release_batches(session: Session) -> int:
     now = clock.now(session, settings=settings)
 
     held = _held_comments(threshold=threshold, now=now)
-    due = _sections_whose_release_is_due(session, held, threshold=threshold)
-    answers = _held_answers_by_section_and_term(session, held)
+    due = _streams_whose_release_is_due(session, held, threshold=threshold)
+    answers = _held_answers_by_section_term_and_stream(session, held)
+
+    # At most one batch per `(section, term)` per run, holding the held comments of
+    # exactly the streams whose three legs all opened. A stream whose legs did not
+    # open stays held, even when its sibling is released: pooling the two would let
+    # one stream's authors open the gate for the other's comments (ADR 0182).
+    due_streams: dict[tuple[UUID, UUID], list[str]] = {}
+    for section_id, term_id, stream in due:
+        due_streams.setdefault((section_id, term_id), []).append(stream)
 
     cut = 0
     # Sorted, so two runs over the same data visit the sections in the same order
     # and a failure part-way through a walk is reproducible. Nothing about the
     # order reaches a caller — this is which section is released first, not which
     # comment is shown first, which is `_shuffled`'s.
-    for key in sorted(due):
+    for key in sorted(due_streams):
         section_id, term_id = key
         batch_id = session.execute(
             insert(ReleaseBatch)
@@ -536,7 +551,11 @@ def cut_due_release_batches(session: Session) -> int:
         ).scalar_one()
         session.execute(
             insert(ReleaseBatchMember),
-            [{"batch_id": batch_id, "answer_id": answer_id} for answer_id in answers[key]],
+            [
+                {"batch_id": batch_id, "answer_id": answer_id}
+                for stream in sorted(due_streams[key])
+                for answer_id in answers[(section_id, term_id, stream)]
+            ],
         )
         # The batch and its whole membership, together. ADR 0146 puts the only
         # release time on the batch row, so a membership committed without its
@@ -665,9 +684,9 @@ def _shuffled(rows: Sequence[Row[tuple[str, str, str]]]) -> tuple[ReportComment,
     return tuple(comments)
 
 
-def _comment_volume_by_section_and_term(
+def _comment_volume_by_section_term_and_stream(
     session: Session,
-) -> dict[tuple[UUID, UUID], int]:
+) -> dict[tuple[UUID, UUID, str], int]:
     """How many comments each section holds in each term — SPEC §4's cumulative volume.
 
     **Every comment answer carrying text, every week, every moderation state.**
@@ -686,12 +705,16 @@ def _comment_volume_by_section_and_term(
         select(
             COMMENT_VIEW.c.section_id,
             Week.term_id,
+            COMMENT_VIEW.c.stream,
             func.count().label("volume"),
         )
         .join_from(COMMENT_VIEW, Week, Week.id == COMMENT_VIEW.c.week_id)
-        .group_by(COMMENT_VIEW.c.section_id, Week.term_id)
+        .group_by(COMMENT_VIEW.c.section_id, Week.term_id, COMMENT_VIEW.c.stream)
     )
-    return {(row.section_id, row.term_id): row.volume for row in session.execute(counted).all()}
+    return {
+        (row.section_id, row.term_id, row.stream): row.volume
+        for row in session.execute(counted).all()
+    }
 
 
 def _in_no_release_batch(answer_id: SQLColumnExpression[Any]) -> ColumnElement[bool]:
@@ -751,8 +774,9 @@ def _held_comments(*, threshold: int, now: datetime) -> Subquery:
     (counted by `_commenters_by_stream_week`, the count `stream_is_suppressed`
     reads), its window has closed, and it is in no batch. The
     predicate is written once, as a subquery, and `cut_due_release_batches` selects
-    from it twice: `_sections_whose_release_is_due` counts it to decide which
-    `(section, term)` the gate opens for, and `_held_answers_by_section_and_term`
+    from it twice: `_streams_whose_release_is_due` counts it to decide which
+    `(section, term, stream)` the gate opens for, and
+    `_held_answers_by_section_term_and_stream`
     reads the answer keys a membership row is written from. One definition, so the
     gate and the batch cannot be about different sets of comments — two copies of
     this predicate that had drifted would gate on one set and release another.
@@ -784,7 +808,7 @@ def _held_comments(*, threshold: int, now: datetime) -> Subquery:
 
     A row carries the comment, the section and term it belongs to, the week it was
     submitted in and **who wrote it**. The last two are what the gate counts and
-    what nothing here ever returns: `_sections_whose_release_is_due` reduces them to
+    what nothing here ever returns: `_streams_whose_release_is_due` reduces them to
     two integers, the membership read selects the answer key alone, and no
     `ReportComment` has ever carried either. The walk to a person is
     `answer.response_id` then `response.user_id`, which is a walk the product may
@@ -796,6 +820,7 @@ def _held_comments(*, threshold: int, now: datetime) -> Subquery:
         select(
             COMMENT_VIEW.c.section_id.label("section_id"),
             Week.term_id.label("term_id"),
+            COMMENT_VIEW.c.stream.label("stream"),
             COMMENT_VIEW.c.answer_id.label("answer_id"),
             COMMENT_VIEW.c.week_id.label("week_id"),
             Response.user_id.label("respondent"),
@@ -835,74 +860,74 @@ def _held_comments(*, threshold: int, now: datetime) -> Subquery:
     )
 
 
-def _sections_whose_release_is_due(
+def _streams_whose_release_is_due(
     session: Session, held: Subquery, *, threshold: int
-) -> set[tuple[UUID, UUID]]:
-    """The `(section, term)` pairs every leg of the release gate opens for.
+) -> set[tuple[UUID, UUID, str]]:
+    """The `(section, term, stream)` triples every leg of the release gate opens for.
 
-    **Three legs, all of which must hold, and nothing is cut when any fails.**
-    Held is the safe direction: an under-threshold comment that stays held still
-    feeds the summary and is released later, while a comment released early cannot
-    be un-shown (ADR 0146 — nothing in this schema deletes a membership row). ADR
-    0152 argues each leg; it recorded that leg (b) subsumed the other two, and
-    ADR 0182 corrects that for leg (c), which per-stream holding made the only
-    refusal of a one-week batch whose two held streams carry enough authors.
+    **Three legs, all of which must hold for a stream, and that stream stays held
+    when any fails.** Held is the safe direction: an under-threshold comment that
+    stays held still feeds the summary and is released later, while a comment
+    released early cannot be un-shown (ADR 0146 — nothing in this schema deletes a
+    membership row). ADR 0152 argues each leg; ADR 0182 evaluates all three per
+    stream, because a released card carries its stream and a pooled gate let one
+    stream's authors open the gate for the other's comments.
 
     Leg (b) is the one the security round added. §4's threshold is a number of
     people — distinct commenters in a stream — while its release trigger names
-    "comment volume", and §3.2 gives every response two comment items. So a volume that reaches the threshold can come from three
-    students, or from one across three quiet weeks, and a release gated on the
-    volume alone goes out over an author set far below what the threshold was
-    chosen to protect.
+    "comment volume", and §3.2 gives every response two comment items. So a volume
+    that reaches the threshold can come from three students, or from one across
+    three quiet weeks, and a release gated on the volume alone goes out over an
+    author set far below what the threshold was chosen to protect.
     """
-    volumes = _comment_volume_by_section_and_term(session)
+    volumes = _comment_volume_by_section_term_and_stream(session)
     counted = select(
         held.c.section_id,
         held.c.term_id,
+        held.c.stream,
         # Distinct **people**, not distinct responses and not a row count: one
         # student answering both of §3.2's comment questions is one person twice
         # over, and the two numbers come apart in exactly the world this leg
         # exists for.
         func.count(distinct(held.c.respondent)).label("respondents"),
         func.count(distinct(held.c.week_id)).label("weeks"),
-    ).group_by(held.c.section_id, held.c.term_id)
+    ).group_by(held.c.section_id, held.c.term_id, held.c.stream)
 
-    due: set[tuple[UUID, UUID]] = set()
+    due: set[tuple[UUID, UUID, str]] = set()
     for row in session.execute(counted).all():
-        key = (row.section_id, row.term_id)
-        # (a) SPEC §4's literal trigger: "the section's cumulative comment volume
-        #     for the term crosses the threshold".
+        key = (row.section_id, row.term_id, row.stream)
+        # (a) SPEC §4's literal trigger, "the section's cumulative comment volume
+        #     for the term crosses the threshold", counted in this stream.
         volume_has_crossed = volumes.get(key, 0) >= threshold
-        # (b) The people behind the comments this release would carry. §4's
-        #     threshold counts people, so the batch has to stand between a
-        #     comment and at least that many candidate authors.
+        # (b) The people behind this stream's comments this release would carry.
+        #     §4's threshold counts people, and a released card names its stream,
+        #     so the stream's slice has to stand between a comment and at least
+        #     that many candidate authors.
         enough_respondents = row.respondents >= threshold
         # (c) The weeks it would draw from. A batch confined to one week is the
         #     week attribution ADR 0153 removed, arriving through the report's own
         #     week-to-week delta: the release that was not there last Monday came
-        #     from the week that closed in between. Distinct `week_id`s, never
-        #     stream-weeks, and load-bearing since holding became per stream: one
-        #     week's two held streams can open leg (b) alone (ADR 0182).
+        #     from the week that closed in between. Counted in this stream.
         spans_enough_weeks = row.weeks >= WEEKS_A_RELEASE_MUST_SPAN
         if volume_has_crossed and enough_respondents and spans_enough_weeks:
             due.add(key)
     return due
 
 
-def _held_answers_by_section_and_term(
+def _held_answers_by_section_term_and_stream(
     session: Session, held: Subquery
-) -> dict[tuple[UUID, UUID], list[UUID]]:
-    """Which comments each `(section, term)` is holding, by key and nothing else.
+) -> dict[tuple[UUID, UUID, str], list[UUID]]:
+    """Which comments each `(section, term, stream)` is holding, by key and nothing else.
 
-    Selected from the same `held` subquery `_sections_whose_release_is_due` counted,
+    Selected from the same `held` subquery `_streams_whose_release_is_due` counted,
     so the batch is built from the one definition the gate was read from — subject
     to the two-statement snapshot caveat and its backstops, which `_held_comments`
     states in full rather than repeating here. The respondent column is deliberately
     not selected: this is the list a membership row is written from, and a
     membership row carries a batch and a comment and nothing else (ADR 0146).
     """
-    asked = select(held.c.section_id, held.c.term_id, held.c.answer_id)
-    found: dict[tuple[UUID, UUID], list[UUID]] = {}
+    asked = select(held.c.section_id, held.c.term_id, held.c.stream, held.c.answer_id)
+    found: dict[tuple[UUID, UUID, str], list[UUID]] = {}
     for row in session.execute(asked).all():
-        found.setdefault((row.section_id, row.term_id), []).append(row.answer_id)
+        found.setdefault((row.section_id, row.term_id, row.stream), []).append(row.answer_id)
     return found
