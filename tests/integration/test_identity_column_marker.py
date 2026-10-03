@@ -2905,6 +2905,20 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
         "A role token, the scope keys the role is held over, and two booleans about which doors "
         "it opens; the person is a foreign key.",
     ),
+    # E5.1-02's, written before the table exists as E2-05's, E3-02's, E4-02's and
+    # E5-01's were, and for the same reason: `person_id` puts it one hop from
+    # `person`, so the fixed-point walk reaches it the moment that ticket's
+    # migration runs, and none of its columns carries a name any identity
+    # vocabulary knows (`docs/MISTAKES.md` entry 22).
+    "ended_teaching_grant": CarriesNothing(
+        ("assignment_id", "ended_on", "id", "nrps_call_id", "person_id", "role", "section_id"),
+        "One ended teaching grant, as `role_assignment` held it the moment it was deleted: the "
+        "assignment's own id, the person and the section as foreign keys, the role token, the day "
+        "it ended and the roster call that ended it. Nothing about the person beyond the key, which "
+        "is the argument the `role_assignment` entry above makes about the row it records. "
+        "`pulse_app` holds no privilege on the table at all; the only writer is the ending "
+        "definer, which may insert and nothing else (E5.1-02, ADR 0183).",
+    ),
     # E4-02's two, written before the tables exist as E2-05's and E3-02's were.
     # Both reference `answer`, which `answer.response_id` and `response.user_id`
     # put two hops from `user`, so the fixed-point walk reaches them the moment

@@ -21,11 +21,16 @@ order. Nothing was dropped silently.
 the design mockup needs (E5-02, closed in the source file on 2026-09-13).
 That was the only E5-owned entry.
 
+**Closed after E5, by E5.1-02:** the roster sync's unbounded
+token-acquisition dial, which this list carried until then (closed in the
+source file, `docs/tickets/e4/carried-from-e3.md`, on 2026-10-03). The
+rehoming of the pinned-resolution adapter and Link parser is a separate entry
+and stays below.
+
 **Carried through unchanged** — the source entry's owner and done-when
 govern, and nothing about them moved in E5. From `carried-from-e4.md`'s own
-pass-through list: the roster sync's unbounded token-acquisition dial; the
-`azp`/multi-valued-`aud` launch handling and the per-launch JWKS fetch (both
-re-affirmed untouched by the E5 boundary's `lti-oidc` review); the
+pass-through list: the `azp`/multi-valued-`aud` launch handling and the
+per-launch JWKS fetch (both re-affirmed untouched by the E5 boundary's `lti-oidc` review); the
 rewound-clock family; the flaky fail-closed framing test; `post_score`
 returning nothing; provisioning's docstring-only separation; the rehoming of
 the pinned-resolution adapter and Link parser; the clock routes' missing

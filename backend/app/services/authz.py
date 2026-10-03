@@ -150,6 +150,7 @@ __all__ = [
     "scoped_reader",
     "taught_section_ids",
     "teaching_instructor_assigned",
+    "teaching_instructor_grants",
     "teaching_instructors_of",
     "transitive_purview",
 ]
@@ -433,9 +434,9 @@ _HOLDS_A_LEADERSHIP_ASSIGNMENT = text(
 # in the caller because `public.assignment_scope` is this module's view to read:
 # E0-41 fails any module under `backend/app/` outside this one that runs SQL
 # naming it, on the ground that a second reader is a second place the scoping rule
-# can be got wrong. The caller is `app.services.roster_sync`, which holds `INSERT`
-# on `role_assignment` and deliberately no `SELECT` — so this is also the only way
-# it can ask.
+# can be got wrong. The caller is `app.services.roster_sync`, which holds no
+# privilege on `role_assignment` at all (it adds and ends the grant through two
+# definers, ADR 0096 and ADR 0183) — so this is also the only way it can ask.
 _HOLDS_THE_TEACHING_INSTRUCTOR_GRANT = text(
     "SELECT EXISTS ("
     " SELECT 1 FROM public.assignment_scope AS granted"
@@ -469,6 +470,18 @@ _TEACHING_INSTRUCTOR_SECTIONS = text(
 # section's report, and each knows the sections they teach.
 _TEACHING_INSTRUCTORS_OF_A_SECTION = text(
     "SELECT DISTINCT granted.person_id"
+    " FROM public.assignment_scope AS granted"
+    " WHERE granted.role = CAST(:role AS public.assignment_role)"
+    " AND granted.section_id = :section_id"
+)
+
+# Every teaching-instructor grant over one section, by assignment — E5.1-02. The
+# same two conditions as `_TEACHING_INSTRUCTORS_OF_A_SECTION` above, answering the
+# assignment id beside the person, because the roster sync ends a grant by its id
+# (`public.end_teaching_instructor`). No `DISTINCT`: two identical grants are two
+# rows, and each is ended on its own.
+_TEACHING_INSTRUCTOR_GRANTS_OF_A_SECTION = text(
+    "SELECT granted.assignment_id, granted.person_id"
     " FROM public.assignment_scope AS granted"
     " WHERE granted.role = CAST(:role AS public.assignment_role)"
     " AND granted.section_id = :section_id"
@@ -944,9 +957,9 @@ def teaching_instructor_assigned(session: Session, *, person_id: UUID, section_i
     **It lives here because the view does.** E0-41's rule is that
     `public.assignment_scope` is read through this module and nowhere else, and
     `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` enforces it.
-    The sync also holds `INSERT` on `role_assignment` and no `SELECT` — E1-11's D8
-    withholds it deliberately — so this view is not merely the tidy way for it to
-    ask, it is the only way.
+    The sync holds no privilege on `role_assignment` at all — it adds and ends the
+    grant through two definers (ADR 0096, ADR 0183) — so this view is not merely
+    the tidy way for it to ask, it is the only way.
 
     **Not an authorization decision**, and the difference matters for how it fails.
     `guard_write` is what decides whether the sync may write the row at all; this
@@ -1036,16 +1049,45 @@ def teaching_instructors_of(session: Session, *, section_id: UUID) -> set[UUID]:
     )
 
 
+def teaching_instructor_grants(session: Session, *, section_id: UUID) -> dict[UUID, UUID]:
+    """Every `INSTRUCTOR` grant over this section, as `{assignment id: person id}`. (E5.1-02)
+
+    Asked by the roster sync after a complete walk, to find the grants the roster
+    no longer supports: each grant whose person the walk did not list as a
+    teaching member is ended through `public.end_teaching_instructor`, which takes
+    the assignment's id. `teaching_instructors_of` above answers the people alone
+    and cannot say which row to end.
+
+    **It lives here because the view does** — E0-41's rule that
+    `public.assignment_scope` is read through this module and nowhere else. The
+    sync holds no `SELECT` on `role_assignment`, so this is the only way it can
+    ask.
+
+    **Not an authorization decision.** It opens nothing. What it feeds is a
+    narrowing: a grant missing from this answer is a grant the sync leaves in
+    place, and the definer refuses any row that is not a section-scoped
+    `INSTRUCTOR` whatever this answers.
+    """
+    return {
+        row.assignment_id: row.person_id
+        for row in session.execute(
+            _TEACHING_INSTRUCTOR_GRANTS_OF_A_SECTION,
+            {"role": LMS_OWNED_ASSIGNMENT_ROLE.value, "section_id": section_id},
+        )
+    }
+
+
 def section_scoped_assignees(session: Session, *, section_id: UUID) -> set[UUID]:
     """The people holding an assignment scoped to this section — its staff (EE-M1).
 
     Asked by SPEC §3.4's participation sweep before it delivers a score. A roster
-    container carries everybody the platform lists, instructors included, and the
-    sync writes an `enrollment` row for each — so without this the sweep posts a
-    participation percentage into the gradebook column of the person doing the
-    grading, computed from the weeks they did not fill in their own survey. §3.4
-    makes the score a student's: "completed items ÷ total items across the
-    student's elapsed weeks".
+    container carries everybody the platform lists, instructors included. Until
+    E5.1-02 the sync wrote an `enrollment` row for each of them; it now writes none
+    for a member listed as Instructor and closes an open one, but a row first seen
+    and closed on the same day still covers that day (ADR 0183). Without this the sweep would post a participation
+    percentage into the gradebook column of the person doing the grading, computed
+    from the weeks they did not fill in their own survey. §3.4 makes the score a
+    student's: "completed items ÷ total items across the student's elapsed weeks".
 
     **It answers people, not members.** The caller holds `user` ids and this
     answers `person` ids, because those are two different keys for two different
