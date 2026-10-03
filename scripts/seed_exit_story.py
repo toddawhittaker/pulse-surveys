@@ -95,14 +95,15 @@ keys — and loud where it cannot be:
 rather than left to be discovered.** §3.2 makes the instructor comment required
 when the instructor rating is 2 or lower, and the plan's week 1 instructor mean is
 2.0 over eight responses — which is unreachable with integer ratings unless several
-of them are 2 or lower. The plan puts one comment per stream in that week, so some
-of its responses carry a low rating and no comment: rows the real submit path
-(`app.services.submissions`) would have refused. Nothing E4 reads asks that
-question — the report's distributions, rates, workload and comments do not — and
-the alternative was either abandoning the fixed weekly means the spec asserts, or
-writing eight instructor comments into week 1, which would make that week's comment
-count equal its response count and quietly weaken the spec's own assertion that a
-summary states responses rather than comments.
+of them are 2 or lower. Six of week 1's eight instructor ratings are 2 or lower and
+the plan puts five comments per stream in that week, so one response carries a low
+rating and no comment: a row the real submit path (`app.services.submissions`)
+would have refused. Nothing E4 reads asks that question — the report's
+distributions, rates, workload and comments do not — and the alternative was
+either abandoning the fixed weekly means the spec asserts, or writing eight
+instructor comments into week 1, which would make that week's comment count equal
+its response count and quietly weaken the spec's own assertion that a summary
+states responses rather than comments.
 """
 
 import sys
@@ -220,9 +221,10 @@ HELD_IN_WEEK_FOUR = (
     "Exit story golf: two slides disagreed about which deadline actually applies.",
 )
 
-# One comment per stream in each of the four weeks at or above the threshold. Weeks
-# 1, 2 and 5's sentences are this file's own — no test asserts them — and week 6's
-# two are the spec's literals.
+# The lead comment of each stream in the four shown weeks. Weeks 1, 2 and 5's
+# sentences are this file's own — no test asserts them — and week 6's two are the
+# spec's literals. Each is written by the week's first respondent, and
+# `five_commenters` below adds four more voices behind it.
 WEEK_ONE_INSTRUCTOR_COMMENT = (
     "Exit story week one instructor: the lecture pace left me behind from the start."
 )
@@ -253,6 +255,55 @@ WEEK_SIX_COURSE_COMMENT = (
 WEEK_FIVE_REFUSED_COMMENT = (
     "Exit story week five course: the assessment weighting still is not clear to me."
 )
+
+# **Five distinct commenters in each stream of every shown week, since E5.1-01.**
+# SPEC §4's threshold counts the distinct students who commented in one stream
+# that week, so a shown week of eight respondents with one comment per stream
+# would be a quiet week in both streams. Respondents 1 to 4 of each shown week add
+# one plain sentence per stream, so each stream has five commenters — the
+# threshold exactly — and respondents 5 to 7 stay silent. The silent three are
+# load-bearing: the spec tells a summary's response count (eight) from a stream's
+# comment count (five) only while the two differ. The quiet weeks are untouched:
+# their instructor streams stay empty and their course streams keep the seven held
+# sentences, so the release is still seven comments from seven people over two
+# weeks.
+#
+# The sentences say nothing about anybody and nothing a reader could place: they
+# are filler with the shape of feedback. Each starts with its voice and its week,
+# so it is distinct from every other inside its first forty characters.
+EXTRA_INSTRUCTOR_VOICES = (
+    "the explanations in class were easy to follow.",
+    "the pace felt about right for the material.",
+    "the worked examples made the topic click for me.",
+    "replies to questions were helpful and clear.",
+)
+EXTRA_COURSE_VOICES = (
+    "the reading was manageable beside my other work.",
+    "the lab instructions were clear enough to follow.",
+    "the assignment matched what we had practised.",
+    "the module pages were easy to find my way around.",
+)
+EXTRA_VOICES = {"instructor": EXTRA_INSTRUCTOR_VOICES, "course": EXTRA_COURSE_VOICES}
+VOICE_WORDS = ("two", "three", "four", "five")
+WEEK_WORDS = {1: "one", 2: "two", 5: "five", 6: "six"}
+
+
+def five_commenters(course_week: int, stream: str, lead: str) -> dict[int, str]:
+    """One shown week's comments in one stream: the lead at position 0 and four more.
+
+    Keyed by respondent position, as `StoryWeek` keys them, so positions 0 to 4
+    each write one comment in this stream and positions 5 to 7 write none.
+    """
+    extras = EXTRA_VOICES[stream]
+    week = WEEK_WORDS[course_week]
+    return {
+        0: lead,
+        **{
+            position: f"Exit story voice {voice} of week {week}, {stream}: {tail}"
+            for position, (voice, tail) in enumerate(zip(VOICE_WORDS, extras, strict=True), 1)
+        },
+    }
+
 
 # What a planted verdict says produced it. Neither half is a lie and neither half is
 # ADR 0054's floor pair, which `app.services.validity.reclassify_floored_comments`
@@ -316,8 +367,8 @@ STORY: tuple[StoryWeek, ...] = (
         instructor_ratings=(1, 1, 2, 2, 2, 2, 3, 3),
         course_ratings=(5, 5, 5, 5, 4, 4, 4, 4),
         workload_hours=("4", "5", "6", "7", "8", "9", "10", "18"),
-        instructor_comments={0: WEEK_ONE_INSTRUCTOR_COMMENT},
-        course_comments={0: WEEK_ONE_COURSE_COMMENT},
+        instructor_comments=five_commenters(1, "instructor", WEEK_ONE_INSTRUCTOR_COMMENT),
+        course_comments=five_commenters(1, "course", WEEK_ONE_COURSE_COMMENT),
     ),
     StoryWeek(
         course_week=2,
@@ -325,8 +376,8 @@ STORY: tuple[StoryWeek, ...] = (
         instructor_ratings=(1, 2, 2, 2, 3, 3, 3, 4),
         course_ratings=(5, 5, 4, 4, 4, 4, 4, 4),
         workload_hours=("5", "6", "7", "8", "9", "10", "11", "19"),
-        instructor_comments={0: WEEK_TWO_INSTRUCTOR_COMMENT},
-        course_comments={0: WEEK_TWO_COURSE_COMMENT},
+        instructor_comments=five_commenters(2, "instructor", WEEK_TWO_INSTRUCTOR_COMMENT),
+        course_comments=five_commenters(2, "course", WEEK_TWO_COURSE_COMMENT),
     ),
     StoryWeek(
         course_week=3,
@@ -353,11 +404,11 @@ STORY: tuple[StoryWeek, ...] = (
         instructor_ratings=(3, 4, 4, 4, 4, 4, 4, 5),
         course_ratings=(1, 2, 2, 3, 3, 3, 3, 3),
         workload_hours=("5", "6", "7", "8", "9", "10", "11", "20"),
-        # The first respondent carries both of this week's comments, and the course
-        # one is the refused sentence — so exactly one of the week's eight responses
-        # is invalid and the validity rate is 7 / 8.
-        instructor_comments={0: WEEK_FIVE_INSTRUCTOR_COMMENT},
-        course_comments={0: WEEK_FIVE_REFUSED_COMMENT},
+        # The first respondent carries both lead comments, and the course one is the
+        # refused sentence — so exactly one of the week's eight responses is invalid
+        # and the validity rate is 7 / 8. The four extra voices are not refused.
+        instructor_comments=five_commenters(5, "instructor", WEEK_FIVE_INSTRUCTOR_COMMENT),
+        course_comments=five_commenters(5, "course", WEEK_FIVE_REFUSED_COMMENT),
     ),
     StoryWeek(
         course_week=6,
@@ -365,8 +416,8 @@ STORY: tuple[StoryWeek, ...] = (
         instructor_ratings=(4, 4, 4, 4, 5, 5, 5, 5),
         course_ratings=(1, 2, 2, 2, 2, 2, 2, 3),
         workload_hours=("6", "7", "8", "9", "10", "11", "12", "20"),
-        instructor_comments={0: WEEK_SIX_INSTRUCTOR_COMMENT},
-        course_comments={0: WEEK_SIX_COURSE_COMMENT},
+        instructor_comments=five_commenters(6, "instructor", WEEK_SIX_INSTRUCTOR_COMMENT),
+        course_comments=five_commenters(6, "course", WEEK_SIX_COURSE_COMMENT),
     ),
 )
 
