@@ -5,19 +5,27 @@ student's words. SPEC §14.3 marks it for line-by-line human review for that
 reason, and the whole of §4's comment paragraph is here rather than spread over
 a query, a serializer and a template:
 
-> **Small-N handling (n < 5 responses in a reporting week):** instructors see
-> rating distributions and the AI summary, but **no raw comments**. Comments
-> from under-threshold weeks are not discarded — they feed the summary, and they
-> surface as raw text once the section's cumulative comment volume for the term
-> crosses the threshold, batched so that timing cannot identify an author.
-> Threshold value is configurable (default 5).
+> **Small-N handling (fewer than the threshold's number of distinct students
+> commenting in a stream in a reporting week):** instructors see rating
+> distributions and the AI summary, but **no raw comments** in that stream. The
+> suppression is per stream: in one week the instructor stream can be held while
+> the course stream is shown. Comments from under-threshold weeks are not
+> discarded — they feed the summary, and they surface as raw text once the
+> section's cumulative comment volume for the term crosses the threshold, batched
+> so that timing cannot identify an author. Held comments surface only in those
+> release batches, with no week named, and a comment released in a batch is never
+> shown again under its own week. Threshold value is configurable (default 5).
 >
 > Comment display order is randomized; timestamps are never shown with comments.
 
-Three callables and one payload:
+Four callables and one payload:
 
-* `visible_comments` — the asked week's comments when that week's response count
-  reaches the configured threshold, and the empty tuple below it;
+* `stream_is_suppressed` — whether one stream of one section-week is below the
+  threshold of distinct commenters; the one definition every reader of the rule
+  calls;
+* `visible_comments` — the asked stream's comments for the asked week when that
+  stream is not suppressed, never a comment that is in a release batch, and the
+  empty tuple when it is suppressed;
 * `released_comments` — every comment a release batch has surfaced for one
   section, term and stream, with no week attribution anywhere;
 * `cut_due_release_batches` — the weekly pass that evaluates the release gate and
@@ -31,7 +39,7 @@ Three callables and one payload:
 SPEC §4's literal trigger is "the section's cumulative comment volume for the term
 crosses the threshold", and E4-04's security round found that counting only that
 under-protects §4's own goal in two ways. A volume is denominated in comment
-*answers* while the threshold is a number of *responses*, and §3.2 gives every
+*answers* while the threshold is a number of *people*, and §3.2 gives every
 response two comment items — so a volume that reaches the threshold can come from
 three students, or from one across three quiet weeks. And a volume condition
 stays true once crossed, so every Monday afterwards the same section passes the
@@ -41,11 +49,12 @@ arriving through the report's own delta.
 
 So a batch is cut only when the volume reaches the threshold **and** the distinct
 people behind the unreleased held comments reach it **and** those comments span at
-least `WEEKS_A_RELEASE_MUST_SPAN` under-threshold closed weeks. When any leg fails
-nothing is cut. ADR 0152 carries the argument, records that the respondent leg
-subsumes the other two, and states plainly that this is a reading of §4 rather
-than §4's own words — the spec question is open and the owner's to settle, and
-this build holds the conservative side meanwhile.
+least `WEEKS_A_RELEASE_MUST_SPAN` distinct closed weeks. When any leg fails
+nothing is cut. ADR 0152 carries the argument and states plainly that this is a
+reading of §4 rather than §4's own words. It also recorded that the respondent
+leg subsumed the other two; ADR 0182 corrects that for the weeks leg, which
+holding per stream made load-bearing — one week's two held streams can carry
+enough authors between them, and only the weeks leg refuses that batch.
 
 ## What is deliberately not here
 
@@ -82,16 +91,28 @@ caller.
 
 ## The three rules this module reads, and where each is decided
 
-**The threshold is a count of responses, and it is the institution's number.** It
-is what all three legs of the release gate compare against as well. `n_threshold`
-below is the one place `Settings.n_threshold_default` is read for §4's rule — by
-this module's gate, by the release cut, and by E4-07's report, which *prints* the
-number beside the comments this gate hid. It is read inside each call rather than
-at import, so an institution that changes it changes the rule rather than needing
-a restart — SPEC §4 makes the value configuration. The count itself is
-`public.report_response_counts`, E4-03's view, which is `count(*)` of `response`
-rows per section-week. Counting them again here would be a second implementation
-of one number, which is the shape `docs/MISTAKES.md` entry 19 is about.
+**The threshold is a count of people per stream, and it is the institution's
+number.** Since E5.1-01 (ADR 0182) a stream's raw comments for a week are shown
+only when at least the threshold of distinct students commented in that stream
+that week, counting only comments in no release batch. Not responses: in a week
+of six respondents where one wrote about the instructor, a count of responses
+shows that comment, and the per-week completion ledger in the gradebook can name
+its author (`docs/MISTAKES.md` entry 50). The count is
+`_commenters_by_stream_week`, written once; `stream_is_suppressed` reads it for
+the week read, the summary's mode and the report's per-stream notice, and
+`_held_comments` joins it to choose what is held. The threshold is also what all
+three legs of the release gate compare against. `n_threshold` below is the one
+place `Settings.n_threshold_default` is read for §4's rule — by this module's
+gate, by the release cut, and by E4-07's report, which *prints* the number beside
+the comments this gate hid. It is read inside each call rather than at import, so
+an institution that changes it changes the rule rather than needing a restart —
+SPEC §4 makes the value configuration.
+
+**A released comment is never shown under its week again.** The week read
+anti-joins `release_batch_member`, and the commenter count leaves released
+comments out, so lowering the threshold or one late comment cannot bring a
+released comment back beside the batch that already showed it with no week
+(ADR 0182, ADR 0153).
 
 **The moderation status is the latest row, or published.** ADR 0145 makes the
 record append-only with the latest row governing and the initial state the
@@ -129,21 +150,23 @@ asserts in both directions. E4-07 reads E4-03's three views and meets the same
 question; if the project wants statement text here, the repair that file
 prescribes is a pinned location exemption, which is an edit inside `tests/`.
 
-**The two views are declared as `table()`/`column()` and not as mapped classes**,
+**The view is declared as `table()`/`column()` and not as a mapped class**,
 because SPEC §13 ships identity-separated views as migrations and never as an
-ORM convention. The declarations are also a statement worth reading on their own:
-between them this module can name a section, a week, a stream, an answer key, a
-comment's text and a response count, and no instant a comment was written at.
+ORM convention. The declaration is also a statement worth reading on its own:
+this module can name a section, a week, a stream, an answer key and a comment's
+text, and no instant a comment was written at.
 
-**One place reaches a person, and it counts them rather than naming them.**
-`_held_comments` walks `answer.response_id` and then `response.user_id`, because
-the release gate's second leg is a number of distinct people and a gate that
-could not reach them could not enforce §4's threshold. What that column is used
-for is a `count(distinct …)` inside one query and a grouping inside one
-subquery; it is not selected by the membership read, it is not returned by
-anything, and no `ReportComment` has ever carried it. That is the whole of the
-identity surface in this file, and it is stated here so a reviewer can check the
-claim against three functions rather than against the module.
+**Two places reach a person, and both count them rather than naming them.**
+`_commenters_by_stream_week` and `_held_comments` walk `answer.response_id` and
+then `response.user_id`, because §4's threshold and the release gate's second leg
+are numbers of distinct people, and a gate that could not reach them could not
+enforce either. In the first the column is inside `count(distinct …)` and is
+grouped away; in the second it is a grouping inside one subquery that
+`_sections_whose_release_is_due` reduces to an integer. It is not selected by the
+membership read, it is not returned by anything, and no `ReportComment` has ever
+carried it. That is the whole of the identity surface in this file, and it is
+stated here so a reviewer can check the claim against four functions rather than
+against the module.
 """
 
 import random
