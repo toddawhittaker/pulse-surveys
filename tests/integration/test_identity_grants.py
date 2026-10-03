@@ -328,7 +328,7 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 
 # Every `SECURITY DEFINER` function `pulse_app` may call, by name, and why.
 #
-# **Eight entries, from four tickets, and one inventory rather than four.** E1-12
+# **Nine entries, from five tickets, and one inventory rather than five.** E1-12
 # and E1-11 opened this door in the same epic and from opposite ends — the first so
 # a verified subject reaches its stored identity, the second so a roster member
 # reaches its `user` row — and each ticket's branch wrote the equality over its own
@@ -442,12 +442,26 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 #     **The count moves from six to eight, and that is the argument for it.**
 #     Two entries, one ticket, one ruling and its amendment — which is the
 #     standard the six above were held to.
+#   - `end_teaching_instructor(assignment_id, nrps_call_id, ended_on)` — E5.1-02's,
+#     and the other half of `record_teaching_instructor`. SPEC §2.1 makes the
+#     teaching instructor LMS-owned, so a grant the roster stops listing has to
+#     end, and the read predicates in `authz.py` assume an ended grant's row is
+#     gone. `pulse_app` holds no `DELETE` on `role_assignment` and must not: a
+#     grant cannot bound which role's row is deleted, so a `CARE` assignment —
+#     the row the reveal definers check — would go as readily as a teaching one.
+#     So the deletion moved into a function whose body refuses anything but a
+#     section-scoped `INSTRUCTOR` row, refuses to act without citing a successful
+#     roster call of that same section, and writes the `ended_teaching_grant`
+#     record in the same transaction. It takes two uuids and a date and returns
+#     no identity. Its owner is a NOLOGIN role of its own,
+#     `pulse_grant_end_definer`, so `pulse_instructor_definer` keeps exactly the
+#     insert it had (ADR 0183). The count moves from eight to nine.
 #
 # What is *not* here is the point of the list: the functions of the Care door.
 # `pulse_app` is refused those by name in an `invariant`-marked test below, and a
-# **ninth** entry appearing here is a new door into identity that some later
+# **tenth** entry appearing here is a new door into identity that some later
 # ticket opened without arguing for it. The number moves only in a change that
-# writes the sentence admitting the entry, as each of the eight above did; an
+# writes the sentence admitting the entry, as each of the nine above did; an
 # entry arriving without one is the thing this inventory exists to make
 # impossible.
 #
@@ -464,6 +478,7 @@ SANCTIONED_APPLICATION_EXECUTE = (
     "resolve_subject_for_user",
     "benchmark_set_week",
     "benchmark_set_rating_week",
+    "end_teaching_instructor",
 )
 
 # What the resolve definer may reach at table grain, and the whole of it.
@@ -749,11 +764,21 @@ THE_CARE_DOOR = (RECORD_FUNCTION, REVEAL_FUNCTION, SUBJECT_RESOLVER_FUNCTION)
 # what `pulse_benchmark_definer` may reach — `SELECT` on the tables a cohort
 # figure is computed from, and no column of `user`, `user_identity` or `person`
 # — is owed by that ticket or named in its deferrals.
+#
+# **E5.1-02 adds a fifth, `pulse_grant_end_definer`**, the owner of
+# `end_teaching_instructor`. It holds `SELECT, DELETE` on `role_assignment`,
+# `SELECT (id, section_id, response_code)` on `nrps_call` and `INSERT` on
+# `ended_teaching_grant`, and nothing else; that equality is pinned in
+# `tests/integration/test_the_teaching_grant_ends_only_through_its_definer.py`.
+# It is a new role rather than a widening of `pulse_instructor_definer` because a
+# door that may insert a teaching grant and a door that may delete one are two
+# doors, and one owner holding both would make each the other's blast radius.
 IDENTITY_DEFINER_ROLES = (
     RESOLVE_DEFINER_ROLE,
     "pulse_roster_definer",
     "pulse_instructor_definer",
     "pulse_benchmark_definer",
+    "pulse_grant_end_definer",
 )
 
 # How the two halves are called. The record's third argument is a null case id:
