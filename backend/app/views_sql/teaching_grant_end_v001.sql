@@ -19,6 +19,10 @@
 -- person. A call that is missing, belongs to another section, or did not answer
 -- 2xx is refused. A NULL response code (the call never reached the platform) is
 -- not between 200 and 299, and the test is written so that NULL fails it.
+-- This check keeps the sync's own logic honest; it is not a bound on a hostile
+-- `pulse_app`, which holds `INSERT` on `nrps_call` and could write a call row to
+-- cite. What bounds such a caller is the role and section-scope refusal above,
+-- and the `ended_teaching_grant` row every ending leaves.
 --
 -- **The record is written in the same call as the deletion.** The deleted row's
 -- person, section and role go into `public.ended_teaching_grant` with the day and
