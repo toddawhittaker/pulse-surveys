@@ -69,7 +69,8 @@ branch for each of its tickets. The spec states each epic's scope and exit; it
 no longer lists per-epic ticket breakdowns (SPEC §14.1 says why).
 
 ⚠ marks epics that additionally require line-by-line human review of the
-security-relevant diff.
+security-relevant diff. That review happens at the epic boundary, not per
+ticket, and a ⚠ epic does not make its tickets heavy-lane.
 
 ## Workflow for a unit of work
 
@@ -106,10 +107,9 @@ security-relevant diff.
    gh pr create --base epic/e1-entering-the-app --fill
    ```
 
-5. **Merge only as the table below allows.** An ordinary ticket PR is merged by
-   the merger agent once the merge conditions hold; a ticket on a ⚠ epic or a
-   heavy-lane path waits for the repository owner's written approval. Do not
-   merge because the ticket looks finished to you.
+5. **Merge only as the table below allows.** Every ticket PR is merged by the
+   merger agent once the merge conditions hold, in either lane and on any
+   epic. Do not merge because the ticket looks finished to you.
 
 ## Who may merge what
 
@@ -117,18 +117,23 @@ Merge authority splits by target branch.
 
 | Pull request | Who merges |
 |---|---|
-| ticket branch → epic branch | the merger agent, once the CLAUDE.md merge conditions hold — except on a ⚠ epic or a heavy-lane path, which wait for the owner's written approval |
+| ticket branch → epic branch | the merger agent, once the CLAUDE.md merge conditions hold, in either lane and on any epic |
 | epic branch → `main` | the owner, always, without exception |
 | `process/` branch → `main` | the owner, always |
 
-An agent may never merge an epic branch into `main`. Since 2026-09-22 the
-owner's per-ticket approval is gone for ordinary tickets: a ticket PR merges
-into its epic branch once its CI run is completed, successful, and resolved
-against the PR's final head commit, its security review is recorded in the
-body against that same commit, and nothing is in dispute. The owner's review
-happens at the epic boundary. Tickets on a ⚠ epic, or touching a path named
-in `.claude/heavy-lane-paths.md`, still wait for the owner in writing —
-that is where the line-by-line human review lives.
+An agent may never merge an epic branch into `main`. No ticket PR waits for
+the owner. A ticket PR merges into its epic branch once its CI run is
+completed, successful, and resolved against the PR's final head commit, its
+security review is recorded in the body against that same commit, nothing
+is in dispute, and, for a heavy ticket, the mutation battery result is
+recorded too. The merger reruns a failed job once only when a runner
+failed to download or install packages; a failed test is always real. A
+ticket branch that is behind its epic but has no conflict merges as it is,
+without merging the epic into it first, which saves a CI run. CI runs on
+the epic branch after every merge, and the merger stops if that run is
+red.
+The owner reviews once, at the epic boundary; on a ⚠ epic that review is
+line by line over the security-relevant diff (SPEC §14.2 item 3).
 
 The reasoning: `main` is the branch worth protecting, and an epic landing
 there is the decision that deserves a human every time. A ticket landing on
@@ -246,23 +251,27 @@ request bodies, test fixtures, seed data, or logs.
 ## Two testing lanes
 
 Every ticket names its lane in its header's `**Lane:**` field, assigned when
-the epic's build order is written. A missing field means heavy, any ⚠ on the
-ticket or its epic means heavy, and doubt means heavy. The ticket file is the
-authority — an epic README's table may summarize, but the header decides.
+the epic's build order is written. Heavy is for security code only, and
+should be about one ticket in five. A ticket is heavy when its diff reaches a
+path in `.claude/heavy-lane-paths.md`, when its `**Lane:**` field carries ⚠,
+or when the field is missing. A ⚠ on the epic alone does not make a ticket
+heavy. The ticket file is the authority — an epic README's table may
+summarize, but the header decides.
 
 **Heavy** is the orchestrated tests-first loop, for the surfaces an attacker
 would aim at — the path table at `.claude/heavy-lane-paths.md`. A separate
 test author writes failing tests from the ticket and the spec before any
-implementation exists; the implementer may not modify tests (a hook enforces
+implementation exists; the builder-heavy may not modify tests (a hook enforces
 the wall) and escalates disagreements as dispute files; an independent
 verifier confirms CI's green run on the same commit and runs a scoped
 mutation battery proving each test can actually fail.
 
-**Light** is for everything else — frontend tooling, UI rendering, governed
-copy, plumbing that touches no guarded surface. One `builder` agent writes
-the code and ordinary tests together, and the verifier confirms CI's green
-run and the standing gates once, fresh. No manifest, no mutation battery, no
-separate test author.
+**Light** is for everything else: ordinary routes and services, jobs, the
+frontend, fixtures, scripts, and Docker files. CI files and gate settings
+are process changes, not ticket work. One `builder-light` agent writes
+the code and ordinary tests together. CI's green run on the head commit,
+which the merger checks, is the verification. No verifier pass, no manifest,
+no mutation battery, no separate test author.
 
 What never varies by lane: CI green with nothing skipped or weakened, the
 §4.1 invariant suite, the independent security review on every pull request
@@ -290,7 +299,9 @@ template restates the per-ticket ones as a checklist. At the epic boundary,
 §14.2 item 6 adds the epic-level reviews — exit, invariant coverage, docs/ADR
 completeness, and a threat model on ⚠ epics — that gate the merge to `main`,
 now joined by the per-PR reviewers moved to this boundary — data-model,
-lti-oidc, a11y-copy, and prompt-eval (see ADR 0004).
+lti-oidc, a11y-copy, and prompt-eval (see ADR 0004) — and by `code-reviewer`,
+which reads the whole epic for bugs first and then for needless complexity.
+Each finding becomes a ticket PR that merges like any other.
 
 Testing and security review are not separate epics. They are part of finishing
 each one.

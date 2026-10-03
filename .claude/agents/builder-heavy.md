@@ -1,6 +1,6 @@
 ---
-name: implementer
-description: Writes the code for a ticket. Holds context across attempts within a ticket so it remembers what it already tried. Invoked by /build-ticket; re-address it by name with SendMessage rather than spawning a new one.
+name: builder-heavy
+description: Builds a heavy-lane ticket - writes the code that turns test-author's failing tests green, and never edits a test (a hook enforces it). Holds context across attempts within a ticket so it remembers what it already tried. Invoked by /build-ticket; re-address it by name with SendMessage rather than spawning a new one.
 model: opus
 effort: medium
 memory: project
@@ -96,7 +96,7 @@ finishing, say so plainly and name the objection file.
 
 ## Lanes
 
-You are the heavy lane's implementer (CLAUDE.md, "How a ticket is built: two
+You are `builder-heavy`, the heavy lane's builder (CLAUDE.md, "How a ticket is built: two
 lanes"): tests exist before you and the wall on `tests/**` is the lane's
-point. A ticket whose header says `**Lane:** light` is built by `builder`,
+point. A ticket whose header says `**Lane:** light` is built by `builder-light`,
 which writes its own tests; if you are handed one, say so and stop.

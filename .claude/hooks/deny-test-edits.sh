@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Deny writes to test files.
 #
-# Scoped to the `implementer` agent via its frontmatter. CLAUDE.md, "How a ticket is built":
+# Scoped to the `builder-heavy` agent via its frontmatter. CLAUDE.md, "How a ticket is built":
 # "Never modify, skip, xfail, or delete a test to make it pass. If it believes
 # a test is wrong, it escalates and stops."
 #
-# That is a rule an instruction cannot hold. An implementer one turn from green,
+# That is a rule an instruction cannot hold. A builder-heavy one turn from green,
 # looking at a test it is convinced is wrong, is exactly the situation where a
 # suggestion loses. This is the wall.
 #
@@ -36,11 +36,11 @@ tool=$(jq -r '.tool_name // empty' <<<"$input")
 command_line=$(jq -r '.tool_input.command // empty' <<<"$input")
 
 # A shell command rewrites a test without ever calling Write or Edit. Unlike the
-# test author, the implementer genuinely needs Bash — it runs `make ci` — so the
+# test author, the builder-heavy genuinely needs Bash — it runs `make ci` — so the
 # capability cannot simply be withdrawn, and this is the only guard available.
 #
 # Reading and running tests must keep working: `pytest tests/unit` is the
-# implementer's whole feedback loop. So this matches mutation, not mention — a
+# builder-heavy's whole feedback loop. So this matches mutation, not mention — a
 # redirection into tests/, or a writing command with a test path as its target.
 if [ -n "$command_line" ]; then
   case "$command_line" in
@@ -49,7 +49,7 @@ if [ -n "$command_line" ]; then
     *sed\ -i*tests/*|*perl\ -i*tests/*|*patch*tests/*|\
     *git\ checkout*tests/*|*git\ restore*tests/*|*git\ apply*tests/*)
       cat >&2 <<EOF
-BLOCKED: the implementer may not modify test files, including from a shell.
+BLOCKED: the builder-heavy may not modify test files, including from a shell.
 
   $command_line
 
@@ -72,8 +72,8 @@ repo_root="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || 
 rel="${path#"$repo_root"/}"
 
 # Frontend component tests (`*.test.ts(x)` beside their components under
-# frontend/src/) are the implementer's to write. The test author may not enter
-# frontend/src/ (deny-impl-reads.sh), so blocking the implementer here left
+# frontend/src/) are the builder-heavy's to write. The test author may not enter
+# frontend/src/ (deny-impl-reads.sh), so blocking the builder-heavy here left
 # those files with no permitted editor at all — E4-16's proof test was blocked
 # by exactly this (docs/tickets/e4/.attempts/E4-16.md).
 #
@@ -99,7 +99,7 @@ esac
 case "$rel" in
   tests/*|*/tests/*|*_test.py|*.test.ts|*.test.tsx|*.spec.ts|*.spec.tsx|conftest.py|*/conftest.py)
     cat >&2 <<EOF
-BLOCKED: the implementer may not $tool test files.
+BLOCKED: the builder-heavy may not $tool test files.
 
   $rel
 

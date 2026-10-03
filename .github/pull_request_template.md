@@ -53,9 +53,11 @@ Check what this PR covers. For anything not applicable, write "n/a" and why.
 - [ ] Small-N suppression still holds on every query this PR touches.
 
 <!-- If this PR touches a ⚠ epic (E1, E9, E10, E13) or any confidentiality-
-     critical path, say so here. Those require line-by-line human review of the
-     security-relevant diff — agent review supplements human judgment, it never
-     replaces it. -->
+     critical path, say so here. Those get line-by-line human review of the
+     security-relevant diff at the epic boundary, before the epic merges to
+     main — agent review supplements human judgment, it never replaces it.
+     A heavy-lane ticket also records its mutation battery result and the
+     commit it ran on. -->
 
 ## Security review findings
 

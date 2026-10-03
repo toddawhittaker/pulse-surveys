@@ -128,3 +128,54 @@ the same reason.
   `/review-selftest` exists and why it should run after any reviewer edit.
 - **The hooks depend on `jq`** being present. They fail closed if the payload
   cannot be parsed.
+
+## Amendment, 2026-10-03: narrow heavy lane, merge every ticket
+
+Most tickets had gone heavy, about four in five, because the path table
+covered nearly all backend code and defaulted unlisted backend paths to
+heavy. The heavy loop is now for security code only, aiming at one ticket in
+five: `.claude/heavy-lane-paths.md` names the §4.1 read paths, authz,
+identity, sessions and tokens, LTI, Care, safety, and audit, and any other
+path is light. The per-PR security review still runs on every PR, so an
+unlisted path is reviewed before it merges.
+
+The light lane drops its verifier pass; the merger's check of CI's green run
+on the exact head commit is the independent check. `spec-conformance` runs
+per PR only on heavy tickets. The merger now lands every ticket PR, ⚠ epics
+included, once its conditions hold, and reruns a failed job once when it
+looks like a flaky test. Todd's review, line by line on ⚠ epics, happens at
+the epic boundary (SPEC §14.2 item 3).
+
+The two building agents are renamed for their lanes: `builder` becomes
+`builder-light` and `implementer` becomes `builder-heavy`. Older records
+keep the old names. Three agents join the roster: `architect` designs each epic and assigns
+shared files and migration numbers before the breakdown, `explorer` does
+cheap searches, and `code-reviewer` reviews the whole epic for correctness
+and simplicity at the boundary.
+
+The merger refuses any ticket diff that touches CI files, gate settings,
+or process files (its agent file lists them), because CI runs a PR's own
+copy of the workflow and settings, and a PR that weakens a gate would pass
+the gate it weakened. The cost: a ticket that needs a new dependency gets
+it from a small `process/` PR first. The merger reruns only a runner that
+failed to download packages, never a failed test, because a race fails
+only some of the time and a rerun would hide it.
+
+A ticket branch behind its epic with no conflict merges without first
+merging the epic into it, as in Portikus; the epic ruleset no longer
+requires an up-to-date branch. This saves a CI run per merge. The cost is
+that two PRs that merge cleanly can still break each other; the push run
+on the epic head catches that after the fact, and the merger stops on a
+red epic head.
+
+Known residue: the security review and the battery result that the merger
+checks are records in the PR body, written by the same session that built
+the ticket. Nothing the builder cannot write proves that they ran. Before
+this change that record already governed light tickets; it now governs
+heavy ones too. The owner accepted this in exchange for reviewing only at
+the epic boundary, where the full reviewer battery runs again.
+
+Rejected: keeping the old table and re-laning tickets by hand. It cost a
+test author, a verifier, and a mutation battery on most tickets that were
+not security code. The cost of the change is that a defect in light code is
+first read by a general reviewer at the epic boundary rather than per PR.

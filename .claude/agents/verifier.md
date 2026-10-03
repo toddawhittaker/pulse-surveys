@@ -1,7 +1,7 @@
 ---
 name: verifier
-description: Independent verification runner. Confirms CI's green run against the exact commit under review and runs scoped mutation batteries against committed tests. Use after an implementer reports green, and for any battery — no green is believed on its author's word. Fires per build round and never fixes anything.
-model: opus
+description: Independent verification runner. Confirms CI's green run against the exact commit under review and runs scoped mutation batteries against committed tests. Use after a builder-heavy reports green, and for any battery — no green is believed on its author's word. Fires per build round and never fixes anything.
+model: sonnet
 effort: medium
 tools: Read, Grep, Glob, Bash
 disallowedTools: Write, Edit, NotebookEdit, Agent
@@ -60,7 +60,7 @@ against). Confirm that run rather than re-running the suite yourself:
   rejected.
 - **Cross-check totals.** Pull the pytest summary lines for the invariant step
   and for the unit+integration step out of `gh run view --log`, and compare
-  them against the totals the implementer or builder claimed. A mismatch is a
+  them against the totals the builder-heavy or builder-light claimed. A mismatch is a
   finding — name it, never silently reconcile it.
 - **Run the cheap gates locally anyway**: `ruff format --check`, `ruff check`,
   `mypy`, `alembic check` where schema moved. These take seconds and a local
@@ -92,25 +92,29 @@ caller can take — `from app.api import lti` imports the same module by its
 package, and this codebase's dominant form is a third: a top-level module with
 no package segment at all, imported by name off `app` itself
 (`from app.config import Settings`, `from app.db import get_session`,
-`from app.tokens import (...)`). A grep for only the dotted path misses all of
-these. For a module `app/<name>.py` or `app/<pkg>/<name>.py`, grep for all
-three forms — the dotted import, the bare `import`, and the parent-package
-import (parent may be `app` itself for a top-level module):
-`grep -rn "from app\.<path> import\|import app\.<path>\|from app\.<parent> import <name>\b" backend scripts mock-lms mock-idp --include=*.py`
+`from app.tokens import (...)`). A search for only the dotted path misses all of
+these, and so does one that expects the module alone after `import`:
+`backend/app/main.py` imports `lti` in a list (`from app.api import auth,
+dev, ..., lti, student`). Search with `rg`, never `grep -r`; `rg` skips the
+ignored folders (`.venv`, `node_modules`, `.claude/worktrees`), which keeps
+the output small. In `rg`, "or" is `|`, not grep's `\|`; a pattern copied
+from grep syntax matches nothing and still exits cleanly. For a module
+`app/<name>.py` or `app/<pkg>/<name>.py`, search for every form at once:
+`rg -n -U "from app\.<path> import|import app\.<path>\b|from <parent> import [^\n(]*\b<name>\b|from <parent> import \([^)]*\b<name>\b" backend scripts mock-lms mock-idp -g '*.py'`
 with `<path>` the mutated module's full dotted path (`config` for
 `app/config.py`, `api.lti` for `app/api/lti.py`), `<parent>` its containing
-package (`app` for a top-level module, `app.api` for `app/api/lti.py`), and
-`<name>` its bare module name (`config`, `lti`). Concrete example for
-`app/config.py`: `grep -rn "from app\.config import\|import app\.config\|from app import config\b" backend scripts mock-lms mock-idp --include=*.py`
-— the third alternative is the one a dotted-only grep would miss entirely.
+package, dots escaped (`app` for a top-level module, `app\.api` for
+`app/api/lti.py`), and `<name>` its bare module name (`config`, `lti`). `-U`
+lets the last form match a parenthesized import that spans lines. Concrete
+example for `app/api/lti.py`, which must find `backend/app/main.py:51`:
+`rg -n -U "from app\.api\.lti import|import app\.api\.lti\b|from app\.api import [^\n(]*\blti\b|from app\.api import \([^)]*\blti\b" backend scripts mock-lms mock-idp -g '*.py'`.
 Run across all of `backend/` (including `backend/migrations/`), `scripts/`,
 and both mocks — not just `backend/app/`. More than one caller means a shared
 entry point (MISTAKES #41: a ticket's own suites don't verify a shared entry
 point) — run the full suite for that row instead, and name the import sites
 in the report. An **empty** caller list is suspicious, not reassuring, for any
-module `.claude/heavy-lane-paths.md` names as its own row rather than folding
-into a directory's fail-closed default — `backend/app/services/`,
-`backend/app/api/`, `backend/app/config.py`, `backend/app/db.py`,
+module `.claude/heavy-lane-paths.md` names in a row — `authz.py`,
+`identity.py`, `session.py`, `tokens.py`, `api/deps.py`,
 `mock-lms/app/tokens.py`, `mock-lms/app/signing.py`, and
 `mock-idp/app/signing.py` included. Those exist to be imported from
 elsewhere; treat an empty list as a reason to check the grep, not as proof the

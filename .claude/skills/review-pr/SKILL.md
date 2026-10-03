@@ -29,27 +29,39 @@ an agent's description matches.
 
 ## 2. Map paths to reviewers
 
-`spec-conformance` **always** runs. Then, for each pattern that matches any
-changed file, add its reviewer:
+Every PR gets a security pass, whatever its lane: each security row below
+that matches a changed path runs, so a diff matching both rows gets both
+reviewers. When neither row matches, a generic pass runs: `app-security`
+spawned with `model: sonnet`, told the diff matched no specialist row. `spec-conformance` runs only when
+the ticket is heavy (its `Lane:` field, read as the merger reads it). A
+light PR's spec drift is caught at the epic boundary instead.
 
 | Reviewer | Fires when a changed path matches |
 |---|---|
-| `privacy-authz` | `backend/app/views_sql/`, `backend/app/services/authz`, `backend/app/models/identity`, `backend/app/models/org`, `scripts/db-init/`, `scripts/seed.py`, `*audit*`, `*care*`, `*safety*`, or any test marked `invariant` |
-| `app-security` | `backend/app/api/`, `backend/app/lti/`, `mock-lms/`, `mock-idp/`, `scripts/`, `Dockerfile*`, `docker-compose*`, `pyproject.toml`, `frontend/package.json`, `.github/workflows/`, `tests/evals/`, `backend/app/ai/` |
+| `privacy-authz` | `backend/app/views_sql/`, `backend/app/services/authz`, `backend/app/services/reporting.py`, `backend/app/services/benchmarks.py`, `backend/app/services/comparison_sets.py`, `backend/app/services/report_comments.py`, `backend/app/models/identity`, `backend/app/models/org`, `backend/migrations/`, `scripts/db-init/`, `scripts/seed.py`, `tests/conftest.py`, `tests/fixtures/`, `*audit*`, `*care*`, `*safety*`, or any test marked `invariant` |
+| `app-security` | `backend/app/api/`, `backend/app/lti/`, `backend/app/models/lti.py`, `backend/app/config.py`, `backend/app/services/validity.py`, `backend/app/services/provisioning.py`, `backend/app/services/grading.py`, `backend/app/services/submissions.py`, `backend/app/services/survey_read.py`, `mock-lms/`, `mock-idp/`, `scripts/`, `Makefile`, `Dockerfile*`, `docker-compose*`, `pyproject.toml`, `frontend/package.json`, `.github/workflows/`, `tests/evals/`, `backend/app/ai/` |
 
 `app-security`'s trigger reaches `tests/evals/` and `backend/app/ai/` because
 its checklist now includes the eval-floor-decrease check, and a floor is only
 diffable where it and its prompts live.
 
+Some paths in these rows are light-lane code that still guards something:
+the four services in the `privacy-authz` row apply n-threshold suppression
+outside `views_sql/`; migrations carry grants; the test fixtures feed the
+§4.1 suite; and the paths added to the `app-security` row hold LTI keys,
+the development switch, the sanctioned fail-open, provisioning, grade
+passback, and student reachability checks. A light ticket's security pass
+must include the specialist who knows them.
+
 `data-model`, `lti-oidc`, `a11y-copy`, and `prompt-eval` no longer run here —
 they run at the epic boundary alongside `epic-exit`, `invariant-coverage`,
-`adr-docs-completeness`, and `threat-model` (ADR 0004). Exception: during an
-epic whose declared subject is a moved reviewer's specialty (an epic
+`adr-docs-completeness`, `threat-model`, and `code-reviewer` (ADR 0004).
+Exception: during an epic whose declared subject is a moved reviewer's specialty (an epic
 integrating real LTI platforms re-lists `lti-oidc`, say), that reviewer runs
 per-PR for that epic's tickets — the epic README says so at breakdown.
 
-A docs-only diff triggers `spec-conformance` alone. That is correct, not a
-misconfiguration.
+A docs-only diff gets the generic security pass alone, and `spec-conformance`
+too when the ticket is heavy. That is correct, not a misconfiguration.
 
 Tell the user which reviewers you are running and why **before** spawning them,
 so a wrong gate is visible immediately rather than after the tokens are spent.
@@ -93,6 +105,8 @@ the silence accounting; it moved, and the comment says where.
 
 ```
 _Not triggered: privacy-authz (no read-path or authz changes)._
+_Not triggered: spec-conformance (light-lane ticket; runs at the epic
+boundary)._
 _Not triggered: data-model, lti-oidc, a11y-copy, prompt-eval (run at the epic
 boundary, not per-PR)._
 ```

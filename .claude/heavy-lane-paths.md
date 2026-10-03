@@ -1,37 +1,39 @@
 # Heavy-lane paths
 
 A ticket's diff reaching any of these paths means heavy lane, whatever the
-header predicted at breakdown — build-ticket step 0 re-lanes on this,
-mid-build.
+header predicted at breakdown. build-ticket step 0 re-lanes on this,
+mid-build. The heavy lane is for security code only: the places where a
+defect lets someone see or do what they should not. The aim is that about
+one ticket in five is heavy.
 
 | Path pattern | Heavy because |
 |---|---|
-| `backend/app/views_sql/` | §4/§4.1 read paths — the identity-separation guarantee lives here |
-| `backend/app/services/` | authz, session, tokens, safety, provisioning, roster sync, and identity — the supervision graph, the scoping computation, and the write paths built on them |
-| `backend/app/models/` | identity, org, and audit shapes — what the authz and audit guarantees are built from |
-| `backend/app/lti/`, `mock-lms/`, `mock-idp/` | the two entry doors and token handling; within the mocks, `mock-lms/app/tokens.py`, `mock-lms/app/signing.py`, and `mock-idp/app/signing.py` are the ones actually issuing and signing tokens |
-| `backend/app/api/` | every route, plus `deps.py` (the dependency chain every route composes from) and `dev.py` (the dev-only bypass surface) — the doors again, at the boundary where a request first authenticates |
-| any test marked `invariant`, and any path matching `*audit*` or `*care*` | guarded writers — the chokepoint and the record nothing may bypass |
-| `backend/app/config.py`, `backend/app/db.py` | process-wide configuration and the database engine every guarantee above sits on |
-| `scripts/db-init/`, `scripts/seed.py`, `backend/migrations/` | key and secret custody, the bootstrap identity, and schema changes underneath every read-path and authz guarantee |
-| `.github/workflows/`, `scripts/ci/`, and any Makefile target a CI gate depends on | CI gates |
-| `docker-compose*`, `Dockerfile*` (any directory) | the review fixture that plants a compose defect publishing the mock IdP is the proof this belongs here — a container definition is where a service gets exposed or hidden |
-| `tests/conftest.py`, `tests/fixtures/` | the fixture chain the §4.1 invariant suite runs on; a broken fixture breaks the guarantee silently |
-| `scripts/` (all of it, not only the subpaths named above) | scripts run with the access to make or check the guarantees above, whatever their individual purpose |
+| `backend/app/views_sql/` | §4/§4.1 read paths; the identity separation and the n-threshold suppression live here |
+| `backend/app/services/authz.py` | the supervision graph and the purview computation (§2.1) |
+| `backend/app/services/identity.py`, `backend/app/models/identity.py`, `backend/app/models/org.py` | the identity and org shapes the authz and identity-separation guarantees are built from |
+| `backend/app/services/session.py`, `backend/app/services/tokens.py`, `backend/app/api/auth.py`, `backend/app/api/deps.py`, `backend/app/api/dev.py` | session and token handling, the dependency chain every route authenticates through, and the dev-only bypass |
+| `backend/app/lti/`, `backend/app/api/lti.py`, `mock-lms/app/tokens.py`, `mock-lms/app/signing.py`, `mock-idp/app/signing.py` | the LTI entry door and the code that issues and signs tokens |
+| `backend/app/services/safety.py`, and any path matching `*audit*` or `*care*` | the Care role (§6.2), safety routing, and the audit record nothing may bypass |
+| `scripts/db-init/` | database roles and grants, which the identity separation rests on (ADR 0001) |
+| any test marked `invariant` | the §4.1 invariant suite |
 
-**Fail closed.** A path under `backend/app/` or `backend/migrations/` that
-matches no row above is heavy until a row says otherwise. An enumeration that
-defaults open is the defect class `docs/MISTAKES.md` records more than once —
-this table does not repeat it. A path one of the rows above names is heavy
-wherever it lives, not only under `backend/app/` or `backend/migrations/`.
+One more case is heavy but is not a path: a migration that creates, alters,
+or grants on an identity, org, audit, or Care table, or on a view. The
+ticket's author decides this at breakdown from what the migration does.
 
-This table and `review-pr`'s reviewer-gating table answer different
-questions — this one decides which build lane a ticket rides, that one
-decides which reviewer fires on a pull request — so they overlap without
-being identical. Where both name the same path they must agree.
-`review-pr`'s `app-security` trigger is still broader in places: it also
-fires on `pyproject.toml`, `frontend/package.json`, `tests/evals/`, and
-`backend/app/ai/`, none of which belong in a heavy-lane row.
+Everything else is light: other routes, services, and models, jobs, the AI
+code, the frontend, other migrations, scripts, fixtures, and Docker and
+Compose files. Light paths still get the per-PR security review that
+`review-pr` picks from the diff, and the full reviewer battery at the epic
+boundary. CI files and gate settings are not ticket work at all: they ride
+a `process/` PR (the merger's refusal list names them). If
+a security reviewer judges that a light diff needs the heavy loop, the
+ticket is re-laned, and the PR says so.
 
-This table is the authority for the build lane. CLAUDE.md's lane paragraph
-points at it rather than restating it.
+**Light is the default.** A path no row names is light. What stays closed
+is the security review: every PR gets one, whatever its lane, so an
+unlisted path is still reviewed before it merges.
+
+This table decides the build lane. `review-pr`'s gating table decides which
+reviewer fires on a pull request. They overlap without being identical,
+and where both name the same path they must agree.

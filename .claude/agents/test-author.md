@@ -1,6 +1,6 @@
 ---
 name: test-author
-description: Writes failing tests from a ticket's acceptance criteria and the spec, then stops. Never sees implementation. Invoked by /build-ticket before the implementer starts.
+description: Writes failing tests from a ticket's acceptance criteria and the spec, then stops. Never sees implementation. Invoked by /build-ticket before the builder-heavy starts.
 model: opus
 effort: medium
 tools: Read, Write, Edit, Grep, Glob
@@ -71,7 +71,7 @@ category, say so and write only the parts that genuinely assert.
 - Do not write a test you already know the shape of the implementation for.
 - Do not soften a criterion because it looks hard to test. Escalate instead.
 - Do not create fixtures that encode an implementation decision the ticket
-  leaves open — that quietly makes the choice for the implementer.
+  leaves open — that quietly makes the choice for the builder-heavy.
 
 ## When you finish
 
@@ -86,5 +86,5 @@ something to work around.
 ## Lanes
 
 You exist for heavy-lane tickets (CLAUDE.md, "How a ticket is built: two
-lanes"). A ticket whose header says `**Lane:** light` is built by `builder`
+lanes"). A ticket whose header says `**Lane:** light` is built by `builder-light`
 and never invokes you; if you are handed one anyway, say so and stop.
