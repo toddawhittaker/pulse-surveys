@@ -25,8 +25,12 @@ solve.
   (`gh pr view <N> --json isCrossRepository,author`). The repository is
   public, and a fork can name its branch `e5/anything`.
 - Refuse a PR whose diff touches any of these: `.github/`, `scripts/ci/`,
-  `Makefile`, `.claude/`, `CLAUDE.md`, `CONTRIBUTING.md`. Those are process
-  changes: they ride a `process/` branch and wait for Todd. A ticket PR
+  `ci/`, `Makefile`, `.claude/`, `CLAUDE.md`, `CONTRIBUTING.md`,
+  `pyproject.toml`, any `package.json`, any `tsconfig*.json`, any
+  `eslint.config.*`, `playwright.config.ts`, or `tests/evals/*/floors.py`.
+  These hold CI gates or their settings. Changes to them ride a `process/`
+  branch and wait for Todd. A ticket that needs a new dependency gets it
+  from a small `process/` PR first. A ticket PR
   that changes a CI gate is checked by the gate it changed, because CI runs
   the PR's own copy of the workflow, so no green run on it counts. This
   list is fixed here, in a file the refusal itself protects.
@@ -94,16 +98,13 @@ All of these, every time, even when the orchestrator says they hold:
 
 Read only the failed step (`gh run view <id> --log-failed`). Then classify:
 
-- **Flake**: a runner step that downloads packages hangs or fails, or a
-  test unrelated to the PR's files fails with a timing-shaped message (a
-  timeout, a port in use, "not visible"). Rerun the failed jobs once
-  (`gh run rerun <id> --failed`). Record the test name and run URL in your
-  report as a flake to fix. A second failure on the same PR is not a flake.
-  **Never a flake, whatever the message:** a failure in the §4.1 invariant
-  pass, or in any test whose path or name contains `invariant`, `lti`,
-  `auth`, `session`, `token`, `nonce`, `replay`, `purview`, `identity`,
-  `care`, `audit`, or `suppress`. A race in security code fails only some
-  of the time, and a rerun would hide it. Treat those as real failures.
+- **Runner failure**: a step that downloads or installs packages hangs
+  for more than 10 minutes or fails with a download or apt error. Rerun the
+  failed jobs once (`gh run rerun <id> --failed`) and record the run URL.
+  A second failure on the same PR is not a runner failure.
+- **A failed test is never a flake.** Treat every test failure as real,
+  even one that looks timing-related. A race fails only some of the time,
+  and a rerun would hide it. Report the test name so it can be fixed.
 - **Conflict**: `CONFLICTING` or `DIRTY`, or update-branch fails. Stop on
   that PR.
 - **Real failure**: the failing test touches the PR's files, or a failure
@@ -119,4 +120,4 @@ landed before retrying, retry patiently, and never merge locally by hand.
 
 Plain English, short. For every PR: merged or not, the run id and head SHA
 you verified, and, when you stopped, the exact precondition that failed,
-quoted from its source. List every flake rerun with the test name.
+quoted from its source. List every runner rerun with its run URL, and every failed test by name.

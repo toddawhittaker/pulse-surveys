@@ -22,9 +22,11 @@ or grants on an identity, org, audit, or Care table, or on a view. The
 ticket's author decides this at breakdown from what the migration does.
 
 Everything else is light: other routes, services, and models, jobs, the AI
-code, the frontend, other migrations, scripts, fixtures, Docker and Compose
-files, and CI. Those still get the per-PR security review that `review-pr`
-picks from the diff, and the full reviewer battery at the epic boundary. If
+code, the frontend, other migrations, scripts, fixtures, and Docker and
+Compose files. Light paths still get the per-PR security review that
+`review-pr` picks from the diff, and the full reviewer battery at the epic
+boundary. CI files and gate settings are not ticket work at all: they ride
+a `process/` PR (the merger's refusal list names them). If
 a security reviewer judges that a light diff needs the heavy loop, the
 ticket is re-laned, and the PR says so.
 

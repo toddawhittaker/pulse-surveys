@@ -151,12 +151,13 @@ shared files and migration numbers before the breakdown, `explorer` does
 cheap searches, and `code-reviewer` reviews the whole epic for correctness
 and simplicity at the boundary.
 
-The merger refuses any ticket diff that touches CI or process files
-(`.github/`, `scripts/ci/`, `Makefile`, `.claude/`, `CLAUDE.md`,
-`CONTRIBUTING.md`), because CI runs a PR's own copy of the workflow and a
-PR that weakens a gate would pass the gate it weakened. It never reruns a
-failure in a security test, because a race there fails only some of the
-time.
+The merger refuses any ticket diff that touches CI files, gate settings,
+or process files (its agent file lists them), because CI runs a PR's own
+copy of the workflow and settings, and a PR that weakens a gate would pass
+the gate it weakened. The cost: a ticket that needs a new dependency gets
+it from a small `process/` PR first. The merger reruns only a runner that
+failed to download packages, never a failed test, because a race fails
+only some of the time and a rerun would hide it.
 
 Known residue: the security review and the battery result that the merger
 checks are records in the PR body, written by the same session that built

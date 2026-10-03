@@ -126,8 +126,8 @@ the owner. A ticket PR merges into its epic branch once its CI run is
 completed, successful, and resolved against the PR's final head commit, its
 security review is recorded in the body against that same commit, nothing
 is in dispute, and, for a heavy ticket, the mutation battery result is
-recorded too. The merger reruns a failed job once when the failure looks
-like a flaky test or a hung runner, and records the test as a flake to fix.
+recorded too. The merger reruns a failed job once only when a runner
+failed to download or install packages; a failed test is always real.
 The owner reviews once, at the epic boundary; on a ⚠ epic that review is
 line by line over the security-relevant diff (SPEC §14.2 item 3).
 
@@ -263,7 +263,8 @@ verifier confirms CI's green run on the same commit and runs a scoped
 mutation battery proving each test can actually fail.
 
 **Light** is for everything else: ordinary routes and services, jobs, the
-frontend, fixtures, scripts, Docker files, and CI. One `builder` agent writes
+frontend, fixtures, scripts, and Docker files. CI files and gate settings
+are process changes, not ticket work. One `builder` agent writes
 the code and ordinary tests together. CI's green run on the head commit,
 which the merger checks, is the verification. No verifier pass, no manifest,
 no mutation battery, no separate test author.

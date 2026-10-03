@@ -29,13 +29,12 @@ an agent's description matches.
 
 ## 2. Map paths to reviewers
 
-Every PR gets **one security pass**, whatever its lane: `privacy-authz` when
-a changed path matches its row below, else `app-security` when one matches
-its row, else a generic security pass (`app-security` at its default effort,
-told the diff matched no specialist row). `spec-conformance` runs only when
+Every PR gets a security pass, whatever its lane: each security row below
+that matches a changed path runs, so a diff matching both rows gets both
+reviewers. When neither row matches, a generic pass runs (`app-security` at
+its default effort, told the diff matched no specialist row). `spec-conformance` runs only when
 the ticket is heavy (its `Lane:` field, read as the merger reads it). A
-light PR's spec drift is caught at the epic boundary instead. On a heavy
-ticket, both security rows run when both match.
+light PR's spec drift is caught at the epic boundary instead.
 
 | Reviewer | Fires when a changed path matches |
 |---|---|
@@ -51,8 +50,8 @@ the four services in the `privacy-authz` row apply n-threshold suppression
 outside `views_sql/`; migrations carry grants; the test fixtures feed the
 §4.1 suite; and the paths added to the `app-security` row hold LTI keys,
 the development switch, the sanctioned fail-open, provisioning, grade
-passback, and student reachability checks. A light ticket's one security
-pass must be the specialist who knows them.
+passback, and student reachability checks. A light ticket's security pass
+must include the specialist who knows them.
 
 `data-model`, `lti-oidc`, `a11y-copy`, and `prompt-eval` no longer run here —
 they run at the epic boundary alongside `epic-exit`, `invariant-coverage`,

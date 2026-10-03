@@ -59,7 +59,7 @@ validate state and nonce on LTI launch`); open a PR into the epic branch using
 the template; then merge it as the paragraph below says.
 
 **Never merge an epic branch into `main`** — Todd's call, always; he reviews
-there, line by line on a ⚠ epic (SPEC §14.2). Every ticket PR, any lane or
+there, line by line on a ⚠ epic or ⚠ path (SPEC §14.2, §14.3). Every ticket PR, any lane or
 epic, merges without him once `.claude/agents/merger.md`'s conditions hold;
 only `process/` PRs wait. Never an admin override, a red-CI merge, or a
 retargeted PR — close and re-cut.
