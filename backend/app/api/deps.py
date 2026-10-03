@@ -43,6 +43,8 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.config import Settings
+from app.copy import CopyEntry, entry
+from app.copy.instructor_report import NOT_AN_INSTRUCTOR
 from app.copy.leadership_sets import NOT_LEADERSHIP
 from app.copy.student_read import NOT_A_STUDENT
 from app.copy.submit import COPY
@@ -188,23 +190,6 @@ def require_student(request: Request) -> SessionClaims:
 NOT_AN_INSTRUCTOR_STATUS = 401
 NOT_AN_INSTRUCTOR_CHALLENGE = {"WWW-Authenticate": BEARER_SCHEME}
 
-# What such a request is told. **Not in `app.copy`, and still a gap.** The reason
-# it was written here has expired: E2-11's inventory governs a key by its surface
-# prefix, and the report was not a governed surface when E4-07 shipped this, so a
-# copy module for it would have landed under a prefix no surface claimed. E4-12
-# made the report a governed surface (ADR 0158) and moved the router's two
-# refusals into `app.copy.instructor_report`, and this third sentence was not in
-# that entry's scope — so it is a literal on a governed surface's road rather
-# than a sentence with nowhere to live. `docs/tickets/e5/deferred.md` carries it
-# with an owner and a done-when.
-#
-# It names nobody and nothing: no section, no role, no subject. A refusal answered
-# to anybody who can make a request is a refusal that may describe only itself.
-NOT_AN_INSTRUCTOR = (
-    "This is an instructor's report, and this request does not carry an instructor's session. "
-    "Open Pulse Surveys from inside your course in the LMS to read it."
-)
-
 
 def require_instructor(request: Request) -> SessionClaims:
     """The verified session of an instructor, or one refusal for everybody else.
@@ -241,7 +226,7 @@ def require_instructor(request: Request) -> SessionClaims:
         request,
         LandingRole.INSTRUCTOR,
         status=NOT_AN_INSTRUCTOR_STATUS,
-        detail=NOT_AN_INSTRUCTOR,
+        detail=NOT_AN_INSTRUCTOR.text,
         challenge=NOT_AN_INSTRUCTOR_CHALLENGE,
     )
 
@@ -362,7 +347,6 @@ def person_of(claims: SessionClaims) -> UUID | None:
 # platform or the provider it came from, and a link built out of a request that
 # just failed validation is the open redirect both doors exist to refuse.
 REFUSAL_TESTID = "pulse-entry-refused"
-REFUSAL_HEADING = "This did not open"
 
 # The sentence each guard's refusal page carries, keyed by the guard's own class
 # name — the machine vocabulary ADR 0103 put in `data-reason`, and the only
@@ -387,41 +371,26 @@ REFUSAL_HEADING = "This did not open"
 # `NonceReplayedError`'s two sentences are `app.lti.replay_guard`'s own words,
 # copied whole: `tests/e2e/exit-refused-launches.spec.ts` keeps one prose
 # assertion as its copy canary and matches that string.
-REFUSAL_COPY: Mapping[str, str] = {
-    "SignatureRefused": (
-        "This launch could not be verified. Its signature, the algorithm it names, or the key it "
-        "was signed with did not hold."
-    ),
-    "AudienceRefused": "This launch was issued for a different tool than this one.",
-    "IssuerRefused": "No registration here exists for the platform that began this launch.",
-    "NonceRefused": "This launch carries no `nonce`, or one this tool did not send.",
-    "NonceReplayedError": (
-        "This launch has already been delivered once. A launch nonce is single-use, and "
-        "presenting the same signed launch a second time is refused."
-    ),
-    "DeploymentRefused": "This launch names a deployment this tool was never installed into.",
-    "MessageTypeRefused": "This launch is a message type this tool does not serve.",
-    "VersionRefused": "This launch states an LTI version this tool does not speak.",
-    "StateRefused": "This launch returns a `state` this tool did not issue, or none at all.",
-    "ClockSkewRefused": "This launch was minted too far in the future, or expired too long ago.",
-    "AnonymousLaunchRefused": (
-        "This launch names nobody. Pulse Surveys shows each person their own work, so a launch "
-        "carrying no subject is one it cannot open."
-    ),
-    "SessionRefusedError": (
-        "That sign-in could not be verified, and nobody has been signed in. Start again from "
-        "where you opened Pulse Surveys."
-    ),
+REFUSAL_COPY: Mapping[str, CopyEntry] = {
+    "SignatureRefused": entry.REFUSED_SIGNATURE,
+    "AudienceRefused": entry.REFUSED_AUDIENCE,
+    "IssuerRefused": entry.REFUSED_ISSUER,
+    "NonceRefused": entry.REFUSED_NONCE,
+    "NonceReplayedError": entry.REFUSED_NONCE_REPLAYED,
+    "DeploymentRefused": entry.REFUSED_DEPLOYMENT,
+    "MessageTypeRefused": entry.REFUSED_MESSAGE_TYPE,
+    "VersionRefused": entry.REFUSED_VERSION,
+    "StateRefused": entry.REFUSED_STATE,
+    "ClockSkewRefused": entry.REFUSED_CLOCK_SKEW,
+    "AnonymousLaunchRefused": entry.REFUSED_ANONYMOUS_LAUNCH,
+    "SessionRefusedError": entry.REFUSED_SESSION,
 }
 
 # What a guard this mapping does not know is answered with. A constant, and
 # every word of it true of any refusal: it reports nothing about what was handed
 # in, which is what keeps a guard name nobody mapped from becoming a caller's
 # string in the body by way of an f-string that meant to be helpful.
-DEFAULT_REFUSAL_COPY = (
-    "This tool could not account for what it was handed, and nobody has been signed in. Start "
-    "again from where you opened Pulse Surveys."
-)
+DEFAULT_REFUSAL_COPY = entry.REFUSED_DEFAULT
 
 # What a cancelled web login says (E1-09). Calm and non-blaming, per
 # `docs/DESIGN_BRIEF.md`'s tone: the person declined to sign in, or the provider
@@ -432,8 +401,6 @@ DEFAULT_REFUSAL_COPY = (
 # that repeated them would be a page whose words they wrote, under this tool's own
 # name and styling.
 CANCELLED_TESTID = "web-login-cancelled"
-CANCELLED_HEADING = "Sign-in did not finish"
-CANCELLED_MESSAGE = "Nothing was changed and nobody is signed in. You can start again when ready."
 
 # What a web login by somebody this system has no record of says (E1-12). A third
 # answer beside the two above, because it is a third event: the sign-in worked and
@@ -448,12 +415,6 @@ CANCELLED_MESSAGE = "Nothing was changed and nobody is signed in. You can start 
 # address in that token are the provider's text, and this page has nowhere to put
 # them.
 NO_ACCOUNT_TESTID = "no-account"
-NO_ACCOUNT_HEADING = "Pulse Surveys has no account for you yet"
-NO_ACCOUNT_MESSAGE = (
-    "You signed in correctly and nothing went wrong. Pulse Surveys keeps its own record of who "
-    "works here, and there is no record for you yet, so there is nothing to show. Ask whoever "
-    "administers Pulse Surveys at your institution to add you."
-)
 
 # What somebody Pulse *does* hold a record of is told when nothing in that record
 # gives them a view at the door they came in by (E1-13). A fourth answer and a
@@ -466,13 +427,6 @@ NO_ACCOUNT_MESSAGE = (
 # this page; and who to ask, which is a different administrator from the one
 # `no-account` sends people to.
 NO_ACCESS_TESTID = "no-access"
-NO_ACCESS_HEADING = "There is nothing in Pulse Surveys for you yet"
-NO_ACCESS_MESSAGE = (
-    "Nothing went wrong and nobody is at fault. Pulse Surveys keeps its own record of who works "
-    "here and who is enrolled, and nothing in yours gives you a view at this door yet. If you "
-    "teach, open Pulse Surveys from inside one of your courses in the LMS rather than from here. "
-    "Otherwise, ask whoever administers Pulse Surveys at your institution."
-)
 
 # The page, as one f-string rather than a template engine: there is one layout,
 # it has three slots, and nothing in the locked closure renders templates. The
@@ -573,8 +527,8 @@ def refusal_page(guard: str) -> str:
     return PAGE.format(
         testid=escape(REFUSAL_TESTID, quote=True),
         reason_attr=_reason_attribute(guard),
-        heading=escape(REFUSAL_HEADING),
-        empty_state=escape(REFUSAL_COPY.get(guard, DEFAULT_REFUSAL_COPY)),
+        heading=escape(entry.REFUSED_HEADING.text),
+        empty_state=escape(REFUSAL_COPY.get(guard, DEFAULT_REFUSAL_COPY).text),
     )
 
 
@@ -595,8 +549,8 @@ def cancelled_page() -> str:
     return PAGE.format(
         testid=escape(CANCELLED_TESTID, quote=True),
         reason_attr="",
-        heading=escape(CANCELLED_HEADING),
-        empty_state=escape(CANCELLED_MESSAGE),
+        heading=escape(entry.CANCELLED_HEADING.text),
+        empty_state=escape(entry.CANCELLED_MESSAGE.text),
     )
 
 
@@ -622,8 +576,8 @@ def no_account_page() -> str:
     return PAGE.format(
         testid=escape(NO_ACCOUNT_TESTID, quote=True),
         reason_attr="",
-        heading=escape(NO_ACCOUNT_HEADING),
-        empty_state=escape(NO_ACCOUNT_MESSAGE),
+        heading=escape(entry.NO_ACCOUNT_HEADING.text),
+        empty_state=escape(entry.NO_ACCOUNT_MESSAGE.text),
     )
 
 
@@ -644,8 +598,8 @@ def no_access_page() -> str:
     return PAGE.format(
         testid=escape(NO_ACCESS_TESTID, quote=True),
         reason_attr="",
-        heading=escape(NO_ACCESS_HEADING),
-        empty_state=escape(NO_ACCESS_MESSAGE),
+        heading=escape(entry.NO_ACCESS_HEADING.text),
+        empty_state=escape(entry.NO_ACCESS_MESSAGE.text),
     )
 
 
