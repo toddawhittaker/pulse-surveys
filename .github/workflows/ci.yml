@@ -945,6 +945,10 @@ jobs:
       # slice to `reports/shard/` for `test-shards` to check. `--cov-report=`
       # writes no report here: a slice's coverage is a third of the picture, so
       # the data file is uploaded and `test-shards` reports the combined figure.
+      # `--cov-fail-under=0` turns off the coverage floor for the slice, because
+      # pytest-cov reads `fail_under` from pyproject.toml and a third of the
+      # tests would always fall below it. The floor is enforced on the combined
+      # figure, in `test-shards`.
       - name: Unit + integration with coverage (one slice of three)
         if: needs.changed.outputs.inert != 'true' && matrix.pass == 'suite'
         env:
@@ -956,7 +960,7 @@ jobs:
           PULSE_TEST_SHARD_RECORD: reports/shard
         run: |
           pytest tests/unit tests/integration -n 4 -p pytest_shard \
-            --cov=backend/app --cov-report= \
+            --cov=backend/app --cov-report= --cov-fail-under=0 \
             --junitxml=reports/pytest.xml
 
       # Everything `test-shards` needs from this slice: the coverage data, the
@@ -1030,12 +1034,15 @@ jobs:
         if: needs.changed.outputs.inert != 'true'
         run: pip install --require-hashes -r requirements-dev.txt
 
-      - name: Combine the slices' coverage
+      # `coverage report` enforces the floor (`fail_under` in pyproject.toml)
+      # and exits non-zero below it. `coverage xml` runs first so the report is
+      # written either way.
+      - name: Combine the slices' coverage and enforce the floor
         if: needs.changed.outputs.inert != 'true'
         run: |
           coverage combine shards/pytest-shard-1/.coverage shards/pytest-shard-2/.coverage shards/pytest-shard-3/.coverage
-          coverage report
           coverage xml
+          coverage report
 
       - name: Upload coverage
         if: needs.changed.outputs.inert != 'true'

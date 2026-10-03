@@ -365,6 +365,9 @@ branch = true
 omit = ["backend/app/main.py", "backend/migrations/*"]
 
 [tool.coverage.report]
+# The coverage floor. Measured at 93.7% (lines and branches together) when it
+# was set. It moves only in a pull request whose subject is moving it.
+fail_under = 93
 show_missing = true
 skip_covered = false
 exclude_lines = [
