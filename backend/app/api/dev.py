@@ -366,7 +366,9 @@ class ConsoleSection:
 # The register is `docs/DESIGN_BRIEF.md`'s admin one: mono is the dominant voice —
 # every number, code, date and timestamp on this page is in it — the reading
 # column is bounded, the rules are hairlines, and nothing decorates.
-STYLE = DESIGN_TOKENS_CSS + """
+STYLE = (
+    DESIGN_TOKENS_CSS
+    + """
 
 * { box-sizing: border-box; }
 
@@ -546,6 +548,7 @@ tbody tr + tr th, tbody tr + tr td { border-top: 1px solid var(--hairline); }
   }
 }
 """
+)
 
 # Static banner markup, no interpolation.
 BANNER = """
