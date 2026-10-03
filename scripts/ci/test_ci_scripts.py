@@ -913,11 +913,116 @@ with tempfile.TemporaryDirectory() as tmp:
     )
 
 # ---------------------------------------------------------------------------
+# check_test_shards.py
+# ---------------------------------------------------------------------------
+# The checker that stands between "every shard was green" and "the whole suite
+# ran". Each case plants a set of shard directories in the layout the workflow
+# uploads and asks for the verdict. The first is the positive control: without
+# it, every refusal below would also be satisfied by a checker that refuses
+# everything.
+SHARD_SUITE = [f"tests/unit/test_x.py::test_{n}" for n in range(7)]
+
+
+def plant_shards(
+    root: Path,
+    slices: list[list[str]],
+    *,
+    collected: list[list[str]] | None = None,
+    cases: list[int] | None = None,
+) -> list[str]:
+    dirs: list[str] = []
+    for number, chosen in enumerate(slices, start=1):
+        shard = root / f"pytest-shard-{number}"
+        (shard / "reports" / "shard").mkdir(parents=True)
+        whole = SHARD_SUITE if collected is None else collected[number - 1]
+        (shard / "reports" / "shard" / "collected.txt").write_text("".join(f"{t}\n" for t in whole))
+        (shard / "reports" / "shard" / "selected.txt").write_text("".join(f"{t}\n" for t in chosen))
+        count = len(chosen) if cases is None else cases[number - 1]
+        testcases = "".join(f'<testcase classname="c" name="t{i}"/>' for i in range(count))
+        (shard / "reports" / "pytest.xml").write_text(
+            f'<?xml version="1.0"?><testsuites><testsuite>{testcases}</testsuite></testsuites>'
+        )
+        dirs.append(str(shard))
+    return dirs
+
+
+def shard_verdict(expected: int, dirs: list[str]) -> tuple[int, bool]:
+    return run_refusing("check_test_shards.py", "--expected", str(expected), *dirs)
+
+
+GOOD_SLICES = [SHARD_SUITE[0::3], SHARD_SUITE[1::3], SHARD_SUITE[2::3]]
+
+with tempfile.TemporaryDirectory() as tmp:
+    d = Path(tmp)
+    check(
+        "test shards: three disjoint slices covering the collection pass",
+        shard_verdict(3, plant_shards(d / "good", GOOD_SLICES)),
+        (0, False),
+    )
+    check(
+        "test shards: a test no shard ran is a failure",
+        shard_verdict(
+            3,
+            plant_shards(d / "gap", [SHARD_SUITE[0::3], SHARD_SUITE[1::3], SHARD_SUITE[2::3][:-1]]),
+        ),
+        REFUSED_WITHOUT_CRASHING,
+    )
+    check(
+        "test shards: a test two shards ran is a failure",
+        shard_verdict(
+            3,
+            plant_shards(
+                d / "overlap",
+                [SHARD_SUITE[0::3], SHARD_SUITE[0::3] + SHARD_SUITE[1::3], SHARD_SUITE[2::3]],
+            ),
+        ),
+        REFUSED_WITHOUT_CRASHING,
+    )
+    check(
+        "test shards: fewer shard directories than expected is a failure",
+        shard_verdict(3, plant_shards(d / "short", GOOD_SLICES)[:2]),
+        REFUSED_WITHOUT_CRASHING,
+    )
+    check(
+        "test shards: shards that collected different suites are a failure",
+        shard_verdict(
+            3,
+            plant_shards(
+                d / "drift",
+                GOOD_SLICES,
+                collected=[
+                    SHARD_SUITE,
+                    SHARD_SUITE,
+                    [*SHARD_SUITE, "tests/unit/test_x.py::test_extra"],
+                ],
+            ),
+        ),
+        REFUSED_WITHOUT_CRASHING,
+    )
+    check(
+        "test shards: a JUnit report with fewer cases than the slice is a failure",
+        shard_verdict(3, plant_shards(d / "short-report", GOOD_SLICES, cases=[3, 2, 1])),
+        REFUSED_WITHOUT_CRASHING,
+    )
+    check(
+        "test shards: an empty collection is a failure",
+        shard_verdict(3, plant_shards(d / "empty", [[], [], []], collected=[[], [], []])),
+        REFUSED_WITHOUT_CRASHING,
+    )
+    missing = plant_shards(d / "missing", GOOD_SLICES)
+    (Path(missing[1]) / "reports" / "pytest.xml").unlink()
+    check(
+        "test shards: a shard that wrote no JUnit report is a failure",
+        shard_verdict(3, missing),
+        REFUSED_WITHOUT_CRASHING,
+    )
+
+# ---------------------------------------------------------------------------
 # 4 licence cases, 8 invariant-report cases, 9 bundle cases (E1-04 took the bundle
 # section from 3 to 9: two exit codes changed answer with the gate flip, and the
 # committed budget file gained four checks of its own), 16 invariant-assertion
-# cases.
-total = len(LICENSE_CASES) + 2 * len(BODY_CASES) + len(CLASSIFIER_CASES) + 21 + 16
+# cases, 8 test-shard cases.
+total = len(LICENSE_CASES) + 2 * len(BODY_CASES) + len(CLASSIFIER_CASES) + 21 + 16 + 8
 if failures:
     print(f"FAIL: {len(failures)} of {total} checks failed:", file=sys.stderr)
     for line in failures:
