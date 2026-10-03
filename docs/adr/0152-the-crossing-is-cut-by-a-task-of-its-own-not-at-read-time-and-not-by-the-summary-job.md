@@ -130,7 +130,7 @@ Pooled, one stream's authors could open the gate for the other's comments, and a
 released card's stream chip would then name its source. Per stream, leg (b)
 still subsumes the other two.
 
-**When any leg fails, nothing is cut, and that is the stance.** Held is the safe
+**When any leg fails for a stream, nothing of that stream is cut, and that is the stance.** Since [0182](0182-raw-comments-are-held-per-stream-by-distinct-commenters.md) the legs are read per stream, so a stream whose legs all opened is still cut beside one whose legs did not. Held is the safe
 direction: an under-threshold comment that stays held still feeds the summary
 (§4 says so in as many words) and can be released later, while a comment released
 early cannot be un-shown — nothing in this schema deletes a membership row
@@ -140,8 +140,8 @@ a term that ends there ends with them unreleased. That is a real loss to the
 students who wrote them, and it is accepted because the alternative loss is a
 disclosure that cannot be taken back.
 
-**One batch per crossing, holding the whole held set, in one transaction per
-section and term.** The service commits after each pair, so a walk over every
+**One batch per crossing, holding the whole held set of every stream whose legs
+opened, in one transaction per section and term.** The service commits after each pair, so a walk over every
 section in the institution keeps the releases it has already cut when a worker
 dies on the fifth one.
 
