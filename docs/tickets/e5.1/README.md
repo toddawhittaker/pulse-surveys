@@ -50,7 +50,7 @@ These were settled before the first ticket branch. No ticket reopens them.
    in SPEC §3.1, which said only "Monday morning".
 
 Four facts were confirmed in the code before the breakdown, and the tickets
-build on them without re-proving them. An instructor the LMS removes keeps her
+build on them without re-proving them. An instructor the LMS removes keeps their
 teaching grant. The comment gate counts responses, not commenters.
 `session_secret` has no validator. Clearing a judged comment on revise answers
 409, which the client shows as "closed".
@@ -60,7 +60,7 @@ teaching grant. The comment gate counts responses, not commenters.
 | # | Ticket | Branch | Lane | Depends on | Summary | Merged |
 |---|---|---|---|---|---|---|
 | 01 | [Raw comments need five commenters in their stream](E5.1-01-commenter-threshold.md) | `e5.1/commenter-threshold` | heavy ⚠ | none | The comment gate counts distinct commenters per stream; a held stream goes to release batches; a released comment never comes back under its week; summaries follow the stream's count; SPEC §4, ADR 0182. | |
-| 02 | [The roster decides who teaches and who answers](E5.1-02-roster-grants-and-respondents.md) | `e5.1/roster-grants-and-respondents` | heavy ⚠ | none | A complete roster walk that drops an instructor ends her teaching grant through a guarded definer; teaching members and test users hold no student enrollment; the roster's token grant gets a time bound; ADR 0183. | |
+| 02 | [The roster decides who teaches and who answers](E5.1-02-roster-grants-and-respondents.md) | `e5.1/roster-grants-and-respondents` | heavy ⚠ | none | A complete roster walk that drops an instructor ends their teaching grant through a guarded definer; teaching members and test users hold no student enrollment; the roster's token grant gets a time bound; ADR 0183. | |
 | 03 | [The API edge holds one job per module](E5.1-03-api-edge.md) | `e5.1/api-edge` | heavy | none | Entry-page sentences join the copy registry; the dev clock routes gain the origin check; one module owns the clock row; one token CSS block; one `_person_of`; dead parts removed. | |
 | 04 | [A deployment refuses the example session secret](E5.1-04-session-secret.md) | `e5.1/session-secret` | light | none | `Settings` refuses the `.env.example` secret, an empty one, or one under 32 characters outside development, naming the variable and never the value. | |
 | 05 | [Five small behaviour fixes](E5.1-05-small-behaviour-fixes.md) | `e5.1/small-behaviour-fixes` | light | 01 | A judged-comment refusal shown inline; a truthful grading log line; the set form shows its stored length; a week opens at 06:00 Monday; a malformed `user_id` is refused; ADR 0184. | |
