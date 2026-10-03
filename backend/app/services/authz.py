@@ -434,9 +434,9 @@ _HOLDS_A_LEADERSHIP_ASSIGNMENT = text(
 # in the caller because `public.assignment_scope` is this module's view to read:
 # E0-41 fails any module under `backend/app/` outside this one that runs SQL
 # naming it, on the ground that a second reader is a second place the scoping rule
-# can be got wrong. The caller is `app.services.roster_sync`, which holds `INSERT`
-# on `role_assignment` and deliberately no `SELECT` — so this is also the only way
-# it can ask.
+# can be got wrong. The caller is `app.services.roster_sync`, which holds no
+# privilege on `role_assignment` at all (it adds and ends the grant through two
+# definers, ADR 0096 and ADR 0183) — so this is also the only way it can ask.
 _HOLDS_THE_TEACHING_INSTRUCTOR_GRANT = text(
     "SELECT EXISTS ("
     " SELECT 1 FROM public.assignment_scope AS granted"
@@ -957,9 +957,9 @@ def teaching_instructor_assigned(session: Session, *, person_id: UUID, section_i
     **It lives here because the view does.** E0-41's rule is that
     `public.assignment_scope` is read through this module and nowhere else, and
     `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` enforces it.
-    The sync also holds `INSERT` on `role_assignment` and no `SELECT` — E1-11's D8
-    withholds it deliberately — so this view is not merely the tidy way for it to
-    ask, it is the only way.
+    The sync holds no privilege on `role_assignment` at all — it adds and ends the
+    grant through two definers (ADR 0096, ADR 0183) — so this view is not merely
+    the tidy way for it to ask, it is the only way.
 
     **Not an authorization decision**, and the difference matters for how it fails.
     `guard_write` is what decides whether the sync may write the row at all; this
@@ -1081,12 +1081,13 @@ def section_scoped_assignees(session: Session, *, section_id: UUID) -> set[UUID]
     """The people holding an assignment scoped to this section — its staff (EE-M1).
 
     Asked by SPEC §3.4's participation sweep before it delivers a score. A roster
-    container carries everybody the platform lists, instructors included, and the
-    sync writes an `enrollment` row for each — so without this the sweep posts a
-    participation percentage into the gradebook column of the person doing the
-    grading, computed from the weeks they did not fill in their own survey. §3.4
-    makes the score a student's: "completed items ÷ total items across the
-    student's elapsed weeks".
+    container carries everybody the platform lists, instructors included. Until
+    E5.1-02 the sync wrote an `enrollment` row for each of them; it now writes none
+    for a member listed as Instructor and closes an open one, but a row first seen
+    and closed on the same day still covers that day (ADR 0183). Without this the sweep would post a participation
+    percentage into the gradebook column of the person doing the grading, computed
+    from the weeks they did not fill in their own survey. §3.4 makes the score a
+    student's: "completed items ÷ total items across the student's elapsed weeks".
 
     **It answers people, not members.** The caller holds `user` ids and this
     answers `person` ids, because those are two different keys for two different

@@ -41,6 +41,13 @@ The catalog does **not** grant `section`: §7.3 gives a section exactly one way 
 be discovered, and it is not the roster of a section that must already exist for
 the roster to be fetchable.
 
+**Enrollment means "student", and the teaching grant follows the roster both
+ways** (E5.1-02, ADR 0183). A member listed with the Instructor role, or as the
+platform's test user, is written no enrollment and has an open one closed; a
+complete walk ends every teaching grant on the section whose person it did not
+list as an active Instructor, through `public.end_teaching_instructor`, which
+deletes the row and records it in `ended_teaching_grant`.
+
 Two things it may not do directly, and the doors it uses instead (ADR 0094, and
 this ticket's D7): it holds no read of `user.lms_user_id`, so a roster member is
 matched to a `user` row through `public.resolve_platform_user`; and it holds no

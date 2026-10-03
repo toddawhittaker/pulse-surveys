@@ -686,8 +686,9 @@ def _no_redirects(http: requests.Session | None) -> requests.Session:
 
     **Where this copy diverges from the roster's**: the session this client builds
     for itself is a `_BoundedTransport`, so the token grant `pylti1p3` posts over it
-    is bounded too (see that class). The roster sync has the same unbounded token
-    dial and is out of this ticket's scope; it is named in E3-05's pull request.
+    is bounded too (see that class). The roster sync bounds its own token dial a
+    different way since E5.1-02: its pinned adapter applies
+    `roster_sync.ROSTER_REQUEST_TIMEOUT` to every request that names no timeout.
     """
     session = _BoundedTransport() if http is None else http
     session.max_redirects = 0
