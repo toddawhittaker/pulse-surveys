@@ -1,8 +1,8 @@
 """A gate that fails must reach the one required check — ticket E0-36, item 1.
 
 `ci` is the single check branch protection points at, and it computes its verdict
-from `join(needs.*.result)`. It needs `[fast-gate, test, e2e, evals, docker,
-frontend-build, supply-chain]`; `migration-drift`, `lint-python`, `lint-frontend`
+from `join(needs.*.result)`. It needs `[fast-gate, test, test-shards, e2e, evals,
+docker, frontend-build, supply-chain]`; `migration-drift`, `lint-python`, `lint-frontend`
 and `ci-selftest` reach it only through `fast-gate`.
 
 **A job whose dependency failed is reported `skipped`, not `failure`.** So a real
