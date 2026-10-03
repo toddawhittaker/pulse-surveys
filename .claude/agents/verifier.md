@@ -108,9 +108,8 @@ and both mocks — not just `backend/app/`. More than one caller means a shared
 entry point (MISTAKES #41: a ticket's own suites don't verify a shared entry
 point) — run the full suite for that row instead, and name the import sites
 in the report. An **empty** caller list is suspicious, not reassuring, for any
-module `.claude/heavy-lane-paths.md` names as its own row rather than folding
-into a directory's fail-closed default — `backend/app/services/`,
-`backend/app/api/`, `backend/app/config.py`, `backend/app/db.py`,
+module `.claude/heavy-lane-paths.md` names in a row — `authz.py`,
+`identity.py`, `session.py`, `tokens.py`, `api/deps.py`,
 `mock-lms/app/tokens.py`, `mock-lms/app/signing.py`, and
 `mock-idp/app/signing.py` included. Those exist to be imported from
 elsewhere; treat an empty list as a reason to check the grep, not as proof the
