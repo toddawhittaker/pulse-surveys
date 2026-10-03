@@ -69,29 +69,33 @@ COURSE_LEVEL_COLUMN = "level"
 # the sentence rather than an aside — an 18-week section exists.
 SPEC_LENGTHS = (3, 6, 8, 10, 12, 15, 16, 18)
 
-# Each length outside that set, paired with the accepted length nearest it. The
-# pairing is what makes each refusal a boundary rather than an anecdote: the test
-# writes the accepted neighbour first and requires it to be stored, so a schema
-# that refused everything cannot pass by refusing this one too.
+# **The owner's ruling of 2026-09-22 (E5-14): a named set's length is data.** The
+# `CHECK` on `comparison_set.length_weeks` becomes `length_weeks >= 1`, matching
+# `section`'s own, and no list of calendar lengths binds a set any longer — SPEC
+# §2.2 makes the calendar institution configuration, and a set declaring a length
+# no calendar list names is a set over sections that length, which a later term
+# may well run. ADR 0164 is superseded in part.
 #
-# Every entry is a near miss on purpose. `17` sits between 16 and 18 and is the
-# one a range check written as `3 <= n <= 18` accepts; `4`, `5`, `7`, `9`, `11`,
-# `13` and `14` are the interior gaps the same range check accepts; `0` and `-1`
-# are the two below every band, and a column typed `integer` accepts both.
-LENGTHS_OUTSIDE_THE_SET = (
-    (-1, 3),
-    (0, 3),
-    (2, 3),
-    (4, 3),
-    (5, 6),
-    (7, 6),
-    (9, 8),
-    (11, 10),
-    (13, 12),
-    (14, 15),
-    (17, 16),
-    (19, 18),
+# So the refused side is now below one week, each beside the accepted length
+# nearest it (the pairing is what makes each refusal a boundary rather than an
+# anecdote: the accepted neighbour is written first and required to be stored).
+# `0` and `-1` are what an `integer` column takes when nothing says otherwise, and
+# a set of zero weeks resolves against no section ever.
+LENGTHS_BELOW_ONE_WEEK = (
+    (-1, 1),
+    (0, 1),
 )
+
+# Lengths no calendar list names, which the old `IN (...)` refused and the ruling
+# makes storable. `4` is the owner's own example; `17` sits between two of §2.2's
+# lengths; `1` is the smallest the new `CHECK` admits; `19` is past every band.
+LENGTHS_NO_CALENDAR_LIST_NAMES = (1, 2, 4, 5, 7, 17, 19)
+
+# Names the ruling's second `CHECK` refuses, `btrim(name) <> ''`: the empty
+# string, and one made only of spaces. (`btrim` with one argument trims spaces
+# only, so a tab is not in this list; the request schema's own strip is the
+# layer that sees one, and it is the implementer's.)
+BLANK_NAMES = ("", "   ")
 
 # SPEC §5.1 names the five and §8 bands them: "`DEV`, `UG`, `UGGR`, `GR`, `DR`".
 SPEC_LEVELS = ("DEV", "UG", "UGGR", "GR", "DR")
@@ -190,6 +194,23 @@ def a_write_of(verb: str, relation: str, tables: dict[str, Any]) -> str:
             "`backend/app/models/benchmark.py`."
         )
     column = next(iter(table.columns)).name
+    return f'UPDATE public.{relation} SET "{column}" = "{column}"'  # noqa: S608
+
+
+def an_update_of_column(relation: str, column: str, tables: dict[str, Any]) -> str:
+    """An `UPDATE` assigning one named column to itself, for a column-grain grant probe.
+
+    The column is required to exist on the declared table first, so a missing
+    column is a failure naming it rather than a `42703` a caller could read as a
+    withheld grant (`docs/MISTAKES.md` entry 3 in its SQLSTATE form).
+    """
+    table = tables.get(relation)
+    if table is None or column not in table.c:
+        declared = [] if table is None else [entry.name for entry in table.columns]
+        pytest.fail(
+            f"`{relation}` declares no `{column}` column (it declares {declared}), so this probe "
+            "cannot ask whether the role may write it."
+        )
     return f'UPDATE public.{relation} SET "{column}" = "{column}"'  # noqa: S608
 
 

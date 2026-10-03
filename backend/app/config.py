@@ -858,18 +858,17 @@ class Settings(BaseSettings):
         description="Responses below which raw comments stay hidden (§4).",
     )
 
-    # Deliberately *not* settled by the spec. §11 open question 1: the benchmark
-    # mechanism is specced (§5.1) and the numbers are not. 3 and 15 are the
-    # suggested starting values, not settled ones — expect them to move once
-    # there is real data behind them. Defaulted so that answering §11 stays a
-    # configuration change rather than a code change.
+    # The benchmark minimums (§5.1, §4.1 item 7), settled in SPEC §11 question 1:
+    # 3 sections and 10 distinct respondents, the owner's ruling at E5's exit.
+    # They stay configuration rather than constants, so a deployment can raise
+    # them, but these are the values the spec settles.
     benchmark_min_sections_default: int = Field(
         default=3,
         ge=1,
         description="Sections a comparison set needs before it is shown (§5.1).",
     )
     benchmark_min_respondents_default: int = Field(
-        default=15,
+        default=10,
         ge=1,
         description="Respondents a comparison set needs before it is shown (§5.1).",
     )

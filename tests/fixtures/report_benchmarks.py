@@ -68,6 +68,7 @@ import pytest
 from sqlalchemy import select, update
 
 from fixtures.benchmark_views import (
+    COHORTS_BY_TERM,
     COURSE_NUMBER_COLUMN,
     COURSE_NUMBER_FOR_LEVEL,
     COURSE_RATING_POSITION,
@@ -86,6 +87,7 @@ from fixtures.report_api import (
     BENCHMARK_MIN_RESPONDENTS,
     BENCHMARK_MIN_SECTIONS,
     EITHER_SIDE_OF_A_CLOSE,
+    INSTRUCTOR_ROLE,
     PAYLOAD_STREAM_KEY,
     PUBLISHED_WEEKS_FIELD,
     STREAMS_MEMBER,
@@ -112,7 +114,11 @@ from fixtures.survey_windows import (
     SECTION_START_COLUMN,
     SECTION_TABLE,
     SEEDED_COHORTS,
+    SURVEY_WINDOW_TABLE,
     TERM_TABLE,
+    WINDOW_CLOSES_COLUMN,
+    WINDOW_SECTION_COLUMN,
+    WINDOW_WEEK_COLUMN,
     WINDOWS_BY_TERM_WEEK,
 )
 
@@ -261,46 +267,57 @@ def _repeated(value: Any, times: int) -> tuple[Any, ...]:
 #
 # Every hours value sits on the half-hour, which is the grid SPEC §3.2's workload
 # question is answered on; every rating is an integer on the 1-5 Likert scale.
+#
+# **Written for a respondent minimum of 10**, the value SPEC §11 question 1
+# settles (E5-14, 2026-09-22): a week at the minimum holds ten entries per table
+# and a week one below it nine. Every even-sized table is split unevenly (6 and 4,
+# 8 and 2, 7 and 3), because an even split puts the fifth and sixth values either
+# side of the gap and makes the median the mean — two statistics this world has to
+# keep apart.
 BENCHMARK_WEEKS: dict[int, WeekPlan] = {
-    # 8 x 7.5 + 7 x 10.5 = 133.5 over 15 -> mean 8.9, median 7.5.
-    # 12 x 4 + 3 x 2 = 54 over 15 -> instructor rating mean 3.6.
-    # 6 x 1 + 9 x 4 = 42 over 15 -> course rating mean 2.8.
+    # 6 x 7.5 + 4 x 9.5 = 45 + 38 = 83 over 10 -> mean 8.3; sorted, the fifth and
+    # sixth of ten are both 7.5 -> median 7.5.
+    # 8 x 4 + 2 x 2 = 36 over 10 -> instructor rating mean 3.6.
+    # 4 x 1 + 6 x 4 = 28 over 10 -> course rating mean 2.8.
     WEEK_CLEAR: WeekPlan(
         sections=AT_MINIMUM,
         respondents=AT_MINIMUM,
-        hours=(*_repeated(Decimal("7.5"), 8), *_repeated(Decimal("10.5"), 7)),
-        instructor_ratings=(*_repeated(4, 12), *_repeated(2, 3)),
-        course_ratings=(*_repeated(1, 6), *_repeated(4, 9)),
+        hours=(*_repeated(Decimal("7.5"), 6), *_repeated(Decimal("9.5"), 4)),
+        instructor_ratings=(*_repeated(4, 8), *_repeated(2, 2)),
+        course_ratings=(*_repeated(1, 4), *_repeated(4, 6)),
     ),
-    # 10 x 4.5 + 4 x 11.5 = 91 over 14 -> mean 6.5, median 4.5.
-    # 10 x 5 + 4 x 2 = 58 over 14 -> instructor rating mean 58/14.
-    # 10 x 4 + 4 x 1 = 44 over 14 -> course rating mean 44/14.
+    # 6 x 4.5 + 3 x 10.5 = 27 + 31.5 = 58.5 over 9 -> mean 6.5; sorted, the fifth
+    # of nine is 4.5 -> median 4.5.
+    # 7 x 5 + 2 x 2 = 39 over 9 -> instructor rating mean 39/9.
+    # 7 x 4 + 2 x 1 = 30 over 9 -> course rating mean 30/9.
     WEEK_THIN_PEOPLE: WeekPlan(
         sections=AT_MINIMUM,
         respondents=ONE_BELOW,
-        hours=(*_repeated(Decimal("4.5"), 10), *_repeated(Decimal("11.5"), 4)),
-        instructor_ratings=(*_repeated(5, 10), *_repeated(2, 4)),
-        course_ratings=(*_repeated(4, 10), *_repeated(1, 4)),
+        hours=(*_repeated(Decimal("4.5"), 6), *_repeated(Decimal("10.5"), 3)),
+        instructor_ratings=(*_repeated(5, 7), *_repeated(2, 2)),
+        course_ratings=(*_repeated(4, 7), *_repeated(1, 2)),
     ),
-    # 12 x 3.5 + 3 x 12.5 = 79.5 over 15 -> mean 5.3, median 3.5.
-    # 11 x 5 + 4 x 1 = 59 over 15 -> instructor rating mean 59/15.
-    # 11 x 4 + 4 x 1 = 48 over 15 -> course rating mean 3.2.
+    # 8 x 3.5 + 2 x 12.5 = 28 + 25 = 53 over 10 -> mean 5.3; the fifth and sixth of
+    # ten are both 3.5 -> median 3.5.
+    # 7 x 5 + 3 x 1 = 38 over 10 -> instructor rating mean 3.8.
+    # 7 x 4 + 3 x 1 = 31 over 10 -> course rating mean 3.1.
     WEEK_THIN_SECTIONS: WeekPlan(
         sections=ONE_BELOW,
         respondents=AT_MINIMUM,
-        hours=(*_repeated(Decimal("3.5"), 12), *_repeated(Decimal("12.5"), 3)),
-        instructor_ratings=(*_repeated(5, 11), *_repeated(1, 4)),
-        course_ratings=(*_repeated(4, 11), *_repeated(1, 4)),
+        hours=(*_repeated(Decimal("3.5"), 8), *_repeated(Decimal("12.5"), 2)),
+        instructor_ratings=(*_repeated(5, 7), *_repeated(1, 3)),
+        course_ratings=(*_repeated(4, 7), *_repeated(1, 3)),
     ),
-    # 8 x 5.5 + 7 x 8.5 = 103.5 over 15 -> mean 6.9, median 5.5.
-    # 9 x 5 + 6 x 1 = 51 over 15 -> instructor rating mean 3.4.
-    # 3 x 1 + 12 x 3 = 39 over 15 -> course rating mean 2.6.
+    # 6 x 5.5 + 4 x 8.5 = 33 + 34 = 67 over 10 -> mean 6.7; the fifth and sixth of
+    # ten are both 5.5 -> median 5.5.
+    # 6 x 5 + 4 x 1 = 34 over 10 -> instructor rating mean 3.4.
+    # 2 x 1 + 8 x 3 = 26 over 10 -> course rating mean 2.6.
     WEEK_CLEAR_TWIN: WeekPlan(
         sections=AT_MINIMUM,
         respondents=AT_MINIMUM,
-        hours=(*_repeated(Decimal("5.5"), 8), *_repeated(Decimal("8.5"), 7)),
-        instructor_ratings=(*_repeated(5, 9), *_repeated(1, 6)),
-        course_ratings=(*_repeated(1, 3), *_repeated(3, 12)),
+        hours=(*_repeated(Decimal("5.5"), 6), *_repeated(Decimal("8.5"), 4)),
+        instructor_ratings=(*_repeated(5, 6), *_repeated(1, 4)),
+        course_ratings=(*_repeated(1, 2), *_repeated(3, 8)),
     ),
 }
 
@@ -329,6 +346,10 @@ class PlantedBenchmarkCohort:
     sections_by_week: dict[int, tuple[str, ...]]
     respondents_by_week: dict[int, tuple[str, ...]]
     plans: Mapping[int, WeekPlan]
+    # The containment rows E4-07's world already seeded, down to the department.
+    # Kept so a test can hang a further course beside the set's without a second
+    # institution (SPEC §8 permits one; see `_door_chain`).
+    spine: Mapping[str, Any]
 
     def set_section_ids(self) -> list[Any]:
         """Every section of the default set, in label order."""
@@ -511,7 +532,201 @@ def plant_the_benchmark_cohort(
         sections_by_week=sections_by_week,
         respondents_by_week=respondents_by_week,
         plans=plans,
+        spine=dict(spine),
     )
+
+
+def plant_a_section_beside(
+    cohort: PlantedBenchmarkCohort,
+    label: str,
+    *,
+    letter: str,
+    term: str = CURRENT_TERM,
+    led: bool = True,
+    course: Mapping[str, Any] | None = None,
+    weeks_later: int = 0,
+    ordinal: str = COHORT_SECTION_ORDINAL,
+) -> PlantedSection:
+    """One more section at the set's level, on a course of its own, answered by nobody yet.
+
+    For E5-14's two report-level modules, which need sections the cohort does not
+    have: a later-starting cohort of the same length, a prior-term section, and
+    sections outside the default set. The course carries the set's number, so its
+    level is the set's by construction (ADR 0015); `letter` is looked up in the
+    start-letter map of `term`, so the length and the start date are the seed's
+    facts rather than this helper's.
+
+    `led` maps the cohort's lead to the new course, which puts the section in the
+    hero's default set; left false, the course has no lead at all, so the section
+    is in the university population and outside the default set — the
+    complement E5-14's university-sealing ruling is about.
+
+    A prior-term section builds the prior term on first use, under the same world.
+
+    **Round 3 (E5-14) adds three knobs**, for the reader-group worlds:
+    - `course` hangs the section on an existing course (the hero's, for a
+      second section of the same course) instead of a new one; `led` is then
+      ignored, because whoever leads that course already does.
+    - `weeks_later` starts the section that many weeks after its letter's start
+      date, so two sections of one length can close the same course week a week
+      apart. Only the stored start date and this world's week arithmetic move;
+      the code keeps the letter's shape.
+    - `ordinal` keeps two codes on one course and term distinct.
+    """
+    world = cohort.world
+    if term not in world.terms:
+        world.build_prior_term()
+    letters = COHORTS_BY_TERM[term]
+    if letter not in letters:
+        pytest.fail(
+            f"The {term} term's start-letter map has no {letter!r}; it has {sorted(letters)}."
+        )
+    length_weeks, first_term_week, start = letters[letter]
+    first_term_week += weeks_later
+    start += timedelta(days=7 * weeks_later)
+    course_chain = dict(cohort.spine)
+    if course is None:
+        course = world.seed(
+            COURSE_TABLE, course_chain, **{COURSE_NUMBER_COLUMN: SHARED_COURSE_NUMBER}
+        )
+    else:
+        course_chain[COURSE_TABLE] = course
+        led = False
+    course_chain[TERM_TABLE] = world.term_row(term)
+    row = world.seed(
+        SECTION_TABLE,
+        course_chain,
+        **{
+            SECTION_CODE_COLUMN: f"{letter}{ordinal}{COHORT_SECTION_MODALITY}",
+            SECTION_LENGTH_COLUMN: length_weeks,
+            SECTION_START_COLUMN: start,
+            SECTION_END_COLUMN: start + timedelta(days=length_weeks * 7 - 1),
+        },
+    )
+    planted = PlantedSection(
+        label=label,
+        row=row,
+        term=term,
+        cohort=letter,
+        level=cohort.level,
+        length_weeks=length_weeks,
+        first_term_week=first_term_week,
+        start_date=start,
+        course=course,
+    )
+    world.sections[label] = planted
+    if led:
+        world.seed(LEAD_FACULTY_MAPPING_TABLE, {PERSON_TABLE: cohort.lead, COURSE_TABLE: course})
+    return planted
+
+
+def hero_window_close(world: BenchmarkWorld, door: ReportDoor, course_week: int) -> datetime:
+    """*T(w)*: the hero section's own `survey_window.closes_at` for one course week, read back.
+
+    Read from the database rather than from the hand-written calendar, because
+    the owner's freeze-at-close ruling defines the cutoff as *that row's* close —
+    which instant E4-07's world gave it is that fixture's business.
+    """
+    table = require_table(world.tables, SURVEY_WINDOW_TABLE)
+    world.session.flush()
+    found = list(
+        world.session.execute(
+            select(table.c[WINDOW_CLOSES_COLUMN]).where(
+                table.c[WINDOW_SECTION_COLUMN] == door.rows.taught_section_id,
+                table.c[WINDOW_WEEK_COLUMN] == door.rows.week_id(course_week),
+            )
+        ).scalars()
+    )
+    if len(found) != 1:
+        pytest.fail(
+            f"The hero section has {len(found)} survey windows for course week {course_week}; the "
+            "freeze-at-close cutoff is its one window's close, so this world cannot say what "
+            "T(w) is."
+        )
+    return found[0]
+
+
+def teach(door: ReportDoor, section_id: Any, *, person: Any = None) -> Any:
+    """Give `person` (the door's own instructor by default) a teaching grant on one section.
+
+    The same row `plant_a_second_taught_section` in `tests/fixtures/report_api.py`
+    writes, for the same reason that fixture gives: E4-07 resolves a request's
+    section scope from the `teaching_instructor` view on every read, so a grant
+    committed after the launch is in scope for the next request. It is also the
+    row E5-14's reader group *R* is resolved from. Answers the person's key.
+    """
+    who = door.person_id if person is None else person
+    if who is None or door.graph is None:
+        pytest.fail(
+            "This door holds no instructor person, so there is nobody to grant a teaching "
+            "scope to."
+        )
+    door.graph.assign(INSTRUCTOR_ROLE, scope=section_id, person=who)
+    return who
+
+
+def publish_every_week(world: BenchmarkWorld, label: str) -> None:
+    """Seed one section's window for every course week it runs, at the hand-written instants.
+
+    A section's report publishes the weeks whose windows have closed, and a
+    section nobody answered has no window rows until something seeds them — so
+    a section whose *own report* a test reads needs them, answered or not.
+    """
+    planted = world.section(label)
+    for course_week in range(1, planted.length_weeks + 1):
+        world.window(label, world.term_week_of(label, course_week))
+
+
+def answer_once(
+    cohort: PlantedBenchmarkCohort,
+    label: str,
+    *,
+    subject: str,
+    course_week: int,
+    workload: Decimal | None = Decimal("30.0"),
+    rating: int = 1,
+    last_submitted_at: datetime | None = None,
+) -> None:
+    """One new student in `label` answers one course week, every question.
+
+    The defaults sit far from every value the cohort plants (hours 3.5-12.5), so
+    a row that is counted moves the means it reaches. `workload=None` answers the
+    two ratings and leaves the hours unanswered (no `answer` row), which is a
+    response with a week row and no hour-reporter.
+    """
+    world = cohort.world
+    student = world.student(subject, enrolled_in=(label,))
+    world.respond(
+        label,
+        course_week=course_week,
+        student=student,
+        workload=workload,
+        instructor_rating=rating,
+        course_rating=rating,
+        last_submitted_at=last_submitted_at,
+    )
+
+
+def benchmark_members_of(
+    door: ReportDoor, *, course_week: int, section_id: Any = None
+) -> dict[str, str]:
+    """Every benchmark member of one report's payload, as canonical JSON, for byte comparison.
+
+    Both streams' `benchmark` member and the top-level `workload_benchmark`. Read
+    for the door's own section unless `section_id` names another the door's
+    instructor teaches.
+    """
+    import json
+
+    body, answered = door.payload(course_week=course_week, section_id=section_id)
+    found = {
+        f"streams.{key}.{BENCHMARK_MEMBER}": member(
+            body, STREAMS_MEMBER, key, BENCHMARK_MEMBER, answered=answered
+        )
+        for key in PAYLOAD_STREAM_KEY.values()
+    }
+    found[WORKLOAD_BENCHMARK_MEMBER] = member(body, WORKLOAD_BENCHMARK_MEMBER, answered=answered)
+    return {where: json.dumps(held, sort_keys=True) for where, held in found.items()}
 
 
 def hero_responses(

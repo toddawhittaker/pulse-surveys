@@ -44,13 +44,16 @@ would tell a caller that a set exists and belongs to somebody else — the
 enumeration `app.api.instructor`'s own refusal pair exists to prevent, in the one
 place here where it has a foothold.
 
-**The five write refusals are translations rather than checks.** SPEC §2.2's
-lengths, §8's levels and §5.1's exact level match are all held by Postgres
-(E5-01, ADR 0164); the service attempts the write and maps the constraint that
+**The five write refusals are translations rather than checks.** A length of
+at least one week, §8's levels and §5.1's exact level match are all held by
+Postgres (E5-01, ADR 0164, E5-14); the service attempts the write and maps the constraint that
 fired to one sentence. So a 422 from here carries a sentence out of
 `app.copy.leadership_sets` rather than a list of field errors, and a body that
 carried field errors would mean the wire model had refused the value before the
-database saw it.
+database saw it. **One refusal is the wire model's by design:** a set name that is
+empty once its spaces are stripped is refused by `SetWrite` itself (E5-14's
+ruling), so its 422 carries the framework's standard field errors and no sentence
+from the copy registry — the one 422 here whose body is a list of field errors.
 
 **The preview answers two counts and nothing else.** SPEC §4.1 item 7 suppresses
 statistics computed over a comparison set below the configured minimums; a count

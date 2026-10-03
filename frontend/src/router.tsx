@@ -199,3 +199,15 @@ declare module '@tanstack/react-router' {
     router: typeof router;
   }
 }
+
+/**
+ * The one piece of navigation state the application carries: the edit page's
+ * "this set was saved" handed to the list it returns to. The list reads it once
+ * and replaces the history entry without it, so a reload of that entry cannot
+ * announce the save a second time (`routes/leadership/ComparisonSets.tsx`).
+ */
+declare module '@tanstack/history' {
+  interface HistoryState {
+    pulseSetSaved?: true;
+  }
+}

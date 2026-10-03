@@ -290,7 +290,7 @@ describe('a suppressed series', () => {
     );
 
     expect(screen.getByTestId(TREND_SUPPRESSION_COMPARISON_TESTID).textContent).toBe(
-      'Comparable 12-week courses: no line this week. The set behind it is too small to report on.',
+      'Comparable 12-week courses: no line on this chart. The set behind it is too small to report on.',
     );
     expect(screen.queryByTestId(TREND_LINE_COMPARISON_TESTID)).toBeNull();
     expect(screen.queryByTestId(TREND_LEGEND_COMPARISON_TESTID)).toBeNull();
@@ -318,7 +318,7 @@ describe('a suppressed series', () => {
     );
 
     expect(screen.getByTestId(TREND_SUPPRESSION_UNIVERSITY_TESTID).textContent).toBe(
-      'University: no line this week. The set behind it is too small to report on.',
+      'University: no line on this chart. The set behind it is too small to report on.',
     );
     expect(screen.queryByTestId(TREND_LINE_UNIVERSITY_TESTID)).toBeNull();
     expect(screen.queryByTestId(TREND_LEGEND_UNIVERSITY_TESTID)).toBeNull();
@@ -453,7 +453,7 @@ describe('a week whose seal does not say exactly false', () => {
       expect(screen.queryByTestId(TREND_LEGEND_COMPARISON_TESTID)).toBeNull();
       expect(screen.getAllByRole('table')).toHaveLength(1);
       expect(screen.getByTestId(TREND_SUPPRESSION_COMPARISON_TESTID).textContent).toBe(
-        'Comparable 12-week courses: no line this week. The set behind it is too small to report on.',
+        'Comparable 12-week courses: no line on this chart. The set behind it is too small to report on.',
       );
     });
   }
@@ -586,7 +586,7 @@ describe('a series some of whose weeks are withheld', () => {
     // so the line is drawn in two runs with a hole between them — and no notice,
     // because the series is on the panel and a reader can see where it stops.
     // The alternative the ADR rejects is a notice whenever any week is withheld,
-    // which would put "no line this week" under a line.
+    // which would put "no line on this chart" under a line.
     const { container } = render(
       <PulseTrendChart
         points={SECTION}
@@ -689,7 +689,7 @@ describe('a member the payload sent without its weeks', () => {
       // And the member said something, because it was there.
       expect(screen.queryByTestId(TREND_LINE_COMPARISON_TESTID)).toBeNull();
       expect(screen.getByTestId(TREND_SUPPRESSION_COMPARISON_TESTID).textContent).toBe(
-        'Comparable 12-week courses: no line this week. The set behind it is too small to report on.',
+        'Comparable 12-week courses: no line on this chart. The set behind it is too small to report on.',
       );
     });
   }

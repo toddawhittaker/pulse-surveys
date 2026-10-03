@@ -1,5 +1,10 @@
 # 0164 — A named comparison set is a list of courses plus one declared length and level
 
+**Status:** Accepted — E5-01. The length-set decision is superseded by
+[ADR 0180](0180-a-named-sets-length-is-data.md) (E5-14): a set's length is
+held to `length_weeks >= 1` and the form offers the lengths sections carry.
+Everything else here stands.
+
 ## Context
 
 SPEC §5.1 lets leadership define named comparison sets beside the default one:
@@ -37,6 +42,7 @@ past-referencing and a section exists in exactly one term, so a set of sections
 would age out every term and leadership would rebuild it each time. A set of
 courses keeps its meaning as terms come and go.
 
+**Superseded by [ADR 0180](0180-a-named-sets-length-is-data.md) (E5-14).**
 **The length set is hard-coded in the migration**, as
 `length_weeks IN (3, 6, 8, 10, 12, 15, 16, 18)`, citing SPEC §2.2. It is written
 out rather than as a range because the set has interior gaps: a range accepts 17

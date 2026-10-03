@@ -3,7 +3,7 @@
 `app.api.leadership` serves the surface leadership defines comparison sets on,
 and it refuses eight ways: a session that is not a leadership session, a set id
 nothing defined, somebody else's set on an edit or a delete, and the five rules
-the database holds a set to — a name used once, a length out of SPEC §2.2's set,
+the database holds a set to — a name used once, a length of at least one week,
 a level out of SPEC §8's five, a member course at another level, and a member
 that is no course at all.
 
@@ -14,13 +14,14 @@ Postgres refused — the route attempts the write and maps the constraint that
 fired — so the sentence has to say which rule was broken without repeating the
 value that broke it.
 
-**No length and no level is spelled out here.** SPEC §2.2's eight lengths live in
-`app.models.benchmark.CALENDAR_LENGTHS` and §8's five levels in
-`app.models.org.CourseLevel`, and a sentence listing either would be a second
-copy of a closed set, stale the day one of them moves (`docs/MISTAKES.md` entry
-19). This package may not import an application module in any case — see the
-package docstring — so the sentences say "one of this institution's course
-lengths" and leave the enumeration where it is held.
+**No level is spelled out here.** §8's five levels live in
+`app.models.org.CourseLevel`, and a sentence listing them would be a second copy
+of a closed set, stale the day one of them moves (`docs/MISTAKES.md` entry 19).
+This package may not import an application module in any case — see the package
+docstring — so the sentence says "one of this institution's course levels" and
+leaves the enumeration where it is held. A length is no longer a closed set at
+all: since E5-14 the table holds a set's length to at least one week, and the
+sentence says exactly that.
 
 **All eight are registry entries on the comparison-set surface, and `COPY` is
 filled from them — E5-13, ADR 0176.** They are published under the
@@ -104,14 +105,14 @@ _NAME_ALREADY_USED = CopyEntry(
     text="Another comparison set already uses this name, and a set is named once.",
 )
 
-# The 422 the `length_is_a_calendar_length` check produces. The set is closed and
-# has interior gaps, which is why the sentence says "one of" rather than a range.
+# The 422 the `length_weeks_is_at_least_one` check produces — a length of zero
+# weeks or fewer. The key keeps its E5-06 name, which every reader of the
+# registry and the frontend reaches it by; only the rule, and so the sentence,
+# changed when the owner ruled at E5-14 that a set's length is data rather than
+# one of SPEC §2.2's eight.
 _LENGTH_NOT_A_CALENDAR_LENGTH = CopyEntry(
     key="leadership_comparison_sets.length_not_a_calendar_length",
-    text=(
-        "A comparison set runs one of this institution's course lengths, and that is not one of "
-        "them."
-    ),
+    text="A comparison set's length is at least one week.",
 )
 
 # The 422 the `course_level` cast produces for a token that is not one of SPEC

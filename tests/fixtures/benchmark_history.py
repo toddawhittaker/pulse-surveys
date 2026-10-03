@@ -53,7 +53,9 @@ E5-12-01.md`) that must not be worked around twice.
 The launched world exists because **every test in this suite until now stopped at
 a refusal, so the seeder's write path was never executed** — which the mutation
 battery found as three survivors. `plant_a_launched_prior_term_world` builds, row
-by row, the world four anchored staff launches and a roster sync would have left:
+by row, the world the anchored staff launches and a roster sync would have left
+(one launch per prior-term section the seeder names — five since E5-14's exit-demo
+fix added `BIOL-215-U8FF`; the count is the seeder's, read off its refusals):
 the sections the seeder names, under the courses their codes name, in the prior
 term the seed wrote, with a window for every course week and a roster enrolled from
 the section's first day. It plants **only what a launch and a sync write** — never
@@ -787,7 +789,7 @@ def map_rows_for(
 
 
 # ---------------------------------------------------------------------------
-# The launched prior-term world: what four staff launches and a roster sync leave
+# The launched prior-term world: what the staff launches and a roster sync leave
 # behind, planted row by row so the seeder's **write path** can be executed.
 # ---------------------------------------------------------------------------
 
@@ -1039,7 +1041,7 @@ def plant_one_launch(
     **Every link is written out through `link_values`, and the seeding
     walker's `chain` is not used at all.** The first version passed the term and the
     prefix as chain entries and let the walker fill the rest; the seeder then refused
-    over a database that visibly held all four of its sections, because a section
+    over a database that visibly held every one of its sections, because a section
     hung on anything but the seed's own prior-term row is a section its
     `(prefix, course number, term, code)` lookup cannot find. Naming every
     referencing column leaves the walker nothing to invent, and

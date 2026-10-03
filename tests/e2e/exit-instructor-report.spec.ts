@@ -1248,9 +1248,9 @@ async function openTheReport(
       'list read rather than a menu defect.',
   ).toBeVisible();
   // Named by prefix, number and §2.2 code, because E5-10's benchmark drive
-  // provisions the prior term's `BIOL-215-E5WW` and this instructor then teaches
-  // two `BIOL 215` sections — a pattern naming only the course resolves to both
-  // links and strict mode refuses it. The code is in the server's governed
+  // provisions the prior term's `BIOL-215-E5WW` and `BIOL-215-U8FF` and this
+  // instructor then teaches three `BIOL 215` sections — a pattern naming only
+  // the course resolves to all of them and strict mode refuses it. The code is in the server's governed
   // label.
   await menu.getByRole('link', { name: new RegExp(`${BIOL.course} ${BIOL.code}`) }).click();
   const report = page.getByTestId(REPORT);

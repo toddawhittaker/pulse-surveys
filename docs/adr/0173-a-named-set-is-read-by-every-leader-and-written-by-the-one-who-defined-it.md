@@ -52,7 +52,7 @@ refusal by pressing it.
 
 **The write and scope code is a new module, `app/services/comparison_sets.py`.**
 Neither existing candidate fits. `app/services/benchmarks.py` is the read and
-figure module and its own docstring says nothing in it writes; `app/services/
+figure module, and nothing in it writes; `app/services/
 authz.py` is SPEC §13's single authorization chokepoint, and putting a write
 path inside it would make the module where permission is decided also the module
 where rows change.

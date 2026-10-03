@@ -181,6 +181,7 @@
     stroke: var(--spruce-60);
     stroke-width: 1.5;
     stroke-dasharray: 6 5;
+    vector-effect: non-scaling-stroke;
     stroke-linecap: round;
     stroke-linejoin: round;
     animation: pulse-trend-fade-in 220ms ease-out 600ms both;
@@ -195,10 +196,19 @@
     stroke: var(--spruce-60);
     stroke-width: 1.5;
     stroke-dasharray: 2 4;
+    vector-effect: non-scaling-stroke;
     stroke-linecap: round;
     stroke-linejoin: round;
     animation: pulse-trend-fade-in 220ms ease-out 600ms both;
   }
+
+  /* **Both overlays keep their weight at any width.** The plot scales its
+   * viewBox to the column, so at a phone's width a 1.5-unit stroke renders under
+   * a pixel and the dash pattern shrinks with it; `non-scaling-stroke` holds the
+   * weight and the dashes in screen pixels instead. The hero line does not take
+   * it: its draw-on measures dashes against `pathLength`, and a stroke measured
+   * in screen space would stop drawing short of the line's end on a wide chart.
+   * At 2.5 units it is also the one line that stays legible when scaled down. */
 
   /* In a stacked pair the lower panel's overlays wait for its own hero draw,
    * which is itself waiting for the upper panel's. */

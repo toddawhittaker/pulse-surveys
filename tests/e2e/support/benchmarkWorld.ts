@@ -65,11 +65,18 @@ import { INSTRUCTOR_SUBJECT, INSTRUCTOR_VIEW, type SectionUnderTest } from './su
 export const PRIOR_TERM_NAME = 'Spring 2026';
 
 /**
- * The four sections `mock-lms/app/seed.py` publishes in the prior term.
+ * The five sections `mock-lms/app/seed.py` publishes in the prior term.
  *
- * Three twelve-week undergraduate sections, which is `BIOL-310-R7FF`'s own
- * length and level and therefore its comparison set, and one six-week section on
- * its own, which is under the three-section minimum and exists to be suppressed.
+ * Three twelve-week undergraduate `BIOL 310` sections, which is
+ * `BIOL-310-R7FF`'s own length and level and — because `BIOL 310` is led by
+ * `lead-biology` — its default comparison set; one six-week section on its own,
+ * which is under the three-section minimum and exists to be suppressed; and
+ * `BIOL-215-U8FF`, a twelve-week undergraduate `BIOL 215` section. `BIOL 215`
+ * has no lead, so `U8FF` joins the hero's **university** population and not its
+ * default set — which is what makes the university line differ from the
+ * comparison line on the seeded world (E5-14's exit-demo fix: without it, the
+ * freeze's earliest-close cutoff leaves the university holding exactly the
+ * three default-set sections, and the two lines coincide at every week).
  * The labels are the platform's and the codes are SPEC §2.2's; both are the
  * spellings `scripts/seed_benchmark_history.py`'s `PRIOR_SECTIONS` carries.
  */
@@ -78,6 +85,7 @@ export const PRIOR_SECTIONS: readonly SectionUnderTest[] = [
   { label: 'BIOL-310-U6WW', code: 'U6WW' },
   { label: 'BIOL-310-R5FF', code: 'R5FF' },
   { label: 'BIOL-215-E5WW', code: 'E5WW' },
+  { label: 'BIOL-215-U8FF', code: 'U8FF' },
 ];
 
 /** The sentence the seeder prints when its recount clears both minimums. */
@@ -136,7 +144,7 @@ function priorSectionStartClock(code: string, dates: ReadonlyMap<string, string>
 /**
  * Stand up the prior term's benchmark world, and answer what the seeder printed.
  *
- * E5-12's runbook, performed: for each of the four prior-term sections, stand the
+ * E5-12's runbook, performed: for each of the five prior-term sections, stand the
  * clock on that section's own first day, launch the instructor persona into it —
  * which is what provisions the section and stores its roster address (SPEC §7.3)
  * — and derive its windows; then pipe the seeder once, which writes a term of

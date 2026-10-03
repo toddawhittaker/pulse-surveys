@@ -159,7 +159,9 @@ REPORT_SCHEMA_MODULE = "app.schemas.report"
 # entry 22's rule is to name the catalog and not the concept, and these two are
 # the catalog. Both already exist in `backend/app/config.py`; `.env.example`
 # documents them as `BENCHMARK_MIN_SECTIONS_DEFAULT` and
-# `BENCHMARK_MIN_RESPONDENTS_DEFAULT` with SPEC §11 question 1's starting values.
+# `BENCHMARK_MIN_RESPONDENTS_DEFAULT` with the values SPEC §11 question 1 settles
+# (3 sections, 10 respondents; E5-14). Nothing in this file reads those numbers:
+# every caller asks `Settings`.
 CONFIG_MODULE = "app.config"
 BENCHMARK_MIN_SECTIONS = "benchmark_min_sections_default"
 BENCHMARK_MIN_RESPONDENTS = "benchmark_min_respondents_default"

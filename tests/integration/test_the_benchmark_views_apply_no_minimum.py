@@ -21,12 +21,13 @@ reason — there is no figure — and the invariant passes without the chokepoin
 ever having been asked. A guard that cannot see the case it is guarding is
 `docs/MISTAKES.md` entry 9 wearing a green tick.
 
-`backend/app/config.py` has carried `benchmark_min_sections_default` = 3 and
-`benchmark_min_respondents_default` = 15 since E0, and the breakdown's decision
-10 leaves both unsettled until E5-14. So the worlds below sit at 1 section and 1
-respondent — under any minimum anybody might rule — and the control sits above
-both, so a `HAVING` that arrived would fail the first and leave the second
-green, naming itself.
+SPEC §11 question 1 settles the two minimums at 3 sections and 10 respondents
+(E5-14, 2026-09-22), and `backend/app/config.py` carries them as
+`benchmark_min_sections_default` and `benchmark_min_respondents_default`, both
+still env-driven. The worlds below sit at 1 section and 1 respondent — under
+either minimum, and under any value a deployment might configure above one — and
+the control sits at both, with the respondent count read from `Settings`, so a `HAVING` that arrived would fail the first and
+leave the second green, naming itself.
 """
 
 from decimal import Decimal
@@ -44,6 +45,7 @@ from fixtures.benchmark_views import (
     BenchmarkWorld,
     require_benchmark_view,
 )
+from fixtures.report_api import BENCHMARK_MIN_RESPONDENTS, configured_benchmark_minimums
 from fixtures.survey_windows import SEEDED_COHORTS
 
 pytestmark = pytest.mark.integration
@@ -58,12 +60,26 @@ THE_START_DATE = SEEDED_COHORTS[THE_COHORT][2]
 THIN_HOURS = Decimal("3.5")
 THIN_RATING = Decimal("4")
 
-# The control's world: three sections, well above `benchmark_min_sections_default`
-# as `config.py` carries it today, and each with its own respondent. Its job is
+# The control's world: three sections, and as many respondents as the configured
+# respondent minimum, dealt round-robin so every section is answered. Its job is
 # to stay green when the thin world goes red, so that a failure names "a minimum
 # was applied" rather than "the view returns nothing".
+#
+# **Three sections is at `benchmark_min_sections_default`, not above it**, and
+# that is enough: a `HAVING count(DISTINCT section) >= 3` keeps this row. The
+# respondents were one per section until E5-14, which put this world *below*
+# the respondent minimum (three people against 15, and against the settled 10
+# as well), so a `HAVING` on people would have reddened the control beside the
+# thin test and the pair could not name it. The docstring of the control test
+# says what to do when a value makes this world thin: the world grows. It now
+# reads the respondent count from `Settings` rather than carrying a copy of it.
 THICK_SECTIONS = 3
 THICK_HOURS = Decimal("2.0")
+
+
+def the_configured_respondent_minimum() -> int:
+    """`benchmark_min_respondents_default` as `Settings` reads it, from a test body."""
+    return configured_benchmark_minimums()[BENCHMARK_MIN_RESPONDENTS]
 
 
 def a_cohort_of_one_section_and_one_respondent(world: BenchmarkWorld) -> BenchmarkWorld:
@@ -81,16 +97,26 @@ def a_cohort_of_one_section_and_one_respondent(world: BenchmarkWorld) -> Benchma
     return world
 
 
-def a_cohort_of_three_sections(world: BenchmarkWorld) -> BenchmarkWorld:
-    """The control: a cohort above any minimum this project has configured."""
+def a_cohort_of_three_sections(world: BenchmarkWorld, *, respondents: int) -> BenchmarkWorld:
+    """The control: a cohort at or above both configured minimums.
+
+    `respondents` distinct people, one response each, dealt round-robin over the
+    three sections so each section is answered by at least one of them.
+    """
+    if respondents < THICK_SECTIONS:
+        pytest.fail(
+            f"{respondents} respondents cannot answer in all {THICK_SECTIONS} sections, so the "
+            "control would not hold the section count it claims."
+        )
     world.build()
-    for index in range(THICK_SECTIONS):
-        label = f"section-{index}"
+    labels = [f"section-{index}" for index in range(THICK_SECTIONS)]
+    for label in labels:
         world.plant_section(label, cohort=THE_COHORT, level=UG)
+    for index in range(respondents):
         world.respond(
-            label,
+            labels[index % THICK_SECTIONS],
             course_week=THE_COURSE_WEEK,
-            subject=f"e5-03-thick-cohort-{index}",
+            subject=f"e5-03-thick-cohort-{index:02d}",
             workload=THICK_HOURS,
             instructor_rating=THIN_RATING,
             course_rating=THIN_RATING,
@@ -117,7 +143,7 @@ def test_a_one_section_cohort_has_a_row_on_the_course_week_axis(
     can disagree, and the one in SQL is the one no invariant reads.
 
     **The mutation it exists to survive**: `HAVING count(DISTINCT section_id) >=
-    3`, `HAVING count(DISTINCT <person key>) >= 15`, or a `WHERE` narrowing to
+    3`, `HAVING count(DISTINCT <person key>) >= 10`, or a `WHERE` narrowing to
     cohorts with more than one section — each of which reds this and leaves
     `test_a_cohort_above_every_configured_minimum_has_a_row_too` green, which is
     the pair that names the defect as a threshold rather than as an empty view.
@@ -177,7 +203,8 @@ def test_the_thin_cohorts_row_carries_the_counts_that_explain_it(
     )
     assert row["respondent_count"] == 1, (
         f"`respondent_count` is {row['respondent_count']!r} for a cohort one student answered. "
-        "E5-04 compares it against `benchmark_min_respondents_default`, which is 15 today, and "
+        "E5-04 compares it against `benchmark_min_respondents_default`, which SPEC §11 question 1 "
+        "settles at 10, and "
         "`docs/MISTAKES.md` entry 50 is what happens when the number crossing a people-protecting "
         "threshold is not a count of people."
     )
@@ -258,8 +285,9 @@ def test_a_cohort_above_every_configured_minimum_has_a_row_too(
 ) -> None:
     """The control, and the half that has to stay green.
 
-    Three sections, three respondents — above `benchmark_min_sections_default`
-    as configuration carries it today. Every one of the four views has a row.
+    Three sections — at `benchmark_min_sections_default` — and as many distinct
+    respondents as `benchmark_min_respondents_default`, read from `Settings`.
+    Every one of the four views has a row.
 
     Its job is to be the *other* half of a pair: if a minimum is added to a
     view, this stays green and the thin tests go red, and the failure reads as
@@ -269,11 +297,20 @@ def test_a_cohort_above_every_configured_minimum_has_a_row_too(
     cannot be attributed is nearly as expensive as a green that cannot be
     trusted.
 
-    It is also the one test in this module that must **not** change when the
-    minimums are settled at E5-14 (breakdown decision 10). If a future value
-    makes this world thin, the world grows; the assertion does not move.
+    It is also the one test in this module whose assertion must **not** change
+    when the minimums move (breakdown decision 10). If a value makes this world
+    thin, the world grows; the assertion does not move. E5-14 is where that
+    happened: one respondent per section was below the respondent minimum both
+    before and after SPEC §11 question 1 was settled at 10, so the world now
+    plants the configured number of people.
+
+    **The near-miss this pair now names:** `HAVING count(DISTINCT <person key>)
+    >= <the respondent minimum>` in a view reddens the thin tests and leaves this
+    one green. With three respondents it reddened both, and the output said
+    "the views return nothing" about a threshold.
     """
-    world = a_cohort_of_three_sections(benchmark_world)
+    respondents = the_configured_respondent_minimum()
+    world = a_cohort_of_three_sections(benchmark_world, respondents=respondents)
 
     if view in TERM_AXIS_VIEWS:
         rows = world.rows(
@@ -295,7 +332,7 @@ def test_a_cohort_above_every_configured_minimum_has_a_row_too(
 
     assert rows, (
         f"`public.{view}` has no row for a cohort of {THICK_SECTIONS} sections and "
-        f"{THICK_SECTIONS} respondents, which is above every minimum "
+        f"{respondents} respondents, which is at or above both minimums "
         "`backend/app/config.py` carries. This is the control for the thin-cohort tests in this "
         "module: with it red, their reds say nothing about thresholds, because the views are "
         "answering nothing for anybody."

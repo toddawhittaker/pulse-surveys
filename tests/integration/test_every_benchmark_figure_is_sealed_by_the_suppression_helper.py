@@ -54,6 +54,7 @@ from fixtures.benchmark_views import (
     NAMED_SET_TERM_AXIS,
     NAMED_SET_TREND,
     NAMED_SET_WORKLOAD,
+    PINNED_NOW,
     PROVENANCE_CHECK,
     UG,
     UNIVERSITY_POPULATION,
@@ -138,12 +139,21 @@ def a_world_every_door_answers_over(
     world.session.flush()
 
 
+# E5-14's freeze at close makes a cutoff per course week a required argument of
+# the four figure doors (the assumed interface is stated in
+# `tests/fixtures/benchmark_views.py`, beside `CUTOFFS_PARAMETER`). This module is
+# about provenance, not about the freeze, so every door is asked for the one week
+# its world answers with a cutoff after every window: nothing is excluded.
+THE_CUTOFFS = {THE_COURSE_WEEK: PINNED_NOW}
+
+
 def a_default_trend(world: BenchmarkWorld, api: dict[str, Any], stream: str) -> Any:
     return api[BENCHMARK_TREND](
         world.session,
         section_id=world.section_id(HERO),
         population=a_population(DEFAULT_SET_POPULATION),
         stream=stream,
+        cutoffs=THE_CUTOFFS,
     )
 
 
@@ -162,6 +172,7 @@ THE_DOORS = (
             section_id=world.section_id(HERO),
             population=a_population(DEFAULT_SET_POPULATION),
             course_week=THE_COURSE_WEEK,
+            cutoffs=THE_CUTOFFS,
         ),
         id="benchmark_workload-default-set",
     ),
@@ -171,6 +182,7 @@ THE_DOORS = (
             section_id=world.section_id(HERO),
             population=a_population(UNIVERSITY_POPULATION),
             course_week=THE_COURSE_WEEK,
+            cutoffs=THE_CUTOFFS,
         ),
         id="benchmark_workload-university",
     ),
@@ -179,6 +191,7 @@ THE_DOORS = (
             world.session,
             set_id=world.comparison_set_id("named"),
             stream=INSTRUCTOR_STREAM,
+            cutoffs=THE_CUTOFFS,
         ),
         id="named_set_trend",
     ),
@@ -187,6 +200,7 @@ THE_DOORS = (
             world.session,
             set_id=world.comparison_set_id("named"),
             course_week=THE_COURSE_WEEK,
+            cutoffs=THE_CUTOFFS,
         ),
         id="named_set_workload",
     ),

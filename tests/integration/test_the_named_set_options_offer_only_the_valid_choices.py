@@ -35,37 +35,81 @@ puzzling failure in E5-09's fixtures.
 from typing import Any
 
 import pytest
-from fixtures.named_sets import COURSE_NUMBERS, COURSE_TITLES, NamedSetDoor
+from fixtures.named_sets import (
+    COURSE_NUMBERS,
+    COURSE_TITLES,
+    NamedSetDoor,
+    plant_a_section_of_length,
+)
 
 pytestmark = pytest.mark.integration
 
+# A section length no start letter in the seed carries and SPEC §2.2 does not
+# list — the owner's own example of a length that is data rather than code.
+A_LENGTH_NO_LETTER_CARRIES = 4
 
-def test_the_options_offer_spec_2_2s_lengths_and_spec_8s_levels(
+
+def the_section_lengths_that_exist(world: Any) -> list[int]:
+    """Every distinct `section.length_weeks` in the database, ascending — read back directly.
+
+    This *is* the owner's rule rather than a copy of an implementation: "`definition_options`
+    offers the distinct `section.length_weeks` values that exist in the database, sorted"
+    (E5-14, 2026-09-22). It is read after the fixture's commit, on the test's own
+    connection.
+    """
+    from fixtures.survey_windows import SECTION_LENGTH_COLUMN, SECTION_TABLE
+    from sqlalchemy import text
+
+    world.refresh()
+    rows = world.session.execute(
+        text(f"SELECT DISTINCT {SECTION_LENGTH_COLUMN} FROM public.{SECTION_TABLE}")  # noqa: S608
+    )
+    return sorted(int(row[0]) for row in rows)
+
+
+def test_the_options_offer_the_section_lengths_that_exist_and_spec_8s_levels(
     named_sets: NamedSetDoor, named_set_contract: Any
 ) -> None:
-    """The two closed sets, against the spec's own transcription of them.
+    """The owner's ruling on lengths (E5-14), and §8's five levels in band order.
 
-    **The mutations this kill:** a length list that drops 18, which SPEC §2.2
-    carries in a parenthesis a reader skims past and which is the dissertation
-    length every doctoral section has; a level list folding `UGGR` into `UG` or
-    `GR`, which §5.1 forbids in as many words and which would let a definer
-    build the one cohort the spec says must never be averaged together; and a
-    level list in alphabetical order, which puts `DEV` after `DR` and hands
-    E5-09 a selector whose order says nothing about the bands it comes from.
+    **Lengths: the distinct section lengths present, sorted** — the owner's ruling
+    of 2026-09-22 that a named set's length is data. Until E5-14 this compared the
+    offer against SPEC §2.2's eight lengths, which the migration's `CHECK`
+    hard-coded; the adr-docs review found that list contradicted §2.2's "the
+    academic calendar is institution configuration, not code". A 4-week section —
+    a length no calendar list names — is planted here, so the offer has to follow
+    the data rather than a list.
 
-    **Expected red before E5-06 lands:** a FAILED naming the router.
+    **The mutations this kills:** `CALENDAR_LENGTHS` left in the options service
+    (4 is missing, and §2.2 lengths no section runs are offered); the distinct
+    lengths unsorted; and a level list
+    folding `UGGR` into `UG` or `GR`, or in alphabetical order, which puts `DEV`
+    after `DR`.
     """
+    plant_a_section_of_length(named_sets.world, A_LENGTH_NO_LETTER_CARRIES, ordinal="9")
+    expected_lengths = the_section_lengths_that_exist(named_sets.world)
+    # The premise rests only on what this test planted: the 4-week length is in the
+    # database. That alone is what makes the comparison below discriminate — SPEC
+    # §2.2's list does not carry 4, so an offer built from `CALENDAR_LENGTHS` differs
+    # from the distinct lengths read back whatever else the world holds. (An 18-week
+    # section can exist in this world; the first version of this guard assumed it did
+    # not and fired before the comparison.)
+    assert A_LENGTH_NO_LETTER_CARRIES in expected_lengths, (
+        f"The database's section lengths are {expected_lengths}; this test planted a "
+        f"{A_LENGTH_NO_LETTER_CARRIES}-week section and it is not among them, so the comparison "
+        "below would not tell an offer built from a calendar list from one built from the data."
+    )
+
     answered = named_sets.options()
     body = named_set_contract.body_of(
         answered, "The set-definition options", named_set_contract.list_ok
     )
 
-    assert body.get(named_set_contract.lengths_field) == list(named_set_contract.spec_lengths), (
-        f"The options offer lengths {body.get(named_set_contract.lengths_field)!r}; SPEC §2.2's "
-        f"set is {list(named_set_contract.spec_lengths)}. A length this list omits is a cohort "
-        "leadership cannot define at all, and one it adds is a set the database will refuse at "
-        "the moment of saving — which is the opposite of decision 3's 'invalid combinations "
-        "impossible rather than erroring'."
+    assert body.get(named_set_contract.lengths_field) == expected_lengths, (
+        f"The options offer lengths {body.get(named_set_contract.lengths_field)!r}; the sections "
+        f"in the database run {expected_lengths} weeks. The owner's ruling: the options offer the "
+        "distinct `section.length_weeks` values that exist, sorted — a length no section runs is a "
+        "cohort that resolves to nothing, and a length a section runs is one a leader may name."
     )
     assert body.get(named_set_contract.levels_field) == list(named_set_contract.spec_levels), (
         f"The options offer levels {body.get(named_set_contract.levels_field)!r}; SPEC §5.1 names "

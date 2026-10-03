@@ -35,6 +35,12 @@ confidentiality assertion, and adding it here would mean this sweep failing for 
 reason unrelated to what it is named for. It is named here so the next reader knows
 it was considered.
 
+**E5-14 extends it to `tests/e2e/**/*.spec.ts`** and adds Playwright's
+`test.fixme(` and `test.fail(` beside the forms above (`test.skip(` was already
+matched): the end-to-end student-seat proof of §4.1 item 1,
+`student-benchmark-exclusion.spec.ts`, could be switched off in place exactly as
+a component test could, and nothing said so.
+
 **Marked `invariant`**, which puts this module in CI's isolated §4.1 pass, where a
 skip or an empty collection is itself a failure — which is the same property this
 sweep asserts of the frontend suite, applied to the sweep. §4.1 items 1, 3 and 5
@@ -69,7 +75,11 @@ pytestmark = pytest.mark.invariant
 # parenthesis of a call.
 DISABLED_FORMS = (
     # `it.skip(`, `test.todo(`, `describe.skip(`, and the same three with `.failing`
-    re.compile(r"\b(?:it|test|describe|suite)\s*\.\s*(?:skip|todo|failing)\s*\("),
+    # — plus Playwright's `test.fixme(` and `test.fail(` (E5-14), which leave a test
+    # in a spec file and stop it asserting anything. `test.skip(` and
+    # `test.describe.skip(` / `.fixme(` are covered by the same alternation, because
+    # `describe` is matched wherever it stands before the dot.
+    re.compile(r"\b(?:it|test|describe|suite)\s*\.\s*(?:skip|todo|failing|fixme|fail)\s*\("),
     # `xit(`, `xtest(`, `xdescribe(`
     re.compile(r"\bx(?:it|test|describe)\s*\("),
 )
@@ -84,6 +94,12 @@ CERTAINLY_DISABLED = (
     "  xit('renders the suppression notice', () => {",
     "  xdescribe('the trend pair', () => {",
     "  suite.failing('workload', () => {",
+    # Playwright's forms, as `tests/e2e/*.spec.ts` would write them (E5-14).
+    "test.fixme('a student seat serves no benchmark key', async ({ page }) => {",
+    "  test.skip(browserName === 'webkit', 'no comparison DOM on webkit');",
+    "test.describe.fixme('the student seat, two consecutive weeks', () => {",
+    "test.describe.skip('the exit drive', () => {",
+    "  test.fail();",
 )
 
 # Text the sweep must allow. Every line here contains a word one of the patterns
@@ -96,6 +112,13 @@ CERTAINLY_ALLOWED = (
     "  expect(rows.map((row) => row.skip)).toEqual([false, false]);",
     "  describe('the todo list component', () => {",
     "  test('xit is a word that appears in this sentence', () => {",
+    # Near misses from the Playwright side (E5-14): the words in a title, a
+    # locator, a variable and an ordinary `test.describe(` / `test.step(`.
+    "test('fixme is only a word in this title', async ({ page }) => {",
+    "  await page.getByRole('button', { name: 'Skip' }).click();",
+    "  const fixme = false;",
+    "test.describe('failing weeks are suppressed, not dropped', () => {",
+    "  await test.step('the student reads a week that failed to close', async () => {",
 )
 
 
@@ -166,6 +189,62 @@ def test_no_frontend_test_module_disables_a_test_in_place() -> None:
         "A test that should not run should be **deleted**, in a change that says what behaviour "
         "stopped being asserted and why. Disabling it in place keeps the appearance of the "
         "assertion and none of it."
+    )
+
+
+# The end-to-end specs, and the one this sweep is required to find (E5-14, the
+# boundary review's invariant-coverage LOW). `student-benchmark-exclusion.spec.ts`
+# is SPEC §4.1 item 1's rendering-side proof — a student seat carries no benchmark
+# key and draws no comparison DOM — and a `test.fixme(` added to it would leave
+# the file, its name and CI's green all in place with the assertion gone.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+E2E_ROOT = REPO_ROOT / "tests" / "e2e"
+E2E_SPEC_GLOB = "*.spec.ts"
+A_CONFIDENTIALITY_SPEC = "student-benchmark-exclusion.spec.ts"
+
+
+def e2e_spec_modules() -> list[Path]:
+    """Every Playwright spec under `tests/e2e`, at any depth."""
+    return sorted(E2E_ROOT.rglob(E2E_SPEC_GLOB))
+
+
+def test_no_end_to_end_spec_disables_a_test_in_place() -> None:
+    """The same sweep over `tests/e2e/**/*.spec.ts`, with Playwright's own disabling forms.
+
+    Playwright leaves a `test.fixme(`, `test.skip(` or `test.fail(` test in the
+    file, lists it in the report and exits zero — the same invisibility `vitest`
+    has, on the suite that proves the student seat's half of §4.1 item 1 end to
+    end.
+
+    **The canary first** (`docs/MISTAKES.md` entry 3): the walk must find the
+    student benchmark-exclusion spec by name, so an empty result from a walk
+    pointed at the wrong directory is a red rather than a clean tree.
+
+    **The mutation this kills:** `test.fixme(` or `test.skip(` added to a spec —
+    in particular to `student-benchmark-exclusion.spec.ts` — while the file stays
+    put. **The near miss it must survive:** the words themselves in a title, a
+    locator or a variable, which the negative control below runs.
+    """
+    specs = e2e_spec_modules()
+    names = {path.name for path in specs}
+    assert A_CONFIDENTIALITY_SPEC in names, (
+        f"The walk over {E2E_ROOT} found {sorted(names)} and not `{A_CONFIDENTIALITY_SPEC}`, the "
+        "student seat's end-to-end proof that no benchmark reaches it. Either the walk is looking "
+        "in the wrong place — and its clean result below means nothing — or that spec has moved, "
+        "and `A_CONFIDENTIALITY_SPEC` is the line that follows it."
+    )
+
+    findings = [
+        f"{path.relative_to(REPO_ROOT)}:{number}: {line}"
+        for path in specs
+        for number, line in offenders_in(path.read_text(encoding="utf8"))
+    ]
+    listed = "\n".join(findings)
+    assert not findings, (
+        f"These end-to-end tests are in the tree and are not run:\n\n{listed}\n\n"
+        "Playwright reports a fixme'd or skipped test and exits zero, so a disabled assertion is "
+        "invisible to everything that reads a green. A test that should not run is **deleted**, "
+        "in a change that says what stopped being asserted and why."
     )
 
 

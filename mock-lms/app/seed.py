@@ -5,7 +5,7 @@ stays small". It is four sections in the current term, each with a roster of its
 own — enough that a roster pages, that one student joins late and one drops, that
 both modalities and more than one start letter reach a tool, and that one class
 is large enough for a week of its survey answers to read like a real one — and
-four more in the term before it, which are the benchmark world E5-12 builds and
+five more in the term before it, which are the benchmark world E5-12 builds and
 are described where they are declared. The full demo institution is
 E0-17's, and it is seeded into Pulse's own database rather than into this
 platform.
@@ -340,16 +340,24 @@ MOLECULAR_GENETICS = MockContext(
 #
 # SPEC §5.1 benchmarks a section against every section of its length and level,
 # and the exit line says "benchmarked against prior terms" — so a demonstrable
-# benchmark needs a *populated* cohort in a term that has ended. These four
-# sections are that cohort and its counter-example:
+# benchmark needs a *populated* cohort in a term that has ended. These five
+# sections are that cohort, a section beside it, and a counter-example:
 #
 #   - three 12-week undergraduate sections, the same length and level as
 #     `BIOL-310-R7FF`, so the hero section's own comparison set is the one they
 #     fill. Two start on the term's first Monday (`U`) and one three weeks later
 #     (`R`), because §5.1 aligns a cohort by course week rather than by calendar
 #     week and a set whose sections all began on one day cannot show that.
+#   - one more 12-week undergraduate section, `BIOL-215-U8FF`, on BIOL 215. No
+#     lead is mapped to BIOL 215, so this section joins `BIOL-310-R7FF`'s
+#     university population and not its default set. It exists so the
+#     university line differs from the comparison line: without it the
+#     university reduces to the three BIOL-310 sections above, because the
+#     current term's earliest-closing cohort has no answers and so no current-term
+#     answer is counted (E5-14's freeze-at-close cutoff), and the two lines are
+#     the same numbers.
 #   - one 6-week undergraduate section on its own, which is under the
-#     three-section minimum SPEC §11 leaves configurable and
+#     three-section minimum SPEC §11 settles and
 #     `app.config.Settings.benchmark_min_sections_default` sets at 3. It exists
 #     to be suppressed: a world that only ever shows figures demonstrates half
 #     of the rule.
@@ -382,10 +390,16 @@ PRIOR_CELL_BIOLOGY = MockContext(
     label="BIOL-215-E5WW",
     title="Cell Biology",
 )
+PRIOR_CELL_BIOLOGY_TWELVE_WEEK = MockContext(
+    context_id="mock-lms-context-biol-215-u8ff",
+    label="BIOL-215-U8FF",
+    title="Cell Biology",
+)
 
 # The prior term's sections, each with the class it carries and the moment its
-# enrollments open. Twenty students in each section of the passing cohort, which
-# is `BIOL-310-R7FF`'s own class size and well clear of the fifteen respondents
+# enrollments open. Twenty students in each section of the passing cohort (the
+# unled BIOL 215 twelve-week section included), which
+# is `BIOL-310-R7FF`'s own class size and well clear of the ten respondents
 # `benchmark_min_respondents_default` asks of a cohort week; twelve in the thin
 # cohort, which is `BIOL-215-R3WW`'s size and enough that the section's own
 # report reads normally while its comparison set suppresses.
@@ -394,6 +408,7 @@ PRIOR_TERM_SECTIONS: tuple[tuple[MockContext, int, str], ...] = (
     (PRIOR_MOLECULAR_GENETICS_TWO, 20, PRIOR_U_SECTIONS_OPEN),
     (PRIOR_MOLECULAR_GENETICS_THREE, 20, PRIOR_R_SECTIONS_OPEN),
     (PRIOR_CELL_BIOLOGY, 12, PRIOR_E_SECTIONS_OPEN),
+    (PRIOR_CELL_BIOLOGY_TWELVE_WEEK, 20, PRIOR_U_SECTIONS_OPEN),
 )
 
 # How many students of its own `BIOL-310-R7FF` carries. Twenty is the owner's
@@ -645,7 +660,7 @@ def seeded_platform() -> SeededPlatform:
         below, because the loop puts the shared learner in every section it
         walks and this is the one section she is deliberately not in.
 
-    The prior term's four sections are assembled separately too, for
+    The prior term's five sections are assembled separately too, for
     `the_demo_story_roster`'s reason and its own: none of them holds the shared
     learner, and each is a straight class of its own size.
 
@@ -701,7 +716,7 @@ def seeded_platform() -> SeededPlatform:
     users.extend(story_students)
     enrollments.extend(story_enrollments)
 
-    # The prior term's four sections, for the same reason and on the same terms:
+    # The prior term's five sections, for the same reason and on the same terms:
     # the shared instructor teaches them, the shared learner and the dean are in
     # none of them, and each carries a class of its own.
     prior_students, prior_enrollments = the_prior_term_rosters()
@@ -743,13 +758,13 @@ def the_demo_story_roster() -> tuple[list[MockUser], list[MockEnrollment]]:
 
 
 def the_prior_term_rosters() -> tuple[list[MockUser], list[MockEnrollment]]:
-    """The prior term's four sections: the shared instructor, and a class each.
+    """The prior term's five sections: the shared instructor, and a class each.
 
     Written as its own function beside `the_demo_story_roster` rather than as
-    four more rows in `seeded_platform`'s loop, and for that function's reason:
+    five more rows in `seeded_platform`'s loop, and for that function's reason:
     the loop's rule is "the instructor, the learner, then this many students",
     and these sections' rule is "the instructor, then this many students". The
-    shared learner is deliberately in none of them — she would gain four more
+    shared learner is deliberately in none of them — she would gain five more
     surveys in every student-survey suite, and a prior term's sections are not
     somebody's current work.
 

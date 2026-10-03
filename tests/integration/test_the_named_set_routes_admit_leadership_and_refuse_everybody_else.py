@@ -250,6 +250,11 @@ def test_a_leadership_session_is_answered_by_every_named_set_route(
     )
 
 
+# Marked `invariant` per test (E5-14, the boundary's invariant-coverage MEDIUM):
+# these two are the denial half of this module, and the isolated §4.1 pass is the
+# one that refuses a skip. The admitting tests beside them stay unmarked, which is
+# why the marker is per test rather than module-wide.
+@pytest.mark.invariant
 @pytest.mark.parametrize("route", ROUTES, ids=ROUTES)
 @pytest.mark.parametrize("session", REFUSED_SESSIONS, ids=REFUSED_SESSIONS)
 def test_a_session_that_is_not_leadership_is_refused_by_every_named_set_route(
@@ -384,6 +389,7 @@ def test_the_two_hat_persons_leadership_session_is_admitted_where_her_instructor
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.invariant
 def test_every_named_set_route_declares_one_of_the_two_leadership_dependencies(
     named_sets: NamedSetDoor, named_set_contract: Any
 ) -> None:

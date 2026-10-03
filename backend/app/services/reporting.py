@@ -56,7 +56,7 @@ import logging
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -1093,6 +1093,17 @@ def _readable_section(session: Session, *, person_id: UUID | None, section_id: U
     return section
 
 
+def _course_week_of(term_week: int, *, section_start: date, term_start: date) -> int:
+    """The course week a term week is, for a section starting on `section_start`.
+
+    `week_of_the_term` is this codebase's one reading of §2.2's two axes; this
+    is the one place a report turns a stored term week back into a course week
+    with it. Course weeks count from 1, which is the inclusive `+ 1`.
+    """
+    first_term_week = week_of_the_term(1, section_start=section_start, term_start=term_start)
+    return term_week - first_term_week + 1
+
+
 def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
     """Every week this section has a survey window for, on both of §2.2's axes.
 
@@ -1112,9 +1123,6 @@ def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
     term = session.get(Term, section.term_id)
     if term is None:  # pragma: no cover - `section.term_id` is a non-null foreign key
         raise SectionUnavailableError
-    first_term_week = week_of_the_term(
-        1, section_start=section.start_date, term_start=term.start_date
-    )
     rows = session.execute(
         select(
             SurveyWindow.week_id,
@@ -1130,7 +1138,9 @@ def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
         _SectionWeek(
             week_id=week_id,
             term_week=number,
-            course_week=number - first_term_week + 1,
+            course_week=_course_week_of(
+                number, section_start=section.start_date, term_start=term.start_date
+            ),
             opens_at=opens_at,
             closes_at=closes_at,
         )
@@ -1233,29 +1243,78 @@ def _served_question_texts(session: Session, *, section_id: UUID, week_id: UUID)
     return served
 
 
+def _population_cutoffs(
+    session: Session, *, section: Section, published: Sequence[_SectionWeek]
+) -> dict[int, datetime]:
+    """Each published course week's benchmark cutoff: the earliest close among this section's peers.
+
+    E5-14's round-4 ruling. For course week *w*, the cutoff is the earliest
+    week-*w* `survey_window.closes_at` among **every section in this section's
+    term with its length and its course's level**, this section included. So it
+    is never later than this section's own close — a figure is fixed from the
+    moment this section's week publishes — and **it depends on no reader**:
+    every report over one population and course week is cut at one instant, so
+    no reader holds two snapshots of one population frozen at two different
+    closes, whose difference would be whatever answered in between.
+
+    Only this term's sections set the cutoff. A prior term's windows closed
+    months earlier and would cut every current-term answer out; prior terms
+    count in full, and comparing snapshots across terms is a residual the ruling
+    carries. The cost the ruling accepts: a current-term section counts toward
+    week *w* only if its own week-*w* window closed by the earliest close.
+
+    One statement over the peers' windows, with each stored term week read back
+    as a course week through `_course_week_of`.
+    """
+    cutoffs = {week.course_week: week.closes_at for week in published}
+    term = session.get(Term, section.term_id)
+    if term is None:  # pragma: no cover - `section.term_id` is a non-null foreign key
+        raise SectionUnavailableError
+    level = select(Course.level).where(Course.id == section.course_id).scalar_subquery()
+    windows = session.execute(
+        select(Week.number, Section.start_date, SurveyWindow.closes_at)
+        .join(Week, Week.id == SurveyWindow.week_id)
+        .join(Section, Section.id == SurveyWindow.section_id)
+        .join(Course, Course.id == Section.course_id)
+        .where(
+            Section.term_id == section.term_id,
+            Section.length_weeks == section.length_weeks,
+            Course.level == level,
+        )
+    ).all()
+    for number, section_start, closes_at in windows:
+        course_week = _course_week_of(
+            number, section_start=section_start, term_start=term.start_date
+        )
+        if course_week in cutoffs and closes_at < cutoffs[course_week]:
+            cutoffs[course_week] = closes_at
+    return cutoffs
+
+
 def _benchmark_members(
-    session: Session, *, section_id: UUID, course_week: int, weeks: Sequence[int]
+    session: Session, *, section: Section, course_week: int, published: Sequence[_SectionWeek]
 ) -> tuple[dict[str, "StreamBenchmark"], "WorkloadBenchmarkView"]:
     """SPEC §5.1's comparison and university figures for one report — assembled, never computed.
 
-    Six reads of `app.services.benchmarks`: a trend per panel per population, and
-    the reported week's workload pair per population. Every number and every
-    suppression decision in what comes back was made there, over each figure's own
-    contributors and both configured minimums, and sealed by
-    `comparison_after_suppression` before this function ever sees it. What happens
-    here is placement: a service result becomes a payload model and nothing else.
+    One read of `app.services.benchmarks.section_benchmarks`, which resolves each
+    population once and asks each set function once per population. Every number
+    and every suppression decision in what comes back was made there, over each
+    figure's sealing contributors and both configured minimums, and sealed by
+    `comparison_after_suppression` before this function ever sees it. What
+    happens here is placement: a service result becomes a payload model and
+    nothing else.
 
-    **`weeks` is the report's own published course weeks, and passing it is a
-    confidentiality rule rather than an optimisation.** It is the axis the
-    section's own trend line above is drawn on — the same list `week.
-    published_weeks` carries — and the comparison lines are drawn on exactly it,
-    one point per week, shown or suppressed. A series that also carried the weeks
-    the *comparison population* answered in would let a reader subtract their own
-    published weeks and read off which weeks other sections answered in; over a
-    thin population that is an existence oracle about people §4.1 item 7 means to
-    say nothing about, and it is readable from a series where every single figure
-    is withheld. It shipped that way in this ticket's first round and a security
-    review found it.
+    **`published` is the report's own published weeks, and it decides two things.**
+    Its course weeks are the axis the comparison lines are drawn on — the same list
+    `week.published_weeks` carries, one point per week, shown or suppressed. A
+    series that also carried the weeks the *comparison population* answered in
+    would let a reader subtract their own published weeks and read off which
+    weeks other sections answered in, which is an existence oracle readable from
+    a series where every figure is withheld (ADR 0170). And each week has a
+    **cutoff** — the owner's freeze-at-close ruling, as E5-14's round 4 shares it
+    across the population (`_population_cutoffs`): a comparison figure for a
+    published week counts only answers fixed by then, so no later answer moves it
+    and two reads of it cannot be subtracted into one student's answer.
 
     **Nothing in this function counts, averages, compares or derives.** A figure
     born in the assembly layer is a figure no minimum was applied to, which is the
@@ -1275,46 +1334,26 @@ def _benchmark_members(
     from app.schemas import report_benchmark as benchmark_schema
     from app.services import benchmarks
 
+    read = benchmarks.section_benchmarks(
+        session,
+        section_id=section.id,
+        course_week=course_week,
+        streams=REPORT_STREAMS,
+        cutoffs=_population_cutoffs(session, section=section, published=published),
+    )
+    default_set = benchmarks.BenchmarkPopulation.DEFAULT_SET
+    university = benchmarks.BenchmarkPopulation.UNIVERSITY
+
     by_stream = {
         token: benchmark_schema.StreamBenchmark(
-            comparison=_benchmark_series(
-                benchmarks.benchmark_trend(
-                    session,
-                    section_id=section_id,
-                    population=benchmarks.BenchmarkPopulation.DEFAULT_SET,
-                    stream=token,
-                    weeks=weeks,
-                )
-            ),
-            university=_benchmark_series(
-                benchmarks.benchmark_trend(
-                    session,
-                    section_id=section_id,
-                    population=benchmarks.BenchmarkPopulation.UNIVERSITY,
-                    stream=token,
-                    weeks=weeks,
-                )
-            ),
+            comparison=_benchmark_series(read.trends[(default_set, token)]),
+            university=_benchmark_series(read.trends[(university, token)]),
         )
         for token in REPORT_STREAMS
     }
     workload = benchmark_schema.WorkloadBenchmarkView(
-        comparison=_workload_benchmark_figures(
-            benchmarks.benchmark_workload(
-                session,
-                section_id=section_id,
-                population=benchmarks.BenchmarkPopulation.DEFAULT_SET,
-                course_week=course_week,
-            )
-        ),
-        university=_workload_benchmark_figures(
-            benchmarks.benchmark_workload(
-                session,
-                section_id=section_id,
-                population=benchmarks.BenchmarkPopulation.UNIVERSITY,
-                course_week=course_week,
-            )
-        ),
+        comparison=_workload_benchmark_figures(read.workloads[default_set]),
+        university=_workload_benchmark_figures(read.workloads[university]),
     )
     return by_stream, workload
 
@@ -1399,11 +1438,11 @@ def _payload(
     question_texts = _served_question_texts(session, section_id=section.id, week_id=week.week_id)
     benchmarks_by_stream, workload_benchmark = _benchmark_members(
         session,
-        section_id=section.id,
+        section=section,
         course_week=week.course_week,
-        # The published axis, which is the list `week.published_weeks` below
-        # carries and the one the streams' own trend lines are drawn on.
-        weeks=[other.course_week for other in published],
+        # The published weeks: their course weeks are the axis `week.published_weeks`
+        # below carries, and each one's cutoff is the population's earliest close.
+        published=published,
     )
 
     streams = {

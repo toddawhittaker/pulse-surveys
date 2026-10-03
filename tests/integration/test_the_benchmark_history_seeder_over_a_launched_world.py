@@ -7,7 +7,8 @@ world in the suite was complete enough for the write path to run. This module is
 that world.
 
 **What is planted, and by whom.** `plant_a_launched_prior_term_world` writes the
-rows four anchored staff launches and a roster sync would have left — the sections
+rows the anchored staff launches (one per prior-term section the seeder names, five
+since E5-14's exit-demo fix) and a roster sync would have left — the sections
 the seeder itself names, under the courses their codes name, in the term
 `scripts/seed.py` seeded, with a window for every course week and a roster enrolled
 from the section's first day — and **not one `response` or `answer`**. The seeder's
@@ -109,7 +110,7 @@ SUBMITTED_AT_COLUMN = "submitted_at"
 def launched_world(
     demo_databases: Any, plant_in: Any, metadata_tables: dict[str, Any]
 ) -> LaunchedWorld:
-    """One database, seeded, planted as four launches would have left it, and written.
+    """One database, seeded, planted as the prior-term launches would have left it, and written.
 
     Module-scoped because building it is the expensive part and the two tests that
     read it only read. It **asserts nothing**, for `docs/MISTAKES.md` entry 44's

@@ -562,6 +562,11 @@ jobs:
       # proves the pattern finds the claim and leaves ordinary prose about
       # comparison sets alone — a sweep run without that control cannot tell a
       # clean tree from a pattern that has gone blind.
+      #
+      # The tenth entry is E5-14's: only `app/services/benchmarks.py` may name
+      # the benchmark set functions and cohort views, swept over `backend/app/`
+      # through a `REPO_ROOT`-rooted walk. A whole module, because its other
+      # tests are the controls that prove the sweep finds a planted caller.
       - name: Repository-wide sweeps that a docs-only diff must not switch off
         run: |
           pytest -q \
@@ -574,7 +579,8 @@ jobs:
             "tests/unit/test_survey_windows_have_one_assignment_site.py" \
             "tests/unit/test_the_signing_key_custody_record_is_amended.py" \
             "tests/unit/test_the_python_runtime_declarations_agree.py" \
-            "tests/unit/test_the_placeholder_era_prose_is_swept_from_the_payload_path.py"
+            "tests/unit/test_the_placeholder_era_prose_is_swept_from_the_payload_path.py" \
+            "tests/unit/test_only_the_benchmark_service_names_the_benchmark_relations.py"
 
   # The job keeps its id and its display name. Branch protection's required-check
   # list keys on the display name, and renaming it is a change to that list

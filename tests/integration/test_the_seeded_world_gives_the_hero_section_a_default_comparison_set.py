@@ -29,7 +29,7 @@ exactly those rows. Nothing here needs a response, so the benchmark-history seed
 not run at all: it fills weeks that no resolution reads, and a world built out of its
 refusals would make these tests depend on a program whose claim they exist to check.
 
-**What that choice costs, and the guard that pays it.** Naming the six placements here
+**What that choice costs, and the guard that pays it.** Naming the seven placements here
 means a rename in the mock platform's seed would leave this module planting a world
 nobody launches, green and meaningless. The last test is that guard: every label
 planted here has to appear in `mock-lms/app/seed.py`, which is where the placements are
@@ -66,7 +66,7 @@ from fixtures.survey_windows import SECTION_LENGTH_COLUMN
 
 pytestmark = pytest.mark.integration
 
-# The six placements, transcribed from the contexts the mock platform offers in
+# The seven placements, transcribed from the contexts the mock platform offers in
 # `mock-lms/app/seed.py` — the file that declares them — and held to that file by the
 # last test in this module. A label is the whole `BIOL-310-R7FF` a person writes; the
 # bare `R7FF` is what `section.lms_section_code` stores, and `plant_one_launch` makes
@@ -81,12 +81,18 @@ pytestmark = pytest.mark.integration
 #     letter — and is the length half of the exclusion.
 #   - `BIOL-215-R3WW` is the current-term section E5-10's browser spec uses as its
 #     suppressed direction, and BIOL 215 has no lead faculty on purpose.
+#   - `BIOL-215-U8FF` is the fifth prior-term section, added by E5-14's exit-demo
+#     fix: twelve weeks, undergraduate, on BIOL 215, which has no lead. It is in the
+#     hero's university population and not in its default set, so the demo's
+#     university line differs from its comparison line (the freeze's earliest-close
+#     cutoff otherwise reduced the university to exactly the default set).
 HERO_LABEL = "BIOL-310-R7FF"
 PRIOR_SET_LABELS = ("BIOL-310-U5FF", "BIOL-310-U6WW", "BIOL-310-R5FF")
 PRIOR_SHORT_LABEL = "BIOL-215-E5WW"
+PRIOR_UNLED_LABEL = "BIOL-215-U8FF"
 UNLED_LABEL = "BIOL-215-R3WW"
 
-PRIOR_LABELS = (*PRIOR_SET_LABELS, PRIOR_SHORT_LABEL)
+PRIOR_LABELS = (*PRIOR_SET_LABELS, PRIOR_SHORT_LABEL, PRIOR_UNLED_LABEL)
 CURRENT_LABELS = (HERO_LABEL, UNLED_LABEL)
 EVERY_LABEL = (*PRIOR_LABELS, *CURRENT_LABELS)
 
@@ -100,7 +106,7 @@ A_LABEL_NO_PLATFORM_OFFERS = "BIOL-310-Z9WW"
 
 # How many students each planted section carries. **One, and it is a cost decision
 # rather than a statement about the world**: nothing here reads an enrollment, a
-# response or a roster, and the twenty of the real world would be a hundred and twenty
+# response or a roster, and the twenty of the real world would be a hundred and forty
 # rows this module never looks at. `tests/fixtures/benchmark_history.py` carries the
 # roster-shaped default for the tests that do read one.
 STUDENTS_PER_PLANTED_SECTION = 1
@@ -116,7 +122,7 @@ COHORT_LENGTH_WEEKS = 12
 
 @dataclass
 class ComparisonWorld:
-    """A seeded demo institution with six placements planted into it.
+    """A seeded demo institution with seven placements planted into it.
 
     **`problem` rather than a raised failure**, because this is built in a
     module-scoped fixture and a `pytest.fail` there is an ERROR in setup that proves
@@ -149,12 +155,12 @@ def require_the_world(world: ComparisonWorld) -> ComparisonWorld:
 def comparison_world(
     demo_databases: Any, plant_in: Any, metadata_tables: dict[str, Any]
 ) -> ComparisonWorld:
-    """One database of its own, seeded, with the six placements planted into it.
+    """One database of its own, seeded, with the seven placements planted into it.
 
     A database of its own rather than the module database, because these rows are a
     launch's and the seed's idempotency tests compare a database against itself.
-    Module-scoped because building it is the expensive part and all three tests below
-    only read.
+    Module-scoped because building it is the expensive part and every test below only
+    reads.
     """
     demo = demo_databases()
     seeded = demo.run()
@@ -200,7 +206,7 @@ def comparison_world(
         # a wrong idea in it (`docs/MISTAKES.md` entry 44).
         world.problem = (
             f"{broke}\n\n"
-            f"(Raised while planting the six placements: {broke!r}. That is a defect in this "
+            f"(Raised while planting the seven placements: {broke!r}. That is a defect in this "
             "module's world or in a schema it no longer matches — not a failed criterion. A "
             "start letter the planted term's map does not hold is the likeliest cause, and it "
             "is a statement about the seeded calendar rather than about the benchmark service.)"
@@ -255,7 +261,7 @@ def section_row(world: ComparisonWorld, tables: dict[str, Any], label: str) -> d
 
 
 def require_the_planted_world(world: ComparisonWorld, tables: dict[str, Any]) -> None:
-    """The readable-something control: the six placements are there, and the four cohorts match.
+    """The readable-something control: the seven placements are there, and the four cohorts match.
 
     Called as the second statement of every test that asserts a resolution, and it is
     not ceremony. A resolution that answers nothing is the correct answer over a world
@@ -274,7 +280,7 @@ def require_the_planted_world(world: ComparisonWorld, tables: dict[str, Any]) ->
     lengths = {
         label: section_row(world, tables, label)[SECTION_LENGTH_COLUMN] for label in EVERY_LABEL
     }
-    cohort = (HERO_LABEL, *PRIOR_SET_LABELS)
+    cohort = (HERO_LABEL, *PRIOR_SET_LABELS, PRIOR_UNLED_LABEL)
     wrong = {
         label: lengths[label] for label in cohort if int(lengths[label]) != COHORT_LENGTH_WEEKS
     }
@@ -311,7 +317,7 @@ def test_the_hero_sections_default_set_holds_the_prior_sections_of_its_own_cours
     code reports a world that is complete while the product draws no comparison line at
     all.
 
-    **The controls, and why each one is load-bearing.** The six placements are read back
+    **The controls, and why each one is load-bearing.** The seven placements are read back
     out of the database first, so an empty set cannot be an empty world. Then the
     university population for the same section is required to hold the three: it is
     resolved over the same rows without consulting the lead-faculty mapping, so it says
@@ -474,10 +480,53 @@ def test_a_current_term_section_whose_course_has_no_lead_resolves_to_no_default_
     )
 
 
+def test_the_fifth_prior_term_section_is_in_the_heros_university_and_not_its_default_set(
+    comparison_world: ComparisonWorld, metadata_tables: dict[str, Any]
+) -> None:
+    """E5-14's exit-demo fix: `BIOL-215-U8FF` widens the university, not the default set.
+
+    The epic-exit review found the seeded demo's university line equal to its
+    comparison line: the current-term U cohort has no answers but its windows
+    close first, so the freeze's earliest-close cutoff counts no current-term
+    answer, and the university reduced to the three Spring 2026 BIOL 310
+    sections — exactly the default set. The fix is a fifth prior-term section on
+    BIOL 215, which has no lead: the hero's length and level, so it is in the
+    university population, and no lead, so it is in no default set.
+
+    **The control** is the three BIOL 310 prior sections in the default set, so
+    the absence below is not an empty set.
+
+    **The mutations this kills:** the fifth section planted on a led course
+    (BIOL 310, or any course with a mapping), which would put it in the default
+    set and leave the two lines equal again; and one of another length or level,
+    which would leave it out of the university. **Red first** through this
+    module's last test until `mock-lms/app/seed.py` declares the placement.
+    """
+    world = require_the_world(comparison_world)
+    require_the_planted_world(world, metadata_tables)
+
+    hero = world.section_id(HERO_LABEL)
+    fifth = world.section_id(PRIOR_UNLED_LABEL)
+    university = set(resolved(world, RESOLVE_UNIVERSITY, hero))
+    default_set = set(resolved(world, RESOLVE_DEFAULT_SET, hero))
+    wanted = {world.section_id(label) for label in PRIOR_SET_LABELS}
+
+    assert wanted <= default_set, (
+        "The control failed: the hero's default set "
+        f"{sorted(map(str, default_set))} does not hold the three prior-term BIOL 310 sections."
+    )
+    assert fifth in university and fifth not in default_set, (
+        f"{PRIOR_UNLED_LABEL} ({fifth}) is {'in' if fifth in university else 'not in'} the hero's "
+        f"university population and {'in' if fifth in default_set else 'not in'} its default set. "
+        "It is planted at the hero's length and level on a course with no lead, so it belongs to "
+        "the first and not the second — which is what makes the demo's two lines differ."
+    )
+
+
 def test_the_placements_this_module_plants_are_the_ones_the_mock_platform_offers() -> None:
     """The tripwire under this module's own world.
 
-    These tests plant six placements by name instead of discovering them, which is what
+    These tests plant seven placements by name instead of discovering them, which is what
     makes them cheap and readable — and it means a rename in `mock-lms/app/seed.py`
     would leave this module planting sections nobody launches, still green, still
     asserting a comparison set that no demo will ever draw. So every label planted here
@@ -489,7 +538,7 @@ def test_the_placements_this_module_plants_are_the_ones_the_mock_platform_offers
     that matches everything — says so instead of passing quietly.
     """
     assert MOCK_PLATFORM_SEED.is_file(), (
-        f"{MOCK_PLATFORM_SEED} does not exist, so this sweep read nothing and the six labels this "
+        f"{MOCK_PLATFORM_SEED} does not exist, so this sweep read nothing and the seven labels this "
         "module plants are held to nothing at all. The mock platform's placements are declared "
         "there; a move is a one-line change to `MOCK_PLATFORM_SEED` in this module."
     )

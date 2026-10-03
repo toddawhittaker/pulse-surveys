@@ -6,6 +6,12 @@ E5-01 criterion 1, in the ticket's words:
 > refused by the database — asserted by attempting the insert, both sides of each
 > boundary.
 
+**The length half was superseded by the owner on 2026-09-22 (E5-14):** a named
+set's length is data, the `CHECK` becomes `length_weeks >= 1` to match `section`,
+and no calendar list binds a set. The length boundary is therefore one week, and
+the lengths §2.2 does not list are asserted *storable* below. The level half is
+unchanged.
+
 SPEC §5.1 is why the pair exists at all: "to be comparable, sections must match on
 **both** length (§2.2's length set) *and* level (§8's set: `DEV`, `UG`, `UGGR`,
 `GR`, `DR`)", and the breakdown's decision 3 turns that into a stored shape — the
@@ -44,9 +50,11 @@ from typing import Any
 
 import pytest
 from fixtures.comparison_sets import (
+    BLANK_NAMES,
     COURSE_LEVEL_COLUMN,
     LENGTH_COLUMN,
-    LENGTHS_OUTSIDE_THE_SET,
+    LENGTHS_BELOW_ONE_WEEK,
+    LENGTHS_NO_CALENDAR_LIST_NAMES,
     LEVEL_COLUMN,
     LEVELS_OUTSIDE_THE_FIVE,
     NAME_COLUMN,
@@ -118,13 +126,12 @@ def test_a_set_declaring_a_length_the_calendar_uses_is_accepted(
     10, 12, 15, 16)` makes every dissertation-length set unwritable, and "§2.2's
     length set" includes the 18 the same sentence puts in parentheses.
 
-    **The mutation it kills:** `18` left out of the `CHECK` in the migration, and
-    its mirror — a `CHECK` written as a range, `length_weeks BETWEEN 3 AND 18`,
-    which passes all eight of these and is caught only by the refusals below.
+    **Still true after E5-14's ruling**, which widened what a set may declare and
+    narrowed nothing: every §2.2 length is at least one week. **The mutation it
+    kills:** a `CHECK` written too tight in the new revision — `length_weeks >= 3`,
+    say, reading §2.2's smallest length as a floor.
 
-    **Its pair** is `test_a_set_declaring_a_length_outside_the_calendars_set_is_refused`.
-    Neither half means anything alone: this one alone is satisfied by a table with
-    no constraint at all, and that one alone by a table nothing can be written to.
+    **Its pair** is `test_a_set_declaring_a_length_below_one_week_is_refused`.
     """
     table = comparison_set_table(metadata_tables)
     require_columns(table, DECLARED_COLUMNS, WHERE_THE_COLUMNS_COME_FROM)
@@ -141,39 +148,67 @@ def test_a_set_declaring_a_length_the_calendar_uses_is_accepted(
     )
 
 
+@pytest.mark.parametrize("length", LENGTHS_NO_CALENDAR_LIST_NAMES, ids=str)
+def test_a_set_declaring_a_length_no_calendar_list_names_is_stored(
+    db_session: Any, metadata_tables: dict[str, Any], seed_rows: Any, length: int
+) -> None:
+    """The owner's ruling of 2026-09-22 (E5-14): a set's length is data; a 4-week set is stored.
+
+    Until E5-14 the migration's `CHECK` listed §2.2's eight lengths and refused
+    every other, and this module asserted the refusal. The adr-docs review found
+    that a hard-coded list contradicts SPEC §2.2 — "the academic calendar is
+    institution configuration, not code" — and the owner ruled: the `CHECK`
+    becomes `length_weeks >= 1`, matching `section`'s, and the list goes away.
+
+    **The mutation it kills:** the old `IN (3, 6, 8, 10, 12, 15, 16, 18)` left in
+    the new revision, or a range `BETWEEN 3 AND 18` put in its place — each
+    refuses `4`, `17` or `19` here.
+
+    **Its pair** is `test_a_set_declaring_a_length_below_one_week_is_refused`.
+    Neither half means anything alone.
+    """
+    table = comparison_set_table(metadata_tables)
+    require_columns(table, DECLARED_COLUMNS, WHERE_THE_COLUMNS_COME_FROM)
+
+    refused = refusal_of(
+        db_session, lambda: write_set(seed_rows, length=length, level=AN_ORDINARY_LEVEL)
+    )
+
+    assert refused is None, (
+        f"A set declaring a length of {length} weeks was refused: {refused}. The owner's ruling "
+        "of 2026-09-22 makes a set's length data — the `CHECK` is `length_weeks >= 1`, matching "
+        "`section` — so a length no calendar list names is a set over the sections of that length "
+        "some term may run."
+    )
+
+
 @pytest.mark.parametrize(
     ("length", "accepted_neighbour"),
-    LENGTHS_OUTSIDE_THE_SET,
-    ids=[f"{refused}-beside-{accepted}" for refused, accepted in LENGTHS_OUTSIDE_THE_SET],
+    LENGTHS_BELOW_ONE_WEEK,
+    ids=[f"{refused}-beside-{accepted}" for refused, accepted in LENGTHS_BELOW_ONE_WEEK],
 )
-def test_a_set_declaring_a_length_outside_the_calendars_set_is_refused(
+def test_a_set_declaring_a_length_below_one_week_is_refused(
     db_session: Any,
     metadata_tables: dict[str, Any],
     seed_rows: Any,
     length: int,
     accepted_neighbour: int,
 ) -> None:
-    """Criterion 1, the refused side, each case beside the accepted length nearest it.
+    """The refused side of the ruling's `length_weeks >= 1`, each beside the accepted `1`.
 
     The control is written first and required to be stored, which is what makes
     the refusal below a statement about this length rather than about the table:
-    a schema that refused every set would otherwise pass all twelve of these
+    a schema that refused every set would otherwise pass both of these
     (`docs/MISTAKES.md` entry 3).
 
-    **Why the near misses and not round numbers.** `17` is the case a range check
-    `BETWEEN 3 AND 18` accepts and no other test here would catch; `4`, `5`, `7`,
-    `9`, `11`, `13` and `14` are the interior gaps the same check accepts; `0` and
-    `-1` are what an `integer` column takes when nothing says otherwise, and a set
-    declaring a length of zero resolves against no section ever.
+    **Renamed and narrowed at E5-14.** This was "a length outside the calendar's
+    set is refused", over twelve lengths; ten of those cases (2, 4, 5, 7, 9, 11,
+    13, 14, 17 and 19) are now storable by the owner's ruling and are asserted so
+    above. `0` and `-1` stay refused: a set of zero weeks resolves against no
+    section ever.
 
-    **The mutation it kills:** the `CHECK` dropped from the migration altogether,
-    and — the near miss that matters more — the `CHECK` rewritten as a range,
-    which every accepted case above passes.
-
-    **Why the length set is hard-coded in the migration rather than read from the
-    start-letter map**, said here because a reader will ask: the map is per-term
-    data and a set outlives terms, so a set validated against this term's letters
-    would become invalid when the letters changed. ADR 0164 records it.
+    **The mutation it kills:** the `CHECK` dropped from the new revision, and
+    `length_weeks >= 0` written for `>= 1`, which stores the zero-week set.
     """
     table = comparison_set_table(metadata_tables)
     require_columns(table, DECLARED_COLUMNS, WHERE_THE_COLUMNS_COME_FROM)
@@ -183,9 +218,9 @@ def test_a_set_declaring_a_length_outside_the_calendars_set_is_refused(
         lambda: write_set(seed_rows, length=accepted_neighbour, level=AN_ORDINARY_LEVEL),
     )
     assert control is None, (
-        f"The control set — {accepted_neighbour} weeks, one of SPEC §2.2's lengths — was refused: "
-        f"{control}. Until an ordinary set inserts, the refusal below says nothing about "
-        f"{length}."
+        f"The control set — {accepted_neighbour} week, the smallest length the ruling admits — "
+        f"was refused: {control}. Until an ordinary set inserts, the refusal below says nothing "
+        f"about {length}."
     )
 
     outside = refusal_of(
@@ -194,11 +229,54 @@ def test_a_set_declaring_a_length_outside_the_calendars_set_is_refused(
     assert_refused_for_the_data(
         outside,
         f"A set declaring a length of {length} weeks",
-        f"SPEC §2.2's lengths are {list(SPEC_LENGTHS)} and {length} is not one of them. A stored "
-        "set nothing can resolve is worse than a refused one: E5-04 selects member courses' "
-        "sections *of the declared length*, so this row is a benchmark that silently computes "
-        f"over nothing. The {accepted_neighbour}-week set above was accepted in this same "
-        "transaction, so the database is not refusing sets in general.",
+        "The owner's ruling of 2026-09-22 makes the `CHECK` `length_weeks >= 1`, matching "
+        "`section`. A stored set of no weeks is a benchmark that silently computes over nothing. "
+        f"The {accepted_neighbour}-week set above was accepted in this same transaction, so the "
+        "database is not refusing sets in general.",
+    )
+
+
+@pytest.mark.parametrize("blank", BLANK_NAMES, ids=["empty", "spaces"])
+def test_a_set_with_a_blank_name_is_refused_beside_one_with_a_name(
+    db_session: Any, metadata_tables: dict[str, Any], seed_rows: Any, blank: str
+) -> None:
+    """E5-14's `CHECK (btrim(name) <> '')`: a set nobody can name in a list is unstorable.
+
+    The data-model review's LOW: `comparison_set.name` accepted `''` and `'   '`,
+    so a leader's list could hold a row with nothing to choose it by — and, since
+    names are unique, exactly one of each. The orchestrator's ruling adds the
+    `CHECK` in the same revision as the column grant.
+
+    **The control** is a named set written first in the same transaction.
+
+    **The mutation it kills:** the `CHECK` left out; and `name <> ''` without the
+    `btrim`, which stores the all-spaces name.
+    """
+    table = comparison_set_table(metadata_tables)
+    require_columns(table, (*DECLARED_COLUMNS, NAME_COLUMN), WHERE_THE_COLUMNS_COME_FROM)
+
+    control = refusal_of(
+        db_session,
+        lambda: write_set(
+            seed_rows, length=AN_ORDINARY_LENGTH, level=AN_ORDINARY_LEVEL, name=ONE_NAME
+        ),
+    )
+    assert control is None, (
+        f"The control set named {ONE_NAME!r} was refused: {control}. Until a named set inserts, "
+        "the refusal below says nothing about a blank name."
+    )
+
+    blank_named = refusal_of(
+        db_session,
+        lambda: write_set(
+            seed_rows, length=AN_ORDINARY_LENGTH, level=AN_ORDINARY_LEVEL, name=blank
+        ),
+    )
+    assert_refused_for_the_data(
+        blank_named,
+        f"A set named {blank!r}",
+        "E5-14 adds `CHECK (btrim(name) <> '')`: a set is named so a person can choose it, and a "
+        "name of nothing but spaces is a row in every leader's list that says nothing.",
     )
 
 

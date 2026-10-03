@@ -97,10 +97,16 @@ export const INSTRUCTOR_REPORT_TREND_COPY = {
   // something is hidden, renders only in that state, and promises nothing about
   // identity. `instructor_report_page.comments_note` is still the report's one
   // standing identity promise.
+  //
+  // **"On this chart", not "this week".** The notice renders only when every
+  // week of the series is withheld (ADR 0171's per-point decision draws a gap,
+  // not a notice, for one withheld week), so what it states is a fact about the
+  // whole chart; a sentence naming one week told the reader something narrower
+  // than the truth.
   'instructor_report_trend.comparison_suppressed':
-    'Comparable {weeks}-week courses: no line this week. The set behind it is too small to report on.',
+    'Comparable {weeks}-week courses: no line on this chart. The set behind it is too small to report on.',
   'instructor_report_trend.university_suppressed':
-    'University: no line this week. The set behind it is too small to report on.',
+    'University: no line on this chart. The set behind it is too small to report on.',
 
   // The accessible alternative. `docs/DESIGN_BRIEF.md` requires one for every
   // chart, and the shape here is a visually hidden table carrying the same

@@ -43,6 +43,8 @@ from fixtures.benchmark_views import (
     COHORT_WEEK_VIEW,
     INSTRUCTOR_STREAM,
     SET_FUNCTION,
+    SET_FUNCTION_RESULT_COLUMNS,
+    SET_FUNCTION_SIGNATURE,
     SET_RATING_FUNCTION,
     UG,
     BenchmarkWorld,
@@ -633,6 +635,79 @@ def test_the_person_keyed_benchmark_view_the_dispute_withdrew_is_not_readable(
         "statement failed for a reason that says nothing about either. `42P01` means *this* "
         f"relation is absent rather than all of them, because `{A_CERTAINLY_READABLE_VIEW}` was "
         "read successfully on this connection a moment ago."
+    )
+
+
+# The catalog's own rendering of one function's arguments and result, which is
+# what the `_v003` signature equality below compares. Both functions are asked for
+# by name; an overload is `require_benchmark_function`'s failure, not this one's.
+SIGNATURE_AND_RESULT = text(
+    """
+    SELECT pg_get_function_arguments(p.oid) AS arguments,
+           pg_get_function_result(p.oid) AS result
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = :name
+    """
+)
+
+
+def result_column_names(result: str) -> list[str]:
+    """The column names of a `TABLE(name type, ...)` result, in the catalog's order.
+
+    Names only. No record this suite may read spells the result's column types,
+    so they are not pinned (the E5-14 manifest names that gap). Split on `", "`,
+    which no Postgres type name contains, and take each entry's first word.
+    """
+    if not (result.startswith("TABLE(") and result.endswith(")")):
+        pytest.fail(
+            f"The function's result is {result!r}, which is not a `RETURNS TABLE (...)` shape. "
+            "The ruling on `docs/disputes/E5-03-01.md` settles both set functions as returning rows."
+        )
+    return [entry.split(" ", 1)[0] for entry in result[len("TABLE(") : -1].split(", ")]
+
+
+# `invariant`-marked: this is the boundary's invariant-coverage LOW ("set
+# functions' result columns unpinned"), applied to `_v003`. A column added to a
+# definer `pulse_app` may execute is new reach arriving without a decision.
+@pytest.mark.invariant
+@pytest.mark.parametrize("name", sorted(SET_FUNCTION_RESULT_COLUMNS))
+def test_each_set_function_takes_and_answers_exactly_its_contract(
+    db_session: Any, name: str
+) -> None:
+    """The `_v003` signature, and the result's columns, as equalities against the contract.
+
+    Arguments: `section_ids uuid[], course_weeks integer[], closed_by timestamp
+    with time zone[]` — E5-14's orchestrator ruling on the owner's freeze at
+    close. Result: the same columns `_v002` returns, E5-03's six or four plus the
+    two contributor counts E5-04's security round added.
+
+    **Both directions**, because each is an equality: a column dropped breaks a
+    reader, and a column added is a new thing `pulse_app` can learn through a
+    `SECURITY DEFINER` body — the kind of widening `test_identity_grants.py`
+    exists to make visible, arriving somewhere it does not look.
+
+    **The mutations it kills:** the old one-argument signature left in place (or
+    beside the new one); the cutoff typed `timestamp` without a zone, which
+    compares a naive instant against aware ones; the arguments in another order;
+    and a result column added or dropped. **Not pinned, and said so:** the
+    result's column *types* and *order*.
+    """
+    require_benchmark_function(db_session, name)
+    found = db_session.execute(SIGNATURE_AND_RESULT, {"name": name}).mappings().one()
+
+    assert found["arguments"] == SET_FUNCTION_SIGNATURE, (
+        f"`public.{name}` takes `{found['arguments']}`; E5-14's ruling settles `_v003` as "
+        f"`{SET_FUNCTION_SIGNATURE}` — the section set, the course weeks asked for, and one "
+        "cutoff per week, paired by index."
+    )
+    names = result_column_names(str(found["result"]))
+    contract = SET_FUNCTION_RESULT_COLUMNS[name]
+    assert len(names) == len(set(names)) and set(names) == set(contract), (
+        f"`public.{name}` returns {names}; the contract is {list(contract)} — `_v002`'s "
+        "columns, unchanged by the freeze. A column beyond these is reach a definer hands "
+        "`pulse_app` without a decision; one short of them is a figure sealed against the wrong "
+        "count."
     )
 
 

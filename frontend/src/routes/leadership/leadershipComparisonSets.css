@@ -54,6 +54,18 @@
   color: var(--spruce-60);
 }
 
+/* The one line a landed save or delete is said in. It is in the page from the
+   first render so a screen reader announces what arrives in it, and it takes no
+   space while it is empty. */
+.pulse-set-announcement {
+  margin: 0;
+  font-size: var(--text-1);
+}
+
+.pulse-set-announcement:not(:empty) {
+  margin: var(--space-3) 0 0;
+}
+
 /* ---- The list of sets ----------------------------------------------------- */
 
 .pulse-set-list {
@@ -98,8 +110,12 @@
   font-size: var(--text-1);
 }
 
+/* A link looks like one: marigold-deep, the brief's text-safe link colour, and
+   underlined, because colour alone does not tell a link from the text around it
+   (WCAG 1.4.1). The leadership landing's one link uses this rule too. */
 .pulse-set-link {
   color: var(--marigold-deep);
+  text-decoration: underline;
 }
 
 /* ---- Deleting, which states what it will change --------------------------- */

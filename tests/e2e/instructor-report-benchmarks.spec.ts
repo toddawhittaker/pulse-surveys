@@ -68,11 +68,16 @@ import { INSTRUCTOR_SUBJECT, sectionStartClock } from './support/survey';
 // of its own; no other section in this repository has both halves.
 const HERO = { label: 'BIOL-310-R7FF', code: 'R7FF', menuName: 'BIOL 310 R7FF', lengthWeeks: 12 };
 
-// **The suppressed one: a section alone in its cohort.** `BIOL-215-R3WW` is a
-// twelve-week level-200 section and the prior term's only other `BIOL-215` is
-// six weeks long, so its comparison set holds too few sections to clear
-// `benchmark_min_sections_default`. That is a property of the seeded world
-// rather than of this file, which is why the payload is read before the page.
+// **The suppressed one: a section whose default set is empty.** SPEC §5.1 draws
+// a section's default comparison set from "the same Lead Faculty's courses", and
+// `BIOL 215` is one of the courses `scripts/seed.py` deliberately maps to no
+// lead (`LEAD_FACULTY_MAPPINGS`, and the comment beside `DemoCourse("BIOL",
+// "215", ...)`). So `BIOL-215-R3WW`'s default set holds 0 sections, which is
+// below `benchmark_min_sections_default` whatever that is set to. (It is not
+// the length of the prior term's other `BIOL 215` section, as this comment once
+// said: with no lead, no section of any length is in the set.) That is a
+// property of the seeded world rather than of this file, which is why the
+// payload is read before the page.
 const ALONE = { label: 'BIOL-215-R3WW', code: 'R3WW', menuName: 'BIOL 215 R3WW', lengthWeeks: 12 };
 
 // The minute this file reads its reports at. **Transcribed from the seeded
@@ -95,10 +100,10 @@ const READ_CLOCK = '2026-10-19T09:00';
 const COMPARISON_LEGEND = `Comparable ${String(HERO.lengthWeeks)}-week courses`;
 const UNIVERSITY_LEGEND = 'University';
 const COMPARISON_SUPPRESSED =
-  `Comparable ${String(HERO.lengthWeeks)}-week courses: no line this week. ` +
+  `Comparable ${String(HERO.lengthWeeks)}-week courses: no line on this chart. ` +
   'The set behind it is too small to report on.';
 const UNIVERSITY_SUPPRESSED =
-  'University: no line this week. The set behind it is too small to report on.';
+  'University: no line on this chart. The set behind it is too small to report on.';
 const WITHHELD = 'Not shown';
 const TOO_SMALL = 'The set behind this figure is too small to report on.';
 
@@ -114,7 +119,7 @@ const UNIVERSITY_NOTICE = 'trend-suppression-university';
 const COMPARISON_CELL = 'stat-cell-comparison';
 const UNIVERSITY_CELL = 'stat-cell-university';
 
-// Budgets. The world is four prior-term launches, a roster sync each, two
+// Budgets. The world is five prior-term launches, a roster sync each, two
 // seeders and a window derivation — minutes rather than seconds, and a hook that
 // ran out of harness rather than out of patience would read as a flake.
 const WORLD_TIMEOUT_MS = 600_000;
@@ -314,9 +319,9 @@ test('a section alone in its cohort shows the withheld treatments instead', asyn
   ).toBeGreaterThan(0);
   expect(
     drawableWeeks(instructor?.comparison),
-    `The payload answered a drawable comparison week for ${ALONE.label}. Its cohort holds one ` +
-      "section — its own — and SPEC §11's section minimum is above that, so a figure here is a " +
-      'suppression that did not fire rather than a page that rendered wrongly.',
+    `The payload answered a drawable comparison week for ${ALONE.label}. Its default set holds ` +
+      "0 sections — its course has no lead — and SPEC §11's section minimum is above that, so a " +
+      'figure here is a suppression that did not fire rather than a page that rendered wrongly.',
   ).toBe(0);
 
   // The page says so, once per panel: no line, and the notice in its place.
@@ -363,7 +368,7 @@ test('a section alone in its cohort shows the withheld treatments instead', asyn
  *
  * The menu is the page an instructor who teaches more than one section lands on,
  * and the seed gives this persona every section in both terms — including the
- * four prior-term ones this file's own world stood up — so the report is reached
+ * five prior-term ones this file's own world stood up — so the report is reached
  * by the link naming this section in full.
  */
 async function openTheReport(page: Page, section: typeof HERO): Promise<Locator> {
@@ -379,7 +384,7 @@ async function openTheReport(page: Page, section: typeof HERO): Promise<Locator>
   // **Named by prefix, number and §2.2 code, which is what makes it one link.**
   // The menu writes the server's governed label ("BIOL 310 R7FF — Molecular
   // Genetics, Fall 2026"), and this persona now teaches four `BIOL 310` sections
-  // and two `BIOL 215` ones — the prior term's, which this file's own world
+  // and three `BIOL 215` ones — two of them the prior term's, which this file's own world
   // provisions. A locator naming only the course resolves to several links and
   // Playwright's strict mode refuses it.
   await menu.getByRole('link', { name: new RegExp(section.menuName) }).click();

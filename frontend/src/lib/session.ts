@@ -81,18 +81,16 @@ export function authorizationHeader(): Record<string, string> {
 /**
  * The cookie the double-submit token rides in, and the header it is echoed in.
  *
- * `csrf_verified_student` (`app.api.deps`) requires the header from any request
- * whose session rides the cookie, and exempts the Bearer carrier — a Bearer header is not something a cross-site form can be tricked
- * into sending, so there is nothing there for a double submit to protect. The
- * cookie is deliberately not `HttpOnly` (ADR 0089) for exactly this reason: the
- * SPA has to read it.
+ * `csrf_verified_student` and `csrf_verified_leadership` (`app.api.deps`)
+ * require the header from any request whose session rides the cookie, and
+ * exempt the Bearer carrier — a Bearer header is not something a cross-site form
+ * can be tricked into sending, so there is nothing there for a double submit to
+ * protect. The cookie is deliberately not `HttpOnly` (ADR 0089) for exactly this
+ * reason: the SPA has to read it.
  *
- * **That dependency is the only one on this branch today.** `api/deps.py`
- * carries one such check, the student's; E5-06 adds `csrf_verified_leadership`
- * for the comparison-set routes `api/leadership.ts` writes to, and this branch
- * merges after it. The cookie and the header are the same on both, which is why
- * one helper serves both clients — but until E5-06 lands, the leadership writes
- * echo a token no dependency on this branch is checking.
+ * **The two checks share one cookie and one header**, which is why one helper
+ * serves both clients: the student's submission and the comparison-set writes
+ * in `api/leadership.ts` echo the same token to the same check.
  */
 const CSRF_COOKIE = 'pulse_csrf';
 const CSRF_HEADER = 'X-Pulse-CSRF';

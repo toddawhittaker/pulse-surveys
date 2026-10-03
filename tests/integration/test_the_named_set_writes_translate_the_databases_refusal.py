@@ -12,8 +12,9 @@ error, maps it by constraint name to one sentence, and rolls back.
 invalid body is the valid body with exactly one field replaced, so the refusal
 is attributable to that field and the twin says the write path works at all. The
 four values are near misses rather than nonsense (`tests/fixtures/comparison_sets.py`
-chose them for E5-01 and they are chosen again here): `17` is the length a range
-check written `3 <= n <= 18` accepts, `ug` is the right token in the wrong case
+chose them for E5-01 and they are chosen again here): `0` is the one length below
+the `length_weeks >= 1` rule the owner set at E5-14 (it was `17`, against §2.2's
+list, until then), `ug` is the right token in the wrong case
 that a `lower()` check accepts, a graduate course is a real course of the wrong
 level, and a fresh uuid is a member key that is simply nobody.
 
@@ -63,9 +64,15 @@ def invalid_and_valid(door: NamedSetDoor, contract: Any, case: str) -> tuple[Any
     """
     world = door.world
     if case == "length":
+        # E5-14: the owner ruled a set's length is data — the `CHECK` is
+        # `length_weeks >= 1` — so `17` is storable now and the refusal's near miss
+        # is zero weeks, beside a 4-week twin no calendar list names. The refusal
+        # constant keeps its name (it is keyed by the constraint); whether its
+        # sentence still reads right for "zero weeks" is a copy question the E5-14
+        # manifest raises rather than this test answering.
         return (
-            world.a_write(length_weeks=17),
-            world.a_write(length_weeks=16),
+            world.a_write(length_weeks=0),
+            world.a_write(length_weeks=4),
             contract.length_not_a_calendar_length,
             contract.refused_value,
         )
@@ -110,8 +117,9 @@ def test_an_invalid_write_is_refused_with_the_sentence_naming_the_rule(
 ) -> None:
     """Each invalid write, refused with §5.1's vocabulary and storing nothing.
 
-    **The mutations this kill, one per case.** A length check written as a range
-    rather than against §2.2's set, which accepts 17; a level check written with
+    **The mutations this kill, one per case.** A length check that lets a set of
+    zero weeks through (`>= 0`, or no check at all since E5-14 replaced §2.2's
+    list with `>= 1`); a level check written with
     `lower()`, which accepts `ug` and stores a token no other read recognises; a
     membership insert that names the course and not the level, which lets a
     graduate course into an undergraduate set and produces a benchmark averaging
@@ -195,8 +203,8 @@ def test_the_valid_twin_of_each_refused_write_is_accepted(
     `IntegrityError` to a sentence and the write path never worked
     (`docs/MISTAKES.md` entry 3).
 
-    **The mutations it kills:** a length check refusing 16, which is in SPEC
-    §2.2's set; a level check refusing `UG`; a membership insert that refuses a
+    **The mutations it kills:** a length check refusing 4, which no calendar list
+    names and the owner's E5-14 ruling makes storable; a level check refusing `UG`; a membership insert that refuses a
     course of the set's own level; and a name-uniqueness check that refuses
     every name because it compares against the whole table rather than against
     other rows.
@@ -213,7 +221,8 @@ def test_the_valid_twin_of_each_refused_write_is_accepted(
         f"The valid twin of the {case} case was refused by `{route}` with "
         f"{answered.status_code} rather than answered {expected}. Body begins "
         f"{answered.text[:400]!r}.\n\n"
-        "Every value in this body is one SPEC §2.2 or §8 allows, and the refused body differs from "
+        "Every value in this body is one the schema allows (§8's levels; since E5-14 any length "
+        "of at least one week), and the refused body differs from "
         "it in exactly one field — so a refusal here means the rule under test refuses the legal "
         "half as well as the illegal one, and its twin above passes for a reason nobody chose."
     )
