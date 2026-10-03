@@ -104,7 +104,7 @@ edited.
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from functools import wraps
 from html import escape
 from inspect import iscoroutinefunction
@@ -116,7 +116,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import delete, insert, select, text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 from starlette.routing import Route
@@ -126,7 +126,6 @@ from app.api.deps import DESIGN_TOKENS_CSS
 from app.config import Settings, is_development
 from app.db import SessionLocal, get_session
 from app.lti.registration import launcher_origins
-from app.models.clock import ClockOverride
 from app.models.org import Course, Prefix, Section
 from app.services import clock
 from app.services.grading import post_scores_for_all_sections
@@ -819,24 +818,6 @@ def sections_section(sections: list[ConsoleSection]) -> str:
     </div>"""
 
 
-def standing_override(session: Session) -> ClockOverride | None:
-    """The `clock_override` row, or `None` if the clock is real.
-
-    **Read here rather than through `app.services.clock`**, which answers what time
-    it is and not whether somebody moved it. Those are two questions, and the second
-    is this page's alone: the console exists to say that an overridden stack is not
-    a live one, and no other reader in the product has any business asking. Adding a
-    third function to the service for one page's readout would put a question with
-    one caller in the module every scheduling read goes through.
-
-    A direct read of a model in a router, which is what the sections table above
-    already does for `section`, `course` and `prefix`. `clock_override` holds two
-    timestamps and no person, so no view stands over it and none of SPEC §4.1's
-    read-path rules reach it.
-    """
-    return session.scalars(select(ClockOverride)).first()
-
-
 def clock_section(session: Session, settings: Settings) -> str:
     """The effective clock, whether an override stands, and the two controls (E2-04).
 
@@ -858,7 +839,7 @@ def clock_section(session: Session, settings: Settings) -> str:
     """
     zone = ZoneInfo(settings.institution_timezone)
     effective = clock.now(session, settings=settings).astimezone(zone)
-    override = standing_override(session)
+    override = clock.standing_override(session)
     if override is None:
         state = NO_OVERRIDE_STATE
     else:
@@ -1231,7 +1212,7 @@ def clear_the_dev_clock(request: Request) -> Response:
         raise HTTPException(status_code=NOT_FOUND)
 
     with SessionLocal() as session:
-        session.execute(delete(ClockOverride))
+        clock.clear_override(session)
         session.commit()
     return RedirectResponse(DEV_CONSOLE_PATH, status_code=SEE_OTHER)
 
@@ -1420,8 +1401,5 @@ def replace_the_override(pretend_now: datetime) -> None:
     `app.db.get_session` does for a routed handler.
     """
     with SessionLocal() as session:
-        session.execute(delete(ClockOverride))
-        session.execute(
-            insert(ClockOverride).values(pretend_now=pretend_now, anchored_at=datetime.now(UTC))
-        )
+        clock.set_override(session, pretend_now=pretend_now)
         session.commit()

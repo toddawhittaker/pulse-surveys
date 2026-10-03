@@ -15,6 +15,13 @@ instant in UTC and `today` is the current date in `settings.institution_timezone
 `today` is derived from `now` rather than reading the clock a second time, so an
 override moves both or neither.
 
+**This module owns the `clock_override` row** (E5.1-03). Beside the two readers
+are the three operations the development console performs on it —
+`standing_override`, `set_override` and `clear_override` — so the row's meaning
+lives in one place. None of them commits: the caller owns the transaction. A
+sweep in the unit suite holds every other module under `backend/app/` to calling
+them rather than reaching the row itself.
+
 **The override is an offset, not a freeze.** In development, and only there, a
 `clock_override` row carries an instant a developer typed (`pretend_now`) and the
 real instant they typed it at (`anchored_at`). The effective now is
@@ -49,7 +56,7 @@ to do with that peer's subject.
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, is_development
@@ -88,3 +95,43 @@ def today(session: Session, *, settings: Settings) -> date:
     return (
         now(session, settings=settings).astimezone(ZoneInfo(settings.institution_timezone)).date()
     )
+
+
+def standing_override(session: Session) -> ClockOverride | None:
+    """The override row, or `None` if the clock is real.
+
+    The development console's readout asks this, to say whether a stack's clock
+    has been moved. It reads whatever the table holds and does not check the
+    environment: the console is served in development alone, and that gate is
+    the console's.
+    """
+    return session.scalars(select(ClockOverride)).first()
+
+
+def set_override(session: Session, *, pretend_now: datetime) -> None:
+    """Make `pretend_now` the single override, anchored at the real instant now.
+
+    Delete then insert, rather than an upsert: the table holds at most one row by
+    a unique index over `(true)`, so a second insert would be refused by that
+    index rather than replacing anything. The anchor is the real instant this ran
+    at, which is what makes the override an offset rather than a freeze: `now`
+    adds the elapsed real time to the pretended instant on every read.
+
+    **It does not commit.** The caller owns the transaction, so the delete and
+    the insert land together or not at all, and a stack is never briefly running
+    on a clock nobody set.
+    """
+    session.execute(delete(ClockOverride))
+    session.execute(
+        insert(ClockOverride).values(pretend_now=pretend_now, anchored_at=datetime.now(UTC))
+    )
+
+
+def clear_override(session: Session) -> None:
+    """Remove the override, so the clock is real again. It does not commit.
+
+    Deleting the row rather than writing a zero offset: a row holding a zero
+    offset answers the same instants today and is a state nothing else in this
+    product knows how to read.
+    """
+    session.execute(delete(ClockOverride))
