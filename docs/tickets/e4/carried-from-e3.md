@@ -131,6 +131,14 @@ machinery; the shape to copy is the AGS client's bounded transport
 (commit 83a18d3). **Done when:** the token dial carries bounded socket
 timeouts, measured against a stalling endpoint the way the AGS fix was.
 
+**Closed by E5.1-02 (2026-10-03).** Every request the sync makes that names no
+timeout, the token grant included, runs under
+`roster_sync.ROSTER_REQUEST_TIMEOUT`, the AGS client's `(3.05, 10.0)`, applied in
+the sync's pinned adapter. It is measured against a loopback endpoint that
+accepts the connection and never answers
+(`tests/integration/test_the_roster_token_grant_is_bounded.py`). Moving the
+shared transport into `app/lti/` is not part of this closure and stays carried.
+
 ## The gradebook's two instructor-visible strings sit outside the copy inventory
 
 `PULSE_LABEL` ("Pulse Participation") and the ledger line format ship into

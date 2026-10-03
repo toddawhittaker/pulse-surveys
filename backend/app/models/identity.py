@@ -725,6 +725,49 @@ class RoleAssignment(UuidPrimaryKey, Base):
     )
 
 
+class EndedTeachingGrant(UuidPrimaryKey, Base):
+    """One teaching grant a complete roster walk ended, as it stood when it was deleted.
+
+    SPEC §2.1 makes the teaching instructor LMS-owned, so when the roster stops
+    listing somebody as Instructor their `INSTRUCTOR` row in `role_assignment` is
+    deleted (E5.1-02). The deletion is the grant ending; this row is the record
+    that it happened, written by `public.end_teaching_instructor` in the same call
+    as the deletion, so a grant cannot end without one. ADR 0183 says why the
+    grant is deleted rather than end-dated.
+
+    **Append-only by grant, not by trigger.** `pulse_app` holds no privilege on
+    this table at all. The only writer is the ending definer, whose owner holds
+    `INSERT` here and nothing else, so no runtime connection can re-date or erase
+    a row.
+
+    **`assignment_id` carries no foreign key**, because the row it names has been
+    deleted; it is unique, so one grant ends once. The person, the section and the
+    roster call that ended it are foreign keys with `RESTRICT`, as every reference
+    in this module is.
+
+    It is not `audit_log`: that table records identity reveals, needs an acting
+    person, and is what the Care reader reads. A roster walk is not a person.
+    """
+
+    __tablename__ = "ended_teaching_grant"
+    __table_args__ = (CheckConstraint("role = 'INSTRUCTOR'", name="role_is_instructor"),)
+
+    assignment_id: Mapped[UUID] = mapped_column(nullable=False, unique=True)
+    person_id: Mapped[UUID] = mapped_column(
+        ForeignKey("person.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    section_id: Mapped[UUID] = mapped_column(
+        ForeignKey("section.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    role: Mapped[AssignmentRole] = mapped_column(
+        Enum(AssignmentRole, name="assignment_role"), nullable=False
+    )
+    ended_on: Mapped[date] = mapped_column(Date, nullable=False)
+    nrps_call_id: Mapped[UUID] = mapped_column(
+        ForeignKey("nrps_call.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+
+
 class LeadFacultyMapping(UuidPrimaryKey, Base):
     """Which courses a person leads (SPEC §2.1, §8).
 

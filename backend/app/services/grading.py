@@ -1196,10 +1196,12 @@ def _live_enrollments(session: Session, section: Section, *, today: date) -> set
 
     **And "students" is a filter now, not a manner of speaking** (E3-08's boundary
     round, EE-M1). An NRPS container carries everybody the platform lists, and the
-    roster sync writes an `enrollment` row for each of them — instructors included,
-    because §7.3 has it record the teaching instructor from the same document. So
-    this used to answer with the people who teach the section beside the people
-    taking it, and the sweep posted a participation percentage into an instructor's
+    roster sync wrote an `enrollment` row for each of them until E5.1-02 —
+    instructors included, because §7.3 has it record the teaching instructor from
+    the same document. It writes none for a teaching member now (ADR 0183), and
+    this filter stays for the one row that rule leaves: an enrollment first seen and
+    closed on the same day still covers that day. So this used to answer with the people who teach the section beside
+    the people taking it, and the sweep posted a participation percentage into an instructor's
     own gradebook column, computed from the weeks they did not fill in a student
     survey. §3.4 makes the score a student's: "completed items ÷ total items across
     the *student's* elapsed weeks".

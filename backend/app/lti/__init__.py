@@ -17,8 +17,13 @@ records it and says what would change the answer.
 A module with no caller is a guess at an interface, and §13 is a map of where
 things go rather than a list of files that must exist.
 
-**`pylti1p3` is not used for launch verification, and §13 names it.** E0-18
-verifies launches with PyJWT instead; the decision, and what it costs, is in
-docs/adr/0073. It *is* used outbound, by both service clients, for the
-client-credentials grant that authorises every service call.
+**`pylti1p3` validates launches, and §13 names it.** E0-18 verified them with
+PyJWT and docs/adr/0073 deferred the library to E1; E1-08 moved the launch door
+onto it. `launch.py` runs `pylti1p3`'s `OIDCLogin` for the login leg, and its
+`MessageLaunch` checks the token's format and its signature, against keys this
+tool fetches itself; the steps the library would otherwise run in one call are
+called one at a time so each refusal is classified by the check that failed.
+The web door still verifies with PyJWT (`app.services.tokens`). The library is
+also used outbound, by both service clients, for the client-credentials grant
+that authorises every service call.
 """
