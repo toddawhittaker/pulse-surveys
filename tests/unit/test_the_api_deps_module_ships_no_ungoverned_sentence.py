@@ -20,6 +20,15 @@ docstring is the first statement of a module, a class or a function; prose
 explaining code is not something a person is served, and a sweep that punished
 it would be training the next reader to delete the explanation.
 
+**Typeface names are removed before the rule runs** (the ruling on
+`docs/disputes/E5.1-03-01.md`). The value of a CSS declaration whose property
+is `font-family`, or a custom property named `--font-...`, is cut out of a
+string up to the next `;` or `}` before the three-word rule reads it. R6 puts
+`design/tokens.css`'s font tokens into `deps.py` verbatim, one of them names a
+three-word typeface, and a typeface is not words a person is served. The
+removal is by property only: the same words in a `content:` declaration or in a
+plain string are still a sentence.
+
 **One exemption, by shape.** The arguments of a `raise` whose exception is not
 `HTTPException`. FastAPI answers such an exception with a generic 500, so its
 words reach a log and never a person. The exemption is read off the syntax of
@@ -78,6 +87,17 @@ DEPS_PATH = REPO_ROOT / "backend" / "app" / "api" / "deps.py"
 # focus rule is a finding. The stylesheet sample below carries exactly that
 # declaration so the boundary is exercised rather than assumed.
 SENTENCE = re.compile(r"(?<![\w-])[A-Za-z]+(?: [A-Za-z]+){2,}(?![\w-])")
+
+# The value of a CSS declaration naming typefaces: `font-family`, or a custom
+# property whose name starts `--font-`. Everything after the colon up to the
+# next `;` or `}` is removed from a string before `SENTENCE` reads it, because a
+# typeface name is not words a person is served — and `design/tokens.css`'s
+# `--font-mono` names a three-word typeface that R6 puts into `deps.py` verbatim.
+# That conflict between R3 and R6 is `docs/disputes/E5.1-03-01.md`, and this is
+# its ruling: the removal is by property, never by constant name and never for
+# quoted strings in general, so the same three words in a `content:` declaration
+# or in a plain constant are still sentences.
+FONT_DECLARATION_VALUE = re.compile(r"((?<![\w-])(?:font-family|--font-[\w-]*)\s*:)[^;}]*")
 
 # The one exception whose message *is* served: FastAPI turns its `detail` into
 # the response body. Matched on the called name's last segment, so
@@ -185,6 +205,48 @@ A_THREE_WORD_TITLE = "\n".join(
     ]
 )
 
+# A three-word typeface name, invented here, in the two declarations that name
+# typefaces — and the same three words where they are not a typeface: as the
+# value of `content:`, which a browser draws on the page, and as a plain string.
+A_THREE_WORD_TYPEFACE = "Sample Grotesk Text"
+
+A_TYPEFACE_IN_A_FONT_TOKEN = "\n".join(
+    [
+        '"""A sample module."""',
+        "",
+        'TOKENS = ":root { --font-sample: '
+        + f"'{A_THREE_WORD_TYPEFACE}', ui-monospace, monospace; }}\"",
+        "",
+    ]
+)
+
+A_TYPEFACE_IN_A_FONT_FAMILY = "\n".join(
+    [
+        '"""A sample module."""',
+        "",
+        f"STYLE = \"code {{ font-family: '{A_THREE_WORD_TYPEFACE}', monospace }}\"",
+        "",
+    ]
+)
+
+THE_WORDS_IN_A_CONTENT_DECLARATION = "\n".join(
+    [
+        '"""A sample module."""',
+        "",
+        f"STYLE = \"p::before {{ content: '{A_THREE_WORD_TYPEFACE}'; }}\"",
+        "",
+    ]
+)
+
+THE_WORDS_AS_A_PLAIN_STRING = "\n".join(
+    [
+        '"""A sample module."""',
+        "",
+        f"HEADING = {A_THREE_WORD_TYPEFACE!r}",
+        "",
+    ]
+)
+
 # A sentence in the literal part of an f-string, and an f-string whose literal
 # parts carry no words at all.
 AN_F_STRING_SENTENCE = "\n".join(
@@ -269,6 +331,16 @@ def unserved_raise_constants(tree: ast.AST) -> set[int]:
     return found
 
 
+def without_font_names(text: str) -> str:
+    """`text` with the value of every typeface declaration removed, the property kept.
+
+    See `FONT_DECLARATION_VALUE`. The property name and its colon stay, so a
+    finding still points at the right place in the string if anything else in it
+    is a sentence.
+    """
+    return FONT_DECLARATION_VALUE.sub(r"\1", text)
+
+
 def scan(source: str, filename: str) -> Scan:
     """Every sentence-shaped string constant in `source` that is not a docstring or exempt.
 
@@ -286,7 +358,7 @@ def scan(source: str, filename: str) -> Scan:
         examined += 1
         if id(node) in skipped:
             continue
-        match = SENTENCE.search(node.value)
+        match = SENTENCE.search(without_font_names(node.value))
         if match is not None:
             findings.append(Finding(getattr(node, "lineno", 0), node.value, match.group(0)))
     return Scan(examined, sorted(findings))
@@ -403,6 +475,54 @@ def test_a_three_word_title_is_named() -> None:
     assert found, (
         "The scanner left alone a title of three letter-words. R3's rule is three or more, so the "
         "boundary is between this sample and the two-word title above."
+    )
+
+
+def test_a_three_word_typeface_in_a_font_declaration_is_left_alone() -> None:
+    """A typeface name in `--font-*:` or `font-family:` is not a sentence, however many words.
+
+    The ruling on `docs/disputes/E5.1-03-01.md`: R6 puts `design/tokens.css`'s
+    font tokens into `deps.py` verbatim, one of them names a three-word
+    typeface, and a typeface name inside a stylesheet is not words a person is
+    served. Both declaration forms are sampled — a custom property ended by `;`
+    and a `font-family` ended by `}` — so both boundaries of the removal run.
+
+    **The mutation it kills:** the removal deleted, which names the token block
+    on a correct `deps.py`. **Its near miss** is the next control: the same
+    three words in a `content:` declaration and in a plain string, both named.
+    **A red here means this module is broken, not that the code is.**
+    """
+    in_token = sentences_in(A_TYPEFACE_IN_A_FONT_TOKEN)
+    assert in_token == [], (
+        f"The scanner named {in_token} in the value of a `--font-` custom property. That value is "
+        "a list of typefaces, and the dispute's ruling removes it before the sentence rule runs."
+    )
+    in_family = sentences_in(A_TYPEFACE_IN_A_FONT_FAMILY)
+    assert (
+        in_family == []
+    ), f"The scanner named {in_family} in the value of a `font-family` declaration ended by `}}`."
+
+
+def test_the_same_three_words_outside_a_font_declaration_are_named() -> None:
+    """The removal is by property: in `content:` or a plain string the same words are a sentence.
+
+    `content:` puts its value on the page, so it is words a person reads; a
+    plain constant is the ordinary offender. **The mutations it kills:** the
+    removal widened to every CSS declaration, which the `content:` sample
+    catches; and widened to every quoted string, which the same sample catches
+    because its value is quoted. **Its near miss** is the control above, where
+    the identical words sit in a typeface declaration and are left alone. **A
+    red here means this module is broken.**
+    """
+    in_content = sentences_in(THE_WORDS_IN_A_CONTENT_DECLARATION)
+    assert in_content, (
+        f"The scanner left alone {A_THREE_WORD_TYPEFACE!r} as the value of `content:`, which a "
+        "browser draws on the page. Only typeface declarations are removed."
+    )
+    as_string = sentences_in(THE_WORDS_AS_A_PLAIN_STRING)
+    assert as_string, (
+        f"The scanner left alone {A_THREE_WORD_TYPEFACE!r} as a plain string constant. The words "
+        "are a sentence anywhere but a typeface declaration."
     )
 
 
