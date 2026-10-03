@@ -1,18 +1,25 @@
 """What a router needs from the request that is not the request (SPEC §13).
 
-Today that is three things. The first is the short-lived signed cookie the **web**
-door uses to carry a `state`, a `nonce` and a PKCE verifier from the redirect
-that mints them to the redirect that checks them. The launch door carried one
-too until E1-08 moved its handshake into a server-side store (ADR 0089); this
-cookie is the web door's alone now, and ADR 0093 says why it stays. The second
-is the small amount of scaffolding both doors share around their answers: the
-two status codes, the four pages a door can answer with that are not a landing,
-and the tail that turns verified claims into a session and a landing redirect,
-or into one of those pages. The third is E2-09's `require_student`, the first
-dependency that reads a session back off a later request and says what it may
-act as. §13 names this module for "auth context, role scoping, n-threshold
-guards"; the first two of those are here now, and the third arrives with the
-screens that need it.
+Today that is four things:
+
+* **the role gates** — `require_student`, `require_instructor` and
+  `require_leadership`, which read a session back off a request and say what it
+  may act as, and `person_of`, which reads the person a session names;
+* **the CSRF check** a writing route carries on top of its role gate,
+  `csrf_verified_student` and `csrf_verified_leadership`;
+* **the landing tail** both doors share, `landing_with_session`, which turns
+  verified claims into a session and a landing redirect, or into a calm page;
+* **the door pages** — the four pages a door can answer with that are not a
+  landing, their template, and the design tokens that template shares with the
+  development console.
+
+§13 names this module for "auth context, role scoping, n-threshold guards"; the
+first two of those are here, and the third arrives with the screens that need it.
+
+**The web door's login cookie is not here.** It lived here while both doors used
+it. E1-08 moved the launch door's handshake into a server-side store (ADR 0089),
+and E5.1-03 moved the cookie and its helpers to `app.api.auth`, the one door that
+still carries it.
 
 **The pages themselves live here from E1-13 on.** They were in
 `app/services/landing.py`, beside the claims-derived landing seam that ticket
@@ -240,9 +247,8 @@ def require_instructor(request: Request) -> SessionClaims:
 # borrowing another role's constant moves when somebody changes that other one.
 #
 # The sentence is `app.copy.leadership_sets.NOT_LEADERSHIP` — in the copy package
-# from the day it is written, unlike the instructor refusal above, which is a
-# module constant here because the report surface was not a governed one when
-# E4-07 shipped. Since E5-13 it is a registry entry's own text, published under
+# from the day it is written. The instructor refusal above joined the package
+# later, when E5.1-03 moved it into `app.copy.instructor_report`. Since E5-13 it is a registry entry's own text, published under
 # the `leadership_comparison_sets.` prefix with the comparison-set screen's other
 # words, so SPEC §4.1 items 4 and 5 are asserted over what this gate answers
 # (ADR 0176).
@@ -343,14 +349,19 @@ def person_of(claims: SessionClaims) -> UUID | None:
 # The four pages a door can answer with that are not a landing.
 # ---------------------------------------------------------------------------
 
+# **Their words are `app.copy.entry`'s** (E5.1-03), so SPEC §4.1 items 4 and 5 are
+# swept over every heading and message a door page shows. What stays here is the
+# routing — which entry a refusing guard's page carries — the testids and the
+# template. The comments below say why each page says what it says.
+
 # What a refused entry says. Deliberately one sentence and a reason, with no
 # retry link: there is nowhere for a browser to go from here that is not the
 # platform or the provider it came from, and a link built out of a request that
 # just failed validation is the open redirect both doors exist to refuse.
 REFUSAL_TESTID = "pulse-entry-refused"
 
-# The sentence each guard's refusal page carries, keyed by the guard's own class
-# name — the machine vocabulary ADR 0103 put in `data-reason`, and the only
+# The registry entry each guard's refusal page carries, keyed by the guard's own
+# class name — the machine vocabulary ADR 0103 put in `data-reason`, and the only
 # thing `refusal_page` takes.
 #
 # **The page derives its copy rather than being handed it, and that is the
@@ -360,7 +371,7 @@ REFUSAL_TESTID = "pulse-entry-refused"
 # provoked it, and the string nearest to hand at every call site is the
 # exception that refused — whose `str()` carries whatever a library was told by
 # the caller. So the callers pass a name from a closed vocabulary, this mapping
-# turns it into a constant, and a name nothing maps gets `DEFAULT_REFUSAL_COPY`.
+# turns it into a registry entry, and a name nothing maps gets `DEFAULT_REFUSAL_COPY`.
 # There is nowhere for a caller's words to go.
 #
 # **Keyed by class name and not by class**, so `app.api.deps` imports neither
@@ -387,7 +398,7 @@ REFUSAL_COPY: Mapping[str, CopyEntry] = {
     "SessionRefusedError": entry.REFUSED_SESSION,
 }
 
-# What a guard this mapping does not know is answered with. A constant, and
+# What a guard this mapping does not know is answered with. A registry entry, and
 # every word of it true of any refusal: it reports nothing about what was handed
 # in, which is what keeps a guard name nobody mapped from becoming a caller's
 # string in the body by way of an f-string that meant to be helpful.
@@ -575,7 +586,7 @@ def cancelled_page() -> str:
     a convenience: the only thing this door knows about a cancel is what the
     provider's redirect said, every parameter in that redirect is attacker-chosen
     text, and a function with nowhere to put such text cannot be talked into
-    rendering it. What the page says is three constants from this module.
+    rendering it. What the page says is two `app.copy.entry` constants.
 
     It carries no landing testid, like `refusal_page`, so a cancel serves nobody's
     view; and its own testid is not the refusal's, because a suite — and a person —

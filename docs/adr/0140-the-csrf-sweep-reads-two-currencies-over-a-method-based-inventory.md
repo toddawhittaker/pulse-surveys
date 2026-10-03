@@ -84,6 +84,14 @@ with no dependency graph posted by a page holding no session. E3-07's own
 route is refused outside development by the environment guard, which is a
 different control answering a different question (ADR 0141).
 
+**Amended 2026-10-03 by E5.1-03.** That ticket retrofitted `/dev/clock` and
+`/dev/clock/clear` onto `DevControlRoute`, which ADR 0141 had named as a change
+for a ticket about those routes. Both now carry currency 2 and left the ledger,
+so two entries remain: the two LTI door legs. The ledger is not empty, so its
+both-direction assertions still run against real entries, and the near-miss
+control that builds a plain `AnyMethodRoute` still proves that class alone is
+not read as guarded.
+
 **Three limits are disclosed rather than closed**, written down the way the
 denial-module sweep's were. A state-changing `GET` escapes the inventory, and
 what closes that is that a `GET` which writes is a defect of its own. A mutating

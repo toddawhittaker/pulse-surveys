@@ -47,16 +47,18 @@ a section a roster sync has really filled.
 anything. SPEC §3.1 makes every survey window a wall-clock time in the institution's
 timezone, and E2 has to be drivable by hand, so the console shows the effective
 clock and offers two `POST` routes — `/dev/clock` sets a pretend now and
-`/dev/clock/clear` gives the real one back. Both carry the same in-handler gate this
-page does, and both are stricter about the method probe: **every** method they do
-not serve answers `404` here rather than the `405 Allow:` the console itself
-discloses (ADR 0079, ADR 0087), because the row they write moves the clock every
-scheduling and visibility read in the product goes through. "Every" is enforced by
-matching the path for any method at all and refusing in the handler — see
-`AnyMethodRoute` below, and the security round of 2026-09-01 that put it there
-after a closed list of verbs let `TRACE` reach the router's `405`.
-`app.services.clock` is what applies the row, and only where `is_development`; ADR
-0109 carries the design and the list of clocks it deliberately does not touch.
+`/dev/clock/clear` gives the real one back. Both are stricter about the method
+probe than this page: **every** method they do not serve answers `404` rather than
+the `405 Allow:` the console itself discloses (ADR 0079, ADR 0087), because the row
+they write moves the clock every scheduling and visibility read in the product goes
+through. "Every" is enforced by matching the path for any method at all and refusing
+in the endpoint — see `AnyMethodRoute` below, and the security round of 2026-09-01
+that put it there after a closed list of verbs let `TRACE` reach the router's `405`.
+Since E5.1-03 both are `DevControlRoute`s, so a `POST` from another origin is
+refused with `403` as well (ADR 0141, amended). `app.services.clock` owns the row:
+it applies it, only where `is_development`, and it is what these two controls call
+to set and clear it. ADR 0109 carries the design and the list of clocks it
+deliberately does not touch.
 
 **It grows a passback trigger in E3-07**, and it is the first control here that
 reaches another system. SPEC §3.4's participation sweep runs on a weekly beat
@@ -64,7 +66,7 @@ which fires on real time, while the formula counts weeks off the pretend clock
 above, so the epic's behaviour is not drivable by hand at all without a way to run
 the sweep on demand — the same gap E2-04 hit with survey windows, and the same
 answer. `POST /dev/passback` runs it over every eligible section and redirects
-back here. It is registered as a `DevControlRoute`, which is the clock pair's
+back here. It is registered as a `DevControlRoute`, which is `AnyMethodRoute`'s
 any-method registration **plus** a same-origin check: this page holds no session
 and no CSRF token, so nothing else distinguishes a POST the developer meant from
 one a page they were reading made on their behalf, and what this control writes
@@ -202,8 +204,8 @@ ORIGIN_HEADER = "Origin"
 # a GET and a reload does not re-post the form.
 SEE_OTHER = 303
 
-# The one method either clock route serves. Every other method — standard, or a
-# token nobody has thought of — is refused by the handler and not by the router,
+# The one method every `/dev` control serves. Every other method — standard, or a
+# token nobody has thought of — is refused by the endpoint and not by the router,
 # which is what `AnyMethodRoute` below exists to arrange. That is a stricter gate
 # than the console's own measured `405` (ADR 0079, ADR 0087, and
 # `tests/unit/test_dev_console_exposure.py` pins it there), deliberately: a page is
@@ -351,16 +353,12 @@ class ConsoleSection:
 # written into it. Served from `DEV_CONSOLE_STYLESHEET_PATH` rather than inlined,
 # because the app's CSP refuses an inline `<style>` — see the module docstring.
 #
-# **The palette, the type stack, the spacing ramp and the radii below are
-# `design/tokens.css`, copied.** The custom properties carry the token names, so
-# a reader can diff the two files by eye, and every value in the rules below is
-# `var(--token)` rather than a hex. They are copied rather than imported because
-# `design/` is a design-system source the backend serves nothing from and cannot
-# reach: this file is Python, the tokens are a stylesheet in another tree, and
-# adding a static mount for one development page would be a deployment concern
-# invented for a scaffold. The cost is that a token changing there does not
-# change here until somebody copies it again, which is the honest trade for a
-# page no deployment serves.
+# **It begins with `app.api.deps.DESIGN_TOKENS_CSS`**, the one block of design
+# tokens this page and the door pages share (E5.1-03). Every value in the rules
+# below is `var(--token)` rather than a hex. The block is still a copy of
+# `design/tokens.css`, because `design/` is a design-system source the backend
+# serves nothing from and cannot reach, but it is one copy rather than two, and a
+# unit test reads each of its values against that file.
 #
 # The register is `docs/DESIGN_BRIEF.md`'s admin one: mono is the dominant voice —
 # every number, code, date and timestamp on this page is in it — the reading
@@ -1040,11 +1038,11 @@ class AnyMethodRoute(Route):
 
     A plain `starlette.routing.Route` rather than a FastAPI `APIRoute`, because
     `APIRouter.api_route` requires a method list and every route class FastAPI
-    builds carries one. It costs the two paths their entry in the OpenAPI schema —
+    builds carries one. It costs these paths their entry in the OpenAPI schema —
     `get_openapi` walks `APIRoute` instances only — which is no loss: `/docs` is
-    served in development alone (ADR 0074) and the controls are two buttons on the
+    served in development alone (ADR 0074) and the controls are buttons on the
     page beside it, not an API anybody writes a client against. It also costs
-    `Depends`, so the two handlers open their own session the way `app.main`'s
+    `Depends`, so the handlers open their own session the way `app.main`'s
     framing middleware does.
     """
 
@@ -1112,8 +1110,8 @@ class DevControlRoute(AnyMethodRoute):
     `tests/unit/test_every_mutating_route_carries_the_csrf_check.py` cannot look
     for `app.api.deps.csrf_verified_student` on one; it reads the class instead.
     A mutating `/dev` route registered as a plain `AnyMethodRoute` is therefore
-    red in that sweep unless the exemption ledger argues for it by name, which is
-    what the two clock controls are and this one deliberately is not.
+    red in that sweep unless the exemption ledger argues for it by name. Every
+    `/dev` control is registered with this class, so none is on the ledger.
 
     **The gates go on the endpoint, and they cannot go anywhere else.** Measured
     against the pinned `fastapi` 0.141.1: `include_router` does not serve the
@@ -1128,10 +1126,12 @@ class DevControlRoute(AnyMethodRoute):
     endpoint is the only part of a route that survives the rebuild, so it is where
     behaviour belongs. ADR 0141 records the measurement.
 
-    **The clock pair is not retrofitted onto this class**, and that is a decision
-    rather than an oversight: those two are the sweep's declared exemption, with a
-    sentence saying so, and moving them would delete the one worked example the
-    ledger's machinery is asserted against. ADR 0141 carries the argument.
+    **The clock pair joined it in E5.1-03.** E3-07 left the two clock controls as
+    plain `AnyMethodRoute`s on the ledger, to keep a worked example of an
+    exemption, and named moving them as a change for a ticket about those routes.
+    E5.1-03 was that ticket: a page on another site could move a developer's
+    clock, and now it cannot. The ledger keeps its two LTI entries (ADR 0140 and
+    ADR 0141, both amended).
 
     The constructor takes the same two arguments its parent does.
     """
@@ -1141,17 +1141,15 @@ class DevControlRoute(AnyMethodRoute):
 
 
 async def set_the_dev_clock(request: Request) -> Response:
-    """Replace the override row with the posted instant, or `404`.
+    """Replace the override row with the posted instant, then `303`.
 
-    `404` in two cases, and they are one answer on purpose: outside development, and
-    to any method that is not `POST`. A caller cannot tell which of those refused
-    them, which is the point — see `AnyMethodRoute` above.
-
-    The gate is the same in-handler comparison the console carries, for the same
-    reason and one step more urgently: the row this writes moves the clock that
+    **The gates are the route's, not this function's** — see `DevControlRoute`.
+    Outside development, or to any method but `POST`, the route answers `404`, and
+    a `POST` from another origin answers `403`, all before this body runs. The
+    gates matter here more than anywhere: the row this writes moves the clock that
     decides which survey window is open, which term a launch lands in and which
-    enrollments are live, and the console has no session and no CSRF token to put in
-    front of it. Outside development this route does not exist, to any method.
+    enrollments are live, and the console has no session and no CSRF token to put
+    in front of it.
 
     **The posted value is a wall time and the institution's zone is what supplies
     the offset.** An `<input type="datetime-local">` sends `2031-03-14T10:30` and
@@ -1191,18 +1189,15 @@ async def set_the_dev_clock(request: Request) -> Response:
 
 
 def clear_the_dev_clock(request: Request) -> Response:
-    """Delete the override row, or `404`.
+    """Delete the override row through `app.services.clock`, commit, then `303`.
 
-    The same two refusals as the setter above and in the same order — not
-    development, or not `POST` — answered identically so a probe learns nothing.
+    The gates are the route's, as for the setter above — see `DevControlRoute`.
+    Why the row is deleted rather than set to a zero offset is
+    `app.services.clock.clear_override`'s to say.
 
-    Deleting the row rather than writing a zero offset: a row holding a zero offset
-    answers the same instants today and is a state nothing else in this product
-    knows how to read.
-
-    Synchronous, and that is enough: it reads no body, and Starlette runs a
-    non-async endpoint in a worker thread, so the statement below is off the event
-    loop without this function saying anything about threads.
+    Synchronous, and that is enough: it reads no body, and the gate in front of it
+    runs a non-async endpoint in a worker thread, so the statement below is off the
+    event loop without this function saying anything about threads.
     """
     with SessionLocal() as session:
         clock.clear_override(session)
@@ -1226,9 +1221,8 @@ async def run_a_passback_now(request: Request) -> Response:
     is a second's work.
 
     **The gates are the route's, not this function's** — see `DevControlRoute`.
-    That is the one thing here a reader should not copy into a handler of their
-    own without registering it the same way: the two clock handlers below check
-    the environment themselves because they are plain `AnyMethodRoute`s.
+    A handler of this shape relies on that registration: registered any other
+    way, it would run for any caller in any environment.
 
     Answers a `303` back to the console, the shape both clock controls give, so a
     browser reload cannot run a second passback.
@@ -1318,10 +1312,12 @@ def post_every_changed_score(settings: Settings) -> None:
 # between a route that serves `POST` and a route that refuses everything else, and
 # no way to reintroduce the router's `405` by moving one of them.
 #
-# The two triggers are `DevControlRoute`s and the clock pair is not: each trigger
-# reaches another system on a request nobody authenticated — one posts a grade, the
-# other spends this deployment's credentials on a platform's roster service — and
-# the pair is the CSRF sweep's declared exemption (ADR 0140, ADR 0141, ADR 0142).
+# All four are `DevControlRoute`s, so each refuses a `POST` from another origin.
+# The two triggers reach another system on a request nobody authenticated — one
+# posts a grade, the other spends this deployment's credentials on a platform's
+# roster service (ADR 0141, ADR 0142). The clock pair moves the clock every
+# scheduling read goes through; it joined them in E5.1-03 (ADR 0140 and ADR 0141,
+# both amended).
 router.routes.append(DevControlRoute(DEV_CLOCK_SET_PATH, set_the_dev_clock))
 router.routes.append(DevControlRoute(DEV_CLOCK_CLEAR_PATH, clear_the_dev_clock))
 router.routes.append(DevControlRoute(DEV_PASSBACK_PATH, run_a_passback_now))
@@ -1379,12 +1375,11 @@ def pretend_instant(posted: str, settings: Settings) -> datetime:
 
 
 def replace_the_override(pretend_now: datetime) -> None:
-    """Make this the single override row, anchored at the real instant now.
+    """Make this the single override row, through `app.services.clock`, and commit.
 
-    Delete then insert, rather than an upsert: the table holds at most one row by a
-    unique index over `(true)`, so a second insert would be refused by that index
-    rather than replacing anything. Both statements and the commit are one
-    transaction, so a stack is never briefly running on a clock nobody set.
+    `app.services.clock.set_override` deletes and inserts and does not commit, so
+    both statements and the commit here are one transaction, and a stack is never
+    briefly running on a clock nobody set.
 
     **It opens its own session.** The route it serves is a plain
     `starlette.routing.Route` (see `AnyMethodRoute`), which has no `Depends`, so
