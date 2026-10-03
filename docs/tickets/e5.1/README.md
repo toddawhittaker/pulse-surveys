@@ -148,7 +148,7 @@ The exact entries and their done-when lines are in E5.1-09.
 |---|---|
 | one instructor-stream commenter in six respondents shows no raw comment in that stream, and the course stream's comments show | 01 |
 | an instructor removed from the mock roster gets the section-unavailable answer | 02 |
-| a deployment with the example session secret refuses to start | 04 |
+| a deployment whose `ENVIRONMENT` is not `development` refuses to start with the example session secret | 04 |
 | a backend schema change without regenerated frontend types fails CI | 06 |
 
 ## Left out, and why

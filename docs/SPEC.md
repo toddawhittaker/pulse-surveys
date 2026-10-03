@@ -570,14 +570,14 @@ The fixes from the whole-repository review of `main` at e259255, built before E6
 
 - **The comment threshold.** Raw comments are shown only when at least 5 distinct students commented in that stream that week, and a stream below that is held for release batches (§4, ruled 2026-10-03). A released comment never reappears under its own week. The threshold query gets line-by-line human review (⚠), although the epic is unmarked.
 - **The teaching grant.** A roster sync that drops an instructor ends their teaching grant (⚠, for the same reason). Roster members who teach, and platform test users, hold no student enrollment, so they can neither answer nor count toward any threshold. The roster's token grant runs under a time bound.
-- **The session secret.** A deployment refuses the example session secret.
+- **The session secret.** A deployment outside development refuses the example session secret. `.env.example`'s development default is E13's.
 - **The wire types.** Frontend wire types are generated from the OpenAPI schema, and a check fails when they are stale.
 - **The API edge and the services.** The API edge and the services each hold one copy of each rule. The entry pages' sentences join the copy registry, and the development clock routes gain the origin check.
 - **The records.** §13 and the ADRs match the code.
 - **Owner ruling 2.** A week with one or two responses keeps showing its own figures, by owner ruling (§4 unchanged).
 
 The deferrals go to `docs/tickets/e6/carried-from-e5.md`, and `docs/tickets/e5.1/README.md` maps every review finding to its ticket or its carried entry.
-*Exit:* An instructor whose seeded section had six respondents and one instructor-stream commenter sees no raw comment in that stream, and sees the course stream's comments. An instructor removed from the mock roster gets the section-unavailable answer on their next read. A deployment configured with the example session secret refuses to start. A backend schema change without regenerated frontend types fails CI.
+*Exit:* An instructor whose seeded section had six respondents and one instructor-stream commenter sees no raw comment in that stream, and sees the course stream's comments. An instructor removed from the mock roster gets the section-unavailable answer on their next read. A deployment outside development configured with the example session secret refuses to start. A backend schema change without regenerated frontend types fails CI.
 
 **E6 — Moderation & exclusions** · medium
 Moderation classification at window close with harm-type routing (§5.2): instructor-abuse to the Lead Faculty review queue, welfare signals to Care regardless of thresholds — written as the case records E10's queue later reads. Full lifecycle: flagged-collapsed, excluded-with-undo, kept-with-undo (both directions logged), excluded text muted but visible to the instructor, reason-required exclusion of unflagged comments, small-N flag concealment with the neutral participation trace, and the exclusion log at the Lead Faculty prefix scope and above.
