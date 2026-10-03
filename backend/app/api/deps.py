@@ -93,6 +93,7 @@ from collections.abc import Mapping
 from html import escape
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from uuid import UUID
 
 import jwt
 from fastapi import Depends, HTTPException
@@ -154,6 +155,7 @@ __all__ = [
     "no_access_page",
     "no_account",
     "no_account_page",
+    "person_of",
     "refusal_page",
     "refused",
     "require_instructor",
@@ -463,6 +465,28 @@ def require_leadership(request: Request) -> SessionClaims:
             headers=NOT_LEADERSHIP_CHALLENGE,
         )
     return session
+
+
+def person_of(claims: SessionClaims) -> UUID | None:
+    """The `person` row this session was resolved to, or `None` where it names none.
+
+    A claim in a JWT is JSON, so `person_id` is a string here and a `uuid.UUID`
+    in every service below (ADR 0016). A value that is not one is a token this
+    deployment did not issue in the shape it issues them, and it resolves to
+    nobody rather than to a 500 from inside the parse. Each service answers that
+    `None` as it answers a session naming a person with nothing to read: the
+    instructor report as somebody who teaches nothing, the comparison sets as a
+    session that may read every set and write none.
+
+    Here because it is what a router needs from the request: `app.api.instructor`
+    and `app.api.leadership` each held a copy of these four lines until E5.1-03.
+    """
+    if claims.person_id is None:
+        return None
+    try:
+        return UUID(claims.person_id)
+    except ValueError:
+        return None
 
 
 # ---------------------------------------------------------------------------

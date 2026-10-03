@@ -78,7 +78,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import csrf_verified_leadership, require_leadership
+from app.api.deps import csrf_verified_leadership, person_of, require_leadership
 from app.config import Settings
 from app.copy.leadership_sets import NOT_THE_SETS_DEFINER, SET_UNAVAILABLE
 from app.db import get_session
@@ -151,7 +151,7 @@ def read_sets(
     event loop.
     """
     response.headers["Cache-Control"] = NO_STORE
-    return SetList(sets=listed_sets(session, person_id=_person_of(claims)))
+    return SetList(sets=listed_sets(session, person_id=person_of(claims)))
 
 
 @router.post(SETS_PATH, status_code=CREATED, summary="Define a comparison set")
@@ -170,7 +170,7 @@ def define_set(
     settings: Settings = request.app.state.settings
     response.headers["Cache-Control"] = NO_STORE
     try:
-        return create_set(session, write=write, person_id=_person_of(claims), settings=settings)
+        return create_set(session, write=write, person_id=person_of(claims), settings=settings)
     except NotTheSetsDefinerError:
         raise _not_the_definer() from None
     except WriteRefusedError as refused:
@@ -209,7 +209,7 @@ def read_one_set(
     """
     response.headers["Cache-Control"] = NO_STORE
     try:
-        return read_set(session, set_id=set_id, person_id=_person_of(claims))
+        return read_set(session, set_id=set_id, person_id=person_of(claims))
     except SetUnavailableError:
         raise _unavailable() from None
 
@@ -236,7 +236,7 @@ def replace_set(
             session,
             set_id=set_id,
             write=write,
-            person_id=_person_of(claims),
+            person_id=person_of(claims),
             settings=settings,
         )
     except SetUnavailableError:
@@ -262,7 +262,7 @@ def remove_set(
     """
     response.headers["Cache-Control"] = NO_STORE
     try:
-        delete_set(session, set_id=set_id, person_id=_person_of(claims))
+        delete_set(session, set_id=set_id, person_id=person_of(claims))
     except SetUnavailableError:
         raise _unavailable() from None
     except NotTheSetsDefinerError:
@@ -286,28 +286,6 @@ def read_preview(
         return preview_of(session, set_id=set_id)
     except SetUnavailableError:
         raise _unavailable() from None
-
-
-def _person_of(claims: SessionClaims) -> UUID | None:
-    """The `person` row this session was resolved to, or `None` where it names none.
-
-    A claim in a JWT is JSON, so `person_id` is a string here and a `uuid.UUID`
-    everywhere below (ADR 0016). A value that is not one is a token this
-    deployment did not issue in the shape it issues them, and it resolves to
-    nobody rather than to a 500 from inside the parse — which the service answers
-    as a session that may read every set and write none.
-
-    The same reader `app.api.instructor` holds, and it is deliberately a second
-    copy of four lines rather than a shared helper: promoting it is a change to a
-    module this ticket was told not to touch, and the pull request proposes it
-    rather than making it.
-    """
-    if claims.person_id is None:
-        return None
-    try:
-        return UUID(claims.person_id)
-    except ValueError:
-        return None
 
 
 def _unavailable() -> HTTPException:
