@@ -76,7 +76,7 @@ dependencies = [
     # publishes it as the `crypto` extra, so a bare `PyJWT` locks a closure that
     # cannot verify RS256 at all and fails at the first launch rather than at
     # install time. An import we depend on is a dependency we name.
-    "PyJWT==2.14.0",
+    "PyJWT==2.15.0",
     "cryptography==50.0.1",
     # The LTI 1.3 library SPEC §13 assigns to `lti/`, adopted by E1-08 for the
     # launch door alone (ADR 0073's deferral, ADR 0089's decision). It ships no
