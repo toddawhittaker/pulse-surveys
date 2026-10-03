@@ -61,15 +61,17 @@ in this schema deletes a membership row).
 **One honest note on isolating the three legs**, stated rather than papered over.
 Leg (b) still implies leg (a) within a stream: the respondents behind a stream's
 held comments are at most the number of those comments, which is at most the
-stream's volume, so (b) fails wherever (a) does. **Leg (b) no longer implies leg
-(c), and leg (c) is load-bearing.** Before E5.1-01 a held set inside one week came
-from a week of fewer than `threshold` responses and so had fewer than `threshold`
-respondents. Now one stream can be held in a week of many responses; and in the
-worlds this module plants, where every comment is in one stream, a one-week held
-set still has fewer than `threshold` respondents only because each planted week is
-under the threshold of commenters. Leg (c)'s own discriminating worlds are in
+stream's volume, so (b) fails wherever (a) does. **Leg (b) also implies leg (c)
+within a stream.** A stream is held in a week only when it has fewer than
+`threshold` distinct commenters that week, so one stream's held comments from a
+single week carry fewer than `threshold` authors by the definition of held, and
+reaching the threshold in authors takes at least two weeks of that stream. Leg (c)
+is kept as a written-out leg — it is the one that still refuses a one-week batch
+if (b)'s denominator ever changes — but deleting leg (c) alone is an equivalent
+mutation under per-stream counting: no world can tell the gate with it from the
+gate without it. The per-stream evaluation itself is driven in
 `test_a_held_stream_is_released_in_a_batch_and_never_shown_under_its_week.py`,
-which also drives the per-stream evaluation of legs (b) and (c). **No world here
+whose tests pin pooling across streams rather than leg (c). **No world here
 isolates leg (b) per stream any more**: the worlds that did doubled comments
 across the two streams, and per stream that leaves each stream's volume as short as
 its respondents. Isolating (b) within one stream needs one person commenting in
@@ -785,10 +787,12 @@ def test_a_held_set_confined_to_one_week_is_never_released(
     world: a week of `threshold - 1` respondents gives each stream fewer than
     `threshold` authors. That is why it is written as the forbidden state — "no
     batch ever maps to a single week" — rather than as a boundary pair on leg (c)
-    alone. **Leg (c) is load-bearing since E5.1-01**, though not in this world:
-    holding is per stream, so a stream can be held in a week of many responses, and
-    leg (b) no longer implies leg (c). The worlds that separate them are in
-    `test_a_held_stream_is_released_in_a_batch_and_never_shown_under_its_week.py`.
+    alone. **No world can separate them**: with every leg per (section, term,
+    stream), one stream's held comments in one week have fewer than `threshold`
+    authors by the definition of held, so leg (b) subsumes leg (c) within a stream.
+    Deleting leg (c) alone is an equivalent mutation; what this test pins is leg (b)
+    per stream — and, in its pair, that a stream whose legs did not open is not
+    released beside one whose legs did.
 
     **What leg (a) alone would do here is the point of the case.** The pooled
     volume is nearly twice the threshold, so a gate pooling the streams and reading
@@ -802,8 +806,9 @@ def test_a_held_set_confined_to_one_week_is_never_released(
     not due and stays held; the batch holds the instructor stream's comments.
     Otherwise this is passed by a cutter that never cuts.
 
-    **The mutation it kills:** the two-week condition deleted together with the
-    streams pooled, on the old reasoning that the respondent leg already covers it.
+    **The mutation it kills:** the streams pooled in leg (b) with leg (c) deleted
+    (pooled, one week's two streams carry `2 x (threshold - 1)` authors). Deleting
+    leg (c) alone, with the legs per stream, is equivalent and survives.
     """
     contract = comment_contract
     world = comment_world

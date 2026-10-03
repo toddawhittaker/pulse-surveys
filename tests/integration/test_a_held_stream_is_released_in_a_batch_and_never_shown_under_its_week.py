@@ -21,6 +21,15 @@ A run still writes at most one `release_batch` row per (section, term); its
 members are the held comments of exactly the streams whose three legs all opened,
 and a stream whose legs did not all open stays held.
 
+**Within one stream, leg (b) subsumes leg (c).** A stream is held in a week only
+when it has fewer than the threshold of distinct commenters that week, so one
+stream's held comments from a single week carry fewer authors than the threshold
+by the definition of held; reaching it takes at least two weeks of that stream.
+Leg (c) is kept as a written-out leg, but deleting it alone is an equivalent
+mutation under per-stream counting, and no test here claims to kill it. What these
+tests pin is the per-stream evaluation: pooling the streams in a leg, and
+releasing a stream that is not due beside one that is.
+
 **Criterion 4.** A comment with a `release_batch_member` row is never returned by
 `visible_comments` for its own week — including after the threshold setting is
 lowered from 5 to 4 **inside the test**, which is the ticket's named near miss: a
@@ -238,9 +247,11 @@ def test_two_held_streams_of_one_week_are_not_cut_and_only_the_stream_that_opens
 
     **The mutations it kills:** releasing a non-due stream's comments in a due
     batch (the second half: the course comments go out with the instructor ones);
-    and leg (c) deleted with leg (b) pooled (the first half: `2 x (threshold - 1)`
-    pooled authors cut one week). **Its pair is the second half's cut**, so a
-    cutter that never cuts is red too.
+    and leg (b) pooled across streams with leg (c) deleted (the first half:
+    `2 x (threshold - 1)` pooled authors cut one week). Deleting leg (c) alone,
+    with the legs per stream, is an equivalent mutation and survives; the first half
+    pins leg (b) per stream. **Its pair is the second half's cut**, so a cutter
+    that never cuts is red too.
     """
     contract = comment_contract
     world = comment_world
