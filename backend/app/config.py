@@ -182,6 +182,18 @@ def is_development(settings: "Settings") -> bool:
 MOCK_IDENTITY_PROVIDER_HOST = "mock-idp"
 MOCK_IDENTITY_PROVIDER_CLIENT_ID = "mock-idp-client"
 
+# The `SESSION_SECRET` placeholder `.env.example` ships, refused in a
+# deployment. Held here rather than read from that file at startup: a deployed
+# image need not carry `.env.example`, and a missing file must not decide whether
+# a signing secret is accepted. The settings tests read the file itself and fail
+# if the two drift apart.
+EXAMPLE_SESSION_SECRET = "replace-me-with-a-token-urlsafe-32-secret"  # noqa: S105 - the published placeholder, refused
+
+# The shortest session secret a deployment accepts: 32 characters, the length
+# of `secrets.token_urlsafe(24)` and below what the documented
+# `secrets.token_urlsafe(32)` produces (43).
+MINIMUM_SESSION_SECRET_LENGTH = 32
+
 # The one spelling by which a configuration can reach the mock model provider
 # `docker-compose.yml` starts, refused on `ai_provider_base_url` in **every**
 # environment by the validator below (E2-07 and ADR 0113 as amended by E2-12 and
@@ -582,22 +594,6 @@ class Settings(BaseSettings):
         description="SQLAlchemy URL for the Care queue's database connection (SPEC §6.2).",
     )
     redis_url: SecretStr = Field(description="Redis URL for the Celery broker and result backend.")
-    # The key both entry doors sign the session JWT with (E1-08, ADR 0089).
-    # `SecretStr` for the reason the block above gives — it is a symmetric HMAC
-    # secret, so a leak forges any session — and required with no default, because
-    # a defaulted signing secret is a key every deployment shares and every reader
-    # of this repository knows. Generate one per deployment with
-    # `secrets.token_urlsafe(32)`; `.env.example` carries an obvious placeholder.
-    #
-    # Unlike the tool's LTI private key (a `tool_signing_key` row, ADR 0082), this
-    # one is a single-line symmetric secret the api container and any future
-    # replica must share so a restart does not invalidate a sitting session — the
-    # exact case ADR 0082's "keep the key out of settings" reasons do not reach,
-    # since none of them is about a one-line shared secret. ADR 0089 records the
-    # split.
-    session_secret: SecretStr = Field(
-        description="Key the session JWT is signed with (SPEC §7.3, ADR 0089)."
-    )
     # The AI provider credential (§6.3: "AI provider (base URL, model, masked
     # key)"). `SecretStr` for the reason the block above gives, and it is the
     # field that reason was written for: `app.ai.gateway` hands this value to a
@@ -675,6 +671,37 @@ class Settings(BaseSettings):
     ai_provider_model_name: str = Field(description="Model identifier passed to the real provider.")
     institution_timezone: str = Field(
         description="IANA timezone the survey window follows (§3.1), such as America/New_York."
+    )
+
+    # The key both entry doors sign the session JWT with (E1-08, ADR 0089).
+    # `SecretStr` because it is a symmetric HMAC secret, so a leak forges any
+    # session — and required with no default, because a defaulted signing secret
+    # is a key every deployment shares and every reader of this repository knows.
+    # Generate one per deployment with `secrets.token_urlsafe(32)`; `.env.example`
+    # carries an obvious placeholder.
+    #
+    # Unlike the tool's LTI private key (a `tool_signing_key` row, ADR 0082), this
+    # one is a single-line symmetric secret the api container and any future
+    # replica must share so a restart does not invalidate a sitting session — the
+    # exact case ADR 0082's "keep the key out of settings" reasons do not reach,
+    # since none of them is about a one-line shared secret. ADR 0089 records the
+    # split.
+    #
+    # It sits here, below `environment`, rather than in the credential block
+    # above, because its validator reads `ENVIRONMENT` and pydantic validates in
+    # declaration order (the comment on `environment` explains the trap).
+    #
+    # The check is skipped when `ENVIRONMENT=development`, and `.env.example`
+    # ships `ENVIRONMENT=development`, so an unedited copy of that file skips it.
+    # Changing that default is carried to the hardening epic, because CI copies
+    # the file as it is.
+    session_secret: SecretStr = Field(
+        description=(
+            "Key the session JWT is signed with (SPEC §7.3, ADR 0089). Outside "
+            "ENVIRONMENT=development it must be at least 32 characters and not the "
+            "placeholder the example environment file ships; generate one with "
+            "secrets.token_urlsafe(32)."
+        )
     )
 
     # --- the web door's identity provider (E0-18, ADR 0077) -------------------
@@ -1272,6 +1299,36 @@ class Settings(BaseSettings):
             "application then verifies correctly — use https, or plain http only for a provider "
             f"on this machine, or run with ENVIRONMENT={DEVELOPMENT_ENVIRONMENT}"
         )
+
+    @field_validator("session_secret")
+    @classmethod
+    def a_deployment_signs_sessions_with_its_own_secret(
+        cls, value: SecretStr, info: ValidationInfo
+    ) -> SecretStr:
+        """Refuse the example placeholder and short values, in a deployment.
+
+        The placeholder is compared whole and the length counts the value as
+        given — nothing is stripped or repaired, because a secret that validated
+        after a repair is not the secret the operator wrote.
+
+        **The check is skipped when `ENVIRONMENT=development`.** `.env.example`
+        ships `ENVIRONMENT=development`, so an unedited copy of that file skips
+        it; changing that default is carried to the hardening epic, because CI
+        copies the file as it is.
+
+        No value is quoted: the startup report prints the field's description,
+        never this message, and the message names nothing it was given.
+        """
+        if not is_a_deployment(info.data.get("environment")):
+            return value
+        secret = value.get_secret_value()
+        if secret == EXAMPLE_SESSION_SECRET or len(secret) < MINIMUM_SESSION_SECRET_LENGTH:
+            raise ValueError(
+                "is the published placeholder or shorter than "
+                f"{MINIMUM_SESSION_SECRET_LENGTH} characters; generate one with "
+                f"secrets.token_urlsafe(32), or run with ENVIRONMENT={DEVELOPMENT_ENVIRONMENT}"
+            )
+        return value
 
     @field_validator("oidc_client_id")
     @classmethod

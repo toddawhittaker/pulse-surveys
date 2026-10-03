@@ -135,6 +135,12 @@ DEPLOYED_HOST = "idp.example.edu"
 AI_PROVIDER_BASE_URL_VARIABLE = "AI_PROVIDER_BASE_URL"
 DEPLOYED_AI_PROVIDER_URL = "https://ai.example.edu/v1"
 
+# The session secret a real deployment holds, applied by `deployment()` for the
+# same reason as the AI provider above: `.env.example`'s `SESSION_SECRET` is a
+# placeholder a deployment refuses, and no test in this module is about it.
+SESSION_SECRET_VARIABLE = "SESSION_SECRET"  # noqa: S105 - a variable name
+DEPLOYED_SESSION_SECRET = "oidc-module-deployment-session-secret-not-real"  # noqa: S105 - a fake
+
 DEPLOYED_OIDC = {
     OIDC_ISSUER_VARIABLE: f"https://{DEPLOYED_HOST}",
     OIDC_AUTHORIZATION_ENDPOINT_VARIABLE: f"https://{DEPLOYED_HOST}/oidc/authorize",
@@ -319,10 +325,12 @@ def deployment(**overrides: str | None) -> dict[str, str | None]:
     **The AI provider is part of "what a real deployment holds" since E2-07**, for
     the same reason and by the same argument: `.env.example` points it at
     `mock-ai` and a deployment refuses that. It is set here rather than in each
-    test because no test in this module is about it.
+    test because no test in this module is about it. The session secret joins
+    it for the same reason.
     """
     values: dict[str, str | None] = dict(DEPLOYED_OIDC)
     values[AI_PROVIDER_BASE_URL_VARIABLE] = DEPLOYED_AI_PROVIDER_URL
+    values[SESSION_SECRET_VARIABLE] = DEPLOYED_SESSION_SECRET
     values.update(overrides)
     return values
 
