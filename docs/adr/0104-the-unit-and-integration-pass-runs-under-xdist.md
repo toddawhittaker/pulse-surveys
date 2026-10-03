@@ -1,5 +1,7 @@
 # 0104 — The unit and integration pass runs under xdist, with a Postgres per worker
 
+**Superseded in part by [ADR 0181](0181-the-pytest-gate-runs-on-four-runners.md):** the rejection of sharding across matrix jobs below. The rest of this record stands.
+
 ## Context
 
 CI's wall clock is one job. On the last green run before this change, `Test ·
