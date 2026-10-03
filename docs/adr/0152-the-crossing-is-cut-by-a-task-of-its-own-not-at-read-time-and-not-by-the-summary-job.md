@@ -121,11 +121,14 @@ where one would compute the same answer today, and it is worth it.
 Two things above are no longer true. "Held" is now per stream: a comment is held
 when fewer than the threshold of distinct students commented in its stream that
 week (counting only comments in no batch), its window has closed, and it is in no
-batch; the week's response count no longer decides it. And leg (b) no longer
-subsumes leg (c): one week can now supply two held streams with up to twice
-`threshold - 1` distinct authors, so leg (b) can open on a single week, and leg
-(c) — distinct `week_id`s, not stream-weeks — is the only thing that refuses that
-batch. Leg (b) still subsumes leg (a). The legs' definitions are unchanged.
+batch; the week's response count no longer decides it. And all three legs are
+evaluated per (section, term, stream): that stream's volume for the term, the
+distinct authors among that stream's unreleased held comments, and the distinct
+weeks those comments span. A run writes at most one batch per section and term,
+holding exactly the streams whose legs all opened; another stream stays held.
+Pooled, one stream's authors could open the gate for the other's comments, and a
+released card's stream chip would then name its source. Per stream, leg (b)
+still subsumes the other two.
 
 **When any leg fails, nothing is cut, and that is the stance.** Held is the safe
 direction: an under-threshold comment that stays held still feeds the summary

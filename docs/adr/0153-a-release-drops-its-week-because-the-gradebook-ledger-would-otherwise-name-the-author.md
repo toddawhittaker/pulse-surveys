@@ -210,12 +210,16 @@ that week's comment item — possibly one. SPEC §4 now counts distinct commente
 per stream, and the sentence above is restated in that unit. The comparison this
 record rests on now holds: an ordinary shown stream and a release both stand on
 at least a threshold's worth of authors. Two further rules from 0182 close
-channels this record names: a released comment is never shown again under its own
-week, so the sequence channel cannot re-attach a week by re-showing one; and leg
-(c) of [0152](0152-the-crossing-is-cut-by-a-task-of-its-own-not-at-read-time-and-not-by-the-summary-job.md)
-is now the only refusal of a batch drawn from one week whose two held streams
-carry enough authors between them, so "no fewer than two quiet weeks" depends on
-it directly.
+channels this record names. A released comment is never shown again under its own
+week, so the sequence channel cannot re-attach a week by re-showing one. And
+[0152](0152-the-crossing-is-cut-by-a-task-of-its-own-not-at-read-time-and-not-by-the-summary-job.md)'s
+legs now count per stream, so **the floors above hold per stream**: each stream's
+slice of a release carries at least `n_threshold_default` distinct authors of
+that stream, drawn from at least two weeks in which that stream was held. That
+is what lets the released card keep its stream chip. The third narrowing above —
+a release partitioned by stream — would otherwise fire, because with holding per
+stream a pooled batch could hold one stream's single comment from one week; with
+the floors per stream, each partition already meets them.
 
 ## Alternatives rejected
 

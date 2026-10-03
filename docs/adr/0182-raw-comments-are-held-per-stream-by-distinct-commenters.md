@@ -1,7 +1,7 @@
 # 0182 — Raw comments are held per stream by distinct commenters, and a released comment never returns to its week
 
 Amends [0152](0152-the-crossing-is-cut-by-a-task-of-its-own-not-at-read-time-and-not-by-the-summary-job.md)
-(what "held" means, and its claim that leg (b) subsumes leg (c)) and corrects
+(what "held" means, and that the gate's legs count per stream) and corrects
 [0153](0153-a-release-drops-its-week-because-the-gradebook-ledger-would-otherwise-name-the-author.md)'s
 floor sentence. Ticket E5.1-01.
 
@@ -54,11 +54,19 @@ groups, and from `design/SmallNNotice.dc.html:31-33`, whose sentence leads with
 small-N mode and passes the reuse guard. The row's `response_count` stays the
 week's responses (§5.1, [0148](0148-the-summary-contract-splits-what-the-model-produces-from-what-the-caller-injects.md)).
 
-**Leg (c) is load-bearing now.** Held per stream, one week can supply two held
-streams with up to twice `threshold - 1` distinct authors, so leg (b) can open on
-one week alone. Only leg (c), at least two distinct `week_id`s (weeks, not
-stream-weeks), refuses that batch, which the report's week-to-week delta would
-date (0153).
+**The release gate's legs count per stream.** A released card carries its stream
+chip, and each week's report says which streams were held. Pooled across streams,
+a week whose course stream was held at four authors and a week whose instructor
+stream was held at one opened the gate together, and the batch's one instructor
+card was that week's lone commenter. So volume, distinct authors and distinct
+weeks are each counted per (section, term, stream). A run writes at most one
+batch per section and term, holding exactly the streams whose three legs opened;
+another stream stays held. Each stream's slice of a release then stands on at
+least a threshold's worth of its own authors over at least two of its own weeks.
+Per stream, leg (b) again subsumes leg (c), since one stream's held set inside one
+week is below the threshold by definition. 0153's third narrowing — a release
+partitioned by stream — is closed for this design rather than reopened: each part
+meets the floor, so the per-card chip stays.
 
 ## Alternatives rejected
 
@@ -69,6 +77,7 @@ date (0153).
   threshold protects people, so it counts people.
 - **Count released authors too.** Their comments are already shown with no week,
   and counting them lets a lowered threshold re-show them under it.
+- **Pool the streams in the gate.** The finding above.
 - **One notice per week.** It claims both groups are held when one is shown.
 - **Show the empty-week line for a stream nobody commented in.** It tells a
   reader zero apart from one to four.

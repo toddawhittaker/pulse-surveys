@@ -37,11 +37,11 @@ import '../../components/instructorReportPage.css';
  * **Nothing here decides what may be shown.** SPEC §4's suppression, §4.1 item
  * 7's comparison chokepoint and §5.2's concealment all happen before this
  * request answers: a small-N week arrives with no comments in it, a comparison
- * figure arrives suppressed, and this page renders what it was given. The one
- * confidentiality decision that is genuinely this file's is which of the two
- * comment groups carries the small-N notice, and it is made once, out loud,
- * below. It is not §4.1 item 5's line: this surface's line is
- * `instructor_report_page.comments_note` (ADR 0158).
+ * figure arrives suppressed, and this page renders what it was given. Each
+ * comment group is handed its own stream's `small_n` and a suppressed group
+ * carries its own small-N notice (E5.1-01, ADR 0182), so this page places no
+ * notice of its own. That notice is not §4.1 item 5's line: this surface's line
+ * is `instructor_report_page.comments_note` (ADR 0158).
  *
  * **No week arithmetic anywhere, and that is criterion 3.** Which weeks a reader
  * may page to is `published_weeks` from the API, handed straight to `WeekNav`;
