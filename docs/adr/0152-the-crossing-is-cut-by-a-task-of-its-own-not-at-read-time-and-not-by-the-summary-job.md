@@ -116,6 +116,17 @@ one-week batch — and the reviewer this module is written for asked for the
 property rather than for an implementation of it. The cost is three conditions
 where one would compute the same answer today, and it is worth it.
 
+**Amended 2026-10-03, by
+[0182](0182-raw-comments-are-held-per-stream-by-distinct-commenters.md) (E5.1-01).**
+Two things above are no longer true. "Held" is now per stream: a comment is held
+when fewer than the threshold of distinct students commented in its stream that
+week (counting only comments in no batch), its window has closed, and it is in no
+batch; the week's response count no longer decides it. And leg (b) no longer
+subsumes leg (c): one week can now supply two held streams with up to twice
+`threshold - 1` distinct authors, so leg (b) can open on a single week, and leg
+(c) — distinct `week_id`s, not stream-weeks — is the only thing that refuses that
+batch. Leg (b) still subsumes leg (a). The legs' definitions are unchanged.
+
 **When any leg fails, nothing is cut, and that is the stance.** Held is the safe
 direction: an under-threshold comment that stays held still feeds the summary
 (§4 says so in as many words) and can be released later, while a comment released

@@ -103,15 +103,17 @@ cutter can write, not of the batches that happen to exist today.
 is the union of the quiet weeks a given batch drew from, and it is bounded below
 rather than made large. A batch of exactly two quiet weeks and exactly
 `n_threshold_default` authors is the smallest the gate permits, and an instructor
-who knows which weeks were quiet — the report shows every week's response count —
-knows that batch drew from two of them. That is a narrower set than "the term",
+who knows which weeks were quiet — the report shows every week's response count,
+and since 2026-10-03 which of its streams were held — knows that batch drew from
+two of them. That is a narrower set than "the term",
 and it is the honest floor: the guarantee is "no fewer than a threshold's worth of
 people, from no fewer than two weeks", not "unattributable".
 
 **Why that residual is accepted.** The floor is the same number §4 already accepts
-for an ordinary above-threshold week: a week of exactly `n_threshold_default`
-responses shows its comments with the same size of candidate set, under its own
-week heading, and §4 calls that safe. A release that meets the same floor while
+for an ordinary shown stream: a stream with exactly `n_threshold_default` distinct
+commenters in a week shows its comments with the same size of candidate set,
+under its own week heading, and §4 calls that safe. *(Corrected 2026-10-03 — see
+the amendment of that date below.)* A release that meets the same floor while
 naming no week is strictly better protected than the ordinary case the spec
 sanctions. Pushing the floor higher costs the students whose comments are
 withheld, and ADR 0152 records what that costs and why the wait is not bounded by
@@ -197,6 +199,23 @@ surface. It is a statement about the release. The quiet week's summary has alway
 been a per-week signal about a set smaller than the threshold, that is what §5.1
 asks for, and what changed on 2026-09-09 is only that the signal may no longer be
 a quotation.
+
+**Amended 2026-10-03: the floor sentence was false when written, and is now
+true** ([0182](0182-raw-comments-are-held-per-stream-by-distinct-commenters.md),
+E5.1-01). It said a week of exactly `n_threshold_default` *responses* shows its
+comments with a candidate set of that size. It did not: the gate counted
+responses, so a week of five respondents showed a stream in which one of them had
+written, and the candidate set behind that comment was the students who completed
+that week's comment item — possibly one. SPEC §4 now counts distinct commenters
+per stream, and the sentence above is restated in that unit. The comparison this
+record rests on now holds: an ordinary shown stream and a release both stand on
+at least a threshold's worth of authors. Two further rules from 0182 close
+channels this record names: a released comment is never shown again under its own
+week, so the sequence channel cannot re-attach a week by re-showing one; and leg
+(c) of [0152](0152-the-crossing-is-cut-by-a-task-of-its-own-not-at-read-time-and-not-by-the-summary-job.md)
+is now the only refusal of a batch drawn from one week whose two held streams
+carry enough authors between them, so "no fewer than two quiet weeks" depends on
+it directly.
 
 ## Alternatives rejected
 
