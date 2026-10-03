@@ -1,6 +1,6 @@
 ---
 name: build-ticket
-description: Build one ticket through the lane its header names - heavy rides the orchestrated tests-first loop (test-author writes red, implementer turns green, verifier proves it by battery), light rides builder-writes-code-and-tests checked by CI; both get the fresh-context security review and merge through the merger agent. Use when the user says "build E0-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the ticket branch and ends with the PR merged into its epic branch.
+description: Build one ticket through the lane its header names - heavy rides the orchestrated tests-first loop (test-author writes red, builder-heavy turns green, verifier proves it by battery), light rides builder-light, which writes code and tests together, checked by CI; both get the fresh-context security review and merge through the merger agent. Use when the user says "build E0-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the ticket branch and ends with the PR merged into its epic branch.
 ---
 
 # Build a ticket
@@ -81,9 +81,9 @@ format-clean. Divergence goes back to the author; a format miss you fix yourself
 before committing. Then commit the tests alone, subject
 `e<N>/<slug>: <what>, tests first and red`.
 
-## 3. Implementer (green)
+## 3. builder-heavy (green)
 
-Spawn `implementer` with the work order, the manifest path, and the settled
+Spawn `builder-heavy` with the work order, the manifest path, and the settled
 rulings restated (pre-arbitrate the objection spots you can foresee — it
 prevents churn). Its first act is confirming the reds itself, controls first.
 `tests/**` is read-only for it (a hook enforces this): a test it believes
@@ -109,7 +109,7 @@ the draft ready.
 **You arbitrate.** Read the objection, the test, and the governing spec
 section; when the question is about behavior, run it. Rule on sources, never
 on argument quality. Three outcomes: the test is wrong (test-author fixes it
-with your ruling); the implementer is wrong (send the *reasoning*, not an
+with your ruling); the builder-heavy is wrong (send the *reasoning*, not an
 order); the spec is silent (**stop and surface to Todd** — this produces a
 spec edit or an ADR, and it is the reason the loop exists). Record the ruling
 in the dispute file.
@@ -169,7 +169,7 @@ For tickets whose header says `**Lane:** light`. Step 1 runs in full — a
 lighter loop is not a lighter brief; the work order still settles decisions,
 names traps, and draws the boundary. Then:
 
-- Spawn `builder` with the work order. It writes implementation and ordinary
+- Spawn `builder-light` with the work order. It writes implementation and ordinary
   tests together: unit and integration tests asserting the acceptance
   criteria, house style, no manifest, no mutation-naming docstrings, no
   red-first commit ordering. The standing rules hold with no exceptions —
@@ -182,11 +182,11 @@ names traps, and draws the boundary. Then:
 - No verifier pass. CI runs the same gates (`ruff format --check`, `ruff
   check`, `mypy`, migration drift, the tests), and the merger checks CI's
   green run on the exact head commit. That is the check that does not take
-  the builder's word. Before calling the build done, run `ruff check` and
-  `mypy` on the builder's work yourself; a builder's "lint passes" has been
+  the builder-light's word. Before calling the build done, run `ruff check` and
+  `mypy` on the builder-light's work yourself; a builder-light's "lint passes" has been
   wrong before.
 - Steps 6 (security review) and 7 (finish) are identical to the heavy lane.
 
 If a ticket spans sittings, resume the session (`claude --resume`) rather than
-starting fresh — the warm implementer's reasoning survives with it; the
+starting fresh — the warm builder-heavy's reasoning survives with it; the
 attempt log carries only the conclusions.

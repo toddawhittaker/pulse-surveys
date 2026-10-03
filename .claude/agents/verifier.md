@@ -1,6 +1,6 @@
 ---
 name: verifier
-description: Independent verification runner. Confirms CI's green run against the exact commit under review and runs scoped mutation batteries against committed tests. Use after an implementer reports green, and for any battery — no green is believed on its author's word. Fires per build round and never fixes anything.
+description: Independent verification runner. Confirms CI's green run against the exact commit under review and runs scoped mutation batteries against committed tests. Use after a builder-heavy reports green, and for any battery — no green is believed on its author's word. Fires per build round and never fixes anything.
 model: sonnet
 effort: medium
 tools: Read, Grep, Glob, Bash
@@ -60,7 +60,7 @@ against). Confirm that run rather than re-running the suite yourself:
   rejected.
 - **Cross-check totals.** Pull the pytest summary lines for the invariant step
   and for the unit+integration step out of `gh run view --log`, and compare
-  them against the totals the implementer or builder claimed. A mismatch is a
+  them against the totals the builder-heavy or builder-light claimed. A mismatch is a
   finding — name it, never silently reconcile it.
 - **Run the cheap gates locally anyway**: `ruff format --check`, `ruff check`,
   `mypy`, `alembic check` where schema moved. These take seconds and a local

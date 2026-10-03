@@ -70,10 +70,10 @@ Every ticket's header carries a `**Lane:**` field, set at breakdown time.
 Heavy is for security code only, about one ticket in five: the paths in
 `.claude/heavy-lane-paths.md`, a ⚠ in the `Lane:` field, or a missing one.
 Everything else is light; a ⚠ epic does not make its tickets heavy. The heavy
-loop (`test-author` writes red; the implementer codes to green without
+loop (`test-author` writes red; the builder-heavy codes to green without
 touching a test, disputes via `docs/disputes/`; `verifier` confirms CI's
 green run and runs the scoped mutation battery) guards those paths. The light
-lane (`builder` writes code and ordinary tests together; CI's green run on
+lane (`builder-light` writes code and ordinary tests together; CI's green run on
 the head commit, checked by the merger, is the verification) covers the
 rest. Neither lane believes a green on its author's word, and both get the
 per-PR security review. A light diff reaching a heavy path stops and

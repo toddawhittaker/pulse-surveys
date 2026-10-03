@@ -146,7 +146,9 @@ included, once its conditions hold, and reruns a failed job once when it
 looks like a flaky test. Todd's review, line by line on ⚠ epics, happens at
 the epic boundary (SPEC §14.2 item 3).
 
-Three agents join the roster: `architect` designs each epic and assigns
+The two building agents are renamed for their lanes: `builder` becomes
+`builder-light` and `implementer` becomes `builder-heavy`. Older records
+keep the old names. Three agents join the roster: `architect` designs each epic and assigns
 shared files and migration numbers before the breakdown, `explorer` does
 cheap searches, and `code-reviewer` reviews the whole epic for correctness
 and simplicity at the boundary.

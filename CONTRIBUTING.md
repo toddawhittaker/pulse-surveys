@@ -257,14 +257,14 @@ summarize, but the header decides.
 **Heavy** is the orchestrated tests-first loop, for the surfaces an attacker
 would aim at — the path table at `.claude/heavy-lane-paths.md`. A separate
 test author writes failing tests from the ticket and the spec before any
-implementation exists; the implementer may not modify tests (a hook enforces
+implementation exists; the builder-heavy may not modify tests (a hook enforces
 the wall) and escalates disagreements as dispute files; an independent
 verifier confirms CI's green run on the same commit and runs a scoped
 mutation battery proving each test can actually fail.
 
 **Light** is for everything else: ordinary routes and services, jobs, the
 frontend, fixtures, scripts, and Docker files. CI files and gate settings
-are process changes, not ticket work. One `builder` agent writes
+are process changes, not ticket work. One `builder-light` agent writes
 the code and ordinary tests together. CI's green run on the head commit,
 which the merger checks, is the verification. No verifier pass, no manifest,
 no mutation battery, no separate test author.

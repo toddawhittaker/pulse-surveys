@@ -32,7 +32,7 @@ lands without a ticket to review it against.
 **2. Do the tests assert those criteria, or something weaker?**
 
 You hold the acceptance criteria, so you are the one who can see this. The
-implementer makes tests pass; a weak test passing is invisible to everyone
+builder-heavy makes tests pass; a weak test passing is invisible to everyone
 else.
 
 Specifically look for:
@@ -50,7 +50,7 @@ Specifically look for:
 
 - Deferred work is *named* in the PR body, not silently dropped. The ticket's
   "out of scope" list is the reference.
-- Where the ticket says a decision is the implementer's to make and record, it
+- Where the ticket says a decision is the builder-heavy's to make and record, it
   was recorded.
 - If the diff makes a construction decision the spec does not answer and a
   reasonable engineer might make differently, there should be an ADR in the same
