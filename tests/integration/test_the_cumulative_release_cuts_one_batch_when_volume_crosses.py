@@ -36,38 +36,53 @@ wrong things.
     re-attaches the week attribution ADR 0153 removed. Single-comment batches
     follow from the same shape.
 
-So the gate is three conditions and **all** must hold before anything is cut:
+So the gate is three conditions and **all** must hold before anything is cut.
+Since E5.1-01 each is evaluated **per (section, term, stream)** — a released card
+carries its stream, and each week's report says which of its streams were held, so
+a gate pooled across the two streams can release one stream's comments from one
+quiet week and one author:
 
-  a. the cumulative comment-answer volume for the term reaches the threshold —
-     §4's literal trigger, kept;
-  b. the number of **distinct respondents** contributing unreleased held comments
-     reaches the threshold;
-  c. the unreleased held set spans at least **two** distinct under-threshold
-     closed weeks.
+  a. the stream's cumulative comment-answer volume for the term reaches the
+     threshold — §4's literal trigger, kept;
+  b. the number of **distinct respondents** behind the stream's unreleased held
+     comments reaches the threshold;
+  c. the stream's unreleased held comments span at least **two** distinct closed
+     weeks.
 
-When any fails, nothing is cut. Held is the safe direction, always: an
-under-threshold comment that stays held still feeds the summary and is released
-later, and a comment released early cannot be un-shown (ADR 0146: nothing in this
-schema deletes a membership row).
+A comment is held when its stream, in its week, has fewer than the threshold of
+distinct commenters (E5.1-01's ruling 1) and its window has closed — not when its
+week's response count is under the threshold. A run writes at most one batch per
+(section, term), holding the held comments of exactly the streams whose three legs
+opened; a stream whose legs did not all open stays held. Held is the safe
+direction, always: a comment that stays held still feeds the summary and is
+released later, and a comment released early cannot be un-shown (ADR 0146: nothing
+in this schema deletes a membership row).
 
-**One honest note on isolating the three legs**, stated rather than papered over,
-because a manifest claiming three independent boundary pairs would be claiming
-something no test here can deliver. **Leg (b) implies both of the others.** The
-respondents behind the held set are at most the number of held comments, which is
-at most the cumulative volume, so (b) fails wherever (a) does; and an
-under-threshold week holds fewer than `threshold` responses *by definition*, so a
-held set inside one week has fewer than `threshold` respondents and (b) fails
-wherever (c) does. Only (b) can be driven with the other two satisfied, and it is
-— `test_five_comments_from_three_respondents_cut_nothing`. The other two are
-driven as the **forbidden states** they exist to make impossible, and each of
-those tests names which legs its case fails and why they cannot be pulled apart.
-All three conditions are still worth writing separately: each survives a change to
-another's denominator, and the reviewer asked for the property rather than for an
-implementation of it.
+**One honest note on isolating the three legs**, stated rather than papered over.
+Leg (b) still implies leg (a) within a stream: the respondents behind a stream's
+held comments are at most the number of those comments, which is at most the
+stream's volume, so (b) fails wherever (a) does. **Leg (b) no longer implies leg
+(c), and leg (c) is load-bearing.** Before E5.1-01 a held set inside one week came
+from a week of fewer than `threshold` responses and so had fewer than `threshold`
+respondents. Now one stream can be held in a week of many responses; and in the
+worlds this module plants, where every comment is in one stream, a one-week held
+set still has fewer than `threshold` respondents only because each planted week is
+under the threshold of commenters. Leg (c)'s own discriminating worlds are in
+`test_a_held_stream_is_released_in_a_batch_and_never_shown_under_its_week.py`,
+which also drives the per-stream evaluation of legs (b) and (c). **No world here
+isolates leg (b) per stream any more**: the worlds that did doubled comments
+across the two streams, and per stream that leaves each stream's volume as short as
+its respondents. Isolating (b) within one stream needs one person commenting in
+that stream in two weeks, so the stream's volume exceeds its authors; that case is
+named rather than claimed (`docs/MISTAKES.md` entry 14). The legs here are driven
+as the **forbidden states** they exist to make impossible, each test naming which
+legs its case fails.
 
-**Every planted week's response count and the section's whole term volume are
-read back out of the database** before any assertion rests on them, which is
-E4-04's first known trap answered: a fixture bug here breaks this diff silently.
+**Every planted week's counts and the section's whole term volume are read back out
+of the database** before any assertion rests on them, which is E4-04's first known
+trap answered: a fixture bug here breaks this diff silently. Most worlds here plant
+one comment per respondent in one stream, so a week's response count and that
+stream's commenter count are the same number; where they are not, the test says so.
 
 **The batches these tests read were cut by the cutter.** Nothing in
 `tests/fixtures/report_comments.py` writes a `release_batch` row
@@ -143,9 +158,11 @@ def held_week(
     world HIGH-1 is about and which no count can express.
 
     The week's response count is read back and required to be under the configured
-    threshold: a week that is not is a week whose comments were never held, and
-    every assertion about a release would then be about a set that is empty for a
-    reason nobody chose.
+    threshold. Since E5.1-01 holding is decided by each stream's distinct
+    commenters, which here are at most the week's respondents, so a week under the
+    threshold of responses is a week whose planted streams are all held. A week that
+    is not under it may hold nothing, and every assertion about a release would then
+    be about a set that is empty for a reason nobody chose.
     """
     streams = (contract.instructor_stream,) if streams is None else streams
     threshold = contract.threshold()
@@ -262,10 +279,13 @@ def test_five_comments_from_three_respondents_cut_nothing(
     section's comment-answer volume to exactly the threshold — from strictly fewer
     people than the threshold, across two under-threshold closed weeks.
 
-    **This is the only case in this module that isolates one leg**, and it is why
-    the leg exists. Leg (a) holds: the volume reaches the threshold. Leg (c) holds:
-    the held set spans two weeks. Only the respondent count is short, and a gate
-    that reads §4's sentence literally cuts here.
+    **This was the case that isolated leg (b) while the legs were pooled across
+    streams**, and it no longer does. Pooled, leg (a) holds — the section's volume
+    reaches the threshold — and leg (c) holds, so only the respondent count is
+    short. Since E5.1-01 every leg is per (section, term, stream), and each stream
+    here has a volume below the threshold too (the doubled-up comments are split
+    across two streams), so legs (a) and (b) fail together per stream. What it still
+    refuses is a gate that pools the streams and reads §4's sentence literally.
 
     **What it would release.** A threshold's worth of comments over three authors,
     with their weeks stripped, on a report whose reader can open the gradebook:
@@ -417,6 +437,15 @@ def test_one_respondent_short_of_the_threshold_cuts_nothing_and_one_more_cuts(
     volume-only gate refuses the first half for the volume reason and the test
     proves nothing about the respondent leg. Doubling the comments separates them,
     and the setup assertion below says so before the cutter is called.
+
+    **What E5.1-01 changed here, said plainly.** The doubling separates the two
+    numbers only while the legs are pooled across streams: the setup assertion
+    reads the section's pooled volume. Since every leg is per (section, term,
+    stream), each stream's volume is its `threshold - 1` respondents, so per stream
+    legs (a) and (b) move together at this boundary. The test still pins the
+    boundary — nothing at `threshold - 1`, a cut at `threshold` — but no longer
+    separates the respondent leg from the volume leg. Both streams open together in
+    the second half, so the one batch holds both streams' comments.
 
     **The pair is inside this test** rather than in a sibling, because the two
     halves must be the same world one respondent apart: a pair built from two
@@ -617,6 +646,13 @@ def test_the_respondent_leg_follows_an_institutions_own_threshold(
 
     So nothing may be cut, and the refusal can come from no other leg.
 
+    **That isolation holds only for legs pooled across streams, and E5.1-01 ended
+    them.** The volume above is the section's, both streams together. Per (section,
+    term, stream), each stream's volume is its five respondents, also short of
+    seven, so legs (a) and (b) refuse together. The test still kills a literal 5 in
+    place of the `Settings` lookup — a gate holding 5 in both legs sees five and
+    cuts — but it no longer says which of the two legs read the setting.
+
     **The first version of this test got that wrong, and the red run caught it.**
     It planted one comment per respondent, so the volume was five as well; the
     volume-only gate that shipped refused for the volume reason, and the test
@@ -670,7 +706,8 @@ def test_the_respondent_leg_follows_an_institutions_own_threshold(
     # is not. One comment each would leave the volume equal to the respondent count
     # and below the override, and the refusal would then be the volume leg's —
     # which is how this test read green against an implementation that has no
-    # respondent leg.
+    # respondent leg. (Per stream, since E5.1-01, each stream's volume is again the
+    # respondent count; see the docstring.)
     both = (contract.instructor_stream, contract.course_stream)
     at_the_spec_default = contract.spec_default_threshold
     first_size = at_the_spec_default // 2
@@ -744,28 +781,29 @@ def test_a_held_set_confined_to_one_week_is_never_released(
     questions, so the volume is `2 x (threshold - 1)` and leg (a) is comfortably
     satisfied. Nothing may be cut.
 
-    **Which legs this case fails, said plainly.** Legs (b) and (c) both, and they
-    cannot be pulled apart: an under-threshold week holds fewer than `threshold`
-    responses by definition, so a held set inside one week has fewer than
-    `threshold` respondents however many comments each of them wrote. That is why
-    this is written as the forbidden state — "no batch ever maps to a single week"
-    — rather than as a boundary pair on leg (c) alone, and why the module docstring
-    says leg (b) implies leg (c). Keeping (c) as its own condition is still worth
-    the line: it is the one that survives if (b)'s denominator is ever changed.
+    **Which legs this case fails, said plainly.** Legs (b) and (c) both, in this
+    world: a week of `threshold - 1` respondents gives each stream fewer than
+    `threshold` authors. That is why it is written as the forbidden state — "no
+    batch ever maps to a single week" — rather than as a boundary pair on leg (c)
+    alone. **Leg (c) is load-bearing since E5.1-01**, though not in this world:
+    holding is per stream, so a stream can be held in a week of many responses, and
+    leg (b) no longer implies leg (c). The worlds that separate them are in
+    `test_a_held_stream_is_released_in_a_batch_and_never_shown_under_its_week.py`.
 
-    **What leg (a) alone would do here is the point of the case.** The volume is
-    nearly twice the threshold, so a gate reading §4's sentence literally releases
-    a single week's comments — stripped of their week — to an instructor whose
-    report showed nothing there last Monday. The delta names the week.
+    **What leg (a) alone would do here is the point of the case.** The pooled
+    volume is nearly twice the threshold, so a gate pooling the streams and reading
+    §4's sentence literally releases a single week's comments — stripped of their
+    week — to an instructor whose report showed nothing there last Monday. The delta
+    names the week.
 
-    **The pair is in the second half of this test**: one more under-threshold week,
-    and the section is released. Otherwise this is passed by a cutter that never
-    cuts.
+    **The pair is in the second half of this test**: one more under-threshold week
+    of instructor comments, and the instructor stream is released. Every leg is per
+    (section, term, stream), so the course stream, held in the first week only, is
+    not due and stays held; the batch holds the instructor stream's comments.
+    Otherwise this is passed by a cutter that never cuts.
 
-    **The mutation it kills:** the two-week condition deleted, on the reasoning
-    that the respondent leg already covers it. It does today; it stops covering it
-    the first time somebody counts responses instead of respondents, and this is
-    the test that notices.
+    **The mutation it kills:** the two-week condition deleted together with the
+    streams pooled, on the old reasoning that the respondent leg already covers it.
     """
     contract = comment_contract
     world = comment_world
@@ -835,10 +873,12 @@ def test_a_terms_volume_one_below_the_threshold_cuts_no_batch(
     fewer authors than the threshold too. A green here is therefore consistent with
     a gate that has only the volume leg, only the respondent leg, or both, and this
     test is not evidence about which. What it *is* evidence for is SPEC §4's own
-    sentence: below the trigger, nothing goes out. The test that discriminates the
-    respondent leg is `test_five_comments_from_three_respondents_cut_nothing`, and
-    the one that discriminates the lookup from a literal is
-    `test_the_respondent_leg_follows_an_institutions_own_threshold`.
+    sentence: below the trigger, nothing goes out. While the legs were pooled across
+    streams, `test_five_comments_from_three_respondents_cut_nothing` discriminated
+    the respondent leg and
+    `test_the_respondent_leg_follows_an_institutions_own_threshold` the lookup from
+    a literal; since E5.1-01 evaluates every leg per (section, term, stream), neither
+    separates leg (b) from leg (a) any more (see the module docstring).
 
     **The pair is
     `test_the_same_volume_from_enough_respondents_is_released_as_one_batch`**,
@@ -1035,9 +1075,9 @@ def test_a_comment_from_a_week_that_is_still_open_is_never_released(
 ) -> None:
     """A week whose count is not final cannot be a week whose count was under the threshold.
 
-    SPEC §4's rule is about "n < 5 responses in a reporting week", and a week whose
-    window is still open has no such number yet: the fifth response may arrive on
-    Sunday evening. Releasing from it releases on a guess, and the guess is wrong
+    SPEC §4's rule, since E5.1-01, is about the distinct commenters in a stream in a
+    reporting week, and a week whose window is still open has no such number yet:
+    the fifth commenter may arrive on Sunday evening. Releasing from it releases on a guess, and the guess is wrong
     in the direction that matters — a week that then reaches the threshold has its
     comments shown twice, once in a batch stripped of its week and once under the
     week itself.
@@ -1050,9 +1090,9 @@ def test_a_comment_from_a_week_that_is_still_open_is_never_released(
     **The pair is in the same test**: the closed weeks' comments must all have been
     released, or this is satisfied by a cutter that releases nothing.
 
-    **The mutation it kills:** a held-comment query that filters on the response
-    count and not on the window's close, which releases from a week still being
-    answered.
+    **The mutation it kills:** a held-comment query that filters on the stream's
+    commenter count and not on the window's close, which releases from a week still
+    being answered.
     **The near miss it distinguishes:** an open week's respondent counted toward
     the gate's second leg. They are not counted here — the closed weeks already
     carry the gate — so what this test reports is the *membership*, which is where

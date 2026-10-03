@@ -12,8 +12,9 @@ answers any of them:
     sides of the boundary rather than trusting this file.
 
   - **A week that is closed and a week that is still open, under any clock.**
-    The cumulative release may only reach a week whose response count is final,
-    and "final" means the window has closed. Every window this world writes
+    The cumulative release may only reach a week whose counts are final — since
+    E5.1-01, each stream's distinct commenters — and "final" means the window has
+    closed. Every window this world writes
     carries instants **this file chooses** — a closed week opens and closes in
     2020, an open week opens in 2020 and closes in 2099 — so the answer is the
     same whether the implementation reads `app.services.clock` or
@@ -55,9 +56,13 @@ above rather than in a comment somewhere:
     which re-attaches the week attribution ADR 0153 removed, through the report's
     own delta. So `cut_due_release_batches` cuts only when the volume reaches the
     threshold **and** the distinct respondents behind the unreleased held comments
-    reach it **and** those comments span at least two under-threshold closed
-    weeks. When any of the three fails, nothing is cut: held is the safe
-    direction, because a release cannot be un-shown.
+    reach it **and** those comments span at least two closed weeks. Since E5.1-01
+    a comment is held when its stream, in its week, has fewer than the threshold of
+    distinct commenters, and each of the three legs is evaluated per (section,
+    term, stream): a run writes at most one batch per (section, term), holding the
+    held comments of exactly the streams whose three legs opened. When a stream's
+    legs do not all open, its comments stay held: held is the safe direction,
+    because a release cannot be un-shown.
   - **`rng` left the public signatures.** It is `_make_rng`, a private module
     hook, and these suites monkeypatch it. A seed a caller could supply is a seed
     an attacker could fix, and a fixed seed turns two reads into a diff that
@@ -763,10 +768,11 @@ class CommentWorld(ReportWorld):
         answer holding no value, and ADR 0115 deletes a withdrawn one).
 
         A response with no `student` given gets one of its own, because SPEC §4's
-        threshold counts *responses* in a week and E2-05 holds one response per
-        student per section-week: two responses from one student in one week is a
-        row the schema refuses, and this world's ordinary job is planting a chosen
-        count of respondents.
+        threshold counts *people* — since E5.1-01, the distinct students commenting
+        in a stream in a week — and E2-05 holds one response per student per
+        section-week: two responses from one student in one week is a row the schema
+        refuses, and this world's ordinary job is planting a chosen count of
+        respondents.
 
         **`student` is how a test plants the same person twice**, which the
         security round made load-bearing. HIGH-1's finding is that a volume
@@ -1022,8 +1028,10 @@ class CommentWorld(ReportWorld):
         week asserts this against the configured threshold, on both sides.
 
         The semantics are `report_response_counts.responses`' — a count of
-        `response` rows for the section and week — which is the number SPEC §4's
-        "n < 5 responses in a reporting week" is about.
+        `response` rows for the section and week. Since E5.1-01 SPEC §4's threshold
+        is compared with each stream's distinct commenters (`commenters_in`), not
+        with this number; where every response carries one comment in the stream
+        read, the two are equal, and a test that relies on that says so.
         """
         table = require_table(self.tables, RESPONSE_TABLE)
         self.session.flush()

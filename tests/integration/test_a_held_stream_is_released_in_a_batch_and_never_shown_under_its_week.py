@@ -10,13 +10,16 @@ cutter's held set (`_held_comments`, through `cut_due_release_batches`), are cut
 ADR 0152's three unchanged legs, and appear only in `released_comments`, with no
 week — never in `visible_comments` for their own week.
 
-**One leg of that gate becomes load-bearing here, and it is driven.** Before this
-ticket a held set inside one week was a held set of fewer than the threshold of
-people, so leg (b) refused everything leg (c) did. Per stream, one week can supply
-two held streams with up to `2 x (threshold - 1)` distinct authors between them, so
-leg (b) can open on one week alone and only leg (c) — at least two distinct
-**weeks** — stands between that week and a batch the report's week-to-week delta
-would date (ADR 0153).
+**Every leg of the gate is evaluated per stream — the ruling of fix round 1.** A
+released card carries its stream, and each week's report says which of its streams
+were held. So a gate that pooled the two streams could release a stream's comments
+from one quiet week and one author: the scenario in
+`test_two_streams_each_held_once_are_not_cut_by_pooling_them`. The ruling: leg (a)
+volume, leg (b) distinct authors at least the threshold, and leg (c) at least two
+distinct weeks are each counted over one (section, term, stream)'s held comments.
+A run still writes at most one `release_batch` row per (section, term); its
+members are the held comments of exactly the streams whose three legs all opened,
+and a stream whose legs did not all open stays held.
 
 **Criterion 4.** A comment with a `release_batch_member` row is never returned by
 `visible_comments` for its own week — including after the threshold setting is
@@ -211,33 +214,33 @@ def test_a_thin_stream_beside_a_shown_stream_is_held_cut_and_shown_only_in_the_r
         )
 
 
-def test_two_held_streams_of_one_week_are_not_cut_on_their_own_and_are_cut_beside_a_second_week(
+def test_two_held_streams_of_one_week_are_not_cut_and_only_the_stream_that_opens_is_cut_later(
     comment_world: CommentWorld, comment_contract: Any, release_rows: ReleaseRows
 ) -> None:
-    """Leg (c) is load-bearing now: one week's two held streams are never a batch by themselves.
+    """One week's two held streams are never a batch; later only the stream that opens is cut.
 
     One closed week: `threshold - 1` students comment about the instructor only and
-    `threshold - 1` others about the course only. Both streams are held, and the
-    held set carries `2 x (threshold - 1)` distinct authors — past the threshold —
-    and a volume past it too. Legs (a) and (b) are open; only leg (c), two distinct
-    weeks, is not. Nothing may be cut.
+    `threshold - 1` others about the course only. Both streams are held. Pooled,
+    the held set carries `2 x (threshold - 1)` distinct authors; per stream, each
+    carries `threshold - 1` in one week. Nothing may be cut.
 
-    Then one student comments about the instructor in a second closed week, and the
-    section is cut as one batch holding all of it.
+    Then one student comments about the instructor in a second closed week. The
+    instructor stream's held comments now carry `threshold` authors across two
+    weeks — all three legs open — and it is cut. The course stream's held comments
+    are still one week's `threshold - 1` and **stay held**: absent from
+    `released_comments`, absent from their week's read, in one batch row.
 
-    **Why this is a test now and was not before.** Under a week-level hold a held
-    set inside one week had fewer than the threshold of people, so leg (b) refused
-    everything leg (c) did and the module that tests the gate says so. Held per
-    stream, that stops being true — this is the world where it stops.
+    **Changed in fix round 1, and why.** This test first expected the course
+    stream's comments in the batch too, because the gate pooled the two streams.
+    The ruling makes every leg per stream, so a stream held in one week only is not
+    due whatever its sibling does — releasing it would put a course card in a batch
+    whose course comments all come from one quiet week.
 
-    **The mutation it kills:** leg (c) deleted on the old reasoning that leg (b)
-    subsumes it — this world's first half then cuts a batch confined to one week,
-    which the report's week-to-week delta dates exactly (ADR 0153). **The near miss
-    it kills:** leg (c) counting stream-weeks rather than weeks, which sees two here.
-    **Its pair is the second half**, so a cutter that never cuts is red too — and on
-    the current tree that is where it reds: a week of `2 x (threshold - 1)`
-    responses is not held there, so the second week's lone comment is the whole
-    held set and nothing is cut.
+    **The mutations it kills:** releasing a non-due stream's comments in a due
+    batch (the second half: the course comments go out with the instructor ones);
+    and leg (c) deleted with leg (b) pooled (the first half: `2 x (threshold - 1)`
+    pooled authors cut one week). **Its pair is the second half's cut**, so a
+    cutter that never cuts is red too.
     """
     contract = comment_contract
     world = comment_world
@@ -265,18 +268,18 @@ def test_two_held_streams_of_one_week_are_not_cut_on_their_own_and_are_cut_besid
     )
     authors = 2 * (threshold - 1)
     assert authors >= threshold, (
-        f"The two held streams carry {authors} distinct authors, which does not reach the threshold "
-        f"of {threshold}; leg (b) would then refuse too and this half would say nothing about "
-        "leg (c)."
+        f"The two held streams carry {authors} distinct authors pooled, which does not reach the "
+        f"threshold of {threshold}; a pooled leg (b) would then refuse too and this half would say "
+        "nothing about pooling."
     )
 
     alone = contract.cut()(world.session)
     assert alone == 0, (
         f"`{contract.cut_name}` cut {alone} batch(es) from one closed week whose two held streams "
-        f"carry {authors} distinct authors between them.\n\n"
-        "ADR 0152's leg (c) requires a batch to draw from at least two distinct weeks. Per stream, "
-        "one week can open leg (b) on its own, so leg (c) is the only thing between this week and "
-        "a batch whose arrival on next Monday's report names the week that just closed (ADR 0153)."
+        f"carry {authors} distinct authors between them and {threshold - 1} each.\n\n"
+        "Every leg is per stream (fix round 1's ruling), and each stream here is one week of "
+        f"{threshold - 1} authors. A batch from one week is also the week attribution ADR 0153 "
+        "removes, arriving through next Monday's report."
     )
     assert release_rows.members() == [], f"Comments were released: {release_rows.members()}."
 
@@ -286,29 +289,193 @@ def test_two_held_streams_of_one_week_are_not_cut_on_their_own_and_are_cut_besid
 
     together = contract.cut()(world.session)
     assert together == 1, (
-        f"With a second closed week holding one held comment, `{contract.cut_name}` cut "
-        f"{together} batch(es). The held set now spans two weeks and carries {authors + 1} "
-        "distinct authors: every leg is open. A cutter that still refuses is not holding both "
-        "streams of the first week — a week of "
-        f"{2 * (threshold - 1)} responses is not held at all when holding counts responses."
+        f"With a second closed week holding one more instructor comment, `{contract.cut_name}` cut "
+        f"{together} batch(es). The instructor stream's held comments now carry {threshold} "
+        "distinct authors across two weeks: its three legs are open."
     )
     expected = {
         world.answer_key(answer)
-        for answer in [
-            *one_week[contract.instructor_stream],
-            *one_week[contract.course_stream],
-            *second[contract.instructor_stream],
-        ]
+        for answer in [*one_week[contract.instructor_stream], *second[contract.instructor_stream]]
     }
     released_answers = release_rows.released_answers()
     assert released_answers == expected, (
-        f"In the batch and not held: {sorted(released_answers - expected)}\n"
-        f"Held and not in the batch: {sorted(expected - released_answers)}"
+        f"In the batch and not a due instructor comment: {sorted(released_answers - expected)}\n"
+        f"Due and not in the batch: {sorted(expected - released_answers)}\n\n"
+        "The batch's members are the held comments of exactly the streams whose three legs all "
+        f"opened. The course stream is one week of {threshold - 1} authors and is not due; its "
+        "comments in the batch would be released course cards that all come from one quiet week."
     )
-    weeks = release_rows.weeks_by_batch()
-    assert all(
-        len(found) >= 2 for found in weeks.values()
-    ), f"A batch draws from fewer than two weeks: {weeks}."
+    assert len(release_rows.batches()) == 1, f"Batches: {release_rows.batches()}."
+    course_release = released(world, contract, contract.course_stream)
+    assert tuple(course_release) == (), (
+        f"`{contract.released_name}` answers {sorted(texts_of(course_release))} for the course "
+        "stream, which is not due and stays held."
+    )
+    still_held = read(world, contract, week=FIRST_WEEK, stream=contract.course_stream)
+    assert tuple(still_held) == (), (
+        f"The course stream's held comments came back under their week: "
+        f"{sorted(texts_of(still_held))}."
+    )
+
+
+def test_two_streams_each_held_once_are_not_cut_by_pooling_them(
+    comment_world: CommentWorld, comment_contract: Any, release_rows: ReleaseRows
+) -> None:
+    """The privacy review's scenario: each stream held in one week, never pooled into a batch.
+
+    Week 1: `threshold` students comment about the instructor (shown) and
+    `threshold - 1` others about the course (held). Week 2: `threshold` students
+    comment about the course (shown) and one other about the instructor (held).
+    Pooled, the held set is `threshold` authors across two weeks and the gate
+    opens. Per stream, the course stream's held comments are one week's
+    `threshold - 1` authors and the instructor stream's are one author: neither
+    stream's legs open, so nothing is cut.
+
+    **What pooling would release.** One released card marked "instructor", and the
+    week-2 report says that week's instructor stream was held — so the card is the
+    lone week-2 instructor commenter's, named by the ledger beside it (ADR 0153).
+
+    **The control is in the same world**: both shown streams return their comments,
+    so the emptiness below is not a read or a cutter that answers nothing everywhere
+    (`docs/MISTAKES.md` entry 3).
+
+    **The mutations it kills:** pooling the streams in leg (b) (authors counted
+    across both streams' held comments) together with pooling in leg (c) (weeks
+    counted across both streams). Either pooled alone still fails here on the other
+    leg per stream; the pair is `test_leg_b_counts_authors_within_one_stream`, which
+    separates leg (b).
+    """
+    contract = comment_contract
+    world = comment_world
+    threshold = contract.threshold()
+    assert threshold >= 2, f"The configured n-threshold is {threshold}; nothing is below it."
+    world.build()
+
+    world.close_week(FIRST_WEEK)
+    first = world.week_by_stream(
+        term_week=FIRST_WEEK,
+        instructor_only=threshold,
+        course_only=threshold - 1,
+        label=HELD_LABEL,
+    )
+    world.close_week(SECOND_WEEK)
+    second = world.week_by_stream(
+        term_week=SECOND_WEEK, course_only=threshold, instructor_only=1, label=HELD_LABEL
+    )
+    counts = tuple(
+        world.commenters_in(term_week=week, stream=stream)
+        for week in (FIRST_WEEK, SECOND_WEEK)
+        for stream in (contract.instructor_stream, contract.course_stream)
+    )
+    assert counts == (threshold, threshold - 1, 1, threshold), (
+        f"The commenters per (week, stream) are {counts}; this test planted "
+        f"{(threshold, threshold - 1, 1, threshold)}."
+    )
+
+    shown_instructor = read(world, contract, week=FIRST_WEEK, stream=contract.instructor_stream)
+    shown_course = read(world, contract, week=SECOND_WEEK, stream=contract.course_stream)
+    assert texts_of(shown_instructor) == planted_texts(first[contract.instructor_stream]) and (
+        texts_of(shown_course) == planted_texts(second[contract.course_stream])
+    ), (
+        "A shown stream did not return its comments, so the emptiness asserted below is what this "
+        "world answers everywhere."
+    )
+
+    cut = contract.cut()(world.session)
+    assert cut == 0, (
+        f"`{contract.cut_name}` cut {cut} batch(es). The course stream's held comments are one "
+        f"week of {threshold - 1} authors and the instructor stream's are one author in one week. "
+        f"Pooled they make {threshold} authors over two weeks, but every leg is per stream: a "
+        "released card carries its stream, and the week-2 report says its instructor stream was "
+        "held, so the one released instructor card would be that week's lone commenter's."
+    )
+    assert release_rows.members() == [], f"Comments were released: {release_rows.members()}."
+    for stream in (contract.instructor_stream, contract.course_stream):
+        found = released(world, contract, stream)
+        assert (
+            tuple(found) == ()
+        ), f"`{contract.released_name}` answers {sorted(texts_of(found))} for the {stream} stream."
+
+
+def test_leg_b_counts_authors_within_one_stream(
+    comment_world: CommentWorld, comment_contract: Any, release_rows: ReleaseRows
+) -> None:
+    """Leg (b) per stream: two streams one author short are not cut; one more author opens one.
+
+    Two closed weeks. The instructor stream's held comments carry `threshold - 1`
+    distinct authors split across both weeks; the course stream's carry
+    `threshold - 1` different authors across the same two weeks. Pooled, that is
+    `2 x (threshold - 1)` authors over two weeks; per stream, each stream spans two
+    weeks (leg c open) and is one author short (leg b closed). Nothing is cut.
+
+    Then one more student comments about the instructor in the second week. The
+    instructor stream reaches `threshold` authors and is cut, in one batch row; the
+    course stream stays held.
+
+    **The mutation it kills:** pooling the streams in leg (b) — the first half
+    cuts. Leg (c) is open per stream here, so the refusal can only be leg (b)'s.
+    **And in the second half:** releasing a non-due stream's comments in a due
+    batch — the course comments would go out beside the instructor ones.
+    """
+    contract = comment_contract
+    world = comment_world
+    threshold = contract.threshold()
+    assert threshold >= 3, (
+        f"The configured n-threshold is {threshold}; each stream's `threshold - 1` authors must "
+        "split across two weeks with at least one in each, which needs 3 or more."
+    )
+    world.build()
+
+    short = threshold - 1
+    first_size = short // 2
+    split = ((FIRST_WEEK, first_size), (SECOND_WEEK, short - first_size))
+    held: dict[str, list[Any]] = {contract.instructor_stream: [], contract.course_stream: []}
+    for week, size in split:
+        world.close_week(week)
+        planted = world.week_by_stream(
+            term_week=week, instructor_only=size, course_only=size, label=HELD_LABEL
+        )
+        for stream in held:
+            held[stream].extend(planted[stream])
+    per_stream = {
+        stream: sum(world.commenters_in(term_week=week, stream=stream) for week, _ in split)
+        for stream in held
+    }
+    assert per_stream == {stream: short for stream in held}, (
+        f"Distinct commenters per stream across the two weeks: {per_stream}; this test planted "
+        f"{short} in each (disjoint people throughout)."
+    )
+
+    refused = contract.cut()(world.session)
+    assert refused == 0, (
+        f"`{contract.cut_name}` cut {refused} batch(es). Each stream's held comments span two "
+        f"weeks and carry {short} distinct authors — one short of {threshold}. Pooled across "
+        f"streams they carry {2 * short}, which is the count a pooled leg (b) reads."
+    )
+    assert release_rows.members() == [], f"Comments were released: {release_rows.members()}."
+
+    extra = world.week_by_stream(term_week=SECOND_WEEK, instructor_only=1, label=HELD_LABEL)
+    cut = contract.cut()(world.session)
+    assert cut == 1, (
+        f"With one more instructor commenter the instructor stream's held comments carry "
+        f"{threshold} authors across two weeks, and `{contract.cut_name}` cut {cut} batch(es)."
+    )
+    expected = {
+        world.answer_key(answer)
+        for answer in [*held[contract.instructor_stream], *extra[contract.instructor_stream]]
+    }
+    released_answers = release_rows.released_answers()
+    assert released_answers == expected, (
+        f"In the batch and not a due instructor comment: {sorted(released_answers - expected)}\n"
+        f"Due and not in the batch: {sorted(expected - released_answers)}\n\n"
+        f"The course stream still has {short} authors and is not due; it stays held."
+    )
+    assert len(release_rows.batches()) == 1, f"Batches: {release_rows.batches()}."
+    course_release = released(world, contract, contract.course_stream)
+    assert tuple(course_release) == (), (
+        f"`{contract.released_name}` answers {sorted(texts_of(course_release))} for the course "
+        "stream, which is not due."
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -168,8 +168,10 @@ def test_a_week_exactly_at_the_threshold_returns_its_comments(
 ) -> None:
     """The upper half: the boundary is inclusive, so `n = threshold` is not small-N.
 
-    SPEC §4 defines small-N as "n < 5 responses in a reporting week", so the
-    threshold value itself is the first size at which comments are shown. A
+    SPEC §4 defines small-N as fewer than the threshold of distinct commenters in a
+    stream in a reporting week (since E5.1-01; here every response carries one
+    instructor-stream comment, so the two counts are equal), so the threshold value
+    itself is the first size at which comments are shown. A
     service that hid the boundary week as well would satisfy every suppression
     test in this epic and would withhold a week of comments from every instructor
     whose section sat exactly on the line — a defect nothing else in the suite
