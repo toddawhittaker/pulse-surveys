@@ -31,8 +31,8 @@ an agent's description matches.
 
 Every PR gets a security pass, whatever its lane: each security row below
 that matches a changed path runs, so a diff matching both rows gets both
-reviewers. When neither row matches, a generic pass runs (`app-security` at
-its default effort, told the diff matched no specialist row). `spec-conformance` runs only when
+reviewers. When neither row matches, a generic pass runs: `app-security`
+spawned with `model: sonnet`, told the diff matched no specialist row. `spec-conformance` runs only when
 the ticket is heavy (its `Lane:` field, read as the merger reads it). A
 light PR's spec drift is caught at the epic boundary instead.
 

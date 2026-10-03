@@ -1,7 +1,7 @@
 ---
 name: verifier
 description: Independent verification runner. Confirms CI's green run against the exact commit under review and runs scoped mutation batteries against committed tests. Use after an implementer reports green, and for any battery — no green is believed on its author's word. Fires per build round and never fixes anything.
-model: opus
+model: sonnet
 effort: medium
 tools: Read, Grep, Glob, Bash
 disallowedTools: Write, Edit, NotebookEdit, Agent

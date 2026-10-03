@@ -104,8 +104,8 @@ pass and treats a skip, an xfail, or an empty collection as a failure;
 deliberate PR whose subject is moving them. The threat and self-harm recall
 floor (§9.3) is a hard gate; lowering it is a safety decision and Todd's call.
 
-**Reviews are tiered.** Every PR gets one fresh-context security pass picked
-from the diff by `review-pr`, diff before ticket. Heavy PRs add
+**Reviews are tiered.** Every PR gets a fresh-context security pass picked
+from the diff by `review-pr` (Sonnet when no specialist matches), diff first. Heavy PRs add
 `spec-conformance` and the matching specialists. The epic boundary runs the
 full Opus battery, `code-reviewer` included; its findings become ticket PRs. One round and one
 fix-check per PR; findings name the head SHA; a fixed-over pass re-runs.
