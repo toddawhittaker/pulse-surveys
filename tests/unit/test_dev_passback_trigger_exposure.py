@@ -60,7 +60,7 @@ set, `.env.example`'s `mock-idp` addresses are refused at startup and
 `create_app()` would raise inside the setup of a test about a completely
 different gate (`docs/MISTAKES.md` entry 22).
 
-**Every gate below is asked of BOTH `DevControlRoute` paths**, added by E3-08's
+**Every gate below is asked of EVERY `DevControlRoute` path**, added by E3-08's
 security round. E3-07's own review found a route subclass's gate discarded at
 dispatch — `docs/MISTAKES.md` entry 47, whose rule ends "every gate needs one test
 that drives the built application over HTTP and reads the status in both
@@ -68,7 +68,10 @@ directions" — and E3-08 registers a **second** control the same way, `POST
 /dev/roster-sync`. A suite that walked only the first would go on certifying the
 route class while the new door swung open on exactly the regression entry 47
 records. So the paths come from `DEV_CONTROL_PATHS` and every dispatch-level case
-here runs once per control.
+here runs once per control. E5.1-03 registers the two clock controls the same way
+(ruling R4), so the inventory holds four and every case runs four times; the
+clock pair's own accepted direction, a same-origin post that moves the row, is
+`tests/integration/test_the_dev_clock_controls_refuse_a_cross_site_post.py`.
 
 **And the inventory itself is reconciled against the router**, because a
 hand-written list of what to cover is covered exactly as well as somebody's
@@ -216,15 +219,15 @@ def test_this_modules_control_inventory_is_every_dev_control_route_registered(
     """`DEV_CONTROL_PATHS` and the registered `DevControlRoute` set are the same set.
 
     **Why a hand-written inventory needs this.** Every gate below is parametrised
-    over `DEV_CONTROL_PATHS`, a two-entry literal in
+    over `DEV_CONTROL_PATHS`, a hand-written literal in
     `tests/fixtures/dev_console.py`. Nothing reconciled it against the application
     until now, so the coverage it drives was exactly as complete as somebody's
     memory: a third control appended to the router with no entry beside it gets
     **zero** dispatch-level coverage, silently, and this module goes on reporting
     a full green over two of three doors. That is `docs/MISTAKES.md` entry 35's
     shape — a guard that enumerates and is never made to find what it missed — and
-    it is the gap E3-08's own security round created by making the inventory two
-    entries long instead of one.
+    it is the gap E3-08's own security round created by making the inventory
+    longer than one entry.
 
     **The mutation this kills**: a third `DevControlRoute` registered in
     `app.api.dev` without a `DEV_CONTROL_PATHS` entry. Before this test that is

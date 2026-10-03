@@ -17,7 +17,7 @@ than in a router because each is one per application:
   handshake per launch;
 * **one per-process secret**, on `app.state.login_secret`, which signs the
   short-lived cookie the web door carries a `state` and a `nonce` in. What that
-  costs, and why it is not a configured value, is in `app.api.deps`. E1-08 took
+  costs, and why it is not a configured value, is in `app.api.auth`. E1-08 took
   the launch door off it — `pylti1p3`'s own in-flight cookies replace it there —
   and left it for the web door until E1-09;
 * **one configured session secret**, on `app.state.session_secret`, which signs
@@ -277,7 +277,7 @@ def create_app() -> FastAPI:
     app.state.http = http
     # Per application, so two applications in one process cannot read each
     # other's login cookies, and per *process*, so a restart invalidates the
-    # logins that were in flight. `app.api.deps` states both consequences.
+    # logins that were in flight. `app.api.auth` states both consequences.
     #
     # **Still the web door's, not the launch door's.** E1-08 moved the launch
     # door onto `pylti1p3`, whose in-flight `state`/`nonce` cookies replace the

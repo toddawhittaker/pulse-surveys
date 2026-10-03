@@ -76,6 +76,13 @@ behaviour belongs.
 **The two clock controls stay plain `AnyMethodRoute` and are the sweep's declared
 exemption.** They are not retrofitted onto the new class.
 
+**Amended 2026-10-03 by E5.1-03, which retrofitted them.** The clock pair is now
+registered as `DevControlRoute`s, behind the same two gates in the same order,
+and both left ADR 0140's ledger. Their handlers' own copies of the environment
+and method check were deleted, so the wrapper is the one gate. That ticket is the
+one "about those routes" the rejected alternative below asks for, and the ledger's
+machinery is re-proven on the two LTI entries that remain.
+
 ## Alternatives rejected
 
 **A per-section or per-student trigger.** It reads as more careful and is not:
@@ -140,6 +147,10 @@ day it lands unless somebody argues for it in the ledger.
 developer's clock. It is named in the ledger's sentence rather than left
 implicit, and it is now the one `/dev` control that writes without an origin
 check.
+
+*Amended 2026-10-03 by E5.1-03:* that residual risk is closed. The clock pair
+refuses a cross-origin `POST` with `403`, and no `/dev` control writes without
+the origin check.
 
 **The trigger's answer table is stricter than the console's.** `GET /dev` answers
 `405` outside development by measurement and accepted disclosure (ADR 0079, ADR
