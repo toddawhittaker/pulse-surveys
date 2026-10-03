@@ -423,8 +423,13 @@ def test_leg_b_counts_authors_within_one_stream(
     instructor stream reaches `threshold` authors and is cut, in one batch row; the
     course stream stays held.
 
-    **The mutation it kills:** pooling the streams in leg (b) — the first half
-    cuts. Leg (c) is open per stream here, so the refusal can only be leg (b)'s.
+    **What it does not isolate, corrected after the verifier's battery.** It was
+    written to pin leg (b) per stream, and it does not: each stream's volume here
+    is its `threshold - 1` comments, so leg (a) refuses per stream as well, and a
+    gate pooling only leg (b) (mutation j) still refuses this world on leg (a).
+    That mutation survived the whole suite. It kills pooling legs (a) and (b)
+    together. The test that isolates leg (b) is
+    `test_leg_b_alone_refuses_a_stream_whose_authors_repeat_across_weeks`.
     **And in the second half:** releasing a non-due stream's comments in a due
     batch — the course comments would go out beside the instructor ones.
     """
@@ -480,6 +485,130 @@ def test_leg_b_counts_authors_within_one_stream(
         f"In the batch and not a due instructor comment: {sorted(released_answers - expected)}\n"
         f"Due and not in the batch: {sorted(expected - released_answers)}\n\n"
         f"The course stream still has {short} authors and is not due; it stays held."
+    )
+    assert len(release_rows.batches()) == 1, f"Batches: {release_rows.batches()}."
+    course_release = released(world, contract, contract.course_stream)
+    assert tuple(course_release) == (), (
+        f"`{contract.released_name}` answers {sorted(texts_of(course_release))} for the course "
+        "stream, which is not due."
+    )
+
+
+THIRD_HELD_WEEK = 10
+
+
+def test_leg_b_alone_refuses_a_stream_whose_authors_repeat_across_weeks(
+    comment_world: CommentWorld, comment_contract: Any, release_rows: ReleaseRows
+) -> None:
+    """Leg (b) is the only leg that refuses: the same few people, in both weeks, in each stream.
+
+    Two closed weeks. The instructor stream is written by the same
+    `threshold - 1` students in both weeks; the course stream by `threshold - 1`
+    other students, also the same in both weeks. No stream-week reaches the
+    threshold of commenters, so all four stream-weeks are held. **Per stream, legs
+    (a) and (c) are open by construction**: each stream's held volume is
+    `2 x (threshold - 1)` comments, at or past the threshold, across two weeks.
+    Only leg (b) is closed — `threshold - 1` distinct authors per stream. Pooled
+    across streams the authors are `2 x (threshold - 1)`. Nothing may be cut.
+
+    Then one new student comments about the instructor in a third closed week. The
+    instructor stream now has `threshold` distinct authors over three weeks and is
+    cut; the course stream still has `threshold - 1` and stays held. The new author
+    goes in a third week rather than one of the first two because either of those
+    weeks would then hold `threshold` instructor commenters, and that stream-week
+    would be shown rather than held.
+
+    **The mutation it kills: mutation j**, leg (b) pooled across both streams while
+    legs (a) and (c) stay per stream. That mutation cuts the first half. It survived
+    the whole suite before this test, because every other world that refuses on
+    leg (b) also has each stream's volume under the threshold, so leg (a) refused
+    first. **The second half kills** releasing a stream that is not due beside one
+    that is, and is the pair: a cutter that never cuts is red there.
+
+    **The readable control** is a shown week in the same world: a stream of
+    `threshold` commenters returns its comments, so the empty releases below are
+    not a read that answers nothing (`docs/MISTAKES.md` entry 3).
+    """
+    contract = comment_contract
+    world = comment_world
+    threshold = contract.threshold()
+    assert threshold >= 3, (
+        f"The configured n-threshold is {threshold}; each stream needs `threshold - 1` repeat "
+        "authors whose two weeks of comments reach the threshold in volume, which needs 3 or more."
+    )
+    world.build()
+
+    short = threshold - 1
+    instructor_people = [world.respondent() for _ in range(short)]
+    course_people = [world.respondent() for _ in range(short)]
+    held: dict[str, list[Any]] = {contract.instructor_stream: [], contract.course_stream: []}
+    for week in (FIRST_WEEK, SECOND_WEEK):
+        world.close_week(week)
+        for stream, people in (
+            (contract.instructor_stream, instructor_people),
+            (contract.course_stream, course_people),
+        ):
+            for index, person in enumerate(people):
+                _response, written = world.submit(
+                    term_week=week,
+                    student=person,
+                    comments={stream: f"{HELD_LABEL} (week {week}, {stream.lower()} {index + 1})"},
+                )
+                held[stream].append(written[stream])
+
+    counts = {
+        (week, stream): world.commenters_in(term_week=week, stream=stream)
+        for week in (FIRST_WEEK, SECOND_WEEK)
+        for stream in held
+    }
+    assert set(counts.values()) == {short}, (
+        f"Commenters per (week, stream) are {counts}; this test planted {short} in each, so "
+        "every stream-week is under the threshold and held."
+    )
+    volume = {stream: len(answers) for stream, answers in held.items()}
+    assert all(found >= threshold for found in volume.values()), (
+        f"Each stream's held volume is {volume}; leg (a) must be open per stream ({threshold} or "
+        "more) or the refusal below could be leg (a)'s, which is how mutation j survived."
+    )
+
+    world.close_week(A_SHOWN_WEEK)
+    shown = world.week_by_stream(
+        term_week=A_SHOWN_WEEK, instructor_only=threshold, label=SHOWN_LABEL
+    )[contract.instructor_stream]
+    control = read(world, contract, week=A_SHOWN_WEEK, stream=contract.instructor_stream)
+    assert texts_of(control) == planted_texts(
+        shown
+    ), f"A week of {threshold} instructor commenters answered {sorted(texts_of(control))}."
+
+    refused = contract.cut()(world.session)
+    assert refused == 0, (
+        f"`{contract.cut_name}` cut {refused} batch(es). Each stream's held comments are "
+        f"{volume} comments over two weeks — legs (a) and (c) open — written by {short} distinct "
+        f"people, one short of {threshold}. Pooled across streams the authors are {2 * short}: "
+        "a cut here is leg (b) counted over both streams."
+    )
+    assert release_rows.members() == [], f"Comments were released: {release_rows.members()}."
+    for stream in held:
+        found = released(world, contract, stream)
+        assert (
+            tuple(found) == ()
+        ), f"`{contract.released_name}` answers {sorted(texts_of(found))} for the {stream} stream."
+
+    world.close_week(THIRD_HELD_WEEK)
+    fifth = world.week_by_stream(term_week=THIRD_HELD_WEEK, instructor_only=1, label=HELD_LABEL)[
+        contract.instructor_stream
+    ]
+    cut = contract.cut()(world.session)
+    assert cut == 1, (
+        f"With a fifth distinct instructor author in a third closed week, the instructor stream's "
+        f"held comments carry {threshold} authors, and `{contract.cut_name}` cut {cut} batch(es)."
+    )
+    expected = {world.answer_key(answer) for answer in [*held[contract.instructor_stream], *fifth]}
+    released_answers = release_rows.released_answers()
+    assert released_answers == expected, (
+        f"In the batch and not a due instructor comment: {sorted(released_answers - expected)}\n"
+        f"Due and not in the batch: {sorted(expected - released_answers)}\n\n"
+        f"The course stream still has {short} distinct authors and is not due; it stays held."
     )
     assert len(release_rows.batches()) == 1, f"Batches: {release_rows.batches()}."
     course_release = released(world, contract, contract.course_stream)
