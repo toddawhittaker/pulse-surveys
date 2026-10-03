@@ -127,7 +127,11 @@ completed, successful, and resolved against the PR's final head commit, its
 security review is recorded in the body against that same commit, nothing
 is in dispute, and, for a heavy ticket, the mutation battery result is
 recorded too. The merger reruns a failed job once only when a runner
-failed to download or install packages; a failed test is always real.
+failed to download or install packages; a failed test is always real. A
+ticket branch that is behind its epic but has no conflict merges as it is,
+without merging the epic into it first, which saves a CI run. CI runs on
+the epic branch after every merge, and the merger stops if that run is
+red.
 The owner reviews once, at the epic boundary; on a ⚠ epic that review is
 line by line over the security-relevant diff (SPEC §14.2 item 3).
 

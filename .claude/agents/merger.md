@@ -85,14 +85,26 @@ All of these, every time, even when the orchestrator says they hold:
 - `gh pr merge <N> --merge`: a merge commit, always. Never `--squash`, never
   `--rebase`. Afterward, verify the shape against git (`git log --merges -1`
   on the epic branch): the merge landed and it is a merge commit.
-- **One PR at a time.** Update a branch (`gh pr update-branch <N>`) only
-  when GitHub refuses the merge because it is `BEHIND`; every update costs a
-  full CI run. After an update, wait for the new run and re-verify
+- **One PR at a time, back to back.** A ticket branch that is behind its
+  epic branch but has no conflict merges as it is. Do not merge the epic
+  back into it first: every update costs a full CI run, and the epic
+  ruleset does not require an up-to-date branch. Skip an update even when
+  your prompt asks for one, and say so in your report. Update a branch
+  (`gh pr update-branch <N>`) only when GitHub refuses the merge because it
+  is `BEHIND`, or reports `CONFLICTING` and the orchestrator has resolved
+  it. After an update, wait for the new run and re-verify
   precondition 1 against the new head SHA before merging. A verdict for the
   old head is void, and so are preconditions 2 and 4's records unless they
   list the update commit.
 - Wait with a time-limited watch (`timeout 3000 gh run watch <id>
   --exit-status`), never a sleep loop.
+- **Watch the epic head.** Two PRs that merge cleanly can still break each
+  other, and no PR run tested them together. CI runs on every push to
+  `epic/**`, so each merge starts a run on the new epic head. Before each
+  merge after the first, check the latest completed `push` run on the epic
+  branch. If it is red, stop merging into that epic and report the run
+  URL and the failing job. Do not wait for a run still in progress; check
+  it at the next merge and once more at the end of your list.
 
 ## A red run
 
