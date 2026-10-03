@@ -164,14 +164,13 @@ def require_student(request: Request) -> SessionClaims:
     put there as "the launch-side row", and a second wrapper around it would be a
     second answer to "who is this" for the two modules to disagree about.
     """
-    session = session_from_request(request, request.app.state.session_secret)
-    if session is None or session.role is not LandingRole.STUDENT:
-        raise HTTPException(
-            status_code=NOT_A_STUDENT_STATUS,
-            detail=NOT_A_STUDENT.text,
-            headers=NOT_A_STUDENT_CHALLENGE,
-        )
-    return session
+    return _session_in_role(
+        request,
+        LandingRole.STUDENT,
+        status=NOT_A_STUDENT_STATUS,
+        detail=NOT_A_STUDENT.text,
+        challenge=NOT_A_STUDENT_CHALLENGE,
+    )
 
 
 # What a request that is not an instructor's is answered with — the same 401 and
@@ -238,14 +237,13 @@ def require_instructor(request: Request) -> SessionClaims:
     four into `None` so that a caller trying tokens cannot tell a real one from a
     forgery by the answer, and the fifth joins them here for the same reason.
     """
-    session = session_from_request(request, request.app.state.session_secret)
-    if session is None or session.role is not LandingRole.INSTRUCTOR:
-        raise HTTPException(
-            status_code=NOT_AN_INSTRUCTOR_STATUS,
-            detail=NOT_AN_INSTRUCTOR,
-            headers=NOT_AN_INSTRUCTOR_CHALLENGE,
-        )
-    return session
+    return _session_in_role(
+        request,
+        LandingRole.INSTRUCTOR,
+        status=NOT_AN_INSTRUCTOR_STATUS,
+        detail=NOT_AN_INSTRUCTOR,
+        challenge=NOT_AN_INSTRUCTOR_CHALLENGE,
+    )
 
 
 # What a request that is not a leadership session is answered with — the same 401
@@ -296,13 +294,40 @@ def require_leadership(request: Request) -> SessionClaims:
     caller trying tokens cannot tell a real one from a forgery by the answer, and
     the fifth joins them here.
     """
+    return _session_in_role(
+        request,
+        LandingRole.LEADERSHIP,
+        status=NOT_LEADERSHIP_STATUS,
+        detail=NOT_LEADERSHIP,
+        challenge=NOT_LEADERSHIP_CHALLENGE,
+    )
+
+
+def _session_in_role(
+    request: Request,
+    role: LandingRole,
+    *,
+    status: int,
+    detail: str,
+    challenge: dict[str, str],
+) -> SessionClaims:
+    """The verified session on `request` if it is in `role`, or the gate's one refusal.
+
+    The body all three role gates share. **The gates themselves stay three public
+    functions**, and that is the point of keeping this private: SPEC §4.1 item 1's
+    sweep and every route inventory find a surface by asking which routes carry
+    `require_student`, `require_instructor` or `require_leadership` as an object in
+    their dependency graph. One function, or three closures out of a factory, would
+    give those walks nothing to tell the surfaces apart by.
+
+    `session_from_request` collapses an absent, malformed, expired or wrongly
+    signed token into `None`, and a real session in another role joins it here,
+    so every one of them gets the same status, the same words and the same
+    challenge — the reason each gate's own docstring gives.
+    """
     session = session_from_request(request, request.app.state.session_secret)
-    if session is None or session.role is not LandingRole.LEADERSHIP:
-        raise HTTPException(
-            status_code=NOT_LEADERSHIP_STATUS,
-            detail=NOT_LEADERSHIP,
-            headers=NOT_LEADERSHIP_CHALLENGE,
-        )
+    if session is None or session.role is not role:
+        raise HTTPException(status_code=status, detail=detail, headers=challenge)
     return session
 
 
