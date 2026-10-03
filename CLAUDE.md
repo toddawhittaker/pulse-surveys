@@ -23,6 +23,9 @@ the spec does not restate. On how work is done, **this file governs** — where
 disagrees, this file wins. If your work contradicts the spec, that is not yours
 to resolve alone — raise it and update the spec.
 
+Search with the `Grep` tool or `rg`, never `grep -r`: it reads the ignored
+`.venv`, `node_modules`, and `.claude/worktrees` and floods the context.
+
 Read the relevant section before touching the code it governs. Do not work from
 a summary of it, including this file:
 
@@ -125,10 +128,8 @@ reasonable engineer might choose differently, write `docs/adr/NNNN-slug.md` **in
 the same pull request as the decision**. Four sections, under a page: context,
 decision, alternatives rejected and why, consequences.
 
-- **Never write an ADR restating something the spec already decides.** Link to
-  the spec section instead.
-- **If a decision contradicts the spec, an ADR is not sufficient.** Raise it,
-  and update the spec.
+- **Never restate the spec in an ADR**; link to the section instead.
+- **If a decision contradicts the spec, an ADR is not enough.** Update the spec.
 - The test is both halves: the spec is silent, *and* the choice is contestable.
 - Number sequentially, never reuse a number, never renumber. A superseded ADR
   stays in place with a line pointing at its replacement.

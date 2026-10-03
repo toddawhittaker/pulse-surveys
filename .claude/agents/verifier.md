@@ -92,17 +92,22 @@ caller can take — `from app.api import lti` imports the same module by its
 package, and this codebase's dominant form is a third: a top-level module with
 no package segment at all, imported by name off `app` itself
 (`from app.config import Settings`, `from app.db import get_session`,
-`from app.tokens import (...)`). A grep for only the dotted path misses all of
-these. For a module `app/<name>.py` or `app/<pkg>/<name>.py`, grep for all
-three forms — the dotted import, the bare `import`, and the parent-package
-import (parent may be `app` itself for a top-level module):
-`grep -rn "from app\.<path> import\|import app\.<path>\|from app\.<parent> import <name>\b" backend scripts mock-lms mock-idp --include=*.py`
+`from app.tokens import (...)`). A search for only the dotted path misses all of
+these, and so does one that expects the module alone after `import`:
+`backend/app/main.py` imports `lti` in a list (`from app.api import auth,
+dev, ..., lti, student`). Search with `rg`, never `grep -r`; `rg` skips the
+ignored folders (`.venv`, `node_modules`, `.claude/worktrees`), which keeps
+the output small. In `rg`, "or" is `|`, not grep's `\|`; a pattern copied
+from grep syntax matches nothing and still exits cleanly. For a module
+`app/<name>.py` or `app/<pkg>/<name>.py`, search for every form at once:
+`rg -n -U "from app\.<path> import|import app\.<path>\b|from <parent> import [^\n(]*\b<name>\b|from <parent> import \([^)]*\b<name>\b" backend scripts mock-lms mock-idp -g '*.py'`
 with `<path>` the mutated module's full dotted path (`config` for
 `app/config.py`, `api.lti` for `app/api/lti.py`), `<parent>` its containing
-package (`app` for a top-level module, `app.api` for `app/api/lti.py`), and
-`<name>` its bare module name (`config`, `lti`). Concrete example for
-`app/config.py`: `grep -rn "from app\.config import\|import app\.config\|from app import config\b" backend scripts mock-lms mock-idp --include=*.py`
-— the third alternative is the one a dotted-only grep would miss entirely.
+package, dots escaped (`app` for a top-level module, `app\.api` for
+`app/api/lti.py`), and `<name>` its bare module name (`config`, `lti`). `-U`
+lets the last form match a parenthesized import that spans lines. Concrete
+example for `app/api/lti.py`, which must find `backend/app/main.py:51`:
+`rg -n -U "from app\.api\.lti import|import app\.api\.lti\b|from app\.api import [^\n(]*\blti\b|from app\.api import \([^)]*\blti\b" backend scripts mock-lms mock-idp -g '*.py'`.
 Run across all of `backend/` (including `backend/migrations/`), `scripts/`,
 and both mocks — not just `backend/app/`. More than one caller means a shared
 entry point (MISTAKES #41: a ticket's own suites don't verify a shared entry

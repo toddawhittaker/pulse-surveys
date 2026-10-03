@@ -47,8 +47,23 @@ For each: file and line, a one-sentence defect, and a concrete scenario
 - **Dead code.** A function, branch, setting, or Make target nothing
   reaches. Search the whole repo, string uses included, before calling
   something dead.
-- **History in comments.** A comment citing a ticket, PR, review, or ruling
-  instead of a SPEC section or an ADR.
+- **Comments.** A comment that only restates what the next line says. A long
+  comment that tells the story of how the code got here; git holds the
+  history, and one line saying why is enough. A comment citing a ticket,
+  PR, review, or ruling instead of a SPEC section or an ADR. A comment the
+  code now contradicts.
+- **A helper that already exists.** A new function that repeats one already
+  in the repo. Search for what it does, not only for its name, before
+  calling it new.
+- **A shared helper in the wrong home.** A helper other files import that
+  lives inside a route, page, or component file instead of a module of its
+  own.
+- **Two values that must match.** Two copies of a value linked only by a
+  "must match" comment, where one shared constant would do.
+- **A file doing too much.** A file past about 800 lines, or one that has
+  started doing a second job. Name the split.
+- **A new thing where the repo has one.** A new dependency, module, layer,
+  or pattern where something already in the repo does the job.
 
 For each: file and line, what is there, the concrete simpler alternative,
 and what it saves. If you cannot name a simpler alternative, do not report
