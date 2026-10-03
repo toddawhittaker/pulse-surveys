@@ -184,6 +184,11 @@ DEPLOYED_AI_PROVIDER = {
     AI_PROVIDER_MODEL_NAME_VARIABLE: "a-real-deployments-model",
 }
 
+# An obviously fake session secret a deployment accepts: longer than the 32
+# characters `Settings` requires outside development, and not the placeholder
+# `.env.example` ships. Not a credential anywhere.
+DEPLOYED_SESSION_SECRET = "test-deployment-session-secret-not-the-example-0001"  # noqa: S105 - a fake
+
 
 def normalised(name: str) -> str:
     """A member name with case, underscores, hyphens and spaces removed."""
@@ -588,9 +593,37 @@ def mock_ai_endpoint(mock_ai: MockAiProvider) -> Iterator[Endpoint]:
 
 
 @pytest.fixture
+def deployed_session_secret(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_env: dict[str, str],
+) -> str:
+    """Set a session secret a deployment accepts, and answer it.
+
+    `configured_env` lays down `.env.example`, whose `SESSION_SECRET` is the
+    published placeholder, and outside development `Settings` refuses that value
+    (SPEC §7.3, ADR 0089). A test that sets `ENVIRONMENT` to a deployment's value
+    and is about something else would stop in its own setup on a rule that is not
+    its subject (`docs/MISTAKES.md` entry 22).
+
+    Requested rather than applied globally, for the reason `deployed_ai_provider`
+    gives: the placeholder is legal in development, and the settings tests assert
+    that the documented file is a working configuration.
+
+    It writes the value into `configured_env`'s mapping as well as the process
+    environment, because `session_secret` in `tests/fixtures/submit.py` mints
+    test sessions from that mapping; leaving the placeholder there would sign
+    every test session with a key the application no longer verifies with.
+    """
+    monkeypatch.setenv("SESSION_SECRET", DEPLOYED_SESSION_SECRET)
+    configured_env["SESSION_SECRET"] = DEPLOYED_SESSION_SECRET
+    return DEPLOYED_SESSION_SECRET
+
+
+@pytest.fixture
 def deployed_ai_provider(
     monkeypatch: pytest.MonkeyPatch,
     configured_env: dict[str, str],
+    deployed_session_secret: str,
 ) -> dict[str, str]:
     """Configure an AI provider that is not the mock, and answer what it set.
 
@@ -601,6 +634,12 @@ def deployed_ai_provider(
     mock and once for being cleartext off this machine — so a test that sets
     `ENVIRONMENT` to a deployment's value and is about something else stops in its
     own setup on a rule that is not its subject (`docs/MISTAKES.md` entry 22).
+
+    It also requests `deployed_session_secret`, which arrived with the same
+    problem: `.env.example`'s `SESSION_SECRET` is a placeholder a deployment
+    refuses. Every test running as a deployment already requests this fixture,
+    directly or through `deployed_identity_provider`, so the secret travels with
+    it rather than every such module gaining a third declaration.
 
     Requested rather than applied globally, because the combination is legal — and
     required — in development, and `tests/unit/test_config_settings.py` asserts
