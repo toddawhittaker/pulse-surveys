@@ -212,17 +212,6 @@ COMMENT_VIEW = table(
     schema="public",
 )
 
-# `public.report_response_counts`, E4-03's view. Only `responses` is named here —
-# SPEC §4's threshold is "n responses in a reporting week", which is that column
-# and not the validity figure beside it (§3.3's rate is E4-07's, over both).
-RESPONSE_COUNTS_VIEW = table(
-    "report_response_counts",
-    column("section_id"),
-    column("week_id"),
-    column("responses"),
-    schema="public",
-)
-
 
 @dataclass(frozen=True)
 class ReportComment:
@@ -255,8 +244,8 @@ class ReportComment:
 def n_threshold() -> int:
     """SPEC §4's configured n-threshold — the one place this number is read.
 
-    "Threshold value is configurable (default 5)", counted in responses per
-    reporting week. Every gate that applies it and every surface that *prints* it
+    "Threshold value is configurable (default 5)", counted in distinct students
+    commenting in one stream in one reporting week (`stream_is_suppressed`). Every gate that applies it and every surface that *prints* it
     calls this, and that second half is the reason the function exists rather than
     each caller reaching for `Settings` itself.
 
@@ -265,7 +254,7 @@ def n_threshold() -> int:
     while `visible_comments` below built a fresh `Settings()` per call. The two
     agree on every ordinary deployment and come apart the moment they are read at
     different times — a screen telling an instructor that comments appear once five
-    students have answered, while the query that hid them applied some other
+    students have commented, while the query that hid them applied some other
     number. A promise about confidentiality printed from one source and enforced
     from another is two promises, and the one a person acts on is the printed one.
 
@@ -286,6 +275,54 @@ def n_threshold() -> int:
     return Settings().n_threshold_default
 
 
+def stream_is_suppressed(
+    session: Session,
+    *,
+    section_id: UUID,
+    week_id: UUID,
+    stream: str,
+) -> bool:
+    """Whether SPEC §4 withholds one stream's raw comments for one section-week.
+
+    **True when fewer than `n_threshold()` distinct students commented in that
+    stream that week**, counting only comments that are in no release batch. This
+    is the one definition of "suppressed": `visible_comments` below asks it before
+    reading any text, `app.services.reporting` asks it for the summary's mode and
+    for the payload's per-stream notice, and `_held_comments` reads the same count
+    through `_commenters_by_stream_week`. A second copy of the count anywhere is
+    the shape `docs/MISTAKES.md` entry 19 is about.
+
+    **The unit is people, per stream** (the owner's ruling for E5.1-01, and
+    `docs/MISTAKES.md` entry 50). Not responses: in a week of six respondents where
+    one student wrote about the instructor, a count of responses shows that one
+    comment, and the per-week completion ledger SPEC §3.4 posts into the gradebook
+    can name its author. Not comment answers either: one student is one candidate
+    author however many comment items they filled in.
+
+    **A stream nobody commented in is suppressed**, because zero is below any
+    threshold. A reader is then told the same thing about an empty stream as about
+    a thin one, so the notice cannot be used to tell nobody from one person.
+
+    **Released comments do not count** (ADR 0182). Their authors are already
+    behind a batch with no week, and counting them here would let a lowered
+    threshold, or one late comment, bring a week's stream over the line on the
+    strength of comments the instructor has already read elsewhere. Moderation
+    state does not matter: a flagged or excluded comment still has an author.
+    """
+    counts = _commenters_by_stream_week()
+    commenters = session.execute(
+        select(counts.c.commenters).where(
+            counts.c.section_id == section_id,
+            counts.c.week_id == week_id,
+            counts.c.stream == stream,
+        )
+    ).scalar_one_or_none()
+    # A stream nobody commented in has no row in the grouped count, which is zero
+    # commenters and so below any threshold. The boundary is inclusive on the
+    # upper side: the threshold itself is the first size at which comments show.
+    return (commenters or 0) < n_threshold()
+
+
 def visible_comments(
     session: Session,
     *,
@@ -297,39 +334,36 @@ def visible_comments(
 
     SPEC §4: below the n-threshold "instructors see rating distributions and the
     AI summary, but **no raw comments**", and §4.1 item 3 makes that an invariant
-    rather than a convention. §5.2 adds the half that is easy to ship without
+    rather than a convention. The threshold is counted in distinct students
+    commenting in this stream this week, and `stream_is_suppressed` above is the
+    one place that count is made. §5.2 adds the half that is easy to ship without
     noticing: below the threshold a flagged comment is hidden "entirely — no chip,
-    no count, no flag-type hint", because in a four-response week a held count is
-    a statement about one of four identifiable people.
+    no count, no flag-type hint", because in a stream of four commenters a held
+    count is a statement about one of four identifiable people.
 
-    **A suppressed week and a week nobody commented in answer the same value.**
+    **A suppressed stream and a stream nobody commented in answer the same value.**
     The empty tuple is returned before any comment is read, so nothing a caller
     receives says how much was withheld — not a length, not a type, not a
     placeholder.
 
-    Above the threshold every comment comes back, whatever its moderation state:
-    a flagged one collapsed with its chip, an excluded one still visible to the
-    instructor (§5.2 keeps its text "visible to the instructor, muted, above the
-    exclusion notice"), and a kept one published. A read that filtered a state out
-    would remove the record of a decision from the report of the person who made
-    it, which is what §5.2's anti-cherry-picking argument rests on.
+    **A comment in a release batch is never returned here** (ADR 0182). It has
+    already been shown with no week, in the from-earlier-weeks list, and returning
+    it under its week again would re-attach the week ADR 0153 removed. The rule is
+    an anti-join rather than a consequence of the count, so it holds after the
+    threshold setting is lowered and after a late comment lifts the stream over it.
+
+    Above the threshold every other comment comes back, whatever its moderation
+    state: a flagged one collapsed with its chip, an excluded one still visible to
+    the instructor (§5.2 keeps its text "visible to the instructor, muted, above
+    the exclusion notice"), and a kept one published. A read that filtered a state
+    out would remove the record of a decision from the report of the person who
+    made it, which is what §5.2's anti-cherry-picking argument rests on.
 
     **The threshold comes from `n_threshold` above, and every surface that prints
     a threshold reads the same function.** E4-07's report prints one beside the
     comments this gate hid; that record says why the two may not be separate reads.
     """
-    # SPEC §4's rule is "n < 5 responses in a reporting week", and the boundary is
-    # inclusive on the upper side: the threshold value itself is the first size at
-    # which comments are shown. A week nobody answered has no row in the count
-    # view (ADR 0147: absence rather than a zero row), which is below any
-    # threshold and so suppressed.
-    responses = session.execute(
-        select(RESPONSE_COUNTS_VIEW.c.responses).where(
-            RESPONSE_COUNTS_VIEW.c.section_id == section_id,
-            RESPONSE_COUNTS_VIEW.c.week_id == week_id,
-        )
-    ).scalar_one_or_none()
-    if (responses or 0) < n_threshold():
+    if stream_is_suppressed(session, section_id=section_id, week_id=week_id, stream=stream):
         return ()
 
     asked = _comments_with_their_status().where(
@@ -340,8 +374,10 @@ def visible_comments(
         # section's weeks would test one week's count and return another's text.
         COMMENT_VIEW.c.week_id == week_id,
         # §5.1's two groups, each headed by its own summary and routed differently
-        # by §5.2.
+        # by §5.2 — and since E5.1-01 each counted against the threshold on its own.
         COMMENT_VIEW.c.stream == stream,
+        # A released comment belongs to the from-earlier-weeks list and to no week.
+        _in_no_release_batch(COMMENT_VIEW.c.answer_id),
     )
     return _shuffled(session.execute(asked).all())
 
@@ -400,8 +436,8 @@ def cut_due_release_batches(session: Session) -> int:
     """Cut one release batch for every section and term whose held comments are now due.
 
     SPEC §4's cumulative rule, evaluated and written once a week rather than at
-    read time (ADR 0152). A comment is **held** when its week was below the
-    threshold, its window has closed, and it is in no batch yet; `_held_comments`
+    read time (ADR 0152). A comment is **held** when its stream was below the
+    threshold of distinct commenters that week (ADR 0182), its window has closed, and it is in no batch yet; `_held_comments`
     is the one definition and both the gate and the batch are built from it.
 
     **The gate is three legs and every one of them must open** (ADR 0152, after the
@@ -414,11 +450,14 @@ def cut_due_release_batches(session: Session) -> int:
     b. the **distinct people** behind the unreleased held comments reach the
        threshold;
     c. those comments span at least `WEEKS_A_RELEASE_MUST_SPAN` distinct
-       under-threshold closed weeks.
+       closed weeks — weeks, not stream-weeks.
 
-    Leg (b) is the effective floor — it cannot hold where (a) or (c) fails — and
-    all three are written out anyway, because they are the reading of §4 this build
-    stands on and each survives a change to another's denominator. **When any leg
+    **Leg (c) is load-bearing since E5.1-01** (ADR 0182). While holding was decided
+    per week, a held set inside one week had fewer than the threshold of people and
+    leg (b) refused everything leg (c) did. Held per stream, one week can supply two
+    held streams with up to twice `threshold - 1` distinct authors, so leg (b) can
+    open on a single week and only leg (c) refuses the one-week batch the report's
+    week-to-week delta would date (ADR 0153). Leg (b) still subsumes leg (a). **When any leg
     fails nothing is cut**, which is the safe direction: a held comment still feeds
     the summary and is released later, and a released one cannot be un-shown.
 
@@ -632,10 +671,62 @@ def _comment_volume_by_section_and_term(
     return {(row.section_id, row.term_id): row.volume for row in session.execute(counted).all()}
 
 
+def _in_no_release_batch(answer_id: SQLColumnExpression[Any]) -> ColumnElement[bool]:
+    """True for a comment that has no `release_batch_member` row — written once.
+
+    Three readers need it and they must agree: the commenter count (a released
+    author no longer counts toward their week), the week read (a released comment
+    is never shown under its week), and the held set (ADR 0146: a comment is
+    released at most once). An anti-join rather than a caught integrity error, so
+    a second membership is a defect somebody sees rather than one the cutter
+    absorbs.
+    """
+    released: ColumnElement[bool] = (
+        select(ReleaseBatchMember.answer_id)
+        .where(ReleaseBatchMember.answer_id == answer_id)
+        .exists()
+    )
+    return ~released
+
+
+def _commenters_by_stream_week() -> Subquery:
+    """How many distinct students commented in each section, week and stream.
+
+    **The one count SPEC §4's threshold is compared with**, as a subquery so that
+    `stream_is_suppressed` filters it to one stream-week and `_held_comments`
+    joins it to every comment. Two copies of this count that drifted would show a
+    stream under its week by one rule and hold it for release by another, and a
+    comment could then be shown twice or never.
+
+    Counted over comments in no release batch (ADR 0182), whatever their
+    moderation state. The walk to a person is `answer.response_id` then
+    `response.user_id`, and the column is used only inside `count(distinct …)`:
+    it is grouped away here and nothing selects it.
+    """
+    return (
+        select(
+            COMMENT_VIEW.c.section_id.label("section_id"),
+            COMMENT_VIEW.c.week_id.label("week_id"),
+            COMMENT_VIEW.c.stream.label("stream"),
+            # Distinct **people**, not responses and not comment answers
+            # (`docs/MISTAKES.md` entry 50).
+            func.count(distinct(Response.user_id)).label("commenters"),
+        )
+        .join_from(COMMENT_VIEW, Answer, Answer.id == COMMENT_VIEW.c.answer_id)
+        .join(Response, Response.id == Answer.response_id)
+        .where(_in_no_release_batch(COMMENT_VIEW.c.answer_id))
+        .group_by(COMMENT_VIEW.c.section_id, COMMENT_VIEW.c.week_id, COMMENT_VIEW.c.stream)
+        .subquery()
+    )
+
+
 def _held_comments(*, threshold: int, now: datetime) -> Subquery:
     """The comments SPEC §4 has been holding back — the one definition of "held".
 
-    Three conditions, one per concern, and none of them is another's spare. The
+    Three conditions, one per concern, and none of them is another's spare: the
+    comment's **stream** was below the threshold of distinct commenters that week
+    (counted by `_commenters_by_stream_week`, the count `stream_is_suppressed`
+    reads), its window has closed, and it is in no batch. The
     predicate is written once, as a subquery, and `cut_due_release_batches` selects
     from it twice: `_sections_whose_release_is_due` counts it to decide which
     `(section, term)` the gate opens for, and `_held_answers_by_section_and_term`
@@ -677,6 +768,7 @@ def _held_comments(*, threshold: int, now: datetime) -> Subquery:
     make to *count* people and may never make to *name* one — SPEC §4's threshold is
     a number of people, so a gate that could not reach them could not enforce it.
     """
+    commenters = _commenters_by_stream_week()
     return (
         select(
             COMMENT_VIEW.c.section_id.label("section_id"),
@@ -689,9 +781,10 @@ def _held_comments(*, threshold: int, now: datetime) -> Subquery:
         .join(Answer, Answer.id == COMMENT_VIEW.c.answer_id)
         .join(Response, Response.id == Answer.response_id)
         .join(
-            RESPONSE_COUNTS_VIEW,
-            (RESPONSE_COUNTS_VIEW.c.section_id == COMMENT_VIEW.c.section_id)
-            & (RESPONSE_COUNTS_VIEW.c.week_id == COMMENT_VIEW.c.week_id),
+            commenters,
+            (commenters.c.section_id == COMMENT_VIEW.c.section_id)
+            & (commenters.c.week_id == COMMENT_VIEW.c.week_id)
+            & (commenters.c.stream == COMMENT_VIEW.c.stream),
         )
         .join(
             SurveyWindow,
@@ -699,22 +792,21 @@ def _held_comments(*, threshold: int, now: datetime) -> Subquery:
             & (SurveyWindow.week_id == COMMENT_VIEW.c.week_id),
         )
         .where(
-            # SPEC §4: the week was below the n-threshold, so its comments were
-            # never shown under their own week. A week at or above it is the
-            # instructor's to read already, and putting one of its comments in a
-            # batch too would show the same student's words twice.
-            RESPONSE_COUNTS_VIEW.c.responses < threshold,
+            # SPEC §4: the comment's stream had fewer than the threshold of
+            # distinct commenters that week, so its comments were never shown
+            # under their own week — the rule `stream_is_suppressed` applies, over
+            # the same count. A stream at or above it is the instructor's to read
+            # already, and putting one of its comments in a batch too would show
+            # the same student's words twice. Per stream (ADR 0182): a thin
+            # instructor stream is held beside a course stream that is shown.
+            commenters.c.commenters < threshold,
             # The week has closed, so that count is final. A window still taking
             # responses may yet reach the threshold, and a comment released from
             # it would then be shown twice — once in a batch and once under its
             # own week.
             SurveyWindow.closes_at < now,
-            # ADR 0146: a comment is released at most once. An anti-join rather
-            # than a caught integrity error, so a second membership is a defect
-            # somebody sees rather than one the cutter absorbs.
-            ~select(ReleaseBatchMember.answer_id)
-            .where(ReleaseBatchMember.answer_id == COMMENT_VIEW.c.answer_id)
-            .exists(),
+            # ADR 0146: a comment is released at most once.
+            _in_no_release_batch(COMMENT_VIEW.c.answer_id),
         )
         .subquery()
     )
@@ -729,14 +821,13 @@ def _sections_whose_release_is_due(
     Held is the safe direction: an under-threshold comment that stays held still
     feeds the summary and is released later, while a comment released early cannot
     be un-shown (ADR 0146 — nothing in this schema deletes a membership row). ADR
-    0152 argues each leg and records that leg (b) subsumes the other two, which is
-    why they are still written out: the legs are the reading of SPEC §4 that this
-    build stands on, and each survives a change to another's denominator.
+    0152 argues each leg; it recorded that leg (b) subsumed the other two, and
+    ADR 0182 corrects that for leg (c), which per-stream holding made the only
+    refusal of a one-week batch whose two held streams carry enough authors.
 
-    Leg (b) is the effective floor and the one the security round added. §4's
-    threshold is "n < 5 **responses** in a reporting week" — a number of people —
-    while its release trigger names "comment volume", and §3.2 gives every response
-    two comment items. So a volume that reaches the threshold can come from three
+    Leg (b) is the one the security round added. §4's threshold is a number of
+    people — distinct commenters in a stream — while its release trigger names
+    "comment volume", and §3.2 gives every response two comment items. So a volume that reaches the threshold can come from three
     students, or from one across three quiet weeks, and a release gated on the
     volume alone goes out over an author set far below what the threshold was
     chosen to protect.
@@ -760,13 +851,15 @@ def _sections_whose_release_is_due(
         #     for the term crosses the threshold".
         volume_has_crossed = volumes.get(key, 0) >= threshold
         # (b) The people behind the comments this release would carry. §4's
-        #     threshold counts responses, so the batch has to stand between a
+        #     threshold counts people, so the batch has to stand between a
         #     comment and at least that many candidate authors.
         enough_respondents = row.respondents >= threshold
         # (c) The weeks it would draw from. A batch confined to one week is the
         #     week attribution ADR 0153 removed, arriving through the report's own
         #     week-to-week delta: the release that was not there last Monday came
-        #     from the week that closed in between.
+        #     from the week that closed in between. Distinct `week_id`s, never
+        #     stream-weeks, and load-bearing since holding became per stream: one
+        #     week's two held streams can open leg (b) alone (ADR 0182).
         spans_enough_weeks = row.weeks >= WEEKS_A_RELEASE_MUST_SPAN
         if volume_has_crossed and enough_respondents and spans_enough_weeks:
             due.add(key)

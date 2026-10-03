@@ -93,6 +93,7 @@ from app.services.report_comments import (
     n_threshold,
     released_comments,
     reported_status_of,
+    stream_is_suppressed,
     visible_comments,
 )
 from app.services.section_codes import week_of_the_term
@@ -430,11 +431,14 @@ def _summary_row(
         session, section_id=section_id, week_id=week_id, token=token
     )
     responses = _responses_that_week(session, section_id=section_id, week_id=week_id)
-    # SPEC §4's threshold, read through the one function that reads it
-    # (`app.services.report_comments.n_threshold`) — the same number
+    # SPEC §4's suppression, asked of the one function that decides it
+    # (`app.services.report_comments.stream_is_suppressed`) — the same answer
     # `visible_comments` applies and `_payload` prints, so the mode a summary is
-    # written under and the rule that hid the comments cannot come apart.
-    small_n = responses < n_threshold()
+    # written under and the rule that hid this stream's comments cannot come
+    # apart. Per stream: a thin instructor stream in a full week is summarized in
+    # small-N mode beside an ordinary course summary (ADR 0182). The row's
+    # `response_count` below stays the week's responses (§5.1, ADR 0148).
+    small_n = stream_is_suppressed(session, section_id=section_id, week_id=week_id, stream=token)
 
     record = _summary_of(
         comments=comments,
@@ -1465,6 +1469,15 @@ def _payload(
             ),
             question_text=question_texts[token],
             benchmark=benchmarks_by_stream[token],
+            # SPEC §4's suppression is per stream (ADR 0182), so the notice is too:
+            # the comment service's own answer for this stream, and the threshold
+            # it compared with. No count of anybody — §5.2's "no count".
+            small_n=schema.SmallNView(
+                suppressed=stream_is_suppressed(
+                    session, section_id=section.id, week_id=week.week_id, stream=token
+                ),
+                threshold=threshold,
+            ),
         )
         for token in REPORT_STREAMS
     }
@@ -1506,7 +1519,6 @@ def _payload(
         # E4-07's own reconciliation test names it; a later ticket may retire it
         # once nothing reads it.
         comparison=workload_benchmark.comparison.mean,
-        small_n=schema.SmallNView(suppressed=responses < threshold, threshold=threshold),
         released_from_earlier_weeks=_comment_views(released),
         institution_timezone=settings.institution_timezone,
     )
