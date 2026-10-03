@@ -150,6 +150,7 @@ __all__ = [
     "scoped_reader",
     "taught_section_ids",
     "teaching_instructor_assigned",
+    "teaching_instructor_grants",
     "teaching_instructors_of",
     "transitive_purview",
 ]
@@ -469,6 +470,18 @@ _TEACHING_INSTRUCTOR_SECTIONS = text(
 # section's report, and each knows the sections they teach.
 _TEACHING_INSTRUCTORS_OF_A_SECTION = text(
     "SELECT DISTINCT granted.person_id"
+    " FROM public.assignment_scope AS granted"
+    " WHERE granted.role = CAST(:role AS public.assignment_role)"
+    " AND granted.section_id = :section_id"
+)
+
+# Every teaching-instructor grant over one section, by assignment — E5.1-02. The
+# same two conditions as `_TEACHING_INSTRUCTORS_OF_A_SECTION` above, answering the
+# assignment id beside the person, because the roster sync ends a grant by its id
+# (`public.end_teaching_instructor`). No `DISTINCT`: two identical grants are two
+# rows, and each is ended on its own.
+_TEACHING_INSTRUCTOR_GRANTS_OF_A_SECTION = text(
+    "SELECT granted.assignment_id, granted.person_id"
     " FROM public.assignment_scope AS granted"
     " WHERE granted.role = CAST(:role AS public.assignment_role)"
     " AND granted.section_id = :section_id"
@@ -1034,6 +1047,34 @@ def teaching_instructors_of(session: Session, *, section_id: UUID) -> set[UUID]:
             {"role": LMS_OWNED_ASSIGNMENT_ROLE.value, "section_id": section_id},
         ).scalars()
     )
+
+
+def teaching_instructor_grants(session: Session, *, section_id: UUID) -> dict[UUID, UUID]:
+    """Every `INSTRUCTOR` grant over this section, as `{assignment id: person id}`. (E5.1-02)
+
+    Asked by the roster sync after a complete walk, to find the grants the roster
+    no longer supports: each grant whose person the walk did not list as a
+    teaching member is ended through `public.end_teaching_instructor`, which takes
+    the assignment's id. `teaching_instructors_of` above answers the people alone
+    and cannot say which row to end.
+
+    **It lives here because the view does** — E0-41's rule that
+    `public.assignment_scope` is read through this module and nowhere else. The
+    sync holds no `SELECT` on `role_assignment`, so this is the only way it can
+    ask.
+
+    **Not an authorization decision.** It opens nothing. What it feeds is a
+    narrowing: a grant missing from this answer is a grant the sync leaves in
+    place, and the definer refuses any row that is not a section-scoped
+    `INSTRUCTOR` whatever this answers.
+    """
+    return {
+        row.assignment_id: row.person_id
+        for row in session.execute(
+            _TEACHING_INSTRUCTOR_GRANTS_OF_A_SECTION,
+            {"role": LMS_OWNED_ASSIGNMENT_ROLE.value, "section_id": section_id},
+        )
+    }
 
 
 def section_scoped_assignees(session: Session, *, section_id: UUID) -> set[UUID]:
