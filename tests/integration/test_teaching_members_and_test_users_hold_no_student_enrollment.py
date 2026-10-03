@@ -360,7 +360,15 @@ def test_a_member_the_walk_read_as_a_learner_still_lands_as_a_student(
         roster_sync, application_session, [roster_member(member.subject, roles=A_STUDENT)]
     )
     landed, _ = member.driver.launch(member.offer)
-    session_token_at(landed, STUDENT_LANDING, "A launch by a subject the walk listed as a Learner")
+    token = session_token_at(
+        landed, STUDENT_LANDING, "A launch by a subject the walk listed as a Learner"
+    )
+    location = landed.headers.get("location") or ""
+    assert token and location.startswith(STUDENT_LANDING), (
+        f"A launch by a subject the walk listed as a Learner landed at {location!r} rather than "
+        f"on the student route `{STUDENT_LANDING}` with a session. A Learner keeps a live "
+        "enrollment after the walk, so the launch must land as a student."
+    )
 
 
 # ---------------------------------------------------------------------------
