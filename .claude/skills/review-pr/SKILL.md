@@ -39,16 +39,20 @@ ticket, both security rows run when both match.
 
 | Reviewer | Fires when a changed path matches |
 |---|---|
-| `privacy-authz` | `backend/app/views_sql/`, `backend/app/services/authz`, `backend/app/services/reporting.py`, `backend/app/services/benchmarks.py`, `backend/app/services/comparison_sets.py`, `backend/app/services/report_comments.py`, `backend/app/models/identity`, `backend/app/models/org`, `scripts/db-init/`, `scripts/seed.py`, `*audit*`, `*care*`, `*safety*`, or any test marked `invariant` |
-| `app-security` | `backend/app/api/`, `backend/app/lti/`, `mock-lms/`, `mock-idp/`, `scripts/`, `Dockerfile*`, `docker-compose*`, `pyproject.toml`, `frontend/package.json`, `.github/workflows/`, `tests/evals/`, `backend/app/ai/` |
+| `privacy-authz` | `backend/app/views_sql/`, `backend/app/services/authz`, `backend/app/services/reporting.py`, `backend/app/services/benchmarks.py`, `backend/app/services/comparison_sets.py`, `backend/app/services/report_comments.py`, `backend/app/models/identity`, `backend/app/models/org`, `backend/migrations/`, `scripts/db-init/`, `scripts/seed.py`, `tests/conftest.py`, `tests/fixtures/`, `*audit*`, `*care*`, `*safety*`, or any test marked `invariant` |
+| `app-security` | `backend/app/api/`, `backend/app/lti/`, `backend/app/models/lti.py`, `backend/app/config.py`, `backend/app/services/validity.py`, `backend/app/services/provisioning.py`, `backend/app/services/grading.py`, `backend/app/services/submissions.py`, `backend/app/services/survey_read.py`, `mock-lms/`, `mock-idp/`, `scripts/`, `Makefile`, `Dockerfile*`, `docker-compose*`, `pyproject.toml`, `frontend/package.json`, `.github/workflows/`, `tests/evals/`, `backend/app/ai/` |
 
 `app-security`'s trigger reaches `tests/evals/` and `backend/app/ai/` because
 its checklist now includes the eval-floor-decrease check, and a floor is only
 diffable where it and its prompts live.
 
-The last four services in the `privacy-authz` row apply the n-threshold
-suppression rules outside `views_sql/`. They are light-lane code, but a
-suppression defect is a privacy defect, so the privacy reviewer reads them.
+Some paths in these rows are light-lane code that still guards something:
+the four services in the `privacy-authz` row apply n-threshold suppression
+outside `views_sql/`; migrations carry grants; the test fixtures feed the
+§4.1 suite; and the paths added to the `app-security` row hold LTI keys,
+the development switch, the sanctioned fail-open, provisioning, grade
+passback, and student reachability checks. A light ticket's one security
+pass must be the specialist who knows them.
 
 `data-model`, `lti-oidc`, `a11y-copy`, and `prompt-eval` no longer run here —
 they run at the epic boundary alongside `epic-exit`, `invariant-coverage`,

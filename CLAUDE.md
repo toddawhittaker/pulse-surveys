@@ -68,7 +68,7 @@ retargeted PR — close and re-cut.
 
 Every ticket's header carries a `**Lane:**` field, set at breakdown time.
 Heavy is for security code only, about one ticket in five: the paths in
-`.claude/heavy-lane-paths.md`, a ⚠ on the ticket itself, or a missing field.
+`.claude/heavy-lane-paths.md`, a ⚠ in the `Lane:` field, or a missing one.
 Everything else is light; a ⚠ epic does not make its tickets heavy. The heavy
 loop (`test-author` writes red; the implementer codes to green without
 touching a test, disputes via `docs/disputes/`; `verifier` confirms CI's

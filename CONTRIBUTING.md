@@ -249,8 +249,8 @@ request bodies, test fixtures, seed data, or logs.
 Every ticket names its lane in its header's `**Lane:**` field, assigned when
 the epic's build order is written. Heavy is for security code only, and
 should be about one ticket in five. A ticket is heavy when its diff reaches a
-path in `.claude/heavy-lane-paths.md`, when the ticket itself carries ⚠, or
-when the field is missing. A ⚠ on the epic alone does not make a ticket
+path in `.claude/heavy-lane-paths.md`, when its `**Lane:**` field carries ⚠,
+or when the field is missing. A ⚠ on the epic alone does not make a ticket
 heavy. The ticket file is the authority — an epic README's table may
 summarize, but the header decides.
 

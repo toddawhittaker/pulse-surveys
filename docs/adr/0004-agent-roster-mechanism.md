@@ -151,6 +151,20 @@ shared files and migration numbers before the breakdown, `explorer` does
 cheap searches, and `code-reviewer` reviews the whole epic for correctness
 and simplicity at the boundary.
 
+The merger refuses any ticket diff that touches CI or process files
+(`.github/`, `scripts/ci/`, `Makefile`, `.claude/`, `CLAUDE.md`,
+`CONTRIBUTING.md`), because CI runs a PR's own copy of the workflow and a
+PR that weakens a gate would pass the gate it weakened. It never reruns a
+failure in a security test, because a race there fails only some of the
+time.
+
+Known residue: the security review and the battery result that the merger
+checks are records in the PR body, written by the same session that built
+the ticket. Nothing the builder cannot write proves that they ran. Before
+this change that record already governed light tickets; it now governs
+heavy ones too. The owner accepted this in exchange for reviewing only at
+the epic boundary, where the full reviewer battery runs again.
+
 Rejected: keeping the old table and re-laning tickets by hand. It cost a
 test author, a verifier, and a mutation battery on most tickets that were
 not security code. The cost of the change is that a defect in light code is

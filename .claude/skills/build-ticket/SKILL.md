@@ -17,9 +17,9 @@ If ambiguous, ask — building the wrong ticket wastes a whole loop.
 
 ## 0. The lane
 
-Read the ticket header's `**Lane:**` field first. A missing field or a ⚠ on
-the ticket itself means **heavy**. A ⚠ on the epic alone does not; the path
-table decides — steps 1 through 7 below.
+Read the ticket header's `**Lane:**` field first. A missing field, a ⚠ in
+that field, or doubt means **heavy**. A ⚠ on the epic alone does not; the
+path table decides — steps 1 through 7 below.
 `**Lane:** light` means step 1, then the **Light lane** section at the end of
 this file in place of steps 2–5, then steps 6 and 7 unchanged. If mid-build
 the diff reaches a surface CLAUDE.md's lane rule names as heavy (the path
