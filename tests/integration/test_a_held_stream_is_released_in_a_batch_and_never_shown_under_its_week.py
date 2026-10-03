@@ -1,0 +1,578 @@
+"""A held stream goes to a release batch, and a released comment never comes back under its week.
+
+Ticket E5.1-01, criteria 3 and 4.
+
+**Criterion 3.** The owner's ruling 1 holds a stream's comments when fewer than the
+threshold of distinct students commented in that stream that week — and the
+holding is **per stream**: in a week whose course stream is shown, a thin
+instructor stream is held while its sibling is not. Held comments enter the
+cutter's held set (`_held_comments`, through `cut_due_release_batches`), are cut by
+ADR 0152's three unchanged legs, and appear only in `released_comments`, with no
+week — never in `visible_comments` for their own week.
+
+**One leg of that gate becomes load-bearing here, and it is driven.** Before this
+ticket a held set inside one week was a held set of fewer than the threshold of
+people, so leg (b) refused everything leg (c) did. Per stream, one week can supply
+two held streams with up to `2 x (threshold - 1)` distinct authors between them, so
+leg (b) can open on one week alone and only leg (c) — at least two distinct
+**weeks** — stands between that week and a batch the report's week-to-week delta
+would date (ADR 0153).
+
+**Criterion 4.** A comment with a `release_batch_member` row is never returned by
+`visible_comments` for its own week — including after the threshold setting is
+lowered from 5 to 4 **inside the test**, which is the ticket's named near miss: a
+test that started at 4 never had a release to protect.
+
+**Every batch here is cut by the cutter** (`docs/MISTAKES.md` entry 30), and every
+planted count is read back from the database before anything rests on it.
+
+**Marked `invariant`**: §4.1 item 3, and ADR 0153's floors on what a release may
+be.
+
+**Which failure a red is, before E5.1-01 lands.** Assertions throughout: on the
+current tree a week of `threshold` responses holds nothing, so the per-stream cut
+answers 0, and a lowered threshold shows a released week's comments again.
+"""
+
+from collections.abc import Callable
+from types import ModuleType
+from typing import Any
+
+import pytest
+from fixtures.report_comments import (
+    COMMENT_SERVICE_MODULE,
+    N_THRESHOLD_VARIABLE,
+    SPEC_DEFAULT_N_THRESHOLD,
+    VISIBLE_FUNCTION,
+    VISIBLE_IS_OWED,
+    CommentWorld,
+    ReleaseRows,
+    configured_threshold,
+)
+from fixtures.report_views import DEFAULT_COHORT
+from fixtures.submit import COMMENT_TEXT_COLUMN
+
+pytestmark = [pytest.mark.integration, pytest.mark.invariant]
+
+# Term weeks inside cohort `F`'s run (7 to 12); cohort `Q` runs 7 to 18, so a
+# second section shares them.
+FIRST_WEEK = 7
+SECOND_WEEK = 8
+A_SHOWN_WEEK = 9
+ANOTHER_SECTION = "Q"
+
+# Criterion 4's two thresholds, from the ticket's own sentence: "including after
+# the threshold setting is lowered from 5 to 4". Written out rather than derived,
+# because the criterion names them.
+STARTING_THRESHOLD = 5
+LOWERED_THRESHOLD = 4
+
+HELD_LABEL = "the lab handout and the lecture used different notation for the same thing"
+SHOWN_LABEL = "the weekly quiz matched what the lectures had covered"
+LATE_LABEL = "a comment that reached this closed week after its release was cut"
+OTHER_LABEL = "a quiet week in a section that never crossed its release gate"
+
+
+def texts_of(comments: Any) -> set[str]:
+    """The texts a read answered with."""
+    return {str(comment.text) for comment in comments}
+
+
+def planted_texts(answers: list[Any]) -> set[str]:
+    """The texts of planted `answer` rows."""
+    return {str(answer[COMMENT_TEXT_COLUMN]) for answer in answers}
+
+
+def read(
+    world: CommentWorld, contract: Any, *, week: int, stream: str, cohort: str = DEFAULT_COHORT
+) -> Any:
+    """`visible_comments` for one of this world's section-weeks."""
+    return contract.visible()(
+        world.session,
+        section_id=world.section_id(cohort),
+        week_id=world.week_id(week),
+        stream=stream,
+    )
+
+
+def released(world: CommentWorld, contract: Any, stream: str) -> Any:
+    """`released_comments` for this world's section and term, in one stream."""
+    return contract.released()(
+        world.session,
+        section_id=world.section_id(),
+        term_id=world.term_id(),
+        stream=stream,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Criterion 3 — held per stream, cut by the release rules, shown only in a batch.
+# ---------------------------------------------------------------------------
+
+
+def test_a_thin_stream_beside_a_shown_stream_is_held_cut_and_shown_only_in_the_release(
+    comment_world: CommentWorld, comment_contract: Any, release_rows: ReleaseRows
+) -> None:
+    """Criterion 3: a stream is held on its own commenters, whatever its sibling does.
+
+    Two closed weeks. In each, `threshold` students comment about the course —
+    so each week holds `threshold` responses and its course stream is shown —
+    and a few of them also comment about the instructor: `threshold // 2` in the
+    first week and the rest of a threshold's worth in the second. Each instructor
+    stream is below the threshold; between them they carry a threshold's worth of
+    distinct authors across two weeks, which opens all three of ADR 0152's legs.
+
+    So the cutter must cut exactly one batch holding exactly the instructor-stream
+    comments; `released_comments` must answer them for the instructor stream and
+    nothing for the course stream; and each week's own read must show its course
+    stream and none of its instructor stream.
+
+    **The mutation it kills:** holding decided by the week's response count — each
+    week has `threshold` responses, so nothing is held and nothing is cut. **The
+    near misses it kills:** a held set that takes the whole week once one stream is
+    thin (the course comments would be in the batch); and a shown stream counted
+    into the held stream's commenters, which shows the instructor stream under its
+    week.
+    """
+    contract = comment_contract
+    world = comment_world
+    threshold = contract.threshold()
+    assert threshold >= 4, (
+        f"The configured n-threshold is {threshold}; this world splits a threshold's worth of "
+        "instructor commenters over two weeks, each still under it, which needs 4 or more."
+    )
+    world.build()
+
+    first_size = threshold // 2
+    split = ((FIRST_WEEK, first_size), (SECOND_WEEK, threshold - first_size))
+    held: list[Any] = []
+    shown: dict[int, list[Any]] = {}
+    for week, thin in split:
+        world.close_week(week)
+        planted = world.week_by_stream(
+            term_week=week, both=thin, course_only=threshold - thin, label=HELD_LABEL
+        )
+        held.extend(planted[contract.instructor_stream])
+        shown[week] = planted[contract.course_stream]
+        counts = (
+            world.responses_in(term_week=week),
+            world.commenters_in(term_week=week, stream=contract.instructor_stream),
+            world.commenters_in(term_week=week, stream=contract.course_stream),
+        )
+        assert counts == (threshold, thin, threshold), (
+            f"Term week {week} holds (responses, instructor commenters, course commenters) = "
+            f"{counts}; this test planted {(threshold, thin, threshold)}. The week's responses "
+            "must reach the threshold while its instructor stream's commenters do not, or a gate "
+            "counting responses holds the same set this one does."
+        )
+
+    cut = contract.cut()(world.session)
+    assert cut == 1, (
+        f"`{contract.cut_name}` cut {cut} batch(es). Two closed weeks each hold a thin instructor "
+        f"stream ({first_size} and {threshold - first_size} distinct commenters, under the "
+        f"threshold of {threshold}) beside a course stream of {threshold}. Held per stream, the "
+        f"instructor comments are {threshold} distinct authors over two weeks — every leg of ADR "
+        "0152's gate open. Nothing cut is holding decided by the week's response count, which is "
+        "at the threshold in both weeks."
+    )
+
+    released_answers = release_rows.released_answers()
+    expected = {world.answer_key(answer) for answer in held}
+    assert released_answers == expected, (
+        f"In a batch and not a held instructor comment: {sorted(released_answers - expected)}\n"
+        f"Held and not in a batch: {sorted(expected - released_answers)}\n\n"
+        "The batch holds the thin streams' comments and nothing else. A course comment in it was "
+        "on its own week's report already, and is now shown twice — once with its week stripped."
+    )
+
+    instructor_release = released(world, contract, contract.instructor_stream)
+    assert texts_of(instructor_release) == planted_texts(held), (
+        f"`{contract.released_name}` answers {sorted(texts_of(instructor_release))} for the "
+        f"instructor stream; the batch holds {sorted(planted_texts(held))}."
+    )
+    course_release = released(world, contract, contract.course_stream)
+    assert tuple(course_release) == (), (
+        f"`{contract.released_name}` answers {sorted(texts_of(course_release))} for the course "
+        "stream, which was never held: both its weeks had a threshold's worth of commenters."
+    )
+
+    for week, _thin in split:
+        course = read(world, contract, week=week, stream=contract.course_stream)
+        assert texts_of(course) == planted_texts(shown[week]), (
+            f"Term week {week}'s course stream answered {sorted(texts_of(course))}; it holds "
+            f"{threshold} distinct commenters and is shown in full. Until it answers, the "
+            "instructor stream's emptiness below is what this read gives every stream."
+        )
+        instructor = read(world, contract, week=week, stream=contract.instructor_stream)
+        assert tuple(instructor) == (), (
+            f"Term week {week}'s instructor stream answered {sorted(texts_of(instructor))} under "
+            "its own week. Those comments are below the commenter threshold and in a release "
+            "batch; criterion 3 puts them in the batch with no week, and nowhere else."
+        )
+
+
+def test_two_held_streams_of_one_week_are_not_cut_on_their_own_and_are_cut_beside_a_second_week(
+    comment_world: CommentWorld, comment_contract: Any, release_rows: ReleaseRows
+) -> None:
+    """Leg (c) is load-bearing now: one week's two held streams are never a batch by themselves.
+
+    One closed week: `threshold - 1` students comment about the instructor only and
+    `threshold - 1` others about the course only. Both streams are held, and the
+    held set carries `2 x (threshold - 1)` distinct authors — past the threshold —
+    and a volume past it too. Legs (a) and (b) are open; only leg (c), two distinct
+    weeks, is not. Nothing may be cut.
+
+    Then one student comments about the instructor in a second closed week, and the
+    section is cut as one batch holding all of it.
+
+    **Why this is a test now and was not before.** Under a week-level hold a held
+    set inside one week had fewer than the threshold of people, so leg (b) refused
+    everything leg (c) did and the module that tests the gate says so. Held per
+    stream, that stops being true — this is the world where it stops.
+
+    **The mutation it kills:** leg (c) deleted on the old reasoning that leg (b)
+    subsumes it — this world's first half then cuts a batch confined to one week,
+    which the report's week-to-week delta dates exactly (ADR 0153). **The near miss
+    it kills:** leg (c) counting stream-weeks rather than weeks, which sees two here.
+    **Its pair is the second half**, so a cutter that never cuts is red too — and on
+    the current tree that is where it reds: a week of `2 x (threshold - 1)`
+    responses is not held there, so the second week's lone comment is the whole
+    held set and nothing is cut.
+    """
+    contract = comment_contract
+    world = comment_world
+    threshold = contract.threshold()
+    assert threshold >= 3, (
+        f"The configured n-threshold is {threshold}; two held streams of one week must together "
+        "reach it while each stays under it, which needs 3 or more."
+    )
+    world.build()
+    world.close_week(FIRST_WEEK)
+    one_week = world.week_by_stream(
+        term_week=FIRST_WEEK,
+        instructor_only=threshold - 1,
+        course_only=threshold - 1,
+        label=HELD_LABEL,
+    )
+    counts = (
+        world.responses_in(term_week=FIRST_WEEK),
+        world.commenters_in(term_week=FIRST_WEEK, stream=contract.instructor_stream),
+        world.commenters_in(term_week=FIRST_WEEK, stream=contract.course_stream),
+    )
+    assert counts == (2 * (threshold - 1), threshold - 1, threshold - 1), (
+        f"The week holds (responses, instructor commenters, course commenters) = {counts}; this "
+        f"test planted {(2 * (threshold - 1), threshold - 1, threshold - 1)}."
+    )
+    authors = 2 * (threshold - 1)
+    assert authors >= threshold, (
+        f"The two held streams carry {authors} distinct authors, which does not reach the threshold "
+        f"of {threshold}; leg (b) would then refuse too and this half would say nothing about "
+        "leg (c)."
+    )
+
+    alone = contract.cut()(world.session)
+    assert alone == 0, (
+        f"`{contract.cut_name}` cut {alone} batch(es) from one closed week whose two held streams "
+        f"carry {authors} distinct authors between them.\n\n"
+        "ADR 0152's leg (c) requires a batch to draw from at least two distinct weeks. Per stream, "
+        "one week can open leg (b) on its own, so leg (c) is the only thing between this week and "
+        "a batch whose arrival on next Monday's report names the week that just closed (ADR 0153)."
+    )
+    assert release_rows.members() == [], f"Comments were released: {release_rows.members()}."
+
+    world.close_week(SECOND_WEEK)
+    second = world.week_by_stream(term_week=SECOND_WEEK, instructor_only=1, label=HELD_LABEL)
+    assert world.commenters_in(term_week=SECOND_WEEK, stream=contract.instructor_stream) == 1
+
+    together = contract.cut()(world.session)
+    assert together == 1, (
+        f"With a second closed week holding one held comment, `{contract.cut_name}` cut "
+        f"{together} batch(es). The held set now spans two weeks and carries {authors + 1} "
+        "distinct authors: every leg is open. A cutter that still refuses is not holding both "
+        "streams of the first week — a week of "
+        f"{2 * (threshold - 1)} responses is not held at all when holding counts responses."
+    )
+    expected = {
+        world.answer_key(answer)
+        for answer in [
+            *one_week[contract.instructor_stream],
+            *one_week[contract.course_stream],
+            *second[contract.instructor_stream],
+        ]
+    }
+    released_answers = release_rows.released_answers()
+    assert released_answers == expected, (
+        f"In the batch and not held: {sorted(released_answers - expected)}\n"
+        f"Held and not in the batch: {sorted(expected - released_answers)}"
+    )
+    weeks = release_rows.weeks_by_batch()
+    assert all(
+        len(found) >= 2 for found in weeks.values()
+    ), f"A batch draws from fewer than two weeks: {weeks}."
+
+
+# ---------------------------------------------------------------------------
+# Criterion 4 — a released comment never comes back under its week.
+# ---------------------------------------------------------------------------
+
+
+def cut_two_held_weeks(
+    world: CommentWorld, contract: Any, release_rows: ReleaseRows, *, per_week: int
+) -> list[Any]:
+    """Two closed weeks of `per_week` instructor-only commenters, cut into one batch.
+
+    Answers the released answers. Called from a test body; every guard it raises
+    is a FAILED in that test (`docs/MISTAKES.md` entry 44).
+    """
+    held: list[Any] = []
+    for week in (FIRST_WEEK, SECOND_WEEK):
+        world.close_week(week)
+        planted = world.week_by_stream(term_week=week, instructor_only=per_week, label=HELD_LABEL)
+        held.extend(planted[contract.instructor_stream])
+        found = world.commenters_in(term_week=week, stream=contract.instructor_stream)
+        assert found == per_week, f"Term week {week} holds {found} instructor commenters."
+    cut = contract.cut()(world.session)
+    assert cut == 1, (
+        f"`{contract.cut_name}` cut {cut} batch(es) over two closed weeks of {per_week} instructor "
+        f"commenters each — {2 * per_week} distinct authors across two weeks. Until a release "
+        "exists there is nothing for criterion 4 to keep out of its week."
+    )
+    released_answers = release_rows.released_answers()
+    assert released_answers == {
+        world.answer_key(answer) for answer in held
+    }, f"The batch holds {sorted(released_answers)}, which is not the two weeks' held comments."
+    return held
+
+
+def test_a_released_comment_stays_out_of_its_week_after_the_threshold_drops_to_four(
+    comment_world: CommentWorld,
+    comment_contract: Any,
+    release_rows: ReleaseRows,
+    monkeypatch: pytest.MonkeyPatch,
+    import_app_module: Callable[[str], ModuleType | None],
+) -> None:
+    """Criterion 4 with its named near miss: start at 5, cut, then lower to 4 inside the test.
+
+    At a threshold of 5, two closed weeks of four instructor commenters each are
+    held and cut into one batch. The setting is then lowered to 4. Each of those
+    weeks now has as many commenters as the threshold — and its comments are in a
+    batch, so they must not come back under their week.
+
+    **The pair is in the same world**: a second section's closed week of four
+    instructor commenters that was never released (its own gate fails: four
+    authors, one week). Lowering the threshold to 4 **does** make it visible, so a
+    read that answers nothing after the lowering is red, and the emptiness
+    asserted for the released weeks is about the release (`docs/MISTAKES.md`
+    entry 3). A week of five commenters in the released section is shown at 5,
+    before the lowering, for the same reason.
+
+    **Why the module is re-imported after the lowering**: a service may build its
+    threshold from `Settings` at import; re-importing makes this true of one that
+    reads per call and of one that reads once, which is the device the module
+    beside it uses for the same setting.
+
+    **The mutation it kills:** the week read with no anti-join against
+    `release_batch_member` and a count that includes released comments — four
+    released commenters reach a threshold of 4, and the released comments are shown
+    under their week, beside the batch that already showed them with no week. That
+    re-attaches the week ADR 0153 removed. **The near miss it names:** a test that
+    began at 4 never cut this release, so the protection was never exercised.
+    """
+    contract = comment_contract
+    world = comment_world
+    starting = configured_threshold()
+    assert starting == STARTING_THRESHOLD == SPEC_DEFAULT_N_THRESHOLD, (
+        f"This test starts at a configured threshold of {starting}, and criterion 4 starts at "
+        f"{STARTING_THRESHOLD} — the documented default — and lowers it to {LOWERED_THRESHOLD}. A "
+        "different starting value is a failure of the environment this test runs under."
+    )
+    world.build()
+    world.section(ANOTHER_SECTION)
+
+    # The control section's quiet week is planted before the cut, so the cutter
+    # meets it and declines it on its own gate (four authors, one week) rather
+    # than never seeing it.
+    world.close_week(FIRST_WEEK)
+    never_released = world.week_by_stream(
+        term_week=FIRST_WEEK,
+        instructor_only=LOWERED_THRESHOLD,
+        label=OTHER_LABEL,
+        cohort=ANOTHER_SECTION,
+    )[contract.instructor_stream]
+
+    held = cut_two_held_weeks(world, contract, release_rows, per_week=LOWERED_THRESHOLD)
+
+    world.close_week(A_SHOWN_WEEK)
+    shown = world.week_by_stream(
+        term_week=A_SHOWN_WEEK, instructor_only=STARTING_THRESHOLD, label=SHOWN_LABEL
+    )[contract.instructor_stream]
+    other_count = world.commenters_in(
+        term_week=FIRST_WEEK, stream=contract.instructor_stream, cohort=ANOTHER_SECTION
+    )
+    assert other_count == LOWERED_THRESHOLD, (
+        f"The second section's week holds {other_count} instructor commenters, not "
+        f"{LOWERED_THRESHOLD}."
+    )
+    assert not release_rows.released_answers() & {
+        world.answer_key(answer) for answer in never_released
+    }, "The second section's comments are in a batch, so they cannot be this test's control."
+
+    # At 5: the shown week answers, and the released weeks do not.
+    at_five_shown = read(world, contract, week=A_SHOWN_WEEK, stream=contract.instructor_stream)
+    assert texts_of(at_five_shown) == planted_texts(shown), (
+        f"At a threshold of {STARTING_THRESHOLD}, a week of {STARTING_THRESHOLD} instructor "
+        f"commenters answered {sorted(texts_of(at_five_shown))}."
+    )
+    for week in (FIRST_WEEK, SECOND_WEEK):
+        at_five = read(world, contract, week=week, stream=contract.instructor_stream)
+        assert tuple(at_five) == (), (
+            f"At a threshold of {STARTING_THRESHOLD}, released term week {week} answered "
+            f"{sorted(texts_of(at_five))} under its own week."
+        )
+
+    # Lower the setting to 4, inside the test.
+    monkeypatch.setenv(N_THRESHOLD_VARIABLE, str(LOWERED_THRESHOLD))
+    lowered = configured_threshold()
+    assert lowered == LOWERED_THRESHOLD, (
+        f"`Settings.n_threshold_default` reads {lowered} after `{N_THRESHOLD_VARIABLE}` was set to "
+        f"{LOWERED_THRESHOLD}, so the lowering never reached configuration."
+    )
+    module = import_app_module(COMMENT_SERVICE_MODULE)
+    assert module is not None, f"There is no `{COMMENT_SERVICE_MODULE}` module. {VISIBLE_IS_OWED}"
+    lowered_read = getattr(module, VISIBLE_FUNCTION, None)
+    assert callable(lowered_read), f"No callable `{VISIBLE_FUNCTION}`. {VISIBLE_IS_OWED}"
+
+    def read_lowered(week: int, cohort: str = DEFAULT_COHORT) -> Any:
+        return lowered_read(
+            world.session,
+            section_id=world.section_id(cohort),
+            week_id=world.week_id(week),
+            stream=contract.instructor_stream,
+        )
+
+    control = read_lowered(FIRST_WEEK, ANOTHER_SECTION)
+    assert texts_of(control) == planted_texts(never_released), (
+        f"At a lowered threshold of {LOWERED_THRESHOLD}, the second section's never-released week "
+        f"of {LOWERED_THRESHOLD} commenters answered {sorted(texts_of(control))}. The lowering is "
+        "supposed to make it visible; until it does, the emptiness asserted below is what this "
+        "read gives every week."
+    )
+
+    held_texts = planted_texts(held)
+    for week in (FIRST_WEEK, SECOND_WEEK):
+        after = read_lowered(week)
+        assert not texts_of(after) & held_texts and tuple(after) == (), (
+            f"After the threshold was lowered from {STARTING_THRESHOLD} to {LOWERED_THRESHOLD}, "
+            f"released term week {week} answered {sorted(texts_of(after))} under its own week.\n\n"
+            "Criterion 4: a comment with a `release_batch_member` row is never returned for its "
+            "own week. These comments already appear in a batch with no week; showing them under "
+            "the week too re-attaches the week ADR 0153 removed, to a reader who can put this "
+            "report beside the gradebook's per-week completion ledger."
+        )
+
+
+def test_a_released_comment_stays_out_of_its_week_when_the_stream_later_reaches_the_threshold(
+    comment_world: CommentWorld, comment_contract: Any, release_rows: ReleaseRows
+) -> None:
+    """The anti-join on its own: a stream reaching the threshold shows only unreleased comments.
+
+    Two weeks of `threshold - 1` instructor commenters are cut into one batch. Then
+    a full threshold of new students' instructor comments arrives in the first of
+    those weeks. That stream now has the threshold of **unreleased** commenters and
+    is shown — and it must show exactly the new comments, none of the released ones.
+
+    **How this world is planted, said plainly.** The product's write path takes no
+    response into a closed window, so this is planted directly: it is the one way
+    to stand a released comment in a stream that is then shown, which is the state
+    the work order's D2 anti-join exists for. Whatever route brings a comment into
+    a released stream-week later, the rule is the same.
+
+    **The mutation it kills:** the anti-join against `release_batch_member` dropped
+    from the comment read while the count is right — the stream is shown and the
+    released comments come back under their week. **The near miss it must
+    survive:** suppressing the whole stream because some of it was released, which
+    would withhold the new comments; the equality below requires them.
+    """
+    contract = comment_contract
+    world = comment_world
+    threshold = contract.threshold()
+    assert threshold >= 3, f"The configured n-threshold is {threshold}; this world needs 3 or more."
+    world.build()
+
+    held = cut_two_held_weeks(world, contract, release_rows, per_week=threshold - 1)
+
+    late = world.week_by_stream(term_week=FIRST_WEEK, instructor_only=threshold, label=LATE_LABEL)[
+        contract.instructor_stream
+    ]
+    total = world.commenters_in(term_week=FIRST_WEEK, stream=contract.instructor_stream)
+    assert total == 2 * threshold - 1, (
+        f"The first week's instructor stream holds {total} commenters; this test planted "
+        f"{threshold - 1} released and {threshold} new."
+    )
+
+    shown = read(world, contract, week=FIRST_WEEK, stream=contract.instructor_stream)
+    assert texts_of(shown) == planted_texts(late), (
+        f"The first week's instructor stream answered {sorted(texts_of(shown))}.\n\n"
+        f"Released and shown under the week: {sorted(texts_of(shown) & planted_texts(held))}\n"
+        f"New and missing: {sorted(planted_texts(late) - texts_of(shown))}\n\n"
+        "Criterion 4: a comment in a release batch is never returned for its own week. The work "
+        "order's D2 excludes every released comment from the read, so a stream shown on its "
+        f"{threshold} unreleased commenters shows those {threshold} comments and no others."
+    )
+
+
+def test_released_commenters_do_not_count_toward_their_weeks_threshold(
+    comment_world: CommentWorld, comment_contract: Any, release_rows: ReleaseRows
+) -> None:
+    """The count's half of criterion 4: released authors are not the week's commenters any more.
+
+    Two weeks of `threshold - 1` instructor commenters are cut into one batch. Then
+    one new student's instructor comment arrives in the first of those weeks. The
+    stream now holds `threshold` commenters in all — `threshold - 1` released and
+    one not — and must show nothing: the work order's D1 counts only comments in no
+    batch, so one unreleased commenter is below the threshold.
+
+    **The shown stream beside it** is a week of `threshold` instructor commenters in
+    the same section, asserted first (`docs/MISTAKES.md` entry 3).
+
+    **The mutation it kills:** released comments counted toward the threshold while
+    the read excludes them — the count reaches the threshold, the anti-join leaves
+    one comment, and one student's words are shown alone under a week heading. That
+    is the defect criterion 1 exists to close, arriving through the release.
+    """
+    contract = comment_contract
+    world = comment_world
+    threshold = contract.threshold()
+    assert threshold >= 3, f"The configured n-threshold is {threshold}; this world needs 3 or more."
+    world.build()
+
+    cut_two_held_weeks(world, contract, release_rows, per_week=threshold - 1)
+
+    world.close_week(A_SHOWN_WEEK)
+    shown_planted = world.week_by_stream(
+        term_week=A_SHOWN_WEEK, instructor_only=threshold, label=SHOWN_LABEL
+    )[contract.instructor_stream]
+    lone = world.week_by_stream(term_week=FIRST_WEEK, instructor_only=1, label=LATE_LABEL)[
+        contract.instructor_stream
+    ]
+    total = world.commenters_in(term_week=FIRST_WEEK, stream=contract.instructor_stream)
+    assert total == threshold, (
+        f"The first week's instructor stream holds {total} commenters; this test planted "
+        f"{threshold - 1} released and one new."
+    )
+
+    shown = read(world, contract, week=A_SHOWN_WEEK, stream=contract.instructor_stream)
+    assert texts_of(shown) == planted_texts(shown_planted), (
+        f"A week of {threshold} instructor commenters answered {sorted(texts_of(shown))}. Until it "
+        "answers, the emptiness asserted below is what this read gives every week."
+    )
+
+    after = read(world, contract, week=FIRST_WEEK, stream=contract.instructor_stream)
+    assert tuple(after) == (), (
+        f"The first week's instructor stream answered {sorted(texts_of(after))}. It holds one "
+        f"unreleased commenter ({sorted(planted_texts(lone))}) beside {threshold - 1} whose comments "
+        "are in a batch.\n\n"
+        "The work order's D1 counts only comments with no `release_batch_member` row: released "
+        "authors already surfaced in a batch with no week, and counting them here lifts one "
+        "student's comment over the threshold to stand alone under its week."
+    )

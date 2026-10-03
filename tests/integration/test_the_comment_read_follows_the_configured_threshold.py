@@ -1,32 +1,49 @@
-"""Where the small-N boundary is, and whose number decides it — ticket E4-04.
+"""Where the small-N boundary is, and whose number decides it — tickets E4-04 and E5.1-01.
 
-SPEC §4 states the rule and its configurability in one breath: "Small-N handling
-(n < 5 responses in a reporting week): instructors see rating distributions and
-the AI summary, but **no raw comments** … Threshold value is configurable
-(default 5)." Two separate claims, and E4-04's third known trap is that a suite
-run against an environment carrying 5 cannot tell them apart — "the configured
-value" and "the spec's default" are then the same number, and a service holding a
-literal 5 satisfies both. E0-41's mutation battery measured exactly that survivor
-one ticket over, in `services/authz.py`.
+SPEC §4 states the rule and its configurability in one breath: raw comments are
+hidden below the n-threshold, and "Threshold value is configurable (default 5)."
+Two separate claims, and E4-04's third known trap is that a suite run against an
+environment carrying 5 cannot tell them apart — "the configured value" and "the
+spec's default" are then the same number, and a service holding a literal 5
+satisfies both. E0-41's mutation battery measured exactly that survivor one ticket
+over, in `services/authz.py`.
 
-So this module drives the boundary three times:
+**What the threshold counts changed in E5.1-01**, and this module is where §4.1
+item 3 is asserted, so it changed here too. E4-04 compared the week's *responses*
+with the threshold. The owner's ruling 1 makes the unit **distinct students who
+commented in that stream that week**: a week of six responses in which one student
+wrote about the instructor shows that one comment under a count of responses, and
+the gradebook's per-week completion ledger (ADR 0125) names its author.
 
-  - **one response below the threshold**, which must return nothing;
+So this module drives the boundary four ways:
+
+  - **one commenter below the threshold**, which must return nothing;
   - **exactly at the threshold**, which must return the week's comments — the
     other half of the same pair, and the half that says `<` was not written where
     `<=` was meant;
+  - **the same pair in weeks whose response count is at or above the threshold
+    while the stream's commenter count is not** — the only worlds in which a gate
+    counting responses and a gate counting commenters answer differently, so the
+    only pair that turns red when the count is swapped back to responses
+    (E5.1-01, criterion 2);
   - **under an institution's own threshold that is deliberately not SPEC §4's
     default**, both sides again, so nothing here is satisfied by a hard-coded 5.
 
-**Every planted week's response count is read back out of the database** before
-any assertion about it, which is E4-04's first known trap answered: a "week of
-four" that seeded three is a fixture bug that makes every suppression assertion
-in this epic true for the wrong reason, silently.
+In the first two and the last, every response carries one comment in the stream
+read, so the response count and the commenter count are the same number; those
+tests pin where the boundary is and whose number it is, and the third pair pins
+what is counted.
+
+**Every planted week's counts are read back out of the database** before any
+assertion about them, which is E4-04's first known trap answered: a "week of four"
+that seeded three is a fixture bug that makes every suppression assertion in this
+epic true for the wrong reason, silently.
 
 **Which failure a red is, before E4-04 lands.** `comment_contract.visible()` is a
 `pytest.fail` naming `app.services.report_comments` and the signature the work
 order settles — a FAILED assertion, not a setup error
-(`docs/MISTAKES.md` entry 44).
+(`docs/MISTAKES.md` entry 44). Before E5.1-01 lands, the commenter pair's hidden
+halves fail on an assertion: a read counting responses shows the thin stream.
 """
 
 from collections.abc import Callable
@@ -41,6 +58,7 @@ from fixtures.report_comments import (
     CommentWorld,
     configured_threshold,
 )
+from fixtures.report_views import COURSE_STREAM, INSTRUCTOR_STREAM
 
 # **Marked `invariant`, which puts this module in CI's isolated §4.1 pass** where a
 # skip or an empty collection is a failure (`scripts/ci/check_invariants.py`).
@@ -177,6 +195,153 @@ def test_a_week_exactly_at_the_threshold_returns_its_comments(
         "is not small-N and its comments are the instructor's to read. A boundary written one "
         "response too high withholds a week of feedback from exactly the sections the product "
         "exists to reach."
+    )
+
+
+def plant_by_stream(
+    world: CommentWorld, *, term_week: int, instructor_only: int, course_only: int
+) -> tuple[int, int, int]:
+    """One closed week of two disjoint groups, and its three counts read back from the database.
+
+    Answers `(responses, instructor commenters, course commenters)` so the test
+    that planted the week asserts all three in its own body.
+    """
+    world.close_week(term_week)
+    world.week_by_stream(
+        term_week=term_week,
+        instructor_only=instructor_only,
+        course_only=course_only,
+        label=A_COMMENT,
+    )
+    return (
+        world.responses_in(term_week=term_week),
+        world.commenters_in(term_week=term_week, stream=INSTRUCTOR_STREAM),
+        world.commenters_in(term_week=term_week, stream=COURSE_STREAM),
+    )
+
+
+def test_a_stream_one_commenter_short_is_hidden_in_a_week_whose_responses_reach_the_threshold(
+    comment_world: CommentWorld, comment_contract: Any
+) -> None:
+    """The hidden half of the commenter pair — E5.1-01's criterion 2, and the one that counts.
+
+    One week, two disjoint groups of respondents: `threshold - 1` students comment
+    about the instructor and nothing else; `threshold` others comment about the
+    course and nothing else. The week holds `2 x threshold - 1` responses — past
+    the threshold — and the instructor stream holds one commenter fewer than it.
+    The instructor stream must return nothing, beside the course stream of the
+    same week returning its comments.
+
+    **This is the world that tells the two counts apart**, which is why it is
+    shaped this way rather than with every respondent commenting in both streams:
+    there, responses and each stream's commenters are one number and a gate
+    counting either passes. Here they differ, in the direction that discloses.
+
+    **The mutation it kills:** the commenter count swapped back to the week's
+    response count — `2 x threshold - 1` reaches the threshold and the thin stream
+    is shown. **Near misses it also kills:** distinct commenters counted across the
+    whole week rather than in the stream (`2 x threshold - 1` people commented
+    somewhere); comment answers counted across the week (the same number, one
+    answer each); and the stream filter dropped from the count, so the instructor
+    stream borrows the course stream's commenters.
+
+    **A near miss this world cannot reach, named rather than claimed**
+    (`docs/MISTAKES.md` entry 14): comment answers counted *within* the stream
+    rather than people. One student writes at most one comment per stream per week
+    — one response per student per section-week (E2-05), one answer per question
+    per response — so inside one stream-week the two counts are always equal, and
+    no fixture world through the schema can pull them apart.
+
+    **The pair is the test below**, which puts exactly the threshold of commenters
+    behind a stream in the same shape of world and requires them shown.
+    """
+    contract = comment_contract
+    world = comment_world
+    threshold = contract.threshold()
+    assert threshold >= 2, f"The configured n-threshold is {threshold}; nothing is below it."
+    world.build()
+
+    counts = plant_by_stream(
+        world, term_week=BELOW_WEEK, instructor_only=threshold - 1, course_only=threshold
+    )
+    assert counts == (2 * threshold - 1, threshold - 1, threshold), (
+        f"The week holds (responses, instructor commenters, course commenters) = {counts} and this "
+        f"test planted {(2 * threshold - 1, threshold - 1, threshold)}. The responses must reach "
+        "the threshold while the instructor stream's commenters do not, or a gate counting "
+        "responses answers this week the same way as one counting commenters."
+    )
+
+    read = contract.visible()
+    course = read_week(read, comment_world, BELOW_WEEK, contract.course_stream)
+    assert len(course) == threshold, (
+        f"The course stream of the same week answered {len(course)} comments, and {threshold} "
+        "distinct students commented in it. Until it answers, the emptiness asserted below is what "
+        "this read gives every stream (`docs/MISTAKES.md` entry 3)."
+    )
+
+    instructor = read_week(read, comment_world, BELOW_WEEK, contract.instructor_stream)
+    assert tuple(instructor) == (), (
+        f"The instructor stream answered {[comment.text for comment in instructor]}. "
+        f"{threshold - 1} distinct students commented in it this week — one below the configured "
+        f"threshold of {threshold} — while the week holds {2 * threshold - 1} responses.\n\n"
+        "SPEC §4.1 item 3 hides raw comments below the n-threshold, and the owner's ruling 1 makes "
+        "the threshold a count of distinct commenters in that stream. A read that shows this "
+        "stream is counting the week's responses, or the week's commenters across both streams, "
+        "and each of those is a count of something other than the people the threshold protects "
+        "(`docs/MISTAKES.md` entry 50)."
+    )
+
+
+def test_a_stream_of_exactly_threshold_commenters_is_shown_beside_a_stream_one_short(
+    comment_world: CommentWorld, comment_contract: Any
+) -> None:
+    """The shown half of the commenter pair: exactly the threshold of commenters is not small-N.
+
+    The mirror of the test above, in one week: `threshold` students comment about
+    the instructor only; `threshold - 1` others comment about the course only. The
+    instructor stream is shown in full; the course stream, one commenter short in
+    a week of `2 x threshold - 1` responses, returns nothing.
+
+    **Two halves in one world**, so neither is satisfied by a read that answers the
+    same thing for every stream. The shown half is asserted first.
+
+    **The mutation it kills:** `<=` written where `<` was meant in the commenter
+    comparison, which hides a stream sitting exactly on the threshold — invisible
+    to every hidden-stream test in this module. Its course half kills the count
+    swapped back to responses a second time, in the other stream, so a gate that
+    counted commenters for one stream and responses for the other is red in one of
+    the two tests.
+    """
+    contract = comment_contract
+    world = comment_world
+    threshold = contract.threshold()
+    assert threshold >= 2, f"The configured n-threshold is {threshold}; nothing is below it."
+    world.build()
+
+    counts = plant_by_stream(
+        world, term_week=AT_WEEK, instructor_only=threshold, course_only=threshold - 1
+    )
+    assert counts == (2 * threshold - 1, threshold, threshold - 1), (
+        f"The week holds (responses, instructor commenters, course commenters) = {counts} and this "
+        f"test planted {(2 * threshold - 1, threshold, threshold - 1)}."
+    )
+
+    read = contract.visible()
+    instructor = read_week(read, comment_world, AT_WEEK, contract.instructor_stream)
+    assert len(instructor) == threshold, (
+        f"The instructor stream answered {len(instructor)} comments: "
+        f"{[comment.text for comment in instructor]}. Exactly {threshold} distinct students "
+        "commented in it this week, which is the configured threshold, so it is not small-N and its "
+        "comments are the instructor's to read. A boundary written one commenter too high withholds "
+        "a week of feedback from exactly the streams that sit on the line."
+    )
+
+    course = read_week(read, comment_world, AT_WEEK, contract.course_stream)
+    assert tuple(course) == (), (
+        f"The course stream answered {[comment.text for comment in course]}. {threshold - 1} "
+        f"distinct students commented in it — one below the threshold of {threshold} — in a week "
+        f"of {2 * threshold - 1} responses. A read showing it is counting responses, or counting "
+        "people across both streams, rather than the people who commented in this one."
     )
 
 

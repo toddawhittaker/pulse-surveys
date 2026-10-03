@@ -334,10 +334,15 @@ TAUGHT_LENGTH_WEEKS = 6
 # published is decided by where `ReportDoor.pretend` puts the clock and by
 # nothing else.
 #
-#   - course week 1 — a week at or above the n-threshold, so its comments are
-#     visible and criterion 4 has something to compare;
-#   - course weeks 3 and 4 — two under-threshold closed weeks whose comments are
-#     held, which is the world ADR 0152's three-legged release gate needs;
+#   - course week 1 — five respondents, each commenting in the instructor stream
+#     and none in the course stream, so its instructor stream is at the
+#     n-threshold of distinct commenters and its comments are visible, and
+#     criterion 4 has something to compare. Its course stream holds no commenter
+#     and is suppressed (E5.1-01 counts commenters per stream), which is the pair
+#     `test_the_report_payload_carries_small_n_per_stream.py` reads;
+#   - course weeks 3 and 4 — two closed weeks whose instructor streams are under
+#     the threshold of commenters, so their comments are held, which is the world
+#     ADR 0152's three-legged release gate needs;
 #   - course weeks 2 and 5 — the enrolment-window boundary pair (ADR 0147's
 #     re-homed criterion 5): the leaver is in one denominator and not the other;
 #   - course week 6 — nobody answered, which is criterion 7's whole subject, and
@@ -1146,6 +1151,17 @@ class ReportWorldRows:
         suites for the wrong reason.
         """
         return self.world.responses_in(term_week=TERM_WEEK_OF_COURSE_WEEK[course_week])
+
+    def commenters_in(self, course_week: int, stream: str) -> int:
+        """How many distinct students commented in one stream of one course week.
+
+        E5.1-01 makes this the number SPEC §4's threshold is compared with, so a
+        test reasoning about a stream's suppression reads it back rather than
+        trusting `ANSWERED_BY` and `HELD_COMMENTS`.
+        """
+        return self.world.commenters_in(
+            term_week=TERM_WEEK_OF_COURSE_WEEK[course_week], stream=stream, cohort=TAUGHT_COHORT
+        )
 
     def enrolled_user_ids(self) -> list[Any]:
         """Every `user` key this world enrolled, respondents and leaver alike."""

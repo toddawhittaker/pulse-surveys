@@ -69,7 +69,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 #
 # Five, because that is `RESPONDENTS` in the canonical world and the size its own
 # above-threshold week is planted at; the premise assertion in each test reads the
-# `small_n.suppressed` flag rather than trusting the number.
+# instructor stream's `small_n.suppressed` flag rather than trusting the number.
 #
 # The sentences are distinctive, over SPEC §3.3's twenty-five character floor, and
 # share no phrase with `FULL_WEEK_COMMENTS` — a shared clause would make a
@@ -127,15 +127,25 @@ def _first_words_of_the_taught_sections_comments(door: ReportDoor, contract: Any
 def _assert_the_week_shows_its_comments(
     body: Any, answered: Any, contract: Any, *, where: str
 ) -> None:
-    """One read's canary: the week is not suppressed and its own words are in it."""
-    suppressed = contract.member(
-        body, contract.small_n_member, contract.suppressed_field, answered=answered
+    """One read's canary: the instructor stream, where both sections' comments are planted, is shown.
+
+    Read per stream since E5.1-01, which moves `small_n` onto each stream: both
+    sections' comments are planted in the instructor stream, so that stream's flag
+    is the one that says whether this week hands any back. The course stream holds
+    no comments in either section and is suppressed, which says nothing here.
+    """
+    suppressed = contract.stream_member(
+        body,
+        INSTRUCTOR_STREAM,
+        contract.small_n_member,
+        contract.suppressed_field,
+        answered=answered,
     )
     assert suppressed is False, (
-        f"{where} declares itself suppressed, so it hands back no comments at all and every "
-        "absence this module asserts would hold for a reason that has nothing to do with the "
-        "section boundary (`docs/MISTAKES.md` entry 30). The week is planted at or above the "
-        "configured threshold."
+        f"{where} declares its instructor stream suppressed, so it hands back no comments at all "
+        "and every absence this module asserts would hold for a reason that has nothing to do with "
+        "the section boundary (`docs/MISTAKES.md` entry 30). The stream is planted with at least "
+        "the configured threshold of distinct commenters."
     )
 
 
