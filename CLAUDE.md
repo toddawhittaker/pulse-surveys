@@ -10,9 +10,8 @@ feature decisions, system behavior, rationale, status, or history.
 - What has already gone wrong here → `docs/MISTAKES.md`, read whole before you
   start; it is the rules, and each links to its incident in `docs/mistakes/`
 
-Before adding a line here, ask whether it would still be true if the process
-changed; if yes, it belongs elsewhere. No feature decisions, status, or
-changelog entries. Under 150 lines; growth means something here belongs elsewhere.
+Before adding a line, ask whether it would still be true if the process
+changed; if yes, it belongs elsewhere. Under 150 lines.
 
 **Active epic:** E5 — Benchmarks & comparison sets. Tickets: `docs/tickets/e5/README.md`.
 
@@ -59,26 +58,28 @@ commit in small coherent steps, subject naming the ticket (`e1/launch-flow:
 validate state and nonce on LTI launch`); open a PR into the epic branch using
 the template; then merge it as the paragraph below says.
 
-**Never merge an epic branch into `main`** — Todd's call, always; his review
-happens at that boundary. A ticket PR merges into its epic
-without him under the three conditions `.claude/agents/merger.md` verifies;
-the merger refuses what still waits for Todd: `process/` PRs, and ⚠-epic or
-heavy-lane-path tickets, where SPEC §14.2's line-by-line review lives. Never
-an admin override, a red-CI merge, or a retargeted PR — close and re-cut.
+**Never merge an epic branch into `main`** — Todd's call, always; he reviews
+there, line by line on a ⚠ epic (SPEC §14.2). Every ticket PR, any lane or
+epic, merges without him once `.claude/agents/merger.md`'s conditions hold;
+only `process/` PRs wait. Never an admin override, a red-CI merge, or a
+retargeted PR — close and re-cut.
 
 ## How a ticket is built: two lanes
 
-Every ticket's header carries a `**Lane:**` field, set at breakdown time; a
-missing field, any ⚠, or doubt means heavy. The heavy loop (`test-author`
-writes red; the implementer codes to green without touching a test, disputes
-via `docs/disputes/`; `verifier` confirms CI's green run on the commit and
-runs the scoped mutation battery) guards the attacked surfaces named in
-`.claude/heavy-lane-paths.md`. The light lane (`builder` writes code and
-ordinary tests together; `verifier` confirms CI's green run and the standing
-gates fresh, no battery) covers the rest. Neither lane believes a green on its
-author's word, and everything outside the loop — the per-PR security review
-included — stands unchanged in both. A light diff reaching a heavy surface
-stops and re-lanes in the PR record. Mechanics: `.claude/skills/build-ticket`.
+Every ticket's header carries a `**Lane:**` field, set at breakdown time.
+Heavy is for security code only, about one ticket in five: the paths in
+`.claude/heavy-lane-paths.md`, a ⚠ on the ticket itself, or a missing field.
+Everything else is light; a ⚠ epic does not make its tickets heavy. The heavy
+loop (`test-author` writes red; the implementer codes to green without
+touching a test, disputes via `docs/disputes/`; `verifier` confirms CI's
+green run and runs the scoped mutation battery) guards those paths. The light
+lane (`builder` writes code and ordinary tests together; CI's green run on
+the head commit, checked by the merger, is the verification) covers the
+rest. Neither lane believes a green on its author's word, and both get the
+per-PR security review. A light diff reaching a heavy path stops and
+re-lanes in the PR record. `architect` designs each epic before its
+breakdown, giving every shared file and migration number one owning ticket;
+`explorer` does cheap searches. Mechanics: `.claude/skills/build-ticket`.
 
 ## CI and build discipline
 
@@ -103,16 +104,14 @@ pass and treats a skip, an xfail, or an empty collection as a failure;
 deliberate PR whose subject is moving them. The threat and self-harm recall
 floor (§9.3) is a hard gate; lowering it is a safety decision and Todd's call.
 
-**Reviews are tiered.** Every PR: `spec-conformance` plus one
-diff-picked security pass (`privacy-authz` on §4.1 surfaces, else
-`app-security` on its, else a generic sonnet-sized pass) from a fresh
-context, diff before ticket. Other specialists: heavy-lane diffs and the
-epic boundary only, which runs the full Opus battery. One round and one
+**Reviews are tiered.** Every PR gets one fresh-context security pass picked
+from the diff by `review-pr`, diff before ticket. Heavy PRs add
+`spec-conformance` and the matching specialists. The epic boundary runs the
+full Opus battery, `code-reviewer` included; its findings become ticket PRs. One round and one
 fix-check per PR; findings name the head SHA; a fixed-over pass re-runs.
 
 **Pin dependency versions and commit lockfiles.** No floating ranges, no
-unpinned tool versions in CI. Dependabot proposes upgrades through the same
-gates as anything else.
+unpinned tool versions in CI.
 
 **Do not weaken a gate to get past it.** An ignore rule, an exclusion, a
 `continue-on-error`, or a raised budget changes what the project guarantees and

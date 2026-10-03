@@ -128,3 +128,30 @@ the same reason.
   `/review-selftest` exists and why it should run after any reviewer edit.
 - **The hooks depend on `jq`** being present. They fail closed if the payload
   cannot be parsed.
+
+## Amendment, 2026-10-03: narrow heavy lane, merge every ticket
+
+Most tickets had gone heavy, about four in five, because the path table
+covered nearly all backend code and defaulted unlisted backend paths to
+heavy. The heavy loop is now for security code only, aiming at one ticket in
+five: `.claude/heavy-lane-paths.md` names the §4.1 read paths, authz,
+identity, sessions and tokens, LTI, Care, safety, and audit, and any other
+path is light. The per-PR security review still runs on every PR, so an
+unlisted path is reviewed before it merges.
+
+The light lane drops its verifier pass; the merger's check of CI's green run
+on the exact head commit is the independent check. `spec-conformance` runs
+per PR only on heavy tickets. The merger now lands every ticket PR, ⚠ epics
+included, once its conditions hold, and reruns a failed job once when it
+looks like a flaky test. Todd's review, line by line on ⚠ epics, happens at
+the epic boundary (SPEC §14.2 item 3).
+
+Three agents join the roster: `architect` designs each epic and assigns
+shared files and migration numbers before the breakdown, `explorer` does
+cheap searches, and `code-reviewer` reviews the whole epic for correctness
+and simplicity at the boundary.
+
+Rejected: keeping the old table and re-laning tickets by hand. It cost a
+test author, a verifier, and a mutation battery on most tickets that were
+not security code. The cost of the change is that a defect in light code is
+first read by a general reviewer at the epic boundary rather than per PR.
