@@ -10,6 +10,7 @@ import {
   A_WEEK_WHOSE_TOP_LEVEL_COMPARISON_DIVERGES,
   A_WEEK_WITH_THE_BENCHMARKS_WITHHELD,
   A_WEEK_NOBODY_ANSWERED,
+  A_WEEK_WITH_ONE_THIN_STREAM,
   A_WEEK_WITH_A_HELD_COMMENT,
   A_WEEK_WITH_A_RELEASE,
   A_WEEK_WITH_NOBODY_ENROLLED,
@@ -70,7 +71,7 @@ const COMPARISON_WORKLOAD_MEAN = '9.0 h';
 
 /** Copy the components ship, transcribed the same way. */
 const ABSENT_SUMMARY = 'No summary was written for this week.';
-const SMALL_N_TITLE = 'Comments are hidden this week';
+const SMALL_N_TITLE = 'No raw comments are shown here this week';
 const NO_RESPONSES = 'No responses yet this week';
 
 /** `app.api.instructor`'s two refusal sentences, transcribed from that module. */
@@ -481,7 +482,8 @@ describe('a published week with data in it', () => {
     rerender(
       <InstructorMondayReport sectionId={SECTION_ID} week={7} onSelectWeek={chosen} />,
     );
-    await screen.findByRole('region', { name: SMALL_N_TITLE });
+    // Both of that week's streams are suppressed, so it carries two notices.
+    await screen.findAllByRole('region', { name: SMALL_N_TITLE });
     await waitFor(() => {
       expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1 }));
     });
@@ -510,6 +512,11 @@ describe('a week nobody answered', () => {
     // Neither stream had a summary, and both say so where the panel would be.
     expect(screen.getAllByText(ABSENT_SUMMARY)).toHaveLength(2);
     expect(screen.queryAllByRole('article')).toHaveLength(0);
+
+    // Nobody commented, and an empty stream is suppressed exactly like a thin
+    // one (ADR 0182), so each group carries the notice and neither says the
+    // week was empty — a reader cannot tell nobody from one person.
+    expect(screen.getAllByRole('region', { name: SMALL_N_TITLE })).toHaveLength(2);
   });
 
   it('renders no response bar at all for a section nobody is enrolled in', async () => {
@@ -551,39 +558,45 @@ describe('the credit-rule note', () => {
   });
 });
 
-describe('a week below the response threshold', () => {
-  it('states the reason once, under both comment groups', async () => {
-    // E4-21 scope item 6, and `design/InstructorMondayReport.dc.html:69-73`: the
-    // suppression is a fact about the week, so the notice explaining it follows
-    // both groups rather than sitting inside the first. The mutation this kills
-    // is the notice back in a group — which reads as a statement about that
-    // group's comments, and which put it between the two summaries.
+describe('a week whose streams are below the commenter threshold', () => {
+  it('states the reason inside each suppressed group, after its summary', async () => {
+    // E5.1-01: SPEC §4's threshold counts distinct commenters per stream
+    // (ADR 0182), so the notice is a fact about a group and each suppressed
+    // group states it, after its summary. The mutation this kills is E4-21's
+    // single page-level notice under both groups, which claims both are held
+    // whether or not they are.
     servingWeeks({ 7: A_SMALL_N_WEEK });
     const { container } = open(7);
     await screen.findByRole('heading', { level: 2, name: 'Comments' });
 
-    const notice = screen.getByRole('region', { name: SMALL_N_TITLE });
     const groups = [...container.querySelectorAll('.pulse-comment-group')];
     expect(groups).toHaveLength(2);
-    for (const group of groups) {
-      expect(group.contains(notice)).toBe(false);
+    const notices = screen.getAllByRole('region', { name: SMALL_N_TITLE });
+    expect(notices).toHaveLength(2);
+    for (const [index, group] of groups.entries()) {
+      const notice = notices[index] as Element;
+      expect(group.contains(notice)).toBe(true);
+      // Both groups of this fixture have a summary, so the panel must be found.
+      const summary = group.querySelector('.pulse-ai-panel');
+      expect(summary).not.toBeNull();
       expect(
-        group.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
-        'the notice is not after both comment groups',
+        (summary as Element).compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
+        'the notice is not after its group\'s summary',
       ).toBeTruthy();
     }
 
-    // And it speaks the mockup's whole sentence, with the week's own counts on
-    // the front of it: three of twenty-one answered, against a threshold of
-    // four. Three different numbers, so none of them can stand in for another.
-    expect(
-      screen.getByText(
-        'Only 3 of 21 students have responded. To keep individual voices unidentifiable, raw comments stay hidden until at least 4 responses arrive. The AI summary above draws on everything received so far.',
-      ),
-    ).toBeTruthy();
+    // The whole sentence, with the payload's threshold of four and no count of
+    // anybody: the week's three of twenty-one answered is in the Participation
+    // region and is not repeated here, because inside a group it would read as
+    // that group's count (§5.2).
+    const sentence = `To keep individual voices unidentifiable, raw comments in this group are shown only when at least ${String(SMALL_N_THRESHOLD)} students comment in it in the same week. Comments held back may appear later among comments from earlier weeks, with no week named. The AI summary above draws on everything received so far.`;
+    expect(screen.getAllByText(sentence)).toHaveLength(2);
+    for (const notice of notices) {
+      expect((notice.textContent ?? '').match(/\d+/g)).toEqual([String(SMALL_N_THRESHOLD)]);
+    }
   });
 
-  it('keeps both summaries, shows no comment card, and states the reason once', async () => {
+  it('keeps both summaries and shows no comment card', async () => {
     servingWeeks({ 7: A_SMALL_N_WEEK });
     const { container } = open(7);
     await screen.findByRole('heading', { level: 2, name: 'Comments' });
@@ -594,14 +607,35 @@ describe('a week below the response threshold', () => {
     expect(screen.getByRole('region', { name: 'AI summary — course comments' })).toBeTruthy();
     expect(screen.queryAllByRole('article')).toHaveLength(0);
 
-    // §4.1 item 5: confidentiality copy appears exactly once per surface. Both
-    // groups are suppressed and exactly one of them carries the notice.
-    expect(screen.getAllByRole('region', { name: SMALL_N_TITLE })).toHaveLength(1);
-    expect((container.textContent ?? '').match(/raw comments stay hidden/g)).toHaveLength(1);
-
     // The configured threshold is the payload's number, not a 5 written down
     // anywhere: the fixture uses 4 for exactly that reason.
-    expect(container.textContent).toContain(`at least ${String(SMALL_N_THRESHOLD)} responses`);
+    expect(container.textContent).toContain(`at least ${String(SMALL_N_THRESHOLD)} students`);
+  });
+});
+
+describe('a full week with one thin stream', () => {
+  it('withholds the thin group and shows the other, with one notice in the thin one', async () => {
+    // The case E5.1-01 exists for: thirteen students answered, so a threshold
+    // counted in responses would show both groups, but the instructor stream
+    // is below the commenter threshold. Its group carries the notice and no
+    // card; the course group shows its comment and no notice. The course card
+    // is the positive control that makes the instructor group's emptiness a
+    // fact about its suppression (`docs/MISTAKES.md` entry 3).
+    servingWeeks({ 4: A_WEEK_WITH_ONE_THIN_STREAM });
+    const { container } = open(4);
+    await screen.findByRole('heading', { level: 2, name: 'Comments' });
+
+    const [instructorGroup, courseGroup] = [
+      ...container.querySelectorAll('.pulse-comment-group'),
+    ] as Element[];
+    const notices = screen.getAllByRole('region', { name: SMALL_N_TITLE });
+
+    expect(notices).toHaveLength(1);
+    expect(instructorGroup?.contains(notices[0] as Element)).toBe(true);
+    expect(courseGroup?.contains(notices[0] as Element)).toBe(false);
+    expect(screen.getByText(COURSE_COMMENT)).toBeTruthy();
+    expect(screen.queryByText(INSTRUCTOR_COMMENT)).toBeNull();
+    expect(screen.getAllByRole('article')).toHaveLength(1);
   });
 });
 
