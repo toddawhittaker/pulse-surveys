@@ -64,6 +64,7 @@ jobs:
   changed:
     name: Detect what changed
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       # `true` only when every path the diff touched is documentation nothing
       # depends on. Read by the six expensive gates, which switch their own work
@@ -322,6 +323,7 @@ jobs:
   detect:
     name: Detect what exists
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       node: ${{ steps.d.outputs.node }}
     steps:
@@ -399,6 +401,7 @@ jobs:
   lint-python:
     name: Fast · ruff + mypy
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -615,6 +618,7 @@ jobs:
     name: Fast · tsc + eslint
     needs: [changed]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -675,6 +679,7 @@ jobs:
   migration-drift:
     name: Fast · migration drift
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         # Must match the `db` service in docker-compose.yml exactly, image
@@ -778,6 +783,7 @@ jobs:
   ci-selftest:
     name: Fast · CI checker self-test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -800,6 +806,7 @@ jobs:
     name: Fast gates passed
     needs: [lint-python, lint-frontend, migration-drift, ci-selftest]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - run: echo "Lint, typecheck, migration drift, and checker self-tests are clean."
 
@@ -826,10 +833,49 @@ jobs:
   # (docs/adr/0002-ci-gates-ship-tolerant.md, and
   # tests/unit/test_the_aggregate_ci_check_sees_an_upstream_failure.py is the
   # regression test).
+  #
+  # **One job, four runners (docs/adr/0181).** The job used to run the invariant
+  # pass and then the full pass one after the other, on one runner, and that
+  # sequence was the pipeline's critical path: about 8 minutes of invariant pass
+  # followed by 11 to 16 minutes of full pass, 18 to 25 minutes in all. The
+  # matrix below runs the same two passes on separate runners at the same time,
+  # and splits the full pass into three slices of the collection:
+  #
+  #   * `invariants` runs the §4.1 pass exactly as before — serial, every
+  #     invariant test, both halves of the gate — and nothing else;
+  #   * `suite` 1, 2 and 3 each run one third of `tests/unit tests/integration`
+  #     under `-n 4`, chosen by `scripts/ci/pytest_shard.py`.
+  #
+  # **Same tests, same commit, same gate.** The full pass still runs every test
+  # it ran before, the invariant tests among them. `test-shards` below reads every
+  # slice's record and its JUnit report and fails the pipeline unless the slices
+  # are disjoint and together hold the whole collection, so a slicing mistake is
+  # a red job rather than a smaller suite. It also combines the slices' coverage
+  # into the one `coverage` artifact this job used to upload.
+  #
+  # It stays one job id, so every guard that reads this job by name still finds
+  # it, and `fail-fast: false` lets every leg finish and report even when one
+  # fails, which is what the single runner did. A leg that fails fails the job.
   test:
-    name: Test · pytest + invariants
+    name: Test · pytest + invariants (${{ matrix.label }})
     needs: [changed]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pass: invariants
+            label: invariants
+          - pass: suite
+            shard: 1
+            label: suite 1 of 3
+          - pass: suite
+            shard: 2
+            label: suite 2 of 3
+          - pass: suite
+            shard: 3
+            label: suite 3 of 3
     steps:
       - uses: actions/checkout@v7
 
@@ -854,8 +900,8 @@ jobs:
           pip install --require-hashes -r requirements-dev.txt
           pip install -e . --no-deps --no-build-isolation
 
-      # The invariant suite runs first and alone, so a failure here is
-      # unambiguous and cheap. It then runs again inside the full suite; that
+      # The invariant suite runs alone, on its own runner, so a failure here is
+      # unambiguous. It then runs again inside the full suite's slices; that
       # duplication is deliberate.
       #
       # §4.1 invariants are assertions about what a student can never see. A
@@ -876,7 +922,7 @@ jobs:
       # reads the sources and refuses exactly that (E0-36 item 3). The Makefile's
       # `invariants` target runs both, in this order.
       - name: Invariant suite (§4.1) — no skips, and no test that asserts nothing
-        if: needs.changed.outputs.inert != 'true'
+        if: needs.changed.outputs.inert != 'true' && matrix.pass == 'invariants'
         run: |
           mkdir -p reports
           pytest -m invariant --junitxml=reports/invariants.xml || true
@@ -884,25 +930,124 @@ jobs:
           python scripts/ci/check_invariant_assertions.py tests
 
       # `-n 4` is pytest-xdist: four worker processes over the same collection.
-      # This pass is the pipeline's wall clock, and it is the only pass that
-      # runs under xdist — the invariant pass above stays serial on purpose
+      # This pass was the pipeline's wall clock until it was sliced, and it is
+      # the only pass that runs under xdist — the invariant pass above stays serial on purpose
       # (docs/adr/0104-the-unit-and-integration-pass-runs-under-xdist.md, which
       # also records what the four workers cost: each is a full pytest session,
       # so each provisions its own testcontainers Postgres and runs alembic
-      # once). `make test` runs the same flag.
-      - name: Unit + integration with coverage
-        if: needs.changed.outputs.inert != 'true'
+      # once). `make test` runs the same flag, over the whole collection on one
+      # machine; the slicing is how CI spreads that same pass over three
+      # runners, and docs/adr/0181 records why.
+      #
+      # `-p pytest_shard` loads the slicing plugin from `scripts/ci/`, which is
+      # what the PYTHONPATH entry is for. It keeps every third collected test,
+      # starting at this leg's number, and writes the whole collection and its
+      # slice to `reports/shard/` for `test-shards` to check. `--cov-report=`
+      # writes no report here: a slice's coverage is a third of the picture, so
+      # the data file is uploaded and `test-shards` reports the combined figure.
+      # `--cov-fail-under=0` turns off the coverage floor for the slice, because
+      # pytest-cov reads `fail_under` from pyproject.toml and a third of the
+      # tests would always fall below it. The floor is enforced on the combined
+      # figure, in `test-shards`.
+      - name: Unit + integration with coverage (one slice of three)
+        if: needs.changed.outputs.inert != 'true' && matrix.pass == 'suite'
         env:
           # testcontainers drives its own Postgres; the runner's Docker daemon
           # is what it talks to.
           TESTCONTAINERS_RYUK_DISABLED: 'false'
+          PYTHONPATH: ${{ github.workspace }}/scripts/ci
+          PULSE_TEST_SHARD: ${{ matrix.shard }}/3
+          PULSE_TEST_SHARD_RECORD: reports/shard
         run: |
-          pytest tests/unit tests/integration -n 4 \
-            --cov=backend/app --cov-report=term-missing --cov-report=xml \
+          pytest tests/unit tests/integration -n 4 -p pytest_shard \
+            --cov=backend/app --cov-report= --cov-fail-under=0 \
             --junitxml=reports/pytest.xml
 
-      - name: Upload coverage
+      # Everything `test-shards` needs from this slice: the coverage data, the
+      # JUnit report, and the plugin's two lists. Hidden files are included on
+      # purpose, because the coverage data file is `.coverage`. Kept for a day:
+      # it is an intermediate, and the combined `coverage` artifact is the one
+      # anybody reads.
+      - name: Upload this slice's record and coverage data
+        if: needs.changed.outputs.inert != 'true' && matrix.pass == 'suite'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytest-shard-${{ matrix.shard }}
+          path: |
+            .coverage
+            reports/pytest.xml
+            reports/shard/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  # The other half of the sharded `test` job above, and the reason the sharding
+  # costs no coverage. A green slice proves only that its own third passed;
+  # this job proves the thirds were the whole. `scripts/ci/check_test_shards.py`
+  # fails unless all three slices collected the same suite, no test ran in two
+  # slices, no collected test ran in none, and each slice's JUnit report — which
+  # pytest writes, not the slicing plugin — holds as many test cases as the slice.
+  #
+  # It needs `test`, so a failed leg leaves this job `skipped` and the aggregate
+  # `ci` check reads that as the failure it is. No job-level `if:`, for the reason
+  # the comment on `ci` gives.
+  test-shards:
+    name: Test · every test ran in exactly one slice + coverage
+    needs: [changed, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Documentation-only diff — no slice ran, so there is nothing to check
+        if: needs.changed.outputs.inert == 'true'
+        run: |
+          echo "::notice::Every changed path is inert documentation (E0-38), so the suite did not run and no slice was recorded."
+          echo "This job ran and reports success, so the required CI check still sees it."
+
+      - uses: actions/download-artifact@v8
         if: needs.changed.outputs.inert != 'true'
+        with:
+          pattern: pytest-shard-*
+          path: shards
+
+      - name: Every collected test ran in exactly one slice
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          python3 scripts/ci/check_test_shards.py --expected 3 \
+            shards/pytest-shard-1 shards/pytest-shard-2 shards/pytest-shard-3
+
+      # The combined coverage, which is what the unsharded job printed and
+      # uploaded. Every runner checks the repository out at the same path, so
+      # the three data files combine without any path mapping. `coverage` comes
+      # from the dev lockfile with its hashes, as every other install here does.
+      - uses: actions/setup-python@v7
+        if: needs.changed.outputs.inert != 'true'
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install coverage (locked)
+        if: needs.changed.outputs.inert != 'true'
+        run: pip install --require-hashes -r requirements-dev.txt
+
+      # `coverage report` enforces the floor (`fail_under` in pyproject.toml)
+      # and exits non-zero below it, after printing the per-file table.
+      # `coverage xml` would enforce it too and stop the step first, so it is
+      # told `--fail-under=0`: the XML is written either way, and the upload
+      # below runs even when this step fails.
+      - name: Combine the slices' coverage and enforce the floor
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          coverage combine shards/pytest-shard-1/.coverage shards/pytest-shard-2/.coverage shards/pytest-shard-3/.coverage
+          coverage xml --fail-under=0
+          coverage report
+
+      - name: Upload coverage
+        if: ${{ !cancelled() && needs.changed.outputs.inert != 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: coverage
@@ -926,10 +1071,19 @@ jobs:
   # The seed registers the mock platform in `lti_platform` behind its development
   # guard, and the launch door resolves `iss` against that row — so a launch spec
   # fails without it.
+  #
+  # **It does not wait on `fast-gate`, for the reason `test` does not** (that
+  # job's comment has the argument, and docs/adr/0181 has the measurement). Once
+  # `test` was split across runners this became the longest chain in the
+  # pipeline, and the edge added the fast gates' minute to it while nothing below
+  # reads anything they produce. `fast-gate` is still a required leg of the `ci`
+  # aggregate, so red lint still fails the pipeline; what is given up is runner
+  # minutes, since a push with red lint now runs Playwright too.
   e2e:
     name: Test · Playwright e2e
-    needs: [changed, fast-gate]
+    needs: [changed]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -937,10 +1091,16 @@ jobs:
         if: needs.changed.outputs.inert == 'true'
         run: echo "::notice::Every changed path is inert documentation (E0-38), so no e2e path was exercised."
 
+      # npm's download cache, as `lint-frontend`, `frontend-build` and
+      # `supply-chain` already carry. `npm ci` checks every package against the
+      # integrity hash in `package-lock.json`, so a cached tarball is verified
+      # the same way a downloaded one is.
       - uses: actions/setup-node@v7
         if: needs.changed.outputs.inert != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
 
       - uses: actions/setup-python@v7
         if: needs.changed.outputs.inert != 'true'
@@ -1038,6 +1198,7 @@ jobs:
     name: Test · AI eval floors
     needs: [changed, detect, fast-gate]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -1184,6 +1345,7 @@ jobs:
     name: Build · images + Compose health
     needs: [changed, fast-gate]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -1321,6 +1483,7 @@ jobs:
     name: Build · frontend + bundle budget
     needs: [changed, fast-gate]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -1379,6 +1542,7 @@ jobs:
     name: Supply chain · audit + licenses
     needs: [changed, detect, fast-gate]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -1497,8 +1661,9 @@ jobs:
   ci:
     name: CI
     if: always()
-    needs: [fast-gate, test, e2e, evals, docker, frontend-build, supply-chain]
+    needs: [fast-gate, test, test-shards, e2e, evals, docker, frontend-build, supply-chain]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Verdict
         run: |
