@@ -197,7 +197,9 @@ const OTHER_COMMENTS = [
 // asked the page what its own words were would pass against any words at all
 // (`tests/e2e/landing-views.spec.ts` states the rule).
 const PICKER_HEADING = 'Your sections';
-const SMALL_N_TITLE = 'Comments are hidden this week';
+// E5.1-01 moves the notice into each comment group and words it per group (work
+// order D6), so a week whose two streams are both thin shows it twice.
+const SMALL_N_TITLE = 'No raw comments are shown here this week';
 const NO_RESPONSES = 'No responses yet this week';
 const COMMENTS_NOTE = 'Shown in random order. No names, no timestamps.';
 const COURSE_WEEK_UNAVAILABLE = 'There is no report for that week of this section.';
@@ -425,10 +427,13 @@ test('an instructor launches, chooses a section, and reads its week', async ({ p
   // makes the rest of it a report rather than a layout.
   await expect(
     report.getByText(BIOL_DISTINCTIVE_COMMENT),
-    'The comment the first student submitted this week is not on the report. Above the ' +
-      `threshold of ${String(N_THRESHOLD)} responses SPEC §4 shows raw comments, and this week ` +
-      `has ${String(BIOL_STUDENTS.length)}.`,
+    'The comment the first student submitted this week is not on the report. A stream with at ' +
+      `least ${String(N_THRESHOLD)} distinct commenters shows its raw comments (SPEC §4), and ` +
+      `${String(BIOL_STUDENTS.length)} students commented in each stream this week.`,
   ).toBeVisible();
+  // And neither group carries the suppression notice: both streams are at the
+  // threshold of commenters. The small-N test below is the other half.
+  await expect(report.getByRole('region', { name: SMALL_N_TITLE })).toHaveCount(0);
 
   // The two rates, with the counts they are ratios of. Five of the section's
   // students answered; the enrolment is the roster's and is not asserted as a
@@ -553,12 +558,15 @@ test('a small-N week hides its comments in the payload and not only on the page'
   const report = await openTheReport(page, MATH.code);
 
   // The DOM half. §4: below the threshold the instructor sees the summary and no
-  // raw comments; §4.1 item 5 puts the confidentiality copy on the surface once.
-  await expect(report.getByRole('region', { name: SMALL_N_TITLE })).toHaveCount(1);
+  // raw comments. **Two notices, one in each group**, since E5.1-01: the notice is
+  // per stream (work order D6), and both of this week's streams hold three
+  // commenters against a threshold of five.
+  await expect(report.getByRole('region', { name: SMALL_N_TITLE })).toHaveCount(2);
   await expect(
     report.getByRole('article'),
-    'A comment card is in the DOM on a week below the threshold. SPEC §4 hides raw comments ' +
-      `below ${String(N_THRESHOLD)} responses, and this week has ${String(MATH_STUDENTS.length)}.`,
+    'A comment card is in the DOM on a week below the threshold. SPEC §4 hides a stream’s raw ' +
+      `comments below ${String(N_THRESHOLD)} distinct commenters, and each stream this week has ` +
+      `${String(MATH_STUDENTS.length)}.`,
   ).toHaveCount(0);
   await expect(report.getByText(MATH_DISTINCTIVE_COMMENT)).toHaveCount(0);
 
@@ -580,18 +588,34 @@ test('a small-N week hides its comments in the payload and not only on the page'
   // things that must be *present* are asserted before the things that must not.
   const payload = JSON.parse(raw) as {
     week: { course_week: number; term_week: number };
-    small_n: { suppressed: boolean; threshold: number };
-    streams: Record<string, { comments: unknown[]; summary: unknown }>;
+    streams: Record<
+      string,
+      {
+        comments: unknown[];
+        summary: unknown;
+        small_n?: { suppressed: boolean; threshold: number };
+      }
+    >;
     released_from_earlier_weeks: unknown[];
   };
   expect(payload.week.course_week).toBe(MATH_COURSE_WEEK);
-  expect(payload.small_n.threshold).toBe(N_THRESHOLD);
 
+  // E5.1-01's payload shape (work order D5): `small_n` sits on each stream and
+  // the week-level member is gone.
   expect(
-    payload.small_n.suppressed,
-    `The payload does not declare this week suppressed. It has ${String(MATH_STUDENTS.length)} ` +
-      `responses against a threshold of ${String(N_THRESHOLD)}.`,
-  ).toBe(true);
+    'small_n' in payload,
+    'The payload still carries a top-level `small_n`. Suppression is decided per stream, so the ' +
+      'flag lives on each stream and a week-level one beside them is a second answer.',
+  ).toBe(false);
+  for (const stream of ['instructor', 'course']) {
+    expect(payload.streams[stream]?.small_n?.threshold).toBe(N_THRESHOLD);
+    expect(
+      payload.streams[stream]?.small_n?.suppressed,
+      `The payload does not declare the ${stream} stream suppressed. It has ` +
+        `${String(MATH_STUDENTS.length)} distinct commenters against a threshold of ` +
+        `${String(N_THRESHOLD)}.`,
+    ).toBe(true);
+  }
   expect(payload.streams.instructor?.comments).toEqual([]);
   expect(payload.streams.course?.comments).toEqual([]);
   expect(payload.released_from_earlier_weeks).toEqual([]);

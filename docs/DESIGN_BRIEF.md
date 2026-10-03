@@ -33,7 +33,7 @@ Tone: institutional but warm. Trustworthy, calm, uncluttered. Not corporate-SaaS
   - Response rate and validity rate
   - Comment list, randomized order, no timestamps, no identities anywhere
   - AI summary block per comment stream (clearly labeled as AI-generated)
-  - **Small-N state:** when fewer than 5 responses, raw comments are hidden and replaced by an explanatory note + summary only. Design this state explicitly.
+  - **Small-N state:** when fewer than the threshold's number of distinct students (default 5) comment in a stream in a week, that stream's raw comments are hidden and replaced by an explanatory note + summary only, per stream. Design this state explicitly.
 - **Moderation:** AI-flagged comments (harmful / privacy / nonsense) appear collapsed with the flag reason; one click excludes a flagged comment from what students will see. Excluding an *unflagged* comment demands a typed reason and shows a notice that the exclusion is logged and visible to the Lead Faculty. That friction is intentional — design it as deliberate, not punitive.
 - **Response composer:** write a response; buttons for "Draft with AI" (generates an editable draft from the week's data) and a coaching pass that annotates the draft with advisory suggestions (tone, defensiveness, singling students out). Suggestions are dismissible; publishing is always a human act. If the course requires a response, show the hold status ("students see nothing until you publish") and the reminder timeline.
 

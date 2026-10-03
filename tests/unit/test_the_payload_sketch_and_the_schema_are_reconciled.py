@@ -99,6 +99,16 @@ DECLARED_DIVERGENCES = frozenset(
     {"released_from_earlier_weeks", "institution_timezone", "workload_benchmark"}
 )
 
+# The one member that has **left** the top level, and where it went. E5.1-01's
+# owner ruling 1 makes SPEC §4's suppression per stream — a stream's raw comments
+# are shown only when enough distinct students commented in that stream that week —
+# so whether comments are suppressed is a fact about a stream and not about a week.
+# Its work order (D5) moves `small_n` from the report onto each stream object, with
+# its fields unchanged, and removes the top-level member outright: a week-level flag
+# beside two stream-level ones is a second answer to one question. It joins
+# `STREAM_DIVERGENCES` below for the same reason.
+MOVED_TO_EACH_STREAM = frozenset({"small_n"})
+
 # Where the first of those two sits, since it is not a top-level member.
 RATES_MEMBER = "rates"
 RATES_DIVERGENCE = "valid_responses"
@@ -120,7 +130,7 @@ STREAMS_MEMBER = "streams"
 # E4's sketch describes neither, because E4 computed no comparison figures at all.
 # Widening this set is the deliberate act this module's own rule asks for, never a
 # repair for a red: each name here has a record behind it.
-STREAM_DIVERGENCES = frozenset({"question_text", "benchmark"})
+STREAM_DIVERGENCES = frozenset({"question_text", "benchmark"}) | MOVED_TO_EACH_STREAM
 
 FENCED_JSON = re.compile(r"```json\n(.*?)\n```", re.DOTALL)
 
@@ -194,6 +204,12 @@ def test_the_schemas_top_level_members_are_the_sketchs_plus_the_declared_diverge
     than added, which the equality catches from both sides at once.
     """
     sketched = set(sketched_payload())
+    assert sketched >= MOVED_TO_EACH_STREAM, (
+        f"The sketch's top level does not carry {sorted(MOVED_TO_EACH_STREAM - sketched)}, so "
+        "`MOVED_TO_EACH_STREAM` names a move from nowhere and the equality below is about less than "
+        "it says."
+    )
+    expected = (sketched - MOVED_TO_EACH_STREAM) | DECLARED_DIVERGENCES
     schema = report_api_contract.schema()
     models = [
         value
@@ -210,15 +226,15 @@ def test_the_schemas_top_level_members_are_the_sketchs_plus_the_declared_diverge
     )
     declared = set(models[0].model_fields)
 
-    assert declared == sketched | DECLARED_DIVERGENCES, "\n".join(
+    assert declared == expected, "\n".join(
         [
             f"`{models[0].__name__}` declares {sorted(declared)}.",
             f"The sketch describes {sorted(sketched)}.",
             f"The divergences E4-07's work order settles are {sorted(DECLARED_DIVERGENCES)}.",
+            f"Moved from the top level to each stream (E5.1-01): {sorted(MOVED_TO_EACH_STREAM)}.",
             "",
-            "In the schema and not accounted for: "
-            f"{sorted(declared - sketched - DECLARED_DIVERGENCES)}",
-            f"In the sketch and not in the schema: {sorted(sketched - declared)}",
+            f"In the schema and not accounted for: {sorted(declared - expected)}",
+            f"Expected and not in the schema: {sorted(expected - declared)}",
             "",
             "Criterion 8: divergences are deliberate and listed in the pull request body. A member "
             "added here without a record is what the frontend fixtures will not describe; one "

@@ -19,12 +19,13 @@
 //   - **both comment groups led by their own summary, each stating its response
 //     count** — §5.1's grouping rule and its "state the response count they draw
 //     from" clause, in the payload and in the reading order of the page;
-//   - **small-N concealment** — a week of four responses declares itself
-//     suppressed, hands back no comment in either stream, renders no comment card
-//     and carries none of the seven withheld sentences *anywhere in its response
-//     body*, while an eight-response week of the same section shows its raw
-//     comments. Both halves, because a payload that hid everything would satisfy
-//     the first alone;
+//   - **small-N concealment** — a week of four responses declares both its
+//     streams suppressed (each has fewer than five distinct commenters), hands
+//     back no comment in either stream, renders no comment card and carries none
+//     of the seven withheld sentences *anywhere in its response body*, while an
+//     eight-response week of the same section, with at least five commenters in
+//     each stream, shows its raw comments. Both halves, because a payload that hid
+//     everything would satisfy the first alone;
 //   - **the cumulative batched release** (§4, ADR 0152, ADR 0153) — seven held
 //     comments from two disjoint quiet weeks reach the latest published week's
 //     report with no week attribution on any of them, while the quiet week's own
@@ -273,7 +274,12 @@ const HELD_IN_WEEK_FOUR = [
 
 const EVERY_HELD_COMMENT = [...HELD_IN_WEEK_THREE, ...HELD_IN_WEEK_FOUR];
 
-// One comment per stream in each of the four weeks at or above the threshold.
+// The lead comment of each stream in the four shown weeks. **Since E5.1-01 a
+// stream's raw comments are shown only when at least five distinct students
+// commented in that stream that week**, so the seeder gives each shown week (1,
+// 2, 5 and 6) at least five commenters in each stream, keeping these sentences as
+// the lead comments (work order D7). The quiet weeks and the seven held sentences
+// are unchanged.
 const WEEK_SIX_INSTRUCTOR_COMMENT =
   'Exit story week six instructor: office hours ran long and nobody was turned away.';
 const WEEK_SIX_COURSE_COMMENT =
@@ -372,7 +378,9 @@ const ROSTER_SYNC_RUN = 'roster-sync-run';
 // E4-12 governs — rather than read off the page. `landing-views.spec.ts` states
 // the rule: a spec that asked the page what its own words were would pass against
 // any words at all.
-const SMALL_N_TITLE = 'Comments are hidden this week';
+// Since E5.1-01 the notice sits inside each comment group whose stream is below
+// the threshold of commenters (work order D6), so a quiet week shows two.
+const SMALL_N_TITLE = 'No raw comments are shown here this week';
 const COMMENTS_NOTE = 'Shown in random order. No names, no timestamps.';
 const INSTRUCTOR_GROUP_HEADING = 'About the instructor';
 const COURSE_GROUP_HEADING = 'About the course';
@@ -566,7 +574,7 @@ test('the story reaches Pulse’s own database, and the two Monday jobs run over
     `The cutter left ${String(released)} release membership rows for ${BIOL.code}, and the story ` +
       `holds ${String(RELEASED_COMMENTS)} comments across course weeks ${String(QUIET_WEEK)} and ` +
       `${String(THE_OTHER_QUIET_WEEK)}, whose respondent sets are disjoint. All three of ADR ` +
-      '0152’s legs are open on that world: the term’s cumulative comment volume is fifteen, the ' +
+      '0152’s legs are open on that world: the term’s cumulative comment volume is past the threshold, the ' +
       `held comments carry ${String(RELEASED_COMMENTS)} distinct authors against a threshold of ` +
       `${String(N_THRESHOLD)}, and they span ${String(WEEKS_A_RELEASE_MUST_SPAN)} distinct closed ` +
       'under-threshold weeks.\n\nZero here is the cutter refusing or not having run; it is ' +
@@ -692,9 +700,12 @@ test('each comment group is led by its own summary, and each summary states its 
   // draw from".
   //
   // The count is the *week's* response count and not the number of comments the
-  // summary read: week 6 holds eight responses and two comments, one per stream,
-  // so the two numbers are eight and one and a payload serving either in the
-  // other's place is red. `tests/unit/test_the_weekly_summary_task.py`'s
+  // summary read: week 6 holds eight responses and, since E5.1-01's seed (work
+  // order D7), at least five comments in each stream. A payload serving a
+  // stream's comment count is red here only while that count is not eight — so
+  // this distinction holds as long as the seeder leaves at least one week-6
+  // respondent silent in each stream, and `test_the_weekly_summary_task.py` pins
+  // it one layer down regardless. `tests/unit/test_the_weekly_summary_task.py`'s
   // "the stated response count is the caller's and not the number of comments"
   // pins the same distinction one layer down.
   //
@@ -711,8 +722,8 @@ test('each comment group is led by its own summary, and each summary states its 
   // count; a summary generated for one stream only, which the two-sided
   // assertion catches; and a group heading rendered with no summary above it at
   // all. **The near miss it must survive:** a summary whose count is the number
-  // of *comments in the whole week* — two — which is neither eight nor one and
-  // fails the equality rather than slipping past it.
+  // of *comments in the whole week* — at least ten since E5.1-01's seed — which
+  // is not eight and fails the equality rather than slipping past it.
   test.setTimeout(CASE_TIMEOUT_MS);
 
   const report = await openTheReport(page);
@@ -748,9 +759,9 @@ test('each comment group is led by its own summary, and each summary states its 
     expect(
       summary?.response_count,
       `The ${stream} summary states a response count of ${String(summary?.response_count)}. Course ` +
-        `week ${String(LATEST_PUBLISHED_WEEK)} holds ${String(respondents)} responses and two ` +
-        'comments — one per stream — so a count of one or two is the number of comments rather ' +
-        'than the number of responses SPEC §5.1 asks the summary to state.',
+        `week ${String(LATEST_PUBLISHED_WEEK)} holds ${String(respondents)} responses, and SPEC ` +
+        '§5.1 asks the summary to state the number of responses it draws from — not the number ' +
+        'of comments in its stream or in the week.',
     ).toBe(respondents);
 
     const summaryAt = shown.indexOf(text);
@@ -762,8 +773,8 @@ test('each comment group is led by its own summary, and each summary states its 
     expect(
       commentAt,
       `The ${stream} stream's comment from course week ${String(LATEST_PUBLISHED_WEEK)} is not on ` +
-        `the page. The week holds ${String(respondents)} responses against a threshold of ` +
-        `${String(N_THRESHOLD)}, so SPEC §4 shows its raw comments.`,
+        `the page. Each stream of the week has at least ${String(N_THRESHOLD)} distinct ` +
+        'commenters, so SPEC §4 shows its raw comments.',
     ).toBeGreaterThanOrEqual(0);
     expect(
       summaryAt,
@@ -788,7 +799,7 @@ test('a quiet week hides its comments in the payload and not only on the page', 
   // this week's, or a report of a section with nothing in it, satisfies every
   // absence assertion here perfectly. So the things that must be *present* are
   // asserted before the things that must not: the week is the one asked for, the
-  // threshold is five, the week declares itself suppressed, and its course
+  // threshold is five, both streams declare themselves suppressed, and its course
   // stream's summary is there stating four responses — because §5.1 generates a
   // summary "even in small-N weeks", where "the summary is the only comment
   // signal".
@@ -838,15 +849,17 @@ test('a quiet week hides its comments in the payload and not only on the page', 
 
   const report = await openTheReport(page, QUIET_WEEK);
 
-  // The DOM half.
+  // The DOM half. **Two notices, one inside each group**, since E5.1-01: the
+  // notice is per stream (work order D6) and both of this week's streams hold
+  // fewer than five distinct commenters.
   await expect(report.getByRole('region', { name: SMALL_N_TITLE })).toHaveCount(
-    1,
+    2,
   );
   await expect(
     report.getByRole('article'),
-    'A comment card is in the DOM on a week below the threshold. SPEC §4 hides raw comments below ' +
-      `${String(N_THRESHOLD)} responses, and course week ${String(QUIET_WEEK)} holds ` +
-      `${String(planFor(QUIET_WEEK).respondents)}.`,
+    'A comment card is in the DOM on a week below the threshold. SPEC §4 hides a stream’s raw ' +
+      `comments below ${String(N_THRESHOLD)} distinct commenters, and course week ` +
+      `${String(QUIET_WEEK)} holds ${String(planFor(QUIET_WEEK).respondents)} respondents in all.`,
   ).toHaveCount(0);
   for (const withheld of EVERY_HELD_COMMENT) {
     await expect(report.getByText(withheld)).toHaveCount(0);
@@ -856,13 +869,21 @@ test('a quiet week hides its comments in the payload and not only on the page', 
   const { payload, raw } = await readTheReportWithItsBody(page, QUIET_WEEK);
 
   expect(payload.week.course_week).toBe(QUIET_WEEK);
-  expect(payload.small_n.threshold).toBe(N_THRESHOLD);
   expect(
-    payload.small_n.suppressed,
-    `The payload does not declare course week ${String(QUIET_WEEK)} suppressed. It holds ` +
-      `${String(planFor(QUIET_WEEK).respondents)} responses against a threshold of ` +
-      `${String(N_THRESHOLD)}.`,
-  ).toBe(true);
+    'small_n' in payload,
+    'The payload still carries a top-level `small_n`; E5.1-01 (work order D5) puts it on each ' +
+      'stream and removes the week-level member.',
+  ).toBe(false);
+  for (const stream of ['instructor', 'course']) {
+    expect(payload.streams[stream]?.small_n?.threshold).toBe(N_THRESHOLD);
+    expect(
+      payload.streams[stream]?.small_n?.suppressed,
+      `The payload does not declare course week ${String(QUIET_WEEK)}'s ${stream} stream ` +
+        `suppressed. The whole week holds ${String(planFor(QUIET_WEEK).respondents)} respondents, ` +
+        `fewer than the threshold of ${String(N_THRESHOLD)}, so neither stream can have enough ` +
+        'distinct commenters.',
+    ).toBe(true);
+  }
 
   const courseSummary = payload.streams.course?.summary;
   expect(
@@ -906,7 +927,8 @@ test('an above-threshold week of the same section shows its raw comments', async
   page,
 }) => {
   // **The other half of the small-N pair.** Course week 6 holds eight responses
-  // against a threshold of five, so §4 shows its raw comments — and the section,
+  // and at least five distinct commenters in each stream (E5.1-01's seed), so §4
+  // shows both streams' raw comments — and the section,
   // the instructor, the session and the route are the same ones the quiet week
   // was read through. Without this, "no comment appeared" is satisfied by a
   // report that never shows a comment to anybody
@@ -920,12 +942,14 @@ test('an above-threshold week of the same section shows its raw comments', async
   const report = await openTheReport(page);
   const payload = await readTheReport(page, LATEST_PUBLISHED_WEEK);
 
-  expect(
-    payload.small_n.suppressed,
-    `Course week ${String(LATEST_PUBLISHED_WEEK)} holds ` +
-      `${String(planFor(LATEST_PUBLISHED_WEEK).respondents)} responses against a threshold of ` +
-      `${String(N_THRESHOLD)}, so it is not a suppressed week.`,
-  ).toBe(false);
+  for (const stream of ['instructor', 'course']) {
+    expect(
+      payload.streams[stream]?.small_n?.suppressed,
+      `Course week ${String(LATEST_PUBLISHED_WEEK)}'s ${stream} stream is declared suppressed. ` +
+        `The story seeds at least ${String(N_THRESHOLD)} distinct commenters in each stream of ` +
+        'the shown weeks (E5.1-01 work order D7), so neither stream is below the threshold.',
+    ).toBe(false);
+  }
   expect(payload.streams.instructor?.comments.length).toBeGreaterThan(0);
   expect(payload.streams.course?.comments.length).toBeGreaterThan(0);
 
@@ -1217,10 +1241,12 @@ interface ReportPayload {
       trend: { course_week: number; term_week: number; mean: number | null }[];
       summary: { text: string; response_count: number } | null;
       comments: Record<string, unknown>[];
+      // Per stream since E5.1-01 (work order D5). Optional in this type so a
+      // payload missing it fails the assertion that reads it, by name.
+      small_n?: { suppressed: boolean; threshold: number };
     }
   >;
   workload: { mean: number | null; median: number | null };
-  small_n: { suppressed: boolean; threshold: number };
   released_from_earlier_weeks: Record<string, unknown>[];
 }
 

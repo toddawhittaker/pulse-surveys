@@ -199,7 +199,8 @@ describe('/instructor/sections/$sectionId, the report', () => {
       expect(addressOf(router)).toBe(`/instructor/sections/${SECTION_ID}?week=7`);
     });
     // And the week that arrived is the one the address now names.
-    await screen.findByRole('region', { name: 'Comments are hidden this week' });
+    // Both of that week's streams are suppressed, so it carries two notices.
+    await screen.findAllByRole('region', { name: 'No raw comments are shown here this week' });
   });
 
   it('mirrors the API on a deep link to a week that is not published', async () => {

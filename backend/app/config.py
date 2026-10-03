@@ -882,7 +882,10 @@ class Settings(BaseSettings):
     n_threshold_default: int = Field(
         default=5,
         ge=1,
-        description="Responses below which raw comments stay hidden (§4).",
+        description=(
+            "Distinct commenters in a stream in a reporting week below which that "
+            "stream's raw comments stay hidden (§4)."
+        ),
     )
 
     # The benchmark minimums (§5.1, §4.1 item 7), settled in SPEC §11 question 1:

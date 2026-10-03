@@ -12,8 +12,9 @@ answers any of them:
     sides of the boundary rather than trusting this file.
 
   - **A week that is closed and a week that is still open, under any clock.**
-    The cumulative release may only reach a week whose response count is final,
-    and "final" means the window has closed. Every window this world writes
+    The cumulative release may only reach a week whose counts are final — since
+    E5.1-01, each stream's distinct commenters — and "final" means the window has
+    closed. Every window this world writes
     carries instants **this file chooses** — a closed week opens and closes in
     2020, an open week opens in 2020 and closes in 2099 — so the answer is the
     same whether the implementation reads `app.services.clock` or
@@ -55,9 +56,13 @@ above rather than in a comment somewhere:
     which re-attaches the week attribution ADR 0153 removed, through the report's
     own delta. So `cut_due_release_batches` cuts only when the volume reaches the
     threshold **and** the distinct respondents behind the unreleased held comments
-    reach it **and** those comments span at least two under-threshold closed
-    weeks. When any of the three fails, nothing is cut: held is the safe
-    direction, because a release cannot be un-shown.
+    reach it **and** those comments span at least two closed weeks. Since E5.1-01
+    a comment is held when its stream, in its week, has fewer than the threshold of
+    distinct commenters, and each of the three legs is evaluated per (section,
+    term, stream): a run writes at most one batch per (section, term), holding the
+    held comments of exactly the streams whose three legs opened. When a stream's
+    legs do not all open, its comments stay held: held is the safe direction,
+    because a release cannot be un-shown.
   - **`rng` left the public signatures.** It is `_make_rng`, a private module
     hook, and these suites monkeypatch it. A seed a caller could supply is a seed
     an attacker could fix, and a fixed seed turns two reads into a diff that
@@ -94,7 +99,7 @@ from importlib import import_module
 from typing import Any
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import distinct, func, select, text
 
 from fixtures.clock import DEVELOPMENT
 from fixtures.grading import (
@@ -151,6 +156,12 @@ COMMENT_CLASS = "ReportComment"
 VISIBLE_FUNCTION = "visible_comments"
 RELEASED_FUNCTION = "released_comments"
 CUT_FUNCTION = "cut_due_release_batches"
+
+# E5.1-01's one public definition of "this stream is suppressed this week". The
+# work order (D1) settles the name and the signature, and every reader of the
+# rule — the comment read, the summary switch, the payload's per-stream flag —
+# is to call it rather than hold a second copy of the count.
+SUPPRESSED_FUNCTION = "stream_is_suppressed"
 
 # The private hook the display order's random source is made by. **Private, and
 # that is the security round's ruling rather than a style preference**: an `rng`
@@ -252,11 +263,20 @@ SERVICE_IS_OWED = (
 
 VISIBLE_IS_OWED = (
     f"`{VISIBLE_FUNCTION}(session, *, section_id, week_id, stream) -> "
-    f"tuple[{COMMENT_CLASS}, ...]` — the asked week's comments when that week's response count "
-    "reaches the configured threshold, and the empty tuple below it. SPEC §4: below the "
-    "n-threshold instructors see distributions and the AI summary but no raw comments. **No "
+    f"tuple[{COMMENT_CLASS}, ...]` — the asked stream's comments for that week when at least the "
+    "configured threshold of distinct students commented in that stream that week, and the empty "
+    "tuple below it; never a comment that is in a release batch. SPEC §4: below the n-threshold "
+    "instructors see distributions and the AI summary but no raw comments. **No "
     f"`rng` parameter**: the shuffle's source is the private `{RNG_HOOK}` hook on this module, "
     "which the security round moved out of the public signature."
+)
+
+SUPPRESSED_IS_OWED = (
+    f"`{SUPPRESSED_FUNCTION}(session, *, section_id, week_id, stream) -> bool` — E5.1-01's work "
+    "order (D1): true when fewer than the configured threshold of distinct students "
+    "(`response.user_id`) wrote a comment in that section, week and stream, counting only comments "
+    "that are in no release batch. A stream nobody commented in is suppressed. It is the one "
+    "definition the comment read, the summary switch and the payload's per-stream flag all call."
 )
 
 RELEASED_IS_OWED = (
@@ -366,8 +386,9 @@ def configured_threshold() -> int:
     if value is None:
         pytest.fail(
             "`Settings` has no `n_threshold_default`. `.env.example` documents "
-            f"`{N_THRESHOLD_VARIABLE}` as the responses in a reporting week below which raw "
-            "comments stay hidden from instructors and students alike (§4, §4.1 invariant 3)."
+            f"`{N_THRESHOLD_VARIABLE}` as the number of distinct commenters in a stream in a "
+            "reporting week below which that stream's raw comments stay hidden from instructors and "
+            "students alike (§4, §4.1 invariant 3)."
         )
     return int(value)
 
@@ -415,6 +436,11 @@ def visible_comments() -> Any:
 def released_comments() -> Any:
     """`released_comments`, or a failure naming it."""
     return named_in_service(RELEASED_FUNCTION, RELEASED_IS_OWED)
+
+
+def stream_is_suppressed() -> Any:
+    """`stream_is_suppressed`, or a failure naming it (E5.1-01's work order, D1)."""
+    return named_in_service(SUPPRESSED_FUNCTION, SUPPRESSED_IS_OWED)
 
 
 def cut_batches() -> Any:
@@ -742,10 +768,11 @@ class CommentWorld(ReportWorld):
         answer holding no value, and ADR 0115 deletes a withdrawn one).
 
         A response with no `student` given gets one of its own, because SPEC §4's
-        threshold counts *responses* in a week and E2-05 holds one response per
-        student per section-week: two responses from one student in one week is a
-        row the schema refuses, and this world's ordinary job is planting a chosen
-        count of respondents.
+        threshold counts *people* — since E5.1-01, the distinct students commenting
+        in a stream in a week — and E2-05 holds one response per student per
+        section-week: two responses from one student in one week is a row the schema
+        refuses, and this world's ordinary job is planting a chosen count of
+        respondents.
 
         **`student` is how a test plants the same person twice**, which the
         security round made load-bearing. HIGH-1's finding is that a volume
@@ -817,6 +844,56 @@ class CommentWorld(ReportWorld):
             self.submit(term_week=term_week, comments={stream: body}, cohort=cohort)[1][stream]
             for body in texts
         ]
+
+    def week_by_stream(
+        self,
+        *,
+        term_week: int,
+        instructor_only: int = 0,
+        course_only: int = 0,
+        both: int = 0,
+        silent: int = 0,
+        label: str = "a planted comment",
+        cohort: str = DEFAULT_COHORT,
+    ) -> dict[str, list[Any]]:
+        """One week of new respondents, each group commenting in the streams it is named for.
+
+        E5.1-01 makes the unit of SPEC §4's threshold the distinct students who
+        commented **in one stream**, so a world has to be able to put a different
+        number of people behind each stream of one week. Four groups, each of new
+        people: those who comment about the instructor only, about the course only,
+        in both streams, and those who answer a rating and write nothing (`silent`),
+        who add a response and no commenter. The week's response count is the sum
+        of the four; each stream's commenter count is its own group plus `both`.
+
+        **This decides no answer.** It plants rows; a test reads the counts back
+        with `responses_in` and `commenters_in` and states its expectation in its
+        own body (`docs/MISTAKES.md` entries 19 and 30).
+
+        Answers back each stream's planted `answer` rows, so a test can name the
+        comments it asserts about.
+        """
+        planted: dict[str, list[Any]] = {INSTRUCTOR_STREAM: [], COURSE_STREAM: []}
+        groups = (
+            ("instructor-only", instructor_only, (INSTRUCTOR_STREAM,)),
+            ("course-only", course_only, (COURSE_STREAM,)),
+            ("both", both, (INSTRUCTOR_STREAM, COURSE_STREAM)),
+        )
+        for kind, count, streams in groups:
+            for index in range(count):
+                _response, written = self.submit(
+                    term_week=term_week,
+                    cohort=cohort,
+                    comments={
+                        stream: f"{label} (week {term_week}, {kind} {index + 1}, {stream.lower()})"
+                        for stream in streams
+                    },
+                )
+                for stream in streams:
+                    planted[stream].append(written[stream])
+        for _ in range(silent):
+            self.submit(term_week=term_week, cohort=cohort, ratings={A_RATING_POSITION: 4})
+        return planted
 
     def comment_text_under_another_kind(
         self,
@@ -951,8 +1028,10 @@ class CommentWorld(ReportWorld):
         week asserts this against the configured threshold, on both sides.
 
         The semantics are `report_response_counts.responses`' — a count of
-        `response` rows for the section and week — which is the number SPEC §4's
-        "n < 5 responses in a reporting week" is about.
+        `response` rows for the section and week. Since E5.1-01 SPEC §4's threshold
+        is compared with each stream's distinct commenters (`commenters_in`), not
+        with this number; where every response carries one comment in the stream
+        read, the two are equal, and a test that relies on that says so.
         """
         table = require_table(self.tables, RESPONSE_TABLE)
         self.session.flush()
@@ -961,6 +1040,48 @@ class CommentWorld(ReportWorld):
             table.c[RESPONSE_WEEK_COLUMN] == self.week_id(term_week),
         )
         return len(list(self.session.execute(statement)))
+
+    def commenters_in(
+        self,
+        *,
+        term_week: int,
+        stream: str,
+        cohort: str = DEFAULT_COHORT,
+        version: int = FIRST_VERSION,
+    ) -> int:
+        """How many distinct students hold a comment answer in one stream of one section-week.
+
+        **Read back rather than assumed**, for `responses_in`'s reason: a planted
+        "stream of four commenters" that seeded five makes every assertion about the
+        threshold true for a reason nobody chose. Counted in the unit E5.1-01 makes
+        SPEC §4's threshold count — distinct `response.user_id`, not responses, not
+        answers (`docs/MISTAKES.md` entry 50) — and over every comment answer
+        planted, whatever its moderation state or release.
+
+        The stream is the comment question's position (`COMMENT_POSITION`), which
+        is how this world plants a comment into a stream; this reads back what was
+        planted and is not a claim about how the product groups streams.
+        """
+        answers = require_table(self.tables, ANSWER_TABLE)
+        responses = require_table(self.tables, RESPONSE_TABLE)
+        answer_response = self.link(ANSWER_TABLE, RESPONSE_TABLE)
+        answer_question = self.link(ANSWER_TABLE, QUESTION_TABLE)
+        response_key = single_primary_key(responses)
+        question_id = self.questions[version][COMMENT_POSITION[stream]][self.key_of(QUESTION_TABLE)]
+        self.session.flush()
+        statement = (
+            select(func.count(distinct(responses.c[RESPONSE_USER_COLUMN])))
+            .select_from(
+                answers.join(responses, answers.c[answer_response] == responses.c[response_key])
+            )
+            .where(
+                responses.c[RESPONSE_SECTION_COLUMN] == self.section_id(cohort),
+                responses.c[RESPONSE_WEEK_COLUMN] == self.week_id(term_week),
+                answers.c[answer_question] == question_id,
+                answers.c[COMMENT_TEXT_COLUMN].is_not(None),
+            )
+        )
+        return int(self.session.execute(statement).scalar_one())
 
     def comment_answers_in_term(self, *, cohort: str = DEFAULT_COHORT) -> int:
         """How many comment answers with text the section holds across the whole term.
@@ -1126,6 +1247,7 @@ def comment_contract() -> Any:
         comment_fields = COMMENT_FIELDS
         visible_name = VISIBLE_FUNCTION
         released_name = RELEASED_FUNCTION
+        suppressed_name = SUPPRESSED_FUNCTION
         cut_name = CUT_FUNCTION
         task_name = CUT_TASK
         rng_hook = RNG_HOOK
@@ -1172,6 +1294,7 @@ def comment_contract() -> Any:
         service = staticmethod(comment_service)
         visible = staticmethod(visible_comments)
         released = staticmethod(released_comments)
+        is_suppressed = staticmethod(stream_is_suppressed)
         cut = staticmethod(cut_batches)
         comment_class = staticmethod(report_comment_class)
         task = staticmethod(cut_task)

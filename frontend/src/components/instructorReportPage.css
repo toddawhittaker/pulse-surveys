@@ -188,14 +188,6 @@
   background: var(--chalk);
 }
 
-/* ---- The small-N notice, under both comment groups (E4-21) --------------- */
-
-/* The week's one suppression, stated once and after both groups
- * (`design/InstructorMondayReport.dc.html:69-73`). */
-.pulse-report-small-n {
-  margin-top: var(--space-4);
-}
-
 /* ---- Comments released from earlier weeks (ADR 0152) --------------------- */
 
 .pulse-report-released-cards {

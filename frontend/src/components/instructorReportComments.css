@@ -266,6 +266,12 @@
 
 /* ---- The small-N notice, instructor audience ---- */
 
+/* Inside a suppressed group, after its summary (E5.1-01, ADR 0182): the
+ * suppression is per stream, so the notice is too. */
+.pulse-comment-group__small-n {
+  margin-top: var(--space-4);
+}
+
 .pulse-small-n-notice {
   display: block;
   background: var(--paper);

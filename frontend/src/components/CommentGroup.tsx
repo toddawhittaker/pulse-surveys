@@ -4,6 +4,7 @@ import type { JSX } from 'react';
 import { AiPanel } from './AiPanel';
 import { CommentCard } from './CommentCard';
 import type { ReportComment } from './CommentCard';
+import { SmallNNotice } from './SmallNNotice';
 import './instructorReportComments.css';
 import { copy } from '../copy/instructorReportCommentCopy';
 
@@ -16,14 +17,15 @@ import { copy } from '../copy/instructorReportCommentCopy';
  * report page decides *where* the groups sit and this decides what a group is.
  *
  * **Three states, and two of them look alike until you read them.** A group
- * with comments shows its summary and its cards. A group whose week produced
- * none shows §5.1's one-line notice under its heading. A group whose week is
- * below the response threshold shows §4's small-N framing instead: the summary,
- * and no cards. Nothing written here blurs the second into the third: a week
- * nobody wrote in and a week whose comments are withheld are different facts
- * about the class, and an instructor who is told the wrong one draws the wrong
- * conclusion about their students — so a suppressed group renders neither the
- * cards nor the empty-week line.
+ * with comments shows its summary and its cards. A group the payload sends with
+ * no comments and not suppressed shows §5.1's one-line notice under its
+ * heading. A suppressed group shows §4's small-N framing instead: the summary,
+ * the notice, and no cards. Since E5.1-01 the server suppresses a stream nobody
+ * commented in exactly as it suppresses a thin one (ADR 0182), so a reader
+ * cannot tell nobody from one person, and the empty-week line is what an
+ * inconsistent payload would get rather than an ordinary week. Nothing written
+ * here blurs the two: a suppressed group renders neither the cards nor the
+ * empty-week line.
  *
  * **A group with no summary is a fourth state, and it is honest rather than
  * empty** (E4-11). `summary` is nullable because `StreamReport.summary` is: a
@@ -36,26 +38,26 @@ import { copy } from '../copy/instructorReportCommentCopy';
  * model had nothing to say about their week rather than that nothing ran.
  *
  * **Suppression is fail-closed, and it covers the summary's held note as well
- * as the cards.** When the payload says the week is suppressed, no card renders
+ * as the cards.** When the payload says the stream is suppressed, no card renders
  * — whatever the comment array happens to hold — and the summary goes out
  * without its held note, which names a flag type §5.2 conceals below the
  * threshold. The array should be empty and the note should be absent (§4 hides
  * both in the payload, not in the browser); if either ever is not, the
  * concealment is still what happens.
  *
- * **The notice explaining the suppression is not this component's** (E4-21). A
- * suppressed week suppresses both of a report's groups, so the explanation is
- * one statement about the week rather than one per group, and
- * `design/InstructorMondayReport.dc.html:69-73` places it under both of them.
- * This component is told the week is suppressed and conceals accordingly; where
- * the sentence about it goes is the surface's, which is also what keeps SPEC
- * §4.1 item 5's once-per-surface count a fact about a placement rather than
- * about which group happened to render first.
+ * **The notice explaining the suppression is this component's, since E5.1-01.**
+ * E4-21 had moved it under both groups because a suppressed week then
+ * suppressed both of them. The threshold now counts distinct commenters per
+ * stream (ADR 0182), so one group of a week can be shown while the other is
+ * held, and a notice under both would claim both were. So each suppressed
+ * group states it once, after its summary; a week with both streams
+ * suppressed shows two. The notice is a state notice, not SPEC §4.1 item 5's
+ * confidentiality line (ADR 0158), so that count is unaffected.
  *
- * **`suppressed` is required rather than defaulted**, so the choice is made out
- * loud at every call site: a caller who forgot it would be a caller showing a
- * below-threshold week's raw comments, and that is not a default anything should
- * have.
+ * **`suppressed` and `threshold` are required rather than defaulted**, so the
+ * choice is made out loud at every call site: a caller who forgot `suppressed`
+ * would be a caller showing a below-threshold stream's raw comments, and that is
+ * not a default anything should have.
  *
  * **Order is the order given.** The randomization SPEC §4 requires is the
  * server's; nothing here sorts, shuffles, groups or numbers, and the cards
@@ -66,6 +68,7 @@ export function CommentGroup({
   summary,
   comments,
   suppressed,
+  threshold,
 }: {
   readonly stream: 'instructor' | 'course';
   /** The stream's generated summary, or `null` for a week none was written for. */
@@ -75,8 +78,10 @@ export function CommentGroup({
     readonly heldNote: string | null;
   } | null;
   readonly comments: readonly ReportComment[];
-  /** Whether this week is below SPEC §4's threshold, as the payload declares it. */
+  /** Whether this stream is below SPEC §4's threshold this week, as the payload declares it. */
   readonly suppressed: boolean;
+  /** The configured threshold the payload compared this stream with. */
+  readonly threshold: number;
 }): JSX.Element {
   const headingId = useId();
   const instructorStream = stream === 'instructor';
@@ -106,7 +111,7 @@ export function CommentGroup({
           // The held note names a flag type, and §5.2 hides flagged comments
           // from the instructor entirely below the threshold — "no chip, no
           // count, no flag-type hint" — while §5.1 permits the note only above
-          // small-N. So a suppressed week's summary goes out without it. This is
+          // small-N. So a suppressed stream's summary goes out without it. This is
           // the same fail-closed move the card list makes below, applied to the
           // one other thing on this panel that could carry a hint: it obeys the
           // suppression the payload already declared, and decides no threshold
@@ -114,7 +119,13 @@ export function CommentGroup({
           heldNote={suppressed ? null : summary.heldNote}
         />
       )}
-      {suppressed ? null : <GroupComments comments={comments} />}
+      {suppressed ? (
+        <div className="pulse-comment-group__small-n">
+          <SmallNNotice threshold={threshold} />
+        </div>
+      ) : (
+        <GroupComments comments={comments} />
+      )}
     </section>
   );
 }

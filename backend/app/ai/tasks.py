@@ -523,7 +523,7 @@ def summarize_stream(
     summary. The caller has the real number; the model is not asked for it.
 
     **`small_n` is the same kind of value and arrives the same way.** The owner's
-    ruling of 2026-09-09 is that a week below SPEC §4's n-threshold has its
+    ruling of 2026-09-09 is that a stream below SPEC §4's n-threshold has its
     summary name themes only, reusing none of the commenters' word strings, and
     this function's whole part in that is to render the prompt that says so —
     `SMALL_N_SUMMARY_PROMPT_VERSION` rather than `SUMMARY_PROMPT_VERSION`, which
@@ -594,11 +594,13 @@ def summarize_stream(
 
     gateway = gateway or process_gateway()
     # Which prompt this week renders, and the only thing `small_n` decides here.
-    # The caller knows the week's response count and SPEC §4's threshold; this
-    # function is told the answer rather than working it out, for the reason
-    # `response_count` is the caller's — the threshold is configurable and read
-    # through `app.services.report_comments.n_threshold`, and a second reading of
-    # it in the AI layer is a second source for the number a promise is made on.
+    # The caller knows whether this stream is under SPEC §4's threshold
+    # (`app.services.report_comments.stream_is_suppressed`, distinct commenters
+    # per stream); this function is told the answer rather than working it out,
+    # for the reason `response_count` is the caller's — the threshold is
+    # configurable and read through `app.services.report_comments.n_threshold`,
+    # and a second reading of it in the AI layer is a second source for the
+    # number a promise is made on.
     version = SMALL_N_SUMMARY_PROMPT_VERSION if small_n else SUMMARY_PROMPT_VERSION
     output = gateway.run_task(
         prompt=render_summary_prompt(version, stream=stream, comments=comments),

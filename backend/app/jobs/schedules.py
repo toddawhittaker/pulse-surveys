@@ -130,8 +130,9 @@ BEAT_SCHEDULE: dict[str, dict[str, Any]] = {
     #
     # **Monday** for the reason the entry above is on one: §3.1 closes every
     # window on Sunday at 23:59:59 in the institution's timezone, so Monday is the
-    # first day the week that just ended has a final response count — and that
-    # count is exactly what decides whether the week's comments were held.
+    # first day the week that just ended has final counts — and the distinct
+    # commenters in each stream are exactly what decides whether that stream's
+    # comments were held (ADR 0182).
     #
     # **02:40** because the passes ahead of it settle the data this one counts:
     # the reclassification entry runs at 00:45 and 01:45, so the floored comments

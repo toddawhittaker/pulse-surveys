@@ -281,6 +281,13 @@ export interface StreamReportView {
    * shipped.
    */
   readonly benchmark?: StreamBenchmarkView;
+  /**
+   * Whether SPEC §4 withholds this stream's raw comments this week, and the
+   * threshold that decided it. Per stream (E5.1-01, ADR 0182): the threshold
+   * counts distinct students commenting in this stream, so one group of a week
+   * can be shown while the other is suppressed.
+   */
+  readonly small_n: SmallNView;
 }
 
 /** The two groups §5.1 heads separately, never pooled into one. */
@@ -295,7 +302,10 @@ export interface WorkloadView {
   readonly median: number | null;
 }
 
-/** Whether this week is under SPEC §4's threshold, and what that threshold is. */
+/**
+ * Whether one stream is under SPEC §4's threshold this week, and what that
+ * threshold is. No count of anybody: the threshold is configuration (§5.2).
+ */
 export interface SmallNView {
   readonly suppressed: boolean;
   readonly threshold: number;
@@ -313,7 +323,6 @@ export interface InstructorReportView {
    * the same terms as `StreamReportView.benchmark`.
    */
   readonly workload_benchmark?: WorkloadBenchmarkView;
-  readonly small_n: SmallNView;
   /**
    * ADR 0152's release: comments from earlier weeks that crossed the cumulative
    * threshold, carrying no week anywhere (ADR 0153).

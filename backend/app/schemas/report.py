@@ -242,6 +242,22 @@ class CommentView(BaseModel):
     stream: str
 
 
+class SmallNView(BaseModel):
+    """Whether one stream is under SPEC §4's n-threshold this week, and what that threshold is.
+
+    Both, because E4-10 renders the reason as well as the state: a stream showing no
+    raw comments has to say why, and the number is the institution's configured
+    one rather than a constant the frontend carries. **No count of anybody**: the
+    threshold is configuration, and a commenter count on a suppressed stream would
+    be the number the threshold is hiding (§5.2).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    suppressed: bool
+    threshold: int
+
+
 class StreamReport(BaseModel):
     """One of SPEC §5.1's two comment groups: its numbers, its summary and its words."""
 
@@ -279,6 +295,12 @@ class StreamReport(BaseModel):
     # the models in `app.schemas.report_benchmark`, which is also where the reason
     # those models are not declared in this file is written down.
     benchmark: report_benchmark.StreamBenchmark
+    # Whether SPEC §4 withholds this stream's raw comments this week, and the
+    # threshold that decided it. Per stream since E5.1-01 (ADR 0182): the unit is
+    # distinct students commenting in this stream, so one stream of a week can be
+    # shown while the other is suppressed, and a week-level flag would be a second
+    # answer to a question each stream answers for itself.
+    small_n: SmallNView
 
 
 class StreamsView(BaseModel):
@@ -301,20 +323,6 @@ class WorkloadView(BaseModel):
 
     mean: float | None
     median: float | None
-
-
-class SmallNView(BaseModel):
-    """Whether this week is under SPEC §4's n-threshold, and what that threshold is.
-
-    Both, because E4-10 renders the reason as well as the state: a week showing no
-    raw comments has to say why, and the number is the institution's configured
-    one rather than a constant the frontend carries.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    suppressed: bool
-    threshold: int
 
 
 class InstructorReport(BaseModel):
@@ -350,7 +358,6 @@ class InstructorReport(BaseModel):
     # checks below it and above it — the validator on this field, and the
     # revalidation that guarantees the validator runs.
     comparison: ComparisonFigure
-    small_n: SmallNView
     # ADR 0152's release, placed here and nowhere else: a list in every report,
     # populated only in the latest published week's, and carrying no week.
     released_from_earlier_weeks: list[CommentView]
