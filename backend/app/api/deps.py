@@ -72,6 +72,7 @@ __all__ = [
     "CSRF_HEADER",
     "CSRF_REFUSED_KEY",
     "CSRF_REFUSED_STATUS",
+    "DESIGN_TOKENS_CSS",
     "FOUND",
     "NOT_AN_INSTRUCTOR_CHALLENGE",
     "NOT_AN_INSTRUCTOR_STATUS",
@@ -428,6 +429,51 @@ NO_ACCOUNT_TESTID = "no-account"
 # `no-account` sends people to.
 NO_ACCESS_TESTID = "no-access"
 
+# The design tokens both server-rendered pages use — the four door pages below and
+# the development console in `app.api.dev` — as one `:root` rule. Neither page can
+# load the SPA's bundle, so each inlines what it needs, and until E5.1-03 each held
+# its own hand-copied palette. That is the shape the focus-ring fix went wrong in:
+# it reached `design/tokens.css` and not the copy.
+#
+# **One copy, still a copy.** `design/` is a design-system source the backend
+# serves nothing from and cannot reach at run time, so the values are written out
+# here, spelled exactly as `design/tokens.css` spells them. The union of what the
+# two pages use, and nothing either page does not.
+# `tests/unit/test_the_door_and_console_pages_take_their_tokens_from_one_block.py`
+# reads every value here against that file, so a token that changes there and not
+# here is a red test rather than a page that quietly drifts.
+#
+# Static CSS with no interpolation. The door template takes it through a format
+# field, so the braces here are not re-read as fields.
+DESIGN_TOKENS_CSS = """:root {
+  --chalk: #F6F8F4;
+  --paper: #FFFFFF;
+  --spruce: #1E3932;
+  --spruce-60: #5B7269;
+  --hairline: #DCE4DD;
+  --mist: #93A5A0;
+  --marigold: #DFA320;
+  --marigold-deep: #8F6A10;
+  --madder: #A93F32;
+  --font-display: 'Literata', Georgia, serif;
+  --font-body: 'Schibsted Grotesk', 'Helvetica Neue', sans-serif;
+  --font-mono: 'Spline Sans Mono', ui-monospace, monospace;
+  --text-1: 13px;
+  --text-2: 16px;
+  --text-4: 25px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --radius-input: 4px;
+  --radius-card: 8px;
+  --shadow-card: 0 1px 2px rgba(30, 57, 50, .06);
+  color-scheme: light;
+}"""
+
 # The page, as one f-string rather than a template engine: there is one layout,
 # it has three slots, and nothing in the locked closure renders templates. The
 # style block is inline for the same reason, and it stays inline now that the SPA
@@ -449,18 +495,7 @@ PAGE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{heading} · Pulse Surveys</title>
 <style>
-  :root {{
-    --chalk: #F6F8F4;
-    --spruce: #1E3932;
-    --spruce-60: #5B7269;
-    --mist: #93A5A0;
-    --marigold-deep: #8F6A10;
-    --font-display: 'Literata', Georgia, serif;
-    --font-body: 'Schibsted Grotesk', 'Helvetica Neue', sans-serif;
-    --space-4: 16px;
-    --space-5: 24px;
-    --space-7: 48px;
-  }}
+{tokens}
   :focus-visible {{ outline: 2px solid var(--marigold-deep); outline-offset: 2px; }}
   body {{
     margin: 0;
@@ -525,6 +560,7 @@ def refusal_page(guard: str) -> str:
     escaping is written for the day it is neither.
     """
     return PAGE.format(
+        tokens=DESIGN_TOKENS_CSS,
         testid=escape(REFUSAL_TESTID, quote=True),
         reason_attr=_reason_attribute(guard),
         heading=escape(entry.REFUSED_HEADING.text),
@@ -547,6 +583,7 @@ def cancelled_page() -> str:
     could not account for".
     """
     return PAGE.format(
+        tokens=DESIGN_TOKENS_CSS,
         testid=escape(CANCELLED_TESTID, quote=True),
         reason_attr="",
         heading=escape(entry.CANCELLED_HEADING.text),
@@ -574,6 +611,7 @@ def no_account_page() -> str:
     signed in correctly that they did something wrong.
     """
     return PAGE.format(
+        tokens=DESIGN_TOKENS_CSS,
         testid=escape(NO_ACCOUNT_TESTID, quote=True),
         reason_attr="",
         heading=escape(entry.NO_ACCOUNT_HEADING.text),
@@ -596,6 +634,7 @@ def no_access_page() -> str:
     else's; and its own testid is none of the other three, for the reason above.
     """
     return PAGE.format(
+        tokens=DESIGN_TOKENS_CSS,
         testid=escape(NO_ACCESS_TESTID, quote=True),
         reason_attr="",
         heading=escape(entry.NO_ACCESS_HEADING.text),

@@ -122,6 +122,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.routing import Route
 
 from app.api.auth import LOGIN_PATH
+from app.api.deps import DESIGN_TOKENS_CSS
 from app.config import Settings, is_development
 from app.db import SessionLocal, get_session
 from app.lti.registration import launcher_origins
@@ -365,46 +366,7 @@ class ConsoleSection:
 # The register is `docs/DESIGN_BRIEF.md`'s admin one: mono is the dominant voice —
 # every number, code, date and timestamp on this page is in it — the reading
 # column is bounded, the rules are hairlines, and nothing decorates.
-STYLE = """
-:root {
-  /* Palette — copied from design/tokens.css */
-  --chalk: #F6F8F4;         /* --chalk: page ground */
-  --paper: #FFFFFF;         /* --paper: the card */
-  --spruce: #1E3932;        /* --spruce: primary ink, primary button */
-  --spruce-60: #5B7269;     /* --spruce-60: labels, helpers, meta */
-  --hairline: #DCE4DD;      /* --hairline: borders, dividers, table rules */
-  --marigold: #DFA320;      /* --marigold: the accent, never text */
-  --marigold-deep: #8F6A10; /* --marigold-deep: links and the focus ring */
-  --madder: #A93F32;        /* --madder: reserved for "attend to this" */
-
-  /* Type — copied from design/tokens.css. The named faces are webfonts this
-     page deliberately does not fetch (it is served by the backend and loads
-     nothing external), so each stack falls through to what the machine has. */
-  --font-display: 'Literata', Georgia, serif;
-  --font-body: 'Schibsted Grotesk', 'Helvetica Neue', sans-serif;
-  --font-mono: 'Spline Sans Mono', ui-monospace, monospace;
-
-  /* Type scale — copied from design/tokens.css */
-  --text-1: 13px;
-  --text-2: 16px;
-  --text-4: 25px;
-
-  /* Spacing — the 4px ramp, copied from design/tokens.css */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --space-7: 48px;
-
-  /* Radii and elevation — copied from design/tokens.css */
-  --radius-input: 4px;
-  --radius-card: 8px;
-  --shadow-card: 0 1px 2px rgba(30, 57, 50, .06);
-
-  color-scheme: light;
-}
+STYLE = DESIGN_TOKENS_CSS + """
 
 * { box-sizing: border-box; }
 
