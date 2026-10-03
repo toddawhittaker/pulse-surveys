@@ -1176,9 +1176,6 @@ async def set_the_dev_clock(request: Request) -> Response:
     the threadpool, the way `app.main`'s framing middleware does its own.
     """
     settings: Settings = request.app.state.settings
-    if not is_development(settings) or request.method != POST_METHOD:
-        raise HTTPException(status_code=NOT_FOUND)
-
     posted = posted_field(await request.body(), PRETEND_NOW_FIELD)
     if not posted:
         raise HTTPException(
@@ -1207,10 +1204,6 @@ def clear_the_dev_clock(request: Request) -> Response:
     non-async endpoint in a worker thread, so the statement below is off the event
     loop without this function saying anything about threads.
     """
-    settings: Settings = request.app.state.settings
-    if not is_development(settings) or request.method != POST_METHOD:
-        raise HTTPException(status_code=NOT_FOUND)
-
     with SessionLocal() as session:
         clock.clear_override(session)
         session.commit()
@@ -1329,8 +1322,8 @@ def post_every_changed_score(settings: Settings) -> None:
 # reaches another system on a request nobody authenticated — one posts a grade, the
 # other spends this deployment's credentials on a platform's roster service — and
 # the pair is the CSRF sweep's declared exemption (ADR 0140, ADR 0141, ADR 0142).
-router.routes.append(AnyMethodRoute(DEV_CLOCK_SET_PATH, set_the_dev_clock))
-router.routes.append(AnyMethodRoute(DEV_CLOCK_CLEAR_PATH, clear_the_dev_clock))
+router.routes.append(DevControlRoute(DEV_CLOCK_SET_PATH, set_the_dev_clock))
+router.routes.append(DevControlRoute(DEV_CLOCK_CLEAR_PATH, clear_the_dev_clock))
 router.routes.append(DevControlRoute(DEV_PASSBACK_PATH, run_a_passback_now))
 router.routes.append(DevControlRoute(DEV_ROSTER_SYNC_PATH, run_a_roster_sync_now))
 
