@@ -82,6 +82,46 @@ def the_revision_below(config: Any, revision: str) -> str:
     return parent
 
 
+def most_steps_a_walk_down_may_take(config: Any) -> int:
+    """How many revisions the history holds, head to base — the bound for a step walk.
+
+    Four modules descend a database one revision at a time until the thing they
+    are about is no longer there, because each was written before its own
+    migration existed and so had no revision identifier to name. Every one of
+    them used to bound that loop with a hand-written `MOST_STEPS_DOWN = 12`, and
+    `docs/disputes/E5-01-02.md` is what that cost: twelve was the exact distance
+    from head to the revision `test_the_passback_schema_survives_a_downgrade.py`
+    was descending towards, so the walk succeeded on its very last permitted step
+    and the *next* migration anybody added — E5-01's, which did nothing wrong —
+    exhausted it. The failure said "no revision crossed drops it" when the
+    revision that drops it was one step below where the walk stopped. That is
+    `docs/MISTAKES.md` entry 22's shape with a scheduled date on it, and raising
+    the number would have set the same trap one ticket further out.
+
+    **Derived, so it never needs raising again.** A walk cannot usefully take
+    more steps than there are revisions: after this many the database stands at
+    base and there is nothing left to undo, so "walked the whole history and the
+    thing is still there" is exactly the claim each caller's failure message
+    makes. No margin is added, and none would mean anything — a margin past base
+    is steps that cannot be taken.
+
+    It is here rather than in the four modules for the reason everything else in
+    this file is here (`docs/MISTAKES.md` entry 13): one hazard, one place it is
+    worked around, and four callers that cannot drift apart.
+    """
+    from alembic.script import ScriptDirectory
+
+    total = len(list(ScriptDirectory.from_config(config).walk_revisions()))
+    if total == 0:
+        pytest.fail(
+            "The script directory holds no revisions at all, so a walk down would take no steps "
+            "and every caller's bound would be zero. That is a misconfigured Alembic environment "
+            "rather than a migration that does not reverse; "
+            "`tests/integration/test_alembic_baseline.py` diagnoses it."
+        )
+    return total
+
+
 def migrate(config: Any, direction: str, revision: str, what: str) -> None:
     """Run one Alembic command to `revision`, failing the test if it does not complete.
 

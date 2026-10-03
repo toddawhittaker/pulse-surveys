@@ -171,7 +171,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 21** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 23** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 16. A mutation harness reported kills it had not made
 
@@ -191,7 +191,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 19. A test held its expectation in a copy of the thing it was checking
 
-**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/19-a-test-held-its-expectation-in-a-copy-of.md)
+**Caught: 8** · [the incidents, the root cause, and the whole rule](mistakes/19-a-test-held-its-expectation-in-a-copy-of.md)
 
 ## 14. An enumeration was reported as an impossibility
 
@@ -284,7 +284,7 @@ file and check the status, or run the gate bare.
 
 ## 24. A test asserted a property no implementation could satisfy
 
-**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/24-a-test-asserted-a-property-no-implementation-could-satisfy.md)
+**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/24-a-test-asserted-a-property-no-implementation-could-satisfy.md)
 
 ## 25. Two lockfiles resolved the same package to two versions
 
@@ -472,7 +472,7 @@ application over HTTP and reads the status in both directions.
 
 ## 48. A known gap was recorded only in a comment in the file that worked around it
 
-**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/48-a-known-gap-was-recorded-only-in-the-file-that-worked-around-it.md)
+**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/48-a-known-gap-was-recorded-only-in-the-file-that-worked-around-it.md)
 
 **Rule.** A limitation you work around goes in the deferral file the next epic
 reads — `carried-from-eN.md` or `deferred.md`, with an owner — in the same change
@@ -514,7 +514,7 @@ open question for the owner rather than editing the promise in passing.
 
 ## 51. A confidentiality property held in every payload and failed across the sequence of them
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/51-an-attribution-channel-lived-in-the-sequence-of-reports.md)
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/51-an-attribution-channel-lived-in-the-sequence-of-reports.md)
 
 **Rule.** A guarantee proven over one response, one report or one export is a
 guarantee about one payload, and a reader who keeps the previous one is subtracting
@@ -531,7 +531,7 @@ difference small enough to attribute.
 
 ## 53. A closed-set guard is defeated one level out
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/53-a-closed-set-guard-is-defeated-one-level-out.md)
+**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/53-a-closed-set-guard-is-defeated-one-level-out.md)
 
 **Rule.** When you build or review a closed-set or inventory guard, attack the
 whole class in the first pass: name what encloses the set — the directory above
@@ -553,3 +553,18 @@ worker drew which file, and pointing at whichever ticket is newest. Read the
 connection out of the traceback before believing any of that — the database name in
 `psycopg`'s message names the test that did the binding, and a throwaway database
 that no longer exists names it exactly.
+
+## 58. A seeded world's claim was verified by the writer that made it
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/58-a-seeded-worlds-claim-was-verified-by-the-writer-that-made-it.md)
+
+**Rule.** Verify a seeded world's claim through the reader the claim is about, not
+through the writer that made it. A seeder's self-check answers "did I write what I
+meant to write"; it never answers "can the thing this world exists for read it",
+and those two come apart exactly where a filter the seeder does not model does the
+excluding. If the claim is "the hero's comparison set is populated", the sentence
+names a function — call it. A recount by the writer's own key is not a weaker
+version of that read but a different query: it asserts the narrowings it happens to
+reproduce and is silent about the rest, while looking like coverage. And where a
+world is built by several files, no one file's docstring is entitled to state the
+result: say what that file contributes and point at what else has to hold.

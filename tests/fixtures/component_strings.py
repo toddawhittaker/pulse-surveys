@@ -121,17 +121,22 @@ JSX_SUFFIX = ".tsx"
 # convention (`WeekNav.test.tsx`).
 TEST_INFIX = ".test."
 
-# The three test-support modules that live inside the swept trees and ship to
+# The test-support modules that live inside the swept trees and ship to
 # nobody. Named one by one rather than matched by a pattern, because a pattern
 # that excused `*Fixtures.ts` would excuse a component somebody named that way,
 # and because each of these is a claim to be checked: the rule module requires
 # every one of them to exist and to be imported only from excluded files. A
 # shipped import of one of them is a finding — that is the moment the exclusion
 # stops being true.
+#
+# The fourth is E5-09's. Its set names and course labels stand in for the
+# comparison-set API's answers, and it sits beside the route that reads it for
+# the reason `instructorReportFixtures.ts` sits beside the instructor route.
 EXCLUDED_SUPPORT_MODULES = (
     Path("components") / "instructorReportCommentFixtures.ts",
     Path("components") / "instructorReportStats.fixtures.ts",
     Path("routes") / "instructor" / "instructorReportFixtures.ts",
+    Path("routes") / "leadership" / "comparisonSetFixtures.ts",
 )
 
 # ---------------------------------------------------------------------------
@@ -780,7 +785,7 @@ def is_test_module(path: Path) -> bool:
 
 
 def excluded_support_paths() -> list[Path]:
-    """The three test-support modules, as absolute paths."""
+    """Every excluded test-support module, as an absolute path."""
     return [FRONTEND_SOURCE_ROOT / relative for relative in EXCLUDED_SUPPORT_MODULES]
 
 

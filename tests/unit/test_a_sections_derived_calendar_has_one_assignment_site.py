@@ -20,6 +20,23 @@ static sweep the read side already uses.
 `length_weeks`, `start_date`, `end_date` or `modality` onto a section is inside
 `backend/app/services/section_codes.py`.
 
+**"Onto a section" is the half this module used to get wrong, and E5-06 is where
+it was corrected** (`docs/disputes/E5-06-02.md`, ruled test-side). The
+persistence-call branch keyed on the keyword's *name* and never on the table the
+statement writes, even though the constructor branch one step earlier already
+discovers the section's mapped classes for exactly that purpose. So
+`insert(ComparisonSet).values(length_weeks=…)` — the length leadership declares
+when it defines a comparison set, one of SPEC §2.2's eight, held by E5-01's
+`CHECK` and derived from nothing (ADR 0164) — was reported as a second writer of
+a *section's* calendar. Nothing about it reads the start-letter map or does
+calendar arithmetic; there is no first writer for it to disagree with. The
+branch now resolves the statement's target off the AST and skips a call that
+names some other table, and it keeps flagging one whose target it cannot resolve,
+so the fail-closed direction is unchanged. A guard one table too wide is a rule
+no correct implementation can satisfy (`docs/MISTAKES.md` entry 24), which is
+what the old assertion had become the moment a second table grew a column of the
+same name.
+
 **The grain is the module, not the function.** ADR 0021 names the function, and a
 sweep at function grain would go red on a refactor that split a private helper out
 of it — a change that alters nothing about the rule, because a helper in that
@@ -36,6 +53,11 @@ states the same limits for the mock-idp gate, and the first two are the same):
   - **It reads the source rather than the running application**, so an assignment
     reached through a mapper event, an ORM cascade or a library call is invisible
     too.
+  - **It reads a statement's target by name.** A statement built up over two
+    lines and written as `statement.values(end_date=…)` names no table here, and
+    is flagged rather than skipped — the fail-closed direction, with a planted
+    sample on each side of it. What this cannot do is tell two tables apart when
+    neither is named at the call.
   - **It says nothing about correctness.** A second module that assigned these
     four columns with the right values would fail here, and a `section_codes.py`
     that assigned the wrong ones would pass. The two tests over the derivation are
@@ -81,6 +103,66 @@ UNSWEPT_DIRECTORIES = frozenset({"__pycache__", ".mypy_cache", ".ruff_cache"})
 PERSISTENCE_CALLS = frozenset(
     {"values", "update", "insert", "merge", "add", "bulk_insert_mappings", "bulk_update_mappings"}
 )
+
+
+def _named(node: ast.expr) -> str | None:
+    """The name an expression carries, where it is one a statement names a table by.
+
+    A bare name (`Section`), an attribute (`models.Section`) or a call
+    (`Section(...)`, which is how a row is handed to `add` and `merge`). Anything
+    else — a comparison, a subscript, a variable holding a statement — has no
+    name this sweep can read, and that is what `persistence_targets` reports.
+    """
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Call):
+        return _named(node.func)
+    return None
+
+
+def persistence_targets(node: ast.Call) -> frozenset[str]:
+    """The names a persistence call names a table or a row by, read off the AST.
+
+    **Added by the ruling on `docs/disputes/E5-06-02.md`, and the reason is the
+    whole point of the narrowing.** The branch this feeds used to key on the
+    keyword's name alone, so `insert(ComparisonSet).values(length_weeks=…)` was
+    reported as a second writer of a *section's* derived calendar. It is not:
+    `comparison_set.length_weeks` is the length leadership declares when it
+    defines a set, held by E5-01's `CHECK`, derived from nothing (ADR 0164). The
+    old assertion was wrong about which table it was reading, and a sweep one
+    table too wide is one no correct implementation of E5-06 can satisfy
+    (`docs/MISTAKES.md` entry 24).
+
+    The names are collected from the call's own positional arguments —
+    `bulk_update_mappings(Section, [...])`, `add(Section(...))` — and from every
+    call in the chain its method hangs off, which is what reaches the `Section`
+    in `update(Section).where(...).values(...)`.
+
+    **An empty answer means "cannot tell", and the caller keeps flagging.** A
+    statement held in a variable and written as `statement.values(end_date=…)`
+    names nothing here, and the fail-closed direction is the one this whole
+    module is built in: over-flagging in a rule with one permitted module fails
+    loudly, under-flagging is silent.
+    """
+    found: set[str] = set()
+    for argument in node.args:
+        name = _named(argument)
+        if name is not None:
+            found.add(name)
+    current: ast.expr = node.func
+    while True:
+        if isinstance(current, ast.Attribute):
+            current = current.value
+        elif isinstance(current, ast.Call):
+            for argument in current.args:
+                name = _named(argument)
+                if name is not None:
+                    found.add(name)
+            current = current.func
+        else:
+            return frozenset(found)
 
 
 class AssignmentSite(NamedTuple):
@@ -161,13 +243,23 @@ def assignment_sites(
             if isinstance(named, ast.Constant) and named.value in DERIVED_COLUMNS:
                 record(node, str(named.value), "a `setattr` with the column named")
 
-        if name not in PERSISTENCE_CALLS and name not in section_classes:
+        if name in section_classes:
+            shape = "a section constructed with the column"
+        elif name in PERSISTENCE_CALLS:
+            targets = persistence_targets(node)
+            if targets and not targets & frozenset(section_classes):
+                # A persistence call that names some other table. The ruling on
+                # `docs/disputes/E5-06-02.md`: this rule is about a *section's*
+                # derived calendar, and a column of the same name on another
+                # table is a different column with a different meaning.
+                continue
+            shape = (
+                "a column handed to a call that persists it"
+                if targets
+                else "a column handed to a persistence call whose table this sweep cannot resolve"
+            )
+        else:
             continue
-        shape = (
-            "a section constructed with the column"
-            if name in section_classes
-            else "a column handed to a call that persists it"
-        )
         for keyword in node.keywords:
             if keyword.arg in DERIVED_COLUMNS:
                 record(node, str(keyword.arg), shape)
@@ -178,6 +270,32 @@ def assignment_sites(
                 for key in inner.keys:
                     if isinstance(key, ast.Constant) and key.value in DERIVED_COLUMNS:
                         record(node, str(key.value), shape)
+    return found
+
+
+def sites_outside_the_sanctioned_module(
+    modules: list[Path], section_classes: tuple[str, ...]
+) -> list[AssignmentSite]:
+    """Every assignment site in `modules` that is not in the one module allowed to have them.
+
+    One helper rather than a loop inside the sweep, because the canary below runs
+    the same walk over a planted tree: a narrowing is only believable if the walk
+    that judges `backend/app/` is the walk shown catching a planted writer
+    (`docs/MISTAKES.md` entry 13, and entry 9 on citing a guard nobody has run).
+    """
+    sanctioned = SANCTIONED_MODULE.resolve()
+    found: list[AssignmentSite] = []
+    for path in modules:
+        if path.resolve() == sanctioned:
+            continue
+        source = path.read_text(encoding="utf-8")
+        try:
+            found.extend(assignment_sites(source, path, section_classes))
+        except SyntaxError as failure:  # pragma: no cover - a broken source tree
+            pytest.fail(
+                f"{path} does not parse ({failure}), so this sweep cannot read it and would report "
+                "success having skipped it."
+            )
     return found
 
 
@@ -244,6 +362,25 @@ ASSIGNMENTS_MUST_CATCH = {
     "a Core update built from a dict literal": (
         'session.execute(update(Section).values({"end_date": end}))\n'
     ),
+    # The three below are the ruling on `docs/disputes/E5-06-02.md` held from the
+    # catching side: narrowing the persistence branch to statements that name a
+    # section is only sound if every shape that *does* name one is still found.
+    "a Core insert naming the section class": (
+        "session.execute(insert(Section).values(length_weeks=weeks))\n"
+    ),
+    "a Core update with a where clause between the target and the values": (
+        "session.execute(update(Section).where(Section.id == key).values(start_date=start))\n"
+    ),
+    "a bulk mapping write naming the section class": (
+        'session.bulk_update_mappings(Section, [{"start_date": start}])\n'
+    ),
+    # And the fail-closed direction: a statement held in a variable names no
+    # table this sweep can read, so it is flagged rather than skipped. Without
+    # this sample the narrowing could be written as "skip unless a section is
+    # named", which silently excuses every write built up over two statements.
+    "a persistence call whose table cannot be resolved": (
+        "session.execute(statement.values(end_date=end))\n"
+    ),
 }
 
 # The near misses. Each is a line the sanctioned service, a report, or a model is
@@ -270,6 +407,19 @@ ASSIGNMENTS_MUST_ALLOW = {
         'payload = {"start_date": start, "end_date": end}\n'
     ),
     "prose in a docstring": '"""Only `apply_section_code` sets `start_date` on a section."""\n',
+    # The ruling on `docs/disputes/E5-06-02.md`, as the two samples that carry
+    # it. `comparison_set.length_weeks` is the length leadership *declares* when
+    # it defines a set — one of SPEC §2.2's eight, held by E5-01's `CHECK` and
+    # derived from nothing (ADR 0164) — so a statement writing it is not a second
+    # reading of the start-letter map and there is no arithmetic for it to
+    # disagree with. Both shapes are what `app.services.comparison_sets` writes.
+    "a Core insert into another table with a column of the same name": (
+        "session.execute(insert(ComparisonSet).values(name=name, length_weeks=write.length_weeks))\n"
+    ),
+    "a Core update of another table naming the column": (
+        "session.execute(update(ComparisonSet).where(ComparisonSet.id == key)"
+        ".values(length_weeks=write.length_weeks))\n"
+    ),
 }
 
 
@@ -400,6 +550,75 @@ def test_the_sanctioned_writer_is_visible_to_this_sweep(
     )
 
 
+def test_a_planted_second_writer_of_a_sections_calendar_is_caught_and_another_table_is_not(
+    tmp_path: Path, configured_env: dict[str, str], import_app_module: Any
+) -> None:
+    """The canary the ruling on `docs/disputes/E5-06-02.md` asks for, over the real class names.
+
+    The narrowing below skips a persistence call that names some table other than
+    a section. That is a hole shaped exactly like the rule if it is written
+    wrongly — a resolver that never finds a section name skips everything, and
+    the sweep goes silent over the defect it exists for while every other test in
+    this file stays green (`docs/MISTAKES.md` entry 3).
+
+    So a second writer is **planted** and the same walk the sweep uses is run
+    over it: a module writing `section.length_weeks` through
+    `update(Section).values(...)` must be flagged, and a module writing
+    `comparison_set.length_weeks` through `insert(ComparisonSet).values(...)` —
+    which is what `app.services.comparison_sets` really does — must not be.
+
+    **Both class names come from the registry rather than from this file.** The
+    section classes are what the sweep itself discovers, and the comparison-set
+    class is required to be a mapped class over `comparison_set`, so the sparing
+    half cannot pass by naming a class that does not exist: a rename on either
+    side is a red here rather than a sweep quietly excusing a real writer.
+
+    **The mutation this kills:** `persistence_targets` returning nothing on every
+    input — a resolver that walks the wrong attribute, or one written against a
+    call shape this codebase does not use. With it, the planted roster sync is
+    skipped and E1's second writer of the calendar lands unnoticed, which is the
+    one thing this module was built to stop.
+    """
+    section_classes = mapped_classes_for(import_app_module, "section")
+    set_classes = mapped_classes_for(import_app_module, "comparison_set")
+    assert (
+        section_classes
+    ), "No mapped class over `section` was found, so the flagged half below is about nothing."
+    assert set_classes, (
+        "No mapped class over `comparison_set` was found on `Base.registry`, so the spared half "
+        "below would name a class this application does not have — and a near miss that names "
+        "nothing is not one. E5-01 ships the model."
+    )
+    a_section = section_classes[0]
+    a_set = set_classes[0]
+
+    caught = tmp_path / "a_planted_roster_sync.py"
+    caught.write_text(
+        f"session.execute(update({a_section}).values(length_weeks=weeks))\n", encoding="utf-8"
+    )
+    spared = tmp_path / "a_planted_comparison_set_service.py"
+    spared.write_text(
+        f"session.execute(insert({a_set}).values(length_weeks=write.length_weeks))\n",
+        encoding="utf-8",
+    )
+
+    found = sites_outside_the_sanctioned_module(sorted(tmp_path.glob("*.py")), section_classes)
+    flagged = {site.path.name for site in found}
+
+    assert caught.name in flagged, (
+        f"The sweep did not flag a module writing `length_weeks` through "
+        f"`update({a_section}).values(...)`; it flagged {sorted(flagged)}. That is the second "
+        "writer this whole module exists to catch — E1's roster sync filling the calendar as it "
+        "creates a section — and a narrowing that lets it through has turned the rule off."
+    )
+    assert spared.name not in flagged, (
+        f"The sweep flagged a module writing `{a_set}.length_weeks`, which is the length "
+        "leadership declares when it defines a comparison set: held by E5-01's `CHECK`, derived "
+        "from nothing (ADR 0164), and on a different table from the one SPEC §2.2's sentence is "
+        "about. Flagging it makes this rule one no correct implementation of E5-06 can satisfy."
+    )
+
+
 def test_no_module_outside_the_sanctioned_service_assigns_a_derived_calendar_column(
     configured_env: dict[str, str], import_app_module: Any
 ) -> None:
@@ -425,25 +644,11 @@ def test_no_module_outside_the_sanctioned_service_assigns_a_derived_calendar_col
     )
 
     section_classes = mapped_classes_for(import_app_module, "section")
-    sanctioned = SANCTIONED_MODULE.resolve()
-
-    offenders: list[str] = []
-    for path in modules:
-        if path.resolve() == sanctioned:
-            continue
-        source = path.read_text(encoding="utf-8")
-        try:
-            sites = assignment_sites(source, path, section_classes)
-        except SyntaxError as failure:  # pragma: no cover - a broken source tree
-            pytest.fail(
-                f"{path.relative_to(REPO_ROOT)} does not parse ({failure}), so this sweep cannot "
-                "read it and would report success having skipped it."
-            )
-        offenders.extend(
-            f"  {path.relative_to(REPO_ROOT)}:{site.line}  {site.column} — {site.shape}: "
-            f"{site.source}"
-            for site in sites
-        )
+    offenders = [
+        f"  {site.path.relative_to(REPO_ROOT)}:{site.line}  {site.column} — {site.shape}: "
+        f"{site.source}"
+        for site in sites_outside_the_sanctioned_module(modules, section_classes)
+    ]
 
     assert not offenders, "\n".join(
         [

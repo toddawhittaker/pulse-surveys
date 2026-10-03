@@ -291,7 +291,18 @@ class Course(UuidPrimaryKey, Base):
     """
 
     __tablename__ = "course"
-    __table_args__ = (UniqueConstraint("prefix_id", "lms_number"),)
+    __table_args__ = (
+        UniqueConstraint("prefix_id", "lms_number"),
+        # `(id, level)` is unique because `id` alone already is, so this
+        # constraint forbids nothing and refuses no row anybody could write.
+        # What it does is give `comparison_set_member`'s composite key something
+        # to reference: SPEC §5.1's exact level match is a rule across two
+        # tables, a `CHECK` cannot read another table (ADR 0018), and a composite
+        # foreign key needs a unique constraint over exactly the columns it
+        # names. E5-01 added it; `section` carries `(id, term_id)` for the same
+        # reason and has since `3f6907349751`.
+        UniqueConstraint("id", "level"),
+    )
 
     prefix_id: Mapped[UUID] = mapped_column(
         ForeignKey("prefix.id", ondelete="RESTRICT"), nullable=False

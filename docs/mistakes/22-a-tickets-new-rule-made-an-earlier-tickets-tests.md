@@ -1,14 +1,18 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 21**
+**Caught: 23**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*24 instances recorded; the 3 most recent are below (E4-06, E4-18, E4-17),
-each after the "What happened" section. The overdue trim the previous header
-owed was taken on 2026-09-08 with the E4-17 bump, removing the E3-04, E4-01,
-E4-05 and E4-04 paragraphs; they are in this file's git history and in the
-pull requests they cite. The E0-18 PR 2 paragraph stays where it sits, beside
+*26 instances recorded; the 3 most recent are below (E4-17, E5-06, E5-13),
+each after the "What happened" section. The E4-06 paragraph sits with them and
+is not counted among the three: like the E0-18 note below, it carries a rule
+sentence of its own — that a closed set written earlier in the same branch is
+as much on the other side of the test wall as one written in E0 — rather than
+only an instance. The trim the previous header owed was taken on 2026-09-08
+with the E4-17 bump, removing the E3-04, E4-01, E4-05 and E4-04 paragraphs,
+and again on 2026-09-14 with the E5-13 bump, removing the E4-18 paragraph;
+they are in this file's git history and in the pull requests they cite. The E0-18 PR 2 paragraph stays where it sits, beside
 the consequence it illustrates: it carries a rule sentence of its own — that
 any instruction to remove or rename a thing is a claim nothing asserts on it —
 rather than only an instance.*
@@ -143,23 +147,6 @@ is about who may edit a test, not about how old the test is, and a set written
 earlier in the same branch is as much on the other side of the wall as one written
 in E0.
 
-**Instance, 2026-09-07 (E4-18, and the named repair was not the whole repair).**
-E4-18's ticket names this entry itself: `tests/fixtures/report_api.py`'s
-`instructor_route_objects` fails every E4-07 suite unless the module has exactly
-two GET routes, and the prescribed repair is a test-side flip of that count to
-three. Reading the fixture whole showed the count is half of it. `instructor_routes`
-maps `_shape_of` over every GET route the module mounts, and `_shape_of` fails **by
-name** on a route declaring no section parameter — which is exactly what E4-18's
-parameterless `GET /instructor/sections` declares. So a count-only flip leaves all
-six E4-07 modules red against a correctly built route, in files the implementer may
-not edit, one step after the flip was supposed to have fixed them. The prepared diff
-therefore also adds a `_names_a_section` predicate and shapes only the two routes
-that take a section, and corrects the two "…'s two GET routes…" sentences the third
-route makes false (entry 1). Counted as a catch: the entry's rule is to go and look
-for what a new rule makes unrunnable rather than to trust the repair a ticket names,
-and here the named repair was incomplete in a way that would have surfaced as an
-implementer's red run.
-
 **Instance, 2026-09-07 (E4-17, PR #205, caught at planning).** The work plan
 assigned a component-test edit to "the implementer", and no agent the hooks
 permit could make it: the implementer's hook denies every `*.test.*` file and
@@ -172,3 +159,41 @@ the pull request, and the standing fix is the owed process change to the hook
 pair. Counted as a catch per the pull request's own wording: without the
 entry, the round would have dispatched an agent into a denial and read the
 refusal as a defect.
+
+**Instance, 2026-09-14 (E5-06, caught while writing the ticket's red).** E3-07's
+sweep `tests/unit/test_every_mutating_route_carries_the_csrf_check.py` requires
+every mutating route to hold `app.api.deps.csrf_verified_student` — matched as
+the **object**, which is right — or to be named in an exemption ledger with a
+sentence. E5-06's three writing routes carry `csrf_verified_leadership`, the
+same mechanism bound to the leadership role gate, so a correctly built ticket
+turns that sweep red on three paths, and both repairs available to the
+implementer are wrong: edit a test they may not edit, or add three exemptions to
+a ledger whose entries are arguments that a route *cannot* hold the check. The
+collision was found by asking, before any test was written, which existing
+sweeps a new route file walks into — the same question this entry's rule asks of
+a new write-time rule, put to a new dependency. The repair shipped with the
+ticket's tests: currency 1 became the `csrf_verified_*` family, read off
+`app.api.deps` by prefix so the next role's pair is swept the day it lands, with
+both known members required by name so a prefix matching nothing is a failure
+rather than a guard with nothing to look for. **The clause it adds:** a new
+*dependency* is as much a new rule as a new constraint — before adding one that
+an existing sweep enumerates by object, grep the read-only suite for the
+enumeration and widen it deliberately, in the tests-first commit, rather than
+leaving the implementer a red they cannot fix.
+
+**Instance, 2026-09-14 (E5-13, caught before the first line of the change).**
+The ticket's settled shape turned `app.copy.leadership_sets`'s eight refusal
+constants into `CopyEntry` values. Read whole first,
+`tests/fixtures/named_sets.py`'s `refusal_sentence` — which every one of E5-06's
+seven integration modules asks for its expected refusal body — walks `app.copy`
+for an attribute of each name, keeps only values that are `isinstance(value,
+str)`, and fails if no home it finds is under `app.copy`. The settled shape
+therefore reds seven modules inside their own fixture, in files the implementer
+may not edit, for a change that is correct in every other respect. The shape
+shipped instead keeps a public string constant of each name holding its own
+entry's `text`, which satisfies both walls and leaves the words in one place.
+**The clause it adds:** a shape ruling about a module's *public constants* is a
+change to an interface earlier suites read by name and by type — before
+implementing one, grep the read-only fixtures for the constant's name and read
+what they require of it, because "the same sentence, in a richer object" is a
+different object to an `isinstance` check.

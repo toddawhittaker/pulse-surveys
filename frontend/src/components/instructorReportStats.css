@@ -153,6 +153,52 @@
   color: var(--spruce-60);
 }
 
+/* The comparison columns — ticket E5-08.
+ *
+ * Six cells rather than two, laid out three across so that each row reads
+ * section, comparison set, university. The grid is the same one, with one more
+ * column: the cells are the same shape, and a row is whatever fills it. Two
+ * columns stay the default above, which is also what one comparison member and
+ * no comparison member both lay out as. */
+.pulse-stat-pair-figures--three {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+/* `docs/DESIGN_BRIEF.md`: "benchmark lines are context, section line is the
+   hero". The same rule off the chart — a comparison figure is set at reading
+   size beside the section's display-sized one, so the section's own number is
+   the one the eye lands on. */
+.pulse-stat-figure-value--benchmark {
+  font-size: var(--text-2);
+}
+
+/* A withheld comparison figure, in words where the digits would be. Body face
+   rather than the mono the values are set in: this is a sentence, and setting it
+   in the figures' face would give it the shape of a reading.
+
+   `--spruce-60`, never `--mist`: mist measures 2.58:1 against chalk (the E4
+   boundary round's measurement, pinned in `reportContrastTokens.test.ts`), and
+   the reason a figure is missing is not text a low-vision reader may be left to
+   guess at. */
+.pulse-stat-figure-withheld {
+  display: block;
+  font-family: var(--font-body);
+  font-size: var(--text-1);
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--spruce-60);
+}
+
+.pulse-stat-figure-withheld-note {
+  display: block;
+  margin-top: var(--space-1);
+  font-family: var(--font-body);
+  font-size: var(--text-1);
+  font-weight: 400;
+  line-height: 1.3;
+  color: var(--spruce-60);
+}
+
 /* The prototype's third line, under the value. It carries a comparison in the
    prototype; comparisons are E5's, so on this surface it carries the one thing
    an absent figure has to say. */

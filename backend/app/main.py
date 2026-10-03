@@ -48,7 +48,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
 from app import __version__
-from app.api import auth, dev, health, instructor, lti, student
+from app.api import auth, dev, health, instructor, leadership, lti, student
 from app.config import Settings, is_development
 from app.db import SessionLocal
 from app.lti.registration import launcher_origins
@@ -310,6 +310,15 @@ def create_app() -> FastAPI:
     # that one dependency is what makes every route this router serves findable to
     # a sweep that asks the running application.
     app.include_router(instructor.router)
+    # Leadership's own surface: E5-06's named comparison sets — the list, the
+    # three writes, the definition choices and the preview. Registered
+    # unconditionally like the routers above, and behind
+    # `app.api.deps.require_leadership` (or `csrf_verified_leadership` on a write)
+    # rather than behind a check of its own — what gates these routes is the
+    # session rather than the build, and carrying one of those two dependencies is
+    # what makes every route this router serves findable to a sweep that asks the
+    # running application.
+    app.include_router(leadership.router)
     # The developer test console. Always registered; the handler gates itself on
     # `ENVIRONMENT == development` and answers 404 elsewhere, so production is
     # indistinguishable from a route that does not exist (ADR 0074).

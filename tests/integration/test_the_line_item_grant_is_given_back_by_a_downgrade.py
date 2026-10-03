@@ -45,7 +45,12 @@ naming the grant, before any migration is run backwards.
 from typing import Any
 
 import pytest
-from fixtures.migration_journey import MODEL_SCHEMA, columns_the_database_reports, migrate
+from fixtures.migration_journey import (
+    MODEL_SCHEMA,
+    columns_the_database_reports,
+    migrate,
+    most_steps_a_walk_down_may_take,
+)
 from sqlalchemy import create_engine, text
 
 pytestmark = pytest.mark.integration
@@ -65,11 +70,16 @@ SECTION = "section"
 LINE_ITEM_COLUMN = "ags_line_item_url"
 CONTAINER_COLUMN = "lms_ags_line_items_url"
 
-# How many revisions the walk down may cross before it is called broken rather
-# than long. The same bound `test_the_passback_schema_survives_a_downgrade.py`
-# uses, for the same reason: E3 builds several tickets off one head, and anything
-# past this is a `downgrade()` that is not undoing what it is supposed to undo.
-MOST_STEPS_DOWN = 12
+# How far the walk down may go is derived from the chain by
+# `most_steps_a_walk_down_may_take`, which is the same answer
+# `test_the_passback_schema_survives_a_downgrade.py` uses and now for a better
+# reason than "the same number". This module carried a copy of that module's
+# `MOST_STEPS_DOWN = 12`; there the value was the exact distance to the revision
+# being descended towards, and the next migration added anywhere in the tree
+# exhausted it (`docs/disputes/E5-01-02.md`). Here it was not yet exact, which is
+# the only reason this module was green — a latent copy of the same arithmetic,
+# fixed in the same change rather than left for whichever ticket met it first
+# (`docs/MISTAKES.md` entry 13).
 
 HOLDS_THE_COLUMN = text(
     "SELECT has_column_privilege(:role, 'public.section', :column, 'UPDATE') AS held"
@@ -99,13 +109,20 @@ def holds_update_on(database: Any, column: str) -> bool:
 
 
 def walk_down_until_the_line_item_grant_is_gone(config: Any, database: Any) -> int:
-    """Downgrade one revision at a time until the grant is not there, and say how far."""
-    for step in range(1, MOST_STEPS_DOWN + 1):
+    """Downgrade one revision at a time until the grant is not there, and say how far.
+
+    The bound comes from the chain rather than from a constant, so a revision
+    added above this one cannot turn the walk's own arithmetic into a red on a
+    ticket that did nothing wrong.
+    """
+    bound = most_steps_a_walk_down_may_take(config)
+    for step in range(1, bound + 1):
         migrate(config, "downgrade", "-1", f"stepping one revision below head, step {step}")
         if not holds_update_on(database, LINE_ITEM_COLUMN):
             return step
     pytest.fail(
-        f"After {MOST_STEPS_DOWN} downgrade steps `{APPLICATION_ROLE}` can still `UPDATE` "
+        f"After {bound} downgrade steps — the whole revision history — `{APPLICATION_ROLE}` can "
+        "still `UPDATE` "
         f"`public.{SECTION}.{LINE_ITEM_COLUMN}`, so no revision crossed revokes it. E3-05's work "
         "order (D6) requires the downgrade to issue a column-grain `REVOKE`, and the note it asks "
         "to be mirrored says why a table-grain one is not enough: a column ACL survives table-level "

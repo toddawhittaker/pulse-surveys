@@ -1,4 +1,11 @@
-import type { InstructorReportView, TaughtSectionView } from '../../api/instructor';
+import type {
+  BenchmarkSeriesPointView,
+  BenchmarkSeriesView,
+  InstructorReportView,
+  StreamBenchmarkView,
+  TaughtSectionView,
+  WorkloadBenchmarkView,
+} from '../../api/instructor';
 
 /**
  * The report payloads the page's tests render — ticket E4-11.
@@ -111,13 +118,127 @@ export const HELD_COMMENT =
   'Quadrat transect week was a shambles and the demonstrator said so out loud.';
 
 /**
- * The wire body for one published week with data in it.
+ * The zone the institution keeps its calendar in, as the payload names it.
+ *
+ * **Deliberately not `America/New_York`.** That is the zone the development
+ * stack is configured with, so a rendering that hard-coded it — or that fell
+ * back to the machine's own — would be right here for the wrong reason. It is
+ * also a zone whose clocks change, which is what makes the fall-back fixture
+ * below able to catch a conversion done with one fixed offset.
+ */
+export const INSTITUTION_TIMEZONE = 'America/Chicago';
+
+/**
+ * The wording each stream's rating question is served with — E5-02.
+ *
+ * **Deliberately not the mockup's sentences.** `design/InstructorMondayReport.dc.html`
+ * titles its two histograms "My instructor supported my learning" and "Materials
+ * and activities supported my learning"; a fixture repeating either would let a
+ * page that pasted the mockup's words into the client pass, which is the whole
+ * thing criterion 4 is about. SPEC §3.2 versions this wording server-side, so
+ * whatever the server sends is what the title says.
+ */
+export const INSTRUCTOR_QUESTION_TEXT = 'This week my instructor was worth turning up for';
+export const COURSE_QUESTION_TEXT = 'This week the course materials earned the time they took';
+
+/**
+ * When the week the fixtures below report on stopped taking answers.
+ *
+ * A Sunday at 23:59:59 in `INSTITUTION_TIMEZONE`, written as the UTC instant the
+ * wire carries — 2026-10-04, which is central daylight time, so the offset is
+ * five hours. SPEC §3.1's rhythm closes every window at that wall clock.
+ */
+export const WEEK_CLOSED_AT = '2026-10-05T04:59:59+00:00';
+
+/**
+ * One benchmark week, sealed as the server seals every one of them.
+ *
+ * The figures below are rounding-revealing in the way this file's own are —
+ * 3.94 is "3.9" rounded and "3.9" truncated but 3.46 is "3.5" against "3.4" —
+ * and **no two of the twelve render the same string**, nor the same string as
+ * any of the section's own trend means. A page that handed one stream's
+ * benchmark to the other panel, or the university's series to the comparison
+ * line, would otherwise draw a perfectly plausible chart.
+ */
+function reported(courseWeek: number, figure: number): BenchmarkSeriesPointView {
+  return { course_week: courseWeek, mean: { suppressed: false, reason: null, figure } };
+}
+
+/** A week SPEC §4.1 item 7 withheld: no figure, and the wire's own reason token. */
+function withheld(courseWeek: number): BenchmarkSeriesPointView {
+  return {
+    course_week: courseWeek,
+    mean: { suppressed: true, reason: 'below-minimum', figure: null },
+  };
+}
+
+/**
+ * One series, over the report's own published weeks.
+ *
+ * **The weeks are `PUBLISHED_WEEKS` and not the population's**, which is the
+ * server's confidentiality rule rather than a convenience: a series carrying the
+ * weeks the comparison population answered in would let a reader subtract their
+ * own published weeks and read off which weeks other sections answered.
+ */
+function series(first: number, second: number, third: number): BenchmarkSeriesView {
+  return {
+    points: [reported(2, first), reported(4, second), reported(7, third)],
+  };
+}
+
+/** The same three weeks, every one of them withheld — a fully suppressed series. */
+const WITHHELD_SERIES: BenchmarkSeriesView = { points: PUBLISHED_WEEKS.map(withheld) };
+
+/** The instructor stream's two comparison series, as `streams.instructor.benchmark`. */
+export const INSTRUCTOR_BENCHMARK: StreamBenchmarkView = {
+  comparison: series(3.94, 3.46, 3.04),
+  university: series(2.94, 2.46, 2.04),
+};
+
+/** The course stream's own, sharing no value with the instructor stream's. */
+export const COURSE_BENCHMARK: StreamBenchmarkView = {
+  comparison: series(3.74, 3.16, 2.84),
+  university: series(2.74, 2.36, 2.14),
+};
+
+/**
+ * The workload pair's two comparison columns.
+ *
+ * The four figures render "9.0", "7.0", "10.5" and "8.1", none of which is the
+ * section's own "9.5" or "8.0" — so a column drawn from the wrong member shows a
+ * different string rather than agreeing with the right answer.
+ */
+export const A_WORKLOAD_BENCHMARK: WorkloadBenchmarkView = {
+  comparison: {
+    mean: { suppressed: false, reason: null, figure: 8.96 },
+    median: { suppressed: false, reason: null, figure: 7.04 },
+  },
+  university: {
+    mean: { suppressed: false, reason: null, figure: 10.46 },
+    median: { suppressed: false, reason: null, figure: 8.06 },
+  },
+};
+
+/**
+ * The wire body for one published week, as the payload was before E5's
+ * benchmarks reached it — the state criterion 4 is about.
+ *
+ * A payload with no `workload_benchmark` and no `streams.<stream>.benchmark` is
+ * not a hypothetical: it is a cached answer read mid-deploy, and it is what
+ * every surface whose payload carries no comparison sends. It has to render E4's
+ * page rather than crash or draw an empty comparison, so it is a fixture rather
+ * than a paragraph.
  *
  * `comparison` is present and suppressed, as every E4 payload's is.
  */
-export const A_PUBLISHED_WEEK = {
+export const A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS = {
   section: { code: 'R3WW', course_label: COURSE_LABEL, length_weeks: 12 },
-  week: { course_week: 4, term_week: 7, published_weeks: PUBLISHED_WEEKS },
+  week: {
+    course_week: 4,
+    term_week: 7,
+    published_weeks: PUBLISHED_WEEKS,
+    closes_at: WEEK_CLOSED_AT,
+  },
   rates: {
     response_rate: 0.62,
     validity_rate: 0.92,
@@ -141,6 +262,7 @@ export const A_PUBLISHED_WEEK = {
         held_note: null,
       },
       comments: [{ text: INSTRUCTOR_COMMENT, status: 'published', stream: 'INSTRUCTOR' }],
+      question_text: INSTRUCTOR_QUESTION_TEXT,
     },
     course: {
       trend: [
@@ -154,12 +276,119 @@ export const A_PUBLISHED_WEEK = {
         held_note: null,
       },
       comments: [{ text: COURSE_COMMENT, status: 'published', stream: 'COURSE' }],
+      question_text: COURSE_QUESTION_TEXT,
     },
   },
   workload: { mean: 9.46, median: 8.04 },
   comparison: { suppressed: true, reason: 'below-minimum' },
   small_n: { suppressed: false, threshold: SMALL_N_THRESHOLD },
   released_from_earlier_weeks: [],
+  institution_timezone: INSTITUTION_TIMEZONE,
+} satisfies InstructorReportView & { comparison: unknown };
+
+/**
+ * The same published week with E5's benchmark members on it — the payload the
+ * report page is wired to (E5-10).
+ *
+ * **The top-level `comparison` carries the same sealed figure
+ * `workload_benchmark.comparison.mean` carries**, because that is what the
+ * server sends: `app.schemas.report.InstructorReport`'s docstring says the two
+ * are one value. Nothing on the page reads the top-level one, and the fixture
+ * below is what makes that assertable.
+ */
+export const A_PUBLISHED_WEEK = {
+  ...A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS,
+  streams: {
+    instructor: {
+      ...A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS.streams.instructor,
+      benchmark: INSTRUCTOR_BENCHMARK,
+    },
+    course: {
+      ...A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS.streams.course,
+      benchmark: COURSE_BENCHMARK,
+    },
+  },
+  workload_benchmark: A_WORKLOAD_BENCHMARK,
+  comparison: A_WORKLOAD_BENCHMARK.comparison.mean,
+} satisfies InstructorReportView & { comparison: unknown };
+
+/**
+ * A payload whose top-level `comparison` says something no other member says.
+ *
+ * **Not a payload the server sends**, and that is the point: the two members are
+ * one figure on the wire, so a page reading the wrong one renders the right
+ * number and nothing says so. Here the top-level member carries a figure that
+ * appears nowhere else in the fixture, so "nothing reads it" is a statement
+ * about a number that would be visible if anything did.
+ */
+export const THE_TOP_LEVEL_COMPARISON_ONLY = 17.83;
+
+export const A_WEEK_WHOSE_TOP_LEVEL_COMPARISON_DIVERGES = {
+  ...A_PUBLISHED_WEEK,
+  comparison: { suppressed: false, reason: null, figure: THE_TOP_LEVEL_COMPARISON_ONLY },
+} satisfies InstructorReportView & { comparison: unknown };
+
+/**
+ * The week every benchmark figure of which is withheld — SPEC §4.1 item 7's
+ * treatment, on the page rather than in a component.
+ *
+ * Every published week is present as a point and every one of them is sealed
+ * shut, and both workload columns are sealed the same way. That is what the wire
+ * sends for a section whose comparison set is below a minimum, and it is the
+ * other half of the pair `docs/MISTAKES.md` entry 3 asks for: the reporting
+ * fixture above says the treatments can be absent, and this one says they
+ * appear.
+ */
+export const A_WEEK_WITH_THE_BENCHMARKS_WITHHELD = {
+  ...A_PUBLISHED_WEEK,
+  streams: {
+    instructor: {
+      ...A_PUBLISHED_WEEK.streams.instructor,
+      benchmark: { comparison: WITHHELD_SERIES, university: WITHHELD_SERIES },
+    },
+    course: {
+      ...A_PUBLISHED_WEEK.streams.course,
+      benchmark: { comparison: WITHHELD_SERIES, university: WITHHELD_SERIES },
+    },
+  },
+  workload_benchmark: {
+    comparison: {
+      mean: { suppressed: true, reason: 'below-minimum', figure: null },
+      median: { suppressed: true, reason: 'below-minimum', figure: null },
+    },
+    university: {
+      mean: { suppressed: true, reason: 'below-minimum', figure: null },
+      median: { suppressed: true, reason: 'below-minimum', figure: null },
+    },
+  },
+  comparison: { suppressed: true, reason: 'below-minimum', figure: null },
+} satisfies InstructorReportView & { comparison: unknown };
+
+/**
+ * The same report for the week the clocks go back — E5-02's timezone proof.
+ *
+ * Course week 8 is term week 11 at this section's constant offset of three, and
+ * term week 11 of Fall 2026 closes on **2026-11-01**, the Sunday North American
+ * clocks return to standard time (the backend's hand-written calendar pins the
+ * same date, and `tests/unit/test_the_fall_2026_window_calendar_is_spec_3_1s_rhythm.py`
+ * is where). At 23:59:59 that night the zone is six hours behind UTC, not five,
+ * so the instant below is `2026-11-02T05:59:59Z`.
+ *
+ * **What it catches.** A rendering that converted with one offset for the whole
+ * term — or with the reader's own zone, or with none — puts this close at
+ * 12:59 AM on the **Monday**. Every other week in these fixtures renders the same
+ * either way, which is exactly why one week has to sit on the boundary.
+ */
+export const FALL_BACK_WEEK_CLOSED_AT = '2026-11-02T05:59:59+00:00';
+
+export const A_WEEK_THAT_CLOSED_AS_THE_CLOCKS_WENT_BACK = {
+  ...A_PUBLISHED_WEEK,
+  week: {
+    course_week: 8,
+    term_week: 11,
+    published_weeks: [...PUBLISHED_WEEKS, 8],
+    closes_at: FALL_BACK_WEEK_CLOSED_AT,
+  },
 } satisfies InstructorReportView & { comparison: unknown };
 
 /**
@@ -171,9 +400,19 @@ export const A_PUBLISHED_WEEK = {
  * real zero over a real enrolment — twenty-one students, none of whom answered —
  * which is a different fact from the enrolment being empty, and both are drawn
  * apart below.
+ *
+ * **It is built on the pre-benchmark payload and carries none of E5-02's three
+ * members**, because it replaces both the `week` and the `streams` objects
+ * outright. That is deliberate and is
+ * criterion 5's fixture: a report built before those members existed still
+ * renders — the eyebrow prints no close note and each histogram keeps its stream
+ * label — rather than crashing or printing a half-formed sentence. E5-10's
+ * fourth criterion is the same statement one epic on, and this fixture carries
+ * that too: no `workload_benchmark`, no stream `benchmark`, and a page that is
+ * exactly the one E4 shipped.
  */
 export const A_WEEK_NOBODY_ANSWERED = {
-  ...A_PUBLISHED_WEEK,
+  ...A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS,
   week: { course_week: 2, term_week: 5, published_weeks: PUBLISHED_WEEKS },
   rates: {
     response_rate: 0,

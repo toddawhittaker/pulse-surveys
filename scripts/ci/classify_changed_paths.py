@@ -156,6 +156,40 @@ PARSED_DOCUMENTS = frozenset(
         # the rest of `docs/tickets/` is genuinely inert and the `docs/` entry in
         # `INERT_DIRECTORIES` above is unchanged.
         "docs/tickets/e4/README.md",
+        # The fifth file to move, and the third for the sweep's reason. E5-05
+        # reconciles the report payload's benchmark members with the sketch in
+        # E5's own breakdown, and
+        # `tests/unit/test_the_benchmark_payload_sketch_and_the_schema_are_reconciled.py`
+        # does it by parsing the fenced JSON block out of this file — the same
+        # shape as the E4 entry above, one epic later, and E5's sketch is the one
+        # E5-07, E5-08 and E5-10 build their fixtures from.
+        #
+        # Called inert, an edit to that sketch would run none of the suite that
+        # checks the schema still describes it. **Only this path moves**; the rest
+        # of `docs/tickets/` is genuinely inert and the `docs/` entry in
+        # `INERT_DIRECTORIES` above is unchanged.
+        "docs/tickets/e5/README.md",
+        # The fourth file to move, and the second that moves for the sweep's
+        # reason rather than for a build input. E5-02 puts the instructor
+        # report's two histogram titles and its eyebrow's close note on the
+        # payload, and its criterion 6 is "each half proven against the mockup".
+        # `tests/integration/test_the_report_payload_carries_the_weeks_close_instant.py`
+        # proves it the only way that claim can be proven: it reads three lines
+        # **copied whole out of this canvas** and fails naming them if the file no
+        # longer carries them, so a re-cut mockup reds that test rather than
+        # leaving it quietly asserting about a design nobody ships.
+        #
+        # Called inert, a re-cut of this canvas would run none of the suite that
+        # checks the payload still feeds it — which is precisely the silence the
+        # sweep in
+        # `tests/unit/test_a_documentation_only_diff_does_not_run_the_expensive_gates.py`
+        # exists to break, and that sweep is what named this file.
+        #
+        # The coverage given up is pull requests touching only this one canvas.
+        # **Only this path moves**; every other `.dc.html` prototype is still
+        # genuinely inert — nothing imports one and no test parses one — and the
+        # `design/` entry in `INERT_DIRECTORIES` above is unchanged.
+        "design/InstructorMondayReport.dc.html",
     }
 )
 

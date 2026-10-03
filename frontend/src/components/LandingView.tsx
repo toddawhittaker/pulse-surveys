@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 
 import type { Landing } from '../lib/landings';
 
@@ -22,7 +22,23 @@ import type { Landing } from '../lib/landings';
  */
 const HEADING_ID = 'pulse-landing-heading';
 
-export function LandingView({ landing }: { readonly landing: Landing }): JSX.Element {
+/**
+ * `children` is what a landing grows before it becomes a screen of its own.
+ *
+ * E5-09 is the first caller: the leadership landing is still the empty roll-up
+ * view, and it now carries one link to the comparison-set surface beneath its
+ * line. The alternative was the instructor area's move — replace the component
+ * with a page of its own — which is right when there is a screen to build and
+ * heavy for one link. Anything rendered here sits inside the landmark and below
+ * the empty-state line, so the heading still labels the whole of it.
+ */
+export function LandingView({
+  landing,
+  children,
+}: {
+  readonly landing: Landing;
+  readonly children?: ReactNode;
+}): JSX.Element {
   return (
     <main className="pulse-landing" data-testid={landing.testid} aria-labelledby={HEADING_ID}>
       <h1 id={HEADING_ID}>{landing.heading}</h1>
@@ -40,6 +56,7 @@ export function LandingView({ landing }: { readonly landing: Landing }): JSX.Ele
         <path d="M2 4 H118" />
       </svg>
       <p>{landing.emptyState}</p>
+      {children}
     </main>
   );
 }

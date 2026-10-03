@@ -55,9 +55,13 @@ than an oversight:
 `docs/MISTAKES.md` entry 35 is the recurring shape here — a guard that enumerates
 the ways a privilege can be held misses the way the design actually uses:
 
-  1. **The dependency.** `app.api.deps.csrf_verified_student`, matched as the
-     **object** and never by name, anywhere in the route's `dependant` graph at
-     any depth. A route may hold it as a parameter default, in the route
+  1. **The dependency.** Any `app.api.deps.csrf_verified_*` — since E5-06 there
+     are two, the student one E2-08 shipped and the leadership one that ticket
+     adds, one mechanism bound to two role gates — matched as the **object** and
+     never by name, anywhere in the route's `dependant` graph at any depth. The
+     family is read off the module by prefix and its known members are required
+     to be there, so a new role's routes are swept the day they land and a
+     rename empties nothing silently. A route may hold it as a parameter default, in the route
      decorator's `dependencies=`, or on its `APIRouter`, and all three are shown
      found below on routes that certainly have them. A fourth attachment exists
      and is **refused rather than read** — see the fourth disclosed limit.
@@ -105,7 +109,11 @@ from fixtures.routing import (
     dependencies_of,
     every_route,
 )
-from fixtures.submit import submit_route
+from fixtures.submit import (
+    CSRF_DEPENDENCY_PREFIX,
+    csrf_verified_dependencies,
+    submit_route,
+)
 
 ENVIRONMENT_VARIABLE = "ENVIRONMENT"
 
@@ -121,6 +129,34 @@ DEVELOPMENT = "development"
 # spelled (`docs/MISTAKES.md` entry 13).
 DEPS_MODULE = "app.api.deps"
 CSRF_DEPENDENCY = "csrf_verified_student"
+
+# **Currency 1 is a family, and E5-06 is why.** Until then this application had
+# one CSRF-checked dependency, because it had one writing surface; E5-06's
+# leadership routes carry `csrf_verified_leadership`, which is the same mechanism
+# bound to a different role gate (its work order: "identical in mechanism to
+# `csrf_verified_student`"). A sweep matching the student one alone would call
+# every correctly built leadership write route unguarded, and the repair for that
+# would be on the other side of the test wall — `docs/MISTAKES.md` entry 22's
+# exact shape, which is why this is written here rather than left for the
+# implementer to discover.
+#
+# The family is **read off `app.api.deps` by prefix** rather than listed, so the
+# next role's pair joins it on the day it lands; and the two that exist are
+# required by name, so a prefix that matched nothing — a rename, a module that
+# stopped exporting them — is a failure rather than a sweep that quietly has no
+# currency to look for (`docs/MISTAKES.md` entry 53: the coverage check must not
+# be built from the guard's own enumeration).
+#
+# **A name is not a check, and this sweep does not pretend otherwise.** E5-06's
+# mutation battery and its security pass found the same hole from two
+# directions: `csrf_verified_leadership` gutted to `return claims` left all 3716
+# tests green, and this sweep admitted it because it was spelled like a member of
+# the family. What executes the check is
+# `tests/integration/test_every_csrf_verified_dependency_refuses_a_cookie_borne_write.py`,
+# which drives each member over HTTP on the carrier the check exists for. The
+# discovery is shared with it (`docs/MISTAKES.md` entry 13), so the two sweeps
+# cannot come to disagree about who is in the family.
+REQUIRED_CSRF_DEPENDENCIES = ("csrf_verified_student", "csrf_verified_leadership")
 
 # The paths this module names. Each is settled somewhere outside this file:
 # `/lti/login` and `/lti/launch` by the two mocks' own configuration
@@ -213,6 +249,33 @@ def csrf_dependency() -> Any:
         "double-submit token from a request whose session rides the cookie. It is the dependency "
         "this sweep requires of every mutating route, so without it there is no check to sweep for.",
     )
+
+
+def csrf_dependencies() -> tuple[Any, ...]:
+    """Every `csrf_verified_*` dependency `app.api.deps` exposes — currency 1's whole family.
+
+    Read by prefix so a role added later is swept from the day its dependency
+    lands, and checked against `REQUIRED_CSRF_DEPENDENCIES` so a prefix matching
+    nothing is a failure rather than a guard with nothing to look for. Both
+    halves matter: without the prefix walk a new role's routes are reported
+    unguarded, and without the named check a rename empties the family and every
+    writing route in this application passes.
+
+    **Expected red before E5-06 lands:** a FAILED naming
+    `csrf_verified_leadership` as a symbol `app.api.deps` does not expose.
+    """
+    found = csrf_verified_dependencies()
+    missing = [name for name in REQUIRED_CSRF_DEPENDENCIES if name not in found]
+    if missing:
+        pytest.fail(
+            f"`{DEPS_MODULE}` exposes no {missing}; the `{CSRF_DEPENDENCY_PREFIX}` family it does "
+            f"expose is {sorted(found)}.\n\n"
+            "E2-08 ships the student one and E5-06 the leadership one, 'identical in mechanism to "
+            "`csrf_verified_student` (cookie carrier verified, Bearer exempt)'. This sweep "
+            "requires every mutating route to hold one of them, so a missing member is a set of "
+            "routes nothing is checked against."
+        )
+    return tuple(found.values())
 
 
 # ---------------------------------------------------------------------------
@@ -356,11 +419,21 @@ def currencies_of(route: Any, *, dependency: Any, route_class: type) -> list[str
     whose graph happens to contain some other `csrf_verified_student` is not a
     route that carries this project's check — and the route class by
     `isinstance`, which is the only thing an appended route offers to read.
+
+    `dependency` is one object or a tuple of them, and a route holding **any**
+    member of the tuple carries currency 1. The tuple is how the real
+    application is swept since E5-06: the check is one mechanism bound to
+    several role gates, and a sweep that demanded one particular binding would
+    report every other role's writing routes as unguarded. The planted controls
+    pass a single object, which is the same question with a family of one.
     """
+    wanted = dependency if isinstance(dependency, tuple) else (dependency,)
     found: list[str] = []
     dependant = getattr(route, "dependant", None)
-    if dependant is not None and dependency in dependencies_of(dependant):
-        found.append(BY_DEPENDENCY)
+    if dependant is not None:
+        graph = dependencies_of(dependant)
+        if any(member in graph for member in wanted):
+            found.append(BY_DEPENDENCY)
     if isinstance(route, route_class):
         found.append(BY_ROUTE_CLASS)
     return found
@@ -983,6 +1056,70 @@ def test_the_passback_route_is_found_carrying_the_dev_control_currency(
     )
 
 
+def test_every_named_set_write_route_is_found_carrying_the_leadership_csrf_dependency(
+    configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Currency 1's canary for the family's second member — all three of E5-06's writing routes.
+
+    The submit canary above proves the collector can see the student
+    dependency; it says nothing about the leadership one, and a family read by
+    prefix is exactly the kind of guard that can grow a member nothing ever
+    finds (`docs/MISTAKES.md` entry 35).
+
+    **Every one of the three, matched as the object, and the "at least one"
+    version of this test was wrong.** As first written it asked only that *some*
+    mutating route under the comparison-set paths carried *some* member of the
+    family — which is green on a tree where the create is guarded and the edit
+    and the delete are not, and it is the delete that removes the cohort an
+    instructor's published figures were drawn against. The three methods are
+    named here, and each is required to hold `csrf_verified_leadership`
+    specifically: a write guarded by another role's dependency would be a
+    different defect wearing this test's green.
+
+    **The mutations this kills:** any one of the three composed from
+    `require_leadership` rather than `csrf_verified_leadership` — the one-import
+    mistake the carried E2 entry names, which the ledger sweep would otherwise
+    report as an unguarded path with no hint about which dependency was meant;
+    and a `csrf_verified_leadership` that exists but is wired to no route, which
+    leaves the family with a member the sweep can see and no route holding it.
+
+    **What it does not kill, and what does:** a `csrf_verified_leadership` that
+    checks nothing. This is a sweep over the route table, and
+    `tests/integration/test_every_csrf_verified_dependency_refuses_a_cookie_borne_write.py`
+    is what drives the check (`docs/MISTAKES.md` entry 47: a sweep answers "is
+    the dependency there", never "does the gate run").
+
+    **Expected red before E5-06 lands:** a FAILED naming
+    `csrf_verified_leadership` as a symbol `app.api.deps` does not expose.
+    """
+    from fixtures.named_sets import LEADERSHIP_WRITE_METHODS, SETS_PATH
+
+    application = application_in(DEVELOPMENT, monkeypatch)
+    leadership = csrf_verified_dependencies()[REQUIRED_CSRF_DEPENDENCIES[1]]
+
+    carried: dict[str, list[str]] = {}
+    for route in mutating_routes(application):
+        path = path_of(route)
+        if not path.startswith(SETS_PATH):
+            continue
+        held = BY_DEPENDENCY in currencies_of(
+            route, dependency=leadership, route_class=NoRouteIsThis
+        )
+        for method in methods_of(route):
+            if method in LEADERSHIP_WRITE_METHODS and held:
+                carried.setdefault(method, []).append(path)
+
+    missing = [method for method in LEADERSHIP_WRITE_METHODS if method not in carried]
+    assert not missing, (
+        f"These comparison-set write methods carry no `{REQUIRED_CSRF_DEPENDENCIES[1]}`: "
+        f"{missing}. Found carrying it: {carried}. Every mutating route this application serves "
+        f"is {sorted(paths_of(mutating_routes(application)))}.\n\n"
+        "E5-06 ships a create, an edit and a delete under "
+        f"`{SETS_PATH}`, and its work order puts the checked dependency on all three: writes "
+        "carry `csrf_verified_leadership`, reads carry `require_leadership`."
+    )
+
+
 def test_the_appended_clock_pair_is_in_the_mutating_inventory(
     configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1047,7 +1184,7 @@ def test_every_exemption_names_a_mutating_route_this_application_still_serves(
     report = ledger_report(
         application,
         EXEMPTIONS,
-        dependency=csrf_dependency(),
+        dependency=csrf_dependencies(),
         route_class=NoRouteIsThis,
     )
 
@@ -1081,7 +1218,7 @@ def test_no_exemption_names_a_route_that_now_carries_the_check(
     report = ledger_report(
         application,
         EXEMPTIONS,
-        dependency=csrf_dependency(),
+        dependency=csrf_dependencies(),
         route_class=dev_control_route_class(),
     )
 
@@ -1132,7 +1269,7 @@ def test_every_mutating_route_outside_the_ledger_carries_the_csrf_check(
     report = ledger_report(
         application,
         EXEMPTIONS,
-        dependency=csrf_dependency(),
+        dependency=csrf_dependencies(),
         route_class=dev_control_route_class(),
     )
     assert report.unguarded == {}, (

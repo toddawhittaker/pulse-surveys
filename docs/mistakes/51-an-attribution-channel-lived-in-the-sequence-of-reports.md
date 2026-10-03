@@ -1,6 +1,6 @@
 # Entry 51. A confidentiality property held in every payload and failed across the sequence of them
 
-**Caught: 0**
+**Caught: 2**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -53,3 +53,16 @@ such a gate has fired, every subsequent firing is about whatever arrived since,
 which is the small set the gate existed to avoid disclosing. Either the gate is
 re-asked about the *unreleased* set rather than the cumulative one, or it carries a
 condition that a single new week cannot satisfy on its own.
+
+*(**Two catches, writing E5-11**, 2026-09-14. Round 1's route sweep was a
+one-payload proof until this entry asked what a student meets in sequence: the
+survey read before submitting, the submit's own answer, the read after — so the
+sequence test drives all three and asserts each clean, and a benchmark member
+placed only on the submit answer is caught by that test alone (the battery's
+row). Round 2's DOM sweep would have been one screenshot of the landing for the
+same reason; it sweeps the landing, the submitted state and the revise form,
+which is every state the student side has today. What would have shipped: a
+member on the submit response, or a legend on the submitted heading, green
+under a test that read the landing once. The paging-across-weeks half is
+recorded in `docs/tickets/e5/deferred.md` as E8's, because no student page
+turns a week yet.)*

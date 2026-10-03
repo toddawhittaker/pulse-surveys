@@ -56,7 +56,7 @@ import logging
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -72,7 +72,14 @@ from app.config import Settings
 from app.models.identity import Enrollment
 from app.models.org import Course, Prefix, Section
 from app.models.report import WeeklySummary
-from app.models.survey import REPORT_STREAMS, Answer, Question, QuestionKind, Response
+from app.models.survey import (
+    REPORT_STREAMS,
+    Answer,
+    Question,
+    QuestionKind,
+    QuestionSet,
+    Response,
+)
 from app.models.term import SurveyWindow, Term, Week
 from app.services import clock, enrollment_windows
 from app.services.authz import (
@@ -98,6 +105,13 @@ if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
     # report, `_stored_summaries` under it, and `taught_sections` — imports it
     # inside the function. See `_payload`'s docstring.
     from app.schemas.report import CommentView, InstructorReport, SummaryView, TaughtSection
+    from app.schemas.report_benchmark import (
+        BenchmarkSeries,
+        StreamBenchmark,
+        WorkloadBenchmarkFigures,
+        WorkloadBenchmarkView,
+    )
+    from app.services.benchmarks import BenchmarkPoint, WorkloadComparison
 
 logger = logging.getLogger(__name__)
 
@@ -624,9 +638,13 @@ WORKLOAD_VIEW = table(
 # between a chart with no bars and a chart of a quiet week.
 LIKERT_VALUES = (1, 2, 3, 4, 5)
 
-# What a suppressed comparison says about itself. One word for one reason, because
-# E4 has exactly one: no comparison set exists until E5 builds them, so every
-# figure over one is below the minimum by construction.
+# What a suppressed comparison says about itself. One word, and one word only: a
+# figure is withheld because the population behind it is below a configured
+# minimum, and this system has no second reason to give. E5-05 is where that
+# became a statement about real comparison sets rather than about a member with
+# nothing behind it, and it did not add a reason — a population nobody could
+# resolve arrives here as counts of zero and is suppressed by the same
+# comparison.
 BELOW_MINIMUM = "below-minimum"
 
 # **The token SPEC §4.1 item 7's chokepoint is made of.** A module-level object
@@ -690,9 +708,12 @@ class ComparisonFigure(BaseModel):
     walked past by every entry point that does not call `__init__`, and pydantic
     has several.
 
-    **E5 fills this, and it fills it through the same helper.** Until then every
-    report carries a suppressed value with no number in it, which is what gives
-    the invariant something to stand on before there is any data to suppress.
+    **Every figure the report shows is built here, through the one helper**, and
+    since E5-05 there are several of them: the two comparison lines per panel, the
+    reported week's workload mean and median against each population, and the
+    top-level `comparison` member. `app.services.benchmarks` is the only caller
+    that resolves a population, and it reaches this type through
+    `comparison_after_suppression` like everything else.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -859,11 +880,11 @@ def comparison_after_suppression(
     "computed from fewer than the configured number of sections", so the configured
     number itself passes and `n - 1` does not.
 
-    **`figure` may be `None`, and that is E4's own case.** No comparison set exists
-    until E5 builds them, so the report calls this with no figure over no sections
-    and no respondents and gets back the suppressed value the payload carries. E5
-    calls the same function with real numbers, and gets suppression or passage from
-    the same two comparisons.
+    **`figure` may be `None`, and that is an ordinary case rather than an error.**
+    A cohort week that carries responses but no hours has a null statistic, and a
+    population that resolves to nothing answers with nulls over counts of zero —
+    both come here and both come back suppressed, from the same two comparisons
+    that pass a real number.
 
     The minimums are read from `Settings` here rather than taken as parameters, the
     way `visible_comments` reads the n-threshold: the promise §4.1 item 7 makes is
@@ -1072,6 +1093,17 @@ def _readable_section(session: Session, *, person_id: UUID | None, section_id: U
     return section
 
 
+def _course_week_of(term_week: int, *, section_start: date, term_start: date) -> int:
+    """The course week a term week is, for a section starting on `section_start`.
+
+    `week_of_the_term` is this codebase's one reading of §2.2's two axes; this
+    is the one place a report turns a stored term week back into a course week
+    with it. Course weeks count from 1, which is the inclusive `+ 1`.
+    """
+    first_term_week = week_of_the_term(1, section_start=section_start, term_start=term_start)
+    return term_week - first_term_week + 1
+
+
 def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
     """Every week this section has a survey window for, on both of §2.2's axes.
 
@@ -1091,9 +1123,6 @@ def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
     term = session.get(Term, section.term_id)
     if term is None:  # pragma: no cover - `section.term_id` is a non-null foreign key
         raise SectionUnavailableError
-    first_term_week = week_of_the_term(
-        1, section_start=section.start_date, term_start=term.start_date
-    )
     rows = session.execute(
         select(
             SurveyWindow.week_id,
@@ -1109,12 +1138,255 @@ def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
         _SectionWeek(
             week_id=week_id,
             term_week=number,
-            course_week=number - first_term_week + 1,
+            course_week=_course_week_of(
+                number, section_start=section.start_date, term_start=term.start_date
+            ),
             opens_at=opens_at,
             closes_at=closes_at,
         )
         for week_id, number, opens_at, closes_at in rows
     ]
+
+
+# The four columns every wording lookup below reads: which stream the question
+# belongs to, which set version it is part of, and the two text columns — the
+# sentence a student reads and the bold heading SPEC §3.2 gives the question.
+_RATING_WORDING = (Question.stream, QuestionSet.version, Question.prompt, Question.name)
+
+
+def _newest_wording_by_stream(rows: Sequence[Any]) -> dict[str, str]:
+    """One wording per stream out of some rating-question rows, newest version winning.
+
+    **`prompt` is the served column, and that is a verified fact rather than a
+    preference.** The student's form draws a Likert question's heading straight
+    from it — `frontend/src/components/LikertInput.tsx` renders
+    `<legend>{question.prompt}</legend>` — so `prompt` is the string the person who
+    answered actually read, which is what the instructor's histogram title is
+    claiming to repeat. `name` is SPEC §3.2's bold heading ("Instructor rating"),
+    which no student sees; it stands in only where a question carries no prompt at
+    all, since the column is nullable and a report is not the place to discover it.
+    """
+    found: dict[str, tuple[int, str]] = {}
+    for stream, version, prompt, name in rows:
+        wording = (prompt or "").strip() or (name or "").strip()
+        if stream is None or not wording:
+            continue
+        seen = found.get(stream)
+        if seen is None or version > seen[0]:
+            found[stream] = (version, wording)
+    return {stream: wording for stream, (_, wording) in found.items()}
+
+
+def _served_question_texts(session: Session, *, section_id: UUID, week_id: UUID) -> dict[str, str]:
+    """The wording each stream's rating question was asked in, for one section-week.
+
+    [ADR 0168](../../../docs/adr/0168-a-weeks-served-question-wording-comes-from-the-rows-its-responses-answered.md)
+    is the rule, and it has two halves because a week may have no responses:
+
+      - **A week somebody answered serves the wording of the rows its own responses
+        answered.** `answer.question_id` is durable, so the questions a week's
+        responses point at stay the questions that week was asked whatever is
+        published afterwards — which is what SPEC §3.2's versioning is for. A
+        report of an October week showing December's wording would be a chart
+        titled with a question nobody in it was asked.
+      - **A week nobody answered serves the newest set's matching question**, the
+        same highest-version rule a submission is judged against
+        (`app.services.submissions.current_questions`). `question_set` has no
+        `is_active` column and no dating — E2-05 says so in as many words — so the
+        newest set is the only thing "the set in force" can mean for a week with no
+        answered rows to read.
+
+    A week whose responses answered two versions serves the newest answered one:
+    the two queries below are read the same way, by version descending, so mixing
+    is decided by the same line that decides everything else.
+
+    The stream comes from `question.stream` and never from a position, for the
+    reason `_comments_reaching_the_model` gives: a later set may put the course
+    rating at a different ordinal, and E4-02 added the column to be the fact.
+    """
+    answered = session.execute(
+        select(*_RATING_WORDING)
+        .join(QuestionSet, QuestionSet.id == Question.question_set_id)
+        .join(Answer, Answer.question_id == Question.id)
+        .join(Response, Response.id == Answer.response_id)
+        .where(
+            Response.section_id == section_id,
+            Response.week_id == week_id,
+            Question.kind == QuestionKind.LIKERT,
+            Question.stream.in_(REPORT_STREAMS),
+        )
+    ).all()
+    newest = session.execute(
+        select(*_RATING_WORDING)
+        .join(QuestionSet, QuestionSet.id == Question.question_set_id)
+        .where(
+            Question.kind == QuestionKind.LIKERT,
+            Question.stream.in_(REPORT_STREAMS),
+        )
+    ).all()
+
+    served = _newest_wording_by_stream(newest)
+    served.update(_newest_wording_by_stream(answered))
+
+    missing = [token for token in REPORT_STREAMS if token not in served]
+    if missing:
+        # Loud rather than an empty title. Every deployment has a question set —
+        # `scripts/seed.py` writes SPEC §3.2's v1 — and a rating question for each
+        # of the two streams is what makes the report's two histograms meaningful,
+        # so an absence here is a broken instrument rather than a quiet week.
+        # `app.services.submissions.current_questions` refuses the same way.
+        raise RuntimeError(
+            f"No rating question was found for {missing} in any question set, so this report has no "
+            "wording to title those histograms with. SPEC §3.2's set carries one rating question per "
+            "stream, and `scripts/seed.py` writes it."
+        )
+    return served
+
+
+def _population_cutoffs(
+    session: Session, *, section: Section, published: Sequence[_SectionWeek]
+) -> dict[int, datetime]:
+    """Each published course week's benchmark cutoff: the earliest close among this section's peers.
+
+    E5-14's round-4 ruling. For course week *w*, the cutoff is the earliest
+    week-*w* `survey_window.closes_at` among **every section in this section's
+    term with its length and its course's level**, this section included. So it
+    is never later than this section's own close — a figure is fixed from the
+    moment this section's week publishes — and **it depends on no reader**:
+    every report over one population and course week is cut at one instant, so
+    no reader holds two snapshots of one population frozen at two different
+    closes, whose difference would be whatever answered in between.
+
+    Only this term's sections set the cutoff. A prior term's windows closed
+    months earlier and would cut every current-term answer out; prior terms
+    count in full, and comparing snapshots across terms is a residual the ruling
+    carries. The cost the ruling accepts: a current-term section counts toward
+    week *w* only if its own week-*w* window closed by the earliest close.
+
+    One statement over the peers' windows, with each stored term week read back
+    as a course week through `_course_week_of`.
+    """
+    cutoffs = {week.course_week: week.closes_at for week in published}
+    term = session.get(Term, section.term_id)
+    if term is None:  # pragma: no cover - `section.term_id` is a non-null foreign key
+        raise SectionUnavailableError
+    level = select(Course.level).where(Course.id == section.course_id).scalar_subquery()
+    windows = session.execute(
+        select(Week.number, Section.start_date, SurveyWindow.closes_at)
+        .join(Week, Week.id == SurveyWindow.week_id)
+        .join(Section, Section.id == SurveyWindow.section_id)
+        .join(Course, Course.id == Section.course_id)
+        .where(
+            Section.term_id == section.term_id,
+            Section.length_weeks == section.length_weeks,
+            Course.level == level,
+        )
+    ).all()
+    for number, section_start, closes_at in windows:
+        course_week = _course_week_of(
+            number, section_start=section_start, term_start=term.start_date
+        )
+        if course_week in cutoffs and closes_at < cutoffs[course_week]:
+            cutoffs[course_week] = closes_at
+    return cutoffs
+
+
+def _benchmark_members(
+    session: Session, *, section: Section, course_week: int, published: Sequence[_SectionWeek]
+) -> tuple[dict[str, "StreamBenchmark"], "WorkloadBenchmarkView"]:
+    """SPEC §5.1's comparison and university figures for one report — assembled, never computed.
+
+    One read of `app.services.benchmarks.section_benchmarks`, which resolves each
+    population once and asks each set function once per population. Every number
+    and every suppression decision in what comes back was made there, over each
+    figure's sealing contributors and both configured minimums, and sealed by
+    `comparison_after_suppression` before this function ever sees it. What
+    happens here is placement: a service result becomes a payload model and
+    nothing else.
+
+    **`published` is the report's own published weeks, and it decides two things.**
+    Its course weeks are the axis the comparison lines are drawn on — the same list
+    `week.published_weeks` carries, one point per week, shown or suppressed. A
+    series that also carried the weeks the *comparison population* answered in
+    would let a reader subtract their own published weeks and read off which
+    weeks other sections answered in, which is an existence oracle readable from
+    a series where every figure is withheld (ADR 0170). And each week has a
+    **cutoff** — the owner's freeze-at-close ruling, as E5-14's round 4 shares it
+    across the population (`_population_cutoffs`): a comparison figure for a
+    published week counts only answers fixed by then, so no later answer moves it
+    and two reads of it cannot be subtracted into one student's answer.
+
+    **Nothing in this function counts, averages, compares or derives.** A figure
+    born in the assembly layer is a figure no minimum was applied to, which is the
+    exact defect the seal exists to make loud — and the natural-looking version of
+    it is not an average but a summary: an "all suppressed" flag over a series, or
+    one flag over the workload pair. Both are statistics about a comparison set,
+    both would be computed here, and neither exists on the wire for that reason
+    (`app.schemas.report_benchmark`'s docstring carries the argument).
+
+    **The imports are inside the function, and both have their own reason.**
+    `app.schemas.report_benchmark` is the schema importing this module back, which
+    is `_payload`'s cycle exactly. `app.services.benchmarks` is a cycle of its own:
+    that module imports `ComparisonFigure` and the suppression helper from here,
+    because the token they are built on is private to this file, so a module-level
+    import of it here would close the loop at import time.
+    """
+    from app.schemas import report_benchmark as benchmark_schema
+    from app.services import benchmarks
+
+    read = benchmarks.section_benchmarks(
+        session,
+        section_id=section.id,
+        course_week=course_week,
+        streams=REPORT_STREAMS,
+        cutoffs=_population_cutoffs(session, section=section, published=published),
+    )
+    default_set = benchmarks.BenchmarkPopulation.DEFAULT_SET
+    university = benchmarks.BenchmarkPopulation.UNIVERSITY
+
+    by_stream = {
+        token: benchmark_schema.StreamBenchmark(
+            comparison=_benchmark_series(read.trends[(default_set, token)]),
+            university=_benchmark_series(read.trends[(university, token)]),
+        )
+        for token in REPORT_STREAMS
+    }
+    workload = benchmark_schema.WorkloadBenchmarkView(
+        comparison=_workload_benchmark_figures(read.workloads[default_set]),
+        university=_workload_benchmark_figures(read.workloads[university]),
+    )
+    return by_stream, workload
+
+
+def _benchmark_series(points: Sequence["BenchmarkPoint"]) -> "BenchmarkSeries":
+    """One population's trend, point for point, in the order the service returned it.
+
+    **Every point the service answered with is on the wire, suppressed ones
+    included** (E5-04 criterion 7). Filtering a suppressed week out here is the
+    one edit that looks like tidying and is not: a missing point is a gap in a
+    chart, which says nothing happened that week, and a suppressed point is the
+    notice §4.1 item 5 governs.
+    """
+    from app.schemas import report_benchmark as benchmark_schema
+
+    return benchmark_schema.BenchmarkSeries(
+        points=[
+            benchmark_schema.BenchmarkSeriesPoint(course_week=point.course_week, mean=point.figure)
+            for point in points
+        ]
+    )
+
+
+def _workload_benchmark_figures(comparison: "WorkloadComparison") -> "WorkloadBenchmarkFigures":
+    """One population's workload mean and median for the reported week, as they were sealed.
+
+    Two figures, each carrying its own suppression decision, because §4.1 item 7
+    names "a mean, a median, or any other statistic" separately and E5-04 seals
+    them separately.
+    """
+    from app.schemas import report_benchmark as benchmark_schema
+
+    return benchmark_schema.WorkloadBenchmarkFigures(mean=comparison.mean, median=comparison.median)
 
 
 def _payload(
@@ -1163,6 +1435,15 @@ def _payload(
     # follow. E4-07's security round found exactly that, and
     # `app.services.report_comments.n_threshold` carries the argument.
     threshold = n_threshold()
+    question_texts = _served_question_texts(session, section_id=section.id, week_id=week.week_id)
+    benchmarks_by_stream, workload_benchmark = _benchmark_members(
+        session,
+        section=section,
+        course_week=week.course_week,
+        # The published weeks: their course weeks are the axis `week.published_weeks`
+        # below carries, and each one's cutoff is the population's earliest close.
+        published=published,
+    )
 
     streams = {
         token: schema.StreamReport(
@@ -1182,6 +1463,8 @@ def _payload(
             comments=_comment_views(
                 visible_comments(session, section_id=section.id, week_id=week.week_id, stream=token)
             ),
+            question_text=question_texts[token],
+            benchmark=benchmarks_by_stream[token],
         )
         for token in REPORT_STREAMS
     }
@@ -1197,6 +1480,10 @@ def _payload(
             course_week=week.course_week,
             term_week=week.term_week,
             published_weeks=[other.course_week for other in published],
+            # The reported week's own window row, which `_section_weeks` already
+            # read — never the latest published week's and never the one the clock
+            # is standing in.
+            closes_at=week.closes_at,
         ),
         rates=schema.RatesView(
             response_rate=None if enrolled == 0 else responses / enrolled,
@@ -1210,12 +1497,18 @@ def _payload(
             course=streams["COURSE"],
         ),
         workload=schema.WorkloadView(mean=workload_mean, median=workload_median),
-        # E4 computes no comparison set, so the figure is asked for over nothing —
-        # and it is asked for through the same helper E5 will use, because there is
-        # no other way to build this member (SPEC §4.1 item 7).
-        comparison=comparison_after_suppression(None, sections=0, respondents=0),
+        workload_benchmark=workload_benchmark,
+        # The member E4 shipped, now carrying what it was always for: the default
+        # comparison set's workload mean for this week. It is the *same object*
+        # `workload_benchmark.comparison.mean` carries — assigned twice, computed
+        # once — so the payload cannot say two things about one statistic. E5-05's
+        # decision 5 keeps it rather than retiring it, because every E4 reader and
+        # E4-07's own reconciliation test names it; a later ticket may retire it
+        # once nothing reads it.
+        comparison=workload_benchmark.comparison.mean,
         small_n=schema.SmallNView(suppressed=responses < threshold, threshold=threshold),
         released_from_earlier_weeks=_comment_views(released),
+        institution_timezone=settings.institution_timezone,
     )
 
 

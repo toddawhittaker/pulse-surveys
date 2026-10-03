@@ -100,3 +100,19 @@ where the workaround lives. Acting on the entry, it also went into
 closed set that cannot express either verdict, enforced where the note is
 written rather than where it is rendered. Counted as a catch: the docstring
 alone would have left E6's breakdown to rediscover it.
+
+**2026-09-14, E5-06 (the named-set API).** The ticket's eight refusal sentences
+had to live under `app.copy` — the registry package every user-facing string in
+the backend is read from — and publishing them as collected entries reds the
+shipped-copy inventory, because its governance map claims no prefix for a
+leadership set-management surface and a prefix nothing governs is refused rather
+than passed over. So `app/copy/leadership_sets.py` ships the sentences as module
+constants beside an empty `COPY` mapping, and the reason was written into that
+module's docstring — which is this entry's shape exactly: the limitation recorded
+in the file that works around it, where no ticket, work order or breakdown is
+written from. Acting on the entry, it also went into `docs/tickets/e5/deferred.md`
+with owner E5-13, whose scope already names "set-management copy", and a done-when
+naming both halves the repair needs: the entries published under a governed
+prefix, and the surface placed in one of the inventory's two maps. Counted as a
+catch: the docstring alone would have left E5-13's breakdown to rediscover eight
+ungoverned strings by tripping over them.

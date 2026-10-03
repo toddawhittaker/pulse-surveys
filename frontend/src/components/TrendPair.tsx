@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 
-import { PulseTrendChart, type TrendPoint } from './PulseTrendChart';
+import { PulseTrendChart, type StreamBenchmark, type TrendPoint } from './PulseTrendChart';
 import { copy } from '../copy/instructorReportTrendCopy';
 import './instructorReportTrend.css';
 
@@ -31,11 +31,35 @@ import './instructorReportTrend.css';
  * (`design/Usage Rules.md` §3). That is a delay on one 600ms draw rather than a
  * second signature moment, and like every other piece of motion here it is CSS,
  * so `design/tokens.css` removes it under `prefers-reduced-motion`.
+ *
+ * **The comparison series are per panel, and this passes them through** —
+ * ticket E5-07. Each stream has its own comparison-set and university figures
+ * in the payload (`streams.<stream>.benchmark`), so each panel is given its
+ * own; nothing is shared between them and nothing is derived here. Both
+ * benchmark props are optional, and a pair given neither is exactly the
+ * two-line pair E4 shipped — SPEC §4.1 item 1, and `PulseTrendChart`'s
+ * docstring on why an absent prop may not draw.
+ *
+ * **The members are the wire's own, and this reads none of them** (E5-10). The
+ * props are typed as the payload spells them, so the page passes
+ * `streams.<stream>.benchmark` straight through and no shape is mapped on the
+ * way; every question about whether a figure may be shown is asked once, in the
+ * panel, where the fail-closed reading lives.
+ *
+ * One consequence of one legend, said out loud: the legend is the lower panel's,
+ * so it names the lines that panel draws. The two panels suppress together in
+ * practice — the benchmark minimums count the sections and the students in the
+ * cohort, which are the same for both streams of one section — but a payload
+ * that suppressed one stream and not the other would leave the upper panel's
+ * overlay lines unnamed, and each panel's own suppression notice is what still
+ * says what happened.
  */
 export function TrendPair({
   instructor,
   course,
   lengthWeeks,
+  instructorBenchmark,
+  courseBenchmark,
 }: {
   /** The instructor stream's published weeks, oldest first. */
   readonly instructor: readonly TrendPoint[];
@@ -43,6 +67,10 @@ export function TrendPair({
   readonly course: readonly TrendPoint[];
   /** How many weeks the section runs for, which is the axis both panels plot on. */
   readonly lengthWeeks: number;
+  /** The instructor stream's two comparison series, or nothing. */
+  readonly instructorBenchmark?: StreamBenchmark;
+  /** The course stream's two comparison series, or nothing. */
+  readonly courseBenchmark?: StreamBenchmark;
 }): JSX.Element {
   return (
     <div className="pulse-trend-pair">
@@ -50,12 +78,16 @@ export function TrendPair({
         points={instructor}
         label={copy('instructor_report_trend.panel_instructor')}
         lengthWeeks={lengthWeeks}
+        comparison={instructorBenchmark?.comparison}
+        university={instructorBenchmark?.university}
         showTicks={false}
       />
       <PulseTrendChart
         points={course}
         label={copy('instructor_report_trend.panel_course')}
         lengthWeeks={lengthWeeks}
+        comparison={courseBenchmark?.comparison}
+        university={courseBenchmark?.university}
         showLegend
         drawDelayed
       />
