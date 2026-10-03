@@ -1035,17 +1035,19 @@ jobs:
         run: pip install --require-hashes -r requirements-dev.txt
 
       # `coverage report` enforces the floor (`fail_under` in pyproject.toml)
-      # and exits non-zero below it. `coverage xml` runs first so the report is
-      # written either way.
+      # and exits non-zero below it, after printing the per-file table.
+      # `coverage xml` would enforce it too and stop the step first, so it is
+      # told `--fail-under=0`: the XML is written either way, and the upload
+      # below runs even when this step fails.
       - name: Combine the slices' coverage and enforce the floor
         if: needs.changed.outputs.inert != 'true'
         run: |
           coverage combine shards/pytest-shard-1/.coverage shards/pytest-shard-2/.coverage shards/pytest-shard-3/.coverage
-          coverage xml
+          coverage xml --fail-under=0
           coverage report
 
       - name: Upload coverage
-        if: needs.changed.outputs.inert != 'true'
+        if: ${{ !cancelled() && needs.changed.outputs.inert != 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: coverage
