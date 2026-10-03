@@ -565,6 +565,20 @@ Report generation at window close, TrendPair with course-week axis and term-week
 Default comparison-set resolution (same lead's courses, matched length+level from derived attributes), **past-referencing benchmarks** spanning current and prior terms, named-set management UI where invalid length/level combinations are impossible, the university-wide line within the length+level cohort, benchmark min-N suppression (a distinct threshold from the per-section one), overlay rendering in both TrendPair panels, cohort-mode term-axis aggregates, student-view exclusion of every benchmark line (§4.1 item 1). The min-N values, §11 question 1, were settled at this epic's exit: 3 sections and 10 distinct respondents.
 *Exit:* an instructor sees three lines per panel benchmarked against prior terms; a student provably sees two lines and no benchmarks.
 
+**E5.1 — Main review fixes** · medium
+The fixes from the whole-repository review of `main` at e259255, built before E6 opens anything on top of it. The review was five passes: architecture, code review, application security, privacy and authorization, and a threat model.
+
+- **The comment threshold.** Raw comments are shown only when at least 5 distinct students commented in that stream that week, and a stream below that is held for release batches (§4, ruled 2026-10-03). A released comment never reappears under its own week. The threshold query gets line-by-line human review (⚠), although the epic is unmarked.
+- **The teaching grant.** A roster sync that drops an instructor ends her teaching grant (⚠, for the same reason). Roster members who teach, and platform test users, hold no student enrollment, so they can neither answer nor count toward any threshold. The roster's token grant runs under a time bound.
+- **The session secret.** A deployment refuses the example session secret.
+- **The wire types.** Frontend wire types are generated from the OpenAPI schema, and a check fails when they are stale.
+- **The API edge and the services.** The API edge and the services each hold one copy of each rule. The entry pages' sentences join the copy registry, and the development clock routes gain the origin check.
+- **The records.** §13 and the ADRs match the code.
+- **Owner ruling 2.** A week with one or two responses keeps showing its own figures, by owner ruling (§4 unchanged).
+
+The deferrals go to `docs/tickets/e6/carried-from-e5.md`, and `docs/tickets/e5.1/README.md` maps every review finding to its ticket or its carried entry.
+*Exit:* An instructor whose seeded section had six respondents and one instructor-stream commenter sees no raw comment in that stream, and sees the course stream's comments. An instructor removed from the mock roster gets the section-unavailable answer on her next read. A deployment configured with the example session secret refuses to start. A backend schema change without regenerated frontend types fails CI.
+
 **E6 — Moderation & exclusions** · medium
 Moderation classification at window close with harm-type routing (§5.2): instructor-abuse to the Lead Faculty review queue, welfare signals to Care regardless of thresholds — written as the case records E10's queue later reads. Full lifecycle: flagged-collapsed, excluded-with-undo, kept-with-undo (both directions logged), excluded text muted but visible to the instructor, reason-required exclusion of unflagged comments, small-N flag concealment with the neutral participation trace, and the exclusion log at the Lead Faculty prefix scope and above.
 *Exit:* the anti-cherry-picking trail is visible up-chain, and a welfare-flagged comment in a 3-response week provably reaches Care with no trace in the instructor view.
@@ -600,6 +614,8 @@ System-level passes that only make sense against the whole: the full WCAG 2.2 AA
 ### 14.4 Sequencing, and what E0 measured
 
 Dependencies are mostly linear through E4 (E1 → E2 → {E3, E4}), after which E5–E8 can interleave and E9–E12 are parallelizable in any order; E13 is last. Two carried deadlines cut across that freedom: the reveal-subject guard lands before E4's first instructor-facing surface, and the §4 audit-grain decision lands before E10 shows a reveal id on any screen.
+
+E5.1 builds after E5 and before E6. E6's moderation writes into the comment gate E5.1 changes, and E8 reuses the student paths E5.1 consolidates. Its number sits between the two so that no epic is renumbered (§14.1).
 
 The hour estimates this section used to carry — per-epic solo and with-Claude-Code columns totalling ~1,005h and ~518h — are retired rather than revised. E0 was planned as eight ticket groupings at 63 Claude-Code hours; it closed as 42 tickets, 69 pull requests, and 651 commits over thirteen calendar days of orchestrated multi-session work, a shape the hour columns were never measuring. The miss was structural, not marginal. Roughly half the epic was work its own reviews generated — fix rounds, gate-fidelity work, record corrections — and the epic-boundary reviews added a final batch after every per-ticket review had passed; the solo column, meanwhile, describes a process nobody runs. Some of E0's cost was one-time platform build-out (the CI gates, the reviewer roster, both mocks, the mistakes ledger), but the review tax recurs in every epic and lands hardest on the ⚠ ones, where line-by-line human review is the constraint no orchestration compresses. The sizes in §14.3 are relative to one another; E1, the first ⚠ vertical slice, is what recalibrates them.
 
