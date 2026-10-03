@@ -194,7 +194,7 @@ def verified_session(token: str | None, secret: bytes) -> SessionClaims | None:
 
     One `None` for every way a token can fail to be one this tool issued — absent,
     unsigned, signed with another key, expired, or carrying a `door`/`role` this
-    build does not know — like `app.api.deps.carried_across`: the caller's answer
+    build does not know — like `app.api.auth.carried_across`: the caller's answer
     is the same refusal in every case, and a reason that told the two apart would
     tell an attacker whether a forgery was well formed.
 

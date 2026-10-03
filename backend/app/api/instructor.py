@@ -73,7 +73,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_instructor
+from app.api.deps import person_of, require_instructor
 from app.config import Settings
 from app.copy.instructor_report import SECTION_UNAVAILABLE as SECTION_UNAVAILABLE_COPY
 from app.copy.instructor_report import WEEK_UNAVAILABLE as WEEK_UNAVAILABLE_COPY
@@ -159,7 +159,7 @@ def read_report(
     try:
         return instructor_report(
             session,
-            person_id=_person_of(claims),
+            person_id=person_of(claims),
             section_id=section_id,
             course_week=course_week,
             settings=settings,
@@ -191,7 +191,7 @@ def read_published_weeks(
     try:
         weeks = published_course_weeks(
             session,
-            person_id=_person_of(claims),
+            person_id=person_of(claims),
             section_id=section_id,
             settings=settings,
         )
@@ -227,24 +227,7 @@ def read_taught_sections(
     synchronous session (ADR 0013).
     """
     response.headers["Cache-Control"] = NO_STORE
-    return TaughtSections(sections=taught_sections(session, person_id=_person_of(claims)))
-
-
-def _person_of(claims: SessionClaims) -> UUID | None:
-    """The `person` row this session was resolved to, or `None` where it names none.
-
-    A claim in a JWT is JSON, so `person_id` is a string here and a `uuid.UUID` in
-    the service (ADR 0016). A value that is not one is a token this deployment did
-    not issue in the shape it issues them, and it resolves to nobody rather than to
-    a 500 from inside the parse — which the service answers exactly as it answers a
-    session naming a person who teaches nothing.
-    """
-    if claims.person_id is None:
-        return None
-    try:
-        return UUID(claims.person_id)
-    except ValueError:
-        return None
+    return TaughtSections(sections=taught_sections(session, person_id=person_of(claims)))
 
 
 def _unavailable(detail: str) -> HTTPException:

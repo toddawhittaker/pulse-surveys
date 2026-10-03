@@ -374,6 +374,12 @@ over it.
 ticket next works on the instructor report's copy or on `app.api.deps`; E9 is
 the likely one.
 
+**Closed by E5.1-03 (2026-10-03).** The sentence is
+`instructor_report.not_an_instructor` in `app.copy.instructor_report`,
+`require_instructor` serves its `.text`, and the items 4 and 5 sweep reads it.
+The carried copy of this entry in `../e6/carried-from-e5.md` is E5.1-09's to
+close.
+
 ## A deleted comparison set leaves no trace anywhere (E5-06)
 
 **What is not enforced.** E5-06 writes no `audit_log` row (ADR 0174), so what

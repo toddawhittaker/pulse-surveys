@@ -1,4 +1,4 @@
-"""The two refusals the instructor report answers with — E4-12.
+"""The three refusals the instructor report answers with — E4-12 and E5.1-03.
 
 `app.api.instructor` serves SPEC §5.1's report, and it refuses two ways: a
 section outside the session's teaching set or absent altogether gets one
@@ -11,14 +11,20 @@ sentences sit outside the copy registry". The prefix a registry key needs
 existed only once the report became a governed surface, which is the rest of
 E4-12 (ADR 0158).
 
+**The third is the role gate's.** `app.api.deps.require_instructor` answers a
+401 to every request at an instructor route that carries no instructor's
+session. Its sentence stayed a literal in `app.api.deps` after E4-12, a carried
+gap, until E5.1-03 moved it here as `instructor_report.not_an_instructor`. The
+report's prefix is already a governed surface, so it is swept with the other two.
+
 **One surface, two sources.** These keys sit on the `report` surface beside the
 four `instructor_report_*` prefixes the frontend copy modules publish, exactly
 as `submit` and `student` sit beside `student_survey` on the survey. Item 5
 counts the screen a person reads rather than the file a string came out of.
 
-**Neither is the surface's confidentiality line.** They say what is not there to
+**None is the surface's confidentiality line.** They say what is not there to
 read, not what happens to anybody's identity; `instructor_report_page`'s
-`comments_note` is the report's one line, and these two are swept for item 4's
+`comments_note` is the report's one line, and these three are swept for item 4's
 vocabulary along with everything else.
 
 **Why each says so little.** The section refusal names nothing it was handed —
@@ -40,7 +46,7 @@ from collections.abc import Mapping
 
 from app.copy import CopyEntry
 
-__all__ = ["COPY", "SECTION_UNAVAILABLE", "WEEK_UNAVAILABLE"]
+__all__ = ["COPY", "NOT_AN_INSTRUCTOR", "SECTION_UNAVAILABLE", "WEEK_UNAVAILABLE"]
 
 # The 404 both halves of the refusal pair get: a section this instructor does not
 # teach, and a section that is not there at all.
@@ -56,6 +62,19 @@ WEEK_UNAVAILABLE = CopyEntry(
     text="There is no report for that week of this section.",
 )
 
+# The 401 `app.api.deps.require_instructor` answers a request that carries no
+# instructor's session — none at all, or one in another role. It names nobody and
+# nothing: no section, no role, no subject. A refusal answered to anybody who can
+# make a request may describe only itself. It was a literal in `app.api.deps` until
+# E5.1-03 moved it here, beside the report's two other refusals.
+NOT_AN_INSTRUCTOR = CopyEntry(
+    key="instructor_report.not_an_instructor",
+    text=(
+        "This is an instructor's report, and this request does not carry an instructor's session. "
+        "Open Pulse Surveys from inside your course in the LMS to read it."
+    ),
+)
+
 COPY: Mapping[str, CopyEntry] = {
-    entry.key: entry for entry in (SECTION_UNAVAILABLE, WEEK_UNAVAILABLE)
+    entry.key: entry for entry in (SECTION_UNAVAILABLE, WEEK_UNAVAILABLE, NOT_AN_INSTRUCTOR)
 }

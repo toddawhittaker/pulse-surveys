@@ -100,6 +100,8 @@ only when it is exactly one of four registry members; anything else logs
   which fact makes it a difference. The day the web door is reached inside an
   iframe — nothing in E1..E13 puts it there — this decision is the one to
   revisit.
+  *Amended 2026-10-03 by E5.1-03:* the web door's half now sits in
+  `app/api/auth.py` rather than `app/api/deps.py`.
 - **A sentence in `app/services/session.py` is now false, and this ticket could
   not fix it.** `SessionClaims` says `iss` is "the platform's issuer URL, or
   `None` for the web door where a session is not platform-issued". `iss=None` is

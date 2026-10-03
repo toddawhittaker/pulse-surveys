@@ -2838,6 +2838,17 @@ SWEEPS_THAT_NEED_NO_PROTECTION = {
     "tests/unit/test_only_the_dependency_module_reads_a_session_from_a_request.py": (
         "sweeps *.py under backend/app, and a .py change is never inert"
     ),
+    # E5.1-03's helper sweep. It matches only because its walker takes the
+    # directory as a parameter named `root`, which is on `ROOT_FIXTURE_NAMES` by
+    # design — the over-detection the comment above that tuple accepts. It is
+    # called with `backend/app` and `backend/app/api` only, and reads `*.py`
+    # only, so every file it can read is a backend Python file, and a Python file
+    # is never inert. If the walker is ever called on anything outside
+    # `backend/app`, or taught to read a file that is not Python, it belongs in
+    # the unconditional job instead (`docs/disputes/E5.1-03-02.md`).
+    "tests/unit/test_the_api_edge_keeps_one_copy_of_each_helper.py": (
+        "sweeps *.py under backend/app, and a .py change is never inert"
+    ),
 }
 
 UNCONDITIONAL_SWEEP_JOB = "lint-python"

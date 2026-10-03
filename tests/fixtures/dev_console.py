@@ -126,9 +126,18 @@ DEV_CONTROL_ROUTE_IS_OWED = (
     "is not a POST in development (a bare 404, indistinguishable from an unregistered path) and "
     "then any request carrying an `Origin` header that is not this application's own origin (403). "
     "It is the CSRF sweep's second currency, because a route appended to `router.routes` — which "
-    "is what the two clock controls are — carries no dependency graph for the first currency to be "
-    "found in."
+    "is how every `/dev` control is registered — carries no dependency graph for the first "
+    "currency to be found in."
 )
+
+# E2-04's clock pair, by the paths its work order settles. E5.1-03's ruling R4
+# registers both as `DevControlRoute`s, so they join the inventory below. No
+# module constant is named for either path — E2-04 settled the strings and not a
+# constant, and R4 settles the route class and not a constant either — so the
+# resolvers below answer the settled strings rather than looking a name up,
+# which would be this file choosing an interface neither ticket chose.
+DEV_CLOCK_SET_PATH = "/dev/clock"
+DEV_CLOCK_CLEAR_PATH = "/dev/clock/clear"
 
 PASSBACK_PATH_IS_OWED = (
     f"E3-07's work order (D2) puts `{PASSBACK_PATH_NAME} = {DEV_PASSBACK_PATH!r}` in `{DEV_MODULE}` "
@@ -205,18 +214,34 @@ def declared_roster_sync_path() -> str:
     return str(declared)
 
 
-# The two `DevControlRoute` paths, keyed by the id a parametrised test reports
+def declared_clock_set_path() -> str:
+    """`POST /dev/clock`, the path E2-04's work order settles. See `DEV_CLOCK_SET_PATH`."""
+    return DEV_CLOCK_SET_PATH
+
+
+def declared_clock_clear_path() -> str:
+    """`POST /dev/clock/clear`, the path E2-04's work order settles. See `DEV_CLOCK_SET_PATH`."""
+    return DEV_CLOCK_CLEAR_PATH
+
+
+# Every `DevControlRoute` path, keyed by the id a parametrised test reports
 # under. **Resolvers rather than strings**, so the lookup that can `pytest.fail` on
-# an absent constant happens in the test body and a tree missing either control
-# reds as a FAILED naming it rather than erroring at collection
-# (`docs/MISTAKES.md` entry 44).
+# an absent constant happens in the test body and a tree missing a control reds
+# as a FAILED naming it rather than erroring at collection (`docs/MISTAKES.md`
+# entry 44). The two clock resolvers look nothing up and cannot fail; they are
+# resolvers so that every entry is called the same way.
 #
-# It is a mapping rather than a list because the gate this pair guards is
+# It is a mapping rather than a list because the gate these controls share is
 # per-route: E3-07's own security round found a route subclass's gate discarded at
-# dispatch (`docs/MISTAKES.md` entry 47), and a second control registered the same
+# dispatch (`docs/MISTAKES.md` entry 47), and every control registered the same
 # way inherits that hazard whole. A suite that walked only the first would go on
-# saying the class is sound while the new door swung open.
+# saying the class is sound while a later door swung open. E5.1-03 adds the clock
+# pair (ruling R4), which is why there are four: the reconciliation in
+# `tests/unit/test_dev_passback_trigger_exposure.py` would otherwise report the
+# two new `DevControlRoute`s as registered and untested.
 DEV_CONTROL_PATHS: dict[str, Callable[[], str]] = {
+    "clock-clear": declared_clock_clear_path,
+    "clock-set": declared_clock_set_path,
     "passback": declared_passback_path,
     "roster-sync": declared_roster_sync_path,
 }
@@ -246,10 +271,10 @@ def registered_dev_control_paths() -> set[str]:
     reconciliation below vacuous in the direction that matters.
 
     **`isinstance` against `DevControlRoute` and not its parent.** `AnyMethodRoute`
-    is what the two clock controls are; `DevControlRoute` extends it and adds the
-    origin check. Matching the parent would drag the clock controls into an
-    inventory they are not part of, and telling the two apart is a property the
-    CSRF sweep already asserts in its own module.
+    carries no origin check; `DevControlRoute` extends it and adds one. Matching
+    the parent would count a plain any-method route — the shape the clock pair
+    had until E5.1-03 — as a checked control, and telling the two apart is a
+    property the CSRF sweep already asserts in its own module.
     """
     router = named_in(dev_api_module(), DEV_ROUTER_NAME, DEV_ROUTER_IS_OWED)
     control = dev_control_route_class()
