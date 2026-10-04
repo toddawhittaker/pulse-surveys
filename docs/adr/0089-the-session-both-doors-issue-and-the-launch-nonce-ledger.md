@@ -159,3 +159,12 @@ the opposite).
   unit test can drive directly; a test proving it *load-bearing end-to-end* needs
   a mock platform that publishes a permissive-algorithm key set, which `docs/tickets/
   e1/deferred.md` carries with a done-when.
+- **Known residual, LOW, owned by E13: a launch is not bound to the browser that
+  started it** (recorded 2026-10-03). `/lti/login` records the `state` and `nonce`
+  server-side (`app.lti.in_flight.remember_launch`) and sets no cookie, so
+  `/lti/launch` (`app.api.lti.launch`) accepts any valid `state` from any browser.
+  A browser can therefore be handed a launch that someone else started and
+  finished, and be signed in as that other person. This is the login request
+  forgery that a browser-bound `state` normally prevents. It was left open because
+  a cookie is exactly what this record removed from the launch, and a binding
+  that survives a cookie-blocked iframe needs its own design. E13 fixes it.

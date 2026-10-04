@@ -98,10 +98,13 @@ sweep, or is a 409, which is the one refusal a retry cannot fix.
 
 - Two service clients in two packages, permanently until something moves them.
   `app/lti/__init__.py` says so, so a reader looking for the roster client under
-  §13's `nrps.py` is told where it is instead of finding an absence.
+  `lti/` is told where it is instead of finding an absence.
 - `app/lti/ags.py` imports one public name from `app/services/roster_sync.py`.
-  That is the only edge from `lti/` into `services/` in this repository, and it
-  is the thing to look at first if the layering is ever tightened.
+  It is one of two edges from `lti/` into `services/`: `app/lti/launch.py` also
+  imports the key-set fetch from `app/services/tokens.py`
+  ([0073](0073-the-tool-verifies-launches-with-pyjwt-rather-than-adopting-pylti1p3.md)).
+  Those two edges are the things to look at first if the layering is ever
+  tightened.
 - The RFC 8288 `Link` reader now exists twice, in two modules, guarding the same
   hazard. Both copies say so and name the other. It is the duplication most
   likely to be repaired by the follow-up above.

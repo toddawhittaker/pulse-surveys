@@ -1,6 +1,6 @@
 # 0073 — The tool verifies both doors' tokens with PyJWT, and `pylti1p3` waits for E1
 
-**Status:** Accepted
+**Status:** Accepted; superseded in part by [0089](0089-the-session-both-doors-issue-and-the-launch-nonce-ledger.md), which moved the launch door's token verification onto `pylti1p3`. The web door still verifies with PyJWT as decided here.
 **Date:** 2026-08-21
 **Ticket:** [E0-18](../tickets/e0/E0-18-e0-exit-smoke.md)
 
