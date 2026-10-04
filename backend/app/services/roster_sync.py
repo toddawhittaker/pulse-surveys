@@ -85,7 +85,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import DEVELOPMENT_ENVIRONMENT, Settings, canonical_host, url_host
-from app.lti.launch import INSTRUCTOR_ROLE_URI, stated_roles
+from app.lti.launch import INSTRUCTOR_ROLE_URI, LEARNER_ROLE_URI, stated_roles
 from app.lti.registration import NoSigningKeyError, OrmToolConf
 from app.models.identity import AssignmentRole, Enrollment, User
 from app.models.lti import (
@@ -168,6 +168,15 @@ DROPPED_STATUSES: Final[frozenset[str]] = frozenset({"Inactive", "Deleted"})
 # so the sync writes it no enrollment (E5.1-02, ADR 0183). Matched exactly, as the
 # Instructor role is: no short form and no sub-role.
 TEST_USER_ROLE_URI: Final[str] = "http://purl.imsglobal.org/vocab/lti/system/person#TestUser"
+
+# The prefix of every Instructor sub-role in LIS v2's membership vocabulary
+# (`…/membership/Instructor#TeachingAssistant`, `…#Grader` and the rest). A member
+# listed with any of them is course staff, so not a student, whatever else the
+# roster lists (E5.1-11, ADR 0183). It does not decide the teaching grant, which
+# stays the exact Instructor role.
+INSTRUCTOR_SUB_ROLE_PREFIX: Final[str] = (
+    "http://purl.imsglobal.org/vocab/lis/v2/membership/Instructor#"
+)
 
 # One `<url>` of an RFC 8288 `Link` header, with the parameter list belonging to
 # it. The parameter tail stops at a comma so that two links in one header are read
@@ -306,6 +315,8 @@ class _Member:
 
     subject: str
     teaches: bool
+    learner: bool
+    instructor_sub_role: bool
     test_user: bool
     dropped: bool
     email: str | None
@@ -321,7 +332,12 @@ class _Member:
         Instructor role teaches whatever else they are listed as, and a platform's
         preview account is not a person answering the survey.
         """
-        return not (self.teaches or self.test_user)
+        return (
+            self.learner
+            and not self.teaches
+            and not self.instructor_sub_role
+            and not self.test_user
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1454,6 +1470,8 @@ def _read_member(member: Mapping[str, Any]) -> _Member | None:
     return _Member(
         subject=subject,
         teaches=INSTRUCTOR_ROLE_URI in roles,
+        learner=LEARNER_ROLE_URI in roles,
+        instructor_sub_role=any(role.startswith(INSTRUCTOR_SUB_ROLE_PREFIX) for role in roles),
         test_user=TEST_USER_ROLE_URI in roles,
         dropped=isinstance(status, str) and status in DROPPED_STATUSES,
         email=email if isinstance(email, str) and email else None,
@@ -1525,12 +1543,14 @@ def _ingest(
         if member.teaches and not member.dropped:
             _record_the_teaching_instructor(session, section, user_id)
 
-    if not complete:
+    if not complete or not members:
         return
     present = set(resolved.values())
     for user_id, row in open_rows.items():
         if user_id not in present:
             _close(session, row, ended_on=today, window_end=None)
+    if today > section.end_date:
+        return
     _end_unsupported_teaching_grants(session, section, members, resolved, last_call_id, today)
 
 
