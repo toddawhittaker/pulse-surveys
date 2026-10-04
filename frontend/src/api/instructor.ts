@@ -138,10 +138,9 @@ export type TrendPointView = Schemas['TrendPoint'];
  * renders it: a wire token is not a governed string, and the words a reader sees
  * come from the copy modules.
  *
- * Both `reason` and `figure` are optional here as well as nullable, because this
- * is a shape over JSON the client casts rather than parses — see
- * `PulseTrendChart`'s `isSuppressed` and `StatPair`'s `isReportable` on why
- * every reader of `suppressed` asks for exactly `false`.
+ * The client casts this rather than parsing it, so every reader asks
+ * `isShownFigure` (`../lib/shownFigure`), which wants `suppressed` to be exactly
+ * `false` and `figure` a finite number before anything is shown.
  */
 export type ComparisonFigureView = Schemas['ComparisonFigure'];
 
