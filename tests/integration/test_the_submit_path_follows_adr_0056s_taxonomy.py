@@ -29,13 +29,15 @@ exists to prevent.
 **Where the §10 budget is measured, and where it is not.** SPEC §10's 2.5s is the
 whole submit round trip, and E0-13's classifier budget is 4 seconds — so a
 submission that waits for a stall cannot come in under 2.5s and the stall test
-does not pretend to. The budget is measured where entry 41's defect would show:
+does not pretend to. The budget is measured, as the median of three submissions
+(`the_median_seconds` says why), where entry 41's defect would show:
 with the broker down, over a classification that answers immediately. That is the
 near miss — a request that is *prompt* when a background dependency is
 unavailable, against one that holds the connection open while a client library
 retries a worker's twenty times.
 """
 
+import statistics
 import time
 from typing import Any
 
@@ -90,6 +92,34 @@ def the_comment_answer(world: SubmitWorld, response: Any) -> dict[str, Any]:
         "be attributed to a row nothing here chose."
     )
     return comments[0]
+
+
+BUDGET_SAMPLES = 3
+
+
+def the_median_seconds(student: Any, answers: Any, first: float, what: str) -> float:
+    """The median wall-clock time of `BUDGET_SAMPLES` submissions of `answers`.
+
+    `first` is the time of a submission the caller already made and checked;
+    the rest are resubmissions of the same answers, which ADR 0115 revises in
+    place, so the response count does not change. Each one must succeed.
+
+    **Why a median and not one sample.** SPEC §10's 2.5 seconds is a p95, and
+    one sample cannot test a p95: a single slow request on a loaded CI runner
+    fails a one-sample assertion while the code is fine (CI run 37166495313
+    measured 2.58s on a commit that changed only documentation). Three samples
+    cannot test a p95 either, and this does not claim to; a p95 needs a load
+    test, which this file is not. What a median of three does
+    test is the defect these assertions exist for. Entry 41's hang is paid on
+    every submission, six seconds or more each, so every sample is slow and the
+    median is slow; one unlucky sample is not enough to move it.
+    """
+    seconds = [first]
+    for attempt in range(2, BUDGET_SAMPLES + 1):
+        answered, elapsed = student.submit_timed(answers)
+        accepted(answered, f"{what} (submission {attempt} of {BUDGET_SAMPLES})")
+        seconds.append(elapsed)
+    return statistics.median(seconds)
 
 
 def the_only_classification(world: SubmitWorld, answer: dict[str, Any]) -> dict[str, Any]:
@@ -426,8 +456,9 @@ def test_a_submission_is_prompt_while_the_broker_is_unreachable(
     done its own job — and the whole suite went from seven minutes to fourteen.
 
     **Both halves of the enqueue are asserted**: the request succeeds (a broker
-    that is down may not make a submission fail) and it comes back inside SPEC
-    §10's 2.5 seconds (it may not wait to find out). Either on its own passes
+    that is down may not make a submission fail) and the median of three
+    submissions comes back inside SPEC §10's 2.5 seconds (it may not wait to find
+    out). `the_median_seconds` says why it is a median. Either on its own passes
     against half of the defect — `retry=False` with the result backend still in
     play is fast and raises, and a broad `try/except` around a twenty-second retry
     succeeds and hangs.
@@ -446,19 +477,23 @@ def test_a_submission_is_prompt_while_the_broker_is_unreachable(
     )
     world = student.world
 
-    answered, elapsed = student.submit_timed(a_valid_submission(comment=marked(mock_ai, "503")))
+    answers = a_valid_submission(comment=marked(mock_ai, "503"))
+    what = "A submission floored on a 503 while the broker was unreachable"
+    answered, elapsed = student.submit_timed(answers)
 
-    accepted(answered, "A submission floored on a 503 while the broker was unreachable")
-    assert elapsed < submit_contract.submit_budget_seconds, (
-        f"The request took {elapsed:.1f}s with the broker at a closed port. SPEC §10: 'survey "
-        f"submit p95 < 2.5s including synchronous validity check'. The classification answered "
-        "immediately, so the time was spent somewhere else — and a client library's defaults on a "
-        "request path turn a dependency that is down into a request that is hanging "
-        "(`docs/MISTAKES.md` entry 41)."
-    )
+    accepted(answered, what)
     responses = world.responses()
     assert len(responses) == 1, f"The submission left {len(responses)} responses: {responses}."
     the_only_classification(world, the_comment_answer(world, responses[0]))
+
+    median = the_median_seconds(student, answers, elapsed, what)
+    assert median < submit_contract.submit_budget_seconds, (
+        f"The median of {BUDGET_SAMPLES} submissions took {median:.1f}s with the broker at a "
+        "closed port. SPEC §10: 'survey submit p95 < 2.5s including synchronous validity check'. "
+        "The classification answered immediately, so the time was spent somewhere else — and a "
+        "client library's defaults on a request path turn a dependency that is down into a "
+        "request that is hanging (`docs/MISTAKES.md` entry 41)."
+    )
 
 
 def test_a_submission_is_prompt_with_a_broker_that_answers(
@@ -496,12 +531,16 @@ def test_a_submission_is_prompt_with_a_broker_that_answers(
     )
     world = student.world
 
-    answered, elapsed = student.submit_timed(a_valid_submission(comment=marked(mock_ai, "503")))
+    answers = a_valid_submission(comment=marked(mock_ai, "503"))
+    what = "A submission floored on a 503 with a broker that answers"
+    answered, elapsed = student.submit_timed(answers)
 
-    accepted(answered, "A submission floored on a 503 with a broker that answers")
-    assert elapsed < submit_contract.submit_budget_seconds, (
-        f"The request took {elapsed:.1f}s against a broker that is up, over a classification that "
-        "answered immediately. SPEC §10 gives the whole round trip 2.5 seconds."
+    accepted(answered, what)
+    median = the_median_seconds(student, answers, elapsed, what)
+    assert median < submit_contract.submit_budget_seconds, (
+        f"The median of {BUDGET_SAMPLES} submissions took {median:.1f}s against a broker that is "
+        "up, over a classification that answered immediately. SPEC §10 gives the whole round trip "
+        "2.5 seconds."
     )
     assert len(world.responses()) == 1
 
