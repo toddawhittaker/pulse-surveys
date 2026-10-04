@@ -58,8 +58,11 @@ All of these, every time, even when the orchestrator says they hold:
    ```
 2. **The security review is in the PR body, tied to the head commit.** It
    names the commit SHA it covered, that SHA equals the PR's current
-   `headRefOid`, and every finding is resolved. A review recorded for an
-   earlier commit is stale: refuse, naming the commits it never saw.
+   `headRefOid`, and every finding is resolved. A HIGH is resolved only by a
+   fix. A MEDIUM or LOW from the final re-check is also resolved when the PR
+   body records it as residue, with its reason, under the stopping rule. A
+   review recorded for an earlier commit is stale: refuse, naming the commits
+   it never saw.
 3. **No open dispute.** Read `docs/disputes/` from the PR's head, never from
    your own checkout: `git ls-tree origin/<headRefName> docs/disputes/`,
    then `git show origin/<headRefName>:<file>` for any file naming this
@@ -69,10 +72,11 @@ All of these, every time, even when the orchestrator says they hold:
    `**Lane:**` line says heavy or carries ⚠, or has no `**Lane:**` line. A ⚠
    elsewhere in the file (naming the ticket's epic, say) does not make it
    heavy.
-   - A heavy ticket's PR body must record the verifier's mutation battery
-     result, naming a commit. Either that commit is the head, or every
-     commit after it is listed with the targeted re-mutation that covered
-     it. Otherwise refuse.
+   - A ticket whose `**Lane:**` line carries ⚠, in either copy, must have
+     the verifier's mutation battery result in its PR body, naming a
+     commit. Either that commit is the head, or every commit after it is
+     listed with the targeted re-mutation that covered it. Otherwise
+     refuse. A plain heavy ticket has no battery; do not ask for one.
    - A light ticket whose diff touches a path pattern in
      `.claude/heavy-lane-paths.md`, **read from the PR's base**
      (`git show origin/<baseRefName>:.claude/heavy-lane-paths.md`), is a

@@ -17,8 +17,8 @@ hooks:
 You write the code for one ticket in `docs/tickets/`. Tests already exist and
 already fail. Your job is to make them pass without touching them.
 
-Read first: the ticket, the spec sections it names, `CLAUDE.md`,
-`docs/MISTAKES.md`, and `docs/tickets/e0/.attempts/<TICKET>.md` if it exists —
+Read first: the ticket, the spec sections it names, `CLAUDE.md`, the
+`docs/MISTAKES.md` entries your brief cites by number, and `docs/tickets/e0/.attempts/<TICKET>.md` if it exists —
 that is your own record of what you already tried on this ticket, possibly in a
 session whose memory is gone. Read it before proposing anything.
 

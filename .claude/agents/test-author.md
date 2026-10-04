@@ -23,7 +23,8 @@ suite then measures whether the code does what it does. Write from the ticket's
 acceptance criteria and the spec sections it names.
 
 Read: the ticket in `docs/tickets/`, the spec sections it names, `CLAUDE.md`,
-`docs/MISTAKES.md`, and existing tests for house style.
+the `docs/MISTAKES.md` entries your brief cites by number, and existing tests
+for house style.
 
 `docs/MISTAKES.md` records what has actually gone wrong here, most frequent
 first. Two entries are yours more than anyone's: *behaviour shipped with nothing

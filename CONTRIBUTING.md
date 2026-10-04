@@ -125,8 +125,8 @@ An agent may never merge an epic branch into `main`. No ticket PR waits for
 the owner. A ticket PR merges into its epic branch once its CI run is
 completed, successful, and resolved against the PR's final head commit, its
 security review is recorded in the body against that same commit, nothing
-is in dispute, and, for a heavy ticket, the mutation battery result is
-recorded too. The merger reruns a failed job once only when a runner
+is in dispute, and, for a ticket with ⚠ in its `**Lane:**` field, the
+mutation battery result is recorded too. The merger reruns a failed job once only when a runner
 failed to download or install packages; a failed test is always real. A
 ticket branch that is behind its epic but has no conflict merges as it is,
 without merging the epic into it first, which saves a CI run. CI runs on
@@ -144,8 +144,9 @@ a recorded security review rather than on a human saying yes each time.
 
 - Never use an admin override to bypass a protection rule.
 - Never mark a pull request ready for review while CI is failing.
-- Never force-push to `main` or to an epic branch. Force-pushing your own ticket
-  branch before review is fine.
+- Never force-push anything, and never rebase a ticket branch that is pushed.
+  When a ticket branch conflicts with its epic branch, merge the epic branch
+  into the ticket branch and push.
 - If a ticket turns out to belong to a different epic, close the pull request and
   re-cut the branch. Do not retarget across epics.
 
@@ -261,10 +262,13 @@ summarize, but the header decides.
 **Heavy** is the orchestrated tests-first loop, for the surfaces an attacker
 would aim at — the path table at `.claude/heavy-lane-paths.md`. A separate
 test author writes failing tests from the ticket and the spec before any
-implementation exists; the builder-heavy may not modify tests (a hook enforces
-the wall) and escalates disagreements as dispute files; an independent
-verifier confirms CI's green run on the same commit and runs a scoped
-mutation battery proving each test can actually fail.
+implementation exists. The builder-heavy first confirms those tests fail for
+the right reason, then makes them pass; it may not modify tests (a hook
+enforces the wall) and escalates disagreements as dispute files. CI's green
+run on the head commit, which the merger checks, is the verification. A
+ticket with ⚠ in its `**Lane:**` field adds an independent verifier, which
+confirms that green run and runs a scoped mutation battery proving each test
+can actually fail.
 
 **Light** is for everything else: ordinary routes and services, jobs, the
 frontend, fixtures, scripts, and Docker files. CI files and gate settings
@@ -276,7 +280,25 @@ no mutation battery, no separate test author.
 What never varies by lane: CI green with nothing skipped or weakened, the
 §4.1 invariant suite, the independent security review on every pull request
 (SPEC §14.2 item 3), ADRs for contestable construction decisions, and the
-merge conditions in "Who may merge what" below. A light ticket whose diff turns out to
+merge conditions in "Who may merge what" above.
+
+The security review runs once, after the last code push, on the final head
+commit; the reviewers the diff calls for run in parallel. If they find
+something, the fix round runs only the targeted tests, pushes once, and gets
+one re-check on the new head, and then the loop stops. A HIGH found in the
+re-check is fixed, and that fix gets one more re-check. The pull request body
+states this stopping rule, and every review it cites names the final head
+commit. Whether the ticket's diff does what the ticket and the spec say is
+checked at the epic boundary, not per pull request.
+
+Before an epic's breakdown is written, the architect gives each migration
+number and each ADR number to one ticket, and puts a ticket after another
+only when it needs that ticket's code. Tickets may edit the same file and
+build in parallel; the breakdown names those files, and the ticket that
+merges second resolves the conflict by merging the epic branch into its own
+branch. Small light tickets that one builder would build in the same place
+are merged into one ticket, because every ticket costs a branch, a pull
+request, a review, a CI run, and a merge. A light ticket whose diff turns out to
 reach a heavy surface stops and re-lanes, and the pull request records the
 switch.
 
@@ -298,8 +320,8 @@ and docs cover anything an operator or developer needs. The pull request
 template restates the per-ticket ones as a checklist. At the epic boundary,
 §14.2 item 6 adds the epic-level reviews — exit, invariant coverage, docs/ADR
 completeness, and a threat model on ⚠ epics — that gate the merge to `main`,
-now joined by the per-PR reviewers moved to this boundary — data-model,
-lti-oidc, a11y-copy, and prompt-eval (see ADR 0004) — and by `code-reviewer`,
+now joined by the per-PR reviewers moved to this boundary — spec-conformance,
+data-model, lti-oidc, a11y-copy, and prompt-eval (see ADR 0004) — and by `code-reviewer`,
 which reads the whole epic for bugs first and then for needless complexity.
 Each finding becomes a ticket PR that merges like any other.
 
