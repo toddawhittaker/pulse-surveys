@@ -57,7 +57,7 @@
  */
 
 import type { components } from './wire.gen';
-import { authorizationHeader } from '../lib/session';
+import { jsonBody, readHeaders, refusalSentence } from '../lib/http';
 
 /** The generated wire schemas (ADR 0185); every wire type below is one of these. */
 type Schemas = components['schemas'];
@@ -290,49 +290,11 @@ const NOT_FOUND_STATUS = 404;
 /** A path parameter FastAPI would not parse — not a uuid, or not an integer. */
 const UNPROCESSABLE_STATUS = 422;
 
-/** The headers one call here carries. Every one of them is a read. */
-function requestHeaders(): Record<string, string> {
-  return { Accept: 'application/json', ...authorizationHeader() };
-}
-
-/**
- * A response's JSON body, or `null` when it did not carry one.
- *
- * Written here rather than imported from `student.ts`: that module's copy is
- * private to the screen it serves, and exporting a five-line helper out of one
- * screen's client so another can share it would put two screens in one blast
- * radius for no measured gain. What must not be duplicated is a *decision*, and
- * every decision this file makes about a refusal is written in the outcome types
- * above.
- */
-async function jsonBody(response: Response): Promise<unknown> {
-  try {
-    return (await response.json()) as unknown;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * `detail` out of an error body, when it is a sentence.
- *
- * FastAPI answers a refusal with `{"detail": …}`, and every refusal these three
- * routes serve carries a **string** there — one of `app.api.instructor`'s two
- * governed sentences. FastAPI's own 422 carries a list of validation objects
- * instead, which is not a sentence anybody wrote for a reader, so it is answered
- * `null` here and the page uses its own words.
- */
-function refusalSentence(body: unknown): string | null {
-  if (typeof body !== 'object' || body === null) return null;
-  const detail = (body as Record<string, unknown>).detail;
-  return typeof detail === 'string' ? detail : null;
-}
-
 /** The sections this session's person teaches — the menu the other two need. */
 export async function readTaughtSections(): Promise<SectionsRead> {
   let response: Response;
   try {
-    response = await fetch(SECTIONS_PATH, { headers: requestHeaders() });
+    response = await fetch(SECTIONS_PATH, { headers: readHeaders() });
   } catch {
     return { kind: 'unavailable', detail: null };
   }
@@ -354,7 +316,7 @@ export async function readTaughtSections(): Promise<SectionsRead> {
 export async function readPublishedWeeks(sectionId: string): Promise<PublishedWeeksRead> {
   let response: Response;
   try {
-    response = await fetch(publishedWeeksPath(sectionId), { headers: requestHeaders() });
+    response = await fetch(publishedWeeksPath(sectionId), { headers: readHeaders() });
   } catch {
     return { kind: 'unavailable', detail: null };
   }
@@ -380,7 +342,7 @@ export async function readInstructorReport(
 ): Promise<ReportRead> {
   let response: Response;
   try {
-    response = await fetch(reportPath(sectionId, courseWeek), { headers: requestHeaders() });
+    response = await fetch(reportPath(sectionId, courseWeek), { headers: readHeaders() });
   } catch {
     return { kind: 'unavailable', detail: null };
   }

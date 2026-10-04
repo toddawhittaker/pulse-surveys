@@ -27,8 +27,8 @@
  * from a cookie carrier, nothing under `frontend/src` read `pulse_csrf`, and a
  * cookie-borne student could therefore read the survey and never submit it. Every
  * POST below carries the cookie's value when the cookie is readable — see
- * `requestHeaders`, which spreads `csrfHeader()` from `../lib/session`. The
- * reader lived here until E5-09 put a second write client beside this one.
+ * `writeHeaders` in `../lib/http`, which spreads `csrfHeader()` from
+ * `../lib/session`.
  *
  * **Every type below is the wire's own**, snake case included, aliased from
  * `wire.gen.ts`, which describes `backend/app/schemas/student.py` and
@@ -40,7 +40,7 @@
  */
 
 import type { components } from './wire.gen';
-import { authorizationHeader, csrfHeader } from '../lib/session';
+import { jsonBody, readHeaders, refusalSentence, writeHeaders } from '../lib/http';
 
 /** The generated wire schemas (ADR 0185); every wire type below is one of these. */
 type Schemas = components['schemas'];
@@ -137,40 +137,6 @@ const CONFLICT_STATUS = 409;
 /** No student session on the request (`require_student`). */
 const UNAUTHORIZED_STATUS = 401;
 
-/**
- * The headers one call here carries.
- *
- * **Every POST, whenever the cookie is readable, and no POST when it is not.** A
- * cookie-borne session could read this survey and never submit it before E2-17:
- * the SPA never read `pulse_csrf` at all, so the one action the screen exists for
- * arrived as a 403. The reader itself is `../lib/session`'s since E5-09, where a
- * second write client arrived and two readers for one cookie became
- * `docs/MISTAKES.md` entry 13; `csrfHeader` carries the reasoning that used to be
- * written here, including why a value the cookie did not supply would be worse
- * than sending nothing.
- */
-function requestHeaders(method: 'GET' | 'POST'): Record<string, string> {
-  const headers: Record<string, string> = { Accept: 'application/json', ...authorizationHeader() };
-  if (method === 'GET') return headers;
-  headers['Content-Type'] = 'application/json';
-  return { ...headers, ...csrfHeader() };
-}
-
-/**
- * `detail` out of an error body, when it is a sentence.
- *
- * FastAPI answers a refusal with `{"detail": …}`, and this route serves two
- * shapes under that name: a **string** for every refusal, which is one of
- * `app.copy`'s sentences, and an **object** `{verdict, message}` for §3.3's
- * bounce. They are told apart by type rather than by status, because 422 is also
- * the status three value refusals carry and those carry a string.
- */
-function refusalSentence(body: unknown): string | null {
-  if (typeof body !== 'object' || body === null) return null;
-  const detail = (body as Record<string, unknown>).detail;
-  return typeof detail === 'string' ? detail : null;
-}
-
 /** The bounce's verdict and coaching sentence, when the body is one. */
 function bounceDetail(body: unknown): { verdict: string; message: string } | null {
   if (typeof body !== 'object' || body === null) return null;
@@ -179,15 +145,6 @@ function bounceDetail(body: unknown): { verdict: string; message: string } | nul
   const { verdict, message } = detail as Record<string, unknown>;
   if (typeof verdict !== 'string' || typeof message !== 'string') return null;
   return { verdict, message };
-}
-
-/** A response's JSON body, or `null` when it did not carry one. */
-async function jsonBody(response: Response): Promise<unknown> {
-  try {
-    return (await response.json()) as unknown;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -204,7 +161,7 @@ async function jsonBody(response: Response): Promise<unknown> {
 export async function readStudentSurvey(): Promise<SurveyRead> {
   let response: Response;
   try {
-    response = await fetch(SURVEY_PATH, { headers: requestHeaders('GET') });
+    response = await fetch(SURVEY_PATH, { headers: readHeaders() });
   } catch {
     return { kind: 'unavailable' };
   }
@@ -235,7 +192,7 @@ export async function submitWeeklySurvey(
   try {
     response = await fetch(SUBMIT_PATH, {
       method: 'POST',
-      headers: requestHeaders('POST'),
+      headers: writeHeaders(),
       body: JSON.stringify(submission),
     });
   } catch {

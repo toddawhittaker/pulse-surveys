@@ -37,7 +37,7 @@
  */
 
 import type { components } from './wire.gen';
-import { authorizationHeader, csrfHeader } from '../lib/session';
+import { jsonBody, readHeaders, refusalSentence, writeHeaders } from '../lib/http';
 
 /** The generated wire schemas (ADR 0185); every wire type below is one of these. */
 type Schemas = components['schemas'];
@@ -149,48 +149,6 @@ const UNAUTHORIZED_STATUS = 401;
 
 /** The set is not there, or is not one this reader may read. */
 const NOT_FOUND_STATUS = 404;
-
-/** The headers a read carries. */
-function readHeaders(): Record<string, string> {
-  return { Accept: 'application/json', ...authorizationHeader() };
-}
-
-/**
- * The headers a write carries: the session, the body's type and the
- * double-submit echo when the cookie is readable.
- */
-function writeHeaders(): Record<string, string> {
-  return {
-    Accept: 'application/json',
-    'Content-Type': 'application/json',
-    ...authorizationHeader(),
-    ...csrfHeader(),
-  };
-}
-
-/** A response's JSON body, or `null` when it did not carry one. */
-async function jsonBody(response: Response): Promise<unknown> {
-  try {
-    return (await response.json()) as unknown;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * `detail` out of an error body, when it is a sentence.
- *
- * FastAPI answers a refusal with `{"detail": …}`, and every refusal these routes
- * serve carries a **string** there. FastAPI's own 422 for a body it could not
- * parse carries a list of validation objects instead, which is not a sentence
- * anybody wrote for a reader, so it is answered `null` here and the screen uses
- * its own words.
- */
-function refusalSentence(body: unknown): string | null {
-  if (typeof body !== 'object' || body === null) return null;
-  const detail = (body as Record<string, unknown>).detail;
-  return typeof detail === 'string' ? detail : null;
-}
 
 /** The sets this session's person may read, by name. */
 export async function readComparisonSets(): Promise<ComparisonSetsRead> {
