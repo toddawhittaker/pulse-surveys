@@ -24,9 +24,9 @@ is either there or it is not. It would go red — but on the criterion about the
 constraint it was attempting, which sends the reader to the migration rather than
 to the missing import.
 
-**Why a module of its own is the subject at all.** SPEC §13 lists no home for a
-reporting model — `survey.py` holds what students submitted and `ai.py` holds the
-verdicts a model returned — so the ticket adds one, and the ADR is where that is
+**Why a module of its own is the subject at all.** SPEC §13 listed no home for
+a reporting model when the ticket was written — `survey.py` holds what students
+submitted and `ai.py` holds the verdicts a model returned — so the ticket adds one, and the ADR is where that is
 argued. What is asserted here is only that whatever module holds them is imported
 by the package: the tables are named and the module is named, and a schema
 shipped in a file nothing executes is the failure either way.

@@ -95,11 +95,13 @@ only when it is exactly one of four registry members; anything else logs
   else, and it is the same exposure the launch door's refusal logging already
   carries. Named here rather than left for a reviewer to find.
 - **Two handshake mechanisms exist, one per door, and that is now on purpose.**
-  Anyone reading `app/api/deps.py` beside `app/lti/in_flight.py` sees a
+  Anyone reading `app/api/auth.py` beside `app/lti/in_flight.py` sees a
   difference that looks like drift; the module docstring and this record say
   which fact makes it a difference. The day the web door is reached inside an
   iframe — nothing in E1..E13 puts it there — this decision is the one to
   revisit.
+  *Amended 2026-10-03 by E5.1-03:* the web door's half moved from
+  `app/api/deps.py` to `app/api/auth.py`.
 - **A sentence in `app/services/session.py` is now false, and this ticket could
   not fix it.** `SessionClaims` says `iss` is "the platform's issuer URL, or
   `None` for the web door where a session is not platform-issued". `iss=None` is

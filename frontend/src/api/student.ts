@@ -9,10 +9,10 @@
  * the read takes none at all, and the write names only a section the server then
  * checks the reader's own enrollment in.
  *
- * **Hand-written, not generated, and not wrapped in a query cache.** ADR 0117
- * records the decision and the alternatives; the short version is that this is
- * one screen with two calls and a generator plus a cache would be two
- * dependencies and a build step bought for it.
+ * **The calls are written by hand and not wrapped in a query cache** (ADR
+ * 0117); **the wire types are generated** from the backend's OpenAPI document
+ * (ADR 0185), so a renamed or added member fails a check rather than going
+ * stale here silently.
  *
  * **The session rides as a Bearer header** (ADR 0089, `../lib/session.ts`): the
  * launch door hands the token over in the URL fragment, the SPA lifts it into
@@ -27,120 +27,48 @@
  * from a cookie carrier, nothing under `frontend/src` read `pulse_csrf`, and a
  * cookie-borne student could therefore read the survey and never submit it. Every
  * POST below carries the cookie's value when the cookie is readable — see
- * `requestHeaders`, which spreads `csrfHeader()` from `../lib/session`. The
- * reader lived here until E5-09 put a second write client beside this one.
+ * `writeHeaders` in `../lib/http`, which spreads `csrfHeader()` from
+ * `../lib/session`.
  *
- * **Every field below is the wire's spelling**, snake case included, because
- * these types describe `backend/app/schemas/student.py` and
- * `backend/app/schemas/survey.py` rather than a shape of this screen's choosing.
- * The three numeric columns arrive as **strings**: they are `Decimal` on the
+ * **Every type below is the wire's own**, snake case included, aliased from
+ * `wire.gen.ts`, which describes `backend/app/schemas/student.py` and
+ * `backend/app/schemas/survey.py`. The three numeric columns arrive as
+ * **strings**: they are `Decimal` on the
  * server and pydantic writes a decimal to JSON as a string, which is the whole
  * point of the column type — half an hour is exactly half an hour and not
  * whatever a float rounds to.
  */
 
-import { authorizationHeader, csrfHeader } from '../lib/session';
+import type { components } from './wire.gen';
+import { jsonBody, readHeaders, refusalSentence, writeHeaders } from '../lib/http';
+
+/** The generated wire schemas (ADR 0185); every wire type below is one of these. */
+type Schemas = components['schemas'];
 
 /** Where the form reads from, and where it posts. `app.api.student`'s two paths. */
 export const SURVEY_PATH = '/student/survey';
 export const SUBMIT_PATH = '/student/submissions';
 
 /** Which of SPEC §3.2's three answer shapes a question takes. */
-export type QuestionKind = 'likert' | 'comment' | 'workload';
+export type QuestionKind = Schemas['QuestionKind'];
 
 /** One question of the set in force, as the form has to render it (SPEC §3.2). */
-export interface SurveyQuestion {
-  readonly id: string;
-  readonly position: number;
-  readonly kind: QuestionKind;
-  readonly name: string;
-  /** The wording a person reads. Null for the questions §3.2 quotes none for. */
-  readonly prompt: string | null;
-  /** Position of the question whose answer can make this one required. */
-  readonly required_if_position: number | null;
-  /** This question is required when that answer is at most this value. */
-  readonly required_if_at_most: number | null;
-  readonly minimum_value: string | null;
-  readonly maximum_value: string | null;
-  readonly step: string | null;
-}
+export type SurveyQuestion = Schemas['SurveyQuestion'];
 
 /** One answer this reader already gave, in whichever of the three it holds. */
-export interface SubmittedAnswer {
-  readonly question_id: string;
-  readonly rating: number | null;
-  readonly comment_text: string | null;
-  readonly workload_hours: string | null;
-}
+export type SubmittedAnswer = Schemas['SubmittedAnswer-Output'];
 
 /** What this reader has already submitted for this week, if anything. */
-export interface OwnSubmission {
-  readonly first_submitted_at: string;
-  readonly last_submitted_at: string;
-  readonly answers: readonly SubmittedAnswer[];
-}
+export type OwnSubmission = Schemas['OwnSubmission'];
 
 /** The one survey open for a section right now (SPEC §3.1's one-open rule). */
-export interface OpenSurvey {
-  readonly window_id: string;
-  readonly course_week: number;
-  /**
-   * How many weeks this section's own run lasts in total — the second half of
-   * the eyebrow's "WK 07 / 12".
-   *
-   * The server's number, read off the section the window belongs to. SPEC §2.2
-   * encodes the length in the start letter of the section code, and the
-   * letter-to-length map is the institution's, so nothing here derives it.
-   */
-  readonly length_weeks: number;
-  readonly term_week: number;
-  readonly opens_at: string;
-  readonly closes_at: string;
-  readonly question_set_version: number;
-  readonly questions: readonly SurveyQuestion[];
-  readonly submission: OwnSubmission | null;
-}
+export type OpenSurvey = Schemas['OpenSurvey'];
 
 /** One section this reader is enrolled in today, and its survey state. */
-export interface EnrolledSection {
-  readonly section_id: string;
-  readonly section_code: string;
-  /**
-   * The reader's own course, as a person names it:
-   * "MATH 140 E1FF — College Algebra, Fall 2026".
-   *
-   * Composed on the server out of the prefix, number, section code, title and
-   * term name of the course above *this* section (`app.services.survey_read`),
-   * because §4.1 item 1 makes which course may be named a scoping question
-   * rather than a formatting one. The heading renders the whole string, and the
-   * order is the owner's ruling of 2026-09-03.
-   */
-  readonly course_label: string;
-  readonly survey_is_open: boolean;
-  /**
-   * When this section's next survey opens, or null.
-   *
-   * Null both while a survey is open and when this section has no materialized
-   * window ahead of it — the closed-state placeholder is dated on an instant and
-   * plain on a null.
-   */
-  readonly next_window_opens_at: string | null;
-  readonly open_survey: OpenSurvey | null;
-}
+export type EnrolledSection = Schemas['EnrolledSection'];
 
 /** Everything the form needs, in one answer. An empty list is between terms. */
-export interface StudentSurveyView {
-  readonly sections: readonly EnrolledSection[];
-  /**
-   * The IANA zone this deployment's survey windows are written in (SPEC §8).
-   *
-   * Deployment configuration rather than anything about the reader, and the zone
-   * `next_window_opens_at` is rendered in: a browser handed an instant and no
-   * zone renders it in its own, which would tell a student an hour their
-   * institution does not keep.
-   */
-  readonly institution_timezone: string;
-}
+export type StudentSurveyView = Schemas['StudentSurveyView'];
 
 /**
  * One question of one submission, answered.
@@ -150,18 +78,10 @@ export interface StudentSurveyView {
  * why: "the comment is blank" and "the required comment is missing" look the
  * same on the wire, and the difference between them is the rating beside it.
  */
-export interface SubmittedValue {
-  readonly position: number;
-  readonly rating?: number;
-  readonly comment_text?: string;
-  readonly workload_hours?: string;
-}
+export type SubmittedValue = Schemas['SubmittedAnswer-Input'];
 
 /** One student's answers to one section's open weekly survey. */
-export interface SubmissionRequest {
-  readonly section_id: string;
-  readonly answers: readonly SubmittedValue[];
-}
+export type SubmissionRequest = Schemas['SubmissionRequest'];
 
 /**
  * What the read answered.
@@ -197,12 +117,14 @@ export type SurveyRead =
  *
  * **`closed` and `refused` differ in what the screen does with the form, and the
  * server's own sentences are what decide which is which.** The 409s all say the
- * submission cannot be stored as it stands — the window shut, the week is already
- * recorded, a judged comment cannot be withdrawn — so the form is taken away and
- * the sentence stands in its place. Everything else says the answers are still
- * worth keeping: `submit.classifier_down` says so in as many words ("Your answers
- * are still in the form, so nothing is lost"), and a form cleared underneath that
- * sentence would make it false.
+ * week can take nothing more from this form — the window shut, or the week is
+ * already recorded — so the form is taken away and the sentence stands in its
+ * place. Everything else says the answers are still worth keeping:
+ * `submit.classifier_down` says so in as many words ("Your answers are still in
+ * the form, so nothing is lost"), and a form cleared underneath that sentence
+ * would make it false. A revise that would clear a judged comment is one of
+ * these since E5.1-05, answered 422 rather than 409: the window is still open
+ * and the student can put the comment back, so the form stays.
  */
 export type SubmitOutcome =
   | { readonly kind: 'stored' }
@@ -217,40 +139,6 @@ const CONFLICT_STATUS = 409;
 /** No student session on the request (`require_student`). */
 const UNAUTHORIZED_STATUS = 401;
 
-/**
- * The headers one call here carries.
- *
- * **Every POST, whenever the cookie is readable, and no POST when it is not.** A
- * cookie-borne session could read this survey and never submit it before E2-17:
- * the SPA never read `pulse_csrf` at all, so the one action the screen exists for
- * arrived as a 403. The reader itself is `../lib/session`'s since E5-09, where a
- * second write client arrived and two readers for one cookie became
- * `docs/MISTAKES.md` entry 13; `csrfHeader` carries the reasoning that used to be
- * written here, including why a value the cookie did not supply would be worse
- * than sending nothing.
- */
-function requestHeaders(method: 'GET' | 'POST'): Record<string, string> {
-  const headers: Record<string, string> = { Accept: 'application/json', ...authorizationHeader() };
-  if (method === 'GET') return headers;
-  headers['Content-Type'] = 'application/json';
-  return { ...headers, ...csrfHeader() };
-}
-
-/**
- * `detail` out of an error body, when it is a sentence.
- *
- * FastAPI answers a refusal with `{"detail": …}`, and this route serves two
- * shapes under that name: a **string** for every refusal, which is one of
- * `app.copy`'s sentences, and an **object** `{verdict, message}` for §3.3's
- * bounce. They are told apart by type rather than by status, because 422 is also
- * the status three value refusals carry and those carry a string.
- */
-function refusalSentence(body: unknown): string | null {
-  if (typeof body !== 'object' || body === null) return null;
-  const detail = (body as Record<string, unknown>).detail;
-  return typeof detail === 'string' ? detail : null;
-}
-
 /** The bounce's verdict and coaching sentence, when the body is one. */
 function bounceDetail(body: unknown): { verdict: string; message: string } | null {
   if (typeof body !== 'object' || body === null) return null;
@@ -259,15 +147,6 @@ function bounceDetail(body: unknown): { verdict: string; message: string } | nul
   const { verdict, message } = detail as Record<string, unknown>;
   if (typeof verdict !== 'string' || typeof message !== 'string') return null;
   return { verdict, message };
-}
-
-/** A response's JSON body, or `null` when it did not carry one. */
-async function jsonBody(response: Response): Promise<unknown> {
-  try {
-    return (await response.json()) as unknown;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -284,7 +163,7 @@ async function jsonBody(response: Response): Promise<unknown> {
 export async function readStudentSurvey(): Promise<SurveyRead> {
   let response: Response;
   try {
-    response = await fetch(SURVEY_PATH, { headers: requestHeaders('GET') });
+    response = await fetch(SURVEY_PATH, { headers: readHeaders() });
   } catch {
     return { kind: 'unavailable' };
   }
@@ -315,7 +194,7 @@ export async function submitWeeklySurvey(
   try {
     response = await fetch(SUBMIT_PATH, {
       method: 'POST',
-      headers: requestHeaders('POST'),
+      headers: writeHeaders(),
       body: JSON.stringify(submission),
     });
   } catch {

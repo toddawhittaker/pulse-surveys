@@ -162,6 +162,13 @@ MODULE_MARKS = "pytestmark"
 # rule about which package may read a mock-only surface, not a §4.1 denial, and its
 # own docstring says so; a shape matching it would demand a marker it must not
 # have.
+#
+# **`_no_count` is E5.1-12's.** `test_the_small_n_notice_states_the_threshold_and_
+# no_count.py` denies a count on the small-N notice, which is §4.1 item 3's
+# disclosure by another route, and it was unmarked until E5.1-12. One module
+# carries the shape today. Its planted samples are below: one demanded and
+# unmarked, so the shape is shown to report, and the opposite claim
+# (`states_the_count`) as the near miss it must spare.
 DENIAL_NAME_SHAPES = (
     "_names_nobody",
     "_name_nobody",
@@ -171,6 +178,7 @@ DENIAL_NAME_SHAPES = (
     "carries_nothing",
     "_trigger_exposure",
     "_control_exposure",
+    "_no_count",
 )
 
 # Two real modules that certainly carry the module-level marker, used as the
@@ -310,6 +318,16 @@ PLANTED_MODULES = {
     "test_a_planted_gate_refuses_a_test_that_asserts_nothing.py": (
         f"import pytest\n\n\n{A_DENIAL_TEST}"
     ),
+    # Demanded, and E5.1-12's notice shape — unmarked, so it is demanded *and*
+    # flagged, which is the half that shows the shape reports rather than only
+    # matches.
+    "test_a_planted_notice_states_the_threshold_and_no_count.py": (
+        f"import pytest\n\n\n{A_DENIAL_TEST}"
+    ),
+    # Not demanded, and the near miss for `_no_count`: a module asserting that a
+    # notice *states* a count is the opposite claim, and a matcher reading for a
+    # bare "count" would take it.
+    "test_a_planted_notice_states_the_count.py": f"import pytest\n\n\n{A_DENIAL_TEST}",
 }
 
 PLANTED_DEMANDED = {
@@ -322,6 +340,7 @@ PLANTED_DEMANDED = {
     "test_a_planted_row_carries_nothing_about_a_student.py",
     "test_a_planted_dev_passback_trigger_exposure.py",
     "test_a_planted_dev_clock_control_exposure.py",
+    "test_a_planted_notice_states_the_threshold_and_no_count.py",
 }
 
 PLANTED_CARRYING_THE_MARKER = {

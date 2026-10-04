@@ -13,12 +13,15 @@ answers any of them:
     the out-of-scope half of criterion 1's refusal pair.
 
   - **A term of weeks whose published/unpublished line the test moves.**
-    Breakdown decision 6 makes a published week one whose survey window has
-    closed, per the clock service, so criterion 3's boundary is a clock position
-    rather than a stored flag. Every window this world writes carries SPEC §3.1's
-    own Fall 2026 instants (`WINDOWS_BY_TERM_WEEK`, hand-written in
-    `tests/fixtures/survey_windows.py`), and `ReportDoor.pretend` puts the
-    development clock on either side of one of them.
+    Breakdown decision 6 made a published week one whose survey window has
+    closed, per the clock service; E5.1-05 moved the line to 06:00 on the first
+    Monday, in the institution's time zone, strictly after that close (SPEC
+    §3.1). Either way the boundary is a clock position rather than a stored flag.
+    Every window this world writes carries SPEC §3.1's own Fall 2026 instants
+    (`WINDOWS_BY_TERM_WEEK`, hand-written in `tests/fixtures/survey_windows.py`),
+    the instant each week's report opens is hand-written below
+    (`REPORT_OPENS_BY_TERM_WEEK`), and `ReportDoor.pretend` puts the development
+    clock on either side of them.
 
   - **A section whose course weeks are not its term weeks.** Cohort `F` runs six
     weeks from term week 7 (`SEEDED_COHORTS`, transcribed from `scripts/seed.py`),
@@ -126,6 +129,7 @@ from fixtures.student_read import (
 from fixtures.submit import RESPONSE_TABLE, USER_TABLE
 from fixtures.supervision import require_table, single_primary_key
 from fixtures.survey_windows import (
+    INSTITUTION_TIMEZONE,
     SECTION_TABLE,
     SEEDED_COHORTS,
     WINDOWS_BY_TERM_WEEK,
@@ -334,10 +338,15 @@ TAUGHT_LENGTH_WEEKS = 6
 # published is decided by where `ReportDoor.pretend` puts the clock and by
 # nothing else.
 #
-#   - course week 1 — a week at or above the n-threshold, so its comments are
-#     visible and criterion 4 has something to compare;
-#   - course weeks 3 and 4 — two under-threshold closed weeks whose comments are
-#     held, which is the world ADR 0152's three-legged release gate needs;
+#   - course week 1 — five respondents, each commenting in the instructor stream
+#     and none in the course stream, so its instructor stream is at the
+#     n-threshold of distinct commenters and its comments are visible, and
+#     criterion 4 has something to compare. Its course stream holds no commenter
+#     and is suppressed (E5.1-01 counts commenters per stream), which is the pair
+#     `test_the_report_payload_carries_small_n_per_stream.py` reads;
+#   - course weeks 3 and 4 — two closed weeks whose instructor streams are under
+#     the threshold of commenters, so their comments are held, which is the world
+#     ADR 0152's three-legged release gate needs;
 #   - course weeks 2 and 5 — the enrolment-window boundary pair (ADR 0147's
 #     re-homed criterion 5): the leaver is in one denominator and not the other;
 #   - course week 6 — nobody answered, which is criterion 7's whole subject, and
@@ -469,11 +478,46 @@ ANSWERED_BY = {
 # *position relative to* an instant this file does not own.
 AFTER_THE_LAST_WINDOW = WINDOWS_BY_TERM_WEEK[TAUGHT_TERM_WEEKS[-1]][1] + timedelta(days=1)
 
-# How far either side of a window's close the clock is put for criterion 3's
-# pair. Whole hours, because ADR 0109 makes the effective instant
+# How far before a window's close the clock is put to stand inside the window.
+# Whole hours, because ADR 0109 makes the effective instant
 # `real + (pretend_now - anchored_at)` — it keeps moving while it is read, so a
 # value placed a second from an edge is a boundary nothing can stand on.
+#
+# **It used to be the "after" side too, and E5.1-05 is why it is not.** Six hours
+# after a Sunday 23:59:59 close is Monday 05:59:59 in the institution's zone, and
+# a week's report now opens at 06:00 that Monday — so `close + 6 hours` stopped
+# being a published clock and became the one instant this ticket says is not. The
+# "after" side is `REPORT_OPENS_BY_TERM_WEEK` below.
 EITHER_SIDE_OF_A_CLOSE = timedelta(hours=6)
+
+# **When each taught week's report opens, written out by hand** (E5.1-05; SPEC
+# §3.1): the first Monday 06:00 in the institution's zone strictly after the
+# window's close. These are the expected instants, so they are literals and never
+# computed from the closes in `WINDOWS_BY_TERM_WEEK` — a table derived by the rule
+# under test would agree with an implementation that got the rule wrong
+# (`docs/MISTAKES.md` entry 19). `assert_the_report_openings_are_what_this_file_says`
+# checks the transcription against the calendar without producing any of them.
+#
+# Term weeks 7 to 10 close on Sundays in daylight time (UTC-4), so 06:00 is 10:00
+# UTC. Term week 11 closes on Sunday 1 November 2026, the day daylight time ends,
+# so its Monday — and term week 12's — is on standard time (UTC-5) and 06:00 is
+# 11:00 UTC. A computation that carried the window's opening offset across that
+# Sunday would say 10:00 UTC for term week 11.
+REPORT_OPENS_BY_TERM_WEEK: dict[int, datetime] = {
+    7: datetime(2026, 10, 5, 10, 0, 0, tzinfo=UTC),
+    8: datetime(2026, 10, 12, 10, 0, 0, tzinfo=UTC),
+    9: datetime(2026, 10, 19, 10, 0, 0, tzinfo=UTC),
+    10: datetime(2026, 10, 26, 10, 0, 0, tzinfo=UTC),
+    11: datetime(2026, 11, 2, 11, 0, 0, tzinfo=UTC),
+    12: datetime(2026, 11, 9, 11, 0, 0, tzinfo=UTC),
+}
+
+# How far past a report's opening a test stands when the opening is not its
+# subject. An hour is clear of the edge in the only direction the effective clock
+# drifts (forward), and is still Monday morning — days before the next window
+# opens on Friday. The tests whose subject *is* the opening stand on the instant
+# itself and on one minute before it.
+CLEAR_OF_AN_OPENING = timedelta(hours=1)
 
 # How far back the refused-role student's enrolment starts, **counted from UTC's
 # real today and not from the pretended clock.** That distinction is the whole of
@@ -1103,6 +1147,50 @@ def assert_the_leaver_straddles_the_boundary() -> None:
     )
 
 
+def assert_the_report_openings_are_what_this_file_says() -> None:
+    """`REPORT_OPENS_BY_TERM_WEEK` against the calendar, before anything stands on it.
+
+    A transcription check, not a second derivation: it produces none of the
+    instants, it only refuses a table that cannot be right. Each opening must be a
+    Monday at 06:00:00 in `America/New_York` (SPEC §3.1's default zone, which is
+    what `configured_env` lays down), strictly after its own week's close, and less
+    than a day after it — every one of these windows closes at 23:59:59 on a
+    Sunday, so its report opens the next morning. A literal typed an hour out on
+    the daylight-saving week fails the first clause, and a literal typed a week out
+    fails the last. Called from the test bodies that read the table, never from a
+    fixture (`docs/MISTAKES.md` entry 44).
+    """
+    from datetime import time
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo(INSTITUTION_TIMEZONE)
+    for term_week, opens in REPORT_OPENS_BY_TERM_WEEK.items():
+        closes = WINDOWS_BY_TERM_WEEK[term_week][1]
+        local = opens.astimezone(zone)
+        assert local.weekday() == 0 and local.time() == time(6, 0), (
+            f"`REPORT_OPENS_BY_TERM_WEEK[{term_week}]` is {opens.isoformat()}, which is "
+            f"{local.isoformat()} in {INSTITUTION_TIMEZONE} — not a Monday at 06:00:00. The table "
+            "in tests/fixtures/report_api.py is the thing to correct."
+        )
+        assert closes < opens < closes + timedelta(days=1), (
+            f"`REPORT_OPENS_BY_TERM_WEEK[{term_week}]` is {opens.isoformat()} and that week's "
+            f"window closes at {closes.isoformat()}. Every window in this world closes on a Sunday "
+            "at 23:59:59, so its report opens the next morning: after the close and within a day "
+            "of it."
+        )
+
+
+def once_the_report_has_opened(course_week: int) -> datetime:
+    """A clock an hour after one of the taught section's weeks has published.
+
+    For the tests that need a week to be readable and whose subject is not the
+    hour it became readable. The premise check runs first, so a stale table is a
+    failure naming it rather than a 404 about a course week.
+    """
+    assert_the_report_openings_are_what_this_file_says()
+    return REPORT_OPENS_BY_TERM_WEEK[TERM_WEEK_OF_COURSE_WEEK[course_week]] + CLEAR_OF_AN_OPENING
+
+
 class ReportWorldRows:
     """The rows one instructor's Monday report is read over, and who they belong to.
 
@@ -1146,6 +1234,17 @@ class ReportWorldRows:
         suites for the wrong reason.
         """
         return self.world.responses_in(term_week=TERM_WEEK_OF_COURSE_WEEK[course_week])
+
+    def commenters_in(self, course_week: int, stream: str) -> int:
+        """How many distinct students commented in one stream of one course week.
+
+        E5.1-01 makes this the number SPEC §4's threshold is compared with, so a
+        test reasoning about a stream's suppression reads it back rather than
+        trusting `ANSWERED_BY` and `HELD_COMMENTS`.
+        """
+        return self.world.commenters_in(
+            term_week=TERM_WEEK_OF_COURSE_WEEK[course_week], stream=stream, cohort=TAUGHT_COHORT
+        )
 
     def enrolled_user_ids(self) -> list[Any]:
         """Every `user` key this world enrolled, respondents and leaver alike."""

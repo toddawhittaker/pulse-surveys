@@ -1,7 +1,7 @@
 """Whether a submission counts, and what to do when the classifier cannot say (SPEC §3.3).
 
-§13 gives this module the synchronous gating the submit path runs and the async
-half that finishes the job afterwards. `app.ai.tasks` owns *how* a comment is
+§13 gives this module the synchronous comment gating the submit path runs; it
+also holds the async half that finishes the job afterwards. `app.ai.tasks` owns *how* a comment is
 classified — the prompt, the budget, the floor, the stored row — and this module
 owns what a **student-facing write path** does with the answer, which is a
 different question with a person on the other end of it.

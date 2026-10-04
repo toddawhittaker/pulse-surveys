@@ -145,8 +145,10 @@ const ANSWERED = { label: 'MATH-140-E1FF', code: 'E1FF' };
 // `instructor-report-benchmarks.spec.ts`, which transcribes it from the seeded
 // calendar: start letter `R` runs twelve weeks from Monday 7 September 2026, and
 // SPEC §3.1 shuts each week's window on the Sunday at 23:59:59, so at 09:00 on
-// Monday 19 October course weeks 1 to 6 have closed. E4-20's demo story writes
-// a response for every week whose window has closed at the effective clock.
+// Monday 19 October course weeks 1 to 6 have closed — and, because a week's
+// report opens at 06:00 on the Monday after its close (SPEC §3.1, E5.1-05), all
+// six are published too. E4-20's demo story writes a response for every week
+// whose window has closed at the effective clock.
 const READ_CLOCK = '2026-10-19T09:00';
 
 // The weeks `BIOL-310-R7FF` has published at `READ_CLOCK`, for the reason above,

@@ -83,25 +83,25 @@ export const INSTRUCTOR_REPORT_COMMENT_COPY = {
   'instructor_report_comments.ai.absent': 'No summary was written for this week.',
 
   // The small-N notice, in its instructor audience (the student audience is
-  // E8's). SPEC §4 hides raw comments below the threshold; the brief asks for
-  // "an honest explanation of why", and `design/Usage Rules.md` §4 asks the
+  // E8's). SPEC §4 hides one stream's raw comments when fewer than the threshold
+  // of distinct students commented in it that week; the brief asks for "an
+  // honest explanation of why", and `design/Usage Rules.md` §4 asks the
   // instructor register to be "formative and factual". The threshold is the
   // configured number and arrives as a number, never a 5 written down here.
   //
-  // **E4-21 restores the two sentences the mockup writes around that one**
-  // (`design/SmallNNotice.dc.html:31-33`): the leading count of who has answered,
-  // and "the AI summary above" rather than "the summary above". The count is the
-  // week's own participation figure — the same pair the Participation region
-  // states — and it is what makes the sentence an explanation rather than a rule:
-  // an instructor reading it learns that three of nine answered, which is the
-  // fact the suppression follows from. It is not a count of what was withheld,
-  // which §5.2 forbids and which this component is given no prop for. Naming the
-  // summary as the AI one is the brief's provenance rule applied to a reference:
-  // the panel above carries the mono AI label, and a sentence pointing at it
-  // says which summary it means.
-  'instructor_report_comments.small_n.title': 'Comments are hidden this week',
+  // **Per stream, and no count of anybody** (E5.1-01, ADR 0182). The notice now
+  // sits inside one comment group, so a count on it would read as that group's:
+  // in a stream of one commenter, "1 student commented" is the whole disclosure,
+  // and §5.2 forbids a count below the threshold. E4-21's leading "Only {responded}
+  // of {enrolled}" sentence is gone for that reason; the week's participation
+  // pair is still on the page, in the Participation region, as a fact about the
+  // week rather than about a group. The body says where held comments go — the
+  // from-earlier-weeks list, with no week — and keeps "the AI summary above",
+  // the brief's provenance rule applied to a reference. The identity promise is
+  // in the body only; the title is a plain statement of what the group shows.
+  'instructor_report_comments.small_n.title': 'No raw comments are shown here this week',
   'instructor_report_comments.small_n.body':
-    'Only {responded} of {enrolled} students have responded. To keep individual voices unidentifiable, raw comments stay hidden until at least {threshold} responses arrive. The AI summary above draws on everything received so far.',
+    'To keep individual voices unidentifiable, raw comments in this group are shown only when at least {threshold} students comment in it in the same week. Comments held back may appear later among comments from earlier weeks, with no week named. The AI summary above draws on everything received so far.',
 
   // A comment card. The label is what an assistive technology announces the
   // card as; the words inside it are the student's.

@@ -85,7 +85,7 @@ View behavior:
 
 ### 3.1 Survey window
 
-- Default rhythm (institution configuration): **opens Friday 18:00, closes Sunday 23:59:59, reports available after window close Monday morning** in the institution timezone (default `America/New_York`).
+- Default rhythm (institution configuration): **opens Friday 18:00, closes Sunday 23:59:59, reports available at 06:00 on the Monday after the window closes** in the institution timezone (default `America/New_York`).
 - A section's active weeks derive from its section code and the term calendar (§2.2).
 - Students see exactly one open survey at a time per section. Missed weeks cannot be back-filled (this keeps the signal weekly and the grading unambiguous).
 
@@ -124,7 +124,7 @@ This is the load-bearing wall of the product.
 
 - Responses are stored keyed to the **LMS user ID** (`sub` from the launch). Identity is never displayed to instructors or any leadership role, in any view, including CSV exports.
 - **Traceability exists for safety, not oversight.** Re-identification is possible only through the Care queue (§6.2), only by the Care role, and every identity access is automatically audit-logged with actor, timestamp, and case. One measured gap in that sentence is open until E10: a committed reveal authorization can currently be spent more than once against a single audit row, so today the log records authorizations rather than accesses. §11 question 6 settles which of the two this guarantee means, before a reveal id reaches any screen.
-- **Small-N handling (n < 5 responses in a reporting week):** instructors see rating distributions and the AI summary, but **no raw comments**. Comments from under-threshold weeks are not discarded — they feed the summary, and they surface as raw text once the section's cumulative comment volume for the term crosses the threshold, batched so that timing cannot identify an author. Threshold value is configurable (default 5).
+- **Small-N handling (fewer than the threshold's number of distinct students commenting in a stream in a reporting week):** instructors see rating distributions and the AI summary, but **no raw comments** in that stream. The suppression is per stream: in one week the instructor stream can be held while the course stream is shown. Comments from under-threshold weeks are not discarded — they feed the summary, and they surface as raw text once the section's cumulative comment volume for the term crosses the threshold, batched so that timing cannot identify an author. Held comments surface only in those release batches, with no week named, and a comment released in a batch is never shown again under its own week. Threshold value is configurable (default 5).
 - Comment display order is randomized; timestamps are never shown with comments.
 - Data retention: raw responses retained for a configurable period (default: current term + 1 year), then comments are deleted and only aggregates persist. All retention jobs are logged.
 
@@ -134,7 +134,7 @@ Each of these is an automated assertion in the test suite (§9), not a conventio
 
 1. Students never see comparables, benchmarks, university averages, or other sections — in charts, text, tooltips, exports, or aria labels. *(Asserted from **E2**, the first epic with a student-visible path and the scoping that gives "another section" its meaning.)*
 2. A Lead Faculty assignment never grants sibling leads' courses, at any point in the purview union computation.
-3. Below the n-threshold, raw comments are hidden from instructors and students alike.
+3. Below the n-threshold — fewer than that many distinct commenters in that stream that week — raw comments in that stream are hidden from instructors and students alike.
 4. Aggregate language counts sections, never instructors; "needs attention," never "underperforming"; no ranking, no composite scores, and no score-sorting anywhere. *(Asserted from **E2**, when the copy-inventory test first collects shipped user-facing strings; the vocabulary rule is checked globally from then on. Until then this item is enforced by review only.)*
 5. Confidentiality copy appears exactly once per surface (survey: once per screen, in the submit area), in plain words, no shield or lock iconography. This item governs a surface's standing line; a state notice that explains why something is hidden — the small-N suppression notice — is not confidentiality copy in this item's sense, even where it promises that nobody can be identified. *(Asserted from **E2** via the same copy-inventory test — the survey is the first governed surface, and the inventory grows with each UI epic. Until then this item is enforced by review only. The standing-line clarification is the ruling of 2026-09-08 on the question ADR 0158 raised.)*
 6. No view may ever widen a student's visibility relative to these rules.
@@ -147,7 +147,7 @@ Each of these is an automated assertion in the test suite (§9), not a conventio
 - **Trend charts as a stacked pair** (instructor stream above, course stream below, shared 1–5 y-scale, one legend): each panel carries three lines — this section (hero), the **comparison set**, and **university-wide**. Course-level pages plot course week with the term-week sub-label (§2.2); week navigation pages across published weeks.
 - This-week rating distributions for both streams; workload mean/median for the section against comparison-set and university figures (true numeric statistics — §3.2); response rate and validity rate.
 - De-identified comments **grouped under "About the instructor" / "About the course," each group led by its own AI summary**; empty groups show a one-line notice, not a hidden heading. Comments carry their moderation status (§5.2), subject to §4 small-N rules.
-- AI summaries per stream: preserve clearly critical themes (never sanded off), state the response count they draw from, exclude flagged-held content (above small-N they may note "one comment is held for review" with type only), and are generated **even in small-N weeks** — there, the summary is the only comment signal. **Below the n-threshold that summary names themes only and may not reuse the commenters' own word strings**, in its prose or in a theme label: the threshold is withholding those comments, and a summary quoting one hands it back to a reader who can set it beside the per-week completion ledger §3.4 posts. Above the threshold nothing changes, because the raw comments are on the page anyway. The ruling of 2026-09-09, on the question the E4 boundary review raised.
+- AI summaries per stream: preserve clearly critical themes (never sanded off), state the response count they draw from, exclude flagged-held content (above small-N they may note "one comment is held for review" with type only), and are generated **even for a stream held below the n-threshold** (§4) — there, the summary is the only comment signal. **For a stream below the n-threshold, that summary names themes only and may not reuse the commenters' own word strings**, in its prose or in a theme label: the threshold is withholding those comments, and a summary quoting one hands it back to a reader who can set it beside the per-week completion ledger §3.4 posts. For a stream at or above the threshold nothing changes, because its raw comments are on the page anyway. The ruling of 2026-09-09, on the question the E4 boundary review raised.
 
 **Comparison sets.** To be comparable, sections must match on **both** length (a section's length in weeks, §2.2) *and* level (§8's set: `DEV`, `UG`, `UGGR`, `GR`, `DR`) — an 8-week graduate course is never averaged against a 12-week undergraduate one. Levels match **exactly**; no level is folded into another. A `UGGR` section is compared against other `UGGR` sections and not against `UG` or `GR` ones, and a `DEV` section only against `DEV`. This is deliberate rather than an omission: the dual-credit and developmental populations are the two whose experience is least like the undergraduate mean, so averaging them into it would hide exactly the signal the product exists to surface. Splitting three levels into five makes a thin comparison set the common case rather than the edge, and **the benchmark minimum covers every figure computed from a comparison set, not only a drawn line**. The workload mean and median this section requires against comparison-set figures are covered by it exactly as the trend lines are. A mean over one or two sections is a number about those sections — the same inference small-N suppression exists to prevent, reached through a benchmark rather than through a comment. That rule is **§4.1 item 7** and carries an automated assertion; it is stated there rather than only here, because a confidentiality rule written where nothing obliges a test is a rule that ships unenforced. Suppression is the right outcome for a thin set and is not a reason to widen the level match. Benchmarks are **past-referencing**: week N of a 12-week section is compared against week N of 12-week sections of the same level in the current *and prior* terms, regardless of start date — except that in the current term a section joins a published week only if its own week N had closed by that week's cutoff (below). The default comparison set is the same Lead Faculty's courses filtered to matching length+level; leadership can define named sets, and set-definition UI makes invalid combinations impossible rather than erroring on them. A named set declares one length and one level. The form offers the lengths the institution's sections actually run; a stored set needs only a length of at least one week, and a length no section runs resolves to nothing and is suppressed (ADR 0180). The university-wide line is all same-length+level sections institution-wide. Comparison-set figures have their own two minimums, distinct from the per-section n-threshold: **3 sections and 10 distinct respondents** by default, both configurable (§11 question 1). Computed from fewer than either, a benchmark line is suppressed rather than shown thin, and a comparison mean or median is suppressed rather than shown at all (§4.1 item 7). **A published figure is frozen at its week's close.** For course week N of a section's report, the cutoff is the earliest week-N survey-window close among all sections of that section's term with its length and level, whoever is reading; a response counts if the window it was submitted in had closed by then and it was last changed no later. Prior terms therefore count in full, and in the current term only sections whose week N closed by that earliest close count. Otherwise a figure recomputed on each read changes one student at a time while another section's window is open, and two snapshots of one population frozen at different moments differ by exactly what closed between them. **A figure is also sealed against what its reader can subtract**, because an instructor knows her own sections' figures and sees several populations at one cutoff. It is shown only if its population meets both minimums and, for each instructor of the reported section, what is left after removing every section that instructor teaches is either empty or meets both minimums; for the university line — which keeps the reported section in its population — two more pieces must each be empty or meet both minimums: each default comparison set of that instructor's sections of the same term, length and level, less her own sections; and what is left of the university after removing her sections and all those default sets. Empty means nobody contributed to that figure that week. Then everything one reader can see at one cutoff is built from pieces she either knows already or that each meet the minimums. The freeze was ruled on 2026-09-22 on a finding of the E5 boundary review; the cutoff's scope and the seal were settled in the same review's fix rounds and are for the owner's review at the E5 epic merge.
 
@@ -169,7 +169,7 @@ Each of these is an automated assertion in the test suite (§9), not a conventio
 
 ### 5.4 Student closing-the-loop view
 
-On next LTI launch (and via the Monday-after notification), students see their own section only: the instructor's response **leading the page** (the page is a reply, not a dashboard), then the two-stream trend chart, distributions, workload median, and the published comments grouped under the same two headings as everywhere else. Page states: `awaiting` (response-required and unpublished — a closed door: no countdown, no teased data, no blame), `published`, `on-behalf` (identical weight, honest attribution, no implication of discipline), and `small-N` (trend and distributions shown; comments replaced by a notice framing suppression as protecting the student, appearing once enough classmates respond). Students page back through published weeks only. Students **never** see comparison-set or university lines, and never other individuals' raw identifiable data — only what §4 and §5.2 permit.
+On next LTI launch (and via the Monday-after notification), students see their own section only: the instructor's response **leading the page** (the page is a reply, not a dashboard), then the two-stream trend chart, distributions, workload median, and the published comments grouped under the same two headings as everywhere else. Page states: `awaiting` (response-required and unpublished — a closed door: no countdown, no teased data, no blame), `published`, `on-behalf` (identical weight, honest attribution, no implication of discipline), and `small-N` (trend and distributions shown; comments replaced by a notice framing suppression as protecting the student, appearing once enough classmates comment). Students page back through published weeks only. Students **never** see comparison-set or university lines, and never other individuals' raw identifiable data — only what §4 and §5.2 permit.
 
 ### 5.5 Leadership roll-ups
 
@@ -391,103 +391,148 @@ pulse-surveys/
 ├── README.md
 ├── LICENSE                         # MIT
 ├── pyproject.toml                  # backend deps + tooling (ruff, mypy, pytest)
-├── docker-compose.yml              # api, worker, beat, db, redis, mailpit, mock-lms
+├── requirements.txt                # locked runtime dependencies
+├── requirements-dev.txt            # locked development dependencies
+├── package.json                    # root npm workspace: the frontend, Playwright, eslint (ADR 0083)
+├── playwright.config.ts            # end-to-end runner configuration (§9.2)
+├── docker-compose.yml              # api, worker, beat, db, redis, mailpit, mock-lms, mock-idp, mock-ai
 ├── docker-compose.override.yml     # dev-only wiring (hot reload, exposed ports)
+├── docker-compose.live-ai.yml      # the dev stack with the real AI provider in place of mock-ai
 ├── .env.example                    # documented config surface (§6.3)
-├── Makefile                        # up / test / lint / migrate / seed shortcuts
+├── Makefile                        # up / test / lint / migrate / seed shortcuts, and `make ci`
 │
 ├── backend/
-│   ├── Dockerfile
+│   ├── Dockerfile                  # the one application image; also builds and serves the SPA (ADR 0086)
 │   ├── alembic.ini
 │   ├── migrations/                 # Alembic revisions
 │   └── app/
 │       ├── main.py                 # FastAPI app factory, router mount, SPA static serve
 │       ├── config.py               # Pydantic settings (all env-driven)
-│       ├── db.py                   # SQLAlchemy engine/session
+│       ├── db.py                   # SQLAlchemy engine, session factory, per-request session
 │       │
 │       ├── models/                 # ORM tables (§8), one module per aggregate
+│       │   ├── base.py             # declarative base, constraint naming, surrogate key, timestamp type
 │       │   ├── org.py              # institution, college, department, prefix, course, section
 │       │   ├── term.py             # term, week, start_letter_map, survey_window
 │       │   ├── identity.py         # user, user_identity, person, enrollment, role_assignment, lead_faculty_mapping
+│       │   ├── lti.py              # platform registrations, signing keys, launch nonces and handshakes, NRPS/AGS call logs
 │       │   ├── survey.py           # question_set, question, response, answer
 │       │   ├── ai.py               # classification
 │       │   ├── report.py           # weekly_summary, moderation_state, release_batch, release_batch_member
-│       │   ├── loop.py             # instructor_response, exclusion_log
-│       │   ├── benchmark.py        # comparison_set
+│       │   ├── loop.py             # instructor_response, exclusion_log — not built yet: E6, E7
+│       │   ├── benchmark.py        # comparison_set, comparison_set_member
 │       │   ├── grades.py           # grade_sync
-│       │   ├── safety.py           # threat_case
-│       │   └── audit.py            # audit_log, notification
+│       │   ├── safety.py           # threat_case — not built yet: E10
+│       │   ├── audit.py            # audit_log
+│       │   └── clock.py            # the development clock override
 │       │
 │       ├── views_sql/              # identity-separated read views (§8) as migrations + query helpers
+│       │   └── queries.py          # typed ways into the read views
 │       │
-│       ├── schemas/                # Pydantic request/response contracts (also feeds OpenAPI + MCP)
+│       ├── schemas/                # Pydantic request/response contracts (also feeds OpenAPI)
+│       │   ├── health.py           # the `/healthz` response
+│       │   ├── survey.py           # a weekly submission, parsed once at the edge
+│       │   ├── student.py          # what a student's weekly survey read answers with
+│       │   ├── report.py           # the instructor's Monday report
+│       │   ├── report_benchmark.py # the report's comparison and university figures
+│       │   └── comparison_sets.py  # the named-set management API
+│       │
+│       ├── copy/                   # every sentence the backend shows a person, keyed (§4.1)
+│       │   ├── entry.py            # the four pages a door answers with when there is no landing
+│       │   ├── submit.py           # the weekly survey's submit path
+│       │   ├── student_read.py     # the student read path
+│       │   ├── instructor_report.py # the instructor report's refusals
+│       │   ├── leadership_sets.py  # the named-set API's refusals
+│       │   └── gradebook.py        # the strings written into a platform's gradebook
 │       │
 │       ├── api/                    # HTTP routers, thin — delegate to services
 │       │   ├── deps.py             # auth context, role scoping, n-threshold guards
-│       │   ├── lti.py              # login-init, launch, JWKS, deep-linking endpoints
-│       │   ├── student.py          # survey fetch/submit, loop-closure view
-│       │   ├── instructor.py       # report, moderation, response draft/coach/publish
-│       │   ├── leadership.py       # roll-ups, comparison sets, response-on-behalf
-│       │   ├── care.py             # threat queue, audited re-identify
-│       │   └── admin.py            # observability, config, hierarchy, roles
+│       │   ├── health.py           # liveness
+│       │   ├── lti.py              # the launch door: login-init, launch, JWKS
+│       │   ├── auth.py             # the web door: OIDC login and callback
+│       │   ├── dev.py              # the development-only test console
+│       │   ├── student.py          # survey fetch/submit
+│       │   ├── instructor.py       # the Monday report reads
+│       │   ├── leadership.py       # named comparison sets
+│       │   ├── care.py             # threat queue, audited re-identify — not built yet: E10
+│       │   └── admin.py            # observability, config, hierarchy, roles — not built yet: E11
 │       │
 │       ├── services/               # domain logic (the real app lives here)
+│       │   ├── authz.py            # the one chokepoint every entry point reads through
+│       │   ├── session.py          # the session both doors issue and every request reads
+│       │   ├── tokens.py           # verifying another party's signed token against its key set
+│       │   ├── identity.py         # who a verified subject is
+│       │   ├── provisioning.py     # what a verified launch discovers, and what it refuses
+│       │   ├── roster_sync.py      # the hourly NRPS roster pull (ADR 0132)
+│       │   ├── enrollment_windows.py # when a student's enrolment runs from (§3.4)
+│       │   ├── clock.py            # what time it is, for everything scheduled
+│       │   ├── section_codes.py    # what a section code says, and its calendar
+│       │   ├── survey_windows.py   # when a section's weekly survey opens and closes
+│       │   ├── survey_read.py      # a student's weekly survey as they see it now
+│       │   ├── submissions.py      # storing one student's weekly answers, and every reason not to
 │       │   ├── validity.py         # synchronous comment gating (§3.3)
 │       │   ├── grading.py          # participation formula + AGS passback (§3.4)
 │       │   ├── reporting.py        # distributions, trend lines, benchmark assembly (§5.1)
+│       │   ├── report_comments.py  # §4's small-N comment rules
 │       │   ├── benchmarks.py       # comparison-set resolution, length/level matching, min-N
-│       │   ├── moderation.py       # classification routing, exclusion rules (§5.2)
-│       │   ├── response_loop.py    # draft/coach/publish, required-response holds (§5.3)
-│       │   ├── safety.py           # threat/self-harm routing to Care queue (§6.2)
-│       │   ├── retention.py        # configurable purge jobs (§4)
-│       │   └── authz.py            # role → hierarchy-node scoping, enforced server-side
+│       │   ├── comparison_sets.py  # defining, editing and deleting a named comparison set
+│       │   ├── safety.py           # the Care queue, and the only connection that can reach identity (§6.2)
+│       │   ├── moderation.py       # classification routing, exclusion rules (§5.2) — not built yet: E6
+│       │   ├── response_loop.py    # draft/coach/publish, required-response holds (§5.3) — not built yet: E7
+│       │   └── retention.py        # configurable purge jobs (§4) — not built yet: E13
 │       │
 │       ├── lti/                    # pylti1p3 integration
 │       │   ├── registration.py     # platform/deployment config, key management
-│       │   ├── launch.py           # launch validation, role/context resolution
-│       │   ├── nrps.py             # roster sync (enrollment windows, emails)
+│       │   ├── launch.py           # beginning a launch, and validating the one that returns
+│       │   ├── fastapi_adapter.py  # the FastAPI adapter pylti1p3 does not ship
+│       │   ├── in_flight.py        # server-side memory of a launch handshake (ADR 0089)
+│       │   ├── replay_guard.py     # single-use launch nonces, held in Postgres (ADR 0089)
 │       │   ├── ags.py              # line-item creation + score posting
 │       │   └── platforms/          # PlatformProfile adapters (§7.3)
-│       │       ├── base.py
-│       │       ├── canvas.py
-│       │       ├── moodle.py
-│       │       ├── d2l.py
-│       │       └── blackboard.py
+│       │       ├── base.py         # what a profile is, and the conformant default
+│       │       ├── mock.py         # the mock platform's profile
+│       │       ├── canvas.py       # not built yet: waits for a launching platform (§14.3, E3)
+│       │       ├── moodle.py       # not built yet: waits for a launching platform (§14.3, E3)
+│       │       ├── d2l.py          # not built yet: waits for a launching platform (§14.3, E3)
+│       │       └── blackboard.py   # not built yet: waits for a launching platform (§14.3, E3)
 │       │
 │       ├── ai/                     # the AIGateway (§7.4) — single-shot, typed
-│       │   ├── gateway.py          # provider-agnostic client (OpenAI-compatible base_url)
-│       │   ├── contracts.py        # Pydantic output models per task (runtime + API + eval fixtures)
+│       │   ├── gateway.py          # the one place a model is called from
+│       │   ├── contracts.py        # one typed output contract per task
 │       │   ├── tasks.py            # validity / moderation / summary / draft / draft-check calls
 │       │   └── prompts/            # versioned prompt templates, one file per task+version
 │       │
-│       ├── agents/                 # agentic loops (§7.4) — read-only, consume services/ + authz
+│       ├── agents/                 # agentic loops (§7.4), read-only — not built yet: Phase 3 roadmap
 │       │
-│       ├── mcp/                    # future read-only leadership MCP server (§7.5), reuses authz
+│       ├── mcp/                    # read-only leadership MCP server (§7.5) — not built yet: Phase 3 roadmap
 │       │
 │       ├── jobs/                   # Celery
-│       │   ├── celery_app.py
-│       │   ├── schedules.py        # window open/close, Monday reports, retention (beat)
-│       │   └── tasks.py            # async classification, summary, passback
+│       │   ├── celery_app.py       # the Celery application
+│       │   ├── schedules.py        # the beat schedule
+│       │   └── tasks.py            # roster sync, windows, passback, reclassification, release batches
 │       │
-│       └── notifications/          # email rendering + SMTP (link-only Monday mail, §5.7)
+│       └── notifications/          # email rendering + SMTP (link-only Monday mail, §5.7) — not built yet: E12
 │
 ├── frontend/
-│   ├── Dockerfile
-│   ├── package.json                # React 19 + TS + Vite
+│   ├── package.json                # React 19 + TS + Vite + TanStack Router
 │   ├── vite.config.ts
+│   ├── vitest.config.ts
 │   ├── index.html
 │   └── src/
 │       ├── main.tsx
-│       ├── router.tsx              # TanStack Router
-│       ├── api/                    # generated client from backend OpenAPI + TanStack Query hooks
-│       ├── lib/                    # auth context, charts (Recharts), formatting
-│       ├── components/             # shared UI (rating input, workload slider, trend chart, comment list)
+│       ├── router.tsx              # TanStack Router over the five role areas
+│       ├── api/                    # typed fetchers per role, over the generated wire types (ADR 0185)
+│       │   ├── openapi.json        # the backend's OpenAPI document, written by scripts/export_openapi.py
+│       │   └── wire.gen.ts         # types generated from openapi.json by `npm run gen:wire`
+│       ├── lib/                    # session, HTTP, landings, shown-figure helpers
+│       ├── copy/                   # every sentence the frontend shows a person
+│       ├── components/             # shared UI (Likert input, trend chart, comment cards, stat pairs)
 │       └── routes/
-│           ├── student/            # survey form, results + response
-│           ├── instructor/         # report, moderation, response editor w/ coaching
-│           ├── leadership/         # roll-up dashboards, comparison-set management
-│           ├── care/               # threat queue
-│           └── admin/              # observability, config, hierarchy, roles
+│           ├── student/            # weekly survey form
+│           ├── instructor/         # Monday report
+│           ├── leadership/         # comparison-set management
+│           ├── care/               # placeholder page; the threat queue is E10
+│           └── admin/              # placeholder page; the console is E11
 │
 ├── mock-lms/                       # in-repo LTI 1.3 platform for dev + e2e (§9.2)
 │   ├── Dockerfile
@@ -502,18 +547,27 @@ pulse-surveys/
 │   └── app/                        # deterministic verdicts, marker-selected wrong answers and stalls
 │
 ├── tests/
-│   ├── unit/                       # services, grading (Hypothesis), authz scoping
-│   ├── integration/                # LTI launch/NRPS/AGS against mock platform, testcontainers PG
+│   ├── unit/                       # services, grading (Hypothesis), authz scoping, repository checks
+│   ├── integration/                # against a real Postgres and the mock platform
+│   ├── fixtures/                   # shared pytest fixtures, registered as plugins
 │   ├── e2e/                        # Playwright specs (§9.2)
 │   └── evals/                      # versioned AI eval sets + runners, CI recall/precision gates (§9.3)
 │
 ├── scripts/
 │   ├── seed.py                     # demo institution, hierarchy, term, sample sections
-│   └── generate_client.sh          # OpenAPI → frontend client
+│   ├── seed_*.py                   # the exit and demo stories, and benchmark history
+│   ├── signing_key.py              # supply, list and retire the tool's LTI signing keys
+│   ├── export_openapi.py           # writes frontend/src/api/openapi.json (ADR 0185)
+│   ├── db-init/                    # database roles created on first start
+│   └── ci/                         # the CI checker scripts
+│
+├── ci/                             # CI configuration data (bundle budget)
 │
 └── .github/workflows/
     └── ci.yml                      # lint, typecheck, unit+integration+e2e, eval gates
 ```
+
+A line marked *not built yet* is a planned home rather than a module: it cites the epic in §14.3 that builds it, or the roadmap phase in §12 when no epic does. There is no frontend image: the backend image builds the single-page application and the app factory serves it ([ADR 0086](adr/0086-the-spa-is-served-by-the-app-factory-at-app.md)). `tests/unit/test_spec_section_13_draws_the_tree.py` holds this tree to the repository.
 
 Three structural choices worth calling out. First, `api/` routers stay thin and all real behavior lives in `services/`, so the same logic backs the HTTP API, the Celery jobs, and the future MCP server without duplication — and the authz scoping in `services/authz.py` is the single chokepoint every entry point passes through. Second, the identity-separated read views (`views_sql/`) are shipped as migrations, not just ORM conventions, so the confidentiality guarantee holds at the database level even against a future careless query. Third, the tree above is the list of module homes rather than a suggestion: **use an existing module; add one only when nothing fits**, and the pull request that adds a module says why nothing did. The comment beside a module here is what that module is for, so code the comment already describes belongs in it — and work that fits nowhere is usually work that spans two modules and should be split before it is placed.
 
@@ -565,6 +619,20 @@ Report generation at window close, TrendPair with course-week axis and term-week
 Default comparison-set resolution (same lead's courses, matched length+level from derived attributes), **past-referencing benchmarks** spanning current and prior terms, named-set management UI where invalid length/level combinations are impossible, the university-wide line within the length+level cohort, benchmark min-N suppression (a distinct threshold from the per-section one), overlay rendering in both TrendPair panels, cohort-mode term-axis aggregates, student-view exclusion of every benchmark line (§4.1 item 1). The min-N values, §11 question 1, were settled at this epic's exit: 3 sections and 10 distinct respondents.
 *Exit:* an instructor sees three lines per panel benchmarked against prior terms; a student provably sees two lines and no benchmarks.
 
+**E5.1 — Main review fixes** · medium
+The fixes from the whole-repository review of `main` at e259255, built before E6 opens anything on top of it. The review was five passes: architecture, code review, application security, privacy and authorization, and a threat model.
+
+- **The comment threshold.** Raw comments are shown only when at least 5 distinct students commented in that stream that week, and a stream below that is held for release batches (§4, ruled 2026-10-03). A released comment never reappears under its own week. The threshold query gets line-by-line human review (⚠), although the epic is unmarked.
+- **The teaching grant.** A roster sync that drops an instructor ends their teaching grant (⚠, for the same reason). Roster members who teach, and platform test users, hold no student enrollment, so they can neither answer nor count toward any threshold. The roster's token grant runs under a time bound.
+- **The session secret.** A deployment outside development refuses the example session secret. `.env.example`'s development default is E13's.
+- **The wire types.** Frontend wire types are generated from the OpenAPI schema, and a check fails when they are stale.
+- **The API edge and the services.** The API edge and the services each hold one copy of each rule. The entry pages' sentences join the copy registry, and the development clock routes gain the origin check.
+- **The records.** §13 and the ADRs match the code.
+- **Owner ruling 2.** A week with one or two responses keeps showing its own figures, by owner ruling (§4 unchanged).
+
+The deferrals go to `docs/tickets/e6/carried-from-e5.md`, and `docs/tickets/e5.1/README.md` maps every review finding to its ticket or its carried entry.
+*Exit:* An instructor whose seeded section had six respondents and one instructor-stream commenter sees no raw comment in that stream, and sees the course stream's comments. An instructor removed from the mock roster gets the section-unavailable answer on their next read. A deployment outside development configured with the example session secret refuses to start. A backend schema change without regenerated frontend types fails CI.
+
 **E6 — Moderation & exclusions** · medium
 Moderation classification at window close with harm-type routing (§5.2): instructor-abuse to the Lead Faculty review queue, welfare signals to Care regardless of thresholds — written as the case records E10's queue later reads. Full lifecycle: flagged-collapsed, excluded-with-undo, kept-with-undo (both directions logged), excluded text muted but visible to the instructor, reason-required exclusion of unflagged comments, small-N flag concealment with the neutral participation trace, and the exclusion log at the Lead Faculty prefix scope and above.
 *Exit:* the anti-cherry-picking trail is visible up-chain, and a welfare-flagged comment in a 3-response week provably reaches Care with no trace in the instructor view.
@@ -594,12 +662,14 @@ Email rendering and SMTP delivery, the link-only Monday instructor mail, optiona
 *Exit:* Monday morning mail arrives with numbers and a link, never content.
 
 **E13 — Hardening & release** ⚠ · medium
-System-level passes that only make sense against the whole: the full WCAG 2.2 AA audit, retention job and purge verification, load test (report generation at 500 sections), end-to-end FERPA data-flow review (⚠ human-led), dependency and license sweep for MIT compatibility, operator documentation, cut v1.0. It also owns the deployment-shaped items E0 measured and could not close: database TLS on both engines, the demo seed refusing a database address a development environment could not legitimately name, and the rows of ADR 0056's error taxonomy that a loopback stub cannot produce (DNS failure, TLS handshake failure, pool timeout), asserted here for the first time; E0's carried-out table holds the first two's "done when"s. This epic exists *despite* integrated testing, not instead of it.
+System-level passes that only make sense against the whole: the full WCAG 2.2 AA audit, retention job and purge verification, load test (report generation at 500 sections), end-to-end FERPA data-flow review (⚠ human-led), dependency and license sweep for MIT compatibility, operator documentation, cut v1.0. It also owns the deployment-shaped items E0 measured and could not close: database TLS on both engines, the demo seed refusing a database address a development environment could not legitimately name, and the rows of ADR 0056's error taxonomy that a loopback stub cannot produce (DNS failure, TLS handshake failure, pool timeout), asserted here for the first time; E0's carried-out table holds the first two's "done when"s. The cookieless launch binds `state` to the starting browser through LTI Platform Storage where the platform offers it, or the residual is accepted by owner ruling (ADR 0089). This epic exists *despite* integrated testing, not instead of it.
 *Exit:* v1.0 is cut with the audit, load, FERPA, and retention passes recorded and green.
 
 ### 14.4 Sequencing, and what E0 measured
 
 Dependencies are mostly linear through E4 (E1 → E2 → {E3, E4}), after which E5–E8 can interleave and E9–E12 are parallelizable in any order; E13 is last. Two carried deadlines cut across that freedom: the reveal-subject guard lands before E4's first instructor-facing surface, and the §4 audit-grain decision lands before E10 shows a reveal id on any screen.
+
+E5.1 builds after E5 and before E6. E6's moderation writes into the comment gate E5.1 changes, and E8 reuses the student paths E5.1 consolidates. Its number sits between the two so that no epic is renumbered (§14.1).
 
 The hour estimates this section used to carry — per-epic solo and with-Claude-Code columns totalling ~1,005h and ~518h — are retired rather than revised. E0 was planned as eight ticket groupings at 63 Claude-Code hours; it closed as 42 tickets, 69 pull requests, and 651 commits over thirteen calendar days of orchestrated multi-session work, a shape the hour columns were never measuring. The miss was structural, not marginal. Roughly half the epic was work its own reviews generated — fix rounds, gate-fidelity work, record corrections — and the epic-boundary reviews added a final batch after every per-ticket review had passed; the solo column, meanwhile, describes a process nobody runs. Some of E0's cost was one-time platform build-out (the CI gates, the reviewer roster, both mocks, the mistakes ledger), but the review tax recurs in every epic and lands hardest on the ⚠ ones, where line-by-line human review is the constraint no orchestration compresses. The sizes in §14.3 are relative to one another; E1, the first ⚠ vertical slice, is what recalibrates them.
 

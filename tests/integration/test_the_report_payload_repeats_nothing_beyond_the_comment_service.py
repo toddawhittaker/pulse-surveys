@@ -342,59 +342,65 @@ def test_the_threshold_the_payload_prints_is_the_threshold_the_gate_applied(
 
     **It asserts agreement, not a number.** Whichever source the implementation
     settles on, the label and the behaviour move together: this test computes what
-    the printed threshold implies for a week of known size and requires the
+    the printed threshold implies for a stream of known size and requires the
     comments to match it. A test that pinned 5, or pinned the changed value, would
     be choosing which of the two sources wins — and that is a decision the ruling
     leaves to the implementer, who only has to make it once.
 
+    **Moved by E5.1-01**, which makes the threshold a count of distinct commenters
+    in a stream and puts the printed threshold on each stream
+    (`streams.<stream>.small_n.threshold`) rather than on the report. The
+    reasoning is unchanged; the label is read where it now is, and the stream's
+    size is its commenters, read back from the database.
+
     **The mutation this kills:** the label and the gate reading two `Settings`
-    objects. **The near miss it is written against:** a week whose response count
-    is outside both candidate thresholds, where the two sources agree by accident
-    — so the week is chosen with the count strictly between them, asserted before
-    anything is read.
+    objects. **The near miss it is written against:** a stream whose commenter
+    count is outside both candidate thresholds, where the two sources agree by
+    accident — so the stream is chosen with the count strictly between them,
+    asserted before anything is read.
     """
     week = FIRST_HELD_WEEK
-    responses = report_door.rows.responses_in(week)
+    stream = report_api_contract.instructor_stream
+    commenters = report_door.rows.commenters_in(week, stream)
 
     body, answered = report_door.payload(course_week=week)
-    at_startup = report_api_contract.member(
-        body, report_api_contract.small_n_member, "threshold", answered=answered
+    at_startup = report_api_contract.stream_member(
+        body, stream, report_api_contract.small_n_member, "threshold", answered=answered
     )
     assert isinstance(at_startup, int), (
-        f"`{report_api_contract.small_n_member}.threshold` came back as {at_startup!r}. The sketch "
-        "spells it the configured response count below which raw comments stay hidden, and this "
-        "test reasons about the week's size against it."
+        f"`streams.instructor.{report_api_contract.small_n_member}.threshold` came back as "
+        f"{at_startup!r}. It is the configured number of distinct commenters below which a "
+        "stream's raw comments stay hidden, and this test reasons about the stream's size against it."
     )
 
-    # A value on the other side of this week's response count from the one the
+    # A value on the other side of this stream's commenter count from the one the
     # application started with, so the two sources cannot agree by accident.
-    changed_to = responses - 1 if at_startup > responses else responses + 1
-    assert min(at_startup, changed_to) <= responses < max(at_startup, changed_to), (
-        f"Course week {week} holds {responses} responses, the application started with a threshold "
-        f"of {at_startup}, and this test would change it to {changed_to} — which does not straddle "
-        "the week's size, so both sources would suppress (or both show) and their disagreement "
-        "would be invisible."
+    changed_to = commenters - 1 if at_startup > commenters else commenters + 1
+    assert min(at_startup, changed_to) <= commenters < max(at_startup, changed_to), (
+        f"Course week {week}'s instructor stream holds {commenters} commenters, the application "
+        f"started with a threshold of {at_startup}, and this test would change it to {changed_to} "
+        "— which does not straddle the stream's size, so both sources would suppress (or both "
+        "show) and their disagreement would be invisible."
     )
     monkeypatch.setenv(comment_contract.threshold_variable, str(changed_to))
 
     body, answered = report_door.payload(course_week=week)
-    printed = report_api_contract.member(
-        body, report_api_contract.small_n_member, "threshold", answered=answered
+    printed = report_api_contract.stream_member(
+        body, stream, report_api_contract.small_n_member, "threshold", answered=answered
     )
     shown = report_api_contract.stream_member(
         body,
-        report_api_contract.instructor_stream,
+        stream,
         report_api_contract.comments_field,
         answered=answered,
     )
-
-    assert bool(shown) == (responses >= printed), "\n".join(
+    assert bool(shown) == (commenters >= printed), "\n".join(
         [
-            f"The report prints a threshold of {printed} for a week holding {responses} responses, "
-            f"and {'shows' if shown else 'hides'} that week's comments.",
+            f"The report prints a threshold of {printed} for a stream holding {commenters} "
+            f"commenters, and {'shows' if shown else 'hides'} that stream's comments.",
             "",
-            f"A threshold of {printed} means comments appear from {printed} responses, so this week "
-            f"should be {'shown' if responses >= printed else 'hidden'} and it is not.",
+            f"A threshold of {printed} means comments appear from {printed} commenters, so this "
+            f"stream should be {'shown' if commenters >= printed else 'hidden'} and it is not.",
             "",
             f"The application started with {at_startup} and `{comment_contract.threshold_variable}` "
             f"was changed to {changed_to} afterwards. The label and the gate are reading two "

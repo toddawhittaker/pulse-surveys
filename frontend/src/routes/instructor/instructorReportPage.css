@@ -1,7 +1,8 @@
 /* The instructor's Monday report, as a page — ticket E4-11.
  *
- * The three stylesheets beside this one dress the components E4-08, E4-09 and
- * E4-10 built; this one dresses what holds them together — the reading column,
+ * The three report stylesheets in `components/` dress the components E4-08,
+ * E4-09 and E4-10 built; this one, beside the route that draws the page,
+ * dresses what holds them together — the reading column,
  * the page title, the region headings, the section menu and the released block.
  * It sits here rather than in `frontend/src/styles.css` for the reason its three
  * siblings give: that file is the application's stylesheet for the surfaces E1
@@ -186,14 +187,6 @@
 
 .pulse-report-section-link:hover {
   background: var(--chalk);
-}
-
-/* ---- The small-N notice, under both comment groups (E4-21) --------------- */
-
-/* The week's one suppression, stated once and after both groups
- * (`design/InstructorMondayReport.dc.html:69-73`). */
-.pulse-report-small-n {
-  margin-top: var(--space-4);
 }
 
 /* ---- Comments released from earlier weeks (ADR 0152) --------------------- */

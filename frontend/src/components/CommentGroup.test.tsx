@@ -8,6 +8,7 @@ import {
   INSTRUCTOR_COMMENTS,
   INSTRUCTOR_SUMMARY,
   SMALL_N_SUMMARY,
+  SMALL_N_THRESHOLD,
   WITHHELD_COMMENT_COUNT,
   WITHHELD_COMMENTS,
 } from './instructorReportCommentFixtures';
@@ -15,7 +16,7 @@ import {
 afterEach(cleanup);
 
 const EMPTY_NOTICE = 'No comments this week.';
-const SMALL_N_TITLE = 'Comments are hidden this week';
+const SMALL_N_TITLE = 'No raw comments are shown here this week';
 const HELD_NOTE = 'One comment is held for review (privacy).';
 /** The line that stands where the panel would have been (E4-11). */
 const ABSENT_SUMMARY = 'No summary was written for this week.';
@@ -37,6 +38,7 @@ describe('CommentGroup', () => {
         summary={INSTRUCTOR_SUMMARY}
         comments={INSTRUCTOR_COMMENTS}
         suppressed={false}
+        threshold={SMALL_N_THRESHOLD}
       />,
     );
 
@@ -64,6 +66,7 @@ describe('CommentGroup', () => {
         summary={COURSE_SUMMARY}
         comments={COURSE_COMMENTS}
         suppressed={false}
+        threshold={SMALL_N_THRESHOLD}
       />);
 
     expect(screen.getByRole('heading', { name: 'About the course' })).toBeTruthy();
@@ -73,7 +76,15 @@ describe('CommentGroup', () => {
 
   describe('a week that produced no comments', () => {
     it('keeps its heading and its summary and states the fact in one line', () => {
-      render(<CommentGroup stream="instructor" summary={INSTRUCTOR_SUMMARY} comments={[]} suppressed={false} />);
+      render(
+        <CommentGroup
+          stream="instructor"
+          summary={INSTRUCTOR_SUMMARY}
+          comments={[]}
+          suppressed={false}
+          threshold={SMALL_N_THRESHOLD}
+        />,
+      );
 
       // §5.1: "empty groups show a one-line notice, not a hidden heading."
       expect(screen.getByRole('heading', { name: 'About the instructor' })).toBeTruthy();
@@ -83,13 +94,21 @@ describe('CommentGroup', () => {
     });
 
     it('does not tell the instructor the comments are being withheld', () => {
-      render(<CommentGroup stream="instructor" summary={INSTRUCTOR_SUMMARY} comments={[]} suppressed={false} />);
+      render(
+        <CommentGroup
+          stream="instructor"
+          summary={INSTRUCTOR_SUMMARY}
+          comments={[]}
+          suppressed={false}
+          threshold={SMALL_N_THRESHOLD}
+        />,
+      );
 
       // The empty group and the suppressed group are different facts about the
       // class, and the copy for one must never stand in for the other.
       expect(screen.getByText(EMPTY_NOTICE)).toBeTruthy();
       expect(screen.queryByText(SMALL_N_TITLE)).toBeNull();
-      expect(screen.queryByText(/raw comments stay hidden/)).toBeNull();
+      expect(screen.queryByText(/raw comments in this group are shown only/)).toBeNull();
     });
   });
 
@@ -112,6 +131,7 @@ describe('CommentGroup', () => {
           summary={null}
           comments={INSTRUCTOR_COMMENTS}
           suppressed={false}
+          threshold={SMALL_N_THRESHOLD}
         />,
       );
 
@@ -137,6 +157,7 @@ describe('CommentGroup', () => {
           summary={null}
           comments={WITHHELD_COMMENTS}
           suppressed
+          threshold={SMALL_N_THRESHOLD}
         />,
       );
 
@@ -158,6 +179,7 @@ describe('CommentGroup', () => {
         summary={SUMMARY_WITH_HELD_NOTE}
         comments={INSTRUCTOR_COMMENTS}
         suppressed={false}
+        threshold={SMALL_N_THRESHOLD}
       />,
     );
 
@@ -168,7 +190,7 @@ describe('CommentGroup', () => {
     expect(screen.getByText(HELD_NOTE)).toBeTruthy();
   });
 
-  describe('a week below the response threshold', () => {
+  describe('a stream below the commenter threshold', () => {
     it('keeps the summary and shows no comment at all', () => {
       // The fixture hands a suppressed group a full week of comments on purpose:
       // "no cards rendered" has to be a fact about the suppression rather than
@@ -181,6 +203,7 @@ describe('CommentGroup', () => {
           summary={SMALL_N_SUMMARY}
           comments={WITHHELD_COMMENTS}
           suppressed
+          threshold={SMALL_N_THRESHOLD}
         />,
       );
 
@@ -204,6 +227,7 @@ describe('CommentGroup', () => {
           summary={SMALL_N_SUMMARY}
           comments={WITHHELD_COMMENTS}
           suppressed
+          threshold={SMALL_N_THRESHOLD}
         />,
       );
 
@@ -212,13 +236,12 @@ describe('CommentGroup', () => {
       // reader sees, and every number an attribute carries.
       expect(container.textContent).toContain(SMALL_N_SUMMARY.text);
 
-      // The only number in the words is the count the summary drew from. The
-      // threshold left with the notice (E4-21): the sentence explaining the
-      // suppression belongs to the week and the surface places it under both
-      // groups, so a group's own text carries one number and it is the
-      // payload's.
+      // The only numbers in the words are the count the summary drew from and
+      // the configured threshold the group's notice states (E5.1-01), in that
+      // order. Both are the payload's, neither is a count of what was withheld,
+      // and the notice states no count of anybody.
       const digits = (container.textContent ?? '').match(/\d+/g) ?? [];
-      expect(digits).toEqual([String(SMALL_N_SUMMARY.responseCount)]);
+      expect(digits).toEqual([String(SMALL_N_SUMMARY.responseCount), String(SMALL_N_THRESHOLD)]);
 
       // And the attributes, `data-` ones included. React's generated ids are
       // skipped: they are the runtime's own counter and say nothing about this
@@ -247,6 +270,7 @@ describe('CommentGroup', () => {
           summary={SUMMARY_WITH_HELD_NOTE}
           comments={WITHHELD_COMMENTS}
           suppressed
+          threshold={SMALL_N_THRESHOLD}
         />,
       );
 
@@ -269,27 +293,57 @@ describe('CommentGroup', () => {
       expect(container.innerHTML).not.toContain('privacy');
     });
 
-    it('leaves the notice to the surface, in either stream', () => {
-      render(
+    it('states the notice inside the group, after its summary, in either stream', () => {
+      const { container } = render(
         <CommentGroup
           stream="course"
           summary={SMALL_N_SUMMARY}
           comments={WITHHELD_COMMENTS}
           suppressed
+          threshold={SMALL_N_THRESHOLD}
         />,
       );
 
-      // E4-21: a suppressed week suppresses both of the report's groups, and the
-      // sentence explaining it renders once, under both of them
-      // (`design/InstructorMondayReport.dc.html:69-73`). So neither group writes
-      // it — the mutation this kills is the notice returning to the group, which
-      // would put two of them on a suppressed report. It does not fall back to
-      // the empty-week line either, because the week was not empty.
-      expect(screen.getByRole('region', { name: 'AI summary — course comments' })).toBeTruthy();
+      // E5.1-01: the threshold counts distinct commenters per stream (ADR 0182),
+      // so a suppressed group states its own notice — one group of a week can be
+      // shown while the other is held, and a notice under both would claim both
+      // were. The mutation this kills is the notice left to the page, which then
+      // shows none for a group the payload says is held. It does not fall back to
+      // the empty-week line either, because the stream was not empty.
+      const group = container.querySelector('.pulse-comment-group');
+      const summary = screen.getByRole('region', { name: 'AI summary — course comments' });
+      const notices = screen
+        .getAllByText(SMALL_N_TITLE)
+        .map((title) => title.parentElement as Element);
+
+      expect(notices).toHaveLength(1);
+      const notice = notices[0] as Element;
+      expect(group?.contains(notice)).toBe(true);
+      expect(
+        summary.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
+        'the notice is not after the summary',
+      ).toBeTruthy();
+      expect(notice.textContent).toContain(`at least ${String(SMALL_N_THRESHOLD)} students`);
       expect(screen.getByText(SMALL_N_SUMMARY.text)).toBeTruthy();
-      expect(screen.queryByText(SMALL_N_TITLE)).toBeNull();
       expect(screen.queryByText(EMPTY_NOTICE)).toBeNull();
       expect(screen.queryAllByRole('article')).toHaveLength(0);
+    });
+
+    it('states no notice in a group that is not suppressed', () => {
+      // The pair to the test above, so that one is about the suppression and not
+      // about a group that always renders a notice.
+      render(
+        <CommentGroup
+          stream="course"
+          summary={COURSE_SUMMARY}
+          comments={COURSE_COMMENTS}
+          suppressed={false}
+          threshold={SMALL_N_THRESHOLD}
+        />,
+      );
+
+      expect(screen.getAllByRole('article')).toHaveLength(COURSE_COMMENTS.length);
+      expect(screen.queryByText(SMALL_N_TITLE)).toBeNull();
     });
   });
 });

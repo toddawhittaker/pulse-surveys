@@ -132,6 +132,25 @@ function membersStillOffered(
   return initial.member_course_ids.filter((id) => offered.has(id));
 }
 
+/**
+ * The lengths the length control offers.
+ *
+ * **Editing adds the set's own stored length to the served ones.** The options
+ * answer carries the lengths sections run today, and a set defined for a length
+ * no section runs any more would otherwise open on a select with no option for
+ * its own value: the control would show the placeholder, and the reader could
+ * not keep the length the set already has. A stored length is a value the
+ * server already accepted for this set, so offering it back is not the form
+ * inventing a length of its own. Creating a set offers the served lengths only.
+ */
+function lengthsOffered(
+  options: ComparisonSetOptionsView,
+  initial: ComparisonSetDetailView | null,
+): readonly number[] {
+  if (initial === null) return options.lengths;
+  return [...new Set([...options.lengths, initial.length_weeks])].sort((a, b) => a - b);
+}
+
 export function ComparisonSetForm({
   options,
   initial,
@@ -275,7 +294,7 @@ export function ComparisonSetForm({
           }}
         >
           <option value={UNCHOSEN}>{copy('leadership_comparison_sets.length_unchosen')}</option>
-          {options.lengths.map((weeks) => (
+          {lengthsOffered(options, editing).map((weeks) => (
             <option key={weeks} value={String(weeks)}>
               {fillCopy('leadership_comparison_sets.length_option', { weeks: String(weeks) })}
             </option>

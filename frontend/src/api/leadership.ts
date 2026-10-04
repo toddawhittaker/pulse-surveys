@@ -9,9 +9,9 @@
  * two: `instructor.ts` reads one instructor's own report and `student.ts` is one
  * student's survey, and neither has anything to say about a leadership surface.
  *
- * **Hand-written, not generated, and not wrapped in a query cache** — ADR 0117,
- * unchanged, and this screen is the case it was argued for: seven calls with no
- * shared cache key between them.
+ * **The calls are written by hand and not wrapped in a query cache** (ADR
+ * 0117): seven calls with no shared cache key between them. **The wire types
+ * are generated** from the backend's OpenAPI document (ADR 0185).
  *
  * **The session rides as a Bearer header** (ADR 0089, `../lib/session.ts`), and
  * **every write echoes the double-submit cookie** through `csrfHeader()`. This
@@ -23,9 +23,8 @@
  * E5-06), which the three writing routes below declare and the four reading
  * routes do not.
  *
- * **Every field below is the wire's spelling**, snake case included, because
- * these types describe E5-06's Pydantic schemas rather than a shape of this
- * screen's choosing.
+ * **Every type below is the wire's own**, snake case included, aliased from
+ * `wire.gen.ts`, which describes E5-06's Pydantic schemas.
  *
  * **A refusal is shown, never re-derived.** SPEC §5.1 puts the rules about which
  * length and level may be combined, who may edit a set and what a duplicate name
@@ -37,7 +36,11 @@
  * the catalogue while the form was open, a name somebody else took first.
  */
 
-import { authorizationHeader, csrfHeader } from '../lib/session';
+import type { components } from './wire.gen';
+import { jsonBody, readHeaders, refusalSentence, writeHeaders } from '../lib/http';
+
+/** The generated wire schemas (ADR 0185); every wire type below is one of these. */
+type Schemas = components['schemas'];
 
 /** `app.api.leadership.COMPARISON_SETS_PATH` — the list, and the create. */
 export const COMPARISON_SETS_PATH = '/leadership/comparison-sets';
@@ -56,13 +59,7 @@ export function comparisonSetPreviewPath(setId: string): string {
 }
 
 /** One course the form may offer, in the level band that decides where it appears. */
-export interface ComparisonSetCourseView {
-  readonly id: string;
-  /** The governed label the server composes; nothing here assembles one. */
-  readonly label: string;
-  /** One of SPEC §8's five bands, as the server spells it. */
-  readonly level: string;
-}
+export type ComparisonSetCourseView = Schemas['CourseOption'];
 
 /**
  * The closed sets the form offers, and nothing else.
@@ -76,57 +73,28 @@ export interface ComparisonSetCourseView {
  * renders what this answer carries and has no opinion about what it should have
  * carried.
  */
-export interface ComparisonSetOptionsView {
-  readonly lengths: readonly number[];
-  readonly levels: readonly string[];
-  readonly courses: readonly ComparisonSetCourseView[];
-}
+export type ComparisonSetOptionsView = Schemas['SetOptions'];
 
 /** One set as the list carries it. */
-export interface ComparisonSetSummaryView {
-  readonly id: string;
-  readonly name: string;
-  readonly length_weeks: number;
-  readonly level: string;
-  readonly member_count: number;
-  /**
-   * Whether this reader may edit and delete this set.
-   *
-   * The server's answer to a question about who defined the set and what this
-   * session's person may do with it, and it is not re-derived here: a screen
-   * deciding for itself which controls to draw would be a second authority on a
-   * question SPEC §2.1 gives to one. The controls follow the flag; the route
-   * still refuses a write the flag should have withheld.
-   */
-  readonly editable: boolean;
-}
+export type ComparisonSetSummaryView = Schemas['SetSummary'];
 
 /** One set with its membership, as the read and both writes answer. */
-export interface ComparisonSetDetailView extends ComparisonSetSummaryView {
-  readonly member_course_ids: readonly string[];
-  readonly created_at: string;
-  readonly updated_at: string;
-}
+export type ComparisonSetDetailView = Schemas['SetDetail'];
 
 /** What a create or an edit sends. */
-export interface ComparisonSetWrite {
-  readonly name: string;
-  readonly length_weeks: number;
-  readonly level: string;
-  readonly member_course_ids: readonly string[];
-}
+export type ComparisonSetWrite = Schemas['SetWrite'];
 
 /**
  * What a set reaches.
  *
- * `section_count` is optional because E5-06's scope note allows the preview to
- * answer the member count without it. An absent count is rendered as an absence;
- * a zero printed in its place would state something the server did not say.
+ * `section_count` is optional and nullable here, and required on the server,
+ * because E5-06's scope note allows the preview to answer the member count
+ * without it. An absent count is rendered as an absence; a zero printed in its
+ * place would state something the server did not say.
  */
-export interface ComparisonSetPreviewView {
-  readonly member_count: number;
-  readonly section_count?: number | null;
-}
+export type ComparisonSetPreviewView = Omit<Schemas['SetPreview'], 'section_count'> & {
+  readonly section_count?: Schemas['SetPreview']['section_count'] | null;
+};
 
 /** What a read of the set list answered. */
 export type ComparisonSetsRead =
@@ -181,48 +149,6 @@ const UNAUTHORIZED_STATUS = 401;
 
 /** The set is not there, or is not one this reader may read. */
 const NOT_FOUND_STATUS = 404;
-
-/** The headers a read carries. */
-function readHeaders(): Record<string, string> {
-  return { Accept: 'application/json', ...authorizationHeader() };
-}
-
-/**
- * The headers a write carries: the session, the body's type and the
- * double-submit echo when the cookie is readable.
- */
-function writeHeaders(): Record<string, string> {
-  return {
-    Accept: 'application/json',
-    'Content-Type': 'application/json',
-    ...authorizationHeader(),
-    ...csrfHeader(),
-  };
-}
-
-/** A response's JSON body, or `null` when it did not carry one. */
-async function jsonBody(response: Response): Promise<unknown> {
-  try {
-    return (await response.json()) as unknown;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * `detail` out of an error body, when it is a sentence.
- *
- * FastAPI answers a refusal with `{"detail": …}`, and every refusal these routes
- * serve carries a **string** there. FastAPI's own 422 for a body it could not
- * parse carries a list of validation objects instead, which is not a sentence
- * anybody wrote for a reader, so it is answered `null` here and the screen uses
- * its own words.
- */
-function refusalSentence(body: unknown): string | null {
-  if (typeof body !== 'object' || body === null) return null;
-  const detail = (body as Record<string, unknown>).detail;
-  return typeof detail === 'string' ? detail : null;
-}
 
 /** The sets this session's person may read, by name. */
 export async function readComparisonSets(): Promise<ComparisonSetsRead> {

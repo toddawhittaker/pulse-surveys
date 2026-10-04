@@ -22,10 +22,13 @@ report, and an open week hands it over through the report's own front door.
 
 **The ruled behaviour:** the report route refuses a course week that is not in the
 published set, with exactly the refusal it already gives a week the section does
-not run — same status, same body, no oracle. "Published" is E4's breakdown
-decision 6's, unchanged: a course week whose survey window has closed, per the
-clock service. Nothing is stored to make a week published, so this is a comparison
-against the clock and the pair below is driven by moving it.
+not run — same status, same body, no oracle. "Published" was E4's breakdown
+decision 6's — a course week whose survey window has closed, per the clock
+service — and E5.1-05 moved it later: a week's report opens at 06:00 on the first
+Monday after its close, in the institution's zone (SPEC §3.1). A week still taking
+responses is unpublished under both rules, which is this module's subject.
+Nothing is stored to make a week published, so this is a comparison against the
+clock and the pair below is driven by moving it.
 
 **The pair is the unit, and the control sits inside the refusing half.** A route
 that refused every week satisfies the first half; one that refused none satisfies
@@ -40,11 +43,12 @@ pass and satisfies
 **The instants are transcribed, not imported from a sibling test module.** A test
 module importing its sibling resolves only because of where pytest puts `tests/`
 on `sys.path` (`tests/fixtures/report_comments.py` says the same about
-`test_report_schema.py`), so the two constants this shares with
-`test_the_published_week_list_holds_only_the_closed_weeks.py` are spelled in both
+`test_report_schema.py`), so the constant this shares with
+`test_the_published_week_list_holds_only_the_closed_weeks.py` is spelled in both
 and each says so. What is shared for real — the calendar itself — comes from
 `tests/fixtures/survey_windows.py`, which is where SPEC §3.1's Fall 2026 instants
-are written out by hand.
+are written out by hand, and the instant each week's report opens comes from
+`tests/fixtures/report_api.py`, which writes those out by hand too.
 """
 
 from typing import Any
@@ -54,6 +58,7 @@ from fixtures.report_api import (
     EITHER_SIDE_OF_A_CLOSE,
     TERM_WEEK_OF_COURSE_WEEK,
     ReportDoor,
+    once_the_report_has_opened,
 )
 from fixtures.survey_windows import WINDOWS_BY_TERM_WEEK
 
@@ -70,6 +75,12 @@ OPEN_COURSE_WEEK = 4
 # is therefore served throughout. It is the non-vacuity control.
 CLOSED_COURSE_WEEK = 1
 
+# The week before the open one. Its window closed the Sunday before this clock
+# and its report opened at 06:00 the next morning (SPEC §3.1), so it is published
+# throughout the open week. It is the control that a served payload's series
+# reach past the requested week at all.
+LAST_WEEK_OPENED_BEFORE_THIS_CLOCK = OPEN_COURSE_WEEK - 1
+
 # A course week this six-week section does not run at all. The other half of the
 # no-oracle pair: an open week and a week that was never scheduled have to be
 # indistinguishable, or the difference between them says which weeks a section
@@ -83,15 +94,25 @@ OPEN_WINDOW_OPENS_AT, OPEN_WINDOW_CLOSES_AT = WINDOWS_BY_TERM_WEEK[
     TERM_WEEK_OF_COURSE_WEEK[OPEN_COURSE_WEEK]
 ]
 
-# Six hours either side of that close, the same offset the published-week
-# boundary pair uses and for the same reason: ADR 0109 makes the effective instant
-# `real + (pretend_now - anchored_at)`, so it keeps moving while it is read and a
-# value placed a second from an edge is a boundary nothing can stand on. Six hours
-# before this close is inside the window — asserted, not assumed, in
+# Six hours before that close, for the reason the published-week boundary pair
+# gives: ADR 0109 makes the effective instant `real + (pretend_now -
+# anchored_at)`, so it keeps moving while it is read and a value placed a second
+# from an edge is a boundary nothing can stand on. Six hours before this close is
+# inside the window — asserted, not assumed, in
 # `assert_the_clock_is_inside_the_window` below — which is what makes this module
 # about an **open** week rather than one that has not begun.
 WHILE_THE_WINDOW_IS_OPEN = OPEN_WINDOW_CLOSES_AT - EITHER_SIDE_OF_A_CLOSE
-ONCE_THE_WINDOW_HAS_CLOSED = OPEN_WINDOW_CLOSES_AT + EITHER_SIDE_OF_A_CLOSE
+
+# **The served half stands after the week's report opens, not six hours after the
+# close.** It used to be the close plus six hours, which is Monday 05:59:59 in the
+# institution's zone — and E5.1-05 opens a week's report at 06:00 on the Monday
+# after its close (SPEC §3.1), so that instant is now one where the week is
+# refused. The served half calls `once_the_report_has_opened` in its own body (the
+# hand-written opening in `tests/fixtures/report_api.py`, plus an hour), so the
+# premise check over that table fails as a test rather than at collection
+# (`docs/MISTAKES.md` entry 44). The hour itself is the subject of
+# `test_a_weeks_report_opens_at_six_on_the_monday_after_its_close.py`, not of this
+# module.
 
 
 def assert_the_clock_is_inside_the_window() -> None:
@@ -129,6 +150,28 @@ def test_a_course_week_whose_window_is_still_open_is_refused(
     clock, is read first and required to be served. The two reads differ in the
     week asked for and in nothing else — same session, same section, same instant
     (`docs/MISTAKES.md` entry 35).
+
+    **The open week feeds no other week's figures either** (E5.1-12, Part B item
+    3). Refusing the open week's own page is not enough if the served week's page
+    carries it: course week 1's `published_weeks` would offer it in navigation,
+    and either stream's trend would plot a point from responses still arriving —
+    the same mid-window difference, read off a page the route does serve. So the
+    served payload is required to name course week 4 nowhere on either axis.
+
+    **Its control** is that the served payload's published weeks and both trends
+    reach past the requested week to course week 3 — closed, and opened at 06:00
+    the Monday after — so the trend is not merely a one-point series that could
+    never have held week 4.
+
+    **The mutation that must turn this red:** `_published_weeks` in
+    `backend/app/services/reporting.py` (near line 1073) selecting weeks by
+    `closes_at <= now`, or by every `survey_window` row, instead of through
+    `week_is_published` — week 4 then appears in `published_weeks` and as a
+    trend point. A second, narrower one: the trend builder in the same file
+    iterating the section's windows rather than the published set, which leaves
+    `published_weeks` correct and puts week 4 on both trends. **The near miss
+    that stays green:** `week_is_published` comparing with `>` instead of `>=` at
+    06:00, which moves no week at this clock.
     """
     assert_the_clock_is_inside_the_window()
     report_door.pretend(WHILE_THE_WINDOW_IS_OPEN)
@@ -139,6 +182,42 @@ def test_a_course_week_whose_window_is_still_open_is_refused(
         f"{served.status_code}. Until a closed week is served, a refusal for the open one says "
         "only that this route refuses. Body begins "
         f"{served.text[:400]!r}."
+    )
+
+    contract = report_api_contract
+    body = served.json()
+    published = contract.member(
+        body, contract.week_member, contract.published_weeks_field, answered=served
+    )
+    trends = {
+        stream: [
+            point[contract.course_week_field]
+            for point in contract.stream_member(body, stream, contract.trend_field, answered=served)
+        ]
+        for stream in (contract.instructor_stream, contract.course_stream)
+    }
+    assert LAST_WEEK_OPENED_BEFORE_THIS_CLOCK in published and all(
+        LAST_WEEK_OPENED_BEFORE_THIS_CLOCK in plotted for plotted in trends.values()
+    ), (
+        f"The served course week {CLOSED_COURSE_WEEK} lists published weeks {published} and trend "
+        f"weeks {trends}; course week {LAST_WEEK_OPENED_BEFORE_THIS_CLOCK}, whose report opened the "
+        "Monday before this clock, is missing from at least one. Until the series reach past the "
+        f"requested week, course week {OPEN_COURSE_WEEK}'s absence below is the absence of a series "
+        "that could never have held it."
+    )
+    assert OPEN_COURSE_WEEK not in published, (
+        f"The served course week {CLOSED_COURSE_WEEK}'s report lists course week {OPEN_COURSE_WEEK} "
+        f"among its published weeks ({published}) while that week's window is still open. Week "
+        "navigation would offer a page the route refuses, and the set that decides what is "
+        "published is not the set the refusal reads."
+    )
+    leaking = {stream: plotted for stream, plotted in trends.items() if OPEN_COURSE_WEEK in plotted}
+    assert not leaking, (
+        f"Course week {OPEN_COURSE_WEEK}, whose window is still open, is a trend point in "
+        f"{sorted(leaking)} of the served course week {CLOSED_COURSE_WEEK}'s report ({leaking}). A "
+        "point computed from a week still taking responses moves with each submission, and two "
+        "readings an hour apart are one student's answer — the delta the refusal below exists to "
+        "withhold, read off a page that is served."
     )
 
     answered = report_door.report(course_week=OPEN_COURSE_WEEK)
@@ -153,7 +232,7 @@ def test_a_course_week_whose_window_is_still_open_is_refused(
     )
 
 
-def test_the_same_course_week_is_served_once_its_window_has_closed(
+def test_the_same_course_week_is_served_once_its_report_has_opened(
     report_door: ReportDoor, report_api_contract: Any
 ) -> None:
     """The other half: the refusal is about the clock and not about the week.
@@ -167,15 +246,22 @@ def test_the_same_course_week_is_served_once_its_window_has_closed(
     `opens_at`, or that refused any week carrying an unreleased comment, would
     leave the first half of this pair green and this half red — which is why
     neither half is worth reading alone.
+
+    **Where the clock stands changed in E5.1-05.** This half used to read six
+    hours after the close, which is Monday 05:59:59 in the institution's zone and
+    is now an instant where the week is refused: its report opens at 06:00 that
+    Monday. It reads an hour after that opening instead. Nothing else moved.
     """
-    report_door.pretend(ONCE_THE_WINDOW_HAS_CLOSED)
+    once_opened = once_the_report_has_opened(OPEN_COURSE_WEEK)
+    report_door.pretend(once_opened)
 
     answered = report_door.report(course_week=OPEN_COURSE_WEEK)
     assert answered.status_code == 200, (
-        f"Course week {OPEN_COURSE_WEEK} answered {answered.status_code} six hours after its window "
-        f"closed at {OPEN_WINDOW_CLOSES_AT.isoformat()}. Its response count is final and E4's "
-        "breakdown decision 6 makes it published; the whole report exists to be read then. Body "
-        f"begins {answered.text[:400]!r}."
+        f"Course week {OPEN_COURSE_WEEK} answered {answered.status_code} with the clock at "
+        f"{once_opened.isoformat()}, an hour after its report opened — its window closed at "
+        f"{OPEN_WINDOW_CLOSES_AT.isoformat()} and SPEC §3.1 (E5.1-05) opens the report at 06:00 "
+        "on the Monday after. Its response count is final and the whole report exists to be read "
+        f"then. Body begins {answered.text[:400]!r}."
     )
     body = answered.json()
     published = report_api_contract.member(

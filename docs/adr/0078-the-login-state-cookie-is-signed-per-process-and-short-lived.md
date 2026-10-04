@@ -10,6 +10,10 @@ docstring, which argues it well and is not where anybody looks for a decision;
 this record is the index entry it never got, and the docstring stays as the
 detail.
 
+*Amended 2026-10-03 by E5.1-03:* the cookie, its helpers and those docstring
+paragraphs now live in `backend/app/api/auth.py`, the web door's module, because
+that door is the cookie's only user.
+
 ## Context
 
 Both entry doors leave the tool and come back. `/lti/login` sends a browser to the

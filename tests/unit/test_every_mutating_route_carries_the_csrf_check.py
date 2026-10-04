@@ -67,18 +67,27 @@ the ways a privilege can be held misses the way the design actually uses:
      and is **refused rather than read** — see the fourth disclosed limit.
   2. **The route class.** `isinstance(route, app.api.dev.DevControlRoute)`.
      A route appended straight onto `router.routes` carries no dependency graph
-     at all — the two clock controls are exactly that shape — so a sweep reading
-     only currency 1 could not see a same-origin check written into a route class
+     at all — every `/dev` control is that shape — so a sweep reading only
+     currency 1 could not see a same-origin check written into a route class
      even when it was there.
 
-**What the ledger may hold, and what an entry costs.** Four entries, each a path
-mapped to one sentence saying why that route cannot carry the check. An entry
-costs the sentence and both directions of assertion below: the path must still be
-a mutating route this application serves, and the route must carry **neither**
-currency, so an exemption that has quietly become unnecessary is red and the
-ledger shrinks. `/dev/passback` is deliberately not on it — a development route
-is refused outside development by the environment guard, which is a different
-control from CSRF (the ticket's own known trap).
+**What the ledger may hold, and what an entry costs.** Two entries, the two legs
+of the LTI door, each a path mapped to one sentence saying why that route cannot
+carry the check. An entry costs the sentence and both directions of assertion
+below: the path must still be a mutating route this application serves, and the
+route must carry **neither** currency, so an exemption that has quietly become
+unnecessary is red and the ledger shrinks. `/dev/passback` is deliberately not on
+it — a development route is refused outside development by the environment
+guard, which is a different control from CSRF (the ticket's own known trap).
+
+**The ledger shrank once, and that is the direction it is built to move.** It
+held four entries until E5.1-03: the two clock controls sat on it as appended
+any-method routes with no check, their residual risk accepted by name in ADR
+0141. Ruling R4 of that ticket registers both as `DevControlRoute`s, so they
+carry currency 2 and their entries are gone — which this module's own
+"no exemption names a route that now carries the check" direction would have
+demanded had they stayed. The origin check's dispatch is driven over HTTP in
+`tests/integration/test_the_dev_clock_controls_refuse_a_cross_site_post.py`.
 
 **Which failure a red here is.** Before E3-07 lands, every test naming
 `DevControlRoute` is expected red on a `pytest.fail` saying `app.api.dev` exposes
@@ -96,6 +105,8 @@ from typing import Any, NamedTuple
 import pytest
 from fixtures.dev_console import (
     ANY_METHOD_ROUTE,
+    DEV_CLOCK_CLEAR_PATH,
+    DEV_CLOCK_SET_PATH,
     DEV_CONTROL_ROUTE,
     any_method_route_class,
     declared_passback_path,
@@ -160,14 +171,13 @@ REQUIRED_CSRF_DEPENDENCIES = ("csrf_verified_student", "csrf_verified_leadership
 
 # The paths this module names. Each is settled somewhere outside this file:
 # `/lti/login` and `/lti/launch` by the two mocks' own configuration
-# (`tests/fixtures/doors.py`) and the clock pair by E2-04's work order. The
-# submit route is **not** named here — E2-08 settles its module and not its URL,
-# so it is discovered through `tests/fixtures/submit.py::submit_route`, the one
-# helper that asks that question.
+# (`tests/fixtures/doors.py`) and the clock pair by E2-04's work order, spelled
+# once in `tests/fixtures/dev_console.py` and imported above. The submit route is
+# **not** named here — E2-08 settles its module and not its URL, so it is
+# discovered through `tests/fixtures/submit.py::submit_route`, the one helper that
+# asks that question.
 LTI_LOGIN_PATH = "/lti/login"
 LTI_LAUNCH_PATH = "/lti/launch"
-DEV_CLOCK_SET_PATH = "/dev/clock"
-DEV_CLOCK_CLEAR_PATH = "/dev/clock/clear"
 
 # The methods that read. A route answering only these is not in the inventory.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -186,8 +196,9 @@ SHORTEST_LEDGER_SENTENCE = 60
 
 # ---------------------------------------------------------------------------
 # The exemption ledger: a path, and one sentence saying why that route cannot
-# carry the check. Four entries, and every one of them is asserted in both
-# directions below.
+# carry the check. Two entries, and both are asserted in both directions below.
+# The clock pair's two entries left in E5.1-03, when the pair became
+# `DevControlRoute`s; the module docstring records why.
 # ---------------------------------------------------------------------------
 
 EXEMPTIONS: dict[str, str] = {
@@ -201,18 +212,6 @@ EXEMPTIONS: dict[str, str] = {
         "another origin, so a same-origin or double-submit rule would refuse every real launch. "
         "The `id_token`'s signature, its `nonce` and the stored `state` are the defence, and the "
         "route mints the session rather than riding one."
-    ),
-    DEV_CLOCK_SET_PATH: (
-        "Appended as an any-method route with no dependency graph, and posted by a console page "
-        "that holds no session, so there is neither a token to double-submit nor a dependency to "
-        "hang the check on. It is development-only by the gate inside the handler; the residual "
-        "risk — a cross-site page moving a developer's clock — is accepted here by name."
-    ),
-    DEV_CLOCK_CLEAR_PATH: (
-        "Appended as an any-method route with no dependency graph, and posted by a console page "
-        "that holds no session, so there is neither a token to double-submit nor a dependency to "
-        "hang the check on. It is development-only by the gate inside the handler; the residual "
-        "risk — a cross-site page moving a developer's clock — is accepted here by name."
     ),
 }
 
@@ -753,16 +752,16 @@ def test_the_structural_currency_finds_an_appended_dev_control_route_not_its_par
 
     The ticket's first known trap: "a route registered by appending to
     `router.routes` rather than by a decorator is exactly the shape that escapes a
-    decorator walk, and `dev.py` already contains two of them". Those two are the
-    clock controls and they are exempt; the trigger E3-07 adds is the same shape
-    and is **not** exempt, so the sweep needs a currency it can read off such a
-    route. `isinstance` is it.
+    decorator walk, and `dev.py` already contains two of them". Those two were the
+    clock controls, exempt until E5.1-03 made them `DevControlRoute`s; the
+    trigger E3-07 adds is the same shape and was never exempt, so the sweep needs
+    a currency it can read off such a route. `isinstance` is it.
 
     **The near miss it must spare** is an `AnyMethodRoute` that is not a
     `DevControlRoute`, appended the same way: the parent class carries no origin
-    check, and a sweep matching on the parent would report every clock control as
-    guarded and would then have nothing to say the day a third any-method route
-    is appended without the check.
+    check, and a sweep matching on the parent would report any plain any-method
+    route as guarded and would then have nothing to say the day one is appended
+    without the check.
 
     **The mutation this kills:** currency 2 written as `type(route).__name__ ==
     "DevControlRoute"`, which a rename breaks silently, or as an `isinstance`
@@ -826,9 +825,9 @@ def test_the_structural_currency_finds_an_appended_dev_control_route_not_its_par
     )
     assert carried.get(parent_path) == [], (
         f"The sweep read an appended `{ANY_METHOD_ROUTE}` as carrying {carried.get(parent_path)}. "
-        f"That class carries no origin check — it is what the two clock controls are, and they are "
-        "on the ledger for exactly that reason — so a sweep matching the parent class would report "
-        "them guarded and would spare the next unchecked any-method route somebody appends."
+        "That class carries no origin check — it is what the two clock controls were while they "
+        "sat on the ledger — so a sweep matching the parent class would report a plain any-method "
+        "route guarded and would spare the next unchecked one somebody appends."
     )
 
 
@@ -838,8 +837,8 @@ def test_every_exemption_carries_a_sentence_saying_why() -> None:
     The ticket settles "what the exemption list is allowed to hold, and what a new
     entry costs". This is the cost, made mechanical: an entry is a path **and** a
     sentence long enough to be a reason. A ledger of bare paths would satisfy
-    every other assertion in this module while saying nothing about why four
-    writing routes in this application have no CSRF check.
+    every other assertion in this module while saying nothing about why the
+    writing routes on it have no CSRF check.
 
     **The mutation this kills:** an entry added with `""`, `"dev"` or `"TODO"`
     beside it, which reads as a ledger entry in a diff and is not one.
@@ -848,7 +847,7 @@ def test_every_exemption_carries_a_sentence_saying_why() -> None:
     """
     assert EXEMPTIONS, (
         "The exemption ledger is empty, so the both-direction assertions below are about nothing "
-        "and the sweep's whole exemption machinery is untested. Four routes in this application "
+        "and the sweep's whole exemption machinery is untested. The two legs of the LTI door "
         "cannot carry the check and each is named here with a sentence."
     )
     thin = {
@@ -1018,9 +1017,9 @@ def test_the_passback_route_is_found_carrying_the_dev_control_currency(
 
     **The mutation this kills:** `/dev/passback` added to `EXEMPTIONS` instead of
     to `DevControlRoute`, which turns the whole second half of this ticket into a
-    line of prose; and a trigger registered as a plain `AnyMethodRoute` beside the
-    clock pair, which has no origin check and would be indistinguishable from the
-    correct build to every other test in this module.
+    line of prose; and a trigger registered as a plain `AnyMethodRoute`, which has
+    no origin check and would be indistinguishable from the correct build to
+    every other test in this module.
 
     **Expected red before E3-07 lands:** a FAILED naming `DevControlRoute` as a
     class `app.api.dev` does not expose. Once it exists and the route is not
@@ -1132,10 +1131,10 @@ def test_the_appended_clock_pair_is_in_the_mutating_inventory(
     application's own route table, and prove it finds the appended pair."
 
     This is that proof, on the real application rather than on a plant: both clock
-    paths must be in the mutating inventory. They are also the ledger's two
-    riskiest entries, and an inventory that could not see them would report the
-    ledger's other direction — "every exempt path is still served" — as a failure
-    for a reason that has nothing to do with the ledger.
+    paths must be in the mutating inventory. They were the ledger's two riskiest
+    entries until E5.1-03, and they are the routes the next test requires to carry
+    the route-class currency now; an inventory that could not see them would make
+    that test fail for a reason that has nothing to do with the check.
 
     **The mutation this kills:** an inventory built by walking decorated route
     functions, or one that requires `methods` to be a non-empty set, which drops
@@ -1153,6 +1152,56 @@ def test_the_appended_clock_pair_is_in_the_mutating_inventory(
         "decorator, and they write the row that moves the clock every survey window, term lookup "
         "and live-enrollment check reads. If this sweep cannot see them it cannot see the shape "
         "E3-07's own trigger is registered in either."
+    )
+
+
+@pytest.mark.parametrize("path", (DEV_CLOCK_SET_PATH, DEV_CLOCK_CLEAR_PATH))
+def test_each_clock_control_is_found_carrying_the_dev_control_currency(
+    path: str, configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """E5.1-03 criterion 3's structural half: the clock pair holds currency 2, by name.
+
+    The sweep below would go red on an unchecked clock route anyway, once its
+    ledger entries are gone — but as one line among every unguarded path, read
+    as "add it to the ledger" by anyone in a hurry. This names the two routes
+    and the one currency they are now required to hold, and refuses the ledger
+    as the answer.
+
+    **The mutation this kills:** either clock route left as a plain
+    `AnyMethodRoute`, which carries no origin check; and either path put back on
+    `EXEMPTIONS`, which is the ledger growing over a route that is meant to be
+    checked. **Its near miss** is `/dev/passback`, already a `DevControlRoute`,
+    which `test_the_passback_route_is_found_carrying_the_dev_control_currency`
+    holds to the same reading.
+
+    **What this does not say** (`docs/MISTAKES.md` entry 47): a route class in
+    the route table is not a gate that runs. That the 403 is answered at
+    dispatch, in both directions, is
+    `tests/integration/test_the_dev_clock_controls_refuse_a_cross_site_post.py`.
+    """
+    application = application_in(DEVELOPMENT, monkeypatch)
+    dependency = csrf_dependencies()
+    route_class = dev_control_route_class()
+
+    carried = {
+        path_of(route): currencies_of(route, dependency=dependency, route_class=route_class)
+        for route in mutating_routes(application)
+    }
+
+    assert path in carried, (
+        f"`{path}` is not a mutating route of this application; the mutating routes are "
+        f"{sorted(carried)}. E2-04 registers it and the test above requires the walk to see it."
+    )
+    assert path not in EXEMPTIONS, (
+        f"`{path}` is on the exemption ledger. E5.1-03 registers the clock pair as "
+        f"`{DEV_CONTROL_ROUTE}`s, so the origin check is carried rather than excused; ADR 0141's "
+        "accepted residual risk ends with that ticket."
+    )
+    assert BY_ROUTE_CLASS in carried[path], (
+        f"`{path}` carries {carried[path]}. E5.1-03's ruling R4 registers it as a "
+        f"`{DEV_CONTROL_ROUTE}`, whose endpoint refuses an `Origin` that is not this "
+        "application's own; until it is one, any page a developer's browser shows can move the "
+        "development clock."
     )
 
 
@@ -1212,7 +1261,9 @@ def test_no_exemption_names_a_route_that_now_carries_the_check(
     left behind — which reads in a diff as a strictly safer change.
 
     **Expected red before E3-07 lands:** a FAILED naming `DevControlRoute`. Once
-    the class exists, this test judges the four entries against both currencies.
+    the class exists, this test judges every entry against both currencies — and
+    it is the test that required the clock pair's two entries to leave the
+    ledger when E5.1-03 made both routes `DevControlRoute`s.
     """
     application = application_in(DEVELOPMENT, monkeypatch)
     report = ledger_report(

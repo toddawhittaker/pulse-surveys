@@ -63,6 +63,17 @@ column nowhere and says so; §5.1's denominator is the people who could have
 answered that week, so the report does read it, in SQL, unchanged. A helper that
 folded the end date in would have made one of the two callers wrong.
 
+*Amended:* the module now also holds `live_on`, whether an enrolment is live on
+one day, and `without_staff`, the section's staff filter, because three services
+each wrote the first and two wrote the second. `live_on` reads `ended_on`, and
+neither the tiers nor the report's §5.1 end test use it: "grading reads that
+column nowhere" is about the credited weeks, and the denominator's end test is
+still its own.
+`authz._A_LIVE_ENROLLMENT` (`backend/app/services/authz.py:1658`) deliberately
+stays a separate SQL copy of the same rule, because `authz.py` is read and not
+edited here. It is held to `live_on` on every boundary day by
+`tests/integration/test_live_on_agrees_with_the_landing_rule_on_every_boundary_day.py`.
+
 The E4-07 moderation-state consolidation is the shape and the precedent: one
 resolution, shaped to be called from elsewhere, with the ordering stated once.
 

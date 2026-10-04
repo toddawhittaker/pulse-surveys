@@ -84,6 +84,13 @@ Four parts, and each is a separate choice.
    `test_the_dev_clock_control_answers_404_to_every_method_outside_development`,
    which drives the seven standard verbs plus `TRACE` plus an arbitrary token.
 
+   *Amended 2026-10-03 by E5.1-03:* the clock pair is now registered as
+   `DevControlRoute`s (ADR 0141), so the environment and method gate sits in the
+   endpoint wrapper rather than in each handler, with the same `404` answers, and
+   a `POST` from another origin is refused with `403`. The row is written by
+   `app.services.clock`'s `set_override` and `clear_override`, which the two
+   handlers call.
+
 **What the readout shows.** `/dev` renders the effective now as ISO 8601 in the
 institution's timezone with its offset and to the second — `2026-09-04T18:30:00-04:00`.
 The zone because SPEC §3.1 makes it the one every window is expressed in and so

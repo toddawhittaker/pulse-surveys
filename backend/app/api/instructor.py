@@ -45,9 +45,10 @@ followed by a scope test.
 **A course week with no published report is a different refusal**, and it is safe
 to be: it is only ever reached after the section has been established as this
 instructor's own, so it says nothing about anything she may not already see. Its
-own two cases — a window still taking responses, and a week the section never runs
-— share one status and one body, because telling them apart would hand back the
-section's calendar a week at a time. A mid-window report is refused rather than
+own cases — a window still taking responses, a window that has closed but whose
+report does not open until 06:00 on the Monday after (ADR 0184), and a week the
+section never runs — share one status and one body, because telling them apart
+would hand back the section's calendar a week at a time. A mid-window report is refused rather than
 served at all: read twice, the difference between two views of an open week is one
 student's submission.
 
@@ -73,7 +74,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_instructor
+from app.api.deps import person_of, require_instructor
 from app.config import Settings
 from app.copy.instructor_report import SECTION_UNAVAILABLE as SECTION_UNAVAILABLE_COPY
 from app.copy.instructor_report import WEEK_UNAVAILABLE as WEEK_UNAVAILABLE_COPY
@@ -116,8 +117,9 @@ SECTIONS_PATH = "/instructor/sections"
 SECTION_UNAVAILABLE_STATUS = 404
 SECTION_UNAVAILABLE = SECTION_UNAVAILABLE_COPY.text
 
-# And the week there is no published report for — whether its window is still open
-# or the section never runs it. One sentence for both, for the same no-oracle reason
+# And the week there is no published report for — whether its window is still open,
+# has closed but its report has not yet opened at 06:00 on the Monday after (ADR
+# 0184), or the section never runs it. One sentence for all three, for the same no-oracle reason
 # the section pair has one: the difference between "not yet" and "never" is a fact
 # about the section's calendar. A separate sentence from the refusal above because it
 # is a different fact and the instructor can act on it, and because it is reached only
@@ -159,7 +161,7 @@ def read_report(
     try:
         return instructor_report(
             session,
-            person_id=_person_of(claims),
+            person_id=person_of(claims),
             section_id=section_id,
             course_week=course_week,
             settings=settings,
@@ -191,7 +193,7 @@ def read_published_weeks(
     try:
         weeks = published_course_weeks(
             session,
-            person_id=_person_of(claims),
+            person_id=person_of(claims),
             section_id=section_id,
             settings=settings,
         )
@@ -227,24 +229,7 @@ def read_taught_sections(
     synchronous session (ADR 0013).
     """
     response.headers["Cache-Control"] = NO_STORE
-    return TaughtSections(sections=taught_sections(session, person_id=_person_of(claims)))
-
-
-def _person_of(claims: SessionClaims) -> UUID | None:
-    """The `person` row this session was resolved to, or `None` where it names none.
-
-    A claim in a JWT is JSON, so `person_id` is a string here and a `uuid.UUID` in
-    the service (ADR 0016). A value that is not one is a token this deployment did
-    not issue in the shape it issues them, and it resolves to nobody rather than to
-    a 500 from inside the parse — which the service answers exactly as it answers a
-    session naming a person who teaches nothing.
-    """
-    if claims.person_id is None:
-        return None
-    try:
-        return UUID(claims.person_id)
-    except ValueError:
-        return None
+    return TaughtSections(sections=taught_sections(session, person_id=person_of(claims)))
 
 
 def _unavailable(detail: str) -> HTTPException:

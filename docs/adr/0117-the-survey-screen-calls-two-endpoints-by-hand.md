@@ -1,13 +1,18 @@
 # 0117 — The survey screen calls its two endpoints by hand
 
-**Status:** Accepted
+**Status:** Accepted, **superseded in part by [0185](0185-the-frontend-wire-types-are-generated-from-openapi.md)**:
+the wire types are now generated from the OpenAPI schema and checked for
+staleness, so the rejection of a generator below and the first consequence
+("a transcription and nothing checks them") no longer hold. The calls are
+still written by hand and there is still no query cache.
 **Date:** 2026-09-02
 **Tickets:** E2-10
 
 ## Context
 
-SPEC §13's repository tree draws `frontend/src/api/` as "generated client from
-backend OpenAPI + TanStack Query hooks". That is a sentence in a directory
+SPEC §13's repository tree drew `frontend/src/api/` as "generated client from
+backend OpenAPI + TanStack Query hooks". (SPEC §13 was redrawn in E5.1-08, on
+2026-10-03, and now draws the generated wire types of ADR 0185 instead.) That is a sentence in a directory
 listing rather than a requirement in a numbered section, and E1-04 read it that
 way and left the question open in as many words: `frontend/src/main.tsx` says
 "there is no data fetching, no client generated from the OpenAPI schema and no
@@ -42,7 +47,7 @@ a shape mismatch needs is to be loud, not to be parsed twice.
 
 ## Alternatives rejected
 
-**Generate a client from `/openapi.json`.** The option §13's tree names. It buys
+**Generate a client from `/openapi.json`.** The option §13's tree named then. It buys
 type agreement between the two sides that today is a transcription somebody has
 to keep right, and for a wide API surface it is clearly correct. Rejected for
 this one: it is a generator, its output, a build step and a check that the output

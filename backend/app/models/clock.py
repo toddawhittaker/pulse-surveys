@@ -28,7 +28,7 @@ there (`app.config.is_development`), which is where the ticket's criterion 3 put
 the gate. A deployment that acquired one of these rows — a restored dump, a copied
 database — goes on reading the real clock.
 
-**A module of its own, and §13 names no aggregate for it.** The section list is
+**A module of its own, outside the product's aggregates.** §13's model list is
 the product's domain — the containment hierarchy, the calendar, identity, LTI,
 audit, AI — and a development-only time control is none of those. `term.py` is the
 nearest neighbour and is the wrong home: it holds the institution's *configured*

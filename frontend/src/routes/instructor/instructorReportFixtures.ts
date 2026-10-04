@@ -72,8 +72,17 @@ export const OTHER_COURSE_LABEL = 'MATH 140 E1FF — College Algebra, Fall 2026'
 /** Exactly the weeks the API says a report may be read for. Note the gaps. */
 export const PUBLISHED_WEEKS = [2, 4, 7];
 
-/** The configured response threshold, deliberately not the default 5 everywhere. */
+/**
+ * The configured threshold — distinct commenters in a stream in a week — and
+ * deliberately not the default 5 everywhere.
+ */
 export const SMALL_N_THRESHOLD = 4;
+
+/** A stream above the threshold: its raw comments are shown (E5.1-01, per stream). */
+const SHOWN = { suppressed: false, threshold: SMALL_N_THRESHOLD } as const;
+
+/** A stream below the threshold, or one nobody commented in: its raw comments are withheld. */
+const WITHHELD_STREAM = { suppressed: true, threshold: SMALL_N_THRESHOLD } as const;
 
 /** The section every report fixture is about, as the menu lists it. */
 export const THIS_TAUGHT_SECTION: TaughtSectionView = {
@@ -263,6 +272,7 @@ export const A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS = {
       },
       comments: [{ text: INSTRUCTOR_COMMENT, status: 'published', stream: 'INSTRUCTOR' }],
       question_text: INSTRUCTOR_QUESTION_TEXT,
+      small_n: SHOWN,
     },
     course: {
       trend: [
@@ -277,11 +287,11 @@ export const A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS = {
       },
       comments: [{ text: COURSE_COMMENT, status: 'published', stream: 'COURSE' }],
       question_text: COURSE_QUESTION_TEXT,
+      small_n: SHOWN,
     },
   },
   workload: { mean: 9.46, median: 8.04 },
   comparison: { suppressed: true, reason: 'below-minimum' },
-  small_n: { suppressed: false, threshold: SMALL_N_THRESHOLD },
   released_from_earlier_weeks: [],
   institution_timezone: INSTITUTION_TIMEZONE,
 } satisfies InstructorReportView & { comparison: unknown };
@@ -427,12 +437,16 @@ export const A_WEEK_NOBODY_ANSWERED = {
       distribution: { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 },
       summary: null,
       comments: [],
+      // Nobody commented, which is below any threshold: the server suppresses an
+      // empty stream exactly as it suppresses a thin one (ADR 0182).
+      small_n: WITHHELD_STREAM,
     },
     course: {
       trend: [{ course_week: 2, term_week: 5, mean: null }],
       distribution: { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 },
       summary: null,
       comments: [],
+      small_n: WITHHELD_STREAM,
     },
   },
   workload: { mean: null, median: null },
@@ -457,15 +471,15 @@ export const A_WEEK_WITH_NOBODY_ENROLLED = {
 } satisfies InstructorReportView & { comparison: unknown };
 
 /**
- * A week below the response threshold.
+ * A week both of whose streams are below the commenter threshold.
  *
  * **The comment arrays are empty because the payload's are** — SPEC §4 hides
  * under-threshold comments in the payload rather than in the browser, and
  * `tests/e2e/instructor-report.spec.ts` is what asserts the wire itself. What
- * this fixture proves on the page is the other half: that the notice appears
- * exactly once across two suppressed groups (§4.1 item 5), and that the summary
- * still leads each of them, which §5.1 requires of a small-N week because there
- * the summary is the only comment signal.
+ * this fixture proves on the page is the other half: that each suppressed group
+ * carries its own notice (E5.1-01, ADR 0182), and that the summary still leads
+ * each of them, which §5.1 requires of a small-N week because there the summary
+ * is the only comment signal.
  */
 export const A_SMALL_N_WEEK = {
   ...A_PUBLISHED_WEEK,
@@ -486,6 +500,7 @@ export const A_SMALL_N_WEEK = {
         held_note: null,
       },
       comments: [],
+      small_n: WITHHELD_STREAM,
     },
     course: {
       ...A_PUBLISHED_WEEK.streams.course,
@@ -495,9 +510,31 @@ export const A_SMALL_N_WEEK = {
         held_note: null,
       },
       comments: [],
+      small_n: WITHHELD_STREAM,
     },
   },
-  small_n: { suppressed: true, threshold: SMALL_N_THRESHOLD },
+} satisfies InstructorReportView & { comparison: unknown };
+
+/**
+ * A full week whose instructor stream is thin and whose course stream is shown —
+ * the case E5.1-01 exists for.
+ *
+ * Thirteen students answered, so a threshold counted in responses would show
+ * both groups. Few of them wrote about the instructor, so that stream is
+ * withheld while the course stream's comments are on the page. The page must
+ * put one notice inside the instructor group and none anywhere else, and must
+ * render the course group's card.
+ */
+export const A_WEEK_WITH_ONE_THIN_STREAM = {
+  ...A_PUBLISHED_WEEK,
+  streams: {
+    instructor: {
+      ...A_PUBLISHED_WEEK.streams.instructor,
+      comments: [],
+      small_n: WITHHELD_STREAM,
+    },
+    course: A_PUBLISHED_WEEK.streams.course,
+  },
 } satisfies InstructorReportView & { comparison: unknown };
 
 /**

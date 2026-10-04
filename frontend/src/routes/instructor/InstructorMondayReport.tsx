@@ -14,6 +14,7 @@ import {
 } from '../../api/instructor';
 import { CommentCard, type ReportComment } from '../../components/CommentCard';
 import { CommentGroup } from '../../components/CommentGroup';
+import { PulseDivider } from '../../components/PulseDivider';
 import { RatingHistogram, type RatingDistribution } from '../../components/RatingHistogram';
 import { ResponseRateBar } from '../../components/ResponseRateBar';
 import { StatPair } from '../../components/StatPair';
@@ -22,9 +23,8 @@ import { TrendPair } from '../../components/TrendPair';
 import type { TrendPoint } from '../../components/PulseTrendChart';
 import { WeekEyebrow } from '../../components/WeekEyebrow';
 import { WeekNav } from '../../components/WeekNav';
-import { SmallNNotice } from '../../components/SmallNNotice';
 import { copy, fillCopy } from '../../copy/instructorReportPageCopy';
-import '../../components/instructorReportPage.css';
+import './instructorReportPage.css';
 
 /**
  * SPEC §7.6's `InstructorMondayReport` — ticket E4-11.
@@ -38,11 +38,11 @@ import '../../components/instructorReportPage.css';
  * **Nothing here decides what may be shown.** SPEC §4's suppression, §4.1 item
  * 7's comparison chokepoint and §5.2's concealment all happen before this
  * request answers: a small-N week arrives with no comments in it, a comparison
- * figure arrives suppressed, and this page renders what it was given. The one
- * confidentiality decision that is genuinely this file's is which of the two
- * comment groups carries the small-N notice, and it is made once, out loud,
- * below. It is not §4.1 item 5's line: this surface's line is
- * `instructor_report_page.comments_note` (ADR 0158).
+ * figure arrives suppressed, and this page renders what it was given. Each
+ * comment group is handed its own stream's `small_n` and a suppressed group
+ * carries its own small-N notice (E5.1-01, ADR 0182), so this page places no
+ * notice of its own. That notice is not §4.1 item 5's line: this surface's line
+ * is `instructor_report_page.comments_note` (ADR 0158).
  *
  * **No week arithmetic anywhere, and that is criterion 3.** Which weeks a reader
  * may page to is `published_weeks` from the API, handed straight to `WeekNav`;
@@ -344,8 +344,7 @@ function ReportBody({ load }: { readonly load: Load }): JSX.Element {
 
 /** One published week of one section, in the order §5.1 and the prototype give it. */
 function ReportWeek({ report }: { readonly report: InstructorReportView }): JSX.Element {
-  const { rates, streams, small_n: smallN } = report;
-  const suppressed = smallN.suppressed;
+  const { rates, streams } = report;
 
   return (
     <>
@@ -423,48 +422,35 @@ function ReportWeek({ report }: { readonly report: InstructorReportView }): JSX.
 
       <h2 className="pulse-report-heading">{copy('instructor_report_page.comments_heading')}</h2>
       <p className="pulse-report-note">{copy('instructor_report_page.comments_note')}</p>
-      {/* **One small-N notice for the week, and it is the page's decision.**
-          SPEC §4's threshold suppresses a week and not a group, so both groups
-          go quiet together and there is one fact to state. E4-21 moves the
-          notice out of the first group and under both of them, where
-          `design/InstructorMondayReport.dc.html:69-73` puts it: it explains a
-          silence that belongs to the whole week, and inside one group it read as
-          a statement about that group's comments alone. `CommentGroup` is told
-          the week is suppressed and renders no notice of its own, so there is
-          one placement and it is here.
+      {/* **Each group is told its own stream's suppression, and states it.**
+          SPEC §4's threshold counts distinct students commenting in one stream
+          (E5.1-01, ADR 0182), so one group of a week can be shown while the
+          other is held. E4-21's single notice under both groups was right while
+          the suppression was a fact about the week; it would now claim both
+          groups were held when one was not. So the page renders no notice of
+          its own, and `CommentGroup` places one inside each suppressed group.
 
           **This is not SPEC §4.1 item 5's line.** Item 5 counts confidentiality
           copy once per surface, and this surface's one line is
           `instructor_report_page.comments_note` under the heading above: a
           standing promise about what an instructor is shown, where the small-N
-          notice is a statement about how many people answered this week. The
-          inventory recognises the first and deliberately not the second, so
-          item 5 cannot pass or fail by the response count (ADR 0158). */}
+          notice explains why one group is quiet. The inventory recognises the
+          first and deliberately not the second, so item 5 cannot pass or fail
+          by how many groups are suppressed (ADR 0158). */}
       <CommentGroup
         stream="instructor"
         summary={summaryOf(streams.instructor.summary)}
         comments={cardsOf(streams.instructor.comments)}
-        suppressed={suppressed}
+        suppressed={streams.instructor.small_n.suppressed}
+        threshold={streams.instructor.small_n.threshold}
       />
       <CommentGroup
         stream="course"
         summary={summaryOf(streams.course.summary)}
         comments={cardsOf(streams.course.comments)}
-        suppressed={suppressed}
+        suppressed={streams.course.small_n.suppressed}
+        threshold={streams.course.small_n.threshold}
       />
-      {suppressed ? (
-        <div className="pulse-report-small-n">
-          {/* The two counts are the week's own participation figures, which the
-              Participation region above states in the same words. What §5.2
-              forbids below the threshold is a count of what was *withheld*, and
-              this notice is given no such number to render. */}
-          <SmallNNotice
-            responded={rates.responses}
-            enrolled={rates.enrolled}
-            threshold={smallN.threshold}
-          />
-        </div>
-      ) : null}
 
       <ReleasedFromEarlierWeeks comments={report.released_from_earlier_weeks} />
     </>
@@ -519,29 +505,6 @@ function ReleasedFromEarlierWeeks({
   );
 }
 
-/** The short marigold pulse line the brief puts under a report title. */
-function PulseDivider(): JSX.Element {
-  return (
-    <svg
-      className="pulse-line pulse-line-divider"
-      width="120"
-      height="14"
-      viewBox="0 0 120 14"
-      aria-hidden="true"
-      fill="none"
-    >
-      <path
-        d="M1 10 H52 L60 3 L68 10 H106"
-        stroke="var(--marigold)"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="112" cy="10" r="3.5" fill="var(--marigold)" />
-    </svg>
-  );
-}
-
 /**
  * One stream's trend, in the shape the chart takes.
  *
@@ -587,7 +550,7 @@ function summaryOf(
   return {
     text: summary.text,
     responseCount: summary.response_count,
-    heldNote: summary.held_note,
+    heldNote: summary.held_note ?? null,
   };
 }
 

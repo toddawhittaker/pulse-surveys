@@ -41,6 +41,16 @@ The catalog does **not** grant `section`: §7.3 gives a section exactly one way 
 be discovered, and it is not the roster of a section that must already exist for
 the roster to be fetchable.
 
+**Enrollment means "student", and the teaching grant follows the roster both
+ways** (E5.1-02, E5.1-11, ADR 0183). Only a member listed as Learner, and neither
+as Instructor, nor as any Instructor sub-role, nor as the platform's test user,
+is written an enrollment; anybody else has an open one closed. On or before the
+section's last day, a member listed as Instructor is granted the section, and a
+complete walk that read at least one member ends every
+teaching grant on the section whose person it did not list as an active
+Instructor, through `public.end_teaching_instructor`, which deletes the row and
+records it in `ended_teaching_grant`.
+
 Two things it may not do directly, and the doors it uses instead (ADR 0094, and
 this ticket's D7): it holds no read of `user.lms_user_id`, so a roster member is
 matched to a `user` row through `public.resolve_platform_user`; and it holds no
@@ -78,7 +88,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import DEVELOPMENT_ENVIRONMENT, Settings, canonical_host, url_host
-from app.lti.launch import INSTRUCTOR_ROLE_URI, stated_roles
+from app.lti.launch import INSTRUCTOR_ROLE_URI, LEARNER_ROLE_URI, stated_roles
 from app.lti.registration import NoSigningKeyError, OrmToolConf
 from app.models.identity import AssignmentRole, Enrollment, User
 from app.models.lti import (
@@ -97,7 +107,9 @@ from app.services.authz import (
     guard_write,
     sanction_for,
     teaching_instructor_assigned,
+    teaching_instructor_grants,
 )
+from app.services.identity import person_for_user
 
 __all__ = ["request_section_sync", "sync_all_rosters", "sync_section"]
 
@@ -128,6 +140,25 @@ MEMBERSHIP_SCOPE: Final[str] = (
 # reason `_walked_roster` gives.
 MAX_PAGES_WALKED: Final[int] = 1000
 
+# The bound on every request the sync makes that names no timeout of its own, as a
+# `requests` `(connect, read)` pair (E5.1-02). `requests`' own default is `None`,
+# which waits for ever, and the request that names no timeout is the token grant:
+# `pylti1p3`'s `ServiceConnector.get_access_token` posts to the token endpoint with
+# none. A platform whose token endpoint accepts the connection and then never
+# answers would otherwise hold the hourly walk on that one section, and every
+# section after it would wait too. `PinnedResolutionAdapter.send` applies it, and
+# reads it from this module at call time.
+#
+# The AGS client's shape and values (`app.lti.ags.AGS_REQUEST_TIMEOUT`, which
+# argues them): a connect bound just over the doubled SYN retransmit, and ten
+# seconds to read a small document. **What it bounds** (E5.1-11, ADR 0183): the
+# connect, and each wait between bytes of the answer. It is not a bound on the
+# whole request, and it does not cover name resolution, so a platform that sends
+# a byte every few seconds can hold one call longer than ten seconds. A total
+# deadline belongs to the carried entry for rehoming the LTI transport
+# (`docs/tickets/e5.1/README.md`), not here.
+ROSTER_REQUEST_TIMEOUT: Final[tuple[float, float]] = (3.05, 10.0)
+
 # How long a launch trigger is debounced by a call this section has already made.
 # **Five minutes** (E1-11's D9, recorded in ADR 0095): SPEC §7.3 debounces the
 # launch trigger because a class of thirty opening the tool at the top of the hour
@@ -139,6 +170,21 @@ DEBOUNCE_WINDOW: Final[timedelta] = timedelta(minutes=5)
 # member means and what every real platform sends for somebody still enrolled.
 MEMBER_STATUS = "status"
 DROPPED_STATUSES: Final[frozenset[str]] = frozenset({"Inactive", "Deleted"})
+
+# The LTI system role a platform gives the account it uses to preview a course as
+# a student (LTI 1.3's system person vocabulary). Such an account is not a student,
+# so the sync writes it no enrollment (E5.1-02, ADR 0183). Matched exactly, as the
+# Instructor role is: no short form and no sub-role.
+TEST_USER_ROLE_URI: Final[str] = "http://purl.imsglobal.org/vocab/lti/system/person#TestUser"
+
+# The prefix of every Instructor sub-role in LIS v2's membership vocabulary
+# (`…/membership/Instructor#TeachingAssistant`, `…#Grader` and the rest). A member
+# listed with any of them is course staff, so not a student, whatever else the
+# roster lists (E5.1-11, ADR 0183). It does not decide the teaching grant, which
+# stays the exact Instructor role.
+INSTRUCTOR_SUB_ROLE_PREFIX: Final[str] = (
+    "http://purl.imsglobal.org/vocab/lis/v2/membership/Instructor#"
+)
 
 # One `<url>` of an RFC 8288 `Link` header, with the parameter list belonging to
 # it. The parameter tail stops at a comma so that two links in one header are read
@@ -212,14 +258,13 @@ WINDOW_END = "end"
 # an object carrying a `start`. See ADR 0095 for what this stands in for.
 URI_MEMBER_MARK = "://"
 
-# The one point-resolution call that turns a roster member into a `user` row, and
-# the one that turns that row into a `person`. ADR 0094: this connection holds no
-# read of `user.lms_user_id` and no privilege on `person`, so both are point
+# The one point-resolution call that turns a roster member into a `user` row. ADR
+# 0094: this connection holds no read of `user.lms_user_id` and no privilege on
+# `person`, so this and the second hop, `identity.person_for_user`, are point
 # queries through a definer function rather than a lookup.
 _RESOLVE_PLATFORM_USER = text(
     "SELECT public.resolve_platform_user(CAST(:platform_id AS uuid), CAST(:subject AS text))"
 )
-_RESOLVE_PERSON_FOR_USER = text("SELECT public.resolve_person_for_user(CAST(:user_id AS uuid))")
 
 # D7's writer. The whole of what this module may do to `user_identity`: an address
 # where the platform exposed one, a null where it stopped, and never a name.
@@ -237,6 +282,15 @@ _RECORD_ROSTER_EMAIL = text(
 # records it.
 _RECORD_TEACHING_INSTRUCTOR = text(
     "SELECT public.record_teaching_instructor(CAST(:person_id AS uuid), CAST(:section_id AS uuid))"
+)
+
+# E5.1-02's door, the other half of the one above: it deletes a section-scoped
+# `INSTRUCTOR` row and writes its `ended_teaching_grant` record in the same call,
+# citing the roster call that showed the grant is no longer supported. This
+# connection holds no `DELETE` on `role_assignment`; ADR 0183 records why.
+_END_TEACHING_INSTRUCTOR = text(
+    "SELECT public.end_teaching_instructor("
+    "CAST(:assignment_id AS uuid), CAST(:nrps_call_id AS uuid), CAST(:ended_on AS date))"
 )
 
 
@@ -268,11 +322,34 @@ class _Member:
 
     subject: str
     teaches: bool
+    learner: bool
+    instructor_sub_role: bool
+    test_user: bool
     dropped: bool
     email: str | None
     window_start: datetime | None
     window_end: datetime | None
     unreadable: bool
+
+    @property
+    def is_student(self) -> bool:
+        """Whether this member may hold an enrollment: an allow-list, not a deny-list.
+
+        Enrollment means "student" (E5.1-02, E5.1-11, ADR 0183). A student is a
+        member the roster lists as Learner, and not as Instructor, not as any
+        Instructor sub-role (a teaching assistant, a grader), and not as the
+        platform's test user. Everybody else is not a student: a Mentor, a
+        ContentDeveloper, an Administrator, a role this tool has never seen. A
+        student enrollment lets its holder submit and makes them one of the
+        distinct commenters SPEC §4's threshold counts, so an unknown role must
+        fail to "not a student" rather than to "student".
+        """
+        return (
+            self.learner
+            and not self.teaches
+            and not self.instructor_sub_role
+            and not self.test_user
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -409,7 +486,7 @@ def sync_section(
     )
     if walked is None:
         return
-    members, complete = walked
+    members, complete, last_call_id = walked
     # The day this sync is running, in the institution's own calendar. SPEC §3.1
     # makes every moment in this product a moment in the institution timezone and §8
     # makes that "a deployment-level setting"; `started_on` and the fallback
@@ -436,6 +513,7 @@ def sync_section(
         _deduplicated(members, section_id),
         clock.today(session, settings=settings),
         complete=complete,
+        last_call_id=last_call_id,
     )
 
 
@@ -544,6 +622,11 @@ class PinnedResolutionAdapter(requests.adapters.BaseAdapter):
                 request=request,
             )
         sending = self.inner if address is None else self._transport_for(split.scheme, hostname)
+        # The bound for a request that names none, read at call time (E5.1-02). The
+        # token grant is such a request, and every request of every sync passes
+        # through here, so this is the one place that bounds them all.
+        if timeout is None:
+            timeout = ROSTER_REQUEST_TIMEOUT
         if address is not None:
             # The authority exactly as `requests` prepared it — the trailing dot
             # and the encoded form included — so the platform is asked for the
@@ -876,15 +959,18 @@ def _walked_roster(
     exempt_host: str | None,
     pins: dict[str, str],
     called_at: datetime | None = None,
-) -> tuple[list[Mapping[str, Any]], bool] | None:
+) -> tuple[list[Mapping[str, Any]], bool, UUID | None] | None:
     """Every member of the container at `address`, following `rel="next"` to the end.
 
-    Answers `(members, complete)` — the members read, and whether the walk reached a
-    page that advertised no next relation — or `None` when there is no usable roster
-    at all. `complete` is what `_ingest` reads to decide whether it may close the
-    enrollment of a member the container did not carry: a member missing from a
-    *complete* walk has left, and a member missing from a *truncated* one is on a
-    page this tool never fetched.
+    Answers `(members, complete, last_call_id)` — the members read, whether the walk
+    reached a page that advertised no next relation, and the `nrps_call` row of the
+    last page that answered — or `None` when there is no usable roster at all.
+    `complete` is what `_ingest` reads to decide whether it may close the
+    enrollment of a member the container did not carry, or end a teaching grant
+    the container did not support: a member missing from a *complete* walk has
+    left, and a member missing from a *truncated* one is on a page this tool never
+    fetched. `last_call_id` is the call a grant ending cites (E5.1-02); on a
+    complete walk it is the final page's, which answered 200.
 
     `called_at` is the instant every row this walk writes is stamped with, and
     `None` — which is what every production caller passes — means the real one.
@@ -998,6 +1084,7 @@ def _walked_roster(
 
     service = NamesRolesProvisioningService(connector, {"context_memberships_url": address})
     members: list[Mapping[str, Any]] = []
+    last_call_id: UUID | None = None
     walked: set[str] = set()
     following: str | None = address
     while following is not None:
@@ -1024,7 +1111,7 @@ def _walked_roster(
             # with the status it answered; a row invented for the terminator would
             # carry a NULL `response_code`, which D9 gives exactly one meaning — a
             # call that never reached the platform — and no request here failed.
-            return members, False
+            return members, False, last_call_id
         try:
             resolved = refuse_invalid_fetched_address(
                 environment,
@@ -1046,7 +1133,7 @@ def _walked_roster(
                 refusal,
                 len(members),
             )
-            return members, False
+            return members, False, last_call_id
         # The first resolution of a host is the one the connection is made to, and
         # a later one never moves it. A page judged again mid-walk is judged again
         # — a name that has started answering a private address stops the walk —
@@ -1070,7 +1157,7 @@ def _walked_roster(
                 section_id,
                 len(members),
             )
-            return members, False
+            return members, False, last_call_id
         except requests.RequestException:
             _record_call(session, section_id, called, None, None, called_at=called_at)
             logger.exception(
@@ -1080,12 +1167,14 @@ def _walked_roster(
                 section_id,
                 len(members),
             )
-            return members, False
+            return members, False, last_call_id
         page = _page_members(answered_page)
         following = _next_page_url(answered_page["headers"])
-        _record_call(session, section_id, called, 200, len(page), called_at=called_at)
+        last_call_id = _record_call(
+            session, section_id, called, 200, len(page), called_at=called_at
+        )
         members.extend(page)
-    return members, True
+    return members, True, last_call_id
 
 
 def _page_members(answered: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
@@ -1098,7 +1187,9 @@ def _page_members(answered: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
     ends completely is a container this tool believes it read to the end, and
     `_ingest` closes the enrollment of everybody a complete walk did not carry. A
     loud failure is one section's, caught by `sync_all_rosters`' savepoint and
-    recorded against that section; a quiet empty page ends a whole class's term.
+    recorded against that section; a quiet empty page ends the term of everybody
+    it should have carried (a walk that read nobody at all `_ingest` treats as
+    incomplete, E5.1-11).
     """
     body: Any = answered["body"]
     carried: Any = body.get("members", [])
@@ -1280,8 +1371,8 @@ def _record_call(
     members_seen: int | None,
     *,
     called_at: datetime | None = None,
-) -> None:
-    """Write down one NRPS HTTP call. Not LMS-owned, so no sanction is spent here.
+) -> UUID:
+    """Write down one NRPS HTTP call, and answer its id. Not LMS-owned, so no sanction is spent.
 
     **`called_at` defaults to the real instant, and every production path takes
     that default.** ADR 0109 lists this log among the clocks the development
@@ -1290,16 +1381,16 @@ def _record_call(
     actually left. The one caller that supplies the argument is E3-08's
     development sync control (`app.api.dev`), and ADR 0142 carries why.
     """
-    session.add(
-        NrpsCall(
-            section_id=section_id,
-            url=url,
-            response_code=response_code,
-            members_seen=members_seen,
-            called_at=datetime.now(UTC) if called_at is None else called_at,
-        )
+    call = NrpsCall(
+        section_id=section_id,
+        url=url,
+        response_code=response_code,
+        members_seen=members_seen,
+        called_at=datetime.now(UTC) if called_at is None else called_at,
     )
+    session.add(call)
     session.flush()
+    return call.id
 
 
 # ---------------------------------------------------------------------------
@@ -1377,6 +1468,7 @@ def _read_member(member: Mapping[str, Any]) -> _Member | None:
         return None
 
     status = member.get(MEMBER_STATUS)
+    roles = stated_roles(member.get(MEMBER_ROLES))
     email = member.get(MEMBER_EMAIL)
     window = _stated_window(member)
     start = _instant(window.get(WINDOW_START)) if window is not None else None
@@ -1391,7 +1483,10 @@ def _read_member(member: Mapping[str, Any]) -> _Member | None:
 
     return _Member(
         subject=subject,
-        teaches=INSTRUCTOR_ROLE_URI in stated_roles(member.get(MEMBER_ROLES)),
+        teaches=INSTRUCTOR_ROLE_URI in roles,
+        learner=LEARNER_ROLE_URI in roles,
+        instructor_sub_role=any(role.startswith(INSTRUCTOR_SUB_ROLE_PREFIX) for role in roles),
+        test_user=TEST_USER_ROLE_URI in roles,
         dropped=isinstance(status, str) and status in DROPPED_STATUSES,
         email=email if isinstance(email, str) and email else None,
         window_start=start if isinstance(start, datetime) else None,
@@ -1413,21 +1508,40 @@ def _ingest(
     today: date,
     *,
     complete: bool,
+    last_call_id: UUID | None,
 ) -> None:
-    """Write one container's members into `user`, `enrollment` and `user_identity`.
+    """Write one container's members into `user`, `enrollment`, `user_identity` and the grants.
 
     The order is the rule. Every member is resolved to a `user` row first, because
     everything below is keyed to one; then the roster's own members are written;
     then the enrollments this section holds for people the container did **not**
-    carry are closed. Doing the last of those first would close a member's window
-    and reopen it in the same transaction.
+    carry are closed, and the teaching grants it no longer supports are ended.
+    Doing the closing first would close a member's window and reopen it in the
+    same transaction.
 
-    **The close-the-vanished pass runs only when the walk was complete** (F1). A
-    member absent from a container this tool read to its last page has left, and
-    ending their enrollment is right; a member absent from a walk that stopped on a
-    refused page is on a page this tool never fetched, and closing them would end a
-    student's enrollment because a *later* page was hostile. So a truncated walk
-    writes what it read and closes nobody.
+    **Enrollment means "student"** (E5.1-02, E5.1-11, ADR 0183). A member who is
+    not a student by `_Member.is_student` gets no enrollment, and one they already
+    hold is closed. That is driven by the member's own document, so it happens on
+    any walk, complete or not.
+
+    **The close-the-vanished pass and the grant ending run only when the walk was
+    complete** (F1, and E5.1-02 criterion 2). A member absent from a container this
+    tool read to its last page has left; a member absent from a walk that stopped
+    on a refused page is on a page this tool never fetched, and ending their
+    enrollment or their grant would act on a *later* page's failure. So a
+    truncated walk writes what it read, closes nobody and ends nothing.
+
+    **A walk that read no member counts as incomplete** (E5.1-11). Trusting it
+    would end every grant and close every enrollment on the section on one empty
+    answer; a platform that truly empties a course is rare and recoverable.
+
+    **No grant is written or ended once the section has ended** (E5.1-11): when
+    `today` is after `section.end_date`, the section's inclusive last day, no
+    teaching grant is written and the grant-ending pass is skipped; one condition,
+    `section_has_ended`, gates both. Platforms commonly end a teacher's enrollment
+    when a course concludes, and the instructor keeps her past reports. Writing is
+    gated too because a grant written after the last day is one no later walk could
+    end. Writing and closing enrollments are not gated on the date.
     """
     read = [_read_member(member) for member in roster]
     members = [member for member in read if member is not None]
@@ -1438,24 +1552,33 @@ def _ingest(
         if found is not None:
             resolved[member.subject] = found
 
+    section_has_ended = today > section.end_date
     open_rows = _open_enrollments(session, section.id)
     for member in members:
-        if member.unreadable:
-            continue
         user_id = resolved.get(member.subject)
         if user_id is None:
             continue
+        if not member.is_student:
+            # Before the unreadable-window skip on purpose: closing reads no window
+            # value, and a member's roles say they are staff whatever their window.
+            _close_a_staff_enrollment(session, open_rows.get(user_id), today)
+        if member.unreadable:
+            continue
         _record_email(session, user_id, member.email)
-        _record_enrollment(session, section, member, user_id, open_rows.get(user_id), today)
-        if member.teaches:
+        if member.is_student:
+            _record_enrollment(session, section, member, user_id, open_rows.get(user_id), today)
+        if member.teaches and not member.dropped and not section_has_ended:
             _record_the_teaching_instructor(session, section, user_id)
 
-    if not complete:
+    if not complete or not members:
         return
     present = set(resolved.values())
     for user_id, row in open_rows.items():
         if user_id not in present:
             _close(session, row, ended_on=today, window_end=None)
+    if section_has_ended:
+        return
+    _end_unsupported_teaching_grants(session, section, members, resolved, last_call_id, today)
 
 
 def _resolve_member(session: Session, platform_id: UUID, member: _Member) -> UUID | None:
@@ -1640,8 +1763,112 @@ def _close(
     session.expire(open_row)
 
 
+def _close_a_staff_enrollment(session: Session, open_row: Enrollment | None, today: date) -> None:
+    """Close the open enrollment of a member who is not a student, before today.
+
+    E5.1-02, criterion 4. The live-enrollment test the landing and the submit path
+    apply is `ended_on >= today`, so a row closed with today, which is what `_close`
+    writes for a vanished student, would still let this person land as a student
+    and submit today. So the row is closed with yesterday.
+
+    **Not before the day it started**, because `CHECK (ended_on >= started_on)`
+    refuses that. A row first seen today is therefore closed with today and still
+    covers today: one day of residue, recorded in ADR 0183. From tomorrow it covers
+    nothing, and no later walk opens another, because a member who is not a
+    student is never given one. Who is not a student is `_Member.is_student`'s
+    rule (E5.1-11): a teacher and a test user, and also a teaching assistant, a
+    mentor, or anybody the roster does not list as Learner.
+
+    `lms_window_end` is left as it is: it is only ever the platform's value.
+    """
+    if open_row is None:
+        return
+    _close(
+        session,
+        open_row,
+        ended_on=max(open_row.started_on, today - timedelta(days=1)),
+        window_end=None,
+    )
+
+
+def _end_unsupported_teaching_grants(
+    session: Session,
+    section: Section,
+    members: Sequence[_Member],
+    resolved: Mapping[str, UUID],
+    last_call_id: UUID | None,
+    today: date,
+) -> None:
+    """End every teaching grant on this section that a complete walk did not support.
+
+    E5.1-02, criterion 1. SPEC §2.1 makes the teaching instructor LMS-owned, so a
+    grant stands only while the roster lists its person as Instructor and not as
+    dropped. The read predicates in `app.services.authz` treat a grant as live
+    while its row exists, so ending one deletes the row, through
+    `public.end_teaching_instructor`, which writes the `ended_teaching_grant` record
+    in the same call and cites `last_call_id`, the final page's successful call.
+
+    **Who keeps the grant.** The person of every resolved member who teaches and is
+    not dropped, an unreadable window included: such a member is still on the
+    roster. **Who loses it.** Everybody else holding an `INSTRUCTOR` grant on the
+    section: a member who left, a member still listed without the Instructor role,
+    one listed as `Inactive` or `Deleted`, and a person with no LMS user at all,
+    whom no roster can list.
+
+    Called only after a complete walk that read at least one member, and only
+    while `today` is on or before the section's last day (E5.1-11; `_ingest`
+    decides both). `last_call_id` is `None` only on a walk that fetched no page,
+    which cannot be complete, so its absence is a defect and raises rather than
+    ending grants on nobody's word.
+    """
+    if last_call_id is None:
+        raise RosterSyncError(
+            f"section {section.id}'s walk was reported complete with no successful call to cite, "
+            "so no teaching grant can be ended on its word."
+        )
+    keep: set[UUID] = set()
+    for member in members:
+        user_id = resolved.get(member.subject)
+        if user_id is None or not member.teaches or member.dropped:
+            continue
+        person_id = person_for_user(session, user_id)
+        if person_id is not None:
+            keep.add(person_id)
+
+    for assignment_id, person_id in teaching_instructor_grants(
+        session, section_id=section.id
+    ).items():
+        if person_id in keep:
+            continue
+        try:
+            guard_write(
+                table="role_assignment",
+                assignment_role=AssignmentRole.INSTRUCTOR,
+                sanction=SANCTION,
+            )
+        except LmsOwnedWriteRefused:
+            logger.exception(
+                "the chokepoint refused the roster sync the ending of a teaching instructor's "
+                "assignment"
+            )
+            return
+        session.execute(
+            _END_TEACHING_INSTRUCTOR,
+            {"assignment_id": assignment_id, "nrps_call_id": last_call_id, "ended_on": today},
+        )
+        logger.info(
+            "a complete roster walk of section %s no longer lists the holder of assignment %s as "
+            "its instructor, so that grant was ended",
+            section.id,
+            assignment_id,
+        )
+
+
 def _record_the_teaching_instructor(session: Session, section: Section, user_id: UUID) -> None:
     """Grant this section's `INSTRUCTOR` assignment, where the member is a known person.
+
+    Called only on or before the section's last day (E5.1-11; `_ingest` decides),
+    because nothing ends a grant written after it.
 
     D5, and the refusing half is the one that matters. An `INSTRUCTOR`
     `role_assignment` is a purview grant — SPEC §2.1 computes the whole oversight
@@ -1670,7 +1897,7 @@ def _record_the_teaching_instructor(session: Session, section: Section, user_id:
     the definer re-checks inside its own transaction, and `guard_write` still guards
     the call site — the catalog entry stays, an ADR 0090 layer, not the only one.
     """
-    person_id = session.execute(_RESOLVE_PERSON_FOR_USER, {"user_id": user_id}).scalar_one()
+    person_id = person_for_user(session, user_id)
     if person_id is None:
         logger.info(
             "a roster instructor of section %s resolves to no person, so no assignment was "

@@ -10,8 +10,9 @@ protects something different:
     still pass — the leaking section may be large while the leaked-from one is
     not, which is small-N suppression defeated from outside.
   - **the week**, which is what makes the threshold mean anything at all: SPEC §4's
-    rule is "n < 5 responses **in a reporting week**", so a read that pooled two
-    weeks would answer a large week's comments under a small week's key.
+    rule (since E5.1-01) counts the distinct commenters in a stream **in a
+    reporting week**, so a read that pooled two weeks would answer a large week's
+    comments under a small week's key.
   - **the stream**, which is SPEC §5.1's two groups — "About the instructor" /
     "About the course" — read from `question.stream` (E4-02) rather than from a
     question's ordinal, so a re-ordered question set still groups correctly.
@@ -168,7 +169,8 @@ def test_a_read_of_one_week_never_returns_another_weeks_comments(
 ) -> None:
     """The week filter, which is what makes SPEC §4's threshold mean anything.
 
-    §4's rule is "n < 5 responses **in a reporting week**". A read that pooled a
+    §4's rule counts the distinct commenters in a stream **in a reporting week**
+    (E5.1-01). A read that pooled a
     section's weeks would answer with a large week's comments under a small week's
     key, so the threshold test would pass on one week's count while returning
     another's text — which is small-N suppression defeated without ever touching

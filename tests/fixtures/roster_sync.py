@@ -1706,6 +1706,279 @@ def a_subject() -> Callable[[str], str]:
     return build
 
 
+# ---------------------------------------------------------------------------
+# E5.1-02 — who teaches, who answers, and how a teaching grant ends.
+# ---------------------------------------------------------------------------
+
+# The LTI system role a platform gives the account it uses to preview a course as
+# a student. Spelled as LTI 1.3 spells it and as E5.1-02's work order (D5) settles
+# it: an exact URI, no short form, no sub-role.
+TEST_USER_ROLE_URN = "http://purl.imsglobal.org/vocab/lti/system/person#TestUser"
+
+# The append-only record a grant ending leaves, and the definer that writes it.
+# All of these are E5.1-02's work order (D1, D2), transcribed once so a test module
+# fails on a spelling a reader can find.
+ENDED_TEACHING_GRANT_TABLE = "ended_teaching_grant"
+GRANT_END_DEFINER_ROLE = "pulse_grant_end_definer"
+END_TEACHING_INSTRUCTOR = "end_teaching_instructor"
+END_TEACHING_INSTRUCTOR_SIGNATURE = "public.end_teaching_instructor(uuid,uuid,date)"
+# Every argument is cast, and none with `::`: SQLAlchemy's `text()` stops reading
+# a bind parameter when a colon follows it, and psycopg sends `None` untyped — an
+# uncast NULL makes Postgres answer "function does not exist" (42883) where a test
+# is asking whether the caller may execute one (42501).
+END_TEACHING_INSTRUCTOR_CALL = (
+    "SELECT public.end_teaching_instructor("
+    "CAST(:assignment_id AS uuid), CAST(:nrps_call_id AS uuid), CAST(:ended_on AS date))"
+)
+
+# How the ended rows are read back, as the superuser connection reads them. The
+# role is read as text so the comparison does not depend on how the enum is
+# adapted.
+READ_ENDED_TEACHING_GRANTS = (
+    "SELECT assignment_id, person_id, section_id, role::text AS role, ended_on, nrps_call_id "
+    "FROM public.ended_teaching_grant"
+)
+
+# What a token endpoint this suite answers for itself hands back. The shape is
+# RFC 6749's; the scope is NRPS 2.0's. No platform verifies this token, because
+# the wire serves the roster this suite composed and never asks.
+A_TOKEN_ANSWER = {
+    "access_token": "e5-1-02-access-token",
+    "token_type": "Bearer",
+    "expires_in": 3600,
+    "scope": NRPS_MEMBERSHIP_SCOPE,
+}
+
+
+def require_the_ended_teaching_grant_table(session: Any) -> None:
+    """Fail, naming the deliverable, when `ended_teaching_grant` does not exist.
+
+    Called as the first statement of a test body and never from a fixture
+    (`docs/MISTAKES.md` entry 44): if the table is missing this is a FAILED naming
+    it, not an ERROR in somebody's setup.
+    """
+    from sqlalchemy import text
+
+    session.rollback()
+    found = session.execute(
+        text("SELECT to_regclass(:name)"), {"name": f"public.{ENDED_TEACHING_GRANT_TABLE}"}
+    ).scalar_one()
+    if found is None:
+        pytest.fail(
+            f"There is no `public.{ENDED_TEACHING_GRANT_TABLE}` table. E5.1-02 criterion 3 adds it "
+            "as the append-only record of every ended teaching grant: the assignment, the person, "
+            "the section, the role, the day it ended and the roster walk that ended it, written by "
+            "the ending definer in the same transaction as the deletion."
+        )
+
+
+def require_the_grant_ending_definer(session: Any) -> None:
+    """Fail, naming the deliverable, when `public.end_teaching_instructor` does not exist."""
+    from sqlalchemy import text
+
+    session.rollback()
+    found = session.execute(
+        text("SELECT to_regprocedure(:signature)"),
+        {"signature": END_TEACHING_INSTRUCTOR_SIGNATURE},
+    ).scalar_one()
+    if found is None:
+        pytest.fail(
+            f"There is no `{END_TEACHING_INSTRUCTOR_SIGNATURE}`. E5.1-02 criterion 3 ends a teaching "
+            "grant through a `SECURITY DEFINER` function, a sibling of "
+            "`record_teaching_instructor`, which refuses any assignment that is not a "
+            "section-scoped `INSTRUCTOR` and writes the `ended_teaching_grant` row in the same "
+            "transaction. The work order (D1) spells it `end_teaching_instructor(assignment_id "
+            "uuid, nrps_call_id uuid, ended_on date)`."
+        )
+
+
+def ended_teaching_grants(session: Any) -> list[dict[str, Any]]:
+    """Every `ended_teaching_grant` row, read after ending this connection's transaction."""
+    from sqlalchemy import text
+
+    require_the_ended_teaching_grant_table(session)
+    session.rollback()
+    return [dict(row) for row in session.execute(text(READ_ENDED_TEACHING_GRANTS)).mappings()]
+
+
+def institution_today() -> Any:
+    """The institution's calendar day now, as the sync's own clock reads it with no override.
+
+    Read from `Settings` at call time, so the zone is the one the running
+    configuration names (`docs/MISTAKES.md` entry 40), never a literal here.
+    """
+    from zoneinfo import ZoneInfo
+
+    from app.config import Settings
+
+    return datetime.now(ZoneInfo(Settings().institution_timezone)).date()
+
+
+def live_enrollments(rows: list[Any], today: Any) -> list[Any]:
+    """The enrollment rows that still cover `today`: open, or ending on or after it.
+
+    The live test the landing and the submit path apply is `ended_on >= today`
+    (E5.1-02's work order, D5), so an enrollment closed *with* today is still
+    live today. "No open enrollment" is asserted through this, not through
+    `ended_on IS NULL`, or a row closed with today would pass while its holder
+    still lands as a student.
+    """
+    return [row for row in rows if row[ENDED_ON_COLUMN] is None or row[ENDED_ON_COLUMN] >= today]
+
+
+class WalkableSection:
+    """An existing section, made walkable by a roster this suite serves itself.
+
+    The roster sync reaches a section's roster through three stored facts: the
+    deployment the section is bound to, its context id, and its roster address;
+    and it asks the registration's token endpoint for a token first. This writes
+    all four onto rows that already exist, so a world built for something else —
+    an instructor's report, a student's submission, a launch — can be walked by
+    the real sync without being rebuilt.
+
+    **The token is answered by the wire, not by a platform.** A platform only
+    matters to this suite as the place the roster comes from, and the roster is
+    composed here. Both addresses sit on one host, which is the section's own:
+    the fetched-address rules that run under the development name run only for a
+    host that differs from the section's stored one (Batch C), and a token host
+    that differed would make every walk here a test of those rules instead.
+    """
+
+    def __init__(
+        self,
+        rows: Any,
+        tables: dict[str, Any],
+        *,
+        platform_row: Any,
+        deployment_key: Any,
+        section_id: Any,
+        label: str,
+    ) -> None:
+        from sqlalchemy import update
+
+        self.rows = rows
+        self.tables = tables
+        self.section_id = section_id
+        self.host = f"roster-{label}.e5-1-02.invalid"
+        self.context_id = f"e5-1-02-{label}-{uuid4().hex[:12]}"
+        base = f"https://{self.host}"
+        self.token_url = f"{base}/token"
+        self.address = f"{base}/lti/contexts/{self.context_id}/memberships"
+        self.next_page = f"{self.address}/e5-1-02-the-page-that-fails"
+        self.wire = ServiceWire({})
+        self.wire.answering(self.token_url, A_TOKEN_ANSWER)
+
+        platform = require_table(tables, "lti_platform")
+        platform_key = single_primary_key(platform)
+        rows.session.execute(
+            update(platform)
+            .where(platform.c[platform_key] == platform_row[platform_key])
+            .values(**{require_column(platform, AUTH_TOKEN_URL_COLUMNS): self.token_url})
+        )
+
+        section = require_table(tables, "section")
+        deployment = sorted(
+            {
+                key.parent.name
+                for key in section.foreign_keys
+                if key.column.table.name == "lti_deployment"
+            }
+        )
+        if len(deployment) != 1:
+            pytest.fail(
+                f"`section` has {len(deployment)} foreign keys to `lti_deployment` ({deployment}). "
+                "The roster sync resolves the registration it requests a token with through that "
+                "one column (deferred E1-10 item 1)."
+            )
+        rows.session.execute(
+            update(section)
+            .where(section.c[single_primary_key(section)] == section_id)
+            .values(
+                **{
+                    deployment[0]: deployment_key,
+                    SECTION_CONTEXT_ID_COLUMN: self.context_id,
+                    SECTION_ADDRESS_COLUMN: self.address,
+                }
+            )
+        )
+        rows.commit()
+
+    def walk(
+        self,
+        roster_sync: RosterSyncService,
+        session: Any,
+        members: Sequence[Mapping[str, Any]],
+        *,
+        truncated: bool = False,
+    ) -> None:
+        """Serve `members` as this section's roster and run the real sync over it.
+
+        `truncated` advertises a second page that answers 500, which is how the
+        suite poses a walk the sync cannot finish (`complete=False`): every member
+        served is on the first page, and the page after it fails — the shape
+        `test_the_roster_walk_follows_the_link_header_the_platform_sent.py` uses.
+        """
+        self.wire.serve(
+            ComposedRoster(
+                urlsplit(self.address).path,
+                self.context_id,
+                members,
+                5,
+                self.next_page if truncated else None,
+            )
+        )
+        if truncated:
+            self.wire.failing(self.next_page, 500)
+        else:
+            self.wire.recovering(self.next_page)
+        roster_sync.call(
+            roster_sync.sync_one_section,
+            session=session,
+            section_id=self.section_id,
+            http=self.wire.session(),
+            resolve=StubResolver({self.host: (A_GLOBAL_ADDRESS,)}),
+        )
+        session.commit()
+
+    def asked_for_the_failing_page(self) -> bool:
+        """Whether a walk requested the page `truncated` makes fail."""
+        return any(call.path == urlsplit(self.next_page).path for call in self.wire.calls)
+
+
+def walk_a_synced_section(
+    roster_sync: RosterSyncService,
+    section: SyncedSection,
+    wire: ServiceWire,
+    session: Any,
+    members: Sequence[Mapping[str, Any]],
+    *,
+    truncated: bool = False,
+) -> str:
+    """Serve `members` at a `synced_section`'s own address and run the sync on `session`.
+
+    The `roster_platforms` counterpart of `WalkableSection.walk`: the token comes
+    from the mock platform, as everywhere else in this suite. Answers the URL of
+    the page `truncated` makes fail, so a caller can check it was asked for.
+    """
+    split = urlsplit(section.address or "")
+    following = f"{split.scheme}://{split.netloc}{split.path}/e5-1-02-the-page-that-fails"
+    wire.serve(
+        ComposedRoster(split.path, section.context_id, members, 5, following if truncated else None)
+    )
+    if truncated:
+        wire.failing(following, 500)
+    else:
+        wire.recovering(following)
+    roster_sync.call(
+        roster_sync.sync_one_section,
+        session=session,
+        section_id=section.id,
+        http=wire.session(),
+    )
+    session.commit()
+    return following
+
+
 @pytest.fixture
 def roster_contract() -> Any:
     """The names E1-11's test modules read the sync's work through.

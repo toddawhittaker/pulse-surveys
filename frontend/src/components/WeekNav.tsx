@@ -7,7 +7,8 @@ import './instructorReportTrend.css';
  * The instructor report's week navigation — ticket E4-08.
  *
  * "Week navigation pages across published weeks" (SPEC §5.1), and a published
- * week is a course week whose survey window has closed. Which weeks those are
+ * week is a course week whose report has opened: 06:00 on the Monday after its
+ * survey window closes (SPEC §3.1). Which weeks those are
  * is the report payload's `published_weeks`, so this control asks nothing and
  * computes nothing: it steps to the neighbouring **published** week, which is
  * not always the neighbouring number. A section whose week 3 opened late has a
@@ -29,7 +30,7 @@ export function WeekNav({
   currentWeek,
   onSelectWeek,
 }: {
-  /** Every course week whose survey window has closed, as the payload lists them. */
+  /** Every course week whose report has opened, as the payload lists them. */
   readonly publishedWeeks: readonly number[];
   /** The week the report is showing. */
   readonly currentWeek: number;

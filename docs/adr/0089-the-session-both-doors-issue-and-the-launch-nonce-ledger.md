@@ -159,3 +159,21 @@ the opposite).
   unit test can drive directly; a test proving it *load-bearing end-to-end* needs
   a mock platform that publishes a permissive-algorithm key set, which `docs/tickets/
   e1/deferred.md` carries with a done-when.
+- **Known residual, MEDIUM, carried to E13: a launch is not bound to the browser
+  that started it** (recorded 2026-10-03). `/lti/login` records the `state` and `nonce`
+  server-side (`app.lti.in_flight.remember_launch`) and sets no cookie, so
+  `/lti/launch` (`app.api.lti.launch`) accepts any valid `state` from any browser.
+  Anyone with an ordinary account on a registered platform can start a launch,
+  finish it as themselves, keep the posted `id_token` and `state`, and have a page
+  the victim opens submit that pair to `/lti/launch`. The victim's browser is then
+  signed in as the attacker, and whatever the victim types, a survey comment
+  included, is stored under the attacker's identity, where the attacker can read
+  it. This is the login request forgery that a browser-bound `state` normally
+  prevents. The window is narrow: a captured pair works once, because the
+  launch spends the token's nonce, and only within 300 seconds of the login
+  (`IN_FLIGHT_LIFETIME_SECONDS` in `app/lti/launch.py`), and the attacker has to
+  stop their own browser's auto-submitting form from posting the pair first. It
+  was left open because a cookie is exactly what this record removed
+  from the launch, and a binding that survives a cookie-blocked iframe needs its
+  own design. The fix is carried to E13 as hand-off 5 in
+  `docs/tickets/e6/carried-from-e5.md`, written by E5.1-09.

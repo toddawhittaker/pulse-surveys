@@ -387,7 +387,7 @@ def generate_weekly_summaries(gateway: AIGateway | None = None) -> dict[str, int
 
     The Monday walk `app.jobs.schedules` runs on `crontab(day_of_week="mon",
     hour="2", minute="50")`. SPEC §3.1 closes every survey window on Sunday at
-    23:59:59 institution time and puts the instructor's report on Monday morning,
+    23:59:59 institution time and opens the instructor's report at 06:00 on Monday,
     so Monday is the first day the week that just ended can be summarized and the
     last day it can be summarized before its reader arrives.
 

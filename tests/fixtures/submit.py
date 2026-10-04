@@ -123,9 +123,18 @@ CLASSIFIER_DOWN_KEY = "submit.classifier_down"
 # after these tests were written:
 # [ADR 0115](../../docs/adr/0115-a-resubmission-revises-its-answers-in-place.md)
 # refuses the withdrawal of a comment a classification names, "with its own
-# reason and its own sentence (`submit.comment_already_judged`, HTTP 409), rather
+# reason and its own sentence (`submit.comment_already_judged`, ...), rather
 # than left to surface as a constraint error under a student".
 COMMENT_ALREADY_JUDGED_KEY = "submit.comment_already_judged"
+
+# **The status that refusal answers with, which E5.1-05 moved from 409 to 422.**
+# ADR 0115 first gave it 409, and the student client reads every 409 as "the
+# window has closed" — so a student who cleared a judged comment was told the
+# week was over, with the form taken away, while the window was still open.
+# E5.1-05 (criterion C1) makes it a 422 shown inline above the form. The closed
+# window and the duplicate race keep `CONFLICT_STATUS`, and that is the pair:
+# a 409 still means closed, and this refusal is no longer one.
+COMMENT_ALREADY_JUDGED_STATUS = 422
 
 # The work order's refusal statuses. Each is settled there by name:
 # "refusals are HTTP 422 for missing-required/out-of-range/off-step ..., 409 for
@@ -348,6 +357,7 @@ class SubmitContract(NamedTuple):
     not_a_student_key: str
     classifier_down_key: str
     comment_already_judged_key: str
+    comment_already_judged: int
     unauthenticated: int
     csrf_refused: int
     not_found: int
@@ -372,6 +382,7 @@ def submit_contract() -> SubmitContract:
         not_a_student_key=NOT_A_STUDENT_KEY,
         classifier_down_key=CLASSIFIER_DOWN_KEY,
         comment_already_judged_key=COMMENT_ALREADY_JUDGED_KEY,
+        comment_already_judged=COMMENT_ALREADY_JUDGED_STATUS,
         unauthenticated=UNAUTHENTICATED_STATUS,
         csrf_refused=CSRF_REFUSED_STATUS,
         not_found=NOT_FOUND_STATUS,

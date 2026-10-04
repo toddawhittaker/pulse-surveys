@@ -6,8 +6,9 @@ E3-04 is the first code in this repository that calls a platform's Assignment
 and Grade Services. Three construction questions come with it and the spec
 answers none of them.
 
-**Where it lives.** SPEC §13 puts `ags.py` in `backend/app/lti/` and puts
-`nrps.py` there too — and the roster client was built at
+**Where it lives.** SPEC §13 put `ags.py` in `backend/app/lti/` and put
+`nrps.py` there too (it has since been redrawn to show the roster client where
+it is) — and the roster client was built at
 `backend/app/services/roster_sync.py` instead. Two siblings in two places is
 the thing to avoid, so this ticket had to either follow §13 and leave the
 roster where it is, or move the roster and leave §13 disagreeing with itself in
@@ -98,10 +99,13 @@ sweep, or is a 409, which is the one refusal a retry cannot fix.
 
 - Two service clients in two packages, permanently until something moves them.
   `app/lti/__init__.py` says so, so a reader looking for the roster client under
-  §13's `nrps.py` is told where it is instead of finding an absence.
+  `lti/` is told where it is instead of finding an absence.
 - `app/lti/ags.py` imports one public name from `app/services/roster_sync.py`.
-  That is the only edge from `lti/` into `services/` in this repository, and it
-  is the thing to look at first if the layering is ever tightened.
+  It is one of two edges from `lti/` into `services/`: `app/lti/launch.py` also
+  imports the key-set fetch from `app/services/tokens.py`
+  ([0073](0073-the-tool-verifies-launches-with-pyjwt-rather-than-adopting-pylti1p3.md)).
+  Those two edges are the things to look at first if the layering is ever
+  tightened.
 - The RFC 8288 `Link` reader now exists twice, in two modules, guarding the same
   hazard. Both copies say so and name the other. It is the duplication most
   likely to be repaired by the follow-up above.

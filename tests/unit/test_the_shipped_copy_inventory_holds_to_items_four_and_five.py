@@ -26,11 +26,11 @@ rewording the survey does not redden this module (`docs/MISTAKES.md` entry 19).
 The one exception is item 5's recognizer, whose subject *is* the sentence's
 vocabulary, and it is written from item 5 and §4 rather than from what shipped.
 
-**The surface model, as E4-12 leaves it and E5-09 extends it.** A surface is a
+**The surface model, as E4-12 leaves it and E5-09 and E5.1-03 extend it.** A surface is a
 governed body of shipped strings. There were three prefixes and one surface until
 E4-12 — the survey, arriving as `student_survey` from the frontend and `submit`
-and `student` from the backend — E4-12 made it four, and E5-09's comparison-set
-screen makes it five:
+and `student` from the backend — E4-12 made it four, E5-09's comparison-set
+screen made it five, and E5.1-03's entry pages make it six:
 
   - `survey`, unchanged;
   - `report`, the instructor Monday report, arriving under five prefixes for one
@@ -38,7 +38,8 @@ screen makes it five:
     built: `instructor_report_page`, `instructor_report_trend`,
     `instructor_report_stats` and `instructor_report_comments`. The fifth,
     `instructor_report`, is the registry module holding the two refusals
-    `app.api.instructor` answers — the same relationship `submit` and `student`
+    `app.api.instructor` answers and, since E5.1-03, the instructor gate's 401
+    that `app.api.deps` answers — the same relationship `submit` and `student`
     have to `student_survey` on the survey, since item 5 counts the screen rather
     than the source;
   - `gradebook`, the two strings Pulse ships into an LMS gradebook (SPEC §3.4's
@@ -52,7 +53,15 @@ screen makes it five:
     courses with a declared length and level, the preview's two numbers are a
     count of courses and a count of sections, and a refusal says who may act and
     what is not there to act on. It owes item 5 no line, for the same shape of
-    reason the gradebook and the unknown-address screen owe none (ADR 0176).
+    reason the gradebook and the unknown-address screen owe none (ADR 0176);
+  - `entry`, E5.1-03's: the four pages either door answers with when it answers
+    no landing — the refusal page, the cancelled page, the no-account page and
+    the no-access page — arriving under one registry prefix from
+    `app/copy/entry.py`. They render before anybody has signed in and show
+    nobody's data, so they owe item 5 no line, for the reason the
+    unknown-address screen owes none. That answer is not contested, so it is
+    recorded in the map below rather than in an ADR (the work order's ruling
+    R2).
 
 `GOVERNED_SURFACES` is the whole of that governance, asserted in both directions:
 a key whose prefix no surface governs is red, and a governed prefix that collects
@@ -63,7 +72,8 @@ survey and the report carry one, and `CONFIDENTIALITY_KEY_OF_SURFACE` says which
 entry it is. The gradebook is rendered by another product and says only what a
 score is made of; the unknown-address screen shows nobody's data at all; the
 comparison-set screen shows the definitions of sets and two counts, and no
-response of anybody's. None of the three promises a student anything about
+response of anybody's; the entry pages say what happened at a door before anybody
+signed in. None of the four promises a student anything about
 identity, so item 5's "exactly once" would be demanding a sentence with no
 subject — they sit in
 `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with the reason written down, and the
@@ -189,6 +199,7 @@ REPORT = "report"
 GRADEBOOK = "gradebook"
 UNKNOWN_ADDRESS = "unknown_address"
 COMPARISON_SETS = "comparison_sets"
+ENTRY = "entry"
 
 # `student_survey` is E2-10's frontend copy module; `submit` and `student` are
 # E2-08's and E2-09's registry modules, whose strings are the refusals and the
@@ -202,10 +213,10 @@ COMPARISON_SETS = "comparison_sets"
 # confidentiality sentences on one page, which is the opposite of what the item
 # says. ADR 0158 records the reading.
 #
-# `gradebook`, `unknown_address` and `comparison_sets` are governed for item 4's
-# vocabulary and owe no line; see `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` below
-# for each reason. Three of the five surfaces owe none, which is the count E5-13
-# leaves and ADR 0176 records.
+# `gradebook`, `unknown_address`, `comparison_sets` and `entry` are governed for
+# item 4's vocabulary and owe no line; see `SURFACES_WITH_NO_CONFIDENTIALITY_LINE`
+# below for each reason. Three of five surfaces owed none when E5-13 left this
+# map, which ADR 0176 records; E5.1-03's `entry` makes it four of six.
 GOVERNED_SURFACES = {
     "student_survey": SURVEY,
     "submit": SURVEY,
@@ -235,6 +246,13 @@ GOVERNED_SURFACES = {
     # source, and the sentences a reader is refused with are the screen's words
     # as much as the copy module's are.
     "leadership_comparison_sets": COMPARISON_SETS,
+    # E5.1-03's entry pages: every heading and message the four door answers
+    # carry, which were literals in `app.api.deps` that no sweep read until that
+    # ticket moved them into `app/copy/entry.py` (its ruling R1). One prefix, one
+    # surface: a reader meets one of the four pages at a time, and none of them
+    # carries a confidentiality line, so how many screens the prefix spans
+    # changes no count in this module.
+    "entry": ENTRY,
 }
 
 # Item 5: "Confidentiality copy appears exactly once per surface (survey: once
@@ -285,6 +303,14 @@ SURFACES_WITH_NO_CONFIDENTIALITY_LINE = {
         "anybody's is rendered here, so item 5's sentence would have no subject: "
         "there is no student whose identity this screen could promise anything "
         "about. E5-13 asserts the answer by name and ADR 0176 records it."
+    ),
+    ENTRY: (
+        "The four pages either door answers with when it answers no landing: a launch or "
+        "sign-in refused, a sign-in cancelled, a sign-in with no account behind it, and an "
+        "account with nothing to land on. Each renders before a session exists and shows "
+        "nobody's data — a heading and a message about what happened at the door — so, as on "
+        "the unknown-address screen, there is nothing about anybody's identity to promise. "
+        "Not contested, so recorded here rather than in an ADR (E5.1-03's ruling R2)."
     ),
 }
 
@@ -419,6 +445,26 @@ COMPARISON_SET_REFUSAL_CONSUMERS = (
 # (`docs/MISTAKES.md` entry 3).
 AUTHORIZATION_DEPENDENCY = "app.api.deps"
 NOT_LEADERSHIP_CONSTANT = "NOT_LEADERSHIP"
+
+# E5.1-03's entry surface, by the keys its ruling R1 settles. Two, from two of
+# the four pages, so one page's entries arriving while another's stay literals in
+# `app.api.deps` does not satisfy the canary that reads them. Keys only, never
+# the sentences (`docs/MISTAKES.md` entry 19): `tests/e2e/exit-refused-launches.
+# spec.ts` holds a transcription of the refusal heading as its own proof, and
+# this module holds none.
+ENTRY_REFUSED_HEADING_KEY = "entry.refused.heading"
+ENTRY_NO_ACCESS_MESSAGE_KEY = "entry.no_access.message"
+
+# The instructor gate's 401 sentence, which R1 moves out of `app.api.deps` and
+# into the report surface's registry module beside its two siblings. The prefix
+# is `instructor_report.`, already governed, so it needs no row of its own.
+NOT_AN_INSTRUCTOR_KEY = "instructor_report.not_an_instructor"
+
+# The word SPEC §4.1 item 4 forbids by name ("'needs attention,' never
+# 'underperforming'"), appended to one entry's text by the planted-word test
+# below. Written from the item rather than from the vocabulary tuple, so the
+# plant is the spec's word and the sweep is what has to recognise it.
+A_FORBIDDEN_WORD = "underperforming"
 
 SYNTHETIC = "a synthetic inventory built in this module"
 
@@ -2520,6 +2566,112 @@ def test_the_comparison_set_refusal_constants_say_what_the_registry_says() -> No
 
 
 # ---------------------------------------------------------------------------
+# E5.1-03's canaries and its planted word. The entry pages' sentences and the
+# instructor gate's refusal were literals in `app.api.deps` that nothing here
+# read; the ticket moves them into the registry, and these say the inventory
+# now sees them and that the sweep over them can go red.
+# ---------------------------------------------------------------------------
+
+
+def test_the_collector_finds_the_two_entry_keys_the_door_pages_serve() -> None:
+    """E5.1-03 criterion 1: the entry pages' sentences reach the inventory.
+
+    The refusal page's heading and the no-access page's message, from two of
+    the four pages, through the registry's own reader. Until both are collected
+    under the `entry.` prefix, every sentence a person reads at a door before
+    signing in is swept by neither vocabulary rule below.
+
+    **The mutation it kills:** `app/copy/entry.py` left out of the registry's
+    enumeration, or its keys spelled under a prefix no row in
+    `GOVERNED_SURFACES` claims. **The near miss it spares:**
+    `entry.no_access.heading`, a key of the same prefix that is neither of
+    these two. **A red here means the entry pages' copy is not collected,
+    which is the state E5.1-03 exists to end.**
+    """
+    collected = {string.key: string.text for string in collect_backend_copy()}
+    assert_collected(
+        collected,
+        (ENTRY_REFUSED_HEADING_KEY, ENTRY_NO_ACCESS_MESSAGE_KEY),
+        "E5.1-03's ruling R1 moves every heading and message the four entry pages serve into "
+        "`app/copy/entry.py` under `entry.`. Until they are entries, they are literals in "
+        "`app.api.deps` that the items 4 and 5 sweep never reads.",
+    )
+
+
+def test_the_collector_finds_the_instructor_gates_refusal() -> None:
+    """E5.1-03 criterion 1's last clause: `NOT_AN_INSTRUCTOR` reaches the inventory.
+
+    The report API's two other refusals have been registry entries since E4-12;
+    the instructor gate's 401 sentence stayed a literal in `app.api.deps`, a
+    carried entry. R1 moves it to `instructor_report.not_an_instructor`, under
+    the prefix this module already governs for the report surface.
+
+    **The mutation it kills:** the sentence left in `deps.py` with no entry, or
+    an entry spelled under a prefix of its own that no surface claims. **The
+    near miss it spares:** `instructor_report.section_unavailable`, a sibling
+    under the same prefix that its own canary reads. **A red here means the
+    instructor gate's refusal is not collected.** That the gate *serves* the
+    entry is asserted over HTTP in
+    `tests/integration/test_the_instructor_gate_answers_with_its_registry_sentence.py`.
+    """
+    collected = {string.key: string.text for string in collect_backend_copy()}
+    assert_collected(
+        collected,
+        (NOT_AN_INSTRUCTOR_KEY,),
+        "The instructor gate answers this sentence to every student and every caller with no "
+        "session at an instructor route. Until it is an entry, the vocabulary rules pass over it.",
+    )
+
+
+def test_a_forbidden_word_planted_in_an_entry_sentence_turns_the_item_four_sweep_red() -> None:
+    """E5.1-03 criterion 1: "A forbidden word planted into one of them turns the sweep red."
+
+    The shipped inventory is collected, one `entry.` sentence has item 4's own
+    word appended to it, and the very function the marked rule below calls —
+    `offenders`, over `UNDERPERFORMING_VOCABULARY` — is required to name that
+    key. That is the criterion made executable: the sweep reads these sentences,
+    shown by the sweep going red on one of them.
+
+    **The pair.** The same inventory unplanted must name no `entry.` key, so a
+    red here cannot be explained by a sweep that flags everything.
+
+    **The mutation it kills:** the entry module enumerated by nothing the
+    inventory reads, which leaves the plant with nothing to plant into; and a
+    governance or collection change that drops the prefix from what the rule
+    sweeps. **A red here means the entry pages' sentences are not swept, or the
+    plant found no entry to go into, which was the state before E5.1-03.**
+    """
+    inventory = collect_shipped_copy()
+    target = next((string for string in inventory if string.key == ENTRY_REFUSED_HEADING_KEY), None)
+    assert target is not None, (
+        f"The inventory holds no `{ENTRY_REFUSED_HEADING_KEY}`, so there is no entry sentence to "
+        "plant a word into. E5.1-03's ruling R1 puts the refusal page's heading there."
+    )
+
+    entry_prefix = prefix_of(ENTRY_REFUSED_HEADING_KEY)
+    before = offenders(inventory, UNDERPERFORMING_VOCABULARY)
+    clean = [key for key in before if prefix_of(key) == entry_prefix]
+    assert clean == [], (
+        f"Before anything was planted, the sweep already named {clean} on the entry surface. "
+        "Either a shipped entry sentence breaks item 4 — which the marked rule below reports on "
+        "its own — or the sweep flags everything, and a red after the plant would mean nothing."
+    )
+
+    planted = tuple(
+        CopyString(string.key, f"{string.text} {A_FORBIDDEN_WORD}", string.source)
+        if string.key == ENTRY_REFUSED_HEADING_KEY
+        else string
+        for string in inventory
+    )
+    found = offenders(planted, UNDERPERFORMING_VOCABULARY)
+    assert ENTRY_REFUSED_HEADING_KEY in found, (
+        f"With {A_FORBIDDEN_WORD!r} appended to `{ENTRY_REFUSED_HEADING_KEY}`, the item 4 sweep "
+        f"named {sorted(found)}. The sweep that guards every shipped sentence has to reach the "
+        "entry pages' sentences, or a forbidden word on a door page ships with this module green."
+    )
+
+
+# ---------------------------------------------------------------------------
 # The rules. Every one of these is marked, and every docstring names the item it
 # asserts.
 # ---------------------------------------------------------------------------
@@ -2707,12 +2859,13 @@ def test_each_line_carrying_surface_carries_exactly_one_confidentiality_line() -
 def test_no_surface_recorded_as_owing_no_confidentiality_line_carries_one() -> None:
     """SPEC §4.1 item 5 over the other half of the surface model.
 
-    Three governed surfaces owe no line, each for a reason written down beside
+    Four governed surfaces owe no line, each for a reason written down beside
     it: the gradebook is a label and an arithmetic ledger rendered inside another
-    product, the unknown-address screen shows nobody's data, and the
-    comparison-set screen shows set definitions, two counts and eight refusals —
-    no response, comment or rating of anybody's. Item 5's sentence would have no
-    subject on any of the three.
+    product, the unknown-address screen shows nobody's data, the comparison-set
+    screen shows set definitions, two counts and eight refusals — no response,
+    comment or rating of anybody's — and the entry pages say what happened at a
+    door before anybody signed in. Item 5's sentence would have no subject on any
+    of the four.
 
     **Owing none and carrying none are the same requirement here, and that is
     deliberate.** A confidentiality sentence on one of these surfaces is a promise
@@ -2830,6 +2983,60 @@ def test_the_comparison_set_surface_owes_no_line_and_collects_from_both_its_sour
         "A confidentiality sentence here is a promise made where nothing keeps it, and a second "
         "copy of the product's identity promise that the exactly-once rule cannot see. The answer "
         "is ADR 0176 or a dispute about it, never a quiet reword."
+    )
+
+
+@pytest.mark.invariant
+def test_the_entry_surface_owes_no_line_and_collects_from_the_registry() -> None:
+    """SPEC §4.1 item 5's answer for E5.1-03's entry surface, asserted as a named fact.
+
+    The four entry pages render before a session exists and show nobody's data,
+    so item 5's sentence would have no subject on them — the unknown-address
+    screen's reason, and not contested, which is why the work order records it
+    here rather than in an ADR (its ruling R2). The general rule above already
+    holds every no-line surface to zero; this is here because zero is satisfied
+    perfectly by a surface that collects nothing (`docs/MISTAKES.md` entry 3),
+    and the entry surface is the newest and has one source, so it is required to
+    collect from that source before its zero is believed.
+
+    **The mutations it kills:** the surface moved into
+    `CONFIDENTIALITY_KEY_OF_SURFACE`, which would demand an identity promise on
+    a refusal page; the row's reason emptied, which turns a decision back into
+    an omission; the entry module dropping out of the collector, which makes the
+    zero meaningless; and a reassuring identity sentence added to a door page.
+    **The near miss it spares:** a door page's message that mentions a course or
+    a sign-in — nothing here reads those words except the recogniser, whose own
+    controls above show it leaves such sentences alone.
+    """
+    assert ENTRY in SURFACES_WITH_NO_CONFIDENTIALITY_LINE, (
+        f"The {ENTRY} surface is not recorded as owing item 5 no line. That answer is a row in "
+        "`SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with its reason written out, not an absence from "
+        "the other map."
+    )
+    assert SURFACES_WITH_NO_CONFIDENTIALITY_LINE[ENTRY].strip(), (
+        f"The {ENTRY} row records no reason. A row with no argument in it is an omission that "
+        "reads like a decision (ADR 0158)."
+    )
+    assert ENTRY not in CONFIDENTIALITY_KEY_OF_SURFACE, (
+        f"The {ENTRY} surface is in both line maps: one demands exactly one confidentiality string "
+        "and the other forbids any."
+    )
+
+    prefix = prefix_of(ENTRY_REFUSED_HEADING_KEY)
+    backend = [string.key for string in collect_backend_copy() if prefix_of(string.key) == prefix]
+    assert backend, (
+        f"No string under `{prefix}.` is collected from `{COPY_PACKAGE}`. The entry pages' "
+        "sentences are this surface's whole source, so a zero counted over it is not an answer to "
+        "item 5. E5.1-03's ruling R1 puts them in `app/copy/entry.py`."
+    )
+
+    inventory = collect_shipped_copy()
+    assert inventory, "The inventory is empty, so this rule passed over nothing."
+    carrying = sorted(string.key for string in confidentiality_strings(inventory, ENTRY))
+    assert not carrying, (
+        f"The {ENTRY} surface owes item 5 no line and carries {carrying}.\n"
+        "\n"
+        f"The reason it owes none: {SURFACES_WITH_NO_CONFIDENTIALITY_LINE[ENTRY]}"
     )
 
 

@@ -63,6 +63,7 @@ timestamp, not on a missing symbol.
 """
 
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
@@ -127,6 +128,13 @@ A_TOLERANCE = timedelta(minutes=5)
 # the test would pass having measured nothing.
 A_MEANINGFUL_OFFSET = timedelta(days=1)
 
+# The cohort the real-time test moves the clock in. Cohort E starts on the
+# term's first Monday, 17 August 2026, so its first window closed on 24 August
+# 2026. Real time only moves away from that date. The default cohort starts on
+# 28 September 2026, and its first close (5 October 2026) met real time in
+# October 2026, which made the control below fail.
+A_COHORT_IN_THE_PAST = "E"
+
 
 def score_posts(book: Any) -> list[Any]:
     """Every `POST` the sweep made to this line item's Score service, in order."""
@@ -173,9 +181,10 @@ def a_student_with_a_score(
     committed_clock_overrides: Any,
     *,
     students: int = 1,
+    cohort: str | None = None,
 ) -> tuple[Any, list[Any]]:
     """One section past its first window's close, with `students` fully answered."""
-    book = gradebooks()
+    book = gradebooks() if cohort is None else gradebooks(cohort=cohort)
     people = sweep_contract.students(book, students)
     for student in people:
         sweep_contract.answered_fully(book.world, student, through=1)
@@ -643,7 +652,9 @@ def test_the_score_timestamp_is_real_time_even_while_the_development_clock_is_mo
     indistinguishable and this test would pass having measured nothing — so it
     says so instead.
     """
-    book, _people = a_student_with_a_score(gradebooks, sweep_contract, committed_clock_overrides)
+    book, _people = a_student_with_a_score(
+        gradebooks, sweep_contract, committed_clock_overrides, cohort=A_COHORT_IN_THE_PAST
+    )
     effective = clock_service.now(book.session, settings=window_settings)
     real = datetime.now(UTC)
 
@@ -652,7 +663,7 @@ def test_the_score_timestamp_is_real_time_even_while_the_development_clock_is_mo
         f"{A_MEANINGFUL_OFFSET} apart. This test tells a real-time stamp from an effective-clock "
         "one by which of the two the wire value is near, and it cannot do that while they are the "
         "same value. The override is set from this section's own window calendar, so a machine "
-        "clock inside Fall 2026 is what produces this."
+        "clock within a day of that calendar's first close is what produces this."
     )
     book.wire.calls.clear()
 
@@ -799,4 +810,103 @@ def test_a_conflict_is_recorded_as_a_failure_carrying_409_and_the_other_student_
         f"The platform holds {held} for the conflicted student. Only the planted score should be "
         "there: a refused post recorded anyway would mean the 409 came from somewhere other than "
         "the staleness rule, and this test would be measuring a different refusal."
+    )
+
+
+# ---------------------------------------------------------------------------
+# What the log says about a conflict — E5.1-05, criterion C2.
+# ---------------------------------------------------------------------------
+
+# The words E5.1-05's ticket says the log line must stop saying, and the clause
+# its work order settles in their place. The whole settled sentence is "%s: the
+# platform holds a newer score than the one offered for one of its students, so
+# that post was recorded as refused, and the next scheduled run sends a fresh
+# score"; only the clause that carries the corrected fact is pinned, so the rest
+# of the sentence stays the builder's to word.
+SAYS_IT_IS_NEVER_RETRIED = "not retried"
+SAYS_THE_NEXT_RUN_SENDS_A_FRESH_SCORE = "the next scheduled run sends a fresh score"
+
+
+def test_a_conflicts_log_line_says_the_next_scheduled_run_sends_a_fresh_score(
+    gradebooks: Any,
+    grade_sync_rows: Any,
+    sweep_contract: Any,
+    ags_contract: Any,
+    window_settings: Any,
+    committed_clock_overrides: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """E5.1-05 C2: the log no longer says a conflicted score is "not retried".
+
+    It was false. A 409 is recorded with its status, and work order D16 (this
+    module's docstring, and the test about a definite status above) makes any
+    `FAILED` row carrying a status get a **fresh** delivery on the next run — so
+    the next scheduled run does send a score for that student, stamped later than
+    the one the platform holds. An operator reading "not retried" would conclude
+    the student's grade is stuck and go and fix by hand something that heals
+    itself on Monday.
+
+    The world is the conflict test's: a score planted on the platform with an
+    instant far ahead of real time, so the sweep's own post is refused 409.
+    **The control comes first**: the student's row must carry 409, or the log read
+    below is not the conflict branch's.
+
+    **The mutations this kills:** the old sentence left in place (the forbidden
+    half), and a sentence that drops "not retried" without saying what does
+    happen (the required half). **The near miss:** a log capture that caught
+    nothing, which satisfies the forbidden half by itself — so the capture is
+    required to hold records, and the required half cannot pass on an empty one.
+    """
+    book, people = a_student_with_a_score(
+        gradebooks, sweep_contract, committed_clock_overrides, students=1
+    )
+    conflicted = people[0]
+    planted = book.platform.post_score(
+        book.line_item,
+        {
+            ags_contract.user_member: conflicted.subject,
+            ags_contract.timestamp_member: sweep_contract.a_future_timestamp,
+            ags_contract.activity_member: ags_contract.conformant_activity,
+            ags_contract.grading_member: ags_contract.conformant_grading,
+            ags_contract.given_member: sweep_contract.a_held_score,
+            ags_contract.maximum_sent_member: ags_contract.score_maximum,
+        },
+    )
+    assert planted.status_code == 200, (
+        f"Planting the newer score answered {planted.status_code}, so the platform holds nothing "
+        f"newer and the sweep's post would simply be accepted. Body begins {planted.text[:300]!r}."
+    )
+    book.wire.calls.clear()
+
+    with caplog.at_level(logging.DEBUG):
+        _answered, raised = sweep_contract.run(
+            book.session, settings=window_settings, http=book.wire.session()
+        )
+
+    assert raised is None, f"The sweep raised {raised!r} when the student's post met a 409."
+    refused = grade_sync_rows.for_pair(book.id, conflicted.user_id)
+    assert len(refused) == 1 and refused[0][sweep_contract.response_code_column] == A_CONFLICT, (
+        f"The student's `grade_sync` rows are {refused}; this test needs exactly one, carrying "
+        f"{A_CONFLICT}. Without it the conflict branch never ran and there is no log line to read."
+    )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages, (
+        "The log capture holds no records at all from a sweep that met a 409. Either the sweep "
+        "logs nothing or the capture is not seeing it; either way the assertion below would pass "
+        "on silence."
+    )
+    stale = [text for text in messages if SAYS_IT_IS_NEVER_RETRIED in text.lower()]
+    assert not stale, (
+        f"The sweep still logs {stale!r} for a 409. It is false: the row is recorded with its "
+        "status, and a `FAILED` row carrying a status gets a fresh delivery on the next run "
+        "(work order D16), so the next scheduled run does send a score. E5.1-05 C2: 'The log text "
+        'no longer says "not retried".\''
+    )
+    told = [text for text in messages if SAYS_THE_NEXT_RUN_SENDS_A_FRESH_SCORE in text.lower()]
+    assert told, (
+        f"No log line from a sweep that met a 409 says {SAYS_THE_NEXT_RUN_SENDS_A_FRESH_SCORE!r}. "
+        f"The sweep logged: {messages!r}. E5.1-05's work order settles the conflict line as '... so "
+        "that post was recorded as refused, and the next scheduled run sends a fresh score', "
+        "because that is what an operator needs to know: the grade heals itself."
     )

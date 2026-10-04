@@ -6,15 +6,17 @@ stores for that person goes out. It is E1-12's first criterion — "the same sto
 identity, one row, by its primary key" — and it is what E1-13 reads assignments
 and enrollment through.
 
-**A module of its own, and §13 names none.** Every module in §13's `services/`
-list is a screen's worth of domain logic and none of them is this. `authz.py` is
+**A module of its own, which §13 now draws as "who a verified subject is".** When
+E1-12 added it, §13's `services/` list named no such module: every module there
+was a screen's worth of domain logic and none of them was this. `authz.py` is
 the authorization chokepoint: it answers what a purview covers, and since E1-13
 which view a session's own identity opens on; `session.py` signs and verifies the
 token a door hands over and touches no database; `provisioning.py` writes what a
 launch discovered. Three of those need this answer and none of them owns the
 question — putting it in one would have the other doors importing that one's
-module for something it does not do. So: a module, because nothing fits, which is
-what §13 asks the pull request to say.
+module for something it does not do. So: a module, because nothing fit, which is
+what §13 asks the pull request to say, and E5.1-08's redraw of §13 put it in the
+tree.
 
 **Nothing here reads an identity table, and a sweep holds that**
 (`tests/unit/test_no_service_reads_an_identity_table_directly.py`). It could not

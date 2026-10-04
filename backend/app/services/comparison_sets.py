@@ -101,6 +101,7 @@ from app.schemas.comparison_sets import (
 )
 from app.services import clock
 from app.services.benchmarks import resolve_named_set
+from app.services.section_codes import course_label
 
 __all__ = [
     "NotTheSetsDefinerError",
@@ -510,9 +511,10 @@ def definition_options(session: Session) -> SetOptions:
     a meaning for.
 
     **Every course, not only the ones some set already names**, because the form
-    is where a new cohort is built. Each is labelled the way the report labels a
-    course — the prefix code, the LMS number, an em dash and the LMS title — so a
-    definer recognises the same course under the same name on both surfaces. The
+    is where a new cohort is built. Each is labelled by
+    `app.services.section_codes.course_label`, the composer the report calls, in its
+    course form — the prefix code, the LMS number, an em dash and the LMS title — so
+    a definer recognises the same course under the same name on both surfaces. The
     section code and the term the report's own label carries are absent because a
     set names a course rather than a section (ADR 0164).
 
@@ -527,7 +529,7 @@ def definition_options(session: Session) -> SetOptions:
     offered = [
         CourseOption(
             id=course_id,
-            label=f"{prefix_code} {lms_number} — {lms_title}",
+            label=course_label(prefix_code=prefix_code, lms_number=lms_number, lms_title=lms_title),
             level=str(level),
         )
         for course_id, lms_number, lms_title, level, prefix_code in rows

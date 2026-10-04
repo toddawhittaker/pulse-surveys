@@ -224,8 +224,18 @@ MAX_PAGES_WALKED: Final[int] = 100
 # TCP SYN retransmit a healthy but momentarily busy host can take, and the read
 # bound is ten seconds: an AGS create or a container page is a small document, and a
 # platform that has accepted the connection and not answered a small body in ten
-# seconds is one this tool gives up on rather than one it waits out. Neither is a
-# retry — there is none here (ADR 0132) — so the number is a ceiling on one attempt.
+# seconds is one this tool gives up on rather than one it waits out. There is no
+# retry here (ADR 0132).
+#
+# **What the pair bounds, and what it does not.** `requests` applies the first
+# number to establishing the connection and the second to each wait between bytes
+# of the answer. Neither bounds the request as a whole: a platform that trickles
+# one byte every nine seconds keeps the call alive indefinitely. Neither bounds the
+# name lookup either, which runs before the connect timer starts. A total deadline
+# for one call is not set here; it belongs with the shared LTI transport code, in
+# the carried entry "Rehoming the pinned-resolution adapter and the copied Link
+# parser" (`docs/tickets/e4/carried-from-e3.md`, carried unchanged by
+# `docs/tickets/e6/carried-from-e5.md`).
 AGS_REQUEST_TIMEOUT: Final[tuple[float, float]] = (3.05, 10.0)
 
 # The link relation a paged container advertises its next page under (RFC 8288 §3)
@@ -686,8 +696,9 @@ def _no_redirects(http: requests.Session | None) -> requests.Session:
 
     **Where this copy diverges from the roster's**: the session this client builds
     for itself is a `_BoundedTransport`, so the token grant `pylti1p3` posts over it
-    is bounded too (see that class). The roster sync has the same unbounded token
-    dial and is out of this ticket's scope; it is named in E3-05's pull request.
+    is bounded too (see that class). The roster sync bounds its own token dial a
+    different way since E5.1-02: its pinned adapter applies
+    `roster_sync.ROSTER_REQUEST_TIMEOUT` to every request that names no timeout.
     """
     session = _BoundedTransport() if http is None else http
     session.max_redirects = 0

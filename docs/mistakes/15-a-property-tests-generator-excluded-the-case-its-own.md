@@ -36,6 +36,14 @@ gone on believing was not there, so the "what these generators do not reach" lis
 were rewritten against what the generators now actually draw rather than amended
 at the edges.)*
 
+*(E5.1-03, 2026-10-03, a sample list rather than a generator. The `deps.py`
+sentence sweep's docstring named font names as text it must leave alone, and its
+stylesheet control proved that only for two-word names. The design tokens hold a
+three-word one, `'Spline Sans Mono'`, which the sweep read as a sentence on the
+built tree (dispute `docs/disputes/E5.1-03-01.md`). The sweep now removes
+`font-family` and `--font-*` values before matching, with a control pair in both
+directions.)*
+
 **What happened.** E0-07's parsing suite carries a property for the definition of
 done's "parsing is total: no exception type that escapes as a 500". Its docstring
 listed the leaks it refuses and put `ValueError` out of `int()` first. It

@@ -50,7 +50,11 @@ place that would show it, not a silent 500.
   - **409 for a closed window**, which is *not* the same shape. The section is the
     student's own and nothing about it is secret; a student who missed the week is
     owed an honest reason rather than the pretence that their own course is not
-    there (SPEC §3.1: "Missed weeks cannot be back-filled").
+    there (SPEC §3.1: "Missed weeks cannot be back-filled"). A duplicate submission
+    is a 409 too. **A revise that would clear a judged comment is a 422 instead**
+    (E5.1-05): the window is still open, and the client reads every 409 as "this
+    week has closed" and takes the form away, so a 409 there told a student their
+    open week had shut. The 422 keeps the form and shows the sentence above it.
   - **503 with `Retry-After: 60` when the classifier cannot be asked** — ADR 0114,
     for the provider failures ADR 0056 keeps outside §3.3's floor. Sixty seconds
     because it is a length of time a student will actually wait, and because the
@@ -72,8 +76,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import csrf_verified_student, require_student
+from app.api.deps import (
+    NOT_A_STUDENT_CHALLENGE,
+    NOT_A_STUDENT_STATUS,
+    csrf_verified_student,
+    require_student,
+)
 from app.config import Settings
+from app.copy.student_read import NOT_A_STUDENT
 from app.copy.submit import COPY
 from app.db import get_session
 from app.schemas.student import StudentSurveyView
@@ -116,7 +126,7 @@ STATUS_OF_REASON: dict[RefusalReason, int] = {
     RefusalReason.SECTION_UNAVAILABLE: 404,
     RefusalReason.WINDOW_CLOSED: 409,
     RefusalReason.ALREADY_SUBMITTED: 409,
-    RefusalReason.COMMENT_ALREADY_JUDGED: 409,
+    RefusalReason.COMMENT_ALREADY_JUDGED: 422,
     RefusalReason.ANSWER_REQUIRED: 422,
     RefusalReason.VALUE_OUT_OF_RANGE: 422,
     RefusalReason.VALUE_OFF_STEP: 422,
@@ -163,7 +173,20 @@ def student_survey(
     response.headers["Cache-Control"] = "no-store"
     if claims.user_id is None:
         return StudentSurveyView(sections=[], institution_timezone=settings.institution_timezone)
-    return survey_for_student(session, user_id=UUID(claims.user_id), settings=settings)
+    try:
+        user_id = UUID(claims.user_id)
+    except ValueError:
+        # A `user_id` claim that is not a UUID is a token this deployment did not
+        # issue in its shape, which `require_student` already answers with one
+        # refusal for every malformed token. The same answer here, rather than a
+        # 500 from inside the parse or a refusal of its own that would tell a caller
+        # which part of a forged token got through.
+        raise HTTPException(
+            status_code=NOT_A_STUDENT_STATUS,
+            detail=NOT_A_STUDENT.text,
+            headers=NOT_A_STUDENT_CHALLENGE,
+        ) from None
+    return survey_for_student(session, user_id=user_id, settings=settings)
 
 
 @router.post(SUBMIT_PATH, summary="Submit this week's survey for one of my sections")

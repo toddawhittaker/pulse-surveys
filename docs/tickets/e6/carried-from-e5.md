@@ -21,15 +21,25 @@ order. Nothing was dropped silently.
 the design mockup needs (E5-02, closed in the source file on 2026-09-13).
 That was the only E5-owned entry.
 
+**Closed after E5, by E5.1-02 (#264, merged as 4d106d1):** the roster sync's
+unbounded token-acquisition dial, which this list carried until then (closed in
+the source file, `docs/tickets/e4/carried-from-e3.md`, on 2026-10-03). Only the
+time bound is closed. The rehoming of the pinned-resolution adapter and Link
+parser is a separate entry and stays below.
+
+**Closed after E5, by E5.1-03 (#262, merged as 43e97e5):** the clock routes'
+missing origin check, which this list carried until then (closed in the source
+file, `docs/tickets/e4/carried-from-e3.md`, on 2026-10-03). `/dev/clock` and
+`/dev/clock/clear` are `DevControlRoute`s, and they answer 403 to a POST from
+another origin.
+
 **Carried through unchanged** — the source entry's owner and done-when
 govern, and nothing about them moved in E5. From `carried-from-e4.md`'s own
-pass-through list: the roster sync's unbounded token-acquisition dial; the
-`azp`/multi-valued-`aud` launch handling and the per-launch JWKS fetch (both
-re-affirmed untouched by the E5 boundary's `lti-oidc` review); the
+pass-through list: the `azp`/multi-valued-`aud` launch handling and the
+per-launch JWKS fetch (both re-affirmed untouched by the E5 boundary's `lti-oidc` review); the
 rewound-clock family; the flaky fail-closed framing test; `post_score`
 returning nothing; provisioning's docstring-only separation; the rehoming of
-the pinned-resolution adapter and Link parser; the clock routes' missing
-origin check; the signing-key runbook (E13); ruff's `py313` target (ruff is
+the pinned-resolution adapter and Link parser; the signing-key runbook (E13); ruff's `py313` target (ruff is
 still 0.6.9, so the next ruff bump still owns it); and everything that file's
 ledger carried through from E2 and E3 — the registration chokepoint's CSP
 endpoint, the squatted section binding, the web-login linkage provisioning,
@@ -60,6 +70,11 @@ closing note in the file. Five are still open and re-listed below: the three
 unread cohort views; E5-06's correction to that entry's owner line (folded
 into the same entry); the instructor gate's 401 literal; the untraced set
 delete; and the student sweep over one week.
+
+**From the E5.1 review of `main`** (`../e5.1/README.md`, the finding table):
+the six hand-offs E5.1-09 wrote, plus the student copy E5.1-05 deferred and the
+design mockups E5.1-01 left. Each is an entry below, and hand-off 2 is three
+lines added to the E9 named-set entry.
 
 **From the E5 boundary** (`../e5/boundary-review.md`), including the passes
 over E5-14's own fix rounds: every finding not fixed inside the epic is an
@@ -101,6 +116,20 @@ is served only for sets inside the reader's purview (or a spec sentence rules
 that a named set's figures are institution-level and says why §4.1 item 2 does
 not reach them), the cutoffs a leadership reader gets are decided in a record,
 and a test plants a sibling lead's set and shows it refused.
+
+The E5.1 review of `main` found the same reads open to subtraction, and adds
+three lines to this entry's done-when (sources:
+`backend/app/services/benchmarks.py:965-995`,
+`backend/app/services/comparison_sets.py:399-544`):
+
+- `named_set_trend` and `named_set_workload` take the reader's purview and
+  refuse member courses outside it.
+- A named-set figure is sealed against the reader's other visible populations,
+  with the remainder step `_university_population` already uses. A test defines
+  S = {own course, sibling course X} and S' = {own course}, and asserts that no
+  figure over X alone can be derived.
+- Editing a set between two reads cannot isolate one course, and a test shows
+  it.
 
 ## Generative sibling isolation does not cover named sets
 
@@ -169,6 +198,10 @@ next works on the instructor report's copy or on `app.api.deps`; E9 opens the
 report to leadership and is the likely one. **Done when:** unchanged from the
 source entry.
 
+**Closed by E5.1-03 (#262, merged as 43e97e5, 2026-10-03).** The sentence is
+`instructor_report.not_an_instructor` in `app.copy.instructor_report`, and the
+items 4 and 5 sweep reads it. The source entry carries the same closure.
+
 ## The course label is composed in three places now, and `_person_of` in two
 
 `carried-from-e4.md`'s course-label entry, with a fact from E5. PR #238 (E5-06)
@@ -180,6 +213,13 @@ form or either `_person_of`; `app/services/enrollment_windows.py` (ADR 0161) is
 the worked example of that promotion done under review. **Done when:** one
 governed composer names a course and a section, and one helper resolves a
 session's person, each with its callers moved and the copies deleted.
+
+**Closed by E5.1-03 and E5.1-07 (2026-10-03).** Both halves are done, so the
+whole entry is closed. The course-label half closed in E5.1-07 (#267, merged as
+b1f2ab9): one composer, `app.services.section_codes.course_label`, with all
+three callers moved and the copies deleted. The `_person_of` half closed in
+E5.1-03 (#262, merged as 43e97e5): one `person_of` in `app.api.deps`, with
+both router copies deleted.
 
 ## The de-anonymization statement — E6's half still owed
 
@@ -315,6 +355,175 @@ implementer had to write those tests through the shell. **Owner:** a
 `git rev-parse --show-toplevel`, and a component test edited inside a worktree
 is allowed while a backend test is still refused.
 
+## A comment with no moderation verdict counts as published
+
+From the E5.1 review of `main` (application security, MEDIUM). The moderation
+state read resolves a comment with no `moderation_state` row to the initial
+state, which counts as published
+(`backend/app/services/report_comments.py:620`,
+`coalesce(latest, INITIAL_STATE)`), and the summary gather reads through the same
+rule (`backend/app/services/reporting.py:498-579`). So a comment whose moderation
+run failed or never ran is shown and summarized. It belongs with the §6.2
+threat-class entry in `../e4/deferred.md`. **Owner:** E6. **Done when:** a
+comment is shown or summarized only when it holds a completed moderation verdict
+that is not harm. A comment whose moderation run failed or never ran is held,
+and a test plants a failed run and asserts the comment reaches neither the
+report nor the summary provider.
+
+## Raising the comment threshold re-holds weeks the instructor already saw
+
+From the E5.1 review of `main` (privacy), and confirmed by the E5.1 boundary's
+threat model. E5.1-01 made a released comment never come back under its week,
+which closed the lowering half. The raising half is open, and its trigger
+exists today. The hold compares each stream-week's commenters with the
+threshold in force at the time of the read
+(`backend/app/services/report_comments.py:850`). So a stream already shown is
+held again, and its comments can enter a batch, when `N_THRESHOLD_DEFAULT`
+changes between two reads, or when a web and a worker process run with
+different values. **Owner:** E11, the configuration editor. **Done when:** a
+stream-week's shown or held state is fixed and stored when its report is first
+read, and every later read and every release cut uses the stored state. A test
+raises the threshold between two reads and asserts the stream stays shown and
+none of its comments enter a batch.
+
+## Summaries written before the per-stream rule, and the small-N prompt's premise
+
+From the E5.1 boundary review (ADR 0182's consequences). Summaries stored
+before E5.1 are not regenerated, so a thin stream in a full week may keep a
+summary written in ordinary mode. And the small-N prompt
+(`backend/app/ai/prompts/summary.v2.md:41-48`) tells the model that "fewer
+students answered this week", which is false for a thin stream in a
+well-answered week. **Owner:** E6, which reopens the summary path with
+moderation. **Done when:** the small-N prompt's premise is per stream, under a
+bumped prompt version, with an eval case for a thin stream in a full week; and
+any stored summary whose stream is now held is regenerated or withheld.
+
+## A week's item total uses today's question set
+
+From the E5.1 review of `main` (code review). Grading sizes every week by the
+question set in force today (`backend/app/services/grading.py:235-249`), so a
+second question set would change past weeks' totals. Only one set exists today.
+**Owner:** the ticket that adds a second question set. **Done when:** each
+week's total comes from the set its responses answered (the ADR 0168 pattern),
+and the second set lands with a test across a mid-term set change.
+
+## The cookieless launch is not bound to the browser that started it
+
+From the E5.1 review of `main` (application security). E5.1-08 rated it MEDIUM
+and recorded it in ADR 0089. The launch's `state` is remembered in the database
+(`backend/app/lti/in_flight.py:43`) and checked by the launch route
+(`backend/app/api/lti.py:149`), and nothing ties it to the browser that began
+the login. Anyone with an ordinary account on a registered platform can sign a
+victim's browser in as themselves, so that what the victim types is stored
+where the attacker can read it. **Owner:** E13. **Done when:** LTI Platform
+Storage binds `state` to the starting browser where the platform offers it, or
+the residual is accepted by owner ruling.
+
+## `.env.example` ships `ENVIRONMENT=development`
+
+From the E5.1 review of `main` (application security, LOW). E5.1-04's session
+secret check is skipped in development, and an unedited copy of the template
+says development, so it skips the check. CI copies `.env.example` to `.env`
+(`.github/workflows/ci.yml:1129` and `:1364`), so blanking the value in a ticket
+breaks CI and needs a `process/` pull request. **Owner:** E13, operator
+documentation. **Done when:** a deployment cannot start from an unedited
+template.
+
+## The student's submitted notice says results appear when the week closes
+
+From E5.1-05 (#265), which deferred it in its pull request body. A week's report
+now opens at 06:00 on the Monday after the window closes (SPEC §3.1, ADR 0184).
+`student_survey.submitted_body` (`frontend/src/copy/studentSurvey.ts:188`) still
+tells a student that results appear "once the week has closed". The student
+results page is E8's, so the wording is too. **Owner:** E8. **Done when:** the
+student copy says when results open in terms of the 06:00 Monday rule, and a
+copy test pins it.
+
+## The design mockups show one notice per week and a response count
+
+From E5.1-01 (#263). SPEC §4 now holds raw comments per stream, by distinct
+commenters, and ADR 0182 records that each held stream shows its own notice.
+`design/InstructorMondayReport.dc.html`, `design/SmallNNotice.dc.html` and
+`design/AdminConsole.dc.html` still show one notice per week and say
+"responses". E5.1-09 corrected the text of `design/CLAUDE.md` and left the
+mockups alone. **Owner:** E6, the first epic after E5.1 that reopens the
+instructor report's interface (its moderation lifecycle lives on that page).
+**Done when:** the mockups show the per-stream rule and per-stream notices.
+
+## A teaching grant with a child edge would stop its section's roster sync
+
+From the E5.1 boundary review. `role_assignment.reports_to` references another
+assignment with `RESTRICT` (`backend/app/models/identity.py:715`). If an
+`INSTRUCTOR` assignment ever had a child edge, the `DELETE` in
+`backend/app/views_sql/teaching_grant_end_v001.sql` would raise, and that
+section's whole roster sync would abort on every run. It cannot happen today:
+the writer sets `reports_to` to NULL, and there is no People editor yet.
+**Owner:** E9, with the People & reporting editor. **Done when:** the editor
+refuses a child edge under a teaching grant, or the definer ends a grant with
+children in a named way that the sync logs and skips, with a test.
+
+## `ended_teaching_grant` has no retention rule
+
+From the E5.1 boundary review. The table holds `person_id`, `section_id` and
+`nrps_call_id`, each with `RESTRICT` (`backend/app/models/identity.py:728`), and
+no retention rule names it, so a purge of the rows it points at would be
+blocked. **Owner:** E13, the retention job. **Done when:** the retention job
+names the table, and a purge test passes.
+
+## The `/dev` controls' origin check trusts the request's own Host header
+
+From the E5.1 boundary review. `DevControlRoute` compares `Origin` with a value
+built from the request's own scheme and Host (`backend/app/api/dev.py:1089`),
+so a DNS-rebinding page, whose Origin and Host agree, passes it in development.
+The routes exist only in development. **Owner:** E13. **Done when:** the check
+compares `Origin` with the origin of the configured `PUBLIC_BASE_URL`, with a
+test that a request whose Host and Origin match each other but name another
+host is refused.
+
+## Six server-required members stay optional in the frontend, and one figure has three names
+
+From the E5.1 boundary review. The frontend wire types keep six members the
+server requires optional: `closes_at`, `question_text`, `benchmark`,
+`workload_benchmark` and `institution_timezone` through `AddedLater`
+(`frontend/src/api/instructor.ts:72`, `:106`, `:206`, `:223`), and
+`section_count` (`frontend/src/api/leadership.ts:96`). ADR 0185 records why.
+The comparison figure type also has three names: `ComparisonFigureView`
+(`instructor.ts:145`), `OverlayFigure` (`components/PulseTrendChart.tsx:43`)
+and `BenchmarkFigure` (`components/StatPair.tsx:30`). **Owner:** E9, whose view
+rework reopens these files. **Done when:** the views alias the generated types
+directly, and one figure type name is imported.
+
+## The per-stream gate has no generated property
+
+From the E5.1 boundary's `invariant-coverage` review (LOW). The per-stream hold
+and the per-stream release legs are tested only on hand-built worlds. **Owner:**
+E6, which reopens the comment gate with moderation. **Done when:** one
+generated (Hypothesis) property asserts, over random worlds, that no answer is
+both visible under its week and in a batch, that every shown stream has at
+least the threshold of unreleased commenters, and that every batch slice has the
+threshold of authors over two or more weeks.
+
+## The summary gather's blank-comment class is not pinned to the view's
+
+From the per-PR re-check of E5.1-12 (#273, LOW). `reporting.py`'s summary
+gather carries its own copy of the blank-comment class that
+`report_comment_v003.sql` uses. The view's class is tested character by
+character under two collations; the gather's copy is tested only against a
+return to the one-argument `btrim`. A change that made the gather's copy
+collation-dependent again would pass every test. **Owner:** E6, which reopens
+the summary path with moderation. **Done when:** a test asserts the gather's
+pattern equals the v003 view's literal, or the gather reads blankness from the
+view instead of carrying a copy.
+
+## The roster reads full role URIs only
+
+From the per-PR security review of E5.1-11 (#274). Both the student rule and the
+instructor rule match the full LTI 1.3 role URIs. A platform that lists a short
+form such as `Learner` gives that member no enrollment, and one that lists
+`Instructor` in short form gives no teaching grant. Both fail closed. **Owner:**
+E13, with platform certification. **Done when:** each certified platform's NRPS
+role spelling is checked against the full-URI rules, and the result is recorded.
+
 ## The ledger
 
 Every source entry, in its source file's order, with what happened to it.
@@ -328,7 +537,7 @@ Every source entry, in its source file's order, with what happened to it.
 | A comment can forge block boundaries in the summary prompt | Carried through unchanged (E7 first) |
 | `moderation_state` has no tie-breakable ordering | Carried through unchanged (E6) |
 | SPEC §6.2's threat class is suppressed nowhere yet | Carried through unchanged (E6) |
-| The course label is composed in two modules | Re-carried: now three composers, plus `_person_of` |
+| The course label is composed in two modules | Re-carried: now three composers, plus `_person_of`. Closed after E5 by E5.1-03 and E5.1-07 |
 | The landing views' sentences sit outside the inventory | Carried through unchanged (E9) |
 | The Monday summary walk is serial | Carried through unchanged (E13) |
 | The reveal door accepts any answer id | Carried through unchanged (E6) |
@@ -357,7 +566,7 @@ Every source entry, in its source file's order, with what happened to it.
 | Three cohort views pair whole-week counts with subset figures | Carried: "The rating term-axis read and three cohort views are unread" (E9) |
 | The benchmark-history self-check has no term filter | Closed by E5-14 (a sentence) |
 | The named-set API's eight refusal sentences sit outside the inventory | Closed by E5-13 |
-| The instructor gate's 401 sentence is still a literal | Carried: "The instructor gate's 401 sentence is still a literal" (E9 likely) |
+| The instructor gate's 401 sentence is still a literal | Carried: "The instructor gate's 401 sentence is still a literal" (E9 likely). Closed after E5 by E5.1-03 |
 | A deleted comparison set leaves no trace anywhere | Carried: "A named-set write leaves no audit record" (E10) |
 | E5-06's preview reads none of the three unread cohort views | Carried, folded into the cohort-views entry (E9) |
 | The student benchmark sweep runs over one week | Carried: "E8's first obligation" (E8) |
@@ -375,7 +584,7 @@ Every source entry, in its source file's order, with what happened to it.
 | data-model LOW (rest): the route's refusal of a blank name | Closed by E5-14 (a 422 through the schema's minimum length) |
 | spec-conformance LOW: named-set writes not audited | Carried with the deferred entry (E10) |
 | a11y-copy LOW: hidden chart tables; input borders at 1.30:1 | Carried (E6) |
-| adr-docs-completeness LOW: PR #238's `_person_of` and third label composer | Carried with the course-label entry |
+| adr-docs-completeness LOW: PR #238's `_person_of` and third label composer | Carried with the course-label entry. Closed after E5 by E5.1-03 and E5.1-07 |
 | adr-docs-completeness HIGH, MEDIUM, LOW: process records from `main` | Closed by PR #248, merged to `main` as 0a9f81a |
 | privacy-authz (pass over round 2) HIGH and MEDIUM: two snapshots per instructor; only the reported section excluded | Closed by E5-14 rounds 3 and 4 (ADRs 0178 and 0179) |
 | privacy-authz (re-check on d7b4561) two HIGHs from co-teaching | Closed by E5-14 round 4 (reader-independent cutoff; per-person seal) |

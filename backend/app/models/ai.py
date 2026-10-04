@@ -1,7 +1,7 @@
 """What a model was asked, what it answered, and which prompt and model produced it (SPEC §7.4, §8).
 
-SPEC §13 gives this module `classification` and `summary`; E0-13 creates the
-first of them and E4 adds the second.
+SPEC §13 gives this module `classification`, which E0-13 creates. The stored
+summary §13 once put here lives in `report.py` as `weekly_summary` (ADR 0145).
 
 **One row is one classification, and rows are never edited.** SPEC §8:
 "`classification` is append-only (re-runs create new rows) with prompt/model

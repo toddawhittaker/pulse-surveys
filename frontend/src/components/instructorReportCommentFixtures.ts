@@ -86,12 +86,15 @@ export const EXCLUDED_COMMENT: ReportComment = {
 };
 
 /**
- * The configured response threshold the sketch's `small_n.threshold` carries.
+ * The configured threshold a stream's `small_n.threshold` carries — distinct
+ * commenters in that stream in a week.
  *
- * Deliberately not the default 5 everywhere in these tests: a component reading
- * a hardcoded 5 passes every assertion made with 5.
+ * Deliberately not the default 5: a component reading a hardcoded 5 passes
+ * every assertion made with 5. Nor 3 or 7, which are the summary's response
+ * count and the withheld comment count below, so no assertion about one of
+ * those numbers can be satisfied by the threshold.
  */
-export const SMALL_N_THRESHOLD = 5;
+export const SMALL_N_THRESHOLD = 6;
 
 /** The summary a below-threshold week still gets (§5.1: it is the only comment signal). */
 export const SMALL_N_SUMMARY = {

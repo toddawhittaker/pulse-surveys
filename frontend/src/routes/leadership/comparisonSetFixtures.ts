@@ -299,3 +299,18 @@ export const A_DUPLICATE_NAME_REFUSAL =
 export const A_NOT_THE_DEFINER_REFUSAL =
   'A comparison set is edited and deleted by the leader who defined it, and this one was defined by somebody else.';
 export const AN_UNKNOWN_SET_REFUSAL = 'There is no comparison set here.';
+
+/**
+ * A stored set whose length no section runs any more (E5.1-05, C4).
+ *
+ * Fourteen weeks is in no options answer in this file, so a form that offers
+ * it while editing this set offers it because the set carried it, and a form
+ * that offers it while creating has a length of its own. Everything else is
+ * `A_SET_THIS_READER_DEFINED`'s, so the length is the one difference.
+ */
+export const A_SET_OF_A_LENGTH_NO_SECTION_RUNS: ComparisonSetDetailView = {
+  ...A_SET_THIS_READER_DEFINED,
+  id: '9c1b77e3-5d84-4a06-b0f2-6e9a1b4c7a17',
+  name: 'Fall biology cohort, fourteen weeks',
+  length_weeks: 14,
+};

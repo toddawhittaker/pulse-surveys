@@ -52,8 +52,9 @@ PURVIEW_LEVELS = (
     "section_ids",
 )
 
-# SPEC §4: "Small-N handling (n < 5 responses in a reporting week)… Threshold
-# value is configurable (default 5)." Read out of the spec, not out of
+# SPEC §4's small-N rule (since E5.1-01, fewer than the threshold of distinct
+# students commenting in a stream in a reporting week): "Threshold value is
+# configurable (default 5)." Read out of the spec, not out of
 # `.env.example` or `Settings`, so that a default quietly changed in either is a
 # failure here rather than a new expectation (`docs/MISTAKES.md` entry 19).
 SPEC_DEFAULT_N_THRESHOLD = 5

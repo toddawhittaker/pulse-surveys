@@ -3,11 +3,12 @@
 SPEC §13 names this module for §5.1 — "distributions, trend lines, benchmark
 assembly" — and it now holds both halves of that section. E4-06 landed the write
 half first: the walk that *generates* §5.1's per-stream AI summaries, once per
-section-week, after the window closes and before Monday morning. E4-07 added the
-read half beside it — the payload layer that divides the counts E4-03's views
-return, derives §2.2's week axis, and assembles what
-`app.api.instructor` serves. They are the same section of the spec and share the
-same rows, so the name §13 chose is the name used and no second module was made.
+section-week, after the window closes and before the report opens at 06:00 on the
+Monday after (ADR 0184). E4-07 added the read half beside it — the payload layer
+that divides the counts E4-03's views return, derives §2.2's week axis, and
+assembles what `app.api.instructor` serves. They are the same section of the spec
+and share the same rows, so the name §13 chose is the name used and no second
+module was made.
 
 **The two halves and where the line between them is.** Everything down to
 `_responses_that_week` is the summary walk, and everything from `ComparisonFigure`
@@ -56,8 +57,9 @@ import logging
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
-from typing import TYPE_CHECKING, Any
+from datetime import UTC, datetime, timedelta
+from datetime import time as time_of_day
+from typing import TYPE_CHECKING, Any, Final
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -83,19 +85,18 @@ from app.models.survey import (
 from app.models.term import SurveyWindow, Term, Week
 from app.services import clock, enrollment_windows
 from app.services.authz import (
-    section_scoped_assignees,
     taught_section_ids,
     teaching_instructor_assigned,
 )
-from app.services.identity import person_for_user
 from app.services.report_comments import (
     ReportComment,
     n_threshold,
     released_comments,
     reported_status_of,
+    stream_is_suppressed,
     visible_comments,
 )
-from app.services.section_codes import week_of_the_term
+from app.services.section_codes import course_label, course_week_of
 
 if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
     # `app.schemas.report` imports `ComparisonFigure` from this module, because
@@ -430,11 +431,14 @@ def _summary_row(
         session, section_id=section_id, week_id=week_id, token=token
     )
     responses = _responses_that_week(session, section_id=section_id, week_id=week_id)
-    # SPEC §4's threshold, read through the one function that reads it
-    # (`app.services.report_comments.n_threshold`) — the same number
+    # SPEC §4's suppression, asked of the one function that decides it
+    # (`app.services.report_comments.stream_is_suppressed`) — the same answer
     # `visible_comments` applies and `_payload` prints, so the mode a summary is
-    # written under and the rule that hid the comments cannot come apart.
-    small_n = responses < n_threshold()
+    # written under and the rule that hid this stream's comments cannot come
+    # apart. Per stream: a thin instructor stream in a full week is summarized in
+    # small-N mode beside an ordinary course summary (ADR 0182). The row's
+    # `response_count` below stays the week's responses (§5.1, ADR 0148).
+    small_n = stream_is_suppressed(session, section_id=section_id, week_id=week_id, stream=token)
 
     record = _summary_of(
         comments=comments,
@@ -562,7 +566,15 @@ def _comments_reaching_the_model(
                 # constraint permits a row filling `comment_text` under a question
                 # of another kind, and a read is not the place to trust a write.
                 Answer.comment_text.is_not(None),
-                func.btrim(Answer.comment_text) != "",
+                # Blank means what Python's `str.strip()` removes, not only
+                # spaces: every such character listed by code point, so no
+                # collation changes the set, and the same class, character for
+                # character, as `report_comment_v003.sql`, whose header lists
+                # them (docs/disputes/E5.1-12-01.md). PostgreSQL's regex engine
+                # reads the escapes; the raw string keeps Python from doing so.
+                Answer.comment_text.regexp_match(
+                    r"[^\u0009-\u000d\u001c-\u001f\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]"
+                ),
                 # The one resolution of "which decision is current", called rather
                 # than written again: `app.services.report_comments` owns it
                 # (ADR 0145), and E4-07 closed the deferral that had this module
@@ -914,11 +926,58 @@ class SectionUnavailableError(Exception):
     """
 
 
+# ---------------------------------------------------------------------------
+# When a week's report opens — the owner's ruling of 2026-10-03 (E5.1-05).
+# ---------------------------------------------------------------------------
+
+# The wall-clock hour, in the institution's time zone, at which a week's report
+# opens. A constant rather than a setting: the rule has one correct answer, and
+# ADR 0184 records why. Naive on purpose — the zone is supplied by the caller.
+REPORT_OPENS_AT: Final[time_of_day] = time_of_day(6, 0)
+
+_MONDAY: Final[int] = 0
+
+
+def report_opens_at(closes_at: datetime, *, zone: ZoneInfo) -> datetime:
+    """The first Monday at `REPORT_OPENS_AT` in `zone` strictly later than `closes_at`.
+
+    For the default rhythm (a window closing Sunday 23:59:59) that is the next
+    morning at 06:00. A window closing Monday 05:00 opens that same morning; one
+    closing at Monday 06:00:00 exactly opens the following Monday.
+
+    **Computed on dates and wall time, never by adding an offset.** The close is
+    converted into `zone`, the candidate Monday is found on the calendar, and
+    `datetime.combine` attaches the zone to 06:00 on that date — so a week that
+    closes across a daylight-saving change still opens at 06:00 local, whichever
+    offset the window opened on. The comparison is made in UTC, because two
+    datetimes sharing one `tzinfo` compare by wall time and ignore `fold`.
+    """
+    local = closes_at.astimezone(zone)
+    monday = local.date() + timedelta(days=(_MONDAY - local.weekday()) % 7)
+    opens = datetime.combine(monday, REPORT_OPENS_AT, tzinfo=zone)
+    if opens.astimezone(UTC) <= closes_at.astimezone(UTC):
+        opens = datetime.combine(monday + timedelta(days=7), REPORT_OPENS_AT, tzinfo=zone)
+    return opens
+
+
+def week_is_published(closes_at: datetime, *, now: datetime, zone: ZoneInfo) -> bool:
+    """Whether the report of a week whose window closes at `closes_at` is open at `now`.
+
+    The one predicate both readers below call (`instructor_report` and
+    `published_course_weeks`, through `_published_weeks`). 06:00:00 exactly is
+    published; a microsecond before is not.
+    """
+    return now.astimezone(UTC) >= report_opens_at(closes_at, zone=zone).astimezone(UTC)
+
+
 class CourseWeekUnavailableError(Exception):
     """There is no report for that course week of this section — one refusal for two states.
 
-    **A week whose survey window has not closed, and a week the section never runs,
-    raise this same exception from the same line, and that is the point.** E4-07's
+    **A week whose report has not opened, and a week the section never runs, raise
+    this same exception from the same line, and that is the point.** A week's report
+    opens at 06:00 on the Monday after its window closes (`report_opens_at`, ADR
+    0184), so "not opened" covers a week still taking responses and a week that has
+    closed and is waiting for that Monday morning. E4-07's
     security round found the first of those served: `instructor_report` answered any
     course week with a `survey_window` row, so an instructor could poll a week that
     was still taking responses and read the *difference* between two views of it —
@@ -973,21 +1032,21 @@ def instructor_report(
     rather than a thing to trust; see `_readable_section`.
 
     **Being published is a precondition, and the asked week is selected out of the
-    published set rather than out of the calendar.** SPEC §3.1 puts the report after
-    the window closes and this ticket's own context is "one published course week";
+    published set rather than out of the calendar.** SPEC §3.1 puts the report at
+    06:00 on the Monday after the window closes (ADR 0184, through
+    `_published_weeks`), and this ticket's own context is "one published course week";
     serving a week still taking responses lets an instructor read the same report
     twice and subtract, which is one student's submission each time
     (`docs/MISTAKES.md` entry 51, and `CourseWeekUnavailableError` carries the
     argument). Selecting from `published` rather than testing against it afterwards
-    is what makes an open week and a week the section never runs leave this function
-    by the same line, with nothing to tell them apart.
+    is what makes an unopened week and a week the section never runs leave this
+    function by the same line, with nothing to tell them apart.
 
     Raises `SectionUnavailableError` and `CourseWeekUnavailableError`; the router
     is what turns each into an HTTP answer.
     """
     section = _readable_section(session, person_id=person_id, section_id=section_id)
-    now = clock.now(session, settings=settings)
-    published = [week for week in _section_weeks(session, section) if week.closes_at < now]
+    published = _published_weeks(session, section=section, settings=settings)
 
     asked = next((week for week in published if week.course_week == course_week), None)
     if asked is None:
@@ -1000,21 +1059,41 @@ def instructor_report(
 def published_course_weeks(
     session: Session, *, person_id: UUID | None, section_id: UUID, settings: Settings
 ) -> list[int]:
-    """The course weeks of this person's own section whose survey window has closed.
+    """The course weeks of this person's own section whose report has opened.
 
-    E4's breakdown decision 6: "a published week is a course week whose survey
+    E4's breakdown decision 6 made a published week "a course week whose survey
     window has closed, per the clock service … Nothing is stored to make a week
-    published." So this is a comparison between a stored instant and the effective
-    clock (ADR 0109) and never a flag, which is what lets a developer move the
-    clock and watch a week appear.
+    published." E5.1-05 moved the instant to 06:00 on the Monday after the close, in
+    the institution's time zone (ADR 0184), and kept the rest: this is still a
+    comparison between a stored instant and the effective clock (ADR 0109) and never
+    a flag, which is what lets a developer move the clock and watch a week appear.
 
     **It is the same derivation the payload's own `week.published_weeks` makes**,
-    through the same two functions, so the list a reader pages across and the list
+    through `_published_weeks`, so the list a reader pages across and the list
     inside the report she is reading cannot disagree.
     """
     section = _readable_section(session, person_id=person_id, section_id=section_id)
+    return [
+        week.course_week for week in _published_weeks(session, section=section, settings=settings)
+    ]
+
+
+def _published_weeks(
+    session: Session, *, section: Section, settings: Settings
+) -> list[_SectionWeek]:
+    """This section's weeks whose report has opened, on the effective clock (ADR 0109).
+
+    The one place both readers above select their published weeks, so the list a
+    reader pages across and the report she is reading cannot disagree. The zone is
+    the institution's, because "06:00 on Monday" is a wall-clock promise.
+    """
     now = clock.now(session, settings=settings)
-    return [week.course_week for week in _section_weeks(session, section) if week.closes_at < now]
+    zone = ZoneInfo(settings.institution_timezone)
+    return [
+        week
+        for week in _section_weeks(session, section)
+        if week_is_published(week.closes_at, now=now, zone=zone)
+    ]
 
 
 def taught_sections(session: Session, *, person_id: UUID | None) -> list["TaughtSection"]:
@@ -1041,9 +1120,10 @@ def taught_sections(session: Session, *, person_id: UUID | None) -> list["Taught
     random uuids only by accident, and any order derived from the assignments would
     say when each grant was written.
 
-    The label is `_course_label`, which is the report's own composer and FIX-01 item
-    2's governed form. A second composition written for this list would be a second
-    answer to what a section is called (`docs/MISTAKES.md` entry 13).
+    The label is `_course_label`'s, which hands the section's rows to
+    `app.services.section_codes.course_label`, the one composer. A second
+    composition written for this list would be a second answer to what a section is
+    called (`docs/MISTAKES.md` entry 13).
     """
     from app.schemas.report import TaughtSection
 
@@ -1093,24 +1173,13 @@ def _readable_section(session: Session, *, person_id: UUID | None, section_id: U
     return section
 
 
-def _course_week_of(term_week: int, *, section_start: date, term_start: date) -> int:
-    """The course week a term week is, for a section starting on `section_start`.
-
-    `week_of_the_term` is this codebase's one reading of §2.2's two axes; this
-    is the one place a report turns a stored term week back into a course week
-    with it. Course weeks count from 1, which is the inclusive `+ 1`.
-    """
-    first_term_week = week_of_the_term(1, section_start=section_start, term_start=term_start)
-    return term_week - first_term_week + 1
-
-
 def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
     """Every week this section has a survey window for, on both of §2.2's axes.
 
     **The stored windows, not the derived ones.** `survey_windows.windows_for_section`
     answers what the calendar *implies*; `survey_window` holds what was written, and
-    "the window has closed" is a statement about the row a student answered against
-    — the same instants `generate_missing_summaries` above compares. A read that
+    when a week's report opens is computed from the close on the row a student
+    answered against — the same instants `generate_missing_summaries` above compares. A read that
     derived its own instants would answer a different question the day a calendar
     is corrected under windows already written.
 
@@ -1118,7 +1187,8 @@ def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
     the section code.** `week_of_the_term` is this codebase's one reading of §2.2's
     two axes, and a second copy of it here is how a course-level page and an
     aggregate page come to disagree about the same section (`docs/MISTAKES.md`
-    entry 19). Course weeks count from 1, which is the inclusive `+ 1` below.
+    entry 19). `section_codes.course_week_of` reads it backwards, once, for every
+    report that turns a stored term week into a course week.
     """
     term = session.get(Term, section.term_id)
     if term is None:  # pragma: no cover - `section.term_id` is a non-null foreign key
@@ -1138,7 +1208,7 @@ def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
         _SectionWeek(
             week_id=week_id,
             term_week=number,
-            course_week=_course_week_of(
+            course_week=course_week_of(
                 number, section_start=section.start_date, term_start=term.start_date
             ),
             opens_at=opens_at,
@@ -1264,7 +1334,7 @@ def _population_cutoffs(
     week *w* only if its own week-*w* window closed by the earliest close.
 
     One statement over the peers' windows, with each stored term week read back
-    as a course week through `_course_week_of`.
+    as a course week through `section_codes.course_week_of`.
     """
     cutoffs = {week.course_week: week.closes_at for week in published}
     term = session.get(Term, section.term_id)
@@ -1283,7 +1353,7 @@ def _population_cutoffs(
         )
     ).all()
     for number, section_start, closes_at in windows:
-        course_week = _course_week_of(
+        course_week = course_week_of(
             number, section_start=section_start, term_start=term.start_date
         )
         if course_week in cutoffs and closes_at < cutoffs[course_week]:
@@ -1465,6 +1535,15 @@ def _payload(
             ),
             question_text=question_texts[token],
             benchmark=benchmarks_by_stream[token],
+            # SPEC §4's suppression is per stream (ADR 0182), so the notice is too:
+            # the comment service's own answer for this stream, and the threshold
+            # it compared with. No count of anybody — §5.2's "no count".
+            small_n=schema.SmallNView(
+                suppressed=stream_is_suppressed(
+                    session, section_id=section.id, week_id=week.week_id, stream=token
+                ),
+                threshold=threshold,
+            ),
         )
         for token in REPORT_STREAMS
     }
@@ -1506,7 +1585,6 @@ def _payload(
         # E4-07's own reconciliation test names it; a later ticket may retire it
         # once nothing reads it.
         comparison=workload_benchmark.comparison.mean,
-        small_n=schema.SmallNView(suppressed=responses < threshold, threshold=threshold),
         released_from_earlier_weeks=_comment_views(released),
         institution_timezone=settings.institution_timezone,
     )
@@ -1707,8 +1785,8 @@ def _enrolled_students(
     E1-11 writes an `enrollment` row for her, so without this an instructor is one
     of the people her own response rate is divided by. The test is an assignment
     scoped to this section, asked in that direction because a student holds no
-    assignment at all (ADR 0028) — `app.services.grading._live_enrollments` answers
-    the same question about today and applies the same rule.
+    assignment at all (ADR 0028). The filter is `enrollment_windows.without_staff`,
+    which `app.services.grading._live_enrollments` calls too about today.
     """
     zone = ZoneInfo(settings.institution_timezone)
     opened_on = week.opens_at.astimezone(zone).date()
@@ -1726,13 +1804,7 @@ def _enrolled_students(
             closes_at=week.closes_at,
         )
     }
-    staff = section_scoped_assignees(session, section_id=section.id)
-    if not staff:
-        return len(enrolled)
-    # The hop from a member to their person is a definer call each (ADR 0024,
-    # ADR 0094), so it is skipped entirely for a section nobody has entered in the
-    # people graph — which is the shape `_live_enrollments` takes and why.
-    return sum(1 for user_id in enrolled if person_for_user(session, user_id) not in staff)
+    return len(enrollment_windows.without_staff(session, section_id=section.id, user_ids=enrolled))
 
 
 def _course_label(session: Session, section: Section) -> str:
@@ -1743,13 +1815,9 @@ def _course_label(session: Session, section: Section) -> str:
     The owner's ruling of 2026-09-03 settled that order for the student's own page,
     and the instructor reads the same course under the same name.
 
-    **This is a second copy of `app.services.survey_read._course_label`'s
-    composition, and it is one deliberately for now.** That function is private to a
-    module E4-07 was told not to touch, and promoting it is a change to a shared
-    signature — which this ticket proposes in its pull request rather than making.
-    Two copies of a format string is `docs/MISTAKES.md` entry 13's shape and the
-    proposal is what closes it; until then, the two are edited together or the
-    student's page and her instructor's report name the same course differently.
+    **The format is `app.services.section_codes.course_label`'s**, the composer the
+    student's page calls too, so the two cannot name the same course differently.
+    This function only fetches the rows the label is made of.
     """
     term = session.get(Term, section.term_id)
     course = session.get(Course, section.course_id)
@@ -1758,7 +1826,10 @@ def _course_label(session: Session, section: Section) -> str:
     prefix = session.get(Prefix, course.prefix_id)
     if prefix is None:  # pragma: no cover - a non-null foreign key
         raise SectionUnavailableError
-    return (
-        f"{prefix.code} {course.lms_number} {section.lms_section_code} — "
-        f"{course.lms_title}, {term.name}"
+    return course_label(
+        prefix_code=prefix.code,
+        lms_number=course.lms_number,
+        lms_title=course.lms_title,
+        section_code=section.lms_section_code,
+        term_name=term.name,
     )

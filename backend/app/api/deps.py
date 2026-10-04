@@ -1,18 +1,29 @@
 """What a router needs from the request that is not the request (SPEC §13).
 
-Today that is three things. The first is the short-lived signed cookie the **web**
-door uses to carry a `state`, a `nonce` and a PKCE verifier from the redirect
-that mints them to the redirect that checks them. The launch door carried one
-too until E1-08 moved its handshake into a server-side store (ADR 0089); this
-cookie is the web door's alone now, and ADR 0093 says why it stays. The second
-is the small amount of scaffolding both doors share around their answers: the
-two status codes, the four pages a door can answer with that are not a landing,
-and the tail that turns verified claims into a session and a landing redirect,
-or into one of those pages. The third is E2-09's `require_student`, the first
-dependency that reads a session back off a later request and says what it may
-act as. §13 names this module for "auth context, role scoping, n-threshold
-guards"; the first two of those are here now, and the third arrives with the
-screens that need it.
+Today that is four things:
+
+* **the role gates** — `require_student`, `require_instructor` and
+  `require_leadership`, which read a session back off a request and say what it
+  may act as, and `person_of`, which reads the person a session names;
+* **the CSRF check** a writing route carries on top of its role gate,
+  `csrf_verified_student` and `csrf_verified_leadership`;
+* **the landing tail** both doors share, `landing_with_session`, which turns
+  verified claims into a session and a landing redirect, or into a calm page;
+* **the door pages** — the four pages a door can answer with that are not a
+  landing, their template, and the design tokens that template shares with the
+  development console.
+
+§13 names this module for "auth context, role scoping, n-threshold guards"; the
+first two of those are here. The n-threshold guards are not: SPEC §4's comment
+threshold is decided in `app.services.report_comments` (`stream_is_suppressed`
+and `visible_comments`, ADR 0182), and the comparison-set minimums in
+`app.services.reporting`. A guard held in `services/` holds for every entry
+point that reads through it, where one held here would hold for HTTP alone.
+
+**The web door's login cookie is not here.** It lived here while both doors used
+it. E1-08 moved the launch door's handshake into a server-side store (ADR 0089),
+and E5.1-03 moved the cookie and its helpers to `app.api.auth`, the one door that
+still carries it.
 
 **The pages themselves live here from E1-13 on.** They were in
 `app/services/landing.py`, beside the claims-derived landing seam that ticket
@@ -28,73 +39,13 @@ provider declined for you (`web-login-cancelled`); Pulse holds no record of you
 view at this door (`no-access`, E1-13). The last three are 200s, because nothing
 went wrong in any of them, and the person in front of the screen is owed the
 right words and the right person to ask.
-
-**Why a cookie at all.** The web login leaves the tool and comes back:
-`/auth/oidc/login` sends a browser to the provider and `/auth/oidc/callback`
-receives the code. `state` is the cross-site request forgery defence, `nonce` is
-the replay defence, and the PKCE verifier is the whole of what binds the code to
-this client. All three are only defences if the second request can be shown to
-have come from the same browser as the first, so something has to hold them in
-between.
-
-**Why it is signed rather than stored — and why it stays a cookie (ADR 0093).**
-A row in a table is what E1-08 built for the launch door, because a cookie
-cannot survive the LMS's cross-site iframe: browsers block it there whatever its
-attributes say. No iframe is involved in a web login. `/auth/oidc/callback` is a
-top-level navigation the browser makes to this tool's own address, which a
-`SameSite=Lax` cookie rides, so the reason the launch handshake had to move does
-not reach this door — and a second, differently shaped handshake store would be
-a schema and a purge beat bought for nothing. Signed rather than plain because
-the whole point of `state` is that the caller did not choose it: an unsigned
-cookie is a value the caller writes, and comparing a caller-supplied `state`
-against a caller-supplied cookie proves nothing at all.
-
-**The secret is per process and is generated at startup.** `app.state` holds
-`secrets.token_bytes(32)` minted in `create_app`, so:
-
-* restarting the API invalidates every login that is in flight, and the browser
-  gets a refusal rather than a session;
-* **more than one API process cannot serve one login**, because the second
-  process cannot read the first one's cookie. Compose runs one `api` container
-  and this is a single-process system, so this is true today and would be the
-  first thing to break under a second replica.
-
-Both are stated rather than hidden. A login dying on a restart is the safe
-direction for a five-minute in-flight value — unlike the session itself, which is
-signed with a *configured* secret precisely so a restart does not log a sitting
-person out (ADR 0089). What is deliberately *not* done is to add a configured
-secret for this one as well: an `.env.example` entry is a promise that a value is
-worth setting, and the price of not making it is the replica limit above, named
-in ADR 0093's consequences rather than discovered.
-
-**`Secure` everywhere except development.** The cookie holds the `state`, the
-`nonce` and the PKCE verifier — the last of which is the whole of what binds an
-authorization code to this client, since it is a public one with no secret. A
-browser sends a cookie without `Secure` over plain HTTP, so anyone on the path
-reads all three. The flag cannot simply be on, either: a `Secure` cookie is not
-sent to `http://localhost`, and `docker compose up` has to be signable-into on a
-laptop, so an unconditional flag would refuse every development flow for a
-`state` mismatch and look like a broken door. So it is on unless `ENVIRONMENT` is
-exactly `development`, which is the same question `app/main.py` asks before it
-serves `/docs`, asked through the same predicate, `app.config.is_development`.
-The question is asked once, here, rather than at each door: two copies of it is
-`docs/MISTAKES.md` entry 13, and one door left insecure is invisible.
-
-**`SameSite=Lax`, not `None`.** The one request that has to carry this cookie is
-the provider's redirect back to `/auth/oidc/callback`, which is a top-level GET
-navigation — exactly what `Lax` is written to allow, cross-site or not. `None`
-would widen the cookie to every cross-site subrequest and buy this door nothing:
-the cross-site POST that needed `None`, and the iframe that made even `None`
-insufficient, both belonged to the launch door, and neither exists here.
 """
 
-import time
 from collections.abc import Mapping
 from html import escape
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from uuid import UUID
 
-import jwt
 from fastapi import Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
@@ -102,7 +53,9 @@ from sqlalchemy.orm import Session
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.config import Settings, is_development
+from app.config import Settings
+from app.copy import CopyEntry, entry
+from app.copy.instructor_report import NOT_AN_INSTRUCTOR
 from app.copy.leadership_sets import NOT_LEADERSHIP
 from app.copy.student_read import NOT_A_STUDENT
 from app.copy.submit import COPY
@@ -130,23 +83,18 @@ __all__ = [
     "CSRF_HEADER",
     "CSRF_REFUSED_KEY",
     "CSRF_REFUSED_STATUS",
+    "DESIGN_TOKENS_CSS",
     "FOUND",
-    "LOGIN_COOKIE_LIFETIME_SECONDS",
-    "LTI_LOGIN_COOKIE",
     "NOT_AN_INSTRUCTOR_CHALLENGE",
     "NOT_AN_INSTRUCTOR_STATUS",
     "NOT_A_STUDENT_CHALLENGE",
     "NOT_A_STUDENT_STATUS",
     "NOT_LEADERSHIP_CHALLENGE",
     "NOT_LEADERSHIP_STATUS",
-    "OIDC_LOGIN_COOKIE",
     "PAGE",
     "REFUSED",
     "cancelled",
     "cancelled_page",
-    "carried_across",
-    "carry_across",
-    "clear_carried",
     "csrf_verified_leadership",
     "csrf_verified_student",
     "landing_with_session",
@@ -154,32 +102,13 @@ __all__ = [
     "no_access_page",
     "no_account",
     "no_account_page",
+    "person_of",
     "refusal_page",
     "refused",
     "require_instructor",
     "require_leadership",
     "require_student",
-    "with_query",
 ]
-
-# One cookie per door. Two names rather than one shared name because the two
-# flows can be in progress at once — the same person opening a report from an
-# LMS launch while a web login is half done — and one cookie would have the
-# second overwrite the first, producing a refusal on a flow nobody did anything
-# wrong in.
-LTI_LOGIN_COOKIE = "pulse_lti_login"
-OIDC_LOGIN_COOKIE = "pulse_oidc_login"
-
-# How long a login may take. Five minutes is what both mocks give their own
-# pending requests, and it is generous for a redirect a browser follows
-# immediately. Not a setting: there is one right answer and a knob for it would
-# only ever be turned up.
-LOGIN_COOKIE_LIFETIME_SECONDS = 300
-
-# The algorithm this module signs with, passed explicitly on the way in *and* on
-# the way out. A verifier that read `alg` out of the cookie would accept `none`
-# from anyone who could write the cookie, which is everyone.
-COOKIE_ALGORITHM = "HS256"
 
 # What a refused launch or sign-in answers. 400 rather than 401 or 403: nothing
 # here is authenticated in the HTTP sense — there is no realm to challenge and no
@@ -190,80 +119,6 @@ REFUSED = 400
 # framework and every platform in the field expect; 303 would also be correct
 # after a POST and is not what tools send.
 FOUND = 302
-
-
-def with_query(url: str, parameters: Mapping[str, str]) -> str:
-    """`url` carrying `parameters`, keeping any query it already had.
-
-    Here rather than in either router because both doors build exactly one
-    redirect this way — the launch door's authorization request and the web
-    door's — and two copies of "how a redirect is assembled" is the shape
-    `docs/MISTAKES.md` entry 13 is about.
-
-    A configured endpoint may legitimately carry a query of its own: a tenant
-    identifier, a routing hint. An implementation that appended `?` would
-    silently drop it. Built with `urlsplit`/`urlunsplit` rather than by string
-    concatenation so that a fragment, if there is one, stays after the query
-    where RFC 3986 puts it.
-    """
-    split = urlsplit(url)
-    existing = parse_qsl(split.query, keep_blank_values=True)
-    merged = urlencode([*existing, *parameters.items()])
-    return urlunsplit((split.scheme, split.netloc, split.path, merged, split.fragment))
-
-
-def carry_across(
-    response: Response,
-    name: str,
-    secret: bytes,
-    values: Mapping[str, str],
-    settings: Settings,
-) -> None:
-    """Put `values` on `response` as a signed, short-lived cookie called `name`.
-
-    `settings` is here for one attribute — `Secure`, which is set unless this is a
-    development environment. See the module docstring for why it is conditional
-    and why the condition is read here rather than at each door.
-    """
-    payload: dict[str, Any] = dict(values)
-    payload["exp"] = int(time.time()) + LOGIN_COOKIE_LIFETIME_SECONDS
-    response.set_cookie(
-        name,
-        jwt.encode(payload, secret, algorithm=COOKIE_ALGORITHM),
-        max_age=LOGIN_COOKIE_LIFETIME_SECONDS,
-        httponly=True,
-        secure=not is_development(settings),
-        samesite="lax",
-        path="/",
-    )
-
-
-def carried_across(secret: bytes, sealed: str | None) -> dict[str, Any] | None:
-    """What this tool put in the cookie, or `None` if it did not put it there.
-
-    One `None` for every way this can fail — no cookie, a cookie this process
-    did not sign, an expired one — because the caller's answer is the same
-    refusal in every case, and a refusal that said which would tell an attacker
-    whether their forgery was well formed.
-    """
-    if not sealed:
-        return None
-    try:
-        return jwt.decode(sealed, secret, algorithms=[COOKIE_ALGORITHM])
-    except jwt.PyJWTError:
-        return None
-
-
-def clear_carried(response: Response, name: str) -> None:
-    """Delete the cookie, because the login it belonged to is over.
-
-    Called on every way out of the web door's callback — the session it issues,
-    the refusal, and the cancel branch — because a `state` is good once, and one
-    left in the browser is one an attacker can replay into a second callback. The
-    launch door had a second caller here until E1-08 moved its handshake into a
-    server-side store; it now sets no login cookie to clear (ADR 0089).
-    """
-    response.delete_cookie(name, path="/")
 
 
 # ---------------------------------------------------------------------------
@@ -323,14 +178,13 @@ def require_student(request: Request) -> SessionClaims:
     put there as "the launch-side row", and a second wrapper around it would be a
     second answer to "who is this" for the two modules to disagree about.
     """
-    session = session_from_request(request, request.app.state.session_secret)
-    if session is None or session.role is not LandingRole.STUDENT:
-        raise HTTPException(
-            status_code=NOT_A_STUDENT_STATUS,
-            detail=NOT_A_STUDENT.text,
-            headers=NOT_A_STUDENT_CHALLENGE,
-        )
-    return session
+    return _session_in_role(
+        request,
+        LandingRole.STUDENT,
+        status=NOT_A_STUDENT_STATUS,
+        detail=NOT_A_STUDENT.text,
+        challenge=NOT_A_STUDENT_CHALLENGE,
+    )
 
 
 # What a request that is not an instructor's is answered with — the same 401 and
@@ -347,23 +201,6 @@ def require_student(request: Request) -> SessionClaims:
 # tests assert the 401 and name the 404 as the near miss for exactly that reason.
 NOT_AN_INSTRUCTOR_STATUS = 401
 NOT_AN_INSTRUCTOR_CHALLENGE = {"WWW-Authenticate": BEARER_SCHEME}
-
-# What such a request is told. **Not in `app.copy`, and still a gap.** The reason
-# it was written here has expired: E2-11's inventory governs a key by its surface
-# prefix, and the report was not a governed surface when E4-07 shipped this, so a
-# copy module for it would have landed under a prefix no surface claimed. E4-12
-# made the report a governed surface (ADR 0158) and moved the router's two
-# refusals into `app.copy.instructor_report`, and this third sentence was not in
-# that entry's scope — so it is a literal on a governed surface's road rather
-# than a sentence with nowhere to live. `docs/tickets/e5/deferred.md` carries it
-# with an owner and a done-when.
-#
-# It names nobody and nothing: no section, no role, no subject. A refusal answered
-# to anybody who can make a request is a refusal that may describe only itself.
-NOT_AN_INSTRUCTOR = (
-    "This is an instructor's report, and this request does not carry an instructor's session. "
-    "Open Pulse Surveys from inside your course in the LMS to read it."
-)
 
 
 def require_instructor(request: Request) -> SessionClaims:
@@ -397,14 +234,13 @@ def require_instructor(request: Request) -> SessionClaims:
     four into `None` so that a caller trying tokens cannot tell a real one from a
     forgery by the answer, and the fifth joins them here for the same reason.
     """
-    session = session_from_request(request, request.app.state.session_secret)
-    if session is None or session.role is not LandingRole.INSTRUCTOR:
-        raise HTTPException(
-            status_code=NOT_AN_INSTRUCTOR_STATUS,
-            detail=NOT_AN_INSTRUCTOR,
-            headers=NOT_AN_INSTRUCTOR_CHALLENGE,
-        )
-    return session
+    return _session_in_role(
+        request,
+        LandingRole.INSTRUCTOR,
+        status=NOT_AN_INSTRUCTOR_STATUS,
+        detail=NOT_AN_INSTRUCTOR.text,
+        challenge=NOT_AN_INSTRUCTOR_CHALLENGE,
+    )
 
 
 # What a request that is not a leadership session is answered with — the same 401
@@ -415,9 +251,8 @@ def require_instructor(request: Request) -> SessionClaims:
 # borrowing another role's constant moves when somebody changes that other one.
 #
 # The sentence is `app.copy.leadership_sets.NOT_LEADERSHIP` — in the copy package
-# from the day it is written, unlike the instructor refusal above, which is a
-# module constant here because the report surface was not a governed one when
-# E4-07 shipped. Since E5-13 it is a registry entry's own text, published under
+# from the day it is written. The instructor refusal above joined the package
+# later, when E5.1-03 moved it into `app.copy.instructor_report`. Since E5-13 it is a registry entry's own text, published under
 # the `leadership_comparison_sets.` prefix with the comparison-set screen's other
 # words, so SPEC §4.1 items 4 and 5 are asserted over what this gate answers
 # (ADR 0176).
@@ -455,29 +290,82 @@ def require_leadership(request: Request) -> SessionClaims:
     caller trying tokens cannot tell a real one from a forgery by the answer, and
     the fifth joins them here.
     """
+    return _session_in_role(
+        request,
+        LandingRole.LEADERSHIP,
+        status=NOT_LEADERSHIP_STATUS,
+        detail=NOT_LEADERSHIP,
+        challenge=NOT_LEADERSHIP_CHALLENGE,
+    )
+
+
+def _session_in_role(
+    request: Request,
+    role: LandingRole,
+    *,
+    status: int,
+    detail: str,
+    challenge: dict[str, str],
+) -> SessionClaims:
+    """The verified session on `request` if it is in `role`, or the gate's one refusal.
+
+    The body all three role gates share. **The gates themselves stay three public
+    functions**, and that is the point of keeping this private: SPEC §4.1 item 1's
+    sweep and every route inventory find a surface by asking which routes carry
+    `require_student`, `require_instructor` or `require_leadership` as an object in
+    their dependency graph. One function, or three closures out of a factory, would
+    give those walks nothing to tell the surfaces apart by.
+
+    `session_from_request` collapses an absent, malformed, expired or wrongly
+    signed token into `None`, and a real session in another role joins it here,
+    so every one of them gets the same status, the same words and the same
+    challenge — the reason each gate's own docstring gives.
+    """
     session = session_from_request(request, request.app.state.session_secret)
-    if session is None or session.role is not LandingRole.LEADERSHIP:
-        raise HTTPException(
-            status_code=NOT_LEADERSHIP_STATUS,
-            detail=NOT_LEADERSHIP,
-            headers=NOT_LEADERSHIP_CHALLENGE,
-        )
+    if session is None or session.role is not role:
+        raise HTTPException(status_code=status, detail=detail, headers=challenge)
     return session
+
+
+def person_of(claims: SessionClaims) -> UUID | None:
+    """The `person` row this session was resolved to, or `None` where it names none.
+
+    A claim in a JWT is JSON, so `person_id` is a string here and a `uuid.UUID`
+    in every service below (ADR 0016). A value that is not one is a token this
+    deployment did not issue in the shape it issues them, and it resolves to
+    nobody rather than to a 500 from inside the parse. Each service answers that
+    `None` as it answers a session naming a person with nothing to read: the
+    instructor report as somebody who teaches nothing, the comparison sets as a
+    session that may read every set and write none.
+
+    Here because it is what a router needs from the request: `app.api.instructor`
+    and `app.api.leadership` each held a copy of these four lines until E5.1-03.
+    """
+    if claims.person_id is None:
+        return None
+    try:
+        return UUID(claims.person_id)
+    except ValueError:
+        return None
 
 
 # ---------------------------------------------------------------------------
 # The four pages a door can answer with that are not a landing.
 # ---------------------------------------------------------------------------
 
+# **Their words are `app.copy.entry`'s** (E5.1-03), so SPEC §4.1 items 4 and 5 are
+# swept over every heading and message a door page shows. What stays here is the
+# routing — which entry a refusing guard's page carries — the testids and the
+# template. The comments below say why each page says what it says.
+
 # What a refused entry says. Deliberately one sentence and a reason, with no
 # retry link: there is nowhere for a browser to go from here that is not the
 # platform or the provider it came from, and a link built out of a request that
 # just failed validation is the open redirect both doors exist to refuse.
 REFUSAL_TESTID = "pulse-entry-refused"
-REFUSAL_HEADING = "This did not open"
 
-# The sentence each guard's refusal page carries, keyed by the guard's own class
-# name — the machine vocabulary ADR 0103 put in `data-reason`, and the only
+# The registry entry each guard's refusal page carries, keyed by the guard's own
+# class name — the machine vocabulary ADR 0103 put in `data-reason`, and the only
 # thing `refusal_page` takes.
 #
 # **The page derives its copy rather than being handed it, and that is the
@@ -487,7 +375,7 @@ REFUSAL_HEADING = "This did not open"
 # provoked it, and the string nearest to hand at every call site is the
 # exception that refused — whose `str()` carries whatever a library was told by
 # the caller. So the callers pass a name from a closed vocabulary, this mapping
-# turns it into a constant, and a name nothing maps gets `DEFAULT_REFUSAL_COPY`.
+# turns it into a registry entry, and a name nothing maps gets `DEFAULT_REFUSAL_COPY`.
 # There is nowhere for a caller's words to go.
 #
 # **Keyed by class name and not by class**, so `app.api.deps` imports neither
@@ -499,41 +387,26 @@ REFUSAL_HEADING = "This did not open"
 # `NonceReplayedError`'s two sentences are `app.lti.replay_guard`'s own words,
 # copied whole: `tests/e2e/exit-refused-launches.spec.ts` keeps one prose
 # assertion as its copy canary and matches that string.
-REFUSAL_COPY: Mapping[str, str] = {
-    "SignatureRefused": (
-        "This launch could not be verified. Its signature, the algorithm it names, or the key it "
-        "was signed with did not hold."
-    ),
-    "AudienceRefused": "This launch was issued for a different tool than this one.",
-    "IssuerRefused": "No registration here exists for the platform that began this launch.",
-    "NonceRefused": "This launch carries no `nonce`, or one this tool did not send.",
-    "NonceReplayedError": (
-        "This launch has already been delivered once. A launch nonce is single-use, and "
-        "presenting the same signed launch a second time is refused."
-    ),
-    "DeploymentRefused": "This launch names a deployment this tool was never installed into.",
-    "MessageTypeRefused": "This launch is a message type this tool does not serve.",
-    "VersionRefused": "This launch states an LTI version this tool does not speak.",
-    "StateRefused": "This launch returns a `state` this tool did not issue, or none at all.",
-    "ClockSkewRefused": "This launch was minted too far in the future, or expired too long ago.",
-    "AnonymousLaunchRefused": (
-        "This launch names nobody. Pulse Surveys shows each person their own work, so a launch "
-        "carrying no subject is one it cannot open."
-    ),
-    "SessionRefusedError": (
-        "That sign-in could not be verified, and nobody has been signed in. Start again from "
-        "where you opened Pulse Surveys."
-    ),
+REFUSAL_COPY: Mapping[str, CopyEntry] = {
+    "SignatureRefused": entry.REFUSED_SIGNATURE,
+    "AudienceRefused": entry.REFUSED_AUDIENCE,
+    "IssuerRefused": entry.REFUSED_ISSUER,
+    "NonceRefused": entry.REFUSED_NONCE,
+    "NonceReplayedError": entry.REFUSED_NONCE_REPLAYED,
+    "DeploymentRefused": entry.REFUSED_DEPLOYMENT,
+    "MessageTypeRefused": entry.REFUSED_MESSAGE_TYPE,
+    "VersionRefused": entry.REFUSED_VERSION,
+    "StateRefused": entry.REFUSED_STATE,
+    "ClockSkewRefused": entry.REFUSED_CLOCK_SKEW,
+    "AnonymousLaunchRefused": entry.REFUSED_ANONYMOUS_LAUNCH,
+    "SessionRefusedError": entry.REFUSED_SESSION,
 }
 
-# What a guard this mapping does not know is answered with. A constant, and
+# What a guard this mapping does not know is answered with. A registry entry, and
 # every word of it true of any refusal: it reports nothing about what was handed
 # in, which is what keeps a guard name nobody mapped from becoming a caller's
 # string in the body by way of an f-string that meant to be helpful.
-DEFAULT_REFUSAL_COPY = (
-    "This tool could not account for what it was handed, and nobody has been signed in. Start "
-    "again from where you opened Pulse Surveys."
-)
+DEFAULT_REFUSAL_COPY = entry.REFUSED_DEFAULT
 
 # What a cancelled web login says (E1-09). Calm and non-blaming, per
 # `docs/DESIGN_BRIEF.md`'s tone: the person declined to sign in, or the provider
@@ -544,8 +417,6 @@ DEFAULT_REFUSAL_COPY = (
 # that repeated them would be a page whose words they wrote, under this tool's own
 # name and styling.
 CANCELLED_TESTID = "web-login-cancelled"
-CANCELLED_HEADING = "Sign-in did not finish"
-CANCELLED_MESSAGE = "Nothing was changed and nobody is signed in. You can start again when ready."
 
 # What a web login by somebody this system has no record of says (E1-12). A third
 # answer beside the two above, because it is a third event: the sign-in worked and
@@ -560,12 +431,6 @@ CANCELLED_MESSAGE = "Nothing was changed and nobody is signed in. You can start 
 # address in that token are the provider's text, and this page has nowhere to put
 # them.
 NO_ACCOUNT_TESTID = "no-account"
-NO_ACCOUNT_HEADING = "Pulse Surveys has no account for you yet"
-NO_ACCOUNT_MESSAGE = (
-    "You signed in correctly and nothing went wrong. Pulse Surveys keeps its own record of who "
-    "works here, and there is no record for you yet, so there is nothing to show. Ask whoever "
-    "administers Pulse Surveys at your institution to add you."
-)
 
 # What somebody Pulse *does* hold a record of is told when nothing in that record
 # gives them a view at the door they came in by (E1-13). A fourth answer and a
@@ -578,13 +443,51 @@ NO_ACCOUNT_MESSAGE = (
 # this page; and who to ask, which is a different administrator from the one
 # `no-account` sends people to.
 NO_ACCESS_TESTID = "no-access"
-NO_ACCESS_HEADING = "There is nothing in Pulse Surveys for you yet"
-NO_ACCESS_MESSAGE = (
-    "Nothing went wrong and nobody is at fault. Pulse Surveys keeps its own record of who works "
-    "here and who is enrolled, and nothing in yours gives you a view at this door yet. If you "
-    "teach, open Pulse Surveys from inside one of your courses in the LMS rather than from here. "
-    "Otherwise, ask whoever administers Pulse Surveys at your institution."
-)
+
+# The design tokens both server-rendered pages use — the four door pages below and
+# the development console in `app.api.dev` — as one `:root` rule. Neither page can
+# load the SPA's bundle, so each inlines what it needs, and until E5.1-03 each held
+# its own hand-copied palette. That is the shape the focus-ring fix went wrong in:
+# it reached `design/tokens.css` and not the copy.
+#
+# **One copy, still a copy.** `design/` is a design-system source the backend
+# serves nothing from and cannot reach at run time, so the values are written out
+# here, spelled exactly as `design/tokens.css` spells them. The union of what the
+# two pages use, and nothing either page does not.
+# `tests/unit/test_the_door_and_console_pages_take_their_tokens_from_one_block.py`
+# reads every value here against that file, so a token that changes there and not
+# here is a red test rather than a page that quietly drifts.
+#
+# Static CSS with no interpolation. The door template takes it through a format
+# field, so the braces here are not re-read as fields.
+DESIGN_TOKENS_CSS = """:root {
+  --chalk: #F6F8F4;
+  --paper: #FFFFFF;
+  --spruce: #1E3932;
+  --spruce-60: #5B7269;
+  --hairline: #DCE4DD;
+  --mist: #93A5A0;
+  --marigold: #DFA320;
+  --marigold-deep: #8F6A10;
+  --madder: #A93F32;
+  --font-display: 'Literata', Georgia, serif;
+  --font-body: 'Schibsted Grotesk', 'Helvetica Neue', sans-serif;
+  --font-mono: 'Spline Sans Mono', ui-monospace, monospace;
+  --text-1: 13px;
+  --text-2: 16px;
+  --text-4: 25px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --radius-input: 4px;
+  --radius-card: 8px;
+  --shadow-card: 0 1px 2px rgba(30, 57, 50, .06);
+  color-scheme: light;
+}"""
 
 # The page, as one f-string rather than a template engine: there is one layout,
 # it has three slots, and nothing in the locked closure renders templates. The
@@ -607,18 +510,7 @@ PAGE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{heading} · Pulse Surveys</title>
 <style>
-  :root {{
-    --chalk: #F6F8F4;
-    --spruce: #1E3932;
-    --spruce-60: #5B7269;
-    --mist: #93A5A0;
-    --marigold-deep: #8F6A10;
-    --font-display: 'Literata', Georgia, serif;
-    --font-body: 'Schibsted Grotesk', 'Helvetica Neue', sans-serif;
-    --space-4: 16px;
-    --space-5: 24px;
-    --space-7: 48px;
-  }}
+{tokens}
   :focus-visible {{ outline: 2px solid var(--marigold-deep); outline-offset: 2px; }}
   body {{
     margin: 0;
@@ -683,10 +575,11 @@ def refusal_page(guard: str) -> str:
     escaping is written for the day it is neither.
     """
     return PAGE.format(
+        tokens=DESIGN_TOKENS_CSS,
         testid=escape(REFUSAL_TESTID, quote=True),
         reason_attr=_reason_attribute(guard),
-        heading=escape(REFUSAL_HEADING),
-        empty_state=escape(REFUSAL_COPY.get(guard, DEFAULT_REFUSAL_COPY)),
+        heading=escape(entry.REFUSED_HEADING.text),
+        empty_state=escape(REFUSAL_COPY.get(guard, DEFAULT_REFUSAL_COPY).text),
     )
 
 
@@ -697,7 +590,7 @@ def cancelled_page() -> str:
     a convenience: the only thing this door knows about a cancel is what the
     provider's redirect said, every parameter in that redirect is attacker-chosen
     text, and a function with nowhere to put such text cannot be talked into
-    rendering it. What the page says is three constants from this module.
+    rendering it. What the page says is two `app.copy.entry` constants.
 
     It carries no landing testid, like `refusal_page`, so a cancel serves nobody's
     view; and its own testid is not the refusal's, because a suite — and a person —
@@ -705,10 +598,11 @@ def cancelled_page() -> str:
     could not account for".
     """
     return PAGE.format(
+        tokens=DESIGN_TOKENS_CSS,
         testid=escape(CANCELLED_TESTID, quote=True),
         reason_attr="",
-        heading=escape(CANCELLED_HEADING),
-        empty_state=escape(CANCELLED_MESSAGE),
+        heading=escape(entry.CANCELLED_HEADING.text),
+        empty_state=escape(entry.CANCELLED_MESSAGE.text),
     )
 
 
@@ -732,10 +626,11 @@ def no_account_page() -> str:
     signed in correctly that they did something wrong.
     """
     return PAGE.format(
+        tokens=DESIGN_TOKENS_CSS,
         testid=escape(NO_ACCOUNT_TESTID, quote=True),
         reason_attr="",
-        heading=escape(NO_ACCOUNT_HEADING),
-        empty_state=escape(NO_ACCOUNT_MESSAGE),
+        heading=escape(entry.NO_ACCOUNT_HEADING.text),
+        empty_state=escape(entry.NO_ACCOUNT_MESSAGE.text),
     )
 
 
@@ -754,10 +649,11 @@ def no_access_page() -> str:
     else's; and its own testid is none of the other three, for the reason above.
     """
     return PAGE.format(
+        tokens=DESIGN_TOKENS_CSS,
         testid=escape(NO_ACCESS_TESTID, quote=True),
         reason_attr="",
-        heading=escape(NO_ACCESS_HEADING),
-        empty_state=escape(NO_ACCESS_MESSAGE),
+        heading=escape(entry.NO_ACCESS_HEADING.text),
+        empty_state=escape(entry.NO_ACCESS_MESSAGE.text),
     )
 
 

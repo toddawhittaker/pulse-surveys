@@ -1,6 +1,6 @@
 # Entry 50. A threshold that exists to protect people was crossed by a count of something else
 
-**Caught: 0**
+**Caught: 2**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -60,3 +60,24 @@ Two halves worth keeping separate:
   literal condition out as its own leg so the departure is visible in the code;
   and put the choice to the owner as an open question, because narrowing a rule
   the spec states is a decision the spec has to catch up with.
+
+*(**A catch**, E5.1-01, PR #263, 2026-10-03. The review of `main` found SPEC
+§4's comment gate counting a week's responses, so one student who wrote about
+the instructor in a six-respondent week was shown. The ticket cited this entry,
+and the gate it built, `stream_is_suppressed`, counts distinct
+`response.user_id` among the stream's comments that are in no release batch.
+The release gate's three legs were made per stream too, after a review found
+that pooling them let one stream's authors open the gate for the other's
+comments.)*
+
+*(**A catch**, E5.1-11, PR #274, 2026-10-03, twice in one ticket. First, the
+boundary reviews found that E5.1-02's student rule was a deny-list: a teaching
+assistant listed only by the `Instructor#TeachingAssistant` sub-role held a
+student enrollment, so they could answer and counted as one of a stream's five
+commenters. The ticket made the rule an allow-list, so only a Learner who is no
+kind of Instructor counts. Second, the ticket ruled that a walk which "read zero
+members" ends no grant. The builder's first check counted the documents the walk
+returned. Saying the unit out loud showed that a page of documents naming no
+subject is non-empty by that count and still names nobody. That check would
+have passed every test and still ended every grant on the section. The gate
+counts the members read, keyed by subject, instead.)*

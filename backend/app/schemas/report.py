@@ -141,9 +141,10 @@ class WeekView(BaseModel):
 
     course_week: int
     term_week: int
-    # Exactly the course weeks whose survey window has closed, per the clock
-    # service (E4's breakdown decision 6). Nothing is stored to make a week
-    # published, so this is a comparison rather than a flag.
+    # Exactly the course weeks whose report has opened, per the clock service:
+    # 06:00 on the Monday after the week's window closes, in the institution's
+    # time zone (ADR 0184; E4's breakdown decision 6 before it). Nothing is stored
+    # to make a week published, so this is a comparison rather than a flag.
     published_weeks: list[int]
     # The reported week's own `survey_window.closes_at` — the row the report read
     # already holds, so this member costs no query. It travels as an instant
@@ -212,8 +213,10 @@ class SummaryView(BaseModel):
     """§5.1's generated summary for one stream of one week, as E4-06 stored it.
 
     The member is absent — `None` on the stream, not an empty string — for a week
-    the summary job has not run over, which is the ordinary state of a report read
-    before Monday morning.
+    the summary job has not run over. Since a week's report opens at 06:00 on the
+    Monday after its close (ADR 0184) and the summary walk runs earlier that
+    morning, an opened report meets this when that walk failed for the week or a
+    developer moved the clock past the walk.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -240,6 +243,22 @@ class CommentView(BaseModel):
     text: str
     status: str
     stream: str
+
+
+class SmallNView(BaseModel):
+    """Whether one stream is under SPEC §4's n-threshold this week, and what that threshold is.
+
+    Both, because E4-10 renders the reason as well as the state: a stream showing no
+    raw comments has to say why, and the number is the institution's configured
+    one rather than a constant the frontend carries. **No count of anybody**: the
+    threshold is configuration, and a commenter count on a suppressed stream would
+    be the number the threshold is hiding (§5.2).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    suppressed: bool
+    threshold: int
 
 
 class StreamReport(BaseModel):
@@ -279,6 +298,12 @@ class StreamReport(BaseModel):
     # the models in `app.schemas.report_benchmark`, which is also where the reason
     # those models are not declared in this file is written down.
     benchmark: report_benchmark.StreamBenchmark
+    # Whether SPEC §4 withholds this stream's raw comments this week, and the
+    # threshold that decided it. Per stream since E5.1-01 (ADR 0182): the unit is
+    # distinct students commenting in this stream, so one stream of a week can be
+    # shown while the other is suppressed, and a week-level flag would be a second
+    # answer to a question each stream answers for itself.
+    small_n: SmallNView
 
 
 class StreamsView(BaseModel):
@@ -301,20 +326,6 @@ class WorkloadView(BaseModel):
 
     mean: float | None
     median: float | None
-
-
-class SmallNView(BaseModel):
-    """Whether this week is under SPEC §4's n-threshold, and what that threshold is.
-
-    Both, because E4-10 renders the reason as well as the state: a week showing no
-    raw comments has to say why, and the number is the institution's configured
-    one rather than a constant the frontend carries.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    suppressed: bool
-    threshold: int
 
 
 class InstructorReport(BaseModel):
@@ -350,7 +361,6 @@ class InstructorReport(BaseModel):
     # checks below it and above it — the validator on this field, and the
     # revalidation that guarantees the validator runs.
     comparison: ComparisonFigure
-    small_n: SmallNView
     # ADR 0152's release, placed here and nowhere else: a list in every report,
     # populated only in the latest published week's, and carrying no week.
     released_from_earlier_weeks: list[CommentView]
