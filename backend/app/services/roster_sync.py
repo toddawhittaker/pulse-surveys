@@ -42,11 +42,13 @@ be discovered, and it is not the roster of a section that must already exist for
 the roster to be fetchable.
 
 **Enrollment means "student", and the teaching grant follows the roster both
-ways** (E5.1-02, ADR 0183). A member listed with the Instructor role, or as the
-platform's test user, is written no enrollment and has an open one closed; a
-complete walk ends every teaching grant on the section whose person it did not
-list as an active Instructor, through `public.end_teaching_instructor`, which
-deletes the row and records it in `ended_teaching_grant`.
+ways** (E5.1-02, E5.1-11, ADR 0183). Only a member listed as Learner, and neither
+as Instructor, nor as any Instructor sub-role, nor as the platform's test user,
+is written an enrollment; anybody else has an open one closed. A complete walk
+that read at least one member, on or before the section's last day, ends every
+teaching grant on the section whose person it did not list as an active
+Instructor, through `public.end_teaching_instructor`, which deletes the row and
+records it in `ended_teaching_grant`.
 
 Two things it may not do directly, and the doors it uses instead (ADR 0094, and
 this ticket's D7): it holds no read of `user.lms_user_id`, so a roster member is
@@ -148,8 +150,12 @@ MAX_PAGES_WALKED: Final[int] = 1000
 #
 # The AGS client's shape and values (`app.lti.ags.AGS_REQUEST_TIMEOUT`, which
 # argues them): a connect bound just over the doubled SYN retransmit, and ten
-# seconds to read a small document. There is no retry, so it is a ceiling on one
-# attempt.
+# seconds to read a small document. **What it bounds** (E5.1-11, ADR 0183): the
+# connect, and each wait between bytes of the answer. It is not a bound on the
+# whole request, and it does not cover name resolution, so a platform that sends
+# a byte every few seconds can hold one call longer than ten seconds. A total
+# deadline belongs to the carried entry for rehoming the LTI transport
+# (`docs/tickets/e5.1/README.md`), not here.
 ROSTER_REQUEST_TIMEOUT: Final[tuple[float, float]] = (3.05, 10.0)
 
 # How long a launch trigger is debounced by a call this section has already made.
@@ -326,11 +332,16 @@ class _Member:
 
     @property
     def is_student(self) -> bool:
-        """Whether this member may hold an enrollment: neither teaching nor a test user.
+        """Whether this member may hold an enrollment: an allow-list, not a deny-list.
 
-        Enrollment means "student" (E5.1-02, ADR 0183). A member listed with the
-        Instructor role teaches whatever else they are listed as, and a platform's
-        preview account is not a person answering the survey.
+        Enrollment means "student" (E5.1-02, E5.1-11, ADR 0183). A student is a
+        member the roster lists as Learner, and not as Instructor, not as any
+        Instructor sub-role (a teaching assistant, a grader), and not as the
+        platform's test user. Everybody else is not a student: a Mentor, a
+        ContentDeveloper, an Administrator, a role this tool has never seen. A
+        student enrollment lets its holder submit and makes them one of the
+        distinct commenters SPEC §4's threshold counts, so an unknown role must
+        fail to "not a student" rather than to "student".
         """
         return (
             self.learner
@@ -1175,7 +1186,9 @@ def _page_members(answered: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
     ends completely is a container this tool believes it read to the end, and
     `_ingest` closes the enrollment of everybody a complete walk did not carry. A
     loud failure is one section's, caught by `sync_all_rosters`' savepoint and
-    recorded against that section; a quiet empty page ends a whole class's term.
+    recorded against that section; a quiet empty page ends the term of everybody
+    it should have carried (a walk that read nobody at all `_ingest` treats as
+    incomplete, E5.1-11).
     """
     body: Any = answered["body"]
     carried: Any = body.get("members", [])
@@ -1505,10 +1518,10 @@ def _ingest(
     Doing the closing first would close a member's window and reopen it in the
     same transaction.
 
-    **Enrollment means "student"** (E5.1-02, ADR 0183). A member who teaches or is
-    the platform's test user gets no enrollment, and one they already hold is
-    closed. That is driven by the member's own document, so it happens on any
-    walk, complete or not.
+    **Enrollment means "student"** (E5.1-02, E5.1-11, ADR 0183). A member who is
+    not a student by `_Member.is_student` gets no enrollment, and one they already
+    hold is closed. That is driven by the member's own document, so it happens on
+    any walk, complete or not.
 
     **The close-the-vanished pass and the grant ending run only when the walk was
     complete** (F1, and E5.1-02 criterion 2). A member absent from a container this
@@ -1516,6 +1529,16 @@ def _ingest(
     on a refused page is on a page this tool never fetched, and ending their
     enrollment or their grant would act on a *later* page's failure. So a
     truncated walk writes what it read, closes nobody and ends nothing.
+
+    **A walk that read no member counts as incomplete** (E5.1-11). Trusting it
+    would end every grant and close every enrollment on the section on one empty
+    answer; a platform that truly empties a course is rare and recoverable.
+
+    **No grant is ended once the section has ended** (E5.1-11): when `today` is
+    after `section.end_date`, the section's inclusive last day, the grant-ending
+    pass is skipped. Platforms commonly end a teacher's enrollment when a course
+    concludes, and the instructor keeps her past reports. Closing enrollments is
+    not gated on the date.
     """
     read = [_read_member(member) for member in roster]
     members = [member for member in read if member is not None]
@@ -1737,7 +1760,7 @@ def _close(
 
 
 def _close_a_staff_enrollment(session: Session, open_row: Enrollment | None, today: date) -> None:
-    """Close the open enrollment of a member who teaches or is a test user, before today.
+    """Close the open enrollment of a member who is not a student, before today.
 
     E5.1-02, criterion 4. The live-enrollment test the landing and the submit path
     apply is `ended_on >= today`, so a row closed with today, which is what `_close`
@@ -1748,7 +1771,9 @@ def _close_a_staff_enrollment(session: Session, open_row: Enrollment | None, tod
     refuses that. A row first seen today is therefore closed with today and still
     covers today: one day of residue, recorded in ADR 0183. From tomorrow it covers
     nothing, and no later walk opens another, because a member who is not a
-    student is never given one.
+    student is never given one. Who is not a student is `_Member.is_student`'s
+    rule (E5.1-11): a teacher and a test user, and also a teaching assistant, a
+    mentor, or anybody the roster does not list as Learner.
 
     `lms_window_end` is left as it is: it is only ever the platform's value.
     """
@@ -1786,9 +1811,11 @@ def _end_unsupported_teaching_grants(
     one listed as `Inactive` or `Deleted`, and a person with no LMS user at all,
     whom no roster can list.
 
-    Called only after a complete walk. `last_call_id` is `None` only on a walk that
-    fetched no page, which cannot be complete, so its absence is a defect and
-    raises rather than ending grants on nobody's word.
+    Called only after a complete walk that read at least one member, and only
+    while `today` is on or before the section's last day (E5.1-11; `_ingest`
+    decides both). `last_call_id` is `None` only on a walk that fetched no page,
+    which cannot be complete, so its absence is a defect and raises rather than
+    ending grants on nobody's word.
     """
     if last_call_id is None:
         raise RosterSyncError(
