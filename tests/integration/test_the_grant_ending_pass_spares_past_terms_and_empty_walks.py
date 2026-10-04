@@ -50,6 +50,7 @@ from fixtures.report_api import INSTRUCTOR_ROLE
 from fixtures.roster_sync import (
     ENDED_ON_COLUMN,
     LEARNER_ROLE_URN,
+    institution_today,
     roster_member,
     walk_a_synced_section,
 )
@@ -422,7 +423,15 @@ def build_empty_walk_world(
 
     The no-user grant is there because a complete walk ends it whoever the roster
     lists (ADR 0183), so it is the grant a zero-member walk is likeliest to end.
+
+    **The section's last day is moved a year past the real today first.** These
+    walks run on the real clock and the seeded `end_date` is a fixed date; once the
+    calendar passes it, criterion 2's rule ends nothing, so the one-member control
+    would go red and the zero-member grant test would pass for the wrong reason.
     """
+    set_section_end_date(
+        committed_rows, metadata_tables, synced_section.id, institution_today() + 365 * ONE_DAY
+    )
     instructor = a_teaching_person(
         committed_rows,
         web_identity,
