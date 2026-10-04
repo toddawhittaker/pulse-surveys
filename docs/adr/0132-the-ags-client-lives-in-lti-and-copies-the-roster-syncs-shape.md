@@ -6,8 +6,9 @@ E3-04 is the first code in this repository that calls a platform's Assignment
 and Grade Services. Three construction questions come with it and the spec
 answers none of them.
 
-**Where it lives.** SPEC §13 puts `ags.py` in `backend/app/lti/` and puts
-`nrps.py` there too — and the roster client was built at
+**Where it lives.** SPEC §13 put `ags.py` in `backend/app/lti/` and put
+`nrps.py` there too (it has since been redrawn to show the roster client where
+it is) — and the roster client was built at
 `backend/app/services/roster_sync.py` instead. Two siblings in two places is
 the thing to avoid, so this ticket had to either follow §13 and leave the
 roster where it is, or move the roster and leave §13 disagreeing with itself in

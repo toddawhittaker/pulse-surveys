@@ -426,7 +426,7 @@ pulse-surveys/
 │       │   ├── audit.py            # audit_log
 │       │   └── clock.py            # the development clock override
 │       │
-│       ├── views_sql/              # identity-separated read views (§8) as migrations
+│       ├── views_sql/              # identity-separated read views (§8) as migrations + query helpers
 │       │   └── queries.py          # typed ways into the read views
 │       │
 │       ├── schemas/                # Pydantic request/response contracts (also feeds OpenAPI)
@@ -470,11 +470,11 @@ pulse-surveys/
 │       │   ├── survey_windows.py   # when a section's weekly survey opens and closes
 │       │   ├── survey_read.py      # a student's weekly survey as they see it now
 │       │   ├── submissions.py      # storing one student's weekly answers, and every reason not to
-│       │   ├── validity.py         # whether a submission counts (§3.3)
-│       │   ├── grading.py          # the participation score and its gradebook column (§3.4)
-│       │   ├── reporting.py        # the Monday report: what is written ahead, and what is read (§5.1)
+│       │   ├── validity.py         # synchronous comment gating (§3.3)
+│       │   ├── grading.py          # participation formula + AGS passback (§3.4)
+│       │   ├── reporting.py        # distributions, trend lines, benchmark assembly (§5.1)
 │       │   ├── report_comments.py  # §4's small-N comment rules
-│       │   ├── benchmarks.py       # which sections a comparison figure covers, and the figure
+│       │   ├── benchmarks.py       # comparison-set resolution, length/level matching, min-N
 │       │   ├── comparison_sets.py  # defining, editing and deleting a named comparison set
 │       │   ├── safety.py           # the Care queue, and the only connection that can reach identity (§6.2)
 │       │   ├── moderation.py       # classification routing, exclusion rules (§5.2) — not built yet: E6
@@ -482,7 +482,7 @@ pulse-surveys/
 │       │   └── retention.py        # configurable purge jobs (§4) — not built yet: E13
 │       │
 │       ├── lti/                    # pylti1p3 integration
-│       │   ├── registration.py     # the tool's signing key and the key set it publishes
+│       │   ├── registration.py     # platform/deployment config, key management
 │       │   ├── launch.py           # beginning a launch, and validating the one that returns
 │       │   ├── fastapi_adapter.py  # the FastAPI adapter pylti1p3 does not ship
 │       │   ├── in_flight.py        # server-side memory of a launch handshake (ADR 0089)
@@ -499,7 +499,7 @@ pulse-surveys/
 │       ├── ai/                     # the AIGateway (§7.4) — single-shot, typed
 │       │   ├── gateway.py          # the one place a model is called from
 │       │   ├── contracts.py        # one typed output contract per task
-│       │   ├── tasks.py            # the §7.4 tasks, one function each
+│       │   ├── tasks.py            # validity / moderation / summary / draft / draft-check calls
 │       │   └── prompts/            # versioned prompt templates, one file per task+version
 │       │
 │       ├── agents/                 # agentic loops (§7.4), read-only — not built yet: Phase 3 roadmap

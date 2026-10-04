@@ -78,7 +78,7 @@ with a known library answer.
   `python:3.14-slim` on the same architecture CI builds for (it was
   `python:3.13-slim` when this was written; FIX-04 moved it), so this holds today
   and would be the first thing to check on a new architecture.
-- **`backend/app/lti/` exists with one module in it, not five.** §13 lists
+- **`backend/app/lti/` exists with one module in it, not five.** §13 listed
   `registration.py`, `launch.py`, `nrps.py`, `ags.py` and `platforms/`; E0-18
   ships `launch.py`, because the other four have no caller. A module with no
   caller is a guess at an interface.
