@@ -742,12 +742,12 @@ def test_an_enrollment_not_live_today_is_answered_exactly_as_no_enrollment(
     door = student_read_door
     world = door.world
     started_on, ended_on = NOT_LIVE_TODAY[shape]
-    assert READING_DAY == INSIDE_THE_WINDOW.astimezone(UTC).date(), (
+    assert INSIDE_THE_WINDOW.astimezone(UTC).date() == READING_DAY, (
         f"The door's instant falls on {READING_DAY} in {DEFAULT_INSTITUTION_TIMEZONE} and on "
         f"{INSIDE_THE_WINDOW.astimezone(UTC).date()} in UTC. This test needs one day both readings "
         "agree on, or 'yesterday' depends on which zone the read path uses."
     )
-    assert ENROLLED_SINCE < READING_DAY - timedelta(days=1), (
+    assert READING_DAY - timedelta(days=1) > ENROLLED_SINCE, (
         f"The enrollment's first day ({ENROLLED_SINCE}) is not before yesterday ({READING_DAY}), "
         "so the 'ended yesterday' window would be empty or inverted."
     )

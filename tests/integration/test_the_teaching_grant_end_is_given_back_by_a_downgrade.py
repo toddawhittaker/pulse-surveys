@@ -173,7 +173,7 @@ def require_the_head_state(database: Any, when: str) -> None:
         f"{GRANT_END_REVISION} creates it."
     )
     whole, columns = owner_holds(database)
-    assert OWNER_AT_HEAD_WHOLE <= whole and OWNER_AT_HEAD_COLUMNS <= columns, (
+    assert whole >= OWNER_AT_HEAD_WHOLE and columns >= OWNER_AT_HEAD_COLUMNS, (
         f"{when}, `{GRANT_END_DEFINER_ROLE}` holds {sorted(whole)} on whole relations and "
         f"{sorted(columns)} by column; ADR 0183 gives it {sorted(OWNER_AT_HEAD_WHOLE)} and "
         f"{sorted(OWNER_AT_HEAD_COLUMNS)}. Until the reader finds those, its empty answer after "
