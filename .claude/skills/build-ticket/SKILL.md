@@ -33,6 +33,12 @@ Read the ticket, its epic README row, and the spec sections the ticket names.
 Check its dependencies actually merged into the epic branch; if not, stop and
 say so.
 
+Check the ticket's planned files against the merger's refused paths
+(`.claude/agents/merger.md`: `package.json`, `pyproject.toml`, `.github/`,
+`.claude/` and the rest). A ticket that must change one cannot land through
+the merger. Split that change into a small `process/` PR for the owner first,
+and build the rest of the ticket on top of it once it reaches the epic branch.
+
 Then write the work order — this is the step that used to be skipped and used
 to cost two extra rounds:
 
