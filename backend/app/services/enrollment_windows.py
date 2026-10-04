@@ -67,11 +67,14 @@ __all__ = [
 # Tier 3 compares against the section's earliest roster sync (ADR 0131). The row is
 # read through the table on `Base.metadata` rather than through
 # `app.models.lti.NrpsCall`, because the participation **formula** reaches this
-# function and may not reach a module path holding `lti` — that is the rule keeping
+# function and may not name a module path holding `lti` — that is the rule keeping
 # E3-04's AGS client out of the arithmetic, and the roster-sync log happens to share
 # a module with it
-# (`tests/unit/test_the_grading_module_reaches_no_network_ags_or_job.py`). The
-# constant moved here with the function that reads it, unchanged.
+# (`tests/unit/test_the_grading_module_reaches_no_network_ags_or_job.py`). The rule
+# is about the import paths this module names. It is not a claim about what is
+# loaded: `without_staff` imports `app.services.identity`, which itself imports
+# `app.models.lti`. The constant moved here with the function that reads it,
+# unchanged.
 NRPS_CALL = Base.metadata.tables["nrps_call"]
 
 
