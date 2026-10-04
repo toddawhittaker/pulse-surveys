@@ -106,6 +106,7 @@ from app.services.authz import (
     teaching_instructor_assigned,
     teaching_instructor_grants,
 )
+from app.services.identity import person_for_user
 
 __all__ = ["request_section_sync", "sync_all_rosters", "sync_section"]
 
@@ -250,14 +251,13 @@ WINDOW_END = "end"
 # an object carrying a `start`. See ADR 0095 for what this stands in for.
 URI_MEMBER_MARK = "://"
 
-# The one point-resolution call that turns a roster member into a `user` row, and
-# the one that turns that row into a `person`. ADR 0094: this connection holds no
-# read of `user.lms_user_id` and no privilege on `person`, so both are point
+# The one point-resolution call that turns a roster member into a `user` row. ADR
+# 0094: this connection holds no read of `user.lms_user_id` and no privilege on
+# `person`, so this and the second hop, `identity.person_for_user`, are point
 # queries through a definer function rather than a lookup.
 _RESOLVE_PLATFORM_USER = text(
     "SELECT public.resolve_platform_user(CAST(:platform_id AS uuid), CAST(:subject AS text))"
 )
-_RESOLVE_PERSON_FOR_USER = text("SELECT public.resolve_person_for_user(CAST(:user_id AS uuid))")
 
 # D7's writer. The whole of what this module may do to `user_identity`: an address
 # where the platform exposed one, a null where it stopped, and never a name.
@@ -1800,7 +1800,7 @@ def _end_unsupported_teaching_grants(
         user_id = resolved.get(member.subject)
         if user_id is None or not member.teaches or member.dropped:
             continue
-        person_id = session.execute(_RESOLVE_PERSON_FOR_USER, {"user_id": user_id}).scalar_one()
+        person_id = person_for_user(session, user_id)
         if person_id is not None:
             keep.add(person_id)
 
@@ -1863,7 +1863,7 @@ def _record_the_teaching_instructor(session: Session, section: Section, user_id:
     the definer re-checks inside its own transaction, and `guard_write` still guards
     the call site — the catalog entry stays, an ADR 0090 layer, not the only one.
     """
-    person_id = session.execute(_RESOLVE_PERSON_FOR_USER, {"user_id": user_id}).scalar_one()
+    person_id = person_for_user(session, user_id)
     if person_id is None:
         logger.info(
             "a roster instructor of section %s resolves to no person, so no assignment was "
