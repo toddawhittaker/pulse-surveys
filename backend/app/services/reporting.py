@@ -569,7 +569,7 @@ def _comments_reaching_the_model(
                 # Blank means what Python's `str.strip()` removes, not only
                 # spaces: every such character listed by code point, so no
                 # collation changes the set, and the same class, character for
-                # character, as `report_comment_v002.sql`, whose header lists
+                # character, as `report_comment_v003.sql`, whose header lists
                 # them (docs/disputes/E5.1-12-01.md). PostgreSQL's regex engine
                 # reads the escapes; the raw string keeps Python from doing so.
                 Answer.comment_text.regexp_match(

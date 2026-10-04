@@ -17,17 +17,16 @@
 -- does not rely on that.
 --
 -- This body keeps a comment only if it holds a character that Python's
--- `str.strip()`, the submission path's test, would not remove. The class lists
--- every character `strip` removes, by code point, and nothing else: U+0009 to
--- U+000D (tab, line feed, vertical tab, form feed, carriage return), U+001C to
--- U+001F, U+0020 (space), U+0085, U+00A0 (no-break space), U+1680, U+2000 to
--- U+200A, U+2028, U+2029, U+202F, U+205F and U+3000. It names no `[:space:]`
--- class, because what that class covers depends on the collation: under
--- en_US.utf8 it misses eight of these characters and under `COLLATE "C"` it
--- misses fifteen. A list of code points means the same thing under every
--- collation. The escapes are PostgreSQL regex escapes inside a standard string
--- literal (standard_conforming_strings is on), so the string parser passes the
--- backslashes through and the regex engine reads them.
+-- `str.strip()`, the submission path's test, would not remove. The class has two
+-- parts. `[:space:]`, under the database's en_US.utf8 character type, covers
+-- space, tab, line feed, vertical tab, form feed, carriage return and most
+-- Unicode spaces. The eight escapes after it are the characters Python strips
+-- and `[:space:]` does not: U+001C to U+001F, U+0085, U+00A0 (no-break space),
+-- U+2007 and U+202F. The escapes are PostgreSQL regex escapes inside a standard
+-- string literal (standard_conforming_strings is on), so the string parser
+-- passes the backslashes through and the regex engine reads them. Measured on
+-- the project's image over every code point: the class and Python's `strip`
+-- agree on all of them. Another character type was not measured.
 
 CREATE OR REPLACE VIEW public.report_comment AS
 SELECT
@@ -41,4 +40,4 @@ JOIN public.question AS asked ON asked.id = written.question_id
 JOIN public.response AS submitted ON submitted.id = written.response_id
 WHERE asked.kind = 'comment'
   AND written.comment_text IS NOT NULL
-  AND written.comment_text ~ '[^\u0009-\u000d\u001c-\u001f\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]';
+  AND written.comment_text ~ '[^[:space:]\u001c-\u001f\u0085\u00a0\u2007\u202f]';
