@@ -1549,6 +1549,7 @@ def _ingest(
         if found is not None:
             resolved[member.subject] = found
 
+    section_has_ended = today > section.end_date
     open_rows = _open_enrollments(session, section.id)
     for member in members:
         user_id = resolved.get(member.subject)
@@ -1563,7 +1564,7 @@ def _ingest(
         _record_email(session, user_id, member.email)
         if member.is_student:
             _record_enrollment(session, section, member, user_id, open_rows.get(user_id), today)
-        if member.teaches and not member.dropped:
+        if member.teaches and not member.dropped and not section_has_ended:
             _record_the_teaching_instructor(session, section, user_id)
 
     if not complete or not members:
@@ -1572,7 +1573,7 @@ def _ingest(
     for user_id, row in open_rows.items():
         if user_id not in present:
             _close(session, row, ended_on=today, window_end=None)
-    if today > section.end_date:
+    if section_has_ended:
         return
     _end_unsupported_teaching_grants(session, section, members, resolved, last_call_id, today)
 
