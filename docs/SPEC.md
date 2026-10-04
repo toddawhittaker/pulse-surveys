@@ -391,103 +391,148 @@ pulse-surveys/
 ├── README.md
 ├── LICENSE                         # MIT
 ├── pyproject.toml                  # backend deps + tooling (ruff, mypy, pytest)
-├── docker-compose.yml              # api, worker, beat, db, redis, mailpit, mock-lms
+├── requirements.txt                # locked runtime dependencies
+├── requirements-dev.txt            # locked development dependencies
+├── package.json                    # root npm workspace: the frontend, Playwright, eslint (ADR 0083)
+├── playwright.config.ts            # end-to-end runner configuration (§9.2)
+├── docker-compose.yml              # api, worker, beat, db, redis, mailpit, mock-lms, mock-idp, mock-ai
 ├── docker-compose.override.yml     # dev-only wiring (hot reload, exposed ports)
+├── docker-compose.live-ai.yml      # the dev stack with the real AI provider in place of mock-ai
 ├── .env.example                    # documented config surface (§6.3)
-├── Makefile                        # up / test / lint / migrate / seed shortcuts
+├── Makefile                        # up / test / lint / migrate / seed shortcuts, and `make ci`
 │
 ├── backend/
-│   ├── Dockerfile
+│   ├── Dockerfile                  # the one application image; also builds and serves the SPA (ADR 0086)
 │   ├── alembic.ini
 │   ├── migrations/                 # Alembic revisions
 │   └── app/
 │       ├── main.py                 # FastAPI app factory, router mount, SPA static serve
 │       ├── config.py               # Pydantic settings (all env-driven)
-│       ├── db.py                   # SQLAlchemy engine/session
+│       ├── db.py                   # SQLAlchemy engine, session factory, per-request session
 │       │
 │       ├── models/                 # ORM tables (§8), one module per aggregate
+│       │   ├── base.py             # declarative base, constraint naming, surrogate key, timestamp type
 │       │   ├── org.py              # institution, college, department, prefix, course, section
 │       │   ├── term.py             # term, week, start_letter_map, survey_window
 │       │   ├── identity.py         # user, user_identity, person, enrollment, role_assignment, lead_faculty_mapping
+│       │   ├── lti.py              # platform registrations, signing keys, launch nonces and handshakes, NRPS/AGS call logs
 │       │   ├── survey.py           # question_set, question, response, answer
 │       │   ├── ai.py               # classification
 │       │   ├── report.py           # weekly_summary, moderation_state, release_batch, release_batch_member
-│       │   ├── loop.py             # instructor_response, exclusion_log
-│       │   ├── benchmark.py        # comparison_set
+│       │   ├── loop.py             # instructor_response, exclusion_log — not built yet: E6, E7
+│       │   ├── benchmark.py        # comparison_set, comparison_set_member
 │       │   ├── grades.py           # grade_sync
-│       │   ├── safety.py           # threat_case
-│       │   └── audit.py            # audit_log, notification
+│       │   ├── safety.py           # threat_case — not built yet: E10
+│       │   ├── audit.py            # audit_log
+│       │   └── clock.py            # the development clock override
 │       │
-│       ├── views_sql/              # identity-separated read views (§8) as migrations + query helpers
+│       ├── views_sql/              # identity-separated read views (§8) as migrations
+│       │   └── queries.py          # typed ways into the read views
 │       │
-│       ├── schemas/                # Pydantic request/response contracts (also feeds OpenAPI + MCP)
+│       ├── schemas/                # Pydantic request/response contracts (also feeds OpenAPI)
+│       │   ├── health.py           # the `/healthz` response
+│       │   ├── survey.py           # a weekly submission, parsed once at the edge
+│       │   ├── student.py          # what a student's weekly survey read answers with
+│       │   ├── report.py           # the instructor's Monday report
+│       │   ├── report_benchmark.py # the report's comparison and university figures
+│       │   └── comparison_sets.py  # the named-set management API
+│       │
+│       ├── copy/                   # every sentence the backend shows a person, keyed (§4.1)
+│       │   ├── entry.py            # the four pages a door answers with when there is no landing
+│       │   ├── submit.py           # the weekly survey's submit path
+│       │   ├── student_read.py     # the student read path
+│       │   ├── instructor_report.py # the instructor report's refusals
+│       │   ├── leadership_sets.py  # the named-set API's refusals
+│       │   └── gradebook.py        # the strings written into a platform's gradebook
 │       │
 │       ├── api/                    # HTTP routers, thin — delegate to services
 │       │   ├── deps.py             # auth context, role scoping, n-threshold guards
-│       │   ├── lti.py              # login-init, launch, JWKS, deep-linking endpoints
-│       │   ├── student.py          # survey fetch/submit, loop-closure view
-│       │   ├── instructor.py       # report, moderation, response draft/coach/publish
-│       │   ├── leadership.py       # roll-ups, comparison sets, response-on-behalf
-│       │   ├── care.py             # threat queue, audited re-identify
-│       │   └── admin.py            # observability, config, hierarchy, roles
+│       │   ├── health.py           # liveness
+│       │   ├── lti.py              # the launch door: login-init, launch, JWKS
+│       │   ├── auth.py             # the web door: OIDC login and callback
+│       │   ├── dev.py              # the development-only test console
+│       │   ├── student.py          # survey fetch/submit
+│       │   ├── instructor.py       # the Monday report reads
+│       │   ├── leadership.py       # named comparison sets
+│       │   ├── care.py             # threat queue, audited re-identify — not built yet: E10
+│       │   └── admin.py            # observability, config, hierarchy, roles — not built yet: E11
 │       │
 │       ├── services/               # domain logic (the real app lives here)
-│       │   ├── validity.py         # synchronous comment gating (§3.3)
-│       │   ├── grading.py          # participation formula + AGS passback (§3.4)
-│       │   ├── reporting.py        # distributions, trend lines, benchmark assembly (§5.1)
-│       │   ├── benchmarks.py       # comparison-set resolution, length/level matching, min-N
-│       │   ├── moderation.py       # classification routing, exclusion rules (§5.2)
-│       │   ├── response_loop.py    # draft/coach/publish, required-response holds (§5.3)
-│       │   ├── safety.py           # threat/self-harm routing to Care queue (§6.2)
-│       │   ├── retention.py        # configurable purge jobs (§4)
-│       │   └── authz.py            # role → hierarchy-node scoping, enforced server-side
+│       │   ├── authz.py            # the one chokepoint every entry point reads through
+│       │   ├── session.py          # the session both doors issue and every request reads
+│       │   ├── tokens.py           # verifying another party's signed token against its key set
+│       │   ├── identity.py         # who a verified subject is
+│       │   ├── provisioning.py     # what a verified launch discovers, and what it refuses
+│       │   ├── roster_sync.py      # the hourly NRPS roster pull (ADR 0132)
+│       │   ├── enrollment_windows.py # when a student's enrolment runs from (§3.4)
+│       │   ├── clock.py            # what time it is, for everything scheduled
+│       │   ├── section_codes.py    # what a section code says, and its calendar
+│       │   ├── survey_windows.py   # when a section's weekly survey opens and closes
+│       │   ├── survey_read.py      # a student's weekly survey as they see it now
+│       │   ├── submissions.py      # storing one student's weekly answers, and every reason not to
+│       │   ├── validity.py         # whether a submission counts (§3.3)
+│       │   ├── grading.py          # the participation score and its gradebook column (§3.4)
+│       │   ├── reporting.py        # the Monday report: what is written ahead, and what is read (§5.1)
+│       │   ├── report_comments.py  # §4's small-N comment rules
+│       │   ├── benchmarks.py       # which sections a comparison figure covers, and the figure
+│       │   ├── comparison_sets.py  # defining, editing and deleting a named comparison set
+│       │   ├── safety.py           # the Care queue, and the only connection that can reach identity (§6.2)
+│       │   ├── moderation.py       # classification routing, exclusion rules (§5.2) — not built yet: E6
+│       │   ├── response_loop.py    # draft/coach/publish, required-response holds (§5.3) — not built yet: E7
+│       │   └── retention.py        # configurable purge jobs (§4) — not built yet: E13
 │       │
 │       ├── lti/                    # pylti1p3 integration
-│       │   ├── registration.py     # platform/deployment config, key management
-│       │   ├── launch.py           # launch validation, role/context resolution
-│       │   ├── nrps.py             # roster sync (enrollment windows, emails)
+│       │   ├── registration.py     # the tool's signing key and the key set it publishes
+│       │   ├── launch.py           # beginning a launch, and validating the one that returns
+│       │   ├── fastapi_adapter.py  # the FastAPI adapter pylti1p3 does not ship
+│       │   ├── in_flight.py        # server-side memory of a launch handshake (ADR 0089)
+│       │   ├── replay_guard.py     # single-use launch nonces, held in Postgres (ADR 0089)
 │       │   ├── ags.py              # line-item creation + score posting
 │       │   └── platforms/          # PlatformProfile adapters (§7.3)
-│       │       ├── base.py
-│       │       ├── canvas.py
-│       │       ├── moodle.py
-│       │       ├── d2l.py
-│       │       └── blackboard.py
+│       │       ├── base.py         # what a profile is, and the conformant default
+│       │       ├── mock.py         # the mock platform's profile
+│       │       ├── canvas.py       # not built yet: waits for a launching platform (§14.3, E3)
+│       │       ├── moodle.py       # not built yet: waits for a launching platform (§14.3, E3)
+│       │       ├── d2l.py          # not built yet: waits for a launching platform (§14.3, E3)
+│       │       └── blackboard.py   # not built yet: waits for a launching platform (§14.3, E3)
 │       │
 │       ├── ai/                     # the AIGateway (§7.4) — single-shot, typed
-│       │   ├── gateway.py          # provider-agnostic client (OpenAI-compatible base_url)
-│       │   ├── contracts.py        # Pydantic output models per task (runtime + API + eval fixtures)
-│       │   ├── tasks.py            # validity / moderation / summary / draft / draft-check calls
+│       │   ├── gateway.py          # the one place a model is called from
+│       │   ├── contracts.py        # one typed output contract per task
+│       │   ├── tasks.py            # the §7.4 tasks, one function each
 │       │   └── prompts/            # versioned prompt templates, one file per task+version
 │       │
-│       ├── agents/                 # agentic loops (§7.4) — read-only, consume services/ + authz
+│       ├── agents/                 # agentic loops (§7.4), read-only — not built yet: Phase 3 roadmap
 │       │
-│       ├── mcp/                    # future read-only leadership MCP server (§7.5), reuses authz
+│       ├── mcp/                    # read-only leadership MCP server (§7.5) — not built yet: Phase 3 roadmap
 │       │
 │       ├── jobs/                   # Celery
-│       │   ├── celery_app.py
-│       │   ├── schedules.py        # window open/close, Monday reports, retention (beat)
-│       │   └── tasks.py            # async classification, summary, passback
+│       │   ├── celery_app.py       # the Celery application
+│       │   ├── schedules.py        # the beat schedule
+│       │   └── tasks.py            # roster sync, windows, passback, reclassification, release batches
 │       │
-│       └── notifications/          # email rendering + SMTP (link-only Monday mail, §5.7)
+│       └── notifications/          # email rendering + SMTP (link-only Monday mail, §5.7) — not built yet: E12
 │
 ├── frontend/
-│   ├── Dockerfile
-│   ├── package.json                # React 19 + TS + Vite
+│   ├── package.json                # React 19 + TS + Vite + TanStack Router
 │   ├── vite.config.ts
+│   ├── vitest.config.ts
 │   ├── index.html
 │   └── src/
 │       ├── main.tsx
-│       ├── router.tsx              # TanStack Router
-│       ├── api/                    # generated client from backend OpenAPI + TanStack Query hooks
-│       ├── lib/                    # auth context, charts (Recharts), formatting
-│       ├── components/             # shared UI (rating input, workload slider, trend chart, comment list)
+│       ├── router.tsx              # TanStack Router over the five role areas
+│       ├── api/                    # typed fetchers per role, over the generated wire types (ADR 0185)
+│       │   ├── openapi.json        # the backend's OpenAPI document, written by scripts/export_openapi.py
+│       │   └── wire.gen.ts         # types generated from openapi.json by `npm run gen:wire`
+│       ├── lib/                    # session, HTTP, landings, shown-figure helpers
+│       ├── copy/                   # every sentence the frontend shows a person
+│       ├── components/             # shared UI (Likert input, trend chart, comment cards, stat pairs)
 │       └── routes/
-│           ├── student/            # survey form, results + response
-│           ├── instructor/         # report, moderation, response editor w/ coaching
-│           ├── leadership/         # roll-up dashboards, comparison-set management
-│           ├── care/               # threat queue
-│           └── admin/              # observability, config, hierarchy, roles
+│           ├── student/            # weekly survey form
+│           ├── instructor/         # Monday report
+│           ├── leadership/         # comparison-set management
+│           ├── care/               # placeholder page; the threat queue is E10
+│           └── admin/              # placeholder page; the console is E11
 │
 ├── mock-lms/                       # in-repo LTI 1.3 platform for dev + e2e (§9.2)
 │   ├── Dockerfile
@@ -502,18 +547,27 @@ pulse-surveys/
 │   └── app/                        # deterministic verdicts, marker-selected wrong answers and stalls
 │
 ├── tests/
-│   ├── unit/                       # services, grading (Hypothesis), authz scoping
-│   ├── integration/                # LTI launch/NRPS/AGS against mock platform, testcontainers PG
+│   ├── unit/                       # services, grading (Hypothesis), authz scoping, repository checks
+│   ├── integration/                # against a real Postgres and the mock platform
+│   ├── fixtures/                   # shared pytest fixtures, registered as plugins
 │   ├── e2e/                        # Playwright specs (§9.2)
 │   └── evals/                      # versioned AI eval sets + runners, CI recall/precision gates (§9.3)
 │
 ├── scripts/
 │   ├── seed.py                     # demo institution, hierarchy, term, sample sections
-│   └── generate_client.sh          # OpenAPI → frontend client
+│   ├── seed_*.py                   # the exit and demo stories, and benchmark history
+│   ├── signing_key.py              # supply, list and retire the tool's LTI signing keys
+│   ├── export_openapi.py           # writes frontend/src/api/openapi.json (ADR 0185)
+│   ├── db-init/                    # database roles created on first start
+│   └── ci/                         # the CI checker scripts
+│
+├── ci/                             # CI configuration data (bundle budget)
 │
 └── .github/workflows/
     └── ci.yml                      # lint, typecheck, unit+integration+e2e, eval gates
 ```
+
+A line marked *not built yet* is a planned home rather than a module: it cites the epic in §14.3 that builds it, or the roadmap phase in §12 when no epic does. There is no frontend image: the backend image builds the single-page application and the app factory serves it ([ADR 0086](adr/0086-the-spa-is-served-by-the-app-factory-at-app.md)). `tests/unit/test_spec_section_13_draws_the_tree.py` holds this tree to the repository.
 
 Three structural choices worth calling out. First, `api/` routers stay thin and all real behavior lives in `services/`, so the same logic backs the HTTP API, the Celery jobs, and the future MCP server without duplication — and the authz scoping in `services/authz.py` is the single chokepoint every entry point passes through. Second, the identity-separated read views (`views_sql/`) are shipped as migrations, not just ORM conventions, so the confidentiality guarantee holds at the database level even against a future careless query. Third, the tree above is the list of module homes rather than a suggestion: **use an existing module; add one only when nothing fits**, and the pull request that adds a module says why nothing did. The comment beside a module here is what that module is for, so code the comment already describes belongs in it — and work that fits nowhere is usually work that spans two modules and should be split before it is placed.
 
