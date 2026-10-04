@@ -36,10 +36,10 @@ forgery vector and must keep working — is
 `tests/integration/test_the_dev_console_sets_and_clears_the_clock.py`, whose
 requests carry no `Origin` and which must stay green unmodified.
 
-**Which failure a red is, before E5.1-03 lands.** The same-origin twins are
-green on today's tree, which has no origin check to refuse them. The four
-refusals are red on the status assertion: the routes answer 303 to a cross-site
-post, and the row moves.
+**How a red reads.** The same-origin twins are the controls: an origin check that
+refused everything would fail them. Each of the four refusals is red on its
+status assertion if the origin check is gone — the route answers 303 to a
+cross-site post, and the row moves.
 """
 
 from datetime import UTC, datetime

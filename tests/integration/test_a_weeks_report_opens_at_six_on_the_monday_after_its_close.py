@@ -47,11 +47,10 @@ zone after the close without producing it.
 saving — for the pair that proves the hour is read in the *configured* zone rather
 than in a zone written into the code.
 
-**Which failure a red is, before E5.1-05 lands.** The refusals at 05:59 are
-assertion failures: today's tree serves a week the moment it closes, so the
-boundary week answers 200 where 404 is required. The served halves at 06:00 are
-green on today's tree as well, and are here as the pairs that stop a builder
-refusing too much. Nothing here imports a symbol E5.1-05 adds.
+**How a red reads.** The refusals at 05:59 are assertion failures: a tree that
+served a week the moment it closed — the code before E5.1-05 — answers 200 there
+where 404 is required. The served halves at 06:00 are the pairs that stop a
+builder refusing too much. Nothing here imports a symbol E5.1-05 added.
 """
 
 from collections.abc import Callable

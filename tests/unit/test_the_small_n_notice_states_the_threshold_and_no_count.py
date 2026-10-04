@@ -18,13 +18,23 @@ edit may do is add a count, and a count reaches static copy only as a placeholde
 so this module sees the strings that inventory sees. The inventory module itself is
 E5.1-03's and is not touched here.
 
-**Which failure a red is, before E5.1-01 lands.** An assertion: the body carries
-count placeholders beside, or instead of, `{threshold}`.
+**Marked `invariant` at the module level** (E5.1-12, Part B item 2). A count on
+this notice is SPEC §4.1 item 3's disclosure by another route: below the
+threshold an instructor sees no raw comment, and "1 student commented" tells them
+whose the summary is. So this module runs in the isolated §4.1 pass, where a skip
+or an empty collection fails CI. Its name carries `_no_count`, which
+`tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`
+now reads as a denial shape, so deleting the `pytestmark` line below turns that
+sweep red (this module itself stays green, since the marker changes where it
+runs and not what it asserts).
 """
 
 import re
 
+import pytest
 from fixtures.copy_inventory import FRONTEND_COPY_DIRECTORY, collect_frontend_copy
+
+pytestmark = pytest.mark.invariant
 
 # The two keys the work order (D6) keeps exactly. The copy inventory exempts the
 # body by key, which is why the keys may not move.

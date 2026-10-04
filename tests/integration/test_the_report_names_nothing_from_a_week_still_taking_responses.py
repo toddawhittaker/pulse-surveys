@@ -75,6 +75,12 @@ OPEN_COURSE_WEEK = 4
 # is therefore served throughout. It is the non-vacuity control.
 CLOSED_COURSE_WEEK = 1
 
+# The week before the open one. Its window closed the Sunday before this clock
+# and its report opened at 06:00 the next morning (SPEC §3.1), so it is published
+# throughout the open week. It is the control that a served payload's series
+# reach past the requested week at all.
+LAST_WEEK_OPENED_BEFORE_THIS_CLOCK = OPEN_COURSE_WEEK - 1
+
 # A course week this six-week section does not run at all. The other half of the
 # no-oracle pair: an open week and a week that was never scheduled have to be
 # indistinguishable, or the difference between them says which weeks a section
@@ -144,6 +150,28 @@ def test_a_course_week_whose_window_is_still_open_is_refused(
     clock, is read first and required to be served. The two reads differ in the
     week asked for and in nothing else — same session, same section, same instant
     (`docs/MISTAKES.md` entry 35).
+
+    **The open week feeds no other week's figures either** (E5.1-12, Part B item
+    3). Refusing the open week's own page is not enough if the served week's page
+    carries it: course week 1's `published_weeks` would offer it in navigation,
+    and either stream's trend would plot a point from responses still arriving —
+    the same mid-window difference, read off a page the route does serve. So the
+    served payload is required to name course week 4 nowhere on either axis.
+
+    **Its control** is that the served payload's published weeks and both trends
+    reach past the requested week to course week 3 — closed, and opened at 06:00
+    the Monday after — so the trend is not merely a one-point series that could
+    never have held week 4.
+
+    **The mutation that must turn this red:** `_published_weeks` in
+    `backend/app/services/reporting.py` (near line 1073) selecting weeks by
+    `closes_at <= now`, or by every `survey_window` row, instead of through
+    `week_is_published` — week 4 then appears in `published_weeks` and as a
+    trend point. A second, narrower one: the trend builder in the same file
+    iterating the section's windows rather than the published set, which leaves
+    `published_weeks` correct and puts week 4 on both trends. **The near miss
+    that stays green:** `week_is_published` comparing with `>` instead of `>=` at
+    06:00, which moves no week at this clock.
     """
     assert_the_clock_is_inside_the_window()
     report_door.pretend(WHILE_THE_WINDOW_IS_OPEN)
@@ -154,6 +182,42 @@ def test_a_course_week_whose_window_is_still_open_is_refused(
         f"{served.status_code}. Until a closed week is served, a refusal for the open one says "
         "only that this route refuses. Body begins "
         f"{served.text[:400]!r}."
+    )
+
+    contract = report_api_contract
+    body = served.json()
+    published = contract.member(
+        body, contract.week_member, contract.published_weeks_field, answered=served
+    )
+    trends = {
+        stream: [
+            point[contract.course_week_field]
+            for point in contract.stream_member(body, stream, contract.trend_field, answered=served)
+        ]
+        for stream in (contract.instructor_stream, contract.course_stream)
+    }
+    assert LAST_WEEK_OPENED_BEFORE_THIS_CLOCK in published and all(
+        LAST_WEEK_OPENED_BEFORE_THIS_CLOCK in plotted for plotted in trends.values()
+    ), (
+        f"The served course week {CLOSED_COURSE_WEEK} lists published weeks {published} and trend "
+        f"weeks {trends}; course week {LAST_WEEK_OPENED_BEFORE_THIS_CLOCK}, whose report opened the "
+        "Monday before this clock, is missing from at least one. Until the series reach past the "
+        f"requested week, course week {OPEN_COURSE_WEEK}'s absence below is the absence of a series "
+        "that could never have held it."
+    )
+    assert OPEN_COURSE_WEEK not in published, (
+        f"The served course week {CLOSED_COURSE_WEEK}'s report lists course week {OPEN_COURSE_WEEK} "
+        f"among its published weeks ({published}) while that week's window is still open. Week "
+        "navigation would offer a page the route refuses, and the set that decides what is "
+        "published is not the set the refusal reads."
+    )
+    leaking = {stream: plotted for stream, plotted in trends.items() if OPEN_COURSE_WEEK in plotted}
+    assert not leaking, (
+        f"Course week {OPEN_COURSE_WEEK}, whose window is still open, is a trend point in "
+        f"{sorted(leaking)} of the served course week {CLOSED_COURSE_WEEK}'s report ({leaking}). A "
+        "point computed from a week still taking responses moves with each submission, and two "
+        "readings an hour apart are one student's answer — the delta the refusal below exists to "
+        "withhold, read off a page that is served."
     )
 
     answered = report_door.report(course_week=OPEN_COURSE_WEEK)

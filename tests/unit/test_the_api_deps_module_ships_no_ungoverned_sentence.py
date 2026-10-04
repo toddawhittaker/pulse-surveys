@@ -58,10 +58,9 @@ that has gone blind or gone wild says so before the real file is read
 (`docs/MISTAKES.md` entry 3). **A red in a control means these tests are
 broken, not the code.**
 
-**Which failure a red is, before E5.1-03 lands.** The controls are green on
-today's tree. The rule over `deps.py` is red on an assertion that lists the
-sentences the module still holds — the entry pages' copy and the instructor
-gate's refusal — by line.
+**How a red reads.** The rule over `deps.py` is red on an assertion that lists,
+by line, the sentences the module holds — before E5.1-03, the entry pages' copy
+and the instructor gate's refusal.
 """
 
 from __future__ import annotations
