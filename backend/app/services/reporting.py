@@ -56,8 +56,8 @@ import logging
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
-from typing import TYPE_CHECKING, Any
+from datetime import UTC, date, datetime, time, timedelta
+from typing import TYPE_CHECKING, Any, Final
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -918,6 +918,50 @@ class SectionUnavailableError(Exception):
     """
 
 
+# ---------------------------------------------------------------------------
+# When a week's report opens — the owner's ruling of 2026-10-03 (E5.1-05).
+# ---------------------------------------------------------------------------
+
+# The wall-clock hour, in the institution's time zone, at which a week's report
+# opens. A constant rather than a setting: the rule has one correct answer, and
+# ADR 0184 records why. Naive on purpose — the zone is supplied by the caller.
+REPORT_OPENS_AT: Final[time] = time(6, 0)
+
+_MONDAY: Final[int] = 0
+
+
+def report_opens_at(closes_at: datetime, *, zone: ZoneInfo) -> datetime:
+    """The first Monday at `REPORT_OPENS_AT` in `zone` strictly later than `closes_at`.
+
+    For the default rhythm (a window closing Sunday 23:59:59) that is the next
+    morning at 06:00. A window closing Monday 05:00 opens that same morning; one
+    closing at Monday 06:00:00 exactly opens the following Monday.
+
+    **Computed on dates and wall time, never by adding an offset.** The close is
+    converted into `zone`, the candidate Monday is found on the calendar, and
+    `datetime.combine` attaches the zone to 06:00 on that date — so a week that
+    closes across a daylight-saving change still opens at 06:00 local, whichever
+    offset the window opened on. The comparison is made in UTC, because two
+    datetimes sharing one `tzinfo` compare by wall time and ignore `fold`.
+    """
+    local = closes_at.astimezone(zone)
+    monday = local.date() + timedelta(days=(_MONDAY - local.weekday()) % 7)
+    opens = datetime.combine(monday, REPORT_OPENS_AT, tzinfo=zone)
+    if opens.astimezone(UTC) <= closes_at.astimezone(UTC):
+        opens = datetime.combine(monday + timedelta(days=7), REPORT_OPENS_AT, tzinfo=zone)
+    return opens
+
+
+def week_is_published(closes_at: datetime, *, now: datetime, zone: ZoneInfo) -> bool:
+    """Whether the report of a week whose window closes at `closes_at` is open at `now`.
+
+    The one predicate both readers below call (`instructor_report` and
+    `published_course_weeks`, through `_published_weeks`). 06:00:00 exactly is
+    published; a microsecond before is not.
+    """
+    return now.astimezone(UTC) >= report_opens_at(closes_at, zone=zone).astimezone(UTC)
+
+
 class CourseWeekUnavailableError(Exception):
     """There is no report for that course week of this section — one refusal for two states.
 
@@ -990,8 +1034,7 @@ def instructor_report(
     is what turns each into an HTTP answer.
     """
     section = _readable_section(session, person_id=person_id, section_id=section_id)
-    now = clock.now(session, settings=settings)
-    published = [week for week in _section_weeks(session, section) if week.closes_at < now]
+    published = _published_weeks(session, section=section, settings=settings)
 
     asked = next((week for week in published if week.course_week == course_week), None)
     if asked is None:
@@ -1017,8 +1060,28 @@ def published_course_weeks(
     inside the report she is reading cannot disagree.
     """
     section = _readable_section(session, person_id=person_id, section_id=section_id)
+    return [
+        week.course_week
+        for week in _published_weeks(session, section=section, settings=settings)
+    ]
+
+
+def _published_weeks(
+    session: Session, *, section: Section, settings: Settings
+) -> list[_SectionWeek]:
+    """This section's weeks whose report has opened, on the effective clock (ADR 0109).
+
+    The one place both readers above select their published weeks, so the list a
+    reader pages across and the report she is reading cannot disagree. The zone is
+    the institution's, because "06:00 on Monday" is a wall-clock promise.
+    """
     now = clock.now(session, settings=settings)
-    return [week.course_week for week in _section_weeks(session, section) if week.closes_at < now]
+    zone = ZoneInfo(settings.institution_timezone)
+    return [
+        week
+        for week in _section_weeks(session, section)
+        if week_is_published(week.closes_at, now=now, zone=zone)
+    ]
 
 
 def taught_sections(session: Session, *, person_id: UUID | None) -> list["TaughtSection"]:
