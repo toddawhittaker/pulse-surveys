@@ -56,7 +56,8 @@ import logging
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, timedelta
+from datetime import time as time_of_day
 from typing import TYPE_CHECKING, Any, Final
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -925,7 +926,7 @@ class SectionUnavailableError(Exception):
 # The wall-clock hour, in the institution's time zone, at which a week's report
 # opens. A constant rather than a setting: the rule has one correct answer, and
 # ADR 0184 records why. Naive on purpose — the zone is supplied by the caller.
-REPORT_OPENS_AT: Final[time] = time(6, 0)
+REPORT_OPENS_AT: Final[time_of_day] = time_of_day(6, 0)
 
 _MONDAY: Final[int] = 0
 
@@ -1061,8 +1062,7 @@ def published_course_weeks(
     """
     section = _readable_section(session, person_id=person_id, section_id=section_id)
     return [
-        week.course_week
-        for week in _published_weeks(session, section=section, settings=settings)
+        week.course_week for week in _published_weeks(session, section=section, settings=settings)
     ]
 
 
