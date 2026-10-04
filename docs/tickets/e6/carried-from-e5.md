@@ -372,15 +372,31 @@ report nor the summary provider.
 
 ## Raising the comment threshold re-holds weeks the instructor already saw
 
-From the E5.1 review of `main` (privacy). E5.1-01 made a released comment never
-come back under its week, which closed the lowering half. The raising half is
-open: the hold compares each stream-week's commenters with the threshold in
-force now (`backend/app/services/report_comments.py:850`), so raising the
-setting hides comments the instructor has already read. **Owner:** E11, the
-configuration editor. **Done when:** changing the threshold never re-holds a
-stream-week whose comments were already shown. The threshold in force at cut
-time is recorded on `release_batch`, or the editor refuses the change while
-held comments exist.
+From the E5.1 review of `main` (privacy), and confirmed by the E5.1 boundary's
+threat model. E5.1-01 made a released comment never come back under its week,
+which closed the lowering half. The raising half is open, and its trigger
+exists today. The hold compares each stream-week's commenters with the
+threshold in force at the time of the read
+(`backend/app/services/report_comments.py:850`). So a stream already shown is
+held again, and its comments can enter a batch, when `N_THRESHOLD_DEFAULT`
+changes between two reads, or when a web and a worker process run with
+different values. **Owner:** E11, the configuration editor. **Done when:** a
+stream-week's shown or held state is fixed and stored when its report is first
+read, and every later read and every release cut uses the stored state. A test
+raises the threshold between two reads and asserts the stream stays shown and
+none of its comments enter a batch.
+
+## Summaries written before the per-stream rule, and the small-N prompt's premise
+
+From the E5.1 boundary review (ADR 0182's consequences). Summaries stored
+before E5.1 are not regenerated, so a thin stream in a full week may keep a
+summary written in ordinary mode. And the small-N prompt
+(`backend/app/ai/prompts/summary.v2.md:41-48`) tells the model that "fewer
+students answered this week", which is false for a thin stream in a
+well-answered week. **Owner:** E6, which reopens the summary path with
+moderation. **Done when:** the small-N prompt's premise is per stream, under a
+bumped prompt version, with an eval case for a thin stream in a full week; and
+any stored summary whose stream is now held is regenerated or withheld.
 
 ## A week's item total uses today's question set
 

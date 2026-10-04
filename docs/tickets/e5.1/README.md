@@ -103,7 +103,7 @@ is never reused. There is one migration, owned by 02, with
 | Finding (review pass) | Same as | Lands in |
 |---|---|---|
 | Threat model, HIGH: the comment gate counts responses, not commenters | | E5.1-01 |
-| Privacy: a released comment reappears under its own week after the threshold is lowered | | E5.1-01. The second half (raising the threshold re-holds weeks the instructor already saw) is carried to E11, hand-off 3. |
+| Privacy: a released comment reappears under its own week after the threshold is lowered | | E5.1-01. The second half (raising the threshold, or two processes reading different values, re-holds stream-weeks the instructor already saw) is carried to E11, hand-off 3. |
 | Privacy, HIGH: the teaching grant is never ended | | E5.1-02 |
 | Privacy: staff and LMS test users count as respondents | | E5.1-02 |
 | Architecture: the transport copies have drifted (no timeout on the roster's token grant) | the carried entry "the roster sync's unbounded token-acquisition dial" | E5.1-02, the timeout fix only. Rehoming the shared code stays carried; see below. |
@@ -137,7 +137,7 @@ The exact entries and their done-when lines are in E5.1-09.
 
 1. A comment with no moderation verdict counts as published. Owner E6.
 2. The existing E9 named-set entry gains three done-when lines.
-3. Raising the comment threshold re-holds weeks the instructor already saw.
+3. A changed comment threshold re-holds stream-weeks the instructor already saw.
    Owner E11.
 4. A week's item total uses today's question set. Owner: the ticket that adds
    a second question set.

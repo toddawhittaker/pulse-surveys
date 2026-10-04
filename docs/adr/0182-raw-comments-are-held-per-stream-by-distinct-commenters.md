@@ -5,6 +5,10 @@ Amends [0152](0152-the-crossing-is-cut-by-a-task-of-its-own-not-at-read-time-and
 [0153](0153-a-release-drops-its-week-because-the-gradebook-ledger-would-otherwise-name-the-author.md)'s
 floor sentence. Ticket E5.1-01.
 
+**Status:** Accepted
+**Date:** 2026-10-03
+**Ticket:** [E5.1-01](../tickets/e5.1/E5.1-01-commenter-threshold.md)
+
 ## Context
 
 SPEC §4 now counts the n-threshold in distinct students commenting in one stream
@@ -86,8 +90,18 @@ meets the floor, so the per-card chip stays.
 
 - §5.1's "empty groups show a one-line notice" is met on the instructor report
   by the suppression notice: a shown stream always has comments.
-- Raising the threshold does not re-hold a stream already shown. That is carried
-  to E11 (hand-off 3, written by E5.1-09).
+- Raising the threshold re-holds a stream already shown. The hold compares each
+  stream-week's commenters with the threshold in force at the time of the read
+  (`backend/app/services/report_comments.py:850`), so a changed
+  `N_THRESHOLD_DEFAULT`, or a web and a worker process running with different
+  values, hides comments the instructor has already read and can put them in a
+  batch. That is carried to E11 (hand-off 3 in
+  `docs/tickets/e6/carried-from-e5.md`).
+- Summaries stored before E5.1 are not regenerated, so a thin stream in a full
+  week may keep a summary written in ordinary mode.
+- The small-N prompt (`backend/app/ai/prompts/summary.v2.md:41-48`) says "fewer
+  students answered this week", which is a false premise for a thin stream in a
+  well-answered week. This and the point above are carried to E6.
 - The design mockups above still show the old placement and sentence; they are
   for the design owner to update.
 - `_held_comments` and `_commenters_by_stream_week` both reach
