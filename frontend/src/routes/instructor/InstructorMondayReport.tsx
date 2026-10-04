@@ -24,7 +24,7 @@ import type { TrendPoint } from '../../components/PulseTrendChart';
 import { WeekEyebrow } from '../../components/WeekEyebrow';
 import { WeekNav } from '../../components/WeekNav';
 import { copy, fillCopy } from '../../copy/instructorReportPageCopy';
-import '../../components/instructorReportPage.css';
+import './instructorReportPage.css';
 
 /**
  * SPEC §7.6's `InstructorMondayReport` — ticket E4-11.
