@@ -56,8 +56,8 @@ Check what this PR covers. For anything not applicable, write "n/a" and why.
      critical path, say so here. Those get line-by-line human review of the
      security-relevant diff at the epic boundary, before the epic merges to
      main — agent review supplements human judgment, it never replaces it.
-     A heavy-lane ticket also records its mutation battery result and the
-     commit it ran on. -->
+     A ticket with ⚠ in its Lane: field also records its mutation battery
+     result and the commit it ran on. -->
 
 ## Security review findings
 

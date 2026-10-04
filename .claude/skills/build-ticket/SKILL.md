@@ -1,6 +1,6 @@
 ---
 name: build-ticket
-description: Build one ticket through the lane its header names - heavy rides the orchestrated tests-first loop (test-author writes red, builder-heavy turns green, verifier proves it by battery), light rides builder-light, which writes code and tests together, checked by CI; both get the fresh-context security review and merge through the merger agent. Use when the user says "build E0-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the ticket branch and ends with the PR merged into its epic branch.
+description: Build one ticket through the lane its header names - heavy rides the orchestrated tests-first loop (test-author writes red, builder-heavy confirms the reds and turns them green, and a ⚠ ticket adds the verifier's mutation battery), light rides builder-light, which writes code and tests together, checked by CI; both get one fresh-context security review on the final head and merge through the merger agent. Use when the user says "build E0-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the ticket branch and ends with the PR merged into its epic branch.
 ---
 
 # Build a ticket
@@ -42,9 +42,14 @@ to cost two extra rounds:
   defaulted, and any test seam the machinery needs. Verify file:line facts
   against the tree yourself before putting them in a brief — stale line
   numbers are the most common brief defect.
-- **Name the traps** the agents cannot know: the relevant `docs/MISTAKES.md`
-  entries, sweeps and gates their change will trip, environment quirks. Put
-  them in the brief, not in a follow-up.
+- **Name the traps** the agents cannot know: sweeps and gates their change
+  will trip, environment quirks, and the `docs/MISTAKES.md` entries that
+  apply to this ticket, cited by number with their rule. You read that file
+  whole once per epic; a subagent does not, so its brief carries only the
+  entries that apply. Put them in the brief, not in a follow-up.
+- **Name the shared files.** The epic breakdown lists the files this ticket
+  shares with others built in parallel. Expect a merge conflict on them;
+  step 6 says when to resolve it.
 - **Draw the boundary**: what this ticket deliberately does not build, and
   where each deferred thing is recorded.
 
@@ -74,18 +79,18 @@ of it:
 
 Run `ruff format` and `ruff check` on its output yourself (it has no shell — it
 cannot format what it writes, and an unformatted test file reddens CI's `ruff
-format --check` gate). Have `verifier` run the suite **and `ruff format
---check`**: every red must be behavioral (assertion), never an import or fixture
-error, the red/green split must match the manifest, and the tree must be
-format-clean. Divergence goes back to the author; a format miss you fix yourself
-before committing. Then commit the tests alone, subject
-`e<N>/<slug>: <what>, tests first and red`.
+format --check` gate). Then commit the tests alone, subject
+`e<N>/<slug>: <what>, tests first and red`. No separate verifier pass confirms
+the reds; the builder-heavy's first act in step 3 is that check.
 
 ## 3. builder-heavy (green)
 
 Spawn `builder-heavy` with the work order, the manifest path, and the settled
 rulings restated (pre-arbitrate the objection spots you can foresee — it
-prevents churn). Its first act is confirming the reds itself, controls first.
+prevents churn). Its first act is confirming the reds itself, controls first:
+every red is behavioral (an assertion), never an import or fixture error, and
+the red/green split matches the manifest. It reports any divergence before
+writing code; that goes back to the test author.
 `tests/**` is read-only for it (a hook enforces this): a test it believes
 wrong gets `docs/disputes/<TICKET>-NN.md` per `docs/disputes/README.md` and a
 stop on that item while everything independent proceeds.
@@ -100,9 +105,9 @@ what it tried. Never edit the tree while it works in it.
 Once it reports green, push the ticket branch and open the pull request into
 the epic branch **as a draft**, right here — not at step 7. CI does not run on
 a ticket branch until a pull request exists (it triggers on `pull_request` and
-on push to `epic/**` only), so the draft PR is what gives step 5's verifier a
-run to confirm. Step 7 no longer opens the PR; it updates the body and marks
-the draft ready.
+on push to `epic/**` only), so the draft PR is what gives CI a run on the
+head. Step 7 no longer opens the PR; it updates the body and marks the draft
+ready.
 
 ## 4. Dispute, if one happens
 
@@ -114,37 +119,58 @@ order); the spec is silent (**stop and surface to Todd** — this produces a
 spec edit or an ADR, and it is the reason the loop exists). Record the ruling
 in the dispute file.
 
-## 5. Verify (proven, not reported)
+## 5. Verify (⚠ tickets only)
 
-Spawn `verifier`: confirm CI's green run on this exact commit (totals
-cross-checked, not re-run locally) — the draft PR opened at the end of step 3
-is what makes that run exist — then the mutation battery from the manifest,
-scoped to each row's named killer test per verifier.md. No green is
-believed on its author's word. A survivor is a decision for you — cover it, or
-record it as named residue with the reason; never silently drop it. Commit
-before any battery runs.
+A plain heavy ticket has no verifier step: tests first plus CI's green run on
+the head, which the merger checks, is the verification. Go to step 6.
 
-## 6. Security review (fresh context)
+A ticket with a ⚠ in its `Lane:` field spawns `verifier`: confirm CI's green
+run on this exact commit (totals cross-checked, not re-run locally), then the
+mutation battery from the manifest, scoped to each row's named killer test per
+verifier.md. No green is believed on its author's word. A survivor is a
+decision for you — cover it, or record it as named residue with the reason;
+never silently drop it. Commit before any battery runs. The merger needs the
+battery tied to the final head: either it ran on that commit, or every later
+commit is listed with the targeted re-mutation that covered it (step 6).
 
-Spawn `app-security` with the branch, the diff range against the epic branch
-(**name the base — the default scoping is wrong on ticket branches**), and the
-instruction to form its view of the diff *before* reading the ticket. Tell it
-"Nothing found" is an allowed answer that must show what it checked. List the
-ticket's recorded decisions so it can tell a decision from an oversight — with
-standing to challenge any decision it judges unsafe.
+## 6. Security review (fresh context, once)
 
-Findings get a fix round: **declare the stopping rule before the round starts**
-(tests-first fixes, one re-verification, targeted re-mutations, no further
-round unless something is red or a HIGH appears), then hold to it and record
-rule and residue in the PR body. The declared rule may extend a round to cover
-findings the round itself introduced; what it forbids is unbounded re-polish
-of work the review already accepted. A fix round has the defect density of the
-original work; the round's fixes get verified the same way **in kind** — no
-green believed on the fixer's word — but the battery is **targeted
-re-mutations of what the round touched, including any original battery rows
-whose subject code the round modified** — never a blind re-run of the whole
-original battery. Scope follows the diff; an original row is not immune just
-because it already ran once.
+The review runs **once, after the last code push**, on the final head SHA. A
+review of an earlier head is stale, and the merger refuses it. So before the
+review, merge the current epic branch into the ticket branch if the two
+conflict (shared files from step 1 are the usual cause): `git merge` and an
+ordinary push, never a rebase or force-push.
+
+Run the reviewers `review-pr` picks from the diff, **in parallel**: the
+security pass from its path table, plus `privacy-authz` when its paths match.
+Brief each with the branch, the diff range against the epic branch (**name the
+base — the default scoping is wrong on ticket branches**), and the instruction
+to form its view of the diff *before* reading the ticket. Tell it "Nothing
+found" is an allowed answer that must show what it checked. List the ticket's
+recorded decisions so it can tell a decision from an oversight — with standing
+to challenge any decision it judges unsafe.
+
+Findings get one fix round, and its stopping rule is fixed in advance:
+
+- Fix the findings (tests first on a heavy ticket), run only the targeted
+  tests locally, and push once.
+- One re-check pass runs on the new head, with the same reviewers. Then the
+  loop stops.
+- A HIGH found in the re-check is fixed, and that fix gets one more re-check
+  on its new head. Nothing else reopens the loop.
+- On a ⚠ ticket, the round also runs targeted re-mutations of what it touched,
+  including any original battery rows whose subject code it modified — never
+  a blind re-run of the whole battery.
+- The PR body states this stopping rule and the residue left by it.
+
+A fix round has the defect density of the original work, which is why the
+re-check exists; the stopping rule is what keeps it from becoming unbounded
+re-polish of work the review already accepted.
+
+If the epic branch moves after the review and the ticket branch now
+conflicts, resolve it the same way (merge the epic branch in, push). That
+push is a code push: it gets one re-check pass on the new head, recorded like
+a fix round's.
 
 ## 7. Finish
 
@@ -155,10 +181,11 @@ because it already ran once.
 - Remove any CI tolerance this ticket owns per its acceptance criteria.
 - Push the final commits; update the draft PR's body: the ticket, the §14.2
   items covered, the security findings and resolutions, the arbitrations, and
-  everything deliberately deferred with where it is recorded. A heavy
-  ticket's body also records the verifier's battery result and the commit
-  it ran on, plus any targeted re-mutations after it. Mark it ready for
-  review.
+  everything deliberately deferred with where it is recorded, and the fix
+  round's stopping rule. Every review and battery the body cites names the
+  final head SHA; the merger refuses a record tied to an earlier commit. A ⚠
+  ticket's body also records the verifier's battery result and the commit it
+  ran on, plus any targeted re-mutations after it. Mark it ready for review.
 - **Then merge it through the merger agent** once the CLAUDE.md merge
   conditions hold. This applies to both lanes and to ⚠ epics. No one
   approves a ticket PR; Todd reviews at the epic boundary.

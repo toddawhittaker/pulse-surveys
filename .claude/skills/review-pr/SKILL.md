@@ -32,9 +32,9 @@ an agent's description matches.
 Every PR gets a security pass, whatever its lane: each security row below
 that matches a changed path runs, so a diff matching both rows gets both
 reviewers. When neither row matches, a generic pass runs: `app-security`
-spawned with `model: sonnet`, told the diff matched no specialist row. `spec-conformance` runs only when
-the ticket is heavy (its `Lane:` field, read as the merger reads it). A
-light PR's spec drift is caught at the epic boundary instead.
+spawned with `model: sonnet`, told the diff matched no specialist row.
+`spec-conformance` does not run per PR in either lane; spec drift is caught
+at the epic boundary.
 
 | Reviewer | Fires when a changed path matches |
 |---|---|
@@ -53,27 +53,29 @@ the development switch, the sanctioned fail-open, provisioning, grade
 passback, and student reachability checks. A light ticket's security pass
 must include the specialist who knows them.
 
-`data-model`, `lti-oidc`, `a11y-copy`, and `prompt-eval` no longer run here —
-they run at the epic boundary alongside `epic-exit`, `invariant-coverage`,
+`spec-conformance`, `data-model`, `lti-oidc`, `a11y-copy`, and `prompt-eval`
+no longer run here — they run at the epic boundary alongside `epic-exit`, `invariant-coverage`,
 `adr-docs-completeness`, `threat-model`, and `code-reviewer` (ADR 0004).
 Exception: during an epic whose declared subject is a moved reviewer's specialty (an epic
 integrating real LTI platforms re-lists `lti-oidc`, say), that reviewer runs
 per-PR for that epic's tickets — the epic README says so at breakdown.
 
-A docs-only diff gets the generic security pass alone, and `spec-conformance`
-too when the ticket is heavy. That is correct, not a misconfiguration.
+A docs-only diff gets the generic security pass alone. That is correct, not a
+misconfiguration.
 
 Tell the user which reviewers you are running and why **before** spawning them,
 so a wrong gate is visible immediately rather than after the tokens are spent.
 
 ## 3. Run them
 
-Spawn the matching reviewers **in parallel, in the foreground** — one message,
-multiple `Agent` calls. Foreground because background subagents lose tools and
-you need their structured text back.
+Run them **once, after the last code push**, against the final head SHA. A
+review of an earlier head is stale: the merger refuses it, and so the work is
+lost. Spawn the matching reviewers **in parallel, in the foreground** — one
+message, multiple `Agent` calls. Foreground because background subagents lose
+tools and you need their structured text back.
 
-Give each: the PR number, the diff, the ticket the PR names, and the list of
-changed files.
+Give each: the PR number, the head SHA, the diff, the ticket the PR names, and
+the list of changed files. The comment names the head SHA it covered.
 
 **Tell each reviewer that a `Nothing found.` must show what it checked.** A bare
 negative is not a reviewable result — it is indistinguishable from a reviewer
@@ -95,20 +97,18 @@ Each reviewer returns a `### <name>` block containing either `Nothing found.` or
 findings ranked HIGH → MED → LOW. Concatenate them in this order — most
 consequential first, so the top of the comment is worth reading:
 
-`privacy-authz`, `app-security`, `spec-conformance`
+`privacy-authz`, `app-security`
 
 Then list every reviewer that did **not** run, with the reason. This includes
-the four reviewers moved to the epic boundary (`data-model`, `lti-oidc`,
-`a11y-copy`, `prompt-eval`, unless step 2's exception re-lists one for this
-epic) — a reviewer deleted from this file's table must never just vanish from
+the five reviewers moved to the epic boundary (`spec-conformance`,
+`data-model`, `lti-oidc`, `a11y-copy`, `prompt-eval`, unless step 2's
+exception re-lists one for this epic) — a reviewer deleted from this file's table must never just vanish from
 the silence accounting; it moved, and the comment says where.
 
 ```
 _Not triggered: privacy-authz (no read-path or authz changes)._
-_Not triggered: spec-conformance (light-lane ticket; runs at the epic
-boundary)._
-_Not triggered: data-model, lti-oidc, a11y-copy, prompt-eval (run at the epic
-boundary, not per-PR)._
+_Not triggered: spec-conformance, data-model, lti-oidc, a11y-copy, prompt-eval
+(run at the epic boundary, not per-PR)._
 ```
 
 Silence must never be ambiguous. A reviewer that did not run and a reviewer that
@@ -124,18 +124,21 @@ Then summarise for the user in chat: the counts by severity, and the single
 finding you would act on first. Do not repeat the whole comment back — they can
 read it.
 
-## 5. A fix round ends with a review pass
+## 5. A fix round ends with one re-check
 
-When findings come back and get fixed, run the reviewers again against the
-fixes. **Verifying a fix yourself is not the review** — it is the session that
-scoped the fix confirming the fix matches the scope, which cannot notice a fix
-that is wrong in a way nobody thought to scope. On PR #13, three consecutive
-rounds each found something in the previous round's fixes, twice a defect
-*introduced by* a fix for that same class of defect.
+When findings come back and get fixed, the fix round runs only the targeted
+tests locally and pushes once. Then the same reviewers run **one re-check
+pass** on the new head, and the loop stops. **Verifying a fix yourself is not
+the review** — it is the session that scoped the fix confirming the fix
+matches the scope, which cannot notice a fix that is wrong in a way nobody
+thought to scope. On PR #13, three consecutive rounds each found something in
+the previous round's fixes, twice a defect *introduced by* a fix for that same
+class of defect.
 
-If the fixes are small enough that another pass seems wasteful, say so in the
-pull request and let the merge decision be made knowing it. The judgment is
-fine; the silence is not. See `docs/MISTAKES.md` entry 10.
+A HIGH found in the re-check is fixed, and that fix gets one more re-check on
+its new head. Nothing else reopens the loop. The PR body records this stopping
+rule, and every review it cites names the final head SHA. See
+`docs/MISTAKES.md` entry 10.
 
 ## 6. The independent security review
 

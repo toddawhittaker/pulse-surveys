@@ -16,7 +16,7 @@ true while you work (your diff reaches a path in
 the orchestrator re-lanes the ticket.
 
 Read first: the ticket, the spec sections it names, `CLAUDE.md`,
-`docs/MISTAKES.md` whole, and the epic's `.attempts/<TICKET>.md` if it exists —
+the `docs/MISTAKES.md` entries your brief cites by number, and the epic's `.attempts/<TICKET>.md` if it exists —
 your own record of what you already tried, possibly from a session whose
 memory is gone.
 
