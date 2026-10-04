@@ -39,7 +39,7 @@ describe('the generated wire types', () => {
     const scratch = mkdtempSync(join(tmpdir(), 'wire-gen-'));
     try {
       const output = join(scratch, 'wire.gen.ts');
-      execFileSync(GENERATOR, [INPUT, '-o', output], { cwd: FRONTEND_ROOT, stdio: 'pipe' });
+      execFileSync(GENERATOR, [INPUT, '--immutable', '-o', output], { cwd: FRONTEND_ROOT, stdio: 'pipe' });
       const regenerated = readFileSync(output, 'utf8');
       expect(
         regenerated === readFileSync(COMMITTED, 'utf8'),

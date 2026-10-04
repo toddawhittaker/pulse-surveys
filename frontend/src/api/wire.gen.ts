@@ -4,32 +4,32 @@
  */
 
 export interface paths {
-    "/healthz": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/healthz": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
         /**
          * Liveness, with the configuration the process is running
          * @description Report the service, its version, and the environment it was configured with.
          */
-        get: operations["healthz_healthz_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly get: operations["healthz_healthz_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
-    "/lti/jwks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/lti/jwks": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
         /**
          * This tool's public key set (RFC 7517)
@@ -54,24 +54,24 @@ export interface paths {
          *     (ADR 0013) and reading it from the event loop would block every other request
          *     on the process.
          */
-        get: operations["jwks_lti_jwks_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly get: operations["jwks_lti_jwks_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
-    "/lti/login": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/lti/login": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        get?: never;
-        put?: never;
+        readonly get?: never;
+        readonly put?: never;
         /**
          * LTI 1.3 third-party-initiated login
          * @description Answer a platform's login initiation with an authorization request.
@@ -82,22 +82,22 @@ export interface paths {
          *     cookie is set here at all — E0-18's signed login cookie is gone from this door
          *     and its state/nonce role is the server-side handshake store now (ADR 0089).
          */
-        post: operations["login_lti_login_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly post: operations["login_lti_login_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
-    "/lti/launch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/lti/launch": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        get?: never;
-        put?: never;
+        readonly get?: never;
+        readonly put?: never;
         /**
          * LTI 1.3 launch: verify the token and issue a session
          * @description Verify what the platform posted back, issue a session, and hand it over.
@@ -163,19 +163,19 @@ export interface paths {
          *     broadly, because by this line the launch is verified, committed and owed a
          *     response (`docs/MISTAKES.md` entry 41).
          */
-        post: operations["launch_lti_launch_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly post: operations["launch_lti_launch_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
-    "/auth/oidc/login": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/auth/oidc/login": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
         /**
          * Start a web login against the identity provider
@@ -191,21 +191,21 @@ export interface paths {
          *     in its threadpool, which is where the two blocking things it does not do
          *     would have run.
          */
-        get: operations["begin_web_login_auth_oidc_login_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly get: operations["begin_web_login_auth_oidc_login_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
-    "/auth/oidc/callback": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/auth/oidc/callback": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
         /**
          * Finish a web login and issue a session
@@ -237,21 +237,21 @@ export interface paths {
          *     cancelled on is exactly the one where an uncleared cookie leaves the PKCE
          *     verifier live in a browser that has finished with it.
          */
-        get: operations["finish_web_login_auth_oidc_callback_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly get: operations["finish_web_login_auth_oidc_callback_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
-    "/student/survey": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/student/survey": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
         /**
          * This student's enrollments and the survey open for each
@@ -283,24 +283,24 @@ export interface paths {
          *     handler declared `async` would take them on the event loop and block every
          *     other request on the process.
          */
-        get: operations["student_survey_student_survey_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly get: operations["student_survey_student_survey_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
-    "/student/submissions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/student/submissions": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        get?: never;
-        put?: never;
+        readonly get?: never;
+        readonly put?: never;
         /**
          * Submit this week's survey for one of my sections
          * @description Store one student's answers to one section's open weekly survey.
@@ -322,19 +322,19 @@ export interface paths {
          *     this route from reporting which door a session came through, which is the same
          *     discipline the enrollment check itself is written under.
          */
-        post: operations["submit_weekly_survey_student_submissions_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly post: operations["submit_weekly_survey_student_submissions_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
-    "/instructor/sections/{section_id}/report/{course_week}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/instructor/sections/{section_id}/report/{course_week}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
         /**
          * The Monday report for one of my sections and one course week
@@ -356,21 +356,21 @@ export interface paths {
          *     handler declared `async` would take them on the event loop and block every other
          *     request on the process.
          */
-        get: operations["read_report_instructor_sections__section_id__report__course_week__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly get: operations["read_report_instructor_sections__section_id__report__course_week__get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
-    "/instructor/sections/{section_id}/published-weeks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/instructor/sections/{section_id}/published-weeks": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
         /**
          * The course weeks of my section a report may be read for
@@ -382,21 +382,21 @@ export interface paths {
          *     calendar for a section the reader has no relationship with, from the endpoint
          *     nobody thinks of as the report.
          */
-        get: operations["read_published_weeks_instructor_sections__section_id__published_weeks_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly get: operations["read_published_weeks_instructor_sections__section_id__published_weeks_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
-    "/instructor/sections": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/instructor/sections": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
         /**
          * The sections I teach, and may read a report for
@@ -420,21 +420,21 @@ export interface paths {
          *     `read_report` above gives: every statement behind this is a blocking read on a
          *     synchronous session (ADR 0013).
          */
-        get: operations["read_taught_sections_instructor_sections_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly get: operations["read_taught_sections_instructor_sections_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
-    "/leadership/comparison-sets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/leadership/comparison-sets": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
         /**
          * Every comparison set this institution has defined
@@ -450,8 +450,8 @@ export interface paths {
          *     statement behind this blocks, so an `async` handler would take them on the
          *     event loop.
          */
-        get: operations["read_sets_leadership_comparison_sets_get"];
-        put?: never;
+        readonly get: operations["read_sets_leadership_comparison_sets_get"];
+        readonly put?: never;
         /**
          * Define a comparison set
          * @description Define a set for whoever this session is, or translate what the database refused.
@@ -459,19 +459,19 @@ export interface paths {
          *     **The definer comes from the session and never from the body**, and it is
          *     what every later edit and delete of this set is scoped by.
          */
-        post: operations["define_set_leadership_comparison_sets_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly post: operations["define_set_leadership_comparison_sets_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
-    "/leadership/comparison-sets/options": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/leadership/comparison-sets/options": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
         /**
          * The lengths, levels and courses a set may be defined out of
@@ -481,21 +481,21 @@ export interface paths {
          *     refusal here beyond the role gate. The courses it lists are every course this
          *     institution runs, because the form is where a new cohort is built.
          */
-        get: operations["read_options_leadership_comparison_sets_options_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly get: operations["read_options_leadership_comparison_sets_options_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
-    "/leadership/comparison-sets/{set_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/leadership/comparison-sets/{set_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
         /**
          * One comparison set, whoever defined it
@@ -506,7 +506,7 @@ export interface paths {
          *     request rather than about a set. ADR 0016 makes every key a uuid, so a
          *     malformed value is not a set id at all and never reaches the lookup.
          */
-        get: operations["read_one_set_leadership_comparison_sets__set_id__get"];
+        readonly get: operations["read_one_set_leadership_comparison_sets__set_id__get"];
         /**
          * Replace the definition of a set I defined
          * @description Replace a set's whole definition, for the leader who defined it.
@@ -515,8 +515,8 @@ export interface paths {
          *     set is a 403, and a definition the database will not store is one of the five
          *     translated sentences.
          */
-        put: operations["replace_set_leadership_comparison_sets__set_id__put"];
-        post?: never;
+        readonly put: operations["replace_set_leadership_comparison_sets__set_id__put"];
+        readonly post?: never;
         /**
          * Delete a set I defined
          * @description Delete a set, taking its membership rows and nothing else (ADR 0164).
@@ -525,18 +525,18 @@ export interface paths {
          *     the set is untouched and stays undeletable while any set names it, which is
          *     the opposite direction of the same rule.
          */
-        delete: operations["remove_set_leadership_comparison_sets__set_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly delete: operations["remove_set_leadership_comparison_sets__set_id__delete"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
-    "/leadership/comparison-sets/{set_id}/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/leadership/comparison-sets/{set_id}/preview": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
         /**
          * How many courses and sections a set reaches
@@ -545,21 +545,21 @@ export interface paths {
          *     Answered for every set, not only for this session's own: a count is what
          *     makes an institution-wide list usable, and it says nothing about anybody.
          */
-        get: operations["read_preview_leadership_comparison_sets__set_id__preview_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly get: operations["read_preview_leadership_comparison_sets__set_id__preview_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
-    "/dev": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly "/dev": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
         /**
          * Development-only test console for both entry doors
@@ -577,14 +577,14 @@ export interface paths {
          *     the same cost every other routed dependency has and is why the gate stays in
          *     the handler (ADR 0079) rather than moving anywhere clever.
          */
-        get: operations["dev_console_dev_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        readonly get: operations["dev_console_dev_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
     };
 }
 export type webhooks = Record<string, never>;
@@ -597,9 +597,9 @@ export interface components {
          *     One model answers for both populations, so a rule cannot land on the
          *     comparison-set line and miss the university one.
          */
-        BenchmarkSeries: {
+        readonly BenchmarkSeries: {
             /** Points */
-            points: components["schemas"]["BenchmarkSeriesPoint"][];
+            readonly points: readonly components["schemas"]["BenchmarkSeriesPoint"][];
         };
         /**
          * BenchmarkSeriesPoint
@@ -616,10 +616,10 @@ export interface components {
          *     the week would hand back the inference the minimum exists to prevent, whether
          *     or not the figure beside it is shown.
          */
-        BenchmarkSeriesPoint: {
+        readonly BenchmarkSeriesPoint: {
             /** Course Week */
-            course_week: number;
-            mean: components["schemas"]["ComparisonFigure"];
+            readonly course_week: number;
+            readonly mean: components["schemas"]["ComparisonFigure"];
         };
         /**
          * CommentView
@@ -630,13 +630,13 @@ export interface components {
          *     `tests/integration/test_the_report_payload_repeats_nothing_beyond_the_comment_service.py`
          *     is what holds this shape to it.
          */
-        CommentView: {
+        readonly CommentView: {
             /** Text */
-            text: string;
+            readonly text: string;
             /** Status */
-            status: string;
+            readonly status: string;
             /** Stream */
-            stream: string;
+            readonly stream: string;
         };
         /**
          * ComparisonFigure
@@ -682,13 +682,13 @@ export interface components {
          *     that resolves a population, and it reaches this type through
          *     `comparison_after_suppression` like everything else.
          */
-        ComparisonFigure: {
+        readonly ComparisonFigure: {
             /** Suppressed */
-            suppressed: boolean;
+            readonly suppressed: boolean;
             /** Reason */
-            reason?: string | null;
+            readonly reason?: string | null;
             /** Figure */
-            figure?: number | null;
+            readonly figure?: number | null;
         };
         /**
          * CourseOption
@@ -699,16 +699,16 @@ export interface components {
          *     is not using the form, and a form that let the choice be made would be
          *     offering a set the database will refuse at the moment of saving.
          */
-        CourseOption: {
+        readonly CourseOption: {
             /**
              * Id
              * Format: uuid
              */
-            id: string;
+            readonly id: string;
             /** Label */
-            label: string;
+            readonly label: string;
             /** Level */
-            level: string;
+            readonly level: string;
         };
         /**
          * EnrolledSection
@@ -731,40 +731,40 @@ export interface components {
          *     argument covers it: a "when does the next one open" lookup that stopped
          *     naming the section would put another section's calendar on this page.
          */
-        EnrolledSection: {
+        readonly EnrolledSection: {
             /**
              * Section Id
              * Format: uuid
              * @description The section row.
              */
-            section_id: string;
+            readonly section_id: string;
             /**
              * Section Code
              * @description The section code a person reads (SPEC §2.2).
              */
-            section_code: string;
+            readonly section_code: string;
             /**
              * Course Label
              * @description The reader's own course as a person names it: prefix, number, the section code, title and term name.
              */
-            course_label: string;
+            readonly course_label: string;
             /**
              * Survey Is Open
              * @description Whether a survey is open for this section at this moment.
              */
-            survey_is_open: boolean;
+            readonly survey_is_open: boolean;
             /**
              * Next Window Opens At
              * @description When this section's next survey opens, or null while one is open and when nothing is ahead.
              */
-            next_window_opens_at: string | null;
+            readonly next_window_opens_at: string | null;
             /** @description The open survey, or null when none is open. */
-            open_survey: components["schemas"]["OpenSurvey"] | null;
+            readonly open_survey: components["schemas"]["OpenSurvey"] | null;
         };
         /** HTTPValidationError */
-        HTTPValidationError: {
+        readonly HTTPValidationError: {
             /** Detail */
-            detail?: components["schemas"]["ValidationError"][];
+            readonly detail?: readonly components["schemas"]["ValidationError"][];
         };
         /**
          * HealthResponse
@@ -774,39 +774,39 @@ export interface components {
          *     watches the deployment, so the three fields are a stable contract rather
          *     than a debugging convenience.
          */
-        HealthResponse: {
+        readonly HealthResponse: {
             /**
              * Service
              * @description Service name, constant for this application.
              */
-            service: string;
+            readonly service: string;
             /**
              * Version
              * @description Version of the running build.
              */
-            version: string;
+            readonly version: string;
             /**
              * Environment
              * @description Configured deployment name (`ENVIRONMENT`).
              */
-            environment: string;
+            readonly environment: string;
         };
         /**
          * InstructorReport
          * @description One instructor's Monday report, for one of her own sections and one course week.
          */
-        InstructorReport: {
-            section: components["schemas"]["SectionView"];
-            week: components["schemas"]["WeekView"];
-            rates: components["schemas"]["RatesView"];
-            streams: components["schemas"]["StreamsView"];
-            workload: components["schemas"]["WorkloadView"];
-            workload_benchmark: components["schemas"]["WorkloadBenchmarkView"];
-            comparison: components["schemas"]["ComparisonFigure"];
+        readonly InstructorReport: {
+            readonly section: components["schemas"]["SectionView"];
+            readonly week: components["schemas"]["WeekView"];
+            readonly rates: components["schemas"]["RatesView"];
+            readonly streams: components["schemas"]["StreamsView"];
+            readonly workload: components["schemas"]["WorkloadView"];
+            readonly workload_benchmark: components["schemas"]["WorkloadBenchmarkView"];
+            readonly comparison: components["schemas"]["ComparisonFigure"];
             /** Released From Earlier Weeks */
-            released_from_earlier_weeks: components["schemas"]["CommentView"][];
+            readonly released_from_earlier_weeks: readonly components["schemas"]["CommentView"][];
             /** Institution Timezone */
-            institution_timezone: string;
+            readonly institution_timezone: string;
         };
         /**
          * OpenSurvey
@@ -830,52 +830,52 @@ export interface components {
          *     optional one would let a read path that found no length answer a half-eyebrow
          *     — "COURSE WK 04 / , TERM WK 07" — instead of failing where the data is wrong.
          */
-        OpenSurvey: {
+        readonly OpenSurvey: {
             /**
              * Window Id
              * Format: uuid
              * @description The survey window this answers over.
              */
-            window_id: string;
+            readonly window_id: string;
             /**
              * Course Week
              * @description Which week of this section's own run the window covers, counting from 1.
              */
-            course_week: number;
+            readonly course_week: number;
             /**
              * Length Weeks
              * @description How many weeks this section's own run lasts in total (SPEC §2.2).
              */
-            length_weeks: number;
+            readonly length_weeks: number;
             /**
              * Term Week
              * @description Which week of the term the same window covers.
              */
-            term_week: number;
+            readonly term_week: number;
             /**
              * Opens At
              * Format: date-time
              * @description When the window opened.
              */
-            opens_at: string;
+            readonly opens_at: string;
             /**
              * Closes At
              * Format: date-time
              * @description When it closes.
              */
-            closes_at: string;
+            readonly closes_at: string;
             /**
              * Question Set Version
              * @description Version of the question set being served.
              */
-            question_set_version: number;
+            readonly question_set_version: number;
             /**
              * Questions
              * @description The questions, in position order.
              */
-            questions: components["schemas"]["SurveyQuestion"][];
+            readonly questions: readonly components["schemas"]["SurveyQuestion"][];
             /** @description What this reader has already submitted for this week, or null. */
-            submission: components["schemas"]["OwnSubmission"] | null;
+            readonly submission: components["schemas"]["OwnSubmission"] | null;
         };
         /**
          * OwnSubmission
@@ -886,24 +886,24 @@ export interface components {
          *     author; the lookup behind this is over the reader, the section and the week
          *     together, and the denial suite is what proves the reader is in that key.
          */
-        OwnSubmission: {
+        readonly OwnSubmission: {
             /**
              * First Submitted At
              * Format: date-time
              * @description When this week was first answered.
              */
-            first_submitted_at: string;
+            readonly first_submitted_at: string;
             /**
              * Last Submitted At
              * Format: date-time
              * @description When it was last revised.
              */
-            last_submitted_at: string;
+            readonly last_submitted_at: string;
             /**
              * Answers
              * @description The answers, in question order.
              */
-            answers: components["schemas"]["SubmittedAnswer-Output"][];
+            readonly answers: readonly components["schemas"]["SubmittedAnswer-Output"][];
         };
         /**
          * PublishedWeeks
@@ -915,9 +915,9 @@ export interface components {
          *     does and is derived by the same function, because two derivations of "which
          *     weeks may I read" is a reader paging to a week the report will not serve.
          */
-        PublishedWeeks: {
+        readonly PublishedWeeks: {
             /** Published Weeks */
-            published_weeks: number[];
+            readonly published_weeks: readonly number[];
         };
         /**
          * QuestionKind
@@ -942,7 +942,7 @@ export interface components {
          *     `LaunchDefectKind` in `app.models.lti` gives for the same choice.
          * @enum {string}
          */
-        QuestionKind: "likert" | "comment" | "workload";
+        readonly QuestionKind: "likert" | "comment" | "workload";
         /**
          * RatesView
          * @description SPEC §5.1's two rates and the counts they are ratios of.
@@ -951,38 +951,38 @@ export interface components {
          *     for a zero denominator is written in one reviewable place. `response_rate` and
          *     `validity_rate` are `None` where that rule leaves them undefined.
          */
-        RatesView: {
+        readonly RatesView: {
             /** Response Rate */
-            response_rate: number | null;
+            readonly response_rate: number | null;
             /** Validity Rate */
-            validity_rate: number | null;
+            readonly validity_rate: number | null;
             /** Responses */
-            responses: number;
+            readonly responses: number;
             /** Enrolled */
-            enrolled: number;
+            readonly enrolled: number;
             /** Valid Responses */
-            valid_responses: number;
+            readonly valid_responses: number;
         };
         /**
          * SectionView
          * @description Which section this report is about, in the words its instructor knows it by.
          */
-        SectionView: {
+        readonly SectionView: {
             /**
              * Code
              * @description The LMS section code, e.g. 'F1WW' (SPEC §2.2).
              */
-            code: string;
+            readonly code: string;
             /**
              * Course Label
              * @description 'MATH 140 E1FF — College Algebra, Fall 2026'.
              */
-            course_label: string;
+            readonly course_label: string;
             /**
              * Length Weeks
              * @description How many weeks this section runs (SPEC §2.2).
              */
-            length_weeks: number;
+            readonly length_weeks: number;
         };
         /**
          * SetDetail
@@ -992,64 +992,64 @@ export interface components {
          *     0174): this ticket writes no `audit_log` row, and these columns are what is
          *     recorded instead.
          */
-        SetDetail: {
+        readonly SetDetail: {
             /**
              * Id
              * Format: uuid
              */
-            id: string;
+            readonly id: string;
             /** Name */
-            name: string;
+            readonly name: string;
             /** Length Weeks */
-            length_weeks: number;
+            readonly length_weeks: number;
             /** Level */
-            level: string;
+            readonly level: string;
             /** Member Count */
-            member_count: number;
+            readonly member_count: number;
             /** Editable */
-            editable: boolean;
+            readonly editable: boolean;
             /** Member Course Ids */
-            member_course_ids: string[];
+            readonly member_course_ids: readonly string[];
             /**
              * Created At
              * Format: date-time
              */
-            created_at: string;
+            readonly created_at: string;
             /**
              * Updated At
              * Format: date-time
              */
-            updated_at: string;
+            readonly updated_at: string;
         };
         /**
          * SetList
          * @description Every set in the institution, in name order.
          */
-        SetList: {
+        readonly SetList: {
             /** Sets */
-            sets: components["schemas"]["SetSummary"][];
+            readonly sets: readonly components["schemas"]["SetSummary"][];
         };
         /**
          * SetOptions
          * @description The closed choices a set is defined out of: the lengths, the levels, the courses.
          */
-        SetOptions: {
+        readonly SetOptions: {
             /** Lengths */
-            lengths: number[];
+            readonly lengths: readonly number[];
             /** Levels */
-            levels: string[];
+            readonly levels: readonly string[];
             /** Courses */
-            courses: components["schemas"]["CourseOption"][];
+            readonly courses: readonly components["schemas"]["CourseOption"][];
         };
         /**
          * SetPreview
          * @description What a set reaches, as two counts and nothing else. See the module docstring.
          */
-        SetPreview: {
+        readonly SetPreview: {
             /** Member Count */
-            member_count: number;
+            readonly member_count: number;
             /** Section Count */
-            section_count: number;
+            readonly section_count: number;
         };
         /**
          * SetSummary
@@ -1059,22 +1059,22 @@ export interface components {
          *     the preview answers that, and the two are different numbers for every set
          *     whose courses run more than one section.
          */
-        SetSummary: {
+        readonly SetSummary: {
             /**
              * Id
              * Format: uuid
              */
-            id: string;
+            readonly id: string;
             /** Name */
-            name: string;
+            readonly name: string;
             /** Length Weeks */
-            length_weeks: number;
+            readonly length_weeks: number;
             /** Level */
-            level: string;
+            readonly level: string;
             /** Member Count */
-            member_count: number;
+            readonly member_count: number;
             /** Editable */
-            editable: boolean;
+            readonly editable: boolean;
         };
         /**
          * SetWrite
@@ -1098,15 +1098,15 @@ export interface components {
          *     but the translator names no sentence for it, so a blank name reaching the
          *     table from this route would be a 500.
          */
-        SetWrite: {
+        readonly SetWrite: {
             /** Name */
-            name: string;
+            readonly name: string;
             /** Length Weeks */
-            length_weeks: number;
+            readonly length_weeks: number;
             /** Level */
-            level: string;
+            readonly level: string;
             /** Member Course Ids */
-            member_course_ids: string[];
+            readonly member_course_ids: readonly string[];
         };
         /**
          * SmallNView
@@ -1118,11 +1118,11 @@ export interface components {
          *     threshold is configuration, and a commenter count on a suppressed stream would
          *     be the number the threshold is hiding (§5.2).
          */
-        SmallNView: {
+        readonly SmallNView: {
             /** Suppressed */
-            suppressed: boolean;
+            readonly suppressed: boolean;
             /** Threshold */
-            threshold: number;
+            readonly threshold: number;
         };
         /**
          * StreamBenchmark
@@ -1132,36 +1132,36 @@ export interface components {
          *     are what it is read against. Both populations are served for both panels,
          *     because §5.1's stacked pair carries three lines each.
          */
-        StreamBenchmark: {
-            comparison: components["schemas"]["BenchmarkSeries"];
-            university: components["schemas"]["BenchmarkSeries"];
+        readonly StreamBenchmark: {
+            readonly comparison: components["schemas"]["BenchmarkSeries"];
+            readonly university: components["schemas"]["BenchmarkSeries"];
         };
         /**
          * StreamReport
          * @description One of SPEC §5.1's two comment groups: its numbers, its summary and its words.
          */
-        StreamReport: {
+        readonly StreamReport: {
             /** Trend */
-            trend: components["schemas"]["TrendPoint"][];
+            readonly trend: readonly components["schemas"]["TrendPoint"][];
             /** Distribution */
-            distribution: {
-                [key: string]: number;
+            readonly distribution: {
+                readonly [key: string]: number;
             };
-            summary: components["schemas"]["SummaryView"] | null;
+            readonly summary: components["schemas"]["SummaryView"] | null;
             /** Comments */
-            comments: components["schemas"]["CommentView"][];
+            readonly comments: readonly components["schemas"]["CommentView"][];
             /** Question Text */
-            question_text: string;
-            benchmark: components["schemas"]["StreamBenchmark"];
-            small_n: components["schemas"]["SmallNView"];
+            readonly question_text: string;
+            readonly benchmark: components["schemas"]["StreamBenchmark"];
+            readonly small_n: components["schemas"]["SmallNView"];
         };
         /**
          * StreamsView
          * @description The two groups §5.1 heads separately, never pooled into one.
          */
-        StreamsView: {
-            instructor: components["schemas"]["StreamReport"];
-            course: components["schemas"]["StreamReport"];
+        readonly StreamsView: {
+            readonly instructor: components["schemas"]["StreamReport"];
+            readonly course: components["schemas"]["StreamReport"];
         };
         /**
          * StudentSurveyView
@@ -1181,17 +1181,17 @@ export interface components {
          *     is the same string for every reader of the deployment and says nothing about
          *     any of them.
          */
-        StudentSurveyView: {
+        readonly StudentSurveyView: {
             /**
              * Sections
              * @description The reader's live enrollments, in section-code order.
              */
-            sections: components["schemas"]["EnrolledSection"][];
+            readonly sections: readonly components["schemas"]["EnrolledSection"][];
             /**
              * Institution Timezone
              * @description The IANA zone this deployment's survey windows are written in (SPEC §8).
              */
-            institution_timezone: string;
+            readonly institution_timezone: string;
         };
         /**
          * SubmissionAccepted
@@ -1201,24 +1201,24 @@ export interface components {
          *     to — the section's validity *rate* is an instructor and leadership surface
          *     (§3.3, §4.1 item 1) and is no part of this answer.
          */
-        SubmissionAccepted: {
+        readonly SubmissionAccepted: {
             /**
              * Response Id
              * Format: uuid
              */
-            response_id: string;
+            readonly response_id: string;
             /** Is Valid */
-            is_valid: boolean;
+            readonly is_valid: boolean;
             /**
              * First Submitted At
              * Format: date-time
              */
-            first_submitted_at: string;
+            readonly first_submitted_at: string;
             /**
              * Last Submitted At
              * Format: date-time
              */
-            last_submitted_at: string;
+            readonly last_submitted_at: string;
         };
         /**
          * SubmissionRequest
@@ -1229,14 +1229,14 @@ export interface components {
          *     resolves from the open window rather than a value a caller may choose. A
          *     request that could name its own week could name a week that has closed.
          */
-        SubmissionRequest: {
+        readonly SubmissionRequest: {
             /**
              * Section Id
              * Format: uuid
              */
-            section_id: string;
+            readonly section_id: string;
             /** Answers */
-            answers: components["schemas"]["SubmittedAnswer-Input"][];
+            readonly answers: readonly components["schemas"]["SubmittedAnswer-Input"][];
         };
         /**
          * SubmittedAnswer
@@ -1252,15 +1252,15 @@ export interface components {
          *     the body rather than in a service the request has already paid to reach. See
          *     `COMMENT_MAXIMUM_LENGTH`.
          */
-        "SubmittedAnswer-Input": {
+        readonly "SubmittedAnswer-Input": {
             /** Position */
-            position: number;
+            readonly position: number;
             /** Rating */
-            rating?: number | null;
+            readonly rating?: number | null;
             /** Comment Text */
-            comment_text?: string | null;
+            readonly comment_text?: string | null;
             /** Workload Hours */
-            workload_hours?: number | string | null;
+            readonly workload_hours?: number | string | null;
         };
         /**
          * SubmittedAnswer
@@ -1271,28 +1271,28 @@ export interface components {
          *     the workload figure renders a resubmit form with a field silently blanked, and
          *     the student's stored hours are then overwritten by the empty box.
          */
-        "SubmittedAnswer-Output": {
+        readonly "SubmittedAnswer-Output": {
             /**
              * Question Id
              * Format: uuid
              * @description The question this answers.
              */
-            question_id: string;
+            readonly question_id: string;
             /**
              * Rating
              * @description A Likert answer, 1-5.
              */
-            rating: number | null;
+            readonly rating: number | null;
             /**
              * Comment Text
              * @description A free-text answer.
              */
-            comment_text: string | null;
+            readonly comment_text: string | null;
             /**
              * Workload Hours
              * @description An hours-per-week answer.
              */
-            workload_hours: string | null;
+            readonly workload_hours: string | null;
         };
         /**
          * SummaryView
@@ -1302,13 +1302,13 @@ export interface components {
          *     the summary job has not run over, which is the ordinary state of a report read
          *     before Monday morning.
          */
-        SummaryView: {
+        readonly SummaryView: {
             /** Text */
-            text: string;
+            readonly text: string;
             /** Response Count */
-            response_count: number;
+            readonly response_count: number;
             /** Held Note */
-            held_note?: string | null;
+            readonly held_note?: string | null;
         };
         /**
          * SurveyQuestion
@@ -1320,55 +1320,55 @@ export interface components {
          *     range with a step, and a form that carried its own copy of either would
          *     disagree with the validity check the moment a set is versioned.
          */
-        SurveyQuestion: {
+        readonly SurveyQuestion: {
             /**
              * Id
              * Format: uuid
              * @description The question row, which an answer is keyed to.
              */
-            id: string;
+            readonly id: string;
             /**
              * Position
              * @description Ordinal within the set, 1-based, ascending.
              */
-            position: number;
+            readonly position: number;
             /** @description What sort of answer this question takes. */
-            kind: components["schemas"]["QuestionKind"];
+            readonly kind: components["schemas"]["QuestionKind"];
             /**
              * Name
              * @description The stable machine name of the question.
              */
-            name: string;
+            readonly name: string;
             /**
              * Prompt
              * @description The wording a person reads.
              */
-            prompt: string | null;
+            readonly prompt: string | null;
             /**
              * Required If Position
              * @description Position of the question whose answer can make this one required.
              */
-            required_if_position: number | null;
+            readonly required_if_position: number | null;
             /**
              * Required If At Most
              * @description This question is required when that answer is at most this value.
              */
-            required_if_at_most: number | null;
+            readonly required_if_at_most: number | null;
             /**
              * Minimum Value
              * @description Lowest value this question accepts.
              */
-            minimum_value: string | null;
+            readonly minimum_value: string | null;
             /**
              * Maximum Value
              * @description Highest value this question accepts.
              */
-            maximum_value: string | null;
+            readonly maximum_value: string | null;
             /**
              * Step
              * @description The increment values must fall on.
              */
-            step: string | null;
+            readonly step: string | null;
         };
         /**
          * TaughtSection
@@ -1384,16 +1384,16 @@ export interface components {
          *     no rates, no week. This is a menu, and a figure on it would be a figure with no
          *     §4 suppression rule applied to it.
          */
-        TaughtSection: {
+        readonly TaughtSection: {
             /**
              * Section Id
              * Format: uuid
              */
-            section_id: string;
+            readonly section_id: string;
             /** Code */
-            code: string;
+            readonly code: string;
             /** Course Label */
-            course_label: string;
+            readonly course_label: string;
         };
         /**
          * TaughtSections
@@ -1407,9 +1407,9 @@ export interface components {
          *     nobody, and both are ordinary states rather than refusals: this route takes no
          *     parameter, so there is nothing in the request to refuse.
          */
-        TaughtSections: {
+        readonly TaughtSections: {
             /** Sections */
-            sections: components["schemas"]["TaughtSection"][];
+            readonly sections: readonly components["schemas"]["TaughtSection"][];
         };
         /**
          * TrendPoint
@@ -1434,26 +1434,26 @@ export interface components {
          *     nothing: it is what every reader of this payload could already compute
          *     from `week` alone.
          */
-        TrendPoint: {
+        readonly TrendPoint: {
             /** Course Week */
-            course_week: number;
+            readonly course_week: number;
             /** Term Week */
-            term_week: number;
+            readonly term_week: number;
             /** Mean */
-            mean: number | null;
+            readonly mean: number | null;
         };
         /** ValidationError */
-        ValidationError: {
+        readonly ValidationError: {
             /** Location */
-            loc: (string | number)[];
+            readonly loc: readonly (string | number)[];
             /** Message */
-            msg: string;
+            readonly msg: string;
             /** Error Type */
-            type: string;
+            readonly type: string;
             /** Input */
-            input?: unknown;
+            readonly input?: unknown;
             /** Context */
-            ctx?: Record<string, never>;
+            readonly ctx?: Record<string, never>;
         };
         /**
          * WeekView
@@ -1464,18 +1464,18 @@ export interface components {
          *     consumer that had one of the two would have to re-derive the other from the
          *     section's start-letter calendar.
          */
-        WeekView: {
+        readonly WeekView: {
             /** Course Week */
-            course_week: number;
+            readonly course_week: number;
             /** Term Week */
-            term_week: number;
+            readonly term_week: number;
             /** Published Weeks */
-            published_weeks: number[];
+            readonly published_weeks: readonly number[];
             /**
              * Closes At
              * Format: date-time
              */
-            closes_at: string;
+            readonly closes_at: string;
         };
         /**
          * WorkloadBenchmarkFigures
@@ -1486,9 +1486,9 @@ export interface components {
          *     other's decision. The two validators below are separate functions for the
          *     same reason: one validator naming both members would be one thing to delete.
          */
-        WorkloadBenchmarkFigures: {
-            mean: components["schemas"]["ComparisonFigure"];
-            median: components["schemas"]["ComparisonFigure"];
+        readonly WorkloadBenchmarkFigures: {
+            readonly mean: components["schemas"]["ComparisonFigure"];
+            readonly median: components["schemas"]["ComparisonFigure"];
         };
         /**
          * WorkloadBenchmarkView
@@ -1498,19 +1498,19 @@ export interface components {
          *     university figures (true numeric statistics — §3.2)". The section's own pair
          *     is `InstructorReport.workload`; this is what stands beside it.
          */
-        WorkloadBenchmarkView: {
-            comparison: components["schemas"]["WorkloadBenchmarkFigures"];
-            university: components["schemas"]["WorkloadBenchmarkFigures"];
+        readonly WorkloadBenchmarkView: {
+            readonly comparison: components["schemas"]["WorkloadBenchmarkFigures"];
+            readonly university: components["schemas"]["WorkloadBenchmarkFigures"];
         };
         /**
          * WorkloadView
          * @description SPEC §3.2's workload figure for this week, as `report_workload` aggregates it.
          */
-        WorkloadView: {
+        readonly WorkloadView: {
             /** Mean */
-            mean: number | null;
+            readonly mean: number | null;
             /** Median */
-            median: number | null;
+            readonly median: number | null;
         };
     };
     responses: never;
@@ -1521,479 +1521,479 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    healthz_healthz_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly healthz_healthz_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HealthResponse"];
+                    readonly "application/json": components["schemas"]["HealthResponse"];
                 };
             };
         };
     };
-    jwks_lti_jwks_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly jwks_lti_jwks_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
                     };
                 };
             };
         };
     };
-    login_lti_login_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly login_lti_login_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    readonly "application/json": unknown;
                 };
             };
         };
     };
-    launch_lti_launch_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly launch_lti_launch_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    readonly "application/json": unknown;
                 };
             };
         };
     };
-    begin_web_login_auth_oidc_login_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly begin_web_login_auth_oidc_login_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    readonly "application/json": unknown;
                 };
             };
         };
     };
-    finish_web_login_auth_oidc_callback_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly finish_web_login_auth_oidc_callback_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    readonly "application/json": unknown;
                 };
             };
         };
     };
-    student_survey_student_survey_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly student_survey_student_survey_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StudentSurveyView"];
+                    readonly "application/json": components["schemas"]["StudentSurveyView"];
                 };
             };
         };
     };
-    submit_weekly_survey_student_submissions_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly submit_weekly_survey_student_submissions_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SubmissionRequest"];
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["SubmissionRequest"];
             };
         };
-        responses: {
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SubmissionAccepted"];
+                    readonly "application/json": components["schemas"]["SubmissionAccepted"];
                 };
             };
             /** @description Validation Error */
-            422: {
+            readonly 422: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    read_report_instructor_sections__section_id__report__course_week__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                section_id: string;
-                course_week: number;
+    readonly read_report_instructor_sections__section_id__report__course_week__get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
             };
-            cookie?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InstructorReport"];
+                    readonly "application/json": components["schemas"]["InstructorReport"];
                 };
             };
             /** @description Validation Error */
-            422: {
+            readonly 422: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    read_published_weeks_instructor_sections__section_id__published_weeks_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                section_id: string;
+    readonly read_published_weeks_instructor_sections__section_id__published_weeks_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
             };
-            cookie?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PublishedWeeks"];
+                    readonly "application/json": components["schemas"]["PublishedWeeks"];
                 };
             };
             /** @description Validation Error */
-            422: {
+            readonly 422: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    read_taught_sections_instructor_sections_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly read_taught_sections_instructor_sections_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaughtSections"];
+                    readonly "application/json": components["schemas"]["TaughtSections"];
                 };
             };
         };
     };
-    read_sets_leadership_comparison_sets_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly read_sets_leadership_comparison_sets_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SetList"];
+                    readonly "application/json": components["schemas"]["SetList"];
                 };
             };
         };
     };
-    define_set_leadership_comparison_sets_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly define_set_leadership_comparison_sets_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetWrite"];
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["SetWrite"];
             };
         };
-        responses: {
+        readonly responses: {
             /** @description Successful Response */
-            201: {
+            readonly 201: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SetDetail"];
+                    readonly "application/json": components["schemas"]["SetDetail"];
                 };
             };
             /** @description Validation Error */
-            422: {
+            readonly 422: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    read_options_leadership_comparison_sets_options_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly read_options_leadership_comparison_sets_options_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SetOptions"];
+                    readonly "application/json": components["schemas"]["SetOptions"];
                 };
             };
         };
     };
-    read_one_set_leadership_comparison_sets__set_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                set_id: string;
+    readonly read_one_set_leadership_comparison_sets__set_id__get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly set_id: string;
             };
-            cookie?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SetDetail"];
+                    readonly "application/json": components["schemas"]["SetDetail"];
                 };
             };
             /** @description Validation Error */
-            422: {
+            readonly 422: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    replace_set_leadership_comparison_sets__set_id__put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                set_id: string;
+    readonly replace_set_leadership_comparison_sets__set_id__put: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly set_id: string;
             };
-            cookie?: never;
+            readonly cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetWrite"];
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["SetWrite"];
             };
         };
-        responses: {
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SetDetail"];
+                    readonly "application/json": components["schemas"]["SetDetail"];
                 };
             };
             /** @description Validation Error */
-            422: {
+            readonly 422: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    remove_set_leadership_comparison_sets__set_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                set_id: string;
+    readonly remove_set_leadership_comparison_sets__set_id__delete: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly set_id: string;
             };
-            cookie?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            204: {
+            readonly 204: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content?: never;
             };
             /** @description Validation Error */
-            422: {
+            readonly 422: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    read_preview_leadership_comparison_sets__set_id__preview_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                set_id: string;
+    readonly read_preview_leadership_comparison_sets__set_id__preview_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly set_id: string;
             };
-            cookie?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SetPreview"];
+                    readonly "application/json": components["schemas"]["SetPreview"];
                 };
             };
             /** @description Validation Error */
-            422: {
+            readonly 422: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    dev_console_dev_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    readonly dev_console_dev_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
         };
-        requestBody?: never;
-        responses: {
+        readonly requestBody?: never;
+        readonly responses: {
             /** @description Successful Response */
-            200: {
+            readonly 200: {
                 headers: {
-                    [name: string]: unknown;
+                    readonly [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    readonly "application/json": unknown;
                 };
             };
         };
