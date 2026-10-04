@@ -44,8 +44,9 @@ the roster to be fetchable.
 **Enrollment means "student", and the teaching grant follows the roster both
 ways** (E5.1-02, E5.1-11, ADR 0183). Only a member listed as Learner, and neither
 as Instructor, nor as any Instructor sub-role, nor as the platform's test user,
-is written an enrollment; anybody else has an open one closed. A complete walk
-that read at least one member, on or before the section's last day, ends every
+is written an enrollment; anybody else has an open one closed. On or before the
+section's last day, a member listed as Instructor is granted the section, and a
+complete walk that read at least one member ends every
 teaching grant on the section whose person it did not list as an active
 Instructor, through `public.end_teaching_instructor`, which deletes the row and
 records it in `ended_teaching_grant`.
@@ -1534,11 +1535,13 @@ def _ingest(
     would end every grant and close every enrollment on the section on one empty
     answer; a platform that truly empties a course is rare and recoverable.
 
-    **No grant is ended once the section has ended** (E5.1-11): when `today` is
-    after `section.end_date`, the section's inclusive last day, the grant-ending
-    pass is skipped. Platforms commonly end a teacher's enrollment when a course
-    concludes, and the instructor keeps her past reports. Closing enrollments is
-    not gated on the date.
+    **No grant is written or ended once the section has ended** (E5.1-11): when
+    `today` is after `section.end_date`, the section's inclusive last day, no
+    teaching grant is written and the grant-ending pass is skipped; one condition,
+    `section_has_ended`, gates both. Platforms commonly end a teacher's enrollment
+    when a course concludes, and the instructor keeps her past reports. Writing is
+    gated too because a grant written after the last day is one no later walk could
+    end. Writing and closing enrollments are not gated on the date.
     """
     read = [_read_member(member) for member in roster]
     members = [member for member in read if member is not None]
@@ -1863,6 +1866,9 @@ def _end_unsupported_teaching_grants(
 
 def _record_the_teaching_instructor(session: Session, section: Section, user_id: UUID) -> None:
     """Grant this section's `INSTRUCTOR` assignment, where the member is a known person.
+
+    Called only on or before the section's last day (E5.1-11; `_ingest` decides),
+    because nothing ends a grant written after it.
 
     D5, and the refusing half is the one that matters. An `INSTRUCTOR`
     `role_assignment` is a purview grant — SPEC §2.1 computes the whole oversight

@@ -28,7 +28,8 @@ SPEC §14.3 gives end-dating assignments to E9.
    same call, with no exception handler and no `ON CONFLICT`, so a failed record
    rolls the deletion back. A truncated walk ends nothing. A grant whose person has
    no LMS user is ended too: no roster can list them. (Amended by E5.1-11: no grant
-   is ended once the section has ended, and a walk that read no member ends nothing.)
+   is written or ended once the section has ended, and a walk that read no member
+   ends nothing.)
 2. **A new owner role, `pulse_grant_end_definer`**, holding `SELECT, DELETE` on
    `role_assignment`, `SELECT (id, section_id, response_code)` on `nrps_call` and
    `INSERT` on `ended_teaching_grant`, and nothing else. `pulse_app` holds nothing
@@ -88,16 +89,23 @@ pass unbounded in time and in what it trusts. Four changes.
   role a platform sends (a sub-role, a custom role) is a student again.
   *Cost:* a platform that lists its students with no Learner role at all
   enrolls nobody. That fails visibly (an empty class) rather than quietly.
-- **No grant is ended once the section has ended.** When the clock service's
-  `today` is after `section.end_date` (the section's inclusive last day), the
-  grant-ending pass does nothing; on `end_date` itself it still runs. Closing
-  enrollments is unchanged. Platforms commonly end teacher enrollments when a
+- **No grant is written or ended once the section has ended.** When the clock
+  service's `today` is after `section.end_date` (the section's inclusive last
+  day), the sync neither writes a teaching grant nor runs the grant-ending pass;
+  on `end_date` itself it does both. One condition, computed once in `_ingest`,
+  gates both. Writing and closing enrollments are unchanged. Platforms commonly end teacher enrollments when a
   course concludes, and the hourly walk visits a section for as long as it has a
   roster address, so without this the instructor lost her past reports and SPEC
   §5's seal changed what it treats as her sections. *Rejected:* ending grants
   after term as the platform says, which is what the original decision did.
   *Cost:* an instructor really removed after the term keeps the grant on that
   past section until E9's end-dating gives an admin a way to end it.
+  **Writing is gated too**, because a grant written after the last day is one no
+  later walk can end: a person first listed as Instructor on a past section
+  would hold its reports for good. *Rejected:* gating only the ending pass,
+  which the privacy and authorization review of this ticket found. *Cost:* an
+  instructor the platform adds to a section after it ended, to grade late work
+  for example, gets no grant from the sync and needs E9's admin surface.
 - **A walk that read no member is incomplete.** A walk reported complete whose
   members, read and keyed by subject, number zero closes no enrollment and ends no
   grant; it is decided where `_ingest` reads `complete`, not in the page reader.
