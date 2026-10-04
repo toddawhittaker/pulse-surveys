@@ -435,7 +435,7 @@ test('an instructor launches, chooses a section, and reads its week', async ({ p
   ).toBeVisible();
   // And neither group carries the suppression notice: both streams are at the
   // threshold of commenters. The small-N test below is the other half.
-  await expect(report.getByRole('region', { name: SMALL_N_TITLE })).toHaveCount(0);
+  await expect(report.getByText(SMALL_N_TITLE)).toHaveCount(0);
 
   // The two rates, with the counts they are ratios of. Five of the section's
   // students answered; the enrolment is the roster's and is not asserted as a
@@ -563,7 +563,7 @@ test('a small-N week hides its comments in the payload and not only on the page'
   // raw comments. **Two notices, one in each group**, since E5.1-01: the notice is
   // per stream (work order D6), and both of this week's streams hold three
   // commenters against a threshold of five.
-  await expect(report.getByRole('region', { name: SMALL_N_TITLE })).toHaveCount(2);
+  await expect(report.getByText(SMALL_N_TITLE)).toHaveCount(2);
   await expect(
     report.getByRole('article'),
     'A comment card is in the DOM on a week below the threshold. SPEC §4 hides a stream’s raw ' +

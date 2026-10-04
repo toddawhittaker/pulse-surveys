@@ -312,7 +312,9 @@ describe('CommentGroup', () => {
       // the empty-week line either, because the stream was not empty.
       const group = container.querySelector('.pulse-comment-group');
       const summary = screen.getByRole('region', { name: 'AI summary — course comments' });
-      const notices = screen.getAllByRole('region', { name: SMALL_N_TITLE });
+      const notices = screen
+        .getAllByText(SMALL_N_TITLE)
+        .map((title) => title.parentElement as Element);
 
       expect(notices).toHaveLength(1);
       const notice = notices[0] as Element;
@@ -341,7 +343,7 @@ describe('CommentGroup', () => {
       );
 
       expect(screen.getAllByRole('article')).toHaveLength(COURSE_COMMENTS.length);
-      expect(screen.queryByRole('region', { name: SMALL_N_TITLE })).toBeNull();
+      expect(screen.queryByText(SMALL_N_TITLE)).toBeNull();
     });
   });
 });
