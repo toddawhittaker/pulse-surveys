@@ -115,9 +115,9 @@ _PROBLEM_EXPLANATIONS = {
 # `backend/app` and `scripts` for a second.
 #
 # Every reader but one goes through `is_development` below rather than
-# comparing the string itself; that sweep test names no readers, so this
-# comment does not list them either. The exception is `scripts/seed.py`, for the
-# behavioural reason that predicate's docstring gives.
+# comparing the string itself. The sweep above is what holds them to that, so
+# this comment keeps no list of readers. The exception is `scripts/seed.py`, for
+# the behavioural reason that predicate's docstring gives.
 DEVELOPMENT_ENVIRONMENT = "development"
 
 
