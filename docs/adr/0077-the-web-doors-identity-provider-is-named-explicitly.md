@@ -289,3 +289,30 @@ and it is already named in every refusal message.
   re-derives them for database columns written through a console, adds a
   link-local rule these settings do not carry, and says where the two records
   differ and why.
+
+## Amended 2026-10-03 by E5.1-04: the session secret
+
+The same rule now covers `SESSION_SECRET`. Outside development, `Settings`
+refuses an empty value, a value under 32 characters
+(`MINIMUM_SESSION_SECRET_LENGTH`), and the published placeholder itself
+(`EXAMPLE_SESSION_SECRET` in `app/config.py`). The refusal names the variable
+and never the value. Development accepts the placeholder, by the same
+`is_a_deployment` test this record uses for mock addresses.
+
+- **The placeholder is refused by value.** A length rule alone would accept it,
+  since it is longer than 32 characters. The value is a constant in the code
+  rather than read from `.env.example` at startup, because a deployed image need
+  not carry that file; the tests read it from `.env.example`, so the two cannot
+  drift apart unnoticed.
+- **32 characters** is the length of `secrets.token_urlsafe(24)`, below the 43
+  that the documented `secrets.token_urlsafe(32)` produces.
+- **Rejected: an enumerated `ENVIRONMENT`.** `ENVIRONMENT` is free-form, and
+  every reader treats anything that is not `development` as a deployment, which
+  is the safe direction. Enumerating it for one rule would change what every
+  other reader accepts.
+- **Rejected: the check in every environment.** A clean checkout ships the
+  placeholder, so development would refuse to start.
+
+**Consequence.** `.env.example` ships `ENVIRONMENT=development`, so an unedited
+copy of it skips the check. CI copies that file as it is, so changing the
+default is E13's (`docs/tickets/e6/carried-from-e5.md`).

@@ -1,10 +1,10 @@
 # Entry 19. A test held its expectation in a copy of the thing it was checking
 
-**Caught: 8**
+**Caught: 10**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*8 caught; this file keeps three instances. Dated from git, the oldest recorded was E0-15's (added 2026-08-18) — dropped in E1's Batch D, then E0-28 and E0-33 (both 2026-08-18) in E5-11, leaving E3-04, E1-D and E5-11. The paragraphs below are not in date order; cite them by content, not position.*
+*10 caught; this file keeps three instances. Dated from git, the oldest recorded was E0-15's (added 2026-08-18) — dropped in E1's Batch D, then E0-28 and E0-33 (both 2026-08-18) in E5-11, then E3-04 and E1-D on 2026-10-03, leaving E5-11, E5.1-04 and E5.1-03. The paragraphs below are not in date order; cite them by content, not position.*
 
 *(**A catch**, writing E5-11's round 2, 2026-09-14, twice in one e2e file. The
 DOM sweep needs a figure to search the student's screen for, and the obvious
@@ -19,40 +19,17 @@ reds the canary instead of moving the expectation with it. The backend needle
 test was widened on the same rule — four figures, each taken off the served
 report, none computed in the test.)*
 
-*(**A catch**, writing E3-04's tests, 2026-09-04, in two places that look
-different and are the same. The first: the enforcement module's whole subject is
-which scope opens which AGS route, and `mock-lms/app/ags.py` declares all four as
-constants — importing them would put the route map and the assertion about the
-route map in one blast radius, so a scope respelled in the mock would move both
-and stay green. They are transcribed from the IMS specifications with a comment
-saying they deliberately are not derived, and the mock's own `ADVERTISED_SCOPES`
-is then read *through the platform's discovery document* — which is where a tool
-finds them — rather than imported, so the two copies are held against each other
-by the platform at run time. The second is the score maximum: criterion 4 says
-the client posts "the line item's own maximum", and the assertion reads that
-maximum back from the platform's line-item document rather than from the number
-this suite seeded with, so a client that echoed a constant is caught by the
-platform's own refusal rather than by a literal agreeing with itself. The same
-reading is why the ledger and the percentage in `tests/fixtures/ags_client.py`
-are values a caller hands over and nothing in that file derives: a fixture that
-computed either would be a second implementation for criterion 3's comparison to
-agree with, and the comparison is the criterion.)*
+*(**A catch**, writing E5.1-04's tests, 2026-10-03. The rule refuses
+`.env.example`'s `SESSION_SECRET` outside development, and the obvious test
+holds that placeholder as a literal or imports the constant `app/config.py`
+keeps. Either would agree with itself if the template's value changed. The tests
+read the placeholder from `.env.example` itself, so the file and the code cannot
+drift apart unnoticed.)*
 
-*(Writing E1's cleanup Batch D — the security response headers — over
-`frame-ancestors`. The directive must be `'self'` plus the origin of every
-registered platform's `authorization_endpoint`, and the repository already has the
-function that computes exactly that set: `launcher_origins`, which the developer
-console uses and which the middleware is required to reuse. The obvious way to
-write the expectation is to import it and compare the header against what it
-returns, and that import is this entry. The middleware and the test would then be
-reading one function, so a `launcher_origins` mutated to return an empty list, the
-wrong column, or a hardcoded address would move both sides together and stay
-green — the whole derivation could break with the suite reporting nothing. Every
-expected origin in `tests/integration/test_the_security_response_headers.py` is
-instead computed from the endpoint **the test itself registered**, with the
-stdlib-only `origin_of`; nothing from `backend/app/` is imported at all. The
-`admits_any_origin` and policy-parser controls are what keep the independent
-expectation from being independently wrong.)*
+*(**A catch**, writing E5.1-03's tests, 2026-10-03. The door pages and the dev
+console now share one design-token CSS block, `DESIGN_TOKENS_CSS`, and the test
+checks every value in it against `design/tokens.css` rather than against a copy
+of the values held in the test.)*
 
 **What happened.** E0-12's moderation contract test asserted that the verdict
 enum offers exactly the six values SPEC §7.4's table names. The six lived in a

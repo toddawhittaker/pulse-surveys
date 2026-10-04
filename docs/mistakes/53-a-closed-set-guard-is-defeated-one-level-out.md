@@ -1,6 +1,6 @@
 # Entry 53. A closed-set guard is defeated one level out
 
-**Caught: 3**
+**Caught: 4**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -69,3 +69,11 @@ student can be served stays inside the sweep, and a gated refusal that later
 becomes reachable leaves the tuple in the same change. What would have shipped:
 a sweep scoped to "student surfaces" that let the role gate's 401 sentence, the
 one a student really is answered with, name comparison sets. ADR 0177.)*
+
+*(**A catch**, writing E5.1-03's clock-row sweep, 2026-10-03. The sweep's first
+currencies were the obvious ones: imports of `ClockOverride` and raw SQL naming
+`clock_override`. This entry's question added the same reference spelled one
+level out, `getattr(models, "ClockOverride")` and `importlib.import_module` on
+`app.models.clock`, and the docstring states what is still outside: a name
+assembled at run time, a walk over every table on the metadata, and files that
+are not Python.)*

@@ -78,6 +78,14 @@ control before comparing anything. Its own second half is quoted in that test's
 docstring, to keep the next reader from mistaking an inventory check for gate
 coverage.)*
 
+*(E5.1-03, 2026-10-03, writing the dev clock routes' origin check. The pair
+became `DevControlRoute`s, and the ticket's criterion drove both directions over
+HTTP against the built application: a cross-origin POST, the literal `null`
+origin included, answers 403, and a same-origin POST still works
+(`tests/integration/test_the_dev_clock_controls_refuse_a_cross_site_post.py`).
+A sweep that found the class on the route table would have passed whether or
+not the gate ran at dispatch.)*
+
 ## The rule
 
 **On this FastAPI, a route's behaviour must live in its endpoint. Anything a

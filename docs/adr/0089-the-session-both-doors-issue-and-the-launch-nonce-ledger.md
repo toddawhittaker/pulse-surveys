@@ -169,7 +169,11 @@ the opposite).
   signed in as the attacker, and whatever the victim types, a survey comment
   included, is stored under the attacker's identity, where the attacker can read
   it. This is the login request forgery that a browser-bound `state` normally
-  prevents. It was left open because a cookie is exactly what this record removed
+  prevents. The window is narrow: a captured pair works once, because the
+  launch spends the token's nonce, and only within 300 seconds of the login
+  (`IN_FLIGHT_LIFETIME_SECONDS` in `app/lti/launch.py`), and the attacker has to
+  stop their own browser's auto-submitting form from posting the pair first. It
+  was left open because a cookie is exactly what this record removed
   from the launch, and a binding that survives a cookie-blocked iframe needs its
   own design. The fix is carried to E13 as hand-off 5 in
   `docs/tickets/e6/carried-from-e5.md`, written by E5.1-09.

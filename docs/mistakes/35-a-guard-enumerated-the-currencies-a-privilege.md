@@ -1,15 +1,31 @@
 # Entry 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 9**
+**Caught: 11**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*14 occurrences recorded; eight of them are catches. This file keeps the three
+*16 occurrences recorded; ten of them are catches. This file keeps the three
 most recent instances; the rest live in git history — plus the oldest catch and
 the addendum under it, which are one lesson, and trimming one without the other
-would leave a paragraph referring to nothing. The E4-04 catch below makes four
-recent ones, and the trim of the E2-16 paragraph is owed to whoever touches this
-file next.*
+would leave a paragraph referring to nothing. The E2-16 and E3-04 paragraphs
+were trimmed on 2026-10-03 with the E5.1-03 catch, and the E3 exit cleanup
+paragraph with the E5.1-12 catch the same day.*
+
+*(**A catch**, E5.1-12, PR #273, 2026-10-03, twice over. The comment view's
+blank-text rule used one-argument `btrim`, which enumerates one whitespace
+character, the space, so a tab-only or newline-only answer counted as a
+commenter. The first fix used `[:space:]`, which reaches only the characters
+the database's collation classes as space: under `COLLATE "C"`, U+3000 and
+fourteen other Unicode spaces still counted. The rule now lists Python's
+whitespace set explicitly, so it no longer depends on the locale.)*
+
+*(**A catch**, writing E5.1-03's tests, 2026-10-03. The sweep that keeps the
+`clock_override` row inside `services/clock.py` enumerates the row's currencies:
+imports, names and attributes, raw SQL strings, and the names spelled as
+strings. Before its silence about any other module counts, it must *find* the
+references in `services/clock.py`, a module that certainly holds them, and it
+must name a planted offender written in each currency
+(`tests/unit/test_only_the_clock_service_touches_the_clock_override_row.py`).)*
 
 *(**A catch**, writing E4-04's grant tests, 2026-09-06. The ACL half of
 `tests/integration/test_the_comment_path_runs_over_the_connection_production_uses.py`
@@ -27,50 +43,6 @@ and the identity-table sweep polices relation names and model classes, neither o
 which a column called `user_id` is — so the module docstring names the three
 functions a reviewer has to read rather than letting a green sweep stand as the
 claim.)*
-
-*(**A catch**, writing the E3 exit cleanup's tests, 2026-09-06. The view guards
-on identity enumerate two currencies — a column dependency and a whole-row
-reference — and ADR 0139's definer function is a third that neither sees: the
-function body is a quoted SQL string, so a view calling it records no
-dependency edge to the identity column at all. The new sweep was written with a
-planted calling view, a join-key-only near miss that must not be flagged, and a
-canary asserting a function of exactly the searched name exists — because a
-guard that only ever reports absence cannot say whether it can see anything.)*
-
-*(**A catch**, writing E3-04's tests, 2026-09-04. The ticket's criterion 6 is a
-triple per AGS route — absent token refused, wrong scope refused, right scope
-accepted — and the third is only there because of this entry: the ticket's own
-known-traps section quotes it. A module holding the two refusals alone is green
-against a platform that refuses **everything**, which is the one implementation
-nobody wants and the cheapest way to satisfy a wall of refusal tests. Acting on
-the entry put the accepting half beside every refusal *and* pushed it one level
-further out, which is where the value was: the two read routes accept either the
-line-item scope or its read-only sibling, so the control loops over the whole
-accepted set rather than presenting the first one — an any-of rule implemented as
-a single required scope passes a one-scope control and refuses a conformant tool.
-Two more controls came from the same reading: the six routes are asserted to be
-six different `(method, url)` pairs, because a `results_url` that came back as the
-line item's own id would turn six routes into four with every refusal still green;
-and the platform is required to *grant* a token for each of the four scopes, since
-a driver handing back a string it invented would fail every acceptance and pass
-every refusal.)*
-
-*(**A catch**, writing E2-16's tests, 2026-09-03. Three of the ticket's criteria
-are assertions that something is **absent**: no `NOT IN` in any statement the
-floored-comment sweep sends, no growth in the reads window derivation issues as
-sections are added, and — the mirror image — an index over
-`classification (task, prompt_version)` that is present. Each is read through an
-instrument this ticket wrote: a `before_cursor_execute` recorder, and a catalog
-matcher over an index's leading key columns. Every one of those absences passes
-for free against an instrument that sees nothing, and the matcher's assertions
-pass equally against a matcher that says yes to everything. This entry's rule put
-both directions in the suite before anything rested on either: the recorder is
-shown a real `NOT IN` over the real tables and has to flag exactly one, and is
-shown a lone `SELECT` and has to count exactly one read; the matcher has to find
-the two week-axis indexes that certainly exist and to refuse a column
-(`response.first_submitted_at`) that nothing indexes. Without them, the day the
-listener was registered on the wrong event, three criteria would have gone green
-over a sweep nobody had watched.)*
 
 *(**The catch**, writing E0-34's tests — the guard that reads
 `backend/app/views_sql/*.sql` looking for an identity column. It enumerates two

@@ -60,16 +60,23 @@ teaching grant. The comment gate counts responses, not commenters.
 
 | # | Ticket | Branch | Lane | Depends on | Summary | Merged |
 |---|---|---|---|---|---|---|
-| 01 | [Raw comments need five commenters in their stream](E5.1-01-commenter-threshold.md) | `e5.1/commenter-threshold` | heavy ⚠ | none | The comment gate counts distinct commenters per stream; a held stream goes to release batches; a released comment never comes back under its week; summaries follow the stream's count; SPEC §4, ADR 0182. | |
-| 02 | [The roster decides who teaches and who answers](E5.1-02-roster-grants-and-respondents.md) | `e5.1/roster-grants-and-respondents` | heavy ⚠ | none | A complete roster walk that drops an instructor ends their teaching grant through a guarded definer; teaching members and test users hold no student enrollment; the roster's token grant gets a time bound; ADR 0183. | |
-| 03 | [The API edge holds one job per module](E5.1-03-api-edge.md) | `e5.1/api-edge` | heavy | none | Entry-page sentences join the copy registry; the dev clock routes gain the origin check; one module owns the clock row; one token CSS block; one `_person_of`; dead parts removed. | |
-| 04 | [A deployment refuses the example session secret](E5.1-04-session-secret.md) | `e5.1/session-secret` | light | none | `Settings` refuses the `.env.example` secret, an empty one, or one under 32 characters outside development, naming the variable and never the value. | |
-| 05 | [Five small behaviour fixes](E5.1-05-small-behaviour-fixes.md) | `e5.1/small-behaviour-fixes` | heavy (re-laned) | 01 | A judged-comment refusal shown inline; a truthful grading log line; the set form shows its stored length; a week opens at 06:00 Monday; a malformed `user_id` is refused; ADR 0184. | |
-| 06 | [Frontend wire types come from the OpenAPI schema](E5.1-06-generated-wire-types.md) | `e5.1/generated-wire-types` | light | 01, 05 | A pinned generator builds `wire.gen.ts` from a committed `openapi.json`, with both stale cases going red; one copy of the fetch helpers, figure types and `PulseDivider`; ADR 0185. | |
-| 07 | [One copy of each services rule](E5.1-07-services-one-rule-one-home.md) | `e5.1/services-one-rule-one-home` | light | 01, 05 | One question-set rule, one course-week rule, one live-on-a-day rule, one staff filter and one course-label composer, with the private copies deleted. | |
-| 08 | [Records match the code](E5.1-08-records-match-code.md) | `e5.1/records-match-code` | light | 03, 06 | SPEC §13 matches the tree, with a test; ADRs 0073, 0132 and 0155 say true things; ADR 0089 records the login-forgery residual. | |
-| 10 | [The submit budget tests stop failing on one slow sample](E5.1-10-submit-budget-test.md) | `e5.1/submit-budget-test` | light | none | The two submit budget assertions read the median of three submissions instead of one sample; entry 41's hang still fails them. Added after the breakdown, when CI failed one on a slow runner. | |
+| 01 | [Raw comments need five commenters in their stream](E5.1-01-commenter-threshold.md) | `e5.1/commenter-threshold` | heavy ⚠ | none | The comment gate counts distinct commenters per stream; a held stream goes to release batches; a released comment never comes back under its week; summaries follow the stream's count; SPEC §4, ADR 0182. | #263 as 5502cc5, 2026-10-03 |
+| 02 | [The roster decides who teaches and who answers](E5.1-02-roster-grants-and-respondents.md) | `e5.1/roster-grants-and-respondents` | heavy ⚠ | none | A complete roster walk that drops an instructor ends their teaching grant through a guarded definer; teaching members and test users hold no student enrollment; the roster's token grant gets a time bound; ADR 0183. | #264 as 4d106d1, 2026-10-03 |
+| 03 | [The API edge holds one job per module](E5.1-03-api-edge.md) | `e5.1/api-edge` | heavy | none | Entry-page sentences join the copy registry; the dev clock routes gain the origin check; one module owns the clock row; one token CSS block; one `_person_of`; dead parts removed. | #262 as 43e97e5, 2026-10-03 |
+| 04 | [A deployment refuses the example session secret](E5.1-04-session-secret.md) | `e5.1/session-secret` | light | none | `Settings` refuses the `.env.example` secret, an empty one, or one under 32 characters outside development, naming the variable and never the value. | #261 as 9ceacfc, 2026-10-03 |
+| 05 | [Five small behaviour fixes](E5.1-05-small-behaviour-fixes.md) | `e5.1/small-behaviour-fixes` | heavy (re-laned) | 01 | A judged-comment refusal shown inline; a truthful grading log line; the set form shows its stored length; a week opens at 06:00 Monday; a malformed `user_id` is refused; ADR 0184. | #265 as 1f2d84b, 2026-10-03 |
+| 06 | [Frontend wire types come from the OpenAPI schema](E5.1-06-generated-wire-types.md) | `e5.1/generated-wire-types` | light | 01, 05 | A pinned generator builds `wire.gen.ts` from a committed `openapi.json`, with both stale cases going red; one copy of the fetch helpers, figure types and `PulseDivider`; ADR 0185. | #268 as 81c0d5d, 2026-10-03 |
+| 07 | [One copy of each services rule](E5.1-07-services-one-rule-one-home.md) | `e5.1/services-one-rule-one-home` | light | 01, 05 | One question-set rule, one course-week rule, one live-on-a-day rule, one staff filter and one course-label composer, with the private copies deleted. | #267 as b1f2ab9, 2026-10-03 |
+| 08 | [Records match the code](E5.1-08-records-match-code.md) | `e5.1/records-match-code` | light | 03, 06 | SPEC §13 matches the tree, with a test; ADRs 0073, 0132 and 0155 say true things; ADR 0089 records the login-forgery residual. | #270 as e14da4a, 2026-10-03 |
+| 10 | [The submit budget tests stop failing on one slow sample](E5.1-10-submit-budget-test.md) | `e5.1/submit-budget-test` | light | none | The two submit budget assertions read the median of three submissions instead of one sample; entry 41's hang still fails them. Added after the breakdown, when CI failed one on a slow runner. | #269 as 413905a, 2026-10-03 |
+| 11 | [The roster enrolls learners only, and leaves past terms alone](E5.1-11-roster-roles-and-term-end.md) | `e5.1/roster-roles-and-term-end` | heavy ⚠ | 02 | Only a Learner who is not an instructor or a test user holds a student enrollment; no grant is written or ended after a section ends; an empty walk ends nothing; ADR 0183 amended. Added from the epic-boundary review. | #274 as 7c82662, 2026-10-03 |
+| 12 | [Heavy-path comments say true things, and the invariant suite reaches E5.1's read paths](E5.1-12-heavy-path-records-and-invariants.md) | `e5.1/heavy-path-records-and-invariants` | heavy | all of 01 to 08 and 10 | False comments in heavy-lane files corrected; invariant tests for the small-N object, the notice, open weeks, live enrollment and blank comments; a downgrade test. Added from the epic-boundary review. | #273 as e62c081, 2026-10-03 |
+| 13 | [The held-comment notice is not a landmark, and the question-set rule has one guarded home](E5.1-13-notice-landmark-and-one-copy.md) | `e5.1/notice-landmark-and-one-copy` | light | 01, 07 | The notice renders without a region landmark; the one-copy test guards the question-set query. Added from the epic-boundary review. | #272 as 7bea76f, 2026-10-03 |
 | 09 | [E5.1 exit](E5.1-09-e5.1-exit.md) | `e5.1/e5.1-exit` | light | all | The exit clause driven against the running stack; the hand-offs written into `../e6/carried-from-e5.md`; the ledger; the boundary reviews. | |
+
+The epic-boundary reviews, the exit drive, and where every boundary finding
+went are recorded in [boundary-review.md](boundary-review.md). Tickets 11, 12
+and 13 were added from those reviews.
 
 ## Waves
 
@@ -84,7 +91,8 @@ teaching grant. The comment gate counts responses, not commenters.
 **Identifiers, allotted now.** ADR numbers 0182 to 0186; the last on `main` is
 0181. 0182 is 01's, 0183 is 02's, 0184 is 05's, 0185 is 06's, and 0186 is
 03's only if it needs one. If 0186 goes unused, E5.1-09 records the gap in the
-ADR README. There is one migration, owned by 02, with
+ADR README. 0186 went unused, because E5.1-03 needed no record, and the number
+is never reused. There is one migration, owned by 02, with
 `down_revision = "a3f6c1d8e5b7"` (the current head).
 
 **Expected conflicts.**
@@ -102,7 +110,7 @@ ADR README. There is one migration, owned by 02, with
 | Finding (review pass) | Same as | Lands in |
 |---|---|---|
 | Threat model, HIGH: the comment gate counts responses, not commenters | | E5.1-01 |
-| Privacy: a released comment reappears under its own week after the threshold is lowered | | E5.1-01. The second half (raising the threshold re-holds weeks the instructor already saw) is carried to E11, hand-off 3. |
+| Privacy: a released comment reappears under its own week after the threshold is lowered | | E5.1-01. The second half (raising the threshold, or two processes reading different values, re-holds stream-weeks the instructor already saw) is carried to E11, hand-off 3. |
 | Privacy, HIGH: the teaching grant is never ended | | E5.1-02 |
 | Privacy: staff and LMS test users count as respondents | | E5.1-02 |
 | Architecture: the transport copies have drifted (no timeout on the roster's token grant) | the carried entry "the roster sync's unbounded token-acquisition dial" | E5.1-02, the timeout fix only. Rehoming the shared code stays carried; see below. |
@@ -117,7 +125,7 @@ ADR README. There is one migration, owned by 02, with
 | Architecture and code review: the API modules repeat their fetch helpers and wire types; `PulseDivider` and the page stylesheet are copied or misplaced | ruling 3 | E5.1-06 |
 | Architecture and code review: the student enrollment rule has four copies, and other services rules are copied | the carried course-label entry | E5.1-07 |
 | Architecture: the §13 tree has drifted; ADRs 0073, 0132 and 0155 say untrue things | | E5.1-08 |
-| Application security, LOW: the cookieless launch is open to login request forgery | | E5.1-08 records the risk in ADR 0089. The fix is carried to E13, hand-off 5. |
+| Application security, MEDIUM: the cookieless launch is open to login request forgery | | E5.1-08 records the risk in ADR 0089 and rated it MEDIUM, up from the review's LOW. The fix is carried to E13, hand-off 5. |
 | Application security, MEDIUM: a comment with no moderation row counts as published | | Carried to E6, hand-off 1 |
 | Privacy: named-set figures are open to subtraction and are not purview-scoped | the existing E9 entry in `../e6/carried-from-e5.md` | That E9 entry gains done-when lines, hand-off 2 |
 | Code review: the weekly item total uses today's question set | | Carried to the ticket that adds a second question set, hand-off 4 |
@@ -136,7 +144,7 @@ The exact entries and their done-when lines are in E5.1-09.
 
 1. A comment with no moderation verdict counts as published. Owner E6.
 2. The existing E9 named-set entry gains three done-when lines.
-3. Raising the comment threshold re-holds weeks the instructor already saw.
+3. A changed comment threshold re-holds stream-weeks the instructor already saw.
    Owner E11.
 4. A week's item total uses today's question set. Owner: the ticket that adds
    a second question set.
