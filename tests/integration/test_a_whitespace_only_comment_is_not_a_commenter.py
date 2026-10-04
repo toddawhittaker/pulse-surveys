@@ -61,7 +61,7 @@ ONLY_UNICODE_SPACES = "\u1680\u2003\u2028\u2029\u205f\u3000"
 # The view file whose blank-text pattern the last test reads. The pattern is read
 # out of the file rather than copied here, so the test follows whatever the file
 # says; what it is checked *against* is built from Python, never from the file.
-REPORT_COMMENT_VIEW_FILE = BACKEND_DIR / "app" / "views_sql" / "report_comment_v002.sql"
+REPORT_COMMENT_VIEW_FILE = BACKEND_DIR / "app" / "views_sql" / "report_comment_v003.sql"
 
 # Every character Python's `str.strip()` removes, built from Python itself. NUL is
 # left out because PostgreSQL text cannot hold it (and `chr(0)` keeps it anyway).
@@ -135,7 +135,7 @@ def test_four_real_commenters_and_one_whitespace_answer_leave_the_stream_suppres
     "the one-argument `btrim`" put back into the view. The second case is made
     only of the characters Python's `str.strip()` removes and PostgreSQL's
     `[:space:]` keeps under `en_US.utf8` (U+001C to U+001F, U+0085, U+00A0,
-    U+2007, U+202F); it kills "v002's character class reverts to `[^[:space:]]`".
+    U+2007, U+202F); it kills "v003's character class reverts to `[^[:space:]]`".
     The third is spaces outside ASCII (U+1680, U+2003, U+2028, U+2029, U+205F,
     U+3000) that `[:space:]` covers under `en_US.utf8` and misses under
     `COLLATE "C"`. On this project's database image, whose collation is
@@ -201,7 +201,7 @@ def test_four_real_commenters_and_one_whitespace_answer_leave_the_stream_suppres
 
 
 def the_views_pattern_literal() -> str:
-    """The one regular-expression literal in the v002 view file, quotes included, as written.
+    """The one regular-expression literal in the v003 view file, quotes included, as written.
 
     SQL comments are removed first, so a pattern quoted in the file's prose is not
     mistaken for the predicate. Exactly one `~ '...'` literal must remain; any
