@@ -27,7 +27,8 @@ and a §4 suppression rule. 02 adds a definer function that writes
 `role_assignment`, an identity table, and edits `backend/app/lti/`. 03 edits
 `api/deps.py` and `api/dev.py`. No natural split moves any of them to light.
 01 and 02 also carry ⚠: SPEC §14.3 puts their paths under line-by-line human
-review although the epic is unmarked.
+review although the epic is unmarked. 05 was planned light and re-laned to
+heavy during its build, because its 06:00 rule made invariant-marked tests red.
 
 ## Rulings this breakdown builds on
 
@@ -63,7 +64,7 @@ teaching grant. The comment gate counts responses, not commenters.
 | 02 | [The roster decides who teaches and who answers](E5.1-02-roster-grants-and-respondents.md) | `e5.1/roster-grants-and-respondents` | heavy ⚠ | none | A complete roster walk that drops an instructor ends their teaching grant through a guarded definer; teaching members and test users hold no student enrollment; the roster's token grant gets a time bound; ADR 0183. | |
 | 03 | [The API edge holds one job per module](E5.1-03-api-edge.md) | `e5.1/api-edge` | heavy | none | Entry-page sentences join the copy registry; the dev clock routes gain the origin check; one module owns the clock row; one token CSS block; one `_person_of`; dead parts removed. | |
 | 04 | [A deployment refuses the example session secret](E5.1-04-session-secret.md) | `e5.1/session-secret` | light | none | `Settings` refuses the `.env.example` secret, an empty one, or one under 32 characters outside development, naming the variable and never the value. | |
-| 05 | [Five small behaviour fixes](E5.1-05-small-behaviour-fixes.md) | `e5.1/small-behaviour-fixes` | light | 01 | A judged-comment refusal shown inline; a truthful grading log line; the set form shows its stored length; a week opens at 06:00 Monday; a malformed `user_id` is refused; ADR 0184. | |
+| 05 | [Five small behaviour fixes](E5.1-05-small-behaviour-fixes.md) | `e5.1/small-behaviour-fixes` | heavy (re-laned) | 01 | A judged-comment refusal shown inline; a truthful grading log line; the set form shows its stored length; a week opens at 06:00 Monday; a malformed `user_id` is refused; ADR 0184. | |
 | 06 | [Frontend wire types come from the OpenAPI schema](E5.1-06-generated-wire-types.md) | `e5.1/generated-wire-types` | light | 01, 05 | A pinned generator builds `wire.gen.ts` from a committed `openapi.json`, with both stale cases going red; one copy of the fetch helpers, figure types and `PulseDivider`; ADR 0185. | |
 | 07 | [One copy of each services rule](E5.1-07-services-one-rule-one-home.md) | `e5.1/services-one-rule-one-home` | light | 01, 05 | One question-set rule, one course-week rule, one live-on-a-day rule, one staff filter and one course-label composer, with the private copies deleted. | |
 | 08 | [Records match the code](E5.1-08-records-match-code.md) | `e5.1/records-match-code` | light | 03, 06 | SPEC §13 matches the tree, with a test; ADRs 0073, 0132 and 0155 say true things; ADR 0089 records the login-forgery residual. | |

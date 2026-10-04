@@ -163,10 +163,10 @@ BEAT_SCHEDULE: dict[str, dict[str, Any]] = {
     #
     # **Monday** for the reason the participation sweep is on a Monday, arriving at
     # it from the other side. §3.1 closes every window on Sunday at 23:59:59 in the
-    # institution's timezone and makes the instructor's report available "Monday
-    # morning", so Monday is both the first day the week that just ended can be
-    # summarized at all and the last day it can be summarized before its reader
-    # opens the report it leads. A slot on any other day either summarizes a week
+    # institution's timezone and opens the instructor's report at 06:00 on the
+    # Monday after (ADR 0184), so Monday is both the first day the week that just
+    # ended can be summarized at all and the last day it can be summarized before
+    # its reader opens the report it leads. A slot on any other day either summarizes a week
     # students are still answering or leaves the finished one unsummarized until
     # after it has been read — and nothing regenerates a summary (the E4
     # breakdown's decision 2), so a summary that arrives late never arrives for

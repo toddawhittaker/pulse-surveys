@@ -610,7 +610,9 @@ def test_a_resubmission_after_the_window_closes_is_refused(
     **The mutation it kills:** the window check made only on the insert branch, so
     a resubmission — which takes the revise branch — is accepted for as long as
     the row exists. And the window check made after the write rather than before
-    it, which is the one the assertion below is aimed at.
+    it, which is the one the assertion below is aimed at. And, since E5.1-05, a
+    closed window answered anything but 409: this is the half of C1's pair that
+    keeps "409 means closed" true while the judged-comment refusal moves to 422.
     """
     student = a_student_in_an_open_window(
         open_submit_tool, submit_world, signed_in_student, mock_ai_endpoint, open_now
@@ -659,6 +661,17 @@ def test_a_comment_that_has_been_classified_cannot_be_withdrawn_by_a_resubmissio
     > (`submit.comment_already_judged`, HTTP 409), rather than left to surface as
     > a constraint error under a student.
 
+    **The status is 422 since E5.1-05, not the 409 the ADR first gave it.** The
+    student client reads every 409 as "the window has closed" and replaces the
+    form with the closed notice, so a student who cleared a judged comment inside
+    an open window was told the week was over. A 422 keeps the form and shows the
+    sentence inline. **Its pair is
+    `test_a_resubmission_after_the_window_closes_is_refused`**, which still
+    requires 409 for a closed window: a builder who moved every 409 to 422 fails
+    there, and one who left this refusal on 409 fails here. The number is
+    `submit_contract.comment_already_judged`, spelled once in
+    `tests/fixtures/submit.py`.
+
     The rule is not an acceptance criterion of this ticket; it is a rule the
     ticket *creates*, and it is asserted here because a rule that ships with
     nothing asserting it is `docs/MISTAKES.md` entry 2 in as many words. What
@@ -668,7 +681,7 @@ def test_a_comment_that_has_been_classified_cannot_be_withdrawn_by_a_resubmissio
     has ever classified.
 
     **The judgement is shown, not assumed.** A `classification` row naming the
-    comment is read back before the withdrawal is attempted — otherwise a 409
+    comment is read back before the withdrawal is attempted — otherwise a refusal
     would be equally well explained by a route that refuses every resubmission,
     and `docs/MISTAKES.md` entry 9's rule is that a guard is executed against the
     case it is claimed to stop rather than cited.
@@ -684,7 +697,7 @@ def test_a_comment_that_has_been_classified_cannot_be_withdrawn_by_a_resubmissio
     refused rather than partly applied — a refusal a student is shown while their
     rating has quietly moved is two different answers to one request. If the
     implementation applies the rest and refuses only the withdrawal, this is where
-    that surfaces: the 409 and the copy pass and the comparison below fails. That
+    that surfaces: the status and the copy pass and the comparison below fails. That
     is a disagreement about what the ADR means, and it belongs in a dispute that
     settles it explicitly rather than in a test quietly widened to accept both.
 
@@ -694,6 +707,8 @@ def test_a_comment_that_has_been_classified_cannot_be_withdrawn_by_a_resubmissio
     the grants cannot see, the second erases the record that a model judged an
     earlier comment — so with the check gone there is no legal way for the delete
     to succeed, and the student meets a constraint error instead of a sentence.
+    And, since E5.1-05, the refusal answered 409: the client then shows the
+    closed notice for a window that is open, which is the defect C1 names.
     """
     student = a_student_in_an_open_window(
         open_submit_tool, submit_world, signed_in_student, mock_ai_endpoint, open_now
@@ -723,12 +738,14 @@ def test_a_comment_that_has_been_classified_cannot_be_withdrawn_by_a_resubmissio
     withdrawn[INSTRUCTOR_RATING_POSITION] = IN_RANGE_RATING
     refused = student.submit(withdrawn)
 
-    assert refused.status_code == submit_contract.conflict, (
+    assert refused.status_code == submit_contract.comment_already_judged, (
         f"Withdrawing a comment that has been classified was answered {refused.status_code} "
-        f"rather than {submit_contract.conflict}. ADR 0115 refuses it 'with its own reason and "
-        "its own sentence ... rather than left to surface as a constraint error under a student', "
-        f"and a 5xx here is that constraint error arriving unhandled. Body begins "
-        f"{refused.text[:400]!r}."
+        f"rather than {submit_contract.comment_already_judged}. ADR 0115 refuses it 'with its own "
+        "reason and its own sentence ... rather than left to surface as a constraint error under a "
+        "student', and a 5xx here is that constraint error arriving unhandled. A "
+        f"{submit_contract.conflict} is the status E5.1-05 moved it off: the student client reads "
+        "every 409 as 'the window has closed' and takes the form away, inside a window that is "
+        f"still open. Body begins {refused.text[:400]!r}."
     )
     published = registry_texts()
     assert submit_contract.comment_already_judged_key in published, (

@@ -46,7 +46,7 @@ import {
 const LOADING = 'Opening this week’s report…';
 const UNAVAILABLE = 'This report could not be loaded just now. Reload the page to try again.';
 const SESSION_ENDED_TITLE = 'Open this from your course';
-const NO_WEEKS_TITLE = 'No weeks have closed yet';
+const NO_WEEKS_TITLE = 'No reports have opened yet';
 const COMMENTS_NOTE = 'Shown in random order. No names, no timestamps.';
 const PARTICIPATION_ABSENT =
   'There is no response rate for this week: nobody is enrolled in this section yet.';

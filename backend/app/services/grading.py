@@ -1135,7 +1135,7 @@ def _delivered(
     except AgsConflictError:
         logger.warning(
             "%s: the platform holds a newer score than the one offered for one of its students, so "
-            "that post was recorded as refused and not retried",
+            "that post was recorded as refused, and the next scheduled run sends a fresh score",
             section.id,
         )
         return GradeSyncOutcome.FAILED, AGS_CONFLICT_STATUS

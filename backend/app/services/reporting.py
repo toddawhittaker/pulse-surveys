@@ -3,11 +3,12 @@
 SPEC §13 names this module for §5.1 — "distributions, trend lines, benchmark
 assembly" — and it now holds both halves of that section. E4-06 landed the write
 half first: the walk that *generates* §5.1's per-stream AI summaries, once per
-section-week, after the window closes and before Monday morning. E4-07 added the
-read half beside it — the payload layer that divides the counts E4-03's views
-return, derives §2.2's week axis, and assembles what
-`app.api.instructor` serves. They are the same section of the spec and share the
-same rows, so the name §13 chose is the name used and no second module was made.
+section-week, after the window closes and before the report opens at 06:00 on the
+Monday after (ADR 0184). E4-07 added the read half beside it — the payload layer
+that divides the counts E4-03's views return, derives §2.2's week axis, and
+assembles what `app.api.instructor` serves. They are the same section of the spec
+and share the same rows, so the name §13 chose is the name used and no second
+module was made.
 
 **The two halves and where the line between them is.** Everything down to
 `_responses_that_week` is the summary walk, and everything from `ComparisonFigure`
@@ -56,8 +57,9 @@ import logging
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from datetime import UTC, datetime, timedelta
+from datetime import time as time_of_day
+from typing import TYPE_CHECKING, Any, Final
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -916,11 +918,58 @@ class SectionUnavailableError(Exception):
     """
 
 
+# ---------------------------------------------------------------------------
+# When a week's report opens — the owner's ruling of 2026-10-03 (E5.1-05).
+# ---------------------------------------------------------------------------
+
+# The wall-clock hour, in the institution's time zone, at which a week's report
+# opens. A constant rather than a setting: the rule has one correct answer, and
+# ADR 0184 records why. Naive on purpose — the zone is supplied by the caller.
+REPORT_OPENS_AT: Final[time_of_day] = time_of_day(6, 0)
+
+_MONDAY: Final[int] = 0
+
+
+def report_opens_at(closes_at: datetime, *, zone: ZoneInfo) -> datetime:
+    """The first Monday at `REPORT_OPENS_AT` in `zone` strictly later than `closes_at`.
+
+    For the default rhythm (a window closing Sunday 23:59:59) that is the next
+    morning at 06:00. A window closing Monday 05:00 opens that same morning; one
+    closing at Monday 06:00:00 exactly opens the following Monday.
+
+    **Computed on dates and wall time, never by adding an offset.** The close is
+    converted into `zone`, the candidate Monday is found on the calendar, and
+    `datetime.combine` attaches the zone to 06:00 on that date — so a week that
+    closes across a daylight-saving change still opens at 06:00 local, whichever
+    offset the window opened on. The comparison is made in UTC, because two
+    datetimes sharing one `tzinfo` compare by wall time and ignore `fold`.
+    """
+    local = closes_at.astimezone(zone)
+    monday = local.date() + timedelta(days=(_MONDAY - local.weekday()) % 7)
+    opens = datetime.combine(monday, REPORT_OPENS_AT, tzinfo=zone)
+    if opens.astimezone(UTC) <= closes_at.astimezone(UTC):
+        opens = datetime.combine(monday + timedelta(days=7), REPORT_OPENS_AT, tzinfo=zone)
+    return opens
+
+
+def week_is_published(closes_at: datetime, *, now: datetime, zone: ZoneInfo) -> bool:
+    """Whether the report of a week whose window closes at `closes_at` is open at `now`.
+
+    The one predicate both readers below call (`instructor_report` and
+    `published_course_weeks`, through `_published_weeks`). 06:00:00 exactly is
+    published; a microsecond before is not.
+    """
+    return now.astimezone(UTC) >= report_opens_at(closes_at, zone=zone).astimezone(UTC)
+
+
 class CourseWeekUnavailableError(Exception):
     """There is no report for that course week of this section — one refusal for two states.
 
-    **A week whose survey window has not closed, and a week the section never runs,
-    raise this same exception from the same line, and that is the point.** E4-07's
+    **A week whose report has not opened, and a week the section never runs, raise
+    this same exception from the same line, and that is the point.** A week's report
+    opens at 06:00 on the Monday after its window closes (`report_opens_at`, ADR
+    0184), so "not opened" covers a week still taking responses and a week that has
+    closed and is waiting for that Monday morning. E4-07's
     security round found the first of those served: `instructor_report` answered any
     course week with a `survey_window` row, so an instructor could poll a week that
     was still taking responses and read the *difference* between two views of it —
@@ -975,21 +1024,21 @@ def instructor_report(
     rather than a thing to trust; see `_readable_section`.
 
     **Being published is a precondition, and the asked week is selected out of the
-    published set rather than out of the calendar.** SPEC §3.1 puts the report after
-    the window closes and this ticket's own context is "one published course week";
+    published set rather than out of the calendar.** SPEC §3.1 puts the report at
+    06:00 on the Monday after the window closes (ADR 0184, through
+    `_published_weeks`), and this ticket's own context is "one published course week";
     serving a week still taking responses lets an instructor read the same report
     twice and subtract, which is one student's submission each time
     (`docs/MISTAKES.md` entry 51, and `CourseWeekUnavailableError` carries the
     argument). Selecting from `published` rather than testing against it afterwards
-    is what makes an open week and a week the section never runs leave this function
-    by the same line, with nothing to tell them apart.
+    is what makes an unopened week and a week the section never runs leave this
+    function by the same line, with nothing to tell them apart.
 
     Raises `SectionUnavailableError` and `CourseWeekUnavailableError`; the router
     is what turns each into an HTTP answer.
     """
     section = _readable_section(session, person_id=person_id, section_id=section_id)
-    now = clock.now(session, settings=settings)
-    published = [week for week in _section_weeks(session, section) if week.closes_at < now]
+    published = _published_weeks(session, section=section, settings=settings)
 
     asked = next((week for week in published if week.course_week == course_week), None)
     if asked is None:
@@ -1002,21 +1051,41 @@ def instructor_report(
 def published_course_weeks(
     session: Session, *, person_id: UUID | None, section_id: UUID, settings: Settings
 ) -> list[int]:
-    """The course weeks of this person's own section whose survey window has closed.
+    """The course weeks of this person's own section whose report has opened.
 
-    E4's breakdown decision 6: "a published week is a course week whose survey
+    E4's breakdown decision 6 made a published week "a course week whose survey
     window has closed, per the clock service … Nothing is stored to make a week
-    published." So this is a comparison between a stored instant and the effective
-    clock (ADR 0109) and never a flag, which is what lets a developer move the
-    clock and watch a week appear.
+    published." E5.1-05 moved the instant to 06:00 on the Monday after the close, in
+    the institution's time zone (ADR 0184), and kept the rest: this is still a
+    comparison between a stored instant and the effective clock (ADR 0109) and never
+    a flag, which is what lets a developer move the clock and watch a week appear.
 
     **It is the same derivation the payload's own `week.published_weeks` makes**,
-    through the same two functions, so the list a reader pages across and the list
+    through `_published_weeks`, so the list a reader pages across and the list
     inside the report she is reading cannot disagree.
     """
     section = _readable_section(session, person_id=person_id, section_id=section_id)
+    return [
+        week.course_week for week in _published_weeks(session, section=section, settings=settings)
+    ]
+
+
+def _published_weeks(
+    session: Session, *, section: Section, settings: Settings
+) -> list[_SectionWeek]:
+    """This section's weeks whose report has opened, on the effective clock (ADR 0109).
+
+    The one place both readers above select their published weeks, so the list a
+    reader pages across and the report she is reading cannot disagree. The zone is
+    the institution's, because "06:00 on Monday" is a wall-clock promise.
+    """
     now = clock.now(session, settings=settings)
-    return [week.course_week for week in _section_weeks(session, section) if week.closes_at < now]
+    zone = ZoneInfo(settings.institution_timezone)
+    return [
+        week
+        for week in _section_weeks(session, section)
+        if week_is_published(week.closes_at, now=now, zone=zone)
+    ]
 
 
 def taught_sections(session: Session, *, person_id: UUID | None) -> list["TaughtSection"]:
@@ -1101,8 +1170,8 @@ def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
 
     **The stored windows, not the derived ones.** `survey_windows.windows_for_section`
     answers what the calendar *implies*; `survey_window` holds what was written, and
-    "the window has closed" is a statement about the row a student answered against
-    — the same instants `generate_missing_summaries` above compares. A read that
+    when a week's report opens is computed from the close on the row a student
+    answered against — the same instants `generate_missing_summaries` above compares. A read that
     derived its own instants would answer a different question the day a calendar
     is corrected under windows already written.
 

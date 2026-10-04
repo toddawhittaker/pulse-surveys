@@ -123,9 +123,11 @@ const MATH = { label: 'MATH-140-E1FF', code: 'E1FF' };
 //   - 17 August is term week 1, so 21 September is term week 6 and 28 September
 //     is term week 7. The two sections sit at different offsets between the
 //     axes, which is the pair SPEC §2.2's two axes exist for.
-//   - Monday 5 October is after both windows shut, so both weeks are published
-//     (E4's breakdown decision 6: a published week is one whose window has
-//     closed).
+//   - Monday 5 October at 09:00 is after both windows shut and after 06:00, so
+//     both weeks are published (SPEC §3.1 since E5.1-05: a week's report opens
+//     at 06:00 on the first Monday after its window closes, in the institution's
+//     time zone — not at the close itself, as E4's breakdown decision 6 first
+//     had it).
 const INSIDE_THE_MATH_WINDOW = '2026-09-25T19:00';
 const INSIDE_THE_BIOL_WINDOW = '2026-10-02T19:00';
 const AFTER_THE_CLOSE = '2026-10-05T09:00';

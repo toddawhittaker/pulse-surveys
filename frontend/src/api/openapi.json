@@ -1613,7 +1613,7 @@
           "response_count"
         ],
         "title": "SummaryView",
-        "description": "\u00a75.1's generated summary for one stream of one week, as E4-06 stored it.\n\nThe member is absent \u2014 `None` on the stream, not an empty string \u2014 for a week\nthe summary job has not run over, which is the ordinary state of a report read\nbefore Monday morning."
+        "description": "\u00a75.1's generated summary for one stream of one week, as E4-06 stored it.\n\nThe member is absent \u2014 `None` on the stream, not an empty string \u2014 for a week\nthe summary job has not run over. Since a week's report opens at 06:00 on the\nMonday after its close (ADR 0184) and the summary walk runs earlier that\nmorning, an opened report meets this when that walk failed for the week or a\ndeveloper moved the clock past the walk."
       },
       "SurveyQuestion": {
         "properties": {

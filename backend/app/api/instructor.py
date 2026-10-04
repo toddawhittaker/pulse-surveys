@@ -45,9 +45,10 @@ followed by a scope test.
 **A course week with no published report is a different refusal**, and it is safe
 to be: it is only ever reached after the section has been established as this
 instructor's own, so it says nothing about anything she may not already see. Its
-own two cases — a window still taking responses, and a week the section never runs
-— share one status and one body, because telling them apart would hand back the
-section's calendar a week at a time. A mid-window report is refused rather than
+own cases — a window still taking responses, a window that has closed but whose
+report does not open until 06:00 on the Monday after (ADR 0184), and a week the
+section never runs — share one status and one body, because telling them apart
+would hand back the section's calendar a week at a time. A mid-window report is refused rather than
 served at all: read twice, the difference between two views of an open week is one
 student's submission.
 
@@ -116,8 +117,9 @@ SECTIONS_PATH = "/instructor/sections"
 SECTION_UNAVAILABLE_STATUS = 404
 SECTION_UNAVAILABLE = SECTION_UNAVAILABLE_COPY.text
 
-# And the week there is no published report for — whether its window is still open
-# or the section never runs it. One sentence for both, for the same no-oracle reason
+# And the week there is no published report for — whether its window is still open,
+# has closed but its report has not yet opened at 06:00 on the Monday after (ADR
+# 0184), or the section never runs it. One sentence for all three, for the same no-oracle reason
 # the section pair has one: the difference between "not yet" and "never" is a fact
 # about the section's calendar. A separate sentence from the refusal above because it
 # is a different fact and the instructor can act on it, and because it is reached only

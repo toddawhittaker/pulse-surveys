@@ -17,6 +17,7 @@ import {
   A_SECOND_GRADUATE_COURSE,
   A_SET_THIS_READER_DEFINED,
   A_COURSE_NO_LONGER_OFFERED,
+  A_SET_OF_A_LENGTH_NO_SECTION_RUNS,
   A_SET_WITH_A_CROSS_LEVEL_MEMBER,
   A_SET_WITH_A_WITHDRAWN_COURSE,
   A_SET_WITH_TWO_WITHDRAWN_COURSES,
@@ -496,6 +497,70 @@ describe('the form opened on a set that already exists', () => {
     });
     expect(writes[0]?.member_course_ids).toEqual([A_BIOLOGY_COURSE.id, A_CHEMISTRY_COURSE.id]);
     expect(writes[0]?.member_course_ids).not.toContain(A_COURSE_NO_LONGER_OFFERED);
+  });
+});
+
+describe('a set whose length no section runs any more (E5.1-05, C4)', () => {
+  /** The length control's options, as a person reads them, placeholder first. */
+  function lengthOptions(): (string | null)[] {
+    return within(lengthField())
+      .getAllByRole('option')
+      .map((option) => option.textContent);
+  }
+
+  it('opens on its own length, selected, among the served ones in order', () => {
+    // The guard that makes the case real: the served answer does not carry
+    // this set's length, so a form reading only `options.lengths` has no
+    // option to select and shows the placeholder instead.
+    expect(THE_OPTIONS.lengths).not.toContain(A_SET_OF_A_LENGTH_NO_SECTION_RUNS.length_weeks);
+
+    renderForm(undefined, A_SET_OF_A_LENGTH_NO_SECTION_RUNS);
+
+    expect(lengthField().value).toBe('14');
+    expect(lengthOptions()).toEqual([
+      'Choose a length',
+      '3 weeks',
+      '6 weeks',
+      '8 weeks',
+      '10 weeks',
+      '12 weeks',
+      '14 weeks',
+      '15 weeks',
+      '16 weeks',
+      '18 weeks',
+    ]);
+  });
+
+  // The form's state already held the stored length before E5.1-05, so this
+  // one is green without the fix: it guards the fix against the other way of
+  // making the control honest, which is to clear a length the options do not
+  // carry and refuse the save until the reader picks a served one.
+  it('sends that length back when the set is saved unchanged', async () => {
+    const { writes, save } = acceptingSaves();
+    renderForm(save, A_SET_OF_A_LENGTH_NO_SECTION_RUNS);
+
+    fireEvent.click(screen.getByRole('button', { name: SAVE }));
+
+    await waitFor(() => {
+      expect(writes).toHaveLength(1);
+    });
+    expect(writes[0]?.length_weeks).toBe(14);
+  });
+
+  it('offers a length the served answer already carries once, not twice', () => {
+    renderForm(undefined, A_SET_THIS_READER_DEFINED);
+
+    expect(lengthOptions().filter((label) => label === '12 weeks')).toHaveLength(1);
+  });
+
+  it('offers only the served lengths when defining a new set', () => {
+    renderForm();
+
+    expect(lengthOptions()).toEqual([
+      'Choose a length',
+      ...THE_OPTIONS.lengths.map((weeks) => `${String(weeks)} weeks`),
+    ]);
+    expect(lengthOptions()).not.toContain('14 weeks');
   });
 });
 
