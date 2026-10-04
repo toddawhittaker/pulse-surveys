@@ -62,3 +62,14 @@ today.
 `pip-audit -r requirements.txt` alone. A gate that reads two files is the only one
 that can see a disagreement between them, and reading one file at a time is how
 this survived a full green suite.
+
+*(E5.1-06, PR #268, 2026-10-03: one lockfile, two versions.* The frontend added
+`openapi-typescript`, whose peer range stops at TypeScript 5, and an `overrides`
+entry scoped to that package alone. The manifest pinned TypeScript 6.0.3, but
+npm still placed TypeScript 5.9.3 under `frontend/node_modules`, so the frontend
+typecheck ran on 5.9.3. The security pass found it. The fix made the override
+top-level (`"typescript": "$typescript"`) and removed the stale lockfile entry,
+and `npx tsc --version` in `frontend/` then printed 6.0.3. **Check the lockfile
+and the installed version, not the manifest:** a pinned version in
+`package.json` says what was asked for, and only the lockfile says what was
+resolved.)

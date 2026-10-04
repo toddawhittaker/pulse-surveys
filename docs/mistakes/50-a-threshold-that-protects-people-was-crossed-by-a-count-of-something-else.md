@@ -1,6 +1,6 @@
 # Entry 50. A threshold that exists to protect people was crossed by a count of something else
 
-**Caught: 0**
+**Caught: 1**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -60,3 +60,12 @@ Two halves worth keeping separate:
   literal condition out as its own leg so the departure is visible in the code;
   and put the choice to the owner as an open question, because narrowing a rule
   the spec states is a decision the spec has to catch up with.
+
+*(**A catch**, E5.1-01, PR #263, 2026-10-03. The review of `main` found SPEC
+§4's comment gate counting a week's responses, so one student who wrote about
+the instructor in a six-respondent week was shown. The ticket cited this entry,
+and the gate it built, `stream_is_suppressed`, counts distinct
+`response.user_id` among the stream's comments that are in no release batch.
+The release gate's three legs were made per stream too, after a review found
+that pooling them let one stream's authors open the gate for the other's
+comments.)*
