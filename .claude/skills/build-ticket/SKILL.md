@@ -157,7 +157,9 @@ Findings get one fix round, and its stopping rule is fixed in advance:
 - One re-check pass runs on the new head, with the same reviewers. Then the
   loop stops.
 - A HIGH found in the re-check is fixed, and that fix gets one more re-check
-  on its new head. Nothing else reopens the loop.
+  on its new head. Nothing else reopens the loop: a MED or LOW found in the
+  re-check is resolved by recording it in the PR body as accepted residue,
+  with the reason, not by another push.
 - On a ⚠ ticket, the round also runs targeted re-mutations of what it touched,
   including any original battery rows whose subject code it modified — never
   a blind re-run of the whole battery.
