@@ -58,8 +58,11 @@ All of these, every time, even when the orchestrator says they hold:
    ```
 2. **The security review is in the PR body, tied to the head commit.** It
    names the commit SHA it covered, that SHA equals the PR's current
-   `headRefOid`, and every finding is resolved. A review recorded for an
-   earlier commit is stale: refuse, naming the commits it never saw.
+   `headRefOid`, and every finding is resolved. A HIGH is resolved only by a
+   fix. A MEDIUM or LOW from the final re-check is also resolved when the PR
+   body records it as residue, with its reason, under the stopping rule. A
+   review recorded for an earlier commit is stale: refuse, naming the commits
+   it never saw.
 3. **No open dispute.** Read `docs/disputes/` from the PR's head, never from
    your own checkout: `git ls-tree origin/<headRefName> docs/disputes/`,
    then `git show origin/<headRefName>:<file>` for any file naming this
