@@ -1187,8 +1187,9 @@ def _live_enrollments(session: Session, section: Section, *, today: date) -> set
     because the formula answers what the enrolled weeks add up to and is not the
     place that decides who is still enrolled.
 
-    The date predicate is `app.services.authz`'s own — `started_on <= today AND
-    (ended_on IS NULL OR ended_on >= today)` — so a drop-and-re-add has two rows and
+    The date predicate is `app.services.enrollment_windows.live_on` — `started_on <=
+    today AND (ended_on IS NULL OR ended_on >= today)`, held by a test to the same
+    answers as `app.services.authz`'s landing rule — so a drop-and-re-add has two rows and
     the live one wins, and a student whose enrollment ends *today* still posts,
     because they were enrolled today. Nothing is posted on the way out: no final
     zero, no blanking. What a gradebook does with the entry of a student who left is
@@ -1218,11 +1219,9 @@ def _live_enrollments(session: Session, section: Section, *, today: date) -> set
     not roles" exists for, and a dean whose assignment names a college is a learner
     in the course they enrolled in.
 
-    **Two statements, and the second only when the first found somebody.** The
-    section's staff is one query through the authorization chokepoint; the hop from
-    a member to their person is a definer call each (ADR 0024, ADR 0094), and it is
-    skipped entirely for the ordinary section whose staff nobody has entered in the
-    people graph.
+    **The filter is `app.services.enrollment_windows.without_staff`**, which
+    §5.1's response-rate denominator calls too: one query for the section's staff,
+    and the per-member hop to a person only when that query found somebody.
     """
     enrolled = set(
         session.scalars(

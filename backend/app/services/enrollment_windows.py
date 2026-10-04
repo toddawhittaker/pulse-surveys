@@ -24,14 +24,19 @@ report's denominator is computed "on the clock and enrolment helpers
 
 **What is here and what is deliberately not.** The tier resolution, the roster-log
 read tier 3 rests on, and the "had this enrolment begun by the time that window
-closed" comparison whose `None` convention the two callers must agree about.
+closed" comparison whose `None` convention the two callers must agree about. Also
+the two rules every service asks about a member on one day: `live_on`, whether an
+enrolment is live on that day, and `without_staff`, which members of a section are
+students there rather than staff.
 **Not** which course weeks a student is credited with, and **not** whether an
-enrolment had ended — those are the two callers' own questions and they answer them
-differently on purpose. §3.4 has a drop stop a score from *updating* rather than
-remove weeks already earned, so `app.services.grading` reads `ended_on` nowhere;
-§5.1's denominator is the people who could have answered *that week*, so
-`app.services.reporting` does read it. A shared helper that folded the end date in
-would have made one of those two wrong.
+enrolment had ended by a window's opening — those are the two callers' own
+questions and they answer them differently on purpose. §3.4 has a drop stop a
+score from *updating* rather than remove weeks already earned, so
+`app.services.grading`'s credited weeks read `ended_on` nowhere; §5.1's
+denominator is the people who could have answered *that week*, so
+`app.services.reporting` tests `ended_on` against the window's opening day itself.
+A shared helper that folded the end date into the tiers would have made one of
+those two wrong.
 
 **Nothing here opens a connection, reads configuration or writes anything.** Both
 callers hand in a session and the institution's timezone, which is the zone every

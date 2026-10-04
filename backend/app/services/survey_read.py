@@ -23,7 +23,7 @@ parameter anywhere in this module by which a caller could name a section, a
 course, a term or another person. The two filters that carry the whole rule are:
 
 * the enrollment read, which is `enrollment.user_id = <the session's own user>`
-  and a day inside `started_on`/`ended_on`; and
+  and a day inside `started_on`/`ended_on` (`enrollment_windows.live_on`); and
 * the submission read, which is the reader **together with** the section and the
   week — E2-05's uniqueness key with nobody left out. A lookup over the section
   and the week alone returns a classmate's answers in a section of two, which is
@@ -141,12 +141,10 @@ def _live_enrollments(
     reader is not in — which is SPEC §4.1 item 1's failure and the mutation the
     invariant suite kills.
 
-    **The window is inclusive at both ends**, matching ADR 0020's `'[]'`
-    convention and `app.services.authz`'s own reading of the same rule: somebody
-    whose enrollment ends today is enrolled today, and a `NULL` `ended_on` is the
-    open window a roster sync leaves on a member it is still seeing (ADR 0023).
-    The `IS NULL` arm is what stops three-valued logic answering "unknown" for
-    every current student.
+    **The window is `app.services.enrollment_windows.live_on`'s**, inclusive at
+    both ends (ADR 0020's `'[]'` convention): somebody whose enrollment ends today
+    is enrolled today, and a `NULL` `ended_on` is the open window a roster sync
+    leaves on a member it is still seeing (ADR 0023).
 
     **The term is joined rather than fetched per section**, and the join is inner
     because `section.term_id` is `NOT NULL` behind a foreign key — the database is

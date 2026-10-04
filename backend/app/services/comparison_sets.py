@@ -511,9 +511,10 @@ def definition_options(session: Session) -> SetOptions:
     a meaning for.
 
     **Every course, not only the ones some set already names**, because the form
-    is where a new cohort is built. Each is labelled the way the report labels a
-    course — the prefix code, the LMS number, an em dash and the LMS title — so a
-    definer recognises the same course under the same name on both surfaces. The
+    is where a new cohort is built. Each is labelled by
+    `app.services.section_codes.course_label`, the composer the report calls, in its
+    course form — the prefix code, the LMS number, an em dash and the LMS title — so
+    a definer recognises the same course under the same name on both surfaces. The
     section code and the term the report's own label carries are absent because a
     set names a course rather than a section (ADR 0164).
 
