@@ -572,7 +572,7 @@ function summaryOf(
   return {
     text: summary.text,
     responseCount: summary.response_count,
-    heldNote: summary.held_note,
+    heldNote: summary.held_note ?? null,
   };
 }
 
