@@ -9,7 +9,7 @@ afterEach(cleanup);
 const TITLE = 'No raw comments are shown here this week';
 
 describe('SmallNNotice', () => {
-  it('says plainly what is hidden and why, as a named region', () => {
+  it('says plainly what is hidden and why, without becoming a landmark', () => {
     render(<SmallNNotice threshold={SMALL_N_THRESHOLD} />);
 
     // SPEC §4 hides one stream's raw comments below the threshold of distinct
@@ -21,7 +21,8 @@ describe('SmallNNotice', () => {
     // The sentence is E5.1-01's (work order D6): the rule, where held comments
     // go, and which summary the group still has. The identity promise is in the
     // body only.
-    expect(screen.getByRole('region', { name: TITLE })).toBeTruthy();
+    expect(screen.getByText(TITLE)).toBeTruthy();
+    expect(screen.queryByRole('region')).toBeNull();
     expect(
       screen.getByText(
         `To keep individual voices unidentifiable, raw comments in this group are shown only when at least ${String(SMALL_N_THRESHOLD)} students comment in it in the same week. Comments held back may appear later among comments from earlier weeks, with no week named. The AI summary above draws on everything received so far.`,

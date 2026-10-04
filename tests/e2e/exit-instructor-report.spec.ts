@@ -852,9 +852,7 @@ test('a quiet week hides its comments in the payload and not only on the page', 
   // The DOM half. **Two notices, one inside each group**, since E5.1-01: the
   // notice is per stream (work order D6) and both of this week's streams hold
   // fewer than five distinct commenters.
-  await expect(report.getByRole('region', { name: SMALL_N_TITLE })).toHaveCount(
-    2,
-  );
+  await expect(report.getByText(SMALL_N_TITLE)).toHaveCount(2);
   await expect(
     report.getByRole('article'),
     'A comment card is in the DOM on a week below the threshold. SPEC §4 hides a stream’s raw ' +
@@ -955,9 +953,7 @@ test('an above-threshold week of the same section shows its raw comments', async
 
   await expect(report.getByText(WEEK_SIX_INSTRUCTOR_COMMENT)).toBeVisible();
   await expect(report.getByText(WEEK_SIX_COURSE_COMMENT)).toBeVisible();
-  await expect(report.getByRole('region', { name: SMALL_N_TITLE })).toHaveCount(
-    0,
-  );
+  await expect(report.getByText(SMALL_N_TITLE)).toHaveCount(0);
 });
 
 test('the cumulative release carries the held comments with no week attribution', async ({
