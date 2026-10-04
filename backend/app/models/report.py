@@ -1,6 +1,6 @@
 """What the weekly report stores: the generated summary, a comment's moderation state, and the batch a held comment was released in.
 
-SPEC §13 lists no home for a reporting model. `survey.py` holds what a student
+SPEC §13 listed no home for a reporting model when this module was added. `survey.py` holds what a student
 submitted and `ai.py` holds the verdicts a model returned about one comment, and
 none of the three tables here is either of those things — so E4-02 adds this
 module and
