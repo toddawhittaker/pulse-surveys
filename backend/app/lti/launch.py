@@ -120,14 +120,15 @@ VERSION_CLAIM = f"{LTI_CLAIM_PREFIX}version"
 # from the assignment model (`app.services.authz.resolve_landing`, ADR 0098).
 # What still reads them, and lawfully, is SPEC §7.3's ingestion —
 # `app.services.provisioning` asks whether a launch is a staff launch, and
-# `app.services.roster_sync` asks which roster members teach — so they belong in
+# `app.services.roster_sync` asks which roster members teach and which are
+# learners — so they belong in
 # the module §13 describes as "launch validation, role/context resolution".
 #
-# **`LEARNER_ROLE_URI` is read by nothing under `app/` today**, and is kept
-# because a vocabulary held half here and half in whoever needs the other member
-# is the drift `docs/MISTAKES.md` entry 13 is about: `INSTRUCTOR_ROLE_URI` means
-# "this is a staff launch" at exactly one call site, and the constant naming its
-# counterpart is what lets the next reader check that reading.
+# **`LEARNER_ROLE_URI` is read by `app.services.roster_sync`** (E5.1-11), whose
+# student rule is an allow-list: Learner listed, and no Instructor role or
+# sub-role. Both constants live here because a vocabulary held half here and half
+# in whoever needs the other member is the drift `docs/MISTAKES.md` entry 13 is
+# about.
 LTI_ROLES_CLAIM = f"{LTI_CLAIM_PREFIX}roles"
 MEMBERSHIP_VOCABULARY = "http://purl.imsglobal.org/vocab/lis/v2/membership#"
 INSTRUCTOR_ROLE_URI = f"{MEMBERSHIP_VOCABULARY}Instructor"

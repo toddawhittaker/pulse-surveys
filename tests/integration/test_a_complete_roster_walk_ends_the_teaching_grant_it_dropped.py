@@ -36,19 +36,37 @@ the table (`docs/MISTAKES.md` entry 44). Criterion 2's tests are green today —
 nothing ends any grant yet — and exist to kill the mutation that ends grants on a
 walk that did not finish.
 
+**Every walk here runs on a day the walked section has not ended.** E5.1-11
+settles that no teaching grant is ended once a section has ended (`today >
+section.end_date`; ADR 0183 as amended), so a walk after the section's last day
+proves nothing about criterion 1, and a walk that *keeps* a grant there keeps it
+for a reason unrelated to the test. The report door's world starts its clock
+after the last window closes, which is the day after the taught section ends, so
+those walks move the development clock into the term first, check the day the
+clock now names against the section's dates, and move it back to the reading
+instant before anything is read (`walk_inside_the_term`). The `synced_section`
+tests run on the real clock, and their section's seeded end date is fixed; they
+move the section's `end_date` past the real today instead (`keep_the_section_running`),
+so they do not go red, or vacuously green, once the real calendar passes it.
+
 Marked `invariant` at the module level: a removed instructor reading a section is
 a §4.1 confidentiality failure, and a module half inside the isolated pass reads
 like a module inside it.
 """
 
+from datetime import timedelta
 from typing import Any
 
 import pytest
 from fixtures.instructor_sections import SECTIONS_PATH, entries_in, section_ids_in
 from fixtures.report_api import (
+    AFTER_THE_LAST_WINDOW,
+    CLEAR_OF_AN_OPENING,
     FULL_WEEK,
     INSTRUCTOR_ROLE,
+    REPORT_OPENS_BY_TERM_WEEK,
     SECOND_TAUGHT_COHORT,
+    TERM_WEEK_OF_COURSE_WEEK,
     a_section_that_does_not_exist,
 )
 from fixtures.roster_sync import (
@@ -73,6 +91,21 @@ pytestmark = [pytest.mark.integration, pytest.mark.lti, pytest.mark.invariant]
 # walk serves in her place. Named so a failure says which one the sync missed.
 LEFT_THE_ROSTER = "left-the-roster"
 LOST_THE_INSTRUCTOR_ROLE = "lost-the-instructor-role"
+
+# When a walk over the report door's world runs: the morning course week 1's
+# report opened, weeks inside the taught section's term and weeks before its last
+# day. Named off this world's own calendar rather than written as a literal; the
+# day it lands on is checked against the section's stored dates before any walk.
+WALK_INSIDE_THE_TERM = (
+    REPORT_OPENS_BY_TERM_WEEK[TERM_WEEK_OF_COURSE_WEEK[FULL_WEEK]] + CLEAR_OF_AN_OPENING
+)
+
+# How far past the real today a `synced_section`'s last day is moved. A year, so
+# no run of this module can reach it.
+STILL_RUNNING_FOR = timedelta(days=365)
+
+SECTION_START_COLUMN = "start_date"
+SECTION_END_COLUMN = "end_date"
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +162,40 @@ def platform_of(section: Any, metadata_tables: dict[str, Any]) -> Any:
     return section.registration.platform_row[
         single_primary_key(require_table(metadata_tables, "lti_platform"))
     ]
+
+
+def section_dates(committed_rows: Any, metadata_tables: dict[str, Any], section_id: Any) -> Any:
+    """The section's stored `(start_date, end_date)`, read after ending the transaction."""
+    from sqlalchemy import select
+
+    section = require_table(metadata_tables, "section")
+    committed_rows.session.rollback()
+    return committed_rows.session.execute(
+        select(section.c[SECTION_START_COLUMN], section.c[SECTION_END_COLUMN]).where(
+            section.c[single_primary_key(section)] == section_id
+        )
+    ).one()
+
+
+def keep_the_section_running(
+    committed_rows: Any, metadata_tables: dict[str, Any], section_id: Any
+) -> None:
+    """Move a `synced_section`'s last day a year past the real today, before it is walked.
+
+    These walks run on the real clock, and the section's seeded `end_date` is a
+    fixed date. Once the real calendar passes it, E5.1-11's past-term rule leaves
+    every grant alone, so a test expecting a grant to end goes red and one
+    expecting grants to survive goes green for the wrong reason.
+    """
+    from sqlalchemy import update
+
+    section = require_table(metadata_tables, "section")
+    committed_rows.session.execute(
+        update(section)
+        .where(section.c[single_primary_key(section)] == section_id)
+        .values(**{SECTION_END_COLUMN: institution_today() + STILL_RUNNING_FOR})
+    )
+    committed_rows.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +277,47 @@ def assert_she_can_read(world: TeachingWorld, when: str) -> None:
     )
 
 
+def the_clocks_day(clock_service: Any, committed_rows: Any) -> Any:
+    """Today as `app.services.clock` answers it, under the settings the sync builds."""
+    from app.config import Settings
+
+    committed_rows.session.rollback()
+    return clock_service.today(committed_rows.session, settings=Settings())
+
+
+def walk_inside_the_term(
+    world: TeachingWorld,
+    members: list[Any],
+    *,
+    roster_sync: Any,
+    application_session: Any,
+    committed_rows: Any,
+    metadata_tables: dict[str, Any],
+    clock_service: Any,
+    truncated: bool = False,
+) -> None:
+    """Walk the section on a day inside its term, then put the clock back where reads happen.
+
+    The report door's world reads at `AFTER_THE_LAST_WINDOW`, which is the day
+    after the taught section's last day, and E5.1-11 ends no grant on a section
+    that has ended. So the walk runs at `WALK_INSIDE_THE_TERM`, through the same
+    seam the door uses, and the day the clock then names is checked against the
+    section's stored dates before the walk: if this world's calendar ever moves,
+    the precondition fails here rather than the walk silently drifting past the
+    term again (`docs/disputes/E5.1-11-01.md`).
+    """
+    world.door.pretend(WALK_INSIDE_THE_TERM)
+    walk_day = the_clocks_day(clock_service, committed_rows)
+    starts, ends = section_dates(committed_rows, metadata_tables, world.walked_section)
+    assert starts <= walk_day <= ends, (
+        f"The walk would run on {walk_day}, and the walked section runs {starts} to {ends}. The walk "
+        "has to fall inside the section's term: after its last day E5.1-11 ends no teaching grant, "
+        "so a walk there says nothing about whether a complete walk ends one."
+    )
+    world.walkable.walk(roster_sync, application_session, members, truncated=truncated)
+    world.door.pretend(AFTER_THE_LAST_WINDOW)
+
+
 # ---------------------------------------------------------------------------
 # Criterion 1 — at the door.
 # ---------------------------------------------------------------------------
@@ -226,6 +334,7 @@ def test_a_complete_walk_that_stops_listing_her_as_instructor_shuts_her_out_of_t
     roster_rows: Any,
     application_session: Any,
     a_subject: Any,
+    clock_service: Any,
 ) -> None:
     """Criterion 1, both ways a member stops teaching, asserted as the refusal at the door.
 
@@ -254,6 +363,15 @@ def test_a_complete_walk_that_stops_listing_her_as_instructor_shuts_her_out_of_t
     **The control that the walk happened** is the learner listed beside her, who
     must hold an enrollment afterwards: a walk that never reached ingestion would
     leave her grant in place for a reason that has nothing to do with criterion 1.
+
+    **The walk happens inside the section's term; the reads happen after it.**
+    E5.1-11 ends no teaching grant once the section has ended (ADR 0183 as
+    amended), and this world reads on the day after the taught section's last day.
+    An earlier version walked on that day too, by accident of the world's clock,
+    and the past-term rule then correctly kept her grant
+    (`docs/disputes/E5.1-11-01.md`). So the walk runs at `WALK_INSIDE_THE_TERM`,
+    with the walk's day asserted to be inside the section's dates, and every read
+    before and after it runs at the reading instant.
     """
     world = build_teaching_world(report_door, committed_rows, metadata_tables)
     assert_she_can_read(world, "Before the walk")
@@ -262,7 +380,15 @@ def test_a_complete_walk_that_stops_listing_her_as_instructor_shuts_her_out_of_t
     members = [roster_member(learner, roles=[LEARNER_ROLE_URN])]
     if how == LOST_THE_INSTRUCTOR_ROLE:
         members.append(roster_member(world.subject, roles=[LEARNER_ROLE_URN]))
-    world.walkable.walk(roster_sync, application_session, members)
+    walk_inside_the_term(
+        world,
+        members,
+        roster_sync=roster_sync,
+        application_session=application_session,
+        committed_rows=committed_rows,
+        metadata_tables=metadata_tables,
+        clock_service=clock_service,
+    )
 
     assert roster_rows.enrollments_for(learner), (
         f"The complete walk served {learner!r} as a learner and wrote no enrollment for them, so "
@@ -309,6 +435,7 @@ def test_a_complete_walk_that_still_lists_her_as_instructor_leaves_the_section_r
     roster_rows: Any,
     application_session: Any,
     a_subject: Any,
+    clock_service: Any,
 ) -> None:
     """Criterion 1's pair: listed as Instructor, she keeps the section.
 
@@ -317,19 +444,24 @@ def test_a_complete_walk_that_still_lists_her_as_instructor_leaves_the_section_r
     above perfectly and strips every instructor of every section every hour.
 
     Green on today's tree, by design; it is the half that goes red when the ending
-    is too wide.
+    is too wide. The walk runs inside the section's term (`walk_inside_the_term`):
+    on a past-term day E5.1-11 ends nothing, so a too-wide ending would pass here.
     """
     world = build_teaching_world(report_door, committed_rows, metadata_tables)
     assert_she_can_read(world, "Before the walk")
 
     learner = a_subject("learner-beside-her")
-    world.walkable.walk(
-        roster_sync,
-        application_session,
+    walk_inside_the_term(
+        world,
         [
             roster_member(world.subject, roles=[INSTRUCTOR_ROLE_URN]),
             roster_member(learner, roles=[LEARNER_ROLE_URN]),
         ],
+        roster_sync=roster_sync,
+        application_session=application_session,
+        committed_rows=committed_rows,
+        metadata_tables=metadata_tables,
+        clock_service=clock_service,
     )
     assert roster_rows.enrollments_for(learner), (
         f"The walk served {learner!r} as a learner and wrote no enrollment for them, so it never "
@@ -352,6 +484,7 @@ def test_a_truncated_walk_that_never_reached_her_leaves_the_section_readable(
     roster_rows: Any,
     application_session: Any,
     a_subject: Any,
+    clock_service: Any,
 ) -> None:
     """Criterion 2 at the door: "A truncated walk (`complete=False`) ends no grant."
 
@@ -366,16 +499,22 @@ def test_a_truncated_walk_that_never_reached_her_leaves_the_section_readable(
 
     **The near miss:** the walk must really have been truncated *and* really have
     ingested page one. Both are asserted, so the section staying readable is about
-    the truncation rather than about a walk that never ran.
+    the truncation rather than about a walk that never ran. The walk runs inside the
+    section's term (`walk_inside_the_term`), so it is not about the past-term rule
+    either.
     """
     world = build_teaching_world(report_door, committed_rows, metadata_tables)
     assert_she_can_read(world, "Before the walk")
 
     learner = a_subject("first-page-learner")
-    world.walkable.walk(
-        roster_sync,
-        application_session,
+    walk_inside_the_term(
+        world,
         [roster_member(learner, roles=[LEARNER_ROLE_URN])],
+        roster_sync=roster_sync,
+        application_session=application_session,
+        committed_rows=committed_rows,
+        metadata_tables=metadata_tables,
+        clock_service=clock_service,
         truncated=True,
     )
     assert world.walkable.asked_for_the_failing_page(), (
@@ -410,6 +549,7 @@ def test_a_truncated_walk_ends_no_grant_on_the_section_it_walked(
     completeness — on "the walk returned members", say — which a truncated walk
     with a populated first page satisfies.
     """
+    keep_the_section_running(committed_rows, metadata_tables, synced_section.id)
     platform_id = platform_of(synced_section, metadata_tables)
     listed_nowhere = a_teaching_person(
         committed_rows,
@@ -471,6 +611,7 @@ def test_a_complete_walk_ends_only_the_grant_of_the_instructor_it_dropped(
     keeps hers). A pair across two worlds cannot tell the first from correct
     behaviour when each world holds one instructor; one world with both can.
     """
+    keep_the_section_running(committed_rows, metadata_tables, synced_section.id)
     platform_id = platform_of(synced_section, metadata_tables)
     kept_subject = a_subject("kept-instructor")
     kept = a_teaching_person(
@@ -529,6 +670,7 @@ def test_an_inactive_instructor_member_loses_the_grant(
     leaves every instructor an LMS deactivated holding the section. **The pair**
     is the Active co-teacher in the same walk, who keeps hers.
     """
+    keep_the_section_running(committed_rows, metadata_tables, synced_section.id)
     platform_id = platform_of(synced_section, metadata_tables)
     active_subject = a_subject("active-instructor")
     inactive_subject = a_subject("inactive-instructor")
@@ -589,6 +731,7 @@ def test_a_complete_walk_ends_a_grant_whose_person_has_no_lms_user(
     leaves a hand-planted or stale grant in place forever. **The pair** is the
     listed instructor in the same walk, who keeps hers.
     """
+    keep_the_section_running(committed_rows, metadata_tables, synced_section.id)
     platform_id = platform_of(synced_section, metadata_tables)
     listed_subject = a_subject("listed-instructor")
     listed = a_teaching_person(
@@ -646,6 +789,7 @@ def test_the_ended_row_a_walk_writes_names_the_grant_and_the_call_that_ended_it(
     row may appear.
     """
     require_the_ended_teaching_grant_table(committed_rows.session)
+    keep_the_section_running(committed_rows, metadata_tables, synced_section.id)
     platform_id = platform_of(synced_section, metadata_tables)
     kept_subject = a_subject("kept-instructor")
     kept = a_teaching_person(
