@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 
 import { copy, fillCopy } from '../copy/instructorReportTrendCopy';
+import { type ComparisonFigureView, isShownFigure } from '../lib/shownFigure';
 import './instructorReportTrend.css';
 
 /**
@@ -27,15 +28,7 @@ export interface TrendPoint {
 
 /**
  * One benchmark number as the report payload carries it — the wire's
- * `ComparisonFigure`, reconciled to the schema by ticket E5-10.
- *
- * **This is the shape the server sends and not a shape of this component's
- * choosing.** E5-07 built the overlays against the README's payload sketch,
- * where a point's `mean` was a bare number and a whole series carried one
- * `suppressed` flag. The shipped schema (`app/schemas/report_benchmark.py`)
- * seals every single figure on its own instead, and E5-10 is the named
- * reconciliation point: the field names below are the wire's, so the page hands
- * this component the payload member whole and nothing maps on the way.
+ * `ComparisonFigure`, the same figure type `StatPair`'s cells read.
  *
  * `figure` is `null` wherever `suppressed` is true — a value carrying both would
  * be a suppressed figure on the wire, which SPEC §4.1 item 7 is exactly about —
@@ -45,17 +38,9 @@ export interface TrendPoint {
  * `reason` is the payload's one-word token (`"below-minimum"`) and **nothing
  * renders it**: a wire token is not a governed string, and the words a reader
  * sees come from `instructorReportTrendCopy.ts` like every other sentence on
- * this surface.
- *
- * Both optional members are optional **and** nullable because this is a
- * TypeScript shape over JSON the client casts rather than parses. See
- * {@link isDrawable} for why that is read fail-closed.
+ * this surface. {@link isShownFigure} is what reads the seal, fail-closed.
  */
-export interface OverlayFigure {
-  readonly suppressed: boolean;
-  readonly reason?: string | null;
-  readonly figure?: number | null;
-}
+export type OverlayFigure = ComparisonFigureView;
 
 /**
  * One week of one comparison series — the wire's `BenchmarkSeriesPoint`.
@@ -612,38 +597,6 @@ export function PulseTrendChart({
 }
 
 /**
- * Whether one benchmark week may be drawn — **only if its own flag says exactly
- * `false` and its own figure is a number**.
- *
- * This is the one question in the file that fails closed, and both halves of it
- * are written the strict way on purpose. {@link OverlayFigure} is a TypeScript
- * shape over JSON the client casts without parsing at runtime, so the type is a
- * description of what the server is expected to send and not a check that it
- * did. A flag that arrived renamed, misspelled, or missing is `undefined` here,
- * and `undefined` is falsy: a truthiness test would read a dropped `suppressed`
- * as "not suppressed" and draw a figure SPEC §4.1 item 7 had suppressed. The
- * whole class of payload slip resolves to "show the figure", which is the wrong
- * direction for a confidentiality rule to fail in.
- *
- * The second half is the same argument about the number. The server's rule is
- * that `figure` is `null` wherever `suppressed` is true, so a figure beside a
- * raised flag is a payload contradicting itself — and `typeof === 'number'`
- * refuses a string, a `null` and an absent member together, none of which can be
- * plotted without becoming `NaN` somewhere down the file.
- *
- * So anything that is not literally `false` beside a real number is treated as a
- * week with nothing to draw. The cost, named: a payload that stopped sending the
- * flag would show suppression notices on every panel rather than drawing lines —
- * loud, visible, and withholding nothing a reader was entitled to.
- */
-function isDrawable(figure: OverlayFigure | null | undefined): boolean {
-  // `!= null` rather than `!== undefined`: a JSON `null` in the `mean` position
-  // is a member that was sent and cannot be read, and reading `suppressed` off
-  // it throws.
-  return figure != null && figure.suppressed === false && typeof figure.figure === 'number';
-}
-
-/**
  * The weeks one comparison series has something to draw, or an empty list.
  *
  * **Empty means "this series says nothing", and the caller is what turns that
@@ -669,7 +622,7 @@ function isDrawable(figure: OverlayFigure | null | undefined): boolean {
 function drawnPoints(series: OverlaySeries | null | undefined): readonly DrawnPoint[] {
   const weeks = sentWeeks(series?.points).map((point) => ({
     courseWeek: point.course_week,
-    mean: isDrawable(point.mean) ? (point.mean.figure ?? null) : null,
+    mean: isShownFigure(point.mean) ? point.mean.figure : null,
   }));
   return weeks.some((week) => week.mean !== null) ? weeks : [];
 }
@@ -682,7 +635,7 @@ function drawnPoints(series: OverlaySeries | null | undefined): readonly DrawnPo
  * says it did and the type is a description of the server rather than a check on
  * it. The cast on the other side of the test is what that costs, and it is
  * bounded — every field read off a point afterwards goes back through
- * {@link isDrawable}, which answers for a malformed one.
+ * {@link isShownFigure}, which answers for a malformed one.
  */
 function sentWeeks(points: unknown): readonly OverlayPoint[] {
   return Array.isArray(points) ? (points as readonly OverlayPoint[]) : [];

@@ -1,28 +1,21 @@
 import type { JSX } from 'react';
 
+import type { ComparisonFigureView, WorkloadBenchmarkFiguresView, WorkloadBenchmarkView } from '../api/instructor';
 import type { InstructorReportStatsCopyKey } from '../copy/instructorReportStatCopy';
 import { copy } from '../copy/instructorReportStatCopy';
+import { isShownFigure } from '../lib/shownFigure';
 import { formatStatistic } from './instructorReportFigures';
 import './instructorReportStats.css';
 
 /**
  * One benchmark number, sealed — the wire's `ComparisonFigure`, which ticket
- * E5-10 reconciled this component's props to.
+ * E5-10 reconciled this component's props to, and the one figure type the
+ * chart's overlays read too.
  *
  * SPEC §4.1 item 7 suppresses every figure computed from a comparison set below
- * the benchmark minimums — "a mean, a median, or any other statistic, not only a
- * drawn line" — and E5's breakdown puts that decision on the server, **per
- * figure**. E5-08 built this component against the README's payload sketch,
- * where one flag per column governed the mean and the median together; the
- * shipped schema (`app/schemas/report_benchmark.py`) seals the two
- * independently, "and neither rides on the other's decision". So the shape below
- * is the wire's and the seal is read once per cell.
- *
- * **`suppressed` has to say `false` for a figure to be drawn.** This is a
- * TypeScript shape over JSON the client casts rather than parses, so the type
- * describes what the server is expected to send and not what arrived. See
- * {@link isReportable} for why the check fails in that direction — the same
- * rule, and the same reason, as `PulseTrendChart`'s `isDrawable`.
+ * the benchmark minimums, and the server seals the mean and the median
+ * independently, "and neither rides on the other's decision". So the seal is
+ * read once per cell, by {@link isShownFigure}.
  *
  * `reason` is the payload's one-word token (`"below-minimum"`) and **nothing
  * renders it**: a wire token is not a governed string, and the words a reader
@@ -34,11 +27,7 @@ import './instructorReportStats.css';
  * again for a week the population has no figure in, which is a different fact
  * and takes different words.
  */
-export interface BenchmarkFigure {
-  readonly suppressed: boolean;
-  readonly reason?: string | null;
-  readonly figure?: number | null;
-}
+export type BenchmarkFigure = ComparisonFigureView;
 
 /**
  * One comparison column's pair of figures — the wire's
@@ -54,10 +43,9 @@ export interface BenchmarkFigure {
  * rather than parsed, and every unreadable shape has to land somewhere that
  * withholds.
  */
-export interface WorkloadBenchmarkFigures {
-  readonly mean?: BenchmarkFigure | null;
-  readonly median?: BenchmarkFigure | null;
-}
+export type WorkloadBenchmarkFigures = {
+  readonly [Figure in keyof WorkloadBenchmarkFiguresView]?: WorkloadBenchmarkFiguresView[Figure] | null;
+};
 
 /**
  * The workload pair's two comparison columns, as `workload_benchmark` on the
@@ -73,10 +61,9 @@ export interface WorkloadBenchmarkFigures {
  * `null` because the wire carries it; a shape that denied it is what let the
  * component read `suppressed` off nothing and throw.
  */
-export interface WorkloadBenchmark {
-  readonly comparison?: WorkloadBenchmarkFigures | null;
-  readonly university?: WorkloadBenchmarkFigures | null;
-}
+export type WorkloadBenchmark = {
+  readonly [Column in keyof WorkloadBenchmarkView]?: WorkloadBenchmarkFigures | null;
+};
 
 /** The comparison-set column's cells, addressable from a test and from E5-14's run. */
 export const STAT_CELL_COMPARISON_TESTID = 'stat-cell-comparison';
@@ -125,7 +112,7 @@ export const STAT_CELL_UNIVERSITY_TESTID = 'stat-cell-university';
  *
  * **A withheld comparison figure is a sentence, never a shape that reads as a
  * number.** See `instructor_report_stats.benchmark_withheld` for the wording and
- * {@link isReportable} for what makes a figure reportable at all.
+ * {@link isShownFigure} for what makes a figure reportable at all.
  *
  * **No benchmark figure is compared to anything here.** The component draws
  * three labelled figures and computes no difference, no ratio and no ordering
@@ -276,7 +263,7 @@ function BenchmarkCell({
     <div data-testid={testId}>
       <dt className="pulse-stat-figure-label">{copy(labelKey)}</dt>
       <dd className="pulse-stat-figure-value pulse-stat-figure-value--benchmark">
-        {isReportable(figure) ? (
+        {isShownFigure(figure) ? (
           <>
             {formatStatistic(figure.figure)}
             <span className="pulse-stat-figure-unit">{` ${copy('instructor_report_stats.workload_unit')}`}</span>
@@ -298,44 +285,6 @@ function BenchmarkCell({
       </dd>
     </div>
   );
-}
-
-/**
- * Whether one comparison figure may be shown — **only if its own flag says
- * exactly `false` and its own number is a number**.
- *
- * This is the one question in the file that fails closed, and both halves are
- * written the strict way on purpose. {@link BenchmarkFigure} is a shape over
- * JSON the client casts without parsing at runtime, so a flag that arrived
- * renamed, misspelled or missing is `undefined` here, and `undefined` is falsy:
- * a truthiness test would read a dropped `suppressed` as "not suppressed" and
- * print a mean SPEC §4.1 item 7 had suppressed, with nothing on the page to say
- * a figure was withheld. The whole class of payload slip would resolve to "show
- * the figure", which is the wrong direction for a confidentiality rule to fail
- * in.
- *
- * The second half is the same argument about the number. The server's rule is
- * that a suppressed figure carries none, so a value beside a raised flag is a
- * payload contradicting itself, and {@link isMeasured} refuses a string, a
- * `null`, an absent member and an arithmetic-over-nothing `NaN` together.
- *
- * So anything that is not literally `false` beside a real number is withheld.
- * The cost, named: a payload that stopped sending the flag would show withheld
- * notices on every report rather than its comparison figures — loud, visible,
- * and withholding nothing a reader was entitled to.
- *
- * **An absent member is not this question.** `benchmark.comparison === undefined`
- * means the payload carried no comparison member at all, which is §4.1 item 1's
- * case and draws no column whatsoever. This function is only ever asked about a
- * cell of a column that is there, and answers `false` for one that is not so
- * that a slip in the caller cannot open a figure either.
- */
-function isReportable(
-  figure: BenchmarkFigure | null | undefined,
-): figure is BenchmarkFigure & { readonly figure: number } {
-  // `!= null` rather than `!== undefined`: a member sent as JSON `null` is one
-  // this function must answer about, and reading `suppressed` off it throws.
-  return figure != null && figure.suppressed === false && isMeasured(figure.figure);
 }
 
 /**
