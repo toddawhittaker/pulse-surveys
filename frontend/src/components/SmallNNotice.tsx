@@ -1,4 +1,3 @@
-import { useId } from 'react';
 import type { JSX } from 'react';
 
 import './instructorReportComments.css';
@@ -35,6 +34,10 @@ import { copy, fillCopy } from '../copy/instructorReportCommentCopy';
  * group. It is not SPEC §4.1 item 5's confidentiality line, which item 5 itself
  * says of a state notice (ADR 0158), so two of them on one page is not two
  * standing promises.
+ *
+ * **It is a plain block, not a landmark.** Two held streams render two notices
+ * with the same title, and WCAG 2.2 asks landmarks of one type to be told apart;
+ * the group's own labelled section and heading already say which stream this is.
  */
 export function SmallNNotice({
   threshold,
@@ -42,12 +45,10 @@ export function SmallNNotice({
   /** The configured number of distinct commenters a stream's raw comments are held until. */
   readonly threshold: number;
 }): JSX.Element {
-  const titleId = useId();
-
   return (
-    <section className="pulse-small-n-notice" aria-labelledby={titleId}>
+    <div className="pulse-small-n-notice">
       <FlatPulseLine />
-      <p className="pulse-small-n-notice__title" id={titleId}>
+      <p className="pulse-small-n-notice__title">
         {copy('instructor_report_comments.small_n.title')}
       </p>
       <p className="pulse-small-n-notice__body">
@@ -55,7 +56,7 @@ export function SmallNNotice({
           threshold: String(threshold),
         })}
       </p>
-    </section>
+    </div>
   );
 }
 

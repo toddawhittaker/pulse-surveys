@@ -483,7 +483,7 @@ describe('a published week with data in it', () => {
       <InstructorMondayReport sectionId={SECTION_ID} week={7} onSelectWeek={chosen} />,
     );
     // Both of that week's streams are suppressed, so it carries two notices.
-    await screen.findAllByRole('region', { name: SMALL_N_TITLE });
+    await screen.findAllByText(SMALL_N_TITLE);
     await waitFor(() => {
       expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1 }));
     });
@@ -516,7 +516,7 @@ describe('a week nobody answered', () => {
     // Nobody commented, and an empty stream is suppressed exactly like a thin
     // one (ADR 0182), so each group carries the notice and neither says the
     // week was empty — a reader cannot tell nobody from one person.
-    expect(screen.getAllByRole('region', { name: SMALL_N_TITLE })).toHaveLength(2);
+    expect(screen.getAllByText(SMALL_N_TITLE)).toHaveLength(2);
   });
 
   it('renders no response bar at all for a section nobody is enrolled in', async () => {
@@ -571,8 +571,14 @@ describe('a week whose streams are below the commenter threshold', () => {
 
     const groups = [...container.querySelectorAll('.pulse-comment-group')];
     expect(groups).toHaveLength(2);
-    const notices = screen.getAllByRole('region', { name: SMALL_N_TITLE });
+    const notices = screen
+      .getAllByText(SMALL_N_TITLE)
+      .map((title) => title.parentElement as Element);
     expect(notices).toHaveLength(2);
+    // Two notices with one title would be two regions of one name, which
+    // WCAG 2.2 asks a landmark list not to hold; the group's own section names
+    // the stream, so the notice is not a landmark at all.
+    expect(screen.queryAllByRole('region', { name: SMALL_N_TITLE })).toHaveLength(0);
     for (const [index, group] of groups.entries()) {
       const notice = notices[index] as Element;
       expect(group.contains(notice)).toBe(true);
@@ -628,7 +634,9 @@ describe('a full week with one thin stream', () => {
     const [instructorGroup, courseGroup] = [
       ...container.querySelectorAll('.pulse-comment-group'),
     ] as Element[];
-    const notices = screen.getAllByRole('region', { name: SMALL_N_TITLE });
+    const notices = screen
+      .getAllByText(SMALL_N_TITLE)
+      .map((title) => title.parentElement as Element);
 
     expect(notices).toHaveLength(1);
     expect(instructorGroup?.contains(notices[0] as Element)).toBe(true);
