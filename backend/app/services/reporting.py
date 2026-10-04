@@ -566,10 +566,14 @@ def _comments_reaching_the_model(
                 # constraint permits a row filling `comment_text` under a question
                 # of another kind, and a read is not the place to trust a write.
                 Answer.comment_text.is_not(None),
-                # Blank means whitespace of any kind, not only spaces: the same
-                # predicate as `report_comment_v002.sql`, whose header says which
-                # characters it covers (docs/disputes/E5.1-12-01.md).
-                Answer.comment_text.regexp_match("[^[:space:]]"),
+                # Blank means what Python's `str.strip()` removes, not only
+                # spaces: the same class, character for character, as
+                # `report_comment_v002.sql`, whose header says why each part is
+                # there (docs/disputes/E5.1-12-01.md). PostgreSQL's regex engine
+                # reads the escapes; the raw string keeps Python from doing so.
+                Answer.comment_text.regexp_match(
+                    r"[^[:space:]\u001c-\u001f\u0085\u00a0\u2007\u202f]"
+                ),
                 # The one resolution of "which decision is current", called rather
                 # than written again: `app.services.report_comments` owns it
                 # (ADR 0145), and E4-07 closed the deferral that had this module

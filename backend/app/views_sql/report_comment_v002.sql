@@ -16,13 +16,17 @@
 -- comment before it is stored, but this view is the read side's own guard and
 -- does not rely on that.
 --
--- This body keeps a comment only if it holds a character that is not in the
--- `[:space:]` class. Under the database's en_US.utf8 character type that class
--- covers space, tab, line feed, vertical tab, form feed and carriage return, as
--- Python's `str.strip()` does, and also most Unicode spaces. Python's `strip`
--- removes eight characters this class does not: U+001C to U+001F, U+0085,
--- U+00A0 (no-break space), U+2007 and U+202F. A comment made only of those still
--- passes here; the submission path's `strip` is what stops one today.
+-- This body keeps a comment only if it holds a character that Python's
+-- `str.strip()`, the submission path's test, would not remove. The class has two
+-- parts. `[:space:]`, under the database's en_US.utf8 character type, covers
+-- space, tab, line feed, vertical tab, form feed, carriage return and most
+-- Unicode spaces. The eight escapes after it are the characters Python strips
+-- and `[:space:]` does not: U+001C to U+001F, U+0085, U+00A0 (no-break space),
+-- U+2007 and U+202F. The escapes are PostgreSQL regex escapes inside a standard
+-- string literal (standard_conforming_strings is on), so the string parser
+-- passes the backslashes through and the regex engine reads them. Measured on
+-- the project's image over every code point: the class and Python's `strip`
+-- agree on all of them. Another character type was not measured.
 
 CREATE OR REPLACE VIEW public.report_comment AS
 SELECT
@@ -36,4 +40,4 @@ JOIN public.question AS asked ON asked.id = written.question_id
 JOIN public.response AS submitted ON submitted.id = written.response_id
 WHERE asked.kind = 'comment'
   AND written.comment_text IS NOT NULL
-  AND written.comment_text ~ '[^[:space:]]';
+  AND written.comment_text ~ '[^[:space:]\u001c-\u001f\u0085\u00a0\u2007\u202f]';
