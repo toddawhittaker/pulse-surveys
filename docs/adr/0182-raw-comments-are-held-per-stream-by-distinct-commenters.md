@@ -98,7 +98,6 @@ meets the floor, so the per-card chip stays.
 The count above counts only comments holding a character Python's `str.strip()`
 would keep: `report_comment_v002.sql` replaced v001's one-argument `btrim`, which
 trimmed only spaces and let a comment of tabs and line breaks count its author,
-with `[:space:]` plus the eight characters Python strips and that class misses,
-and on the project's image (en_US.utf8) the two agree on every code point
-(`docs/disputes/E5.1-12-01.md`); another database character type was not
-measured.
+with an explicit list of the code points `strip` removes and no `[:space:]`
+class, so the rule is the same under every collation
+(`docs/disputes/E5.1-12-01.md`).
