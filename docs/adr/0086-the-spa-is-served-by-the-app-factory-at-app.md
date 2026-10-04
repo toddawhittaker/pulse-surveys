@@ -2,10 +2,10 @@
 
 ## Context
 
-[SPEC §13](../SPEC.md) draws two things that have to be reconciled. It gives
+[SPEC §13](../SPEC.md) drew two things that had to be reconciled. It gave
 `backend/app/main.py` the job "FastAPI app factory, router mount, **SPA static
-serve**", and it also draws a `frontend/Dockerfile` beside the frontend package,
-which is what a separately-served frontend would need. E1-04 is the ticket that
+serve**", and it also drew a `frontend/Dockerfile` beside the frontend package,
+which is what a separately-served frontend would need. (SPEC §13 was redrawn in E5.1-08, on 2026-10-03, and no longer draws it.) E1-04 is the ticket that
 lands the application, so it is the ticket that has to decide which of those is
 the deployment.
 
@@ -48,7 +48,7 @@ door.
 
 ## Alternatives rejected
 
-**A frontend container of its own, per §13's drawn `frontend/Dockerfile`.** The
+**A frontend container of its own, per the `frontend/Dockerfile` §13 drew then.** The
 tidiest picture and the most moving parts. It needs a fourth application service
 in `docker-compose.yml`, and — because the browser has to reach one origin for
 both the API and the application, or the tool acquires a cross-origin story it
@@ -66,7 +66,8 @@ shape, and the one that reads best in a browser's address bar. Rejected because
 the API's addresses are not this ticket's to move: `/healthz` is waited on by
 every service in the Compose stack and by both CI health gates, `/lti/*` and
 `/auth/*` are registered with a real platform and a real provider, and
-`/openapi.json` is what §13's client generator reads. Moving all of them to buy a
+`/openapi.json` is what §13's client generator was to read (the generator was
+never built; the wire types are generated from the same schema, ADR 0185). Moving all of them to buy a
 shorter URL for five empty pages is a change with no upside and four gates'
 worth of downside. `/app` also makes the mount's blast radius legible: anything
 that goes wrong inside it is confined to one prefix, where a mount at `/`

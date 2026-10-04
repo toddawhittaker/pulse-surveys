@@ -9,8 +9,8 @@
 # health check as a configuration gap rather than as healthy, deliberately.
 #
 # **The frontend is built into this image rather than served from one of its
-# own** (ADR 0086). SPEC §13 draws a `frontend/Dockerfile`; what the same section
-# gives `backend/app/main.py` is the SPA static serve, and one process serving
+# own** (ADR 0086). SPEC §13 once drew a `frontend/Dockerfile` and no longer
+# does; what the same section gives `backend/app/main.py` is the SPA static serve, and one process serving
 # both is what makes `docker compose up` bring up a working application with no
 # reverse proxy in front of it to route `/app` away from the API.
 #

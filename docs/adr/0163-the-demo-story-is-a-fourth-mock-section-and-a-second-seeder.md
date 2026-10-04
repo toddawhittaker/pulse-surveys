@@ -15,7 +15,9 @@ demonstration driving, with the parameters written into E4-20: twenty students,
 and roughly 70% to 85% of them commenting each week, not the same ones every
 time.
 
-SPEC is silent on demonstration data — §13 names `seed.py` and nothing else — and
+SPEC is silent on demonstration data — §13 named `seed.py` and nothing else when
+this was written (SPEC §13 was redrawn in E5.1-08, on 2026-10-03, and now also
+draws the `seed_*.py` stories) — and
 where such a story should live is genuinely contestable, so this records the
 choice.
 

@@ -149,8 +149,10 @@ layer in.
 own types".** This is the tidying that removes the whole mechanism: a token
 private to the schema module is reachable by anybody who can import the schema,
 which is every caller the chokepoint exists to stop. The cost of keeping the type
-in the service is a cycle between the two modules, and it is paid with one
-function-local import in `_payload`, named and explained there.
+in the service is a cycle between the two modules, and it is paid with
+function-local imports: the service imports the schema modules back inside the
+functions that need them, never at module scope, and each says why where it
+stands.
 
 **A convention instead of a token — "the helper is the only supported way to
 populate this member".** Rejected on `docs/MISTAKES.md` entry 22: a closed-set
@@ -212,9 +214,12 @@ not the denominator, and a response rate above 1 is a report nobody can read.
 - **One module holds §5.1's read and its write.** It is longer than either half
   would be, and a reader has to know the line between them; the header names it.
 - **`app/schemas/report.py` imports `app/services/reporting.py`, and the service
-  imports the schema back inside one function.** That is a real cycle, paid
-  deliberately for the token's privacy, and it is the one function-local import in
-  the module. Anyone tempted to lift it to module scope will break the import.
+  imports the schema modules back inside the functions that need them, never at
+  module scope.** That is a real cycle, paid deliberately for the token's privacy.
+  There were eight function-local imports in the module when this sentence was
+  corrected, seven of them schema imports and one of `app.services.benchmarks`;
+  the count grows with the module, so read the module rather than this record.
+  Anyone tempted to lift one to module scope will break the import.
 - **E5 cannot ship a comparison figure without going through the suppression
   helper**, because there is no other way to build a value the payload boundary
   admits. If E5 needs a shape this type does not have, the change is to this type

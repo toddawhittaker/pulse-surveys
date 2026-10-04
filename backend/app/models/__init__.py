@@ -9,13 +9,13 @@ supervision graph, role_assignment and lead_faculty_mapping (E0-09), which SPEC
 §13 puts in that module. `audit` holds audit_log, which E0-10 needs because the
 Care reveal cannot return a name until its record is committed (ADR 0071). `ai` holds
 classification, the append-only record of what a model answered and which prompt
-version and model ID produced it (E0-13). §13 gives that module `summary` too
-and this sentence used to promise it here; E4-02 built the stored summary in
+version and model ID produced it (E0-13). §13 once gave that module `summary`
+too and this sentence used to promise it here; E4-02 built the stored summary in
 `report` instead, as `weekly_summary`, and ADR 0145 argues the move and names it
 as a departure from §13's layout rather than a gap in it. `clock` holds
 `clock_override`, the single row E2-04 lets a
-developer move the effective clock with — the one module here that §13 names no
-aggregate for, because a development scaffold is not part of the product's
+developer move the effective clock with — the one module here that holds no
+product aggregate, because a development scaffold is not part of the product's
 domain. `survey` holds question_set, question, response and answer — the
 weekly instrument and everything it collects (E2-05). `grades` holds grade_sync,
 the append-only account of what Pulse posted to a platform's gradebook, one row per

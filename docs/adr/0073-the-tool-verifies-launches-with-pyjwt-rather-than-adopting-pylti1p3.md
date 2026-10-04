@@ -1,6 +1,6 @@
 # 0073 — The tool verifies both doors' tokens with PyJWT, and `pylti1p3` waits for E1
 
-**Status:** Accepted
+**Status:** Accepted; superseded in part by [0089](0089-the-session-both-doors-issue-and-the-launch-nonce-ledger.md), which moved the launch door's token verification onto `pylti1p3`. The web door still verifies with PyJWT as decided here.
 **Date:** 2026-08-21
 **Ticket:** [E0-18](../tickets/e0/E0-18-e0-exit-smoke.md)
 
@@ -78,7 +78,7 @@ with a known library answer.
   `python:3.14-slim` on the same architecture CI builds for (it was
   `python:3.13-slim` when this was written; FIX-04 moved it), so this holds today
   and would be the first thing to check on a new architecture.
-- **`backend/app/lti/` exists with one module in it, not five.** §13 lists
+- **`backend/app/lti/` exists with one module in it, not five.** §13 listed
   `registration.py`, `launch.py`, `nrps.py`, `ags.py` and `platforms/`; E0-18
   ships `launch.py`, because the other four have no caller. A module with no
   caller is a guess at an interface.

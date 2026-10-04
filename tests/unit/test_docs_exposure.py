@@ -15,8 +15,8 @@ Three tests, because the property has three halves and each fails differently:
     — a launched browser enumerating every route of a system that holds student
     comment text;
   - the schema is still *producible* either way, because §7.1 keeps it for the
-    future MCP server and §13's client generator calls `app.openapi()`
-    in process. A gate that suppressed the schema itself rather than its route
+    future MCP server and `scripts/export_openapi.py` (ADR 0185) calls
+    `app.openapi()` in process. A gate that suppressed the schema itself rather than its route
     would satisfy the second test and break both of those, silently, in a script
     nobody runs until E1.
 
@@ -156,8 +156,8 @@ def test_the_schema_is_still_produced_in_process_outside_development(
 
     The difference is invisible from HTTP — both spellings answer 404 — and it is
     the whole of what E0-18 means by "the schema stays *producible* either way".
-    SPEC §7.1 keeps it for the future MCP server and §13's client generator calls
-    `app.openapi()` in process; a `create_app()` that stopped building one breaks
+    SPEC §7.1 keeps it for the future MCP server and `scripts/export_openapi.py`
+    (ADR 0185) calls `app.openapi()` in process; a `create_app()` that stopped building one breaks
     both, and the failure arrives in a script rather than in a request.
 
     The non-emptiness guard is the point of the second assertion: `{}` and
@@ -175,5 +175,6 @@ def test_the_schema_is_still_produced_in_process_outside_development(
     assert schema.get("paths"), (
         f"`app.openapi()` describes no paths outside development (it carries {sorted(schema)}). "
         "A schema with nothing in it satisfies every type check and is useless to the MCP server "
-        "§7.1 keeps it for and to the client generator §13 names."
+        "§7.1 keeps it for and to `scripts/export_openapi.py`, which writes the frontend's wire "
+        "types' source (ADR 0185)."
     )
