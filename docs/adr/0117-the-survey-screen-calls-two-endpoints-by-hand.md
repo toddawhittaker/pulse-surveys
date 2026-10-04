@@ -1,6 +1,10 @@
 # 0117 — The survey screen calls its two endpoints by hand
 
-**Status:** Accepted
+**Status:** Accepted, **superseded in part by [0185](0185-the-frontend-wire-types-are-generated-from-openapi.md)**:
+the wire types are now generated from the OpenAPI schema and checked for
+staleness, so the rejection of a generator below and the first consequence
+("a transcription and nothing checks them") no longer hold. The calls are
+still written by hand and there is still no query cache.
 **Date:** 2026-09-02
 **Tickets:** E2-10
 

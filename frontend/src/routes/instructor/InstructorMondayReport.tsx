@@ -14,6 +14,7 @@ import {
 } from '../../api/instructor';
 import { CommentCard, type ReportComment } from '../../components/CommentCard';
 import { CommentGroup } from '../../components/CommentGroup';
+import { PulseDivider } from '../../components/PulseDivider';
 import { RatingHistogram, type RatingDistribution } from '../../components/RatingHistogram';
 import { ResponseRateBar } from '../../components/ResponseRateBar';
 import { StatPair } from '../../components/StatPair';
@@ -23,7 +24,7 @@ import type { TrendPoint } from '../../components/PulseTrendChart';
 import { WeekEyebrow } from '../../components/WeekEyebrow';
 import { WeekNav } from '../../components/WeekNav';
 import { copy, fillCopy } from '../../copy/instructorReportPageCopy';
-import '../../components/instructorReportPage.css';
+import './instructorReportPage.css';
 
 /**
  * SPEC §7.6's `InstructorMondayReport` — ticket E4-11.
@@ -504,29 +505,6 @@ function ReleasedFromEarlierWeeks({
   );
 }
 
-/** The short marigold pulse line the brief puts under a report title. */
-function PulseDivider(): JSX.Element {
-  return (
-    <svg
-      className="pulse-line pulse-line-divider"
-      width="120"
-      height="14"
-      viewBox="0 0 120 14"
-      aria-hidden="true"
-      fill="none"
-    >
-      <path
-        d="M1 10 H52 L60 3 L68 10 H106"
-        stroke="var(--marigold)"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="112" cy="10" r="3.5" fill="var(--marigold)" />
-    </svg>
-  );
-}
-
 /**
  * One stream's trend, in the shape the chart takes.
  *
@@ -572,7 +550,7 @@ function summaryOf(
   return {
     text: summary.text,
     responseCount: summary.response_count,
-    heldNote: summary.held_note,
+    heldNote: summary.held_note ?? null,
   };
 }
 

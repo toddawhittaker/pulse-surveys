@@ -39,10 +39,11 @@ import { router } from './router';
  * The entry point — SPEC §13's `main.tsx`.
  *
  * **There is still no generated client and no query cache.** E1 had nothing to
- * fetch and left the question to E2's first real screen; E2-10 answered it, and
- * ADR 0117 is the record: the weekly survey calls two endpoints by hand from
- * `api/student.ts`, and neither an OpenAPI generator nor TanStack Query is in
- * the closure. What is here is the fetch each screen makes for itself.
+ * fetch and left the question to E2's first real screen; E2-10 answered it in
+ * ADR 0117, and ADR 0185 superseded that in part: each screen's calls are
+ * written by hand in `api/`, and only their wire types are generated from the
+ * backend's OpenAPI document. TanStack Query is not in the closure. What is
+ * here is the fetch each screen makes for itself.
  *
  * The one thing that happens before the router mounts is capturing the session
  * an entry door handed over in the URL fragment (E1-08): it is lifted into

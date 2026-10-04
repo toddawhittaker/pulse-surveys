@@ -435,8 +435,9 @@ def test_the_answer_is_json_a_form_can_read(student_read_door: StudentReadDoor) 
     scan. This one says it once, plainly, and names what came back.
 
     **The mutation it kills:** an HTML surface where an API contract belongs.
-    E2-10's form is a React route (SPEC §13) fetching this path through the
-    generated client, and §7.6's OpenAPI contract is what generates it.
+    E2-10's form is a React route (SPEC §13) fetching this path through
+    `api/student.ts`, whose wire types are generated from §7.6's OpenAPI
+    contract (ADR 0185).
     """
     answered = student_read_door.get()
     assert answered.status_code == 200, (

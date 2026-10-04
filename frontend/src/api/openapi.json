@@ -1,0 +1,1948 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Pulse Surveys",
+    "summary": "Weekly course feedback, confidential by construction.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Liveness, with the configuration the process is running",
+        "description": "Report the service, its version, and the environment it was configured with.",
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/lti/jwks": {
+      "get": {
+        "tags": [
+          "lti"
+        ],
+        "summary": "This tool's public key set (RFC 7517)",
+        "description": "Publish the public half of the key this tool signs with, and nothing else.\n\nA platform verifies the `client_assertion` this tool presents at its token\nendpoint against the key set it fetches from here, so a tool that publishes\nnone can make no service call at any platform (E1-06 part 4).\n\n**Registered in every environment, deliberately.** `/docs` (ADR 0074), `/dev`\n(ADR 0079) and the demo seed (ADR 0063) are all gated on `ENVIRONMENT`, so a\nroute written beside them inherits that gate without anybody deciding to \u2014\nand a tool whose key set answers 404 in production cannot be registered at a\nreal platform at all. There is nothing here to gate: every value it serves is\npublic by construction, which is what a public key is for.\n\n**Never the private half.** `app.lti.registration` assembles the JWK from the\nmodulus and the public exponent rather than filtering members out of a\nserialised key pair, so a private member cannot appear through an omission.\n\nA plain `def`, so FastAPI runs it in a threadpool: the session is synchronous\n(ADR 0013) and reading it from the event loop would block every other request\non the process.",
+        "operationId": "jwks_lti_jwks_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Jwks Lti Jwks Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/lti/login": {
+      "post": {
+        "tags": [
+          "lti"
+        ],
+        "summary": "LTI 1.3 third-party-initiated login",
+        "description": "Answer a platform's login initiation with an authorization request.\n\n`pylti1p3`'s `OIDCLogin` (`app.lti.launch.begin_a_launch`) mints the `state`\nand `nonce` and remembers the mapping server-side (`app.lti.in_flight`); this\nhandler commits that write so the launch, a separate request, can read it. No\ncookie is set here at all \u2014 E0-18's signed login cookie is gone from this door\nand its state/nonce role is the server-side handshake store now (ADR 0089).",
+        "operationId": "login_lti_login_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/lti/launch": {
+      "post": {
+        "tags": [
+          "lti"
+        ],
+        "summary": "LTI 1.3 launch: verify the token and issue a session",
+        "description": "Verify what the platform posted back, issue a session, and hand it over.\n\nOn a valid launch the door issues the session `app.services.session` defines,\nsets the session and CSRF cookies, and returns a fragment redirect to the\nlanding route (`landing_with_session`) \u2014 the response contract E1-08 replaces\nE0-18's inline landing page with, and the one the web door joined in E1-09.\nWhich route that is comes from the launching person's own assignments and\nenrollment from E1-13 on, never from the launch's roles claim (ADR 0098); a\nverified launch by somebody nothing entitles to a view is answered with a calm\n200 page rather than refused.\n\nThe session is committed on both paths, and each commit persists a different\nthing. On success it persists the claimed nonce, which is what makes the\nlaunch single-use survive to the next request. On a refusal it persists the\nconsumed in-flight `state` (`verified_launch` deleted it, burn-after-use), so a\ncorrect `state` replayed after a refusal finds nothing and is refused too.\n\n**What a verified launch discovers is written before the landing is resolved**\n(E1-10, ADR 0091). `provision_from_launch` writes the launching subject's\n`user` row on every verified launch and, for a staff launch, the course and\nsection its context names \u2014 and it runs here rather than after the landing\nbecause a launch this door has nothing to *show* is still a launch that\nauthenticated somebody: a teaching assistant is refused a view and is no less\na person E1-12 has to be able to link. It never refuses a launch of its own\naccord; an unreadable context is written down and the person lands anyway.\n\n**Its work gets a commit of its own, after the launch's.** The two are\nindependent: the nonce claim and the consumed handshake are what make this\nlaunch single-use, and they must not be hostage to what provisioning found in\nthe context.\n\n**That commit is also what makes the identity resolvable** (E1-12).\n`landing_with_session` resolves `sub` \u2192 `user` \u2192 `person` through ADR 0094's\npoint functions and binds the result into the session, and the `user` row it\nreads is the one provisioning has just written \u2014 so the ordering here is a\ndependency now rather than only a preference about failure isolation.\n\n**And then the roster sync is asked for, after that commit** (E1-11, SPEC \u00a77.3:\nNRPS is \"pulled on schedule and on launch (debounced)\"). Which section \u2014 or\nnone \u2014 is provisioning's answer rather than this router's to work out, and\nwhether anything is enqueued at all is `request_section_sync`'s: it skips a\nsection that was called in the last five minutes, so a class of thirty opening\nthe tool at the top of the hour asks the platform for one roster rather than\nthirty. It runs after the commit because the worker that picks the job up reads\nits own connection and would otherwise find a section this request has not\nwritten yet.\n\n**And the participation column beside it** (E3-05, SPEC \u00a73.4: one line item per\nsection, \"created by the tool on first launch\"). It is the same shape and\ndeliberately the same one decision: both triggers ride\n`provision_from_launch`'s answer, so \u00a77.3's rule about *who* may cause them \u2014\nan instructor yes, a leadership role only inside their own purview, a student\nnever \u2014 is computed once and this router asks nothing of its own about roles.\n`request_line_item_creation` decides whether there is anything to ask for, and\nit answers no for a section with no gradebook address and for one whose column\nthis tool has already recorded.\n\n**Neither enqueue can fail this launch or delay it.** Both publish through\n`app.jobs.celery_app.publish_once` \u2014 one attempt, on a connection made for the\ncall with its retries off and its socket timeouts bounded \u2014 and both catch\nbroadly, because by this line the launch is verified, committed and owed a\nresponse (`docs/MISTAKES.md` entry 41).",
+        "operationId": "launch_lti_launch_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/oidc/login": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Start a web login against the identity provider",
+        "description": "Send the browser to the provider with a fresh state, nonce and challenge.\n\nAll three are per flow. A reused `state` is no cross-site request forgery\ndefence, a reused `nonce` makes every session a replay of the last, and a\nreused challenge means one verifier opens every code this tool ever gets \u2014\nand every one of the three validates perfectly inside any single flow, so\nnothing but freshness itself can catch a constant.\n\nSynchronous, and it touches nothing: no database, no network. FastAPI runs it\nin its threadpool, which is where the two blocking things it does not do\nwould have run.",
+        "operationId": "begin_web_login_auth_oidc_login_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/oidc/callback": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Finish a web login and issue a session",
+        "description": "Redeem the code, verify the session, and hand it over \u2014 or answer the refusal.\n\n`async def` for the reason `app.api.lti` gives at length: the exchange and\nthe key-set fetch are synchronous, and `run_in_threadpool` is what keeps them\noff the event loop.\n\n**The database session is E1-12's**, and it is the first this door has needed.\nA verified `id_token` identifies its holder by `(issuer, sub)` and nothing\nelse, and which person that pair is comes out of the `web_login_subject`\nlinkage \u2014 read by `landing_with_session` through ADR 0094's definer function.\nNothing on this path writes: the linkage is provisioned by the seed or by an\nadministrator, `pulse_app` holds no grant of any kind on the table, and a\nsubject with no row gets the calm no-account page rather than an account.\nNothing here commits, because there is nothing to commit.\n\n**`error` is read first, and a redirect carrying one goes no further.** RFC\n6749 \u00a74.1.2.1 says a provider sends `error` *or* `code`, never both, so a\ncallback carrying both is one nobody conformant sent \u2014 and a door that looked\nfor `code` first would find one, redeem it, and hand out a session for a login\nit had just been told had failed. Taking the branch first is what makes that\nimpossible rather than unlikely: on this path the token endpoint is not\nreached and no code is spent.\n\nThe cookie is cleared whichever way this goes \u2014 all three ways, now. A `state`\nis good once; the provider has already spent the code; and the branch a person\ncancelled on is exactly the one where an uncleared cookie leaves the PKCE\nverifier live in a browser that has finished with it.",
+        "operationId": "finish_web_login_auth_oidc_callback_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/student/survey": {
+      "get": {
+        "tags": [
+          "student"
+        ],
+        "summary": "This student's enrollments and the survey open for each",
+        "description": "Answer the form's whole question for whoever this session belongs to.\n\n**`Cache-Control: no-store`, set before the branch so both answers carry it.**\nWhat comes back is this student's own prior free-text comment, and a stored copy\nof it outlives the reason they were shown it: a browser back button after they\nhave revised the comment, or the next person on a shared machine after they have\nsigned out. The write sets the same header for the same reason, and E2-15 pinned\nboth so neither can go quiet.\n\n**The reader comes from the session and from nowhere else.**\n`require_student` verified the token and refused anybody who is not a student;\nthe `user` row it carries was resolved at the door out of the verified launch\n(E1-12), so no part of this request's own text reaches the query.\n\n**A session carrying no `user` row reads nothing rather than everything.** A\nstudent landing is reached through an enrollment (ADR 0028), so a `STUDENT`\nsession without one is a token from before that resolution existed; the honest\nanswer is that this reader is enrolled in nothing, and the dangerous one would\nbe a query with its scoping left empty. That answer still carries the\ndeployment's `institution_timezone` (FIX-01 item 4), because it is\nconfiguration rather than anything about the reader and the contract makes it\na member of every answer.\n\n**Synchronous, and FastAPI runs it in a threadpool.** The session is\nsynchronous (ADR 0013) and every statement here is a blocking read, so a\nhandler declared `async` would take them on the event loop and block every\nother request on the process.",
+        "operationId": "student_survey_student_survey_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentSurveyView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/student/submissions": {
+      "post": {
+        "tags": [
+          "student"
+        ],
+        "summary": "Submit this week's survey for one of my sections",
+        "description": "Store one student's answers to one section's open weekly survey.\n\nA plain `def` rather than `async def`, so FastAPI runs it in a threadpool: the\nsession is synchronous (ADR 0013) and the classifier is a real HTTP call with a\nfour-second budget, either of which would block every other request on the\nprocess if it were taken on the event loop.\n\n**The student is the session's, never the request's.** `response.user_id` is\nwritten from `SessionClaims.user_id`, which E1-12 sealed into the token at the\ndoor; a submission cannot name whose week it is, so there is nothing here for a\ncaller to file somebody else's participation under.\n\n**A session carrying no `user_id` is answered exactly as an unreachable section\nis.** That is the web door's session \u2014 it resolves a person and no LMS subject \u2014\nand \u00a72.1 gives a student the launch door alone, so such a session has no\nenrollment to check and no row to write. Answering it with the same 404 keeps\nthis route from reporting which door a session came through, which is the same\ndiscipline the enrollment check itself is written under.",
+        "operationId": "submit_weekly_survey_student_submissions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmissionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionAccepted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instructor/sections/{section_id}/report/{course_week}": {
+      "get": {
+        "tags": [
+          "instructor"
+        ],
+        "summary": "The Monday report for one of my sections and one course week",
+        "description": "Answer \u00a75.1's whole report for one section-week, for whoever this session is.\n\n**The reader comes from the session and from nowhere else.**\n`require_instructor` verified the token and refused anybody who is not an\ninstructor; the `person` row it carries was resolved at the door out of the\nverified launch (E1-12), and that is what the teaching grant is asked about. No\npart of this request's own text decides whose sections these are.\n\n**A section id that is not a uuid is refused before this runs**, by FastAPI's\nown parsing of the path parameter, which is a 422 about the shape of a request\nrather than an answer about a section. ADR 0016 makes every key a uuid, so a\nmalformed value is not a section id at all and never reaches the scope query.\n\n**Synchronous, and FastAPI runs it in a threadpool.** The session is\nsynchronous (ADR 0013) and every statement behind this is a blocking read, so a\nhandler declared `async` would take them on the event loop and block every other\nrequest on the process.",
+        "operationId": "read_report_instructor_sections__section_id__report__course_week__get",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          },
+          {
+            "name": "course_week",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Course Week"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructorReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instructor/sections/{section_id}/published-weeks": {
+      "get": {
+        "tags": [
+          "instructor"
+        ],
+        "summary": "The course weeks of my section a report may be read for",
+        "description": "The closed course weeks of one of this session's own sections.\n\n**Behind the same scope as the report, because scope is a property of the\nsession and the section rather than of one endpoint.** A route that listed any\nsection's weeks to anybody who asked would give away the shape of a term's\ncalendar for a section the reader has no relationship with, from the endpoint\nnobody thinks of as the report.",
+        "operationId": "read_published_weeks_instructor_sections__section_id__published_weeks_get",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishedWeeks"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instructor/sections": {
+      "get": {
+        "tags": [
+          "instructor"
+        ],
+        "summary": "The sections I teach, and may read a report for",
+        "description": "The sections this session's person teaches \u2014 the menu the other two routes need.\n\n**Why it exists.** Both routes above take a section key in the path and nothing\na client holds supplies one: the launch redirect carries the role and the\nsession, and the session claims carry keys and never sections. This answers that\nquestion the way the student surface answers its own \u2014 a parameterless read of\nthe reader's own scope (ADR 0156).\n\n**The reader comes from the session and from nowhere else**, exactly as above,\nand there is nothing else in this request at all: no path parameter, no query\nstring, nothing a caller could substitute for whose sections these are.\n\n**No refusal pair, because there is nothing here to refuse.** A person who\nteaches nothing and a session naming nobody are both answered 200 with an empty\nlist \u2014 see the module docstring.\n\n**Synchronous, and FastAPI runs it in a threadpool**, for the reason\n`read_report` above gives: every statement behind this is a blocking read on a\nsynchronous session (ADR 0013).",
+        "operationId": "read_taught_sections_instructor_sections_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaughtSections"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/comparison-sets": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "Every comparison set this institution has defined",
+        "description": "The institution's sets, in name order, each marked editable or not.\n\n**Institution-wide rather than this session's own** (ADR 0173). The reader\nstill comes from the session and from nowhere else: `editable` is decided\nagainst the `person` row this session was resolved to at the door, so no part\nof this request's own text decides which sets it may change.\n\n**Synchronous, and FastAPI runs it in a threadpool**, for the reason\n`app.api.instructor` gives: the session is synchronous (ADR 0013) and every\nstatement behind this blocks, so an `async` handler would take them on the\nevent loop.",
+        "operationId": "read_sets_leadership_comparison_sets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "Define a comparison set",
+        "description": "Define a set for whoever this session is, or translate what the database refused.\n\n**The definer comes from the session and never from the body**, and it is\nwhat every later edit and delete of this set is scoped by.",
+        "operationId": "define_set_leadership_comparison_sets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/comparison-sets/options": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "The lengths, levels and courses a set may be defined out of",
+        "description": "The closed choices the definition form offers. Declared before `{set_id}`.\n\nIt takes no parameter, so there is nothing in the request to refuse and no\nrefusal here beyond the role gate. The courses it lists are every course this\ninstitution runs, because the form is where a new cohort is built.",
+        "operationId": "read_options_leadership_comparison_sets_options_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetOptions"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/comparison-sets/{set_id}": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "One comparison set, whoever defined it",
+        "description": "One set and its membership.\n\n**A set id that is not a uuid is refused before this runs**, by FastAPI's own\nparsing of the path parameter \u2014 which is an answer about the shape of a\nrequest rather than about a set. ADR 0016 makes every key a uuid, so a\nmalformed value is not a set id at all and never reaches the lookup.",
+        "operationId": "read_one_set_leadership_comparison_sets__set_id__get",
+        "parameters": [
+          {
+            "name": "set_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Set Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "Replace the definition of a set I defined",
+        "description": "Replace a set's whole definition, for the leader who defined it.\n\nThe three refusals in order: an id nothing defined is a 404, another leader's\nset is a 403, and a definition the database will not store is one of the five\ntranslated sentences.",
+        "operationId": "replace_set_leadership_comparison_sets__set_id__put",
+        "parameters": [
+          {
+            "name": "set_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Set Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "Delete a set I defined",
+        "description": "Delete a set, taking its membership rows and nothing else (ADR 0164).\n\n204 and no body, because there is nothing left to describe. A course named by\nthe set is untouched and stays undeletable while any set names it, which is\nthe opposite direction of the same rule.",
+        "operationId": "remove_set_leadership_comparison_sets__set_id__delete",
+        "parameters": [
+          {
+            "name": "set_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Set Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/comparison-sets/{set_id}/preview": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "How many courses and sections a set reaches",
+        "description": "Two counts and nothing else \u2014 see the module docstring on what that costs and why.\n\nAnswered for every set, not only for this session's own: a count is what\nmakes an institution-wide list usable, and it says nothing about anybody.",
+        "operationId": "read_preview_leadership_comparison_sets__set_id__preview_get",
+        "parameters": [
+          {
+            "name": "set_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Set Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetPreview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dev": {
+      "get": {
+        "tags": [
+          "dev"
+        ],
+        "summary": "Development-only test console for both entry doors",
+        "description": "Render the console, or `404` outside development.\n\nThe gate is the whole safety of the feature (see the module docstring), and it\nis checked here so production is indistinguishable from a route that was never\nregistered. Synchronous, and the blocking things it does \u2014 the roster fetch\nover the network, and two reads for the sections table \u2014 run in FastAPI's\nthreadpool the way `app.api.auth.begin_web_login` does.\n\n**The session is taken before the gate rather than after**, because\n`Depends` resolves before the handler body runs either way. It costs a\nconnection from the pool on a request a deployment answers `404` to, which is\nthe same cost every other routed dependency has and is why the gate stays in\nthe handler (ADR 0079) rather than moving anywhere clever.",
+        "operationId": "dev_console_dev_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BenchmarkSeries": {
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/BenchmarkSeriesPoint"
+            },
+            "type": "array",
+            "title": "Points"
+          }
+        },
+        "type": "object",
+        "required": [
+          "points"
+        ],
+        "title": "BenchmarkSeries",
+        "description": "One comparison line: the weeks it covers, each carrying its own sealed figure.\n\nOne model answers for both populations, so a rule cannot land on the\ncomparison-set line and miss the university one."
+      },
+      "BenchmarkSeriesPoint": {
+        "properties": {
+          "course_week": {
+            "type": "integer",
+            "title": "Course Week"
+          },
+          "mean": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          }
+        },
+        "type": "object",
+        "required": [
+          "course_week",
+          "mean"
+        ],
+        "title": "BenchmarkSeriesPoint",
+        "description": "One course week of one comparison line, and the sealed mean for that week.\n\n**A suppressed week is a point, not an absence.** E5-04 decides suppression\nweek by week from that week's own contributors, so a week below either\nminimum arrives here with a suppressed figure in `mean` rather than being\nleft out of the series: a gap in a chart invites the reader to conclude that\nnothing happened that week, and the notice \u00a74.1 item 5 governs says something\nelse entirely.\n\nNothing else sits on a point. A count of sections or of respondents beside\nthe week would hand back the inference the minimum exists to prevent, whether\nor not the figure beside it is shown."
+      },
+      "CommentView": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "stream": {
+            "type": "string",
+            "title": "Stream"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "status",
+          "stream"
+        ],
+        "title": "CommentView",
+        "description": "One comment, with exactly the three fields the comment service answers with.\n\nNo week, no timestamp, no author, no index, at any depth. SPEC \u00a74 and ADR 0153\nare the argument, and\n`tests/integration/test_the_report_payload_repeats_nothing_beyond_the_comment_service.py`\nis what holds this shape to it."
+      },
+      "ComparisonFigure": {
+        "properties": {
+          "suppressed": {
+            "type": "boolean",
+            "title": "Suppressed"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "figure": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Figure"
+          }
+        },
+        "type": "object",
+        "required": [
+          "suppressed"
+        ],
+        "title": "ComparisonFigure",
+        "description": "One \u00a75.1 comparison figure, or the statement that it is suppressed.\n\nSPEC \u00a74.1 item 7: \"No figure computed from a comparison set is shown below the\nbenchmark minimum \u2014 a mean, a median, or any other statistic, not only a drawn\nline.\" This type is where that rule is enforced for the whole product, because\nit is the only type the report schema's `comparison` member accepts.\n\n**`figure` is `None` whenever `suppressed` is true, and the helper is what\nguarantees it.** A value carrying both would be a suppressed figure on the\nwire, which is the exact thing item 7 forbids.\n\n**The guarantee is about the value on the wire, not about how it was built,\nand it took three rounds of review to get there.** Each round found the\nprevious guard defeated one level out, which is `docs/MISTAKES.md` entry 22 in\nthree instalments:\n\n  - the token in `__init__` was walked past by `model_construct` and by\n    `model_copy(update=...)`, which build a *figure* without calling it;\n  - the field validator that replaced it was walked past by the same two\n    methods used one level up, which build a *report* that no validator sees;\n  - so `app.schemas.report.InstructorReport` carries\n    `revalidate_instances=\"always\"` and the response re-reads whatever object\n    the route hands it.\n\nWhat is checked there is **the seal**, and it is checked on the value rather\nthan on its history: a figure on the wire has to carry a seal matching its own\nfields, which only `comparison_after_suppression` can produce. A value that is\nsuppressed and carries no figure needs no seal, because it shows nothing \u2014 see\n`refuse_an_unsealed_comparison`, which is where that line is drawn and why.\n\n\u00a74.1 item 7 is a rule about what is *shown*, so the boundary that has to hold\nit is the one the payload crosses. A guard standing only in `__init__` is\nwalked past by every entry point that does not call `__init__`, and pydantic\nhas several.\n\n**Every figure the report shows is built here, through the one helper**, and\nsince E5-05 there are several of them: the two comparison lines per panel, the\nreported week's workload mean and median against each population, and the\ntop-level `comparison` member. `app.services.benchmarks` is the only caller\nthat resolves a population, and it reaches this type through\n`comparison_after_suppression` like everything else."
+      },
+      "CourseOption": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "level": {
+            "type": "string",
+            "title": "Level"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "level"
+        ],
+        "title": "CourseOption",
+        "description": "One course a set may name, as the definition form offers it.\n\nThe level is carried beside the label so the form can offer only the courses\na chosen level admits \u2014 the cross-level refusal exists for the API caller who\nis not using the form, and a form that let the choice be made would be\noffering a set the database will refuse at the moment of saving."
+      },
+      "EnrolledSection": {
+        "properties": {
+          "section_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Section Id",
+            "description": "The section row."
+          },
+          "section_code": {
+            "type": "string",
+            "title": "Section Code",
+            "description": "The section code a person reads (SPEC \u00a72.2)."
+          },
+          "course_label": {
+            "type": "string",
+            "title": "Course Label",
+            "description": "The reader's own course as a person names it: prefix, number, the section code, title and term name."
+          },
+          "survey_is_open": {
+            "type": "boolean",
+            "title": "Survey Is Open",
+            "description": "Whether a survey is open for this section at this moment."
+          },
+          "next_window_opens_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Window Opens At",
+            "description": "When this section's next survey opens, or null while one is open and when nothing is ahead."
+          },
+          "open_survey": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpenSurvey"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The open survey, or null when none is open."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "section_id",
+          "section_code",
+          "course_label",
+          "survey_is_open",
+          "next_window_opens_at",
+          "open_survey"
+        ],
+        "title": "EnrolledSection",
+        "description": "One section this reader is enrolled in today, and its survey state.\n\n**`course_label` is the reader's own enrollment metadata and nobody else's**\n(E2-17 item 5, respelled by FIX-01 item 2). It is composed from the section's\nown row, the course row above it, the prefix row above that course and the\nterm the section belongs to \u2014 every one of them reached by following the\nsection's own foreign keys upward, so the only course any answer can name is\none the reader is enrolled in. \u00a74.1 item 1 is what that has to hold against,\nand\n`tests/integration/test_the_course_label_names_nothing_outside_the_students_enrollment.py`\nis where it is measured, inside the isolated invariant pass.\n\n**`next_window_opens_at` is this section's own next window and no other's**\n(FIX-01 item 4). It is the opening instant of the first materialized\n`survey_window` for *this* section that has not opened yet, and it is null\nboth while a survey is open and when nothing is ahead. The same scoping\nargument covers it: a \"when does the next one open\" lookup that stopped\nnaming the section would put another section's calendar on this page."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service",
+            "description": "Service name, constant for this application."
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Version of the running build."
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment",
+            "description": "Configured deployment name (`ENVIRONMENT`)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "version",
+          "environment"
+        ],
+        "title": "HealthResponse",
+        "description": "What a healthy API answers with.\n\nRead by humans, by the Compose health checks (E0-02), and by whatever\nwatches the deployment, so the three fields are a stable contract rather\nthan a debugging convenience."
+      },
+      "InstructorReport": {
+        "properties": {
+          "section": {
+            "$ref": "#/components/schemas/SectionView"
+          },
+          "week": {
+            "$ref": "#/components/schemas/WeekView"
+          },
+          "rates": {
+            "$ref": "#/components/schemas/RatesView"
+          },
+          "streams": {
+            "$ref": "#/components/schemas/StreamsView"
+          },
+          "workload": {
+            "$ref": "#/components/schemas/WorkloadView"
+          },
+          "workload_benchmark": {
+            "$ref": "#/components/schemas/WorkloadBenchmarkView"
+          },
+          "comparison": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          },
+          "released_from_earlier_weeks": {
+            "items": {
+              "$ref": "#/components/schemas/CommentView"
+            },
+            "type": "array",
+            "title": "Released From Earlier Weeks"
+          },
+          "institution_timezone": {
+            "type": "string",
+            "title": "Institution Timezone"
+          }
+        },
+        "type": "object",
+        "required": [
+          "section",
+          "week",
+          "rates",
+          "streams",
+          "workload",
+          "workload_benchmark",
+          "comparison",
+          "released_from_earlier_weeks",
+          "institution_timezone"
+        ],
+        "title": "InstructorReport",
+        "description": "One instructor's Monday report, for one of her own sections and one course week."
+      },
+      "OpenSurvey": {
+        "properties": {
+          "window_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Window Id",
+            "description": "The survey window this answers over."
+          },
+          "course_week": {
+            "type": "integer",
+            "title": "Course Week",
+            "description": "Which week of this section's own run the window covers, counting from 1."
+          },
+          "length_weeks": {
+            "type": "integer",
+            "title": "Length Weeks",
+            "description": "How many weeks this section's own run lasts in total (SPEC \u00a72.2)."
+          },
+          "term_week": {
+            "type": "integer",
+            "title": "Term Week",
+            "description": "Which week of the term the same window covers."
+          },
+          "opens_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Opens At",
+            "description": "When the window opened."
+          },
+          "closes_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Closes At",
+            "description": "When it closes."
+          },
+          "question_set_version": {
+            "type": "integer",
+            "title": "Question Set Version",
+            "description": "Version of the question set being served."
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/SurveyQuestion"
+            },
+            "type": "array",
+            "title": "Questions",
+            "description": "The questions, in position order."
+          },
+          "submission": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OwnSubmission"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What this reader has already submitted for this week, or null."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "window_id",
+          "course_week",
+          "length_weeks",
+          "term_week",
+          "opens_at",
+          "closes_at",
+          "question_set_version",
+          "questions",
+          "submission"
+        ],
+        "title": "OpenSurvey",
+        "description": "The one survey open for a section right now (SPEC \u00a73.1's one-open rule).\n\nPresent only while the window is open. \u00a73.1 says a missed week cannot be\nback-filled, so a closed week is not something the form can answer and is not\noffered as one; the section it belonged to is still reported, which is how a\nstudent is told they are enrolled and there is nothing to do this minute.\n\n**`length_weeks` is the reader's own section's length and nobody else's**\n(E4-17). It is the `length_weeks` column of the section the window belongs\nto, reached through the section the reader is enrolled in \u2014 the same scoping\nargument `EnrolledSection.course_label` stands on, and \u00a74.1 item 1 is what it\nhas to hold against. It names no other section, carries no identity, and\ndiscloses nothing new: SPEC \u00a72.2 puts the length in the section code the\nstudent is already shown. It is a number about a calendar rather than about a\nperson, so no confidentiality rule in \u00a74 reaches it.\n\nIt is a plain integer because the column is `NOT NULL` on the section row. An\noptional one would let a read path that found no length answer a half-eyebrow\n\u2014 \"COURSE WK 04 / , TERM WK 07\" \u2014 instead of failing where the data is wrong."
+      },
+      "OwnSubmission": {
+        "properties": {
+          "first_submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Submitted At",
+            "description": "When this week was first answered."
+          },
+          "last_submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Submitted At",
+            "description": "When it was last revised."
+          },
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/SubmittedAnswer-Output"
+            },
+            "type": "array",
+            "title": "Answers",
+            "description": "The answers, in question order."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "first_submitted_at",
+          "last_submitted_at",
+          "answers"
+        ],
+        "title": "OwnSubmission",
+        "description": "What this reader has already submitted for this week, if anything.\n\nTheir own and only ever their own. SPEC \u00a75.4 gives a student their own section\nand never another individual's raw data, and \u00a74 keys every response to its\nauthor; the lookup behind this is over the reader, the section and the week\ntogether, and the denial suite is what proves the reader is in that key."
+      },
+      "PublishedWeeks": {
+        "properties": {
+          "published_weeks": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Published Weeks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "published_weeks"
+        ],
+        "title": "PublishedWeeks",
+        "description": "What the week-navigation route answers with: the course weeks a reader may page to.\n\nAn object with one member rather than a bare array, so that a later addition \u2014\nwhich week is current, say \u2014 is a member beside this one rather than a change\nof the response's own type. It carries the same list `InstructorReport.week`\ndoes and is derived by the same function, because two derivations of \"which\nweeks may I read\" is a reader paging to a week the report will not serve."
+      },
+      "QuestionKind": {
+        "type": "string",
+        "enum": [
+          "likert",
+          "comment",
+          "workload"
+        ],
+        "title": "QuestionKind",
+        "description": "Which of \u00a73.2's three answer shapes a question has.\n\nThree, and the section is where each comes from: two Likert ratings, two free\ntext comments, and the workload slider. The kind is what tells E2-10 which\ncontrol to render and E2-08 which of `answer`'s three value columns a\nsubmission may fill, so a question of the wrong kind is a question that\ncannot be answered.\n\n`workload` is its own member rather than a second numeric alongside `likert`\nbecause the two differ in everything except being numbers: one is a five\npoint agreement scale that \u00a75.1 plots as a distribution, the other is hours\n\"stored as a decimal so reporting can show true means and medians rather than\nband midpoints\".\n\n**The member values are the labels in the database**, so the type is declared\nwith `values_callable` below rather than storing the member names \u2014 the two\nspellings would otherwise differ by case alone, which is the kind of\ndifference nobody notices until a query returns nothing. That is the reasoning\n`LaunchDefectKind` in `app.models.lti` gives for the same choice."
+      },
+      "RatesView": {
+        "properties": {
+          "response_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Rate"
+          },
+          "validity_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validity Rate"
+          },
+          "responses": {
+            "type": "integer",
+            "title": "Responses"
+          },
+          "enrolled": {
+            "type": "integer",
+            "title": "Enrolled"
+          },
+          "valid_responses": {
+            "type": "integer",
+            "title": "Valid Responses"
+          }
+        },
+        "type": "object",
+        "required": [
+          "response_rate",
+          "validity_rate",
+          "responses",
+          "enrolled",
+          "valid_responses"
+        ],
+        "title": "RatesView",
+        "description": "SPEC \u00a75.1's two rates and the counts they are ratios of.\n\nADR 0147 keeps every division out of SQL and here instead, so that the rule\nfor a zero denominator is written in one reviewable place. `response_rate` and\n`validity_rate` are `None` where that rule leaves them undefined."
+      },
+      "SectionView": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "The LMS section code, e.g. 'F1WW' (SPEC \u00a72.2)."
+          },
+          "course_label": {
+            "type": "string",
+            "title": "Course Label",
+            "description": "'MATH 140 E1FF \u2014 College Algebra, Fall 2026'."
+          },
+          "length_weeks": {
+            "type": "integer",
+            "title": "Length Weeks",
+            "description": "How many weeks this section runs (SPEC \u00a72.2)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "course_label",
+          "length_weeks"
+        ],
+        "title": "SectionView",
+        "description": "Which section this report is about, in the words its instructor knows it by."
+      },
+      "SetDetail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "length_weeks": {
+            "type": "integer",
+            "title": "Length Weeks"
+          },
+          "level": {
+            "type": "string",
+            "title": "Level"
+          },
+          "member_count": {
+            "type": "integer",
+            "title": "Member Count"
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable"
+          },
+          "member_course_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Member Course Ids"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "length_weeks",
+          "level",
+          "member_count",
+          "editable",
+          "member_course_ids",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SetDetail",
+        "description": "One set on its own: the summary, its membership, and when it was written.\n\nThe two instants are the whole record that a set was created and edited (ADR\n0174): this ticket writes no `audit_log` row, and these columns are what is\nrecorded instead."
+      },
+      "SetList": {
+        "properties": {
+          "sets": {
+            "items": {
+              "$ref": "#/components/schemas/SetSummary"
+            },
+            "type": "array",
+            "title": "Sets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sets"
+        ],
+        "title": "SetList",
+        "description": "Every set in the institution, in name order."
+      },
+      "SetOptions": {
+        "properties": {
+          "lengths": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Lengths"
+          },
+          "levels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Levels"
+          },
+          "courses": {
+            "items": {
+              "$ref": "#/components/schemas/CourseOption"
+            },
+            "type": "array",
+            "title": "Courses"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lengths",
+          "levels",
+          "courses"
+        ],
+        "title": "SetOptions",
+        "description": "The closed choices a set is defined out of: the lengths, the levels, the courses."
+      },
+      "SetPreview": {
+        "properties": {
+          "member_count": {
+            "type": "integer",
+            "title": "Member Count"
+          },
+          "section_count": {
+            "type": "integer",
+            "title": "Section Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "member_count",
+          "section_count"
+        ],
+        "title": "SetPreview",
+        "description": "What a set reaches, as two counts and nothing else. See the module docstring."
+      },
+      "SetSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "length_weeks": {
+            "type": "integer",
+            "title": "Length Weeks"
+          },
+          "level": {
+            "type": "string",
+            "title": "Level"
+          },
+          "member_count": {
+            "type": "integer",
+            "title": "Member Count"
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "length_weeks",
+          "level",
+          "member_count",
+          "editable"
+        ],
+        "title": "SetSummary",
+        "description": "One set as it appears in the institution-wide list.\n\n`member_count` is the number of member courses, not of resolved sections \u2014\nthe preview answers that, and the two are different numbers for every set\nwhose courses run more than one section."
+      },
+      "SetWrite": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name"
+          },
+          "length_weeks": {
+            "type": "integer",
+            "title": "Length Weeks"
+          },
+          "level": {
+            "type": "string",
+            "title": "Level"
+          },
+          "member_course_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Member Course Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "length_weeks",
+          "level",
+          "member_course_ids"
+        ],
+        "title": "SetWrite",
+        "description": "What a client sends to create or edit a comparison set.\n\nThe same body on `POST` and on `PUT`, because an edit replaces a set's whole\ndefinition \u2014 its name, its declared pair, and its membership \u2014 rather than\npatching part of one. A partial edit would make \"what is this set\" a question\nabout which fields arrived.\n\n`length_weeks` and `level` are deliberately unconstrained here. See the module\ndocstring: the database holds both rules and this route translates what it\nrefuses.\n\n**The name's surrounding spaces are stripped, and a name empty after that\nis refused here** (E5-14), so \" Nursing\" and \"Nursing\" are one name to the\nunique constraint, and a name of only spaces is answered with the framework's\nstandard 422 before any statement runs. That is the one rule this model\nholds itself, and it is the ruling's choice over a new refusal sentence: the\ntable's `name_is_not_blank` check stays underneath it for every other writer,\nbut the translator names no sentence for it, so a blank name reaching the\ntable from this route would be a 500."
+      },
+      "SmallNView": {
+        "properties": {
+          "suppressed": {
+            "type": "boolean",
+            "title": "Suppressed"
+          },
+          "threshold": {
+            "type": "integer",
+            "title": "Threshold"
+          }
+        },
+        "type": "object",
+        "required": [
+          "suppressed",
+          "threshold"
+        ],
+        "title": "SmallNView",
+        "description": "Whether one stream is under SPEC \u00a74's n-threshold this week, and what that threshold is.\n\nBoth, because E4-10 renders the reason as well as the state: a stream showing no\nraw comments has to say why, and the number is the institution's configured\none rather than a constant the frontend carries. **No count of anybody**: the\nthreshold is configuration, and a commenter count on a suppressed stream would\nbe the number the threshold is hiding (\u00a75.2)."
+      },
+      "StreamBenchmark": {
+        "properties": {
+          "comparison": {
+            "$ref": "#/components/schemas/BenchmarkSeries"
+          },
+          "university": {
+            "$ref": "#/components/schemas/BenchmarkSeries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "comparison",
+          "university"
+        ],
+        "title": "StreamBenchmark",
+        "description": "The second and third of SPEC \u00a75.1's three lines, for one of the two panels.\n\nThe first line is the section's own, which is `StreamReport.trend`; these two\nare what it is read against. Both populations are served for both panels,\nbecause \u00a75.1's stacked pair carries three lines each."
+      },
+      "StreamReport": {
+        "properties": {
+          "trend": {
+            "items": {
+              "$ref": "#/components/schemas/TrendPoint"
+            },
+            "type": "array",
+            "title": "Trend"
+          },
+          "distribution": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Distribution"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SummaryView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/CommentView"
+            },
+            "type": "array",
+            "title": "Comments"
+          },
+          "question_text": {
+            "type": "string",
+            "title": "Question Text"
+          },
+          "benchmark": {
+            "$ref": "#/components/schemas/StreamBenchmark"
+          },
+          "small_n": {
+            "$ref": "#/components/schemas/SmallNView"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trend",
+          "distribution",
+          "summary",
+          "comments",
+          "question_text",
+          "benchmark",
+          "small_n"
+        ],
+        "title": "StreamReport",
+        "description": "One of SPEC \u00a75.1's two comment groups: its numbers, its summary and its words."
+      },
+      "StreamsView": {
+        "properties": {
+          "instructor": {
+            "$ref": "#/components/schemas/StreamReport"
+          },
+          "course": {
+            "$ref": "#/components/schemas/StreamReport"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instructor",
+          "course"
+        ],
+        "title": "StreamsView",
+        "description": "The two groups \u00a75.1 heads separately, never pooled into one."
+      },
+      "StudentSurveyView": {
+        "properties": {
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/EnrolledSection"
+            },
+            "type": "array",
+            "title": "Sections",
+            "description": "The reader's live enrollments, in section-code order."
+          },
+          "institution_timezone": {
+            "type": "string",
+            "title": "Institution Timezone",
+            "description": "The IANA zone this deployment's survey windows are written in (SPEC \u00a78)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sections",
+          "institution_timezone"
+        ],
+        "title": "StudentSurveyView",
+        "description": "Everything a student's weekly survey form needs, in one answer.\n\nA list rather than a single section, because a student may be enrolled in\nseveral and the form asks about all of them at once. An empty list is an\nordinary answer: somebody between terms is enrolled in nothing today and is\ntold so, rather than refused.\n\n**`institution_timezone` is deployment configuration, not person data**\n(FIX-01 item 4). SPEC \u00a73.1 puts every window at a wall-clock time in the\ninstitution's zone, and the screen renders the next opening with an\nabbreviation derived from the date; a browser handed an instant and no zone\nrenders it in the reader's own, so a student travelling \u2014 or one whose\nlaptop is set to UTC \u2014 would be told an hour nobody's institution keeps. It\nis the same string for every reader of the deployment and says nothing about\nany of them."
+      },
+      "SubmissionAccepted": {
+        "properties": {
+          "response_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Response Id"
+          },
+          "is_valid": {
+            "type": "boolean",
+            "title": "Is Valid"
+          },
+          "first_submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Submitted At"
+          },
+          "last_submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Submitted At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "response_id",
+          "is_valid",
+          "first_submitted_at",
+          "last_submitted_at"
+        ],
+        "title": "SubmissionAccepted",
+        "description": "What a stored submission answers with: the student's own row, and nothing else.\n\n`is_valid` is this submission's own \u00a73.3 verdict, which the student is entitled\nto \u2014 the section's validity *rate* is an instructor and leadership surface\n(\u00a73.3, \u00a74.1 item 1) and is no part of this answer."
+      },
+      "SubmissionRequest": {
+        "properties": {
+          "section_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Section Id"
+          },
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/SubmittedAnswer-Input"
+            },
+            "type": "array",
+            "title": "Answers"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "section_id",
+          "answers"
+        ],
+        "title": "SubmissionRequest",
+        "description": "One student's answers to one section's open weekly survey.\n\nThe week is deliberately absent: SPEC \u00a73.1 gives a section exactly one open\nsurvey at a time, so the week a submission belongs to is a fact the server\nresolves from the open window rather than a value a caller may choose. A\nrequest that could name its own week could name a week that has closed."
+      },
+      "SubmittedAnswer-Input": {
+        "properties": {
+          "position": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Position"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "comment_text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment Text"
+          },
+          "workload_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workload Hours"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "position"
+        ],
+        "title": "SubmittedAnswer",
+        "description": "One question of one submission, answered.\n\nExactly one of the three value fields is expected to be filled, and that this\nis so is checked in the service beside the rest of the rules rather than here:\nthe refusal a student sees for it is one of `app.copy`'s sentences, and a\nPydantic validator's own message is not.\n\n**The one bound that does live here is the comment's length**, and the reason\nis the opposite of the one above: it is worth refusing before anything reads\nthe body rather than in a service the request has already paid to reach. See\n`COMMENT_MAXIMUM_LENGTH`."
+      },
+      "SubmittedAnswer-Output": {
+        "properties": {
+          "question_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Question Id",
+            "description": "The question this answers."
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating",
+            "description": "A Likert answer, 1-5."
+          },
+          "comment_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment Text",
+            "description": "A free-text answer."
+          },
+          "workload_hours": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workload Hours",
+            "description": "An hours-per-week answer."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "question_id",
+          "rating",
+          "comment_text",
+          "workload_hours"
+        ],
+        "title": "SubmittedAnswer",
+        "description": "One answer this reader already gave, in whichever of the three it holds.\n\nAll three value columns travel, and the reason is a defect this shape makes\nimpossible rather than a convenience: a read that returned the comment and not\nthe workload figure renders a resubmit form with a field silently blanked, and\nthe student's stored hours are then overwritten by the empty box."
+      },
+      "SummaryView": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "response_count": {
+            "type": "integer",
+            "title": "Response Count"
+          },
+          "held_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "response_count"
+        ],
+        "title": "SummaryView",
+        "description": "\u00a75.1's generated summary for one stream of one week, as E4-06 stored it.\n\nThe member is absent \u2014 `None` on the stream, not an empty string \u2014 for a week\nthe summary job has not run over, which is the ordinary state of a report read\nbefore Monday morning."
+      },
+      "SurveyQuestion": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id",
+            "description": "The question row, which an answer is keyed to."
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position",
+            "description": "Ordinal within the set, 1-based, ascending."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/QuestionKind",
+            "description": "What sort of answer this question takes."
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "The stable machine name of the question."
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt",
+            "description": "The wording a person reads."
+          },
+          "required_if_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required If Position",
+            "description": "Position of the question whose answer can make this one required."
+          },
+          "required_if_at_most": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required If At Most",
+            "description": "This question is required when that answer is at most this value."
+          },
+          "minimum_value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Value",
+            "description": "Lowest value this question accepts."
+          },
+          "maximum_value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum Value",
+            "description": "Highest value this question accepts."
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step",
+            "description": "The increment values must fall on."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "position",
+          "kind",
+          "name",
+          "prompt",
+          "required_if_position",
+          "required_if_at_most",
+          "minimum_value",
+          "maximum_value",
+          "step"
+        ],
+        "title": "SurveyQuestion",
+        "description": "One question of the set, as the form has to render it (SPEC \u00a73.2).\n\nThe conditional rule and the numeric bounds travel with the question rather\nthan being restated in the form: \u00a73.2 makes the instructor comment required\nwhen the instructor rating is 2 or less, and the workload figure a number in a\nrange with a step, and a form that carried its own copy of either would\ndisagree with the validity check the moment a set is versioned."
+      },
+      "TaughtSection": {
+        "properties": {
+          "section_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Section Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "course_label": {
+            "type": "string",
+            "title": "Course Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "section_id",
+          "code",
+          "course_label"
+        ],
+        "title": "TaughtSection",
+        "description": "One of the sections this session's person teaches, as her page lists it (E4-18).\n\nThree members and no fourth. The key is what every report route is asked with,\nthe code is what a reader knows the class by, and the label is the same\ngoverned form `SectionView` above carries \u2014 composed by the one function in\n`app.services.reporting` that composes it, so a section cannot be named one way\nin the list and another way in the report the list opens.\n\nNothing here says anything about the section beyond its name: no roster size,\nno rates, no week. This is a menu, and a figure on it would be a figure with no\n\u00a74 suppression rule applied to it."
+      },
+      "TaughtSections": {
+        "properties": {
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/TaughtSection"
+            },
+            "type": "array",
+            "title": "Sections"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sections"
+        ],
+        "title": "TaughtSections",
+        "description": "What the section-list route answers: the sections this reader may ask about.\n\nAn object with one member rather than a bare array, for the reason\n`PublishedWeeks` above gives \u2014 a later addition is a member beside this one\nrather than a change of the response's own type.\n\nThe list is empty for a person who teaches nothing and for a session that names\nnobody, and both are ordinary states rather than refusals: this route takes no\nparameter, so there is nothing in the request to refuse."
+      },
+      "TrendPoint": {
+        "properties": {
+          "course_week": {
+            "type": "integer",
+            "title": "Course Week"
+          },
+          "term_week": {
+            "type": "integer",
+            "title": "Term Week"
+          },
+          "mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean"
+          }
+        },
+        "type": "object",
+        "required": [
+          "course_week",
+          "term_week",
+          "mean"
+        ],
+        "title": "TrendPoint",
+        "description": "One week of one stream's trend line.\n\n`mean` is `None` for a week nobody rated. Zero is a rating nobody can give \u2014\nSPEC \u00a73.2's scale runs 1 to 5 \u2014 so a zero here would draw a line to the floor\nof the chart for a week that has no line at all (ADR 0147's zero-filling: a\nstored zero and a missing week never arrive looking the same).\n\n`term_week` is the term week of the window row this point was built from \u2014\n\u00a72.2's second axis, stated here rather than left for the client to derive\n(breakdown decision 12, ADR 0157). Today the gap between the two axes is a\nper-section constant (`_section_weeks`' `first_term_week`), so a client\ncould compute this member from the report week's own `course_week` /\n`term_week` pair. It is on the wire anyway because `week_of_the_term` is\nthis codebase's one reading of the axis mapping (\u00a72.2), and a client that\nderived the pair would freeze today's arithmetic into a second copy of\nthat reading \u2014 one that would disagree silently the day the mapping\nstops being affine, which is exactly the section-pausing-over-a-break\ncase E4-08's copy file anticipates. Stating the number here widens\nnothing: it is what every reader of this payload could already compute\nfrom `week` alone."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "WeekView": {
+        "properties": {
+          "course_week": {
+            "type": "integer",
+            "title": "Course Week"
+          },
+          "term_week": {
+            "type": "integer",
+            "title": "Term Week"
+          },
+          "published_weeks": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Published Weeks"
+          },
+          "closes_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Closes At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "course_week",
+          "term_week",
+          "published_weeks",
+          "closes_at"
+        ],
+        "title": "WeekView",
+        "description": "Where on \u00a72.2's two axes this report sits, and where week navigation may go.\n\nBoth axes are on the wire because \u00a72.2 puts both on the page: a course-level\npage plots the course week with the term week as a quiet sub-label, and a\nconsumer that had one of the two would have to re-derive the other from the\nsection's start-letter calendar."
+      },
+      "WorkloadBenchmarkFigures": {
+        "properties": {
+          "mean": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          },
+          "median": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mean",
+          "median"
+        ],
+        "title": "WorkloadBenchmarkFigures",
+        "description": "One population's workload mean and median for the reported week, each sealed alone.\n\nSPEC \u00a74.1 item 7 covers \"a mean, a median, or any other statistic, not only a\ndrawn line\", so the two are suppressed independently and neither rides on the\nother's decision. The two validators below are separate functions for the\nsame reason: one validator naming both members would be one thing to delete."
+      },
+      "WorkloadBenchmarkView": {
+        "properties": {
+          "comparison": {
+            "$ref": "#/components/schemas/WorkloadBenchmarkFigures"
+          },
+          "university": {
+            "$ref": "#/components/schemas/WorkloadBenchmarkFigures"
+          }
+        },
+        "type": "object",
+        "required": [
+          "comparison",
+          "university"
+        ],
+        "title": "WorkloadBenchmarkView",
+        "description": "\u00a75.1's workload statistics against both populations, for the week being reported.\n\n\"workload mean/median for the section against comparison-set and\nuniversity figures (true numeric statistics \u2014 \u00a73.2)\". The section's own pair\nis `InstructorReport.workload`; this is what stands beside it."
+      },
+      "WorkloadView": {
+        "properties": {
+          "mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean"
+          },
+          "median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mean",
+          "median"
+        ],
+        "title": "WorkloadView",
+        "description": "SPEC \u00a73.2's workload figure for this week, as `report_workload` aggregates it."
+      }
+    }
+  }
+}

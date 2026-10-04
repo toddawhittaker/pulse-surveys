@@ -31,7 +31,11 @@ import { describe, expect, it } from 'vitest';
 const read = (name: string): string =>
   readFileSync(resolve(process.cwd(), `src/components/${name}`), 'utf8');
 
-const PAGE_CSS = read('instructorReportPage.css');
+// The page stylesheet belongs to the route that draws the page, not to the components.
+const PAGE_CSS = readFileSync(
+  resolve(process.cwd(), 'src/routes/instructor/instructorReportPage.css'),
+  'utf8',
+);
 const STATS_CSS = read('instructorReportStats.css');
 const COMMENTS_CSS = read('instructorReportComments.css');
 const TREND_CSS = read('instructorReportTrend.css');

@@ -15,9 +15,9 @@
  * and never sections. So the page reads the menu, and the pages behind it are
  * what a reader opens from it.
  *
- * **Hand-written, not generated, and not wrapped in a query cache** — ADR 0117,
- * unchanged. This is a second screen with three calls, and a generator plus a
- * cache would still be two dependencies and a build step bought for it.
+ * **The calls are written by hand and not wrapped in a query cache** (ADR
+ * 0117); **the wire types are generated** from the backend's OpenAPI document
+ * (ADR 0185).
  *
  * **The session rides as a Bearer header** (ADR 0089, `../lib/session.ts`), for
  * the reason `student.ts` gives: the tool's cookie is `SameSite=None` and a
@@ -27,10 +27,9 @@
  * path's CSRF machinery in `student.ts` is deliberately absent rather than
  * copied.
  *
- * **Every field below is the wire's spelling**, snake case included, because
- * these types describe `backend/app/schemas/report.py` rather than a shape of
- * this screen's choosing. Two departures from "mirror it field for field", both
- * deliberate:
+ * **Every type below is the wire's own**, aliased from `wire.gen.ts`, which
+ * describes `backend/app/schemas/report.py`. Two departures from the generated
+ * shape, both deliberate:
  *
  *   - **The top-level `comparison` is not here, and the benchmark members are**
  *     — ticket E5-10. SPEC §4.1 item 7's `comparison` member exists on the wire
@@ -44,13 +43,10 @@
  *     structural version of that rule — the same move `CommentCard` makes by
  *     having no prop for a timestamp — so no future edit can start reading it
  *     without saying so in this file.
- *   - **`term_week` is on `TrendPointView` before the wire carries it.** SPEC
- *     §2.2 puts both week axes on every course-level chart and `PulseTrendChart`
- *     renders both; E4-19 is adding the field to `report.TrendPoint` in
- *     parallel. It is typed here now because the alternative is deriving it in
- *     the browser, which §2.2 and E4-08 both refuse. Until that ticket merges,
- *     the field arrives absent and the chart's term sub-label reads as such —
- *     loudly, which is the wanted failure.
+ *   - **The members a later epic added to the payload may be absent** —
+ *     `AddedLater` below. The server requires them; an answer cached before it
+ *     wrote them, or a fixture built before then, has none, and the page
+ *     renders without them rather than crashing.
  *
  * **The answers are cast rather than validated field by field**, and each cast
  * is bounded by one check: the member every render walks has to be there.
@@ -60,7 +56,20 @@
  * rather than re-parsed.
  */
 
-import { authorizationHeader } from '../lib/session';
+import type { components } from './wire.gen';
+import { jsonBody, readHeaders, refusalSentence } from '../lib/http';
+
+/** The generated wire schemas (ADR 0185); every wire type below is one of these. */
+type Schemas = components['schemas'];
+
+/**
+ * `T` with the members `K` allowed to be absent.
+ *
+ * A member added to a live payload is required on the server and optional here:
+ * an answer cached before the server wrote it, or a fixture built before then,
+ * has none, and the page renders without it rather than crashing.
+ */
+type AddedLater<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 
 /** `app.api.instructor.SECTIONS_PATH` — the menu, which takes no parameter. */
 export const SECTIONS_PATH = '/instructor/sections';
@@ -76,48 +85,25 @@ export function reportPath(sectionId: string, courseWeek: number): string {
 }
 
 /** One of the sections this reader teaches, as `TaughtSection` carries it. */
-export interface TaughtSectionView {
-  readonly section_id: string;
-  readonly code: string;
-  /** The governed label the student's own page carries, composed on the server. */
-  readonly course_label: string;
-}
+export type TaughtSectionView = Schemas['TaughtSection'];
 
 /** What the section list answers. An empty list is a person who teaches nothing. */
-export interface TaughtSectionsView {
-  readonly sections: readonly TaughtSectionView[];
-}
+export type TaughtSectionsView = Schemas['TaughtSections'];
 
 /** What the week-navigation route answers: the course weeks a reader may page to. */
-export interface PublishedWeeksView {
-  /** Ascending, and exactly the weeks whose survey window has closed. */
-  readonly published_weeks: readonly number[];
-}
+export type PublishedWeeksView = Schemas['PublishedWeeks'];
 
 /** Which section this report is about, in the words its instructor knows it by. */
-export interface SectionView {
-  readonly code: string;
-  readonly course_label: string;
-  readonly length_weeks: number;
-}
+export type SectionView = Schemas['SectionView'];
 
-/** Where on SPEC §2.2's two axes this report sits, and where navigation may go. */
-export interface WeekView {
-  readonly course_week: number;
-  readonly term_week: number;
-  readonly published_weeks: readonly number[];
-  /**
-   * When this week's survey window shut — the reported week's own row, not the
-   * latest one's (E5-02). An ISO 8601 instant with an offset; the eyebrow reads
-   * it in `institution_timezone` below and never in the browser's zone.
-   *
-   * Optional here and required on the server, which is the shape every member
-   * added to a live payload takes: a fixture or a cached answer built before
-   * E5-02 has none, and the eyebrow renders without the note rather than
-   * printing a broken sentence.
-   */
-  readonly closes_at?: string;
-}
+/**
+ * Where on SPEC §2.2's two axes this report sits, and where navigation may go.
+ *
+ * `closes_at` (E5-02) is the week's own close, read in `institution_timezone`
+ * and never in the browser's zone; a report without it renders the eyebrow
+ * without the note.
+ */
+export type WeekView = AddedLater<Schemas['WeekView'], 'closes_at'>;
 
 /**
  * SPEC §5.1's two rates and the counts they are ratios of.
@@ -127,26 +113,16 @@ export interface WeekView {
  * rate over an empty enrolment is not "nobody answered"; both are the absence of
  * a ratio, and the page renders the absence.
  */
-export interface RatesView {
-  readonly response_rate: number | null;
-  readonly validity_rate: number | null;
-  readonly responses: number;
-  readonly enrolled: number;
-  readonly valid_responses: number;
-}
+export type RatesView = Schemas['RatesView'];
 
 /**
  * One week of one stream's trend line.
  *
  * `mean` is `null` for a week nobody rated — zero is a rating nobody can give,
  * so a zero here would draw a line to the floor of a chart for a week that has
- * no line at all. `term_week` is E4-19's field; see this module's header.
+ * no line at all.
  */
-export interface TrendPointView {
-  readonly course_week: number;
-  readonly term_week: number;
-  readonly mean: number | null;
-}
+export type TrendPointView = Schemas['TrendPoint'];
 
 /**
  * One benchmark number, sealed — `app.services.reporting.ComparisonFigure`.
@@ -162,16 +138,11 @@ export interface TrendPointView {
  * renders it: a wire token is not a governed string, and the words a reader sees
  * come from the copy modules.
  *
- * Both `reason` and `figure` are optional here as well as nullable, because this
- * is a shape over JSON the client casts rather than parses — see
- * `PulseTrendChart`'s `isSuppressed` and `StatPair`'s `isReportable` on why
- * every reader of `suppressed` asks for exactly `false`.
+ * The client casts this rather than parsing it, so every reader asks
+ * `isShownFigure` (`../lib/shownFigure`), which wants `suppressed` to be exactly
+ * `false` and `figure` a finite number before anything is shown.
  */
-export interface ComparisonFigureView {
-  readonly suppressed: boolean;
-  readonly reason?: string | null;
-  readonly figure?: number | null;
-}
+export type ComparisonFigureView = Schemas['ComparisonFigure'];
 
 /**
  * One course week of one comparison series — `report_benchmark.BenchmarkSeriesPoint`.
@@ -182,10 +153,7 @@ export interface ComparisonFigureView {
  * §5.1), so the figure behind one point spans several terms and has no single
  * term week to carry.
  */
-export interface BenchmarkSeriesPointView {
-  readonly course_week: number;
-  readonly mean: ComparisonFigureView;
-}
+export type BenchmarkSeriesPointView = Schemas['BenchmarkSeriesPoint'];
 
 /**
  * One comparison population's trend — `report_benchmark.BenchmarkSeries`.
@@ -197,15 +165,10 @@ export interface BenchmarkSeriesPointView {
  * A series every one of whose weeks is suppressed is exactly that and nothing
  * more.
  */
-export interface BenchmarkSeriesView {
-  readonly points: readonly BenchmarkSeriesPointView[];
-}
+export type BenchmarkSeriesView = Schemas['BenchmarkSeries'];
 
 /** One stream's two comparison series — `report_benchmark.StreamBenchmark`. */
-export interface StreamBenchmarkView {
-  readonly comparison: BenchmarkSeriesView;
-  readonly university: BenchmarkSeriesView;
-}
+export type StreamBenchmarkView = Schemas['StreamBenchmark'];
 
 /**
  * One comparison population's workload pair — `report_benchmark.WorkloadBenchmarkFigures`.
@@ -214,24 +177,13 @@ export interface StreamBenchmarkView {
  * other's decision**, which is the server's rule and the reason there is no flag
  * over the pair.
  */
-export interface WorkloadBenchmarkFiguresView {
-  readonly mean: ComparisonFigureView;
-  readonly median: ComparisonFigureView;
-}
+export type WorkloadBenchmarkFiguresView = Schemas['WorkloadBenchmarkFigures'];
 
 /** The workload pair's two comparison columns — `report_benchmark.WorkloadBenchmarkView`. */
-export interface WorkloadBenchmarkView {
-  readonly comparison: WorkloadBenchmarkFiguresView;
-  readonly university: WorkloadBenchmarkFiguresView;
-}
+export type WorkloadBenchmarkView = Schemas['WorkloadBenchmarkView'];
 
 /** §5.1's generated summary for one stream of one week, or absent on the stream. */
-export interface SummaryView {
-  readonly text: string;
-  readonly response_count: number;
-  /** ADR 0148's held-note type. Null in every E4 payload; E6 populates it. */
-  readonly held_note: string | null;
-}
+export type SummaryView = Schemas['SummaryView'];
 
 /**
  * One comment, with exactly the three fields the comment service answers with.
@@ -241,105 +193,40 @@ export interface SummaryView {
  * is what the schema says; the page narrows them where a component's prop needs
  * one, and says there what it does with a value it does not know.
  */
-export interface CommentView {
-  readonly text: string;
-  readonly status: string;
-  readonly stream: string;
-}
+export type CommentView = Schemas['CommentView'];
 
-/** One of §5.1's two comment groups: its numbers, its summary and its words. */
-export interface StreamReportView {
-  readonly trend: readonly TrendPointView[];
-  /**
-   * A count per Likert value, keyed by the value as a string.
-   *
-   * `dict[str, int]` on the wire, zero-filled by the server for every value
-   * nobody chose. Typed as the wire types it rather than as the histogram's
-   * five declared members, so the narrowing happens once, in the page, where a
-   * missing bucket can be said out loud.
-   */
-  readonly distribution: Readonly<Record<string, number>>;
-  readonly summary: SummaryView | null;
-  readonly comments: readonly CommentView[];
-  /**
-   * The wording of this stream's rating question, as the students who answered
-   * it read it (E5-02). SPEC §3.2 versions question text server-side, so this is
-   * served and never written in the client — a second copy here would be right
-   * until the first re-versioning and silently wrong afterwards.
-   *
-   * Optional for the reason `WeekView.closes_at` gives; without it the histogram
-   * keeps its stream-label title.
-   */
-  readonly question_text?: string;
-  /**
-   * This stream's comparison-set and university series (E5-05), or nothing.
-   *
-   * Optional for the reason `WeekView.closes_at` gives, and here that reason has
-   * a second half: SPEC §4.1 item 1 is why an absent member has to render
-   * nothing at all rather than an empty comparison. A payload built before the
-   * benchmarks existed — a cached answer read mid-deploy — renders the page E4
-   * shipped.
-   */
-  readonly benchmark?: StreamBenchmarkView;
-  /**
-   * Whether SPEC §4 withholds this stream's raw comments this week, and the
-   * threshold that decided it. Per stream (E5.1-01, ADR 0182): the threshold
-   * counts distinct students commenting in this stream, so one group of a week
-   * can be shown while the other is suppressed.
-   */
-  readonly small_n: SmallNView;
-}
+/**
+ * One of §5.1's two comment groups: its numbers, its summary and its words.
+ *
+ * `question_text` (E5-02) and `benchmark` (E5-05) may be absent. Without the
+ * first the histogram keeps its stream-label title; without the second SPEC
+ * §4.1 item 1 is why the stream renders no comparison at all rather than an
+ * empty one.
+ */
+export type StreamReportView = AddedLater<Schemas['StreamReport'], 'question_text' | 'benchmark'>;
 
 /** The two groups §5.1 heads separately, never pooled into one. */
-export interface StreamsView {
-  readonly instructor: StreamReportView;
-  readonly course: StreamReportView;
-}
+export type StreamsView = {
+  readonly [Stream in keyof Schemas['StreamsView']]: StreamReportView;
+};
 
 /** SPEC §3.2's workload figure for this week. Both members absent together. */
-export interface WorkloadView {
-  readonly mean: number | null;
-  readonly median: number | null;
-}
+export type WorkloadView = Schemas['WorkloadView'];
 
 /**
  * Whether one stream is under SPEC §4's threshold this week, and what that
  * threshold is. No count of anybody: the threshold is configuration (§5.2).
  */
-export interface SmallNView {
-  readonly suppressed: boolean;
-  readonly threshold: number;
-}
+export type SmallNView = Schemas['SmallNView'];
 
 /** One instructor's Monday report, for one of her own sections and one course week. */
-export interface InstructorReportView {
-  readonly section: SectionView;
+export type InstructorReportView = AddedLater<
+  Omit<Schemas['InstructorReport'], 'comparison' | 'week' | 'streams'>,
+  'workload_benchmark' | 'institution_timezone'
+> & {
   readonly week: WeekView;
-  readonly rates: RatesView;
   readonly streams: StreamsView;
-  readonly workload: WorkloadView;
-  /**
-   * The workload pair's two comparison columns (E5-05), or nothing — optional on
-   * the same terms as `StreamReportView.benchmark`.
-   */
-  readonly workload_benchmark?: WorkloadBenchmarkView;
-  /**
-   * ADR 0152's release: comments from earlier weeks that crossed the cumulative
-   * threshold, carrying no week anywhere (ADR 0153).
-   *
-   * A list in every report, populated only in the latest published week's.
-   */
-  readonly released_from_earlier_weeks: readonly CommentView[];
-  /**
-   * The IANA name of the institution's timezone (E5-02) — the zone
-   * `week.closes_at` is read in. The institution's calendar is what closed the
-   * week, so its zone is what says which day that was; the browser's own zone
-   * would name the Monday for a reader one timezone east.
-   *
-   * Optional for the reason `WeekView.closes_at` gives.
-   */
-  readonly institution_timezone?: string;
-}
+};
 
 /**
  * What a read of the report answered.
@@ -402,49 +289,11 @@ const NOT_FOUND_STATUS = 404;
 /** A path parameter FastAPI would not parse — not a uuid, or not an integer. */
 const UNPROCESSABLE_STATUS = 422;
 
-/** The headers one call here carries. Every one of them is a read. */
-function requestHeaders(): Record<string, string> {
-  return { Accept: 'application/json', ...authorizationHeader() };
-}
-
-/**
- * A response's JSON body, or `null` when it did not carry one.
- *
- * Written here rather than imported from `student.ts`: that module's copy is
- * private to the screen it serves, and exporting a five-line helper out of one
- * screen's client so another can share it would put two screens in one blast
- * radius for no measured gain. What must not be duplicated is a *decision*, and
- * every decision this file makes about a refusal is written in the outcome types
- * above.
- */
-async function jsonBody(response: Response): Promise<unknown> {
-  try {
-    return (await response.json()) as unknown;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * `detail` out of an error body, when it is a sentence.
- *
- * FastAPI answers a refusal with `{"detail": …}`, and every refusal these three
- * routes serve carries a **string** there — one of `app.api.instructor`'s two
- * governed sentences. FastAPI's own 422 carries a list of validation objects
- * instead, which is not a sentence anybody wrote for a reader, so it is answered
- * `null` here and the page uses its own words.
- */
-function refusalSentence(body: unknown): string | null {
-  if (typeof body !== 'object' || body === null) return null;
-  const detail = (body as Record<string, unknown>).detail;
-  return typeof detail === 'string' ? detail : null;
-}
-
 /** The sections this session's person teaches — the menu the other two need. */
 export async function readTaughtSections(): Promise<SectionsRead> {
   let response: Response;
   try {
-    response = await fetch(SECTIONS_PATH, { headers: requestHeaders() });
+    response = await fetch(SECTIONS_PATH, { headers: readHeaders() });
   } catch {
     return { kind: 'unavailable', detail: null };
   }
@@ -466,7 +315,7 @@ export async function readTaughtSections(): Promise<SectionsRead> {
 export async function readPublishedWeeks(sectionId: string): Promise<PublishedWeeksRead> {
   let response: Response;
   try {
-    response = await fetch(publishedWeeksPath(sectionId), { headers: requestHeaders() });
+    response = await fetch(publishedWeeksPath(sectionId), { headers: readHeaders() });
   } catch {
     return { kind: 'unavailable', detail: null };
   }
@@ -492,7 +341,7 @@ export async function readInstructorReport(
 ): Promise<ReportRead> {
   let response: Response;
   try {
-    response = await fetch(reportPath(sectionId, courseWeek), { headers: requestHeaders() });
+    response = await fetch(reportPath(sectionId, courseWeek), { headers: readHeaders() });
   } catch {
     return { kind: 'unavailable', detail: null };
   }

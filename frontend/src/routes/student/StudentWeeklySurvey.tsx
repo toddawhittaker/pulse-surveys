@@ -10,6 +10,7 @@ import {
 } from '../../api/student';
 import { ConditionalTextArea, type CommentState } from '../../components/ConditionalTextArea';
 import { LikertInput } from '../../components/LikertInput';
+import { PulseDivider } from '../../components/PulseDivider';
 import { StateNotice } from '../../components/StateNotice';
 import { SubmitBar } from '../../components/SubmitBar';
 import { WeekEyebrow } from '../../components/WeekEyebrow';
@@ -693,29 +694,6 @@ function QuestionField({
   // control chosen for the wrong kind submits into the wrong column and the
   // write path refuses it with a sentence about the instrument.
   return null;
-}
-
-/** The short marigold pulse line the brief puts under a page title. */
-function PulseDivider(): JSX.Element {
-  return (
-    <svg
-      className="pulse-line pulse-line-divider"
-      width="120"
-      height="14"
-      viewBox="0 0 120 14"
-      aria-hidden="true"
-      fill="none"
-    >
-      <path
-        d="M1 10 H52 L60 3 L68 10 H106"
-        stroke="var(--marigold)"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="112" cy="10" r="3.5" fill="var(--marigold)" />
-    </svg>
-  );
 }
 
 /** One field's DOM id, which is also the Likert group's radio name. */
