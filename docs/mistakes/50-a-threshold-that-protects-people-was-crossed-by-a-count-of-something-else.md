@@ -60,11 +60,3 @@ Two halves worth keeping separate:
   literal condition out as its own leg so the departure is visible in the code;
   and put the choice to the owner as an open question, because narrowing a rule
   the spec states is a decision the spec has to catch up with.
-
-**Caught, 2026-10-03 (E5.1-11).** The ticket ruled that a roster walk which
-"read zero members" is treated as incomplete, so it ends no teaching grant and
-closes no enrollment. The obvious gate is the length of the documents the walk
-returned. Saying the unit out loud showed that a page of documents with no
-subject is non-empty by that count and still names nobody, so the gate would
-have passed every test and still ended every grant on the section. The gate
-counts the members read and keyed by subject instead.

@@ -501,7 +501,7 @@ layer that declines quietly, or reds against a correct tree.
 
 ## 50. A threshold that exists to protect people was crossed by a count of something else
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/50-a-threshold-that-protects-people-was-crossed-by-a-count-of-something-else.md)
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/50-a-threshold-that-protects-people-was-crossed-by-a-count-of-something-else.md)
 
 **Rule.** A threshold is a promise about a candidate set — "whoever wrote this is
 one of at least *n* people" — so the number compared against it has to be a count
