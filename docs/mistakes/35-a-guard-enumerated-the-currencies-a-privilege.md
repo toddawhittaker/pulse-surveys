@@ -1,14 +1,23 @@
 # Entry 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 10**
+**Caught: 11**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*15 occurrences recorded; nine of them are catches. This file keeps the three
+*16 occurrences recorded; ten of them are catches. This file keeps the three
 most recent instances; the rest live in git history — plus the oldest catch and
 the addendum under it, which are one lesson, and trimming one without the other
 would leave a paragraph referring to nothing. The E2-16 and E3-04 paragraphs
-were trimmed on 2026-10-03 with the E5.1-03 catch.*
+were trimmed on 2026-10-03 with the E5.1-03 catch, and the E3 exit cleanup
+paragraph with the E5.1-12 catch the same day.*
+
+*(**A catch**, E5.1-12, PR #273, 2026-10-03, twice over. The comment view's
+blank-text rule used one-argument `btrim`, which enumerates one whitespace
+character, the space, so a tab-only or newline-only answer counted as a
+commenter. The first fix used `[:space:]`, which reaches only the characters
+the database's collation classes as space: under `COLLATE "C"`, U+3000 and
+fourteen other Unicode spaces still counted. The rule now lists Python's
+whitespace set explicitly, so it no longer depends on the locale.)*
 
 *(**A catch**, writing E5.1-03's tests, 2026-10-03. The sweep that keeps the
 `clock_override` row inside `services/clock.py` enumerates the row's currencies:
@@ -34,15 +43,6 @@ and the identity-table sweep polices relation names and model classes, neither o
 which a column called `user_id` is — so the module docstring names the three
 functions a reviewer has to read rather than letting a green sweep stand as the
 claim.)*
-
-*(**A catch**, writing the E3 exit cleanup's tests, 2026-09-06. The view guards
-on identity enumerate two currencies — a column dependency and a whole-row
-reference — and ADR 0139's definer function is a third that neither sees: the
-function body is a quoted SQL string, so a view calling it records no
-dependency edge to the identity column at all. The new sweep was written with a
-planted calling view, a join-key-only near miss that must not be flagged, and a
-canary asserting a function of exactly the searched name exists — because a
-guard that only ever reports absence cannot say whether it can see anything.)*
 
 *(**The catch**, writing E0-34's tests — the guard that reads
 `backend/app/views_sql/*.sql` looking for an identity column. It enumerates two

@@ -171,7 +171,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 25** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 26** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 16. A mutation harness reported kills it had not made
 
@@ -199,7 +199,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 10** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
+**Caught: 11** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
 
 **Rule.** When a guard enumerates mechanisms, require it to *find* each one on a
 subject that certainly has it, as a control. A guard that only ever reports
@@ -501,7 +501,7 @@ layer that declines quietly, or reds against a correct tree.
 
 ## 50. A threshold that exists to protect people was crossed by a count of something else
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/50-a-threshold-that-protects-people-was-crossed-by-a-count-of-something-else.md)
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/50-a-threshold-that-protects-people-was-crossed-by-a-count-of-something-else.md)
 
 **Rule.** A threshold is a promise about a candidate set — "whoever wrote this is
 one of at least *n* people" — so the number compared against it has to be a count

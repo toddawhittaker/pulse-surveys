@@ -1,10 +1,10 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 25**
+**Caught: 26**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*28 instances recorded; the 3 most recent are below (E5-13, E5.1-04, E5.1-01),
+*29 instances recorded; the 3 most recent are below (E5.1-04, E5.1-01, E5.1-11),
 each after the "What happened" section. The E4-06 paragraph sits with them and
 is not counted among the three: like the E0-18 note below, it carries a rule
 sentence of its own — that a closed set written earlier in the same branch is
@@ -12,7 +12,7 @@ as much on the other side of the test wall as one written in E0 — rather than
 only an instance. The trim the previous header owed was taken on 2026-09-08
 with the E4-17 bump, removing the E3-04, E4-01, E4-05 and E4-04 paragraphs,
 again on 2026-09-14 with the E5-13 bump, removing the E4-18 paragraph, and
-again on 2026-10-03 with the E5.1 bumps, removing the E4-17 and E5-06 paragraphs;
+again on 2026-10-03 with the E5.1 bumps, removing the E4-17, E5-06 and E5-13 paragraphs;
 they are in this file's git history and in the pull requests they cite. The E0-18 PR 2 paragraph stays where it sits, beside
 the consequence it illustrates: it carries a rule sentence of its own — that
 any instruction to remove or rename a thing is a claim nothing asserts on it —
@@ -148,23 +148,6 @@ is about who may edit a test, not about how old the test is, and a set written
 earlier in the same branch is as much on the other side of the wall as one written
 in E0.
 
-**Instance, 2026-09-14 (E5-13, caught before the first line of the change).**
-The ticket's settled shape turned `app.copy.leadership_sets`'s eight refusal
-constants into `CopyEntry` values. Read whole first,
-`tests/fixtures/named_sets.py`'s `refusal_sentence` — which every one of E5-06's
-seven integration modules asks for its expected refusal body — walks `app.copy`
-for an attribute of each name, keeps only values that are `isinstance(value,
-str)`, and fails if no home it finds is under `app.copy`. The settled shape
-therefore reds seven modules inside their own fixture, in files the implementer
-may not edit, for a change that is correct in every other respect. The shape
-shipped instead keeps a public string constant of each name holding its own
-entry's `text`, which satisfies both walls and leaves the words in one place.
-**The clause it adds:** a shape ruling about a module's *public constants* is a
-change to an interface earlier suites read by name and by type — before
-implementing one, grep the read-only fixtures for the constant's name and read
-what they require of it, because "the same sentence, in a richer object" is a
-different object to an `isinstance` check.
-
 **Instance, 2026-10-03 (E5.1-04, PR #261, caught at planning).** The new rule
 refuses the example session secret outside development, and every older test
 that builds deployment `Settings` with that placeholder would have failed inside
@@ -181,3 +164,9 @@ hold before its comments show. The pull request moved the worlds with the rule:
 the exit story seed gives its shown weeks five commenters in each stream, and the
 two report end-to-end specs follow the per-stream payload and notice, in the
 same change rather than after a red drive.
+
+**Instance, 2026-10-03 (E5.1-11, PR #274, caught while building).** The new
+rule that no teaching grant is ended after a section's end date made E5.1-02's
+door test walk the roster on the day after its section ended, where the grant
+now stays. The repair was in the test, which now walks inside the term as the
+ruling requires; the code was not bent to keep the old test green.
