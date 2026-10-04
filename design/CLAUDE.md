@@ -8,15 +8,15 @@
 - Routing depends on harm type:
   - Abuse/attacks on instructor → Lead Faculty review queue.
   - Self-harm or student-welfare signals → the "Care" person in the Office of Community Standards, immediately, regardless of N or survey anonymity.
-- Small-N state: flagged comments stay hidden from the instructor (no chip, no count, no flag-type hint). Flags still route immediately to the appropriate reviewer. If the section later crosses the response threshold, the comment appears in flagged-collapsed state carrying any reviewer decision.
-- Severe/safety escalations are never gated on response threshold and live outside the Monday Report.
+- Small-N state: flagged comments stay hidden from the instructor (no chip, no count, no flag-type hint). Flags still route immediately to the appropriate reviewer. If the comment's stream later reaches the threshold of distinct commenters (SPEC §4, ADR 0182), the comment appears in flagged-collapsed state carrying any reviewer decision.
+- Severe/safety escalations are never gated on the commenter threshold and live outside the Monday Report.
 - Optional visible trace in small-N: a neutral "1 response held for review" line in participation, with no category revealed.
 
 ## Structure
 - Design system, session 1 of ~7. Handoff target: React/Tailwind via Claude Code.
 - tokens.css holds all palette/type/spacing/radii/shadow/focus tokens; no raw hex in components.
 - Primitives (one file each): WeekEyebrow, PulseTrendChart, RatingHistogram, StatPair, CommentCard, AiPanel, SmallNNotice, ResponseRateBar, InstructorResponse.
-- Screen: InstructorMondayReport.dc.html (smallN prop toggles the 3-of-9 state; week nav pages seeded weeks 1–7).
+- Screen: InstructorMondayReport.dc.html (smallN prop toggles the 3-of-9 state; week nav pages seeded weeks 1–7). The mockup predates the per-stream rule: SPEC §4 now holds each comment stream separately when fewer than five distinct students commented in it that week, and each held stream shows its own SmallNNotice (ADR 0182). The mockups are not updated yet; `docs/tickets/e6/carried-from-e5.md` carries that.
 - InstructorResponse has an optional, instructor-initiated "Check draft with AI" (themes prop: label/keywords/count; compares draft to weekly themes, names unaddressed ones; never blocks posting). Themes seeded for week 7 + small-N.
 
 ## Session 2
