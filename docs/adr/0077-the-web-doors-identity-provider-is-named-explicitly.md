@@ -304,11 +304,12 @@ and never the value. Development accepts the placeholder, by the same
   rather than read from `.env.example` at startup, because a deployed image need
   not carry that file; the tests read it from `.env.example`, so the two cannot
   drift apart unnoticed.
-- **32 characters** is the shortest value that is plausibly random, and
-  `secrets.token_urlsafe(32)` produces 43.
-- **Rejected: an enumerated `ENVIRONMENT`.** It would change what every other
-  reader of the variable accepts, for one rule; anything that is not
-  `development` is already a deployment, which is the safe direction.
+- **32 characters** is the length of `secrets.token_urlsafe(24)`, below the 43
+  that the documented `secrets.token_urlsafe(32)` produces.
+- **Rejected: an enumerated `ENVIRONMENT`.** `ENVIRONMENT` is free-form, and
+  every reader treats anything that is not `development` as a deployment, which
+  is the safe direction. Enumerating it for one rule would change what every
+  other reader accepts.
 - **Rejected: the check in every environment.** A clean checkout ships the
   placeholder, so development would refuse to start.
 
