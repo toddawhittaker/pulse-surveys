@@ -179,3 +179,45 @@ Rejected: keeping the old table and re-laning tickets by hand. It cost a
 test author, a verifier, and a mutation battery on most tickets that were
 not security code. The cost of the change is that a defect in light code is
 first read by a general reviewer at the epic boundary rather than per PR.
+
+## Amendment, 2026-10-03 (later): faster tickets
+
+Tickets took about twice as long as they needed to, mostly in fixed per-ticket
+steps and repeated review passes. The in-depth review stays at the epic
+boundary, where the full battery runs before an epic merges to `main`. Per
+ticket:
+
+- **Parallel tickets may share files.** The `architect` still gives each
+  migration number and ADR number to one ticket and still puts a ticket after
+  another when it needs that ticket's code. A shared file alone no longer
+  serializes tickets. The breakdown names the shared files, and the ticket
+  that merges second merges the epic branch into its own branch, never a
+  rebase or force-push. The architect also merges light tickets that one
+  builder would build in the same place, because every ticket costs a branch,
+  a PR, a review, a CI run, and a merge.
+- **A shorter heavy lane.** Tests still come first. The `verifier` no longer
+  confirms the reds before the build; the builder-heavy's first act already
+  does. The mutation battery runs only on a ticket with ⚠ in its `Lane:`
+  field. A plain heavy ticket relies on tests first plus CI's green run,
+  which the merger checks.
+- **`spec-conformance` moves to the epic boundary** for heavy tickets too,
+  as it already had for light ones. The per-PR roster is now `app-security`
+  and `privacy-authz`, gated by the diff as before.
+- **Review once, push once.** The per-PR security review runs once, after the
+  last code push, on the final head SHA, with its reviewers in parallel. A
+  fix round runs targeted tests, pushes once, and gets one re-check on the new
+  head; then the loop stops, except that a HIGH found in the re-check gets its
+  fix one more re-check. The PR body records this rule.
+- **Briefs carry the mistakes that apply.** The orchestrator reads
+  `docs/MISTAKES.md` whole once per epic; each subagent brief cites only the
+  entries that apply to its ticket, by number.
+
+The mechanism this record decides, hooks and computed gating, is unchanged.
+
+Accepted cost: a plain heavy ticket's tests are no longer proven able to fail
+by a battery, and a ticket's spec drift is first seen at the epic boundary.
+A fix round's own fixes get one re-check rather than repeated passes, so a
+defect introduced late can reach the epic branch and be found at the
+boundary. Rejected: keeping per-ticket batteries and spec checks on every
+heavy ticket, which roughly doubled each heavy ticket's time for checks the
+epic boundary repeats.
