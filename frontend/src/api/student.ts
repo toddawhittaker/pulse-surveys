@@ -197,12 +197,14 @@ export type SurveyRead =
  *
  * **`closed` and `refused` differ in what the screen does with the form, and the
  * server's own sentences are what decide which is which.** The 409s all say the
- * submission cannot be stored as it stands — the window shut, the week is already
- * recorded, a judged comment cannot be withdrawn — so the form is taken away and
- * the sentence stands in its place. Everything else says the answers are still
- * worth keeping: `submit.classifier_down` says so in as many words ("Your answers
- * are still in the form, so nothing is lost"), and a form cleared underneath that
- * sentence would make it false.
+ * week can take nothing more from this form — the window shut, or the week is
+ * already recorded — so the form is taken away and the sentence stands in its
+ * place. Everything else says the answers are still worth keeping:
+ * `submit.classifier_down` says so in as many words ("Your answers are still in
+ * the form, so nothing is lost"), and a form cleared underneath that sentence
+ * would make it false. A revise that would clear a judged comment is one of
+ * these since E5.1-05, answered 422 rather than 409: the window is still open
+ * and the student can put the comment back, so the form stays.
  */
 export type SubmitOutcome =
   | { readonly kind: 'stored' }

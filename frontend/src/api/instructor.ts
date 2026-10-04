@@ -90,7 +90,10 @@ export interface TaughtSectionsView {
 
 /** What the week-navigation route answers: the course weeks a reader may page to. */
 export interface PublishedWeeksView {
-  /** Ascending, and exactly the weeks whose survey window has closed. */
+  /**
+   * Ascending, and exactly the weeks whose report has opened: 06:00 on the Monday
+   * after the week's survey window closes, in the institution's time zone.
+   */
   readonly published_weeks: readonly number[];
 }
 

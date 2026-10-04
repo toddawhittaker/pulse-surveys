@@ -50,7 +50,11 @@ place that would show it, not a silent 500.
   - **409 for a closed window**, which is *not* the same shape. The section is the
     student's own and nothing about it is secret; a student who missed the week is
     owed an honest reason rather than the pretence that their own course is not
-    there (SPEC §3.1: "Missed weeks cannot be back-filled").
+    there (SPEC §3.1: "Missed weeks cannot be back-filled"). A duplicate submission
+    is a 409 too. **A revise that would clear a judged comment is a 422 instead**
+    (E5.1-05): the window is still open, and the client reads every 409 as "this
+    week has closed" and takes the form away, so a 409 there told a student their
+    open week had shut. The 422 keeps the form and shows the sentence above it.
   - **503 with `Retry-After: 60` when the classifier cannot be asked** — ADR 0114,
     for the provider failures ADR 0056 keeps outside §3.3's floor. Sixty seconds
     because it is a length of time a student will actually wait, and because the
