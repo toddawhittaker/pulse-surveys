@@ -9,10 +9,11 @@ E5.1-12, and the ruling appended to `docs/disputes/E5.1-12-01.md`. The
 ''`, and PostgreSQL's one-argument `btrim` trims only the space character. A
 comment of spaces, tabs and line breaks therefore counted its author toward SPEC
 §4's comment threshold. `report_comment_v002.sql` keeps a comment only if it
-holds a character Python's `str.strip()` would keep, by listing every character
-`strip` removes by code point. It names no `[:space:]` class, whose meaning
-changes with the collation, so the rule is the same under every collation and
-leaves nothing to the submission path.
+holds a character outside the `[:space:]` class and eight escapes for the
+characters Python's `str.strip()` removes and that class misses under the
+project's en_US.utf8. That class follows the collation, so under `COLLATE "C"`
+fifteen Unicode spaces still count as text; `ad9da2d96664` replaces v002 with
+v003, which lists the characters by code point.
 
 **Replaced on the way up, dropped and recreated on the way down.** The body
 changes only its last filter and keeps its five columns in order, so `CREATE OR
