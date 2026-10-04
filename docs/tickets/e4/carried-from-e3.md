@@ -284,7 +284,11 @@ AGS client and the roster sync can import, and moving `roster_sync.py` under
 `app/lti/`.
 **Owner:** a candidate for whichever epic next restructures the LTI
 plumbing. **Done when:** rehomed per the ADR, or a recorded decision to keep
-the copies where they are.
+the copies where they are. Added by the E5.1 boundary review: one call to the
+token endpoint, the roster service or the score service is bounded by a total
+deadline, name lookup included, and a test with a server that trickles bytes
+shows the bound. Today's `(3.05, 10.0)` timeout bounds the connect and each
+wait between bytes, not the whole call.
 
 ## The clock routes lack the origin check
 

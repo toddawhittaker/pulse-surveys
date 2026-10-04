@@ -493,6 +493,25 @@ and `BenchmarkFigure` (`components/StatPair.tsx:30`). **Owner:** E9, whose view
 rework reopens these files. **Done when:** the views alias the generated types
 directly, and one figure type name is imported.
 
+## The per-stream gate has no generated property
+
+From the E5.1 boundary's `invariant-coverage` review (LOW). The per-stream hold
+and the per-stream release legs are tested only on hand-built worlds. **Owner:**
+E6, which reopens the comment gate with moderation. **Done when:** one
+generated (Hypothesis) property asserts, over random worlds, that no answer is
+both visible under its week and in a batch, that every shown stream has at
+least the threshold of unreleased commenters, and that every batch slice has the
+threshold of authors over two or more weeks.
+
+## The roster reads full role URIs only
+
+From the per-PR security review of E5.1-11 (#274). Both the student rule and the
+instructor rule match the full LTI 1.3 role URIs. A platform that lists a short
+form such as `Learner` gives that member no enrollment, and one that lists
+`Instructor` in short form gives no teaching grant. Both fail closed. **Owner:**
+E13, with platform certification. **Done when:** each certified platform's NRPS
+role spelling is checked against the full-URI rules, and the result is recorded.
+
 ## The ledger
 
 Every source entry, in its source file's order, with what happened to it.
