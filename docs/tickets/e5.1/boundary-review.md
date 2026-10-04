@@ -270,4 +270,6 @@ checked was clean.
 
 ## CI on the exit commit
 
-TODO: run id, status, conclusion and head SHA.
+A commit cannot record its own CI run. The run on the exit commit, with its id,
+status, conclusion and head SHA, is recorded in pull request #271's body and
+checked by the merger before the merge.
