@@ -20,8 +20,6 @@
     "typescript-eslint": "8.70.0"
   },
   "overrides": {
-    "openapi-typescript": {
-      "typescript": "$typescript"
-    }
+    "typescript": "$typescript"
   }
 }

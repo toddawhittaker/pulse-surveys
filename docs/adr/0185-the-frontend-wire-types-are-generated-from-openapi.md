@@ -26,8 +26,14 @@ The calls stay hand-written, as ADR 0117 decided.
 
 **The generator's peer range is overridden, not relaxed.** It declares
 `typescript: ^5.x` and the repository pins 6.0.3, so the root `package.json`
-carries `"overrides": {"openapi-typescript": {"typescript": "$typescript"}}`.
-That names the one package and points it at the repository's own compiler.
+carries `"overrides": {"typescript": "$typescript"}`. Every request for
+TypeScript in the tree then resolves to the root's pin, so the lockfile holds
+one compiler. A first version scoped the override to `openapi-typescript`
+alone. npm still placed a second TypeScript, 5.9.3, under
+`frontend/node_modules` to satisfy the peer, and the frontend's `typecheck`
+quietly ran on it. The fix was the top-level form plus removing that lockfile
+entry. The lockfile is the thing to check: it must list exactly one
+`node_modules/typescript`.
 
 **Two stale checks, each inside a job CI already runs.** A unit test compares
 the export script's `render()` with the committed JSON, so a backend change
