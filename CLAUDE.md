@@ -7,8 +7,8 @@ feature decisions, system behavior, rationale, status, or history.
 - Why a construction choice was made → `docs/adr/`
 - What is being built next → `docs/tickets/`
 - How it should look → `docs/DESIGN_BRIEF.md`, `design/`
-- What has already gone wrong here → `docs/MISTAKES.md`, read whole before you
-  start; it is the rules, and each links to its incident in `docs/mistakes/`
+- What has already gone wrong here → `docs/MISTAKES.md`, the rules (incidents
+  in `docs/mistakes/`); read whole once per epic, cited by number in each brief
 
 Before adding a line, ask whether it would still be true if the process
 changed; if yes, it belongs elsewhere. Under 150 lines.
@@ -69,20 +69,19 @@ retargeted PR — close and re-cut.
 
 ## How a ticket is built: two lanes
 
-Every ticket's header carries a `**Lane:**` field, set at breakdown time.
-Heavy is for security code only, about one ticket in five: the paths in
+Every ticket's header carries a `**Lane:**` field, set at breakdown time. Heavy
+is for security code only, about one ticket in five: the paths in
 `.claude/heavy-lane-paths.md`, a ⚠ in the `Lane:` field, or a missing one.
-Everything else is light; a ⚠ epic does not make its tickets heavy. The heavy
-loop (`test-author` writes red; the builder-heavy codes to green without
-touching a test, disputes via `docs/disputes/`; `verifier` confirms CI's
-green run and runs the scoped mutation battery) guards those paths. The light
-lane (`builder-light` writes code and ordinary tests together; CI's green run on
-the head commit, checked by the merger, is the verification) covers the
-rest. Neither lane believes a green on its author's word, and both get the
-per-PR security review. A light diff reaching a heavy path stops and
-re-lanes in the PR record. `architect` designs each epic before its
-breakdown, giving every shared file and migration number one owning ticket;
-`explorer` does cheap searches. Mechanics: `.claude/skills/build-ticket`.
+Everything else is light; a ⚠ epic does not make its tickets heavy. Heavy:
+`test-author` writes red; builder-heavy confirms the reds, codes to green
+without touching a test, and disputes via `docs/disputes/`; a ⚠ ticket adds
+`verifier`'s mutation battery. Light: `builder-light` writes code and tests
+together. In both, CI's green run, checked by the merger, is the verification. A
+light diff reaching a heavy path stops and re-lanes in the PR record.
+`architect` designs each epic first: one owning ticket per migration and ADR
+number, serial order only where a ticket needs another's code. Tickets may share
+files; the breakdown names them, and the second to merge merges in the epic
+branch. `explorer` does cheap searches. Mechanics: `.claude/skills/build-ticket`.
 
 ## CI and build discipline
 
@@ -107,11 +106,12 @@ pass and treats a skip, an xfail, or an empty collection as a failure;
 deliberate PR whose subject is moving them. The threat and self-harm recall
 floor (§9.3) is a hard gate; lowering it is a safety decision and Todd's call.
 
-**Reviews are tiered.** Every PR gets a fresh-context security pass picked
-from the diff by `review-pr` (Sonnet when no specialist matches), diff first. Heavy PRs add
-`spec-conformance` and the matching specialists. The epic boundary runs the
-full Opus battery, `code-reviewer` included; its findings become ticket PRs. One round and one
-fix-check per PR; findings name the head SHA; a fixed-over pass re-runs.
+**Reviews are tiered.** Each PR's security review runs once, on the head SHA
+after the last push: the passes `review-pr` picks from the diff (Sonnet if no
+specialist matches), in parallel, diff first. A fix round runs targeted tests,
+pushes once, gets one re-check on the new head, and stops (a HIGH there gets one
+more); the PR body says so. The epic boundary runs the full Opus battery,
+`spec-conformance` and `code-reviewer` included; findings become ticket PRs.
 
 **Pin dependency versions and commit lockfiles.** No floating ranges, no
 unpinned tool versions in CI.
