@@ -68,6 +68,7 @@ teaching grant. The comment gate counts responses, not commenters.
 | 06 | [Frontend wire types come from the OpenAPI schema](E5.1-06-generated-wire-types.md) | `e5.1/generated-wire-types` | light | 01, 05 | A pinned generator builds `wire.gen.ts` from a committed `openapi.json`, with both stale cases going red; one copy of the fetch helpers, figure types and `PulseDivider`; ADR 0185. | |
 | 07 | [One copy of each services rule](E5.1-07-services-one-rule-one-home.md) | `e5.1/services-one-rule-one-home` | light | 01, 05 | One question-set rule, one course-week rule, one live-on-a-day rule, one staff filter and one course-label composer, with the private copies deleted. | |
 | 08 | [Records match the code](E5.1-08-records-match-code.md) | `e5.1/records-match-code` | light | 03, 06 | SPEC §13 matches the tree, with a test; ADRs 0073, 0132 and 0155 say true things; ADR 0089 records the login-forgery residual. | |
+| 10 | [The submit budget tests stop failing on one slow sample](E5.1-10-submit-budget-test.md) | `e5.1/submit-budget-test` | light | none | The two submit budget assertions read the median of three submissions instead of one sample; entry 41's hang still fails them. Added after the breakdown, when CI failed one on a slow runner. | |
 | 09 | [E5.1 exit](E5.1-09-e5.1-exit.md) | `e5.1/e5.1-exit` | light | all | The exit clause driven against the running stack; the hand-offs written into `../e6/carried-from-e5.md`; the ledger; the boundary reviews. | |
 
 ## Waves

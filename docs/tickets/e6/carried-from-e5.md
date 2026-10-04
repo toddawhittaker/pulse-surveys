@@ -186,6 +186,10 @@ the worked example of that promotion done under review. **Done when:** one
 governed composer names a course and a section, and one helper resolves a
 session's person, each with its callers moved and the copies deleted.
 
+The course-label half is closed by E5.1-07: one composer,
+`app.services.section_codes.course_label`, with all three callers moved and the
+copies deleted.
+
 ## The de-anonymization statement — E6's half still owed
 
 Unchanged from `carried-from-e4.md`, with one fact. E5 added two
