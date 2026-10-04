@@ -92,3 +92,13 @@ meets the floor, so the per-card chip stays.
   for the design owner to update.
 - `_held_comments` and `_commenters_by_stream_week` both reach
   `response.user_id`, each only to count.
+
+## Amendment, 2026-10-03 (E5.1-12)
+
+The count above counts only comments holding a character outside `[:space:]`:
+`report_comment_v002.sql` replaced v001's one-argument `btrim`, which trimmed
+only spaces and let a comment of tabs and line breaks count its author
+(`docs/disputes/E5.1-12-01.md`); under the database's en_US.utf8 character type
+eight characters Python's `strip` removes are still not blank to the view
+(U+001C to U+001F, U+0085, U+00A0, U+2007, U+202F), and only the submission
+path stops a comment made of those.
