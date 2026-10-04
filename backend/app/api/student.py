@@ -72,8 +72,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import csrf_verified_student, require_student
+from app.api.deps import (
+    NOT_A_STUDENT_CHALLENGE,
+    NOT_A_STUDENT_STATUS,
+    csrf_verified_student,
+    require_student,
+)
 from app.config import Settings
+from app.copy.student_read import NOT_A_STUDENT
 from app.copy.submit import COPY
 from app.db import get_session
 from app.schemas.student import StudentSurveyView
@@ -163,7 +169,20 @@ def student_survey(
     response.headers["Cache-Control"] = "no-store"
     if claims.user_id is None:
         return StudentSurveyView(sections=[], institution_timezone=settings.institution_timezone)
-    return survey_for_student(session, user_id=UUID(claims.user_id), settings=settings)
+    try:
+        user_id = UUID(claims.user_id)
+    except ValueError:
+        # A `user_id` claim that is not a UUID is a token this deployment did not
+        # issue in its shape, which `require_student` already answers with one
+        # refusal for every malformed token. The same answer here, rather than a
+        # 500 from inside the parse or a refusal of its own that would tell a caller
+        # which part of a forged token got through.
+        raise HTTPException(
+            status_code=NOT_A_STUDENT_STATUS,
+            detail=NOT_A_STUDENT.text,
+            headers=NOT_A_STUDENT_CHALLENGE,
+        ) from None
+    return survey_for_student(session, user_id=user_id, settings=settings)
 
 
 @router.post(SUBMIT_PATH, summary="Submit this week's survey for one of my sections")
