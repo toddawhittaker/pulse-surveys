@@ -1299,8 +1299,10 @@ export interface components {
          * @description §5.1's generated summary for one stream of one week, as E4-06 stored it.
          *
          *     The member is absent — `None` on the stream, not an empty string — for a week
-         *     the summary job has not run over, which is the ordinary state of a report read
-         *     before Monday morning.
+         *     the summary job has not run over. Since a week's report opens at 06:00 on the
+         *     Monday after its close (ADR 0184) and the summary walk runs earlier that
+         *     morning, an opened report meets this when that walk failed for the week or a
+         *     developer moved the clock past the walk.
          */
         readonly SummaryView: {
             /** Text */
