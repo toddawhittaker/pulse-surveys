@@ -566,7 +566,10 @@ def _comments_reaching_the_model(
                 # constraint permits a row filling `comment_text` under a question
                 # of another kind, and a read is not the place to trust a write.
                 Answer.comment_text.is_not(None),
-                func.btrim(Answer.comment_text) != "",
+                # Blank means whitespace of any kind, not only spaces: the same
+                # predicate as `report_comment_v002.sql`, whose header says which
+                # characters it covers (docs/disputes/E5.1-12-01.md).
+                Answer.comment_text.regexp_match("[^[:space:]]"),
                 # The one resolution of "which decision is current", called rather
                 # than written again: `app.services.report_comments` owns it
                 # (ADR 0145), and E4-07 closed the deferral that had this module
