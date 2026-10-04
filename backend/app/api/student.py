@@ -116,7 +116,7 @@ STATUS_OF_REASON: dict[RefusalReason, int] = {
     RefusalReason.SECTION_UNAVAILABLE: 404,
     RefusalReason.WINDOW_CLOSED: 409,
     RefusalReason.ALREADY_SUBMITTED: 409,
-    RefusalReason.COMMENT_ALREADY_JUDGED: 409,
+    RefusalReason.COMMENT_ALREADY_JUDGED: 422,
     RefusalReason.ANSWER_REQUIRED: 422,
     RefusalReason.VALUE_OUT_OF_RANGE: 422,
     RefusalReason.VALUE_OFF_STEP: 422,
