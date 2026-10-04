@@ -141,9 +141,10 @@ class WeekView(BaseModel):
 
     course_week: int
     term_week: int
-    # Exactly the course weeks whose survey window has closed, per the clock
-    # service (E4's breakdown decision 6). Nothing is stored to make a week
-    # published, so this is a comparison rather than a flag.
+    # Exactly the course weeks whose report has opened, per the clock service:
+    # 06:00 on the Monday after the week's window closes, in the institution's
+    # time zone (ADR 0184; E4's breakdown decision 6 before it). Nothing is stored
+    # to make a week published, so this is a comparison rather than a flag.
     published_weeks: list[int]
     # The reported week's own `survey_window.closes_at` — the row the report read
     # already holds, so this member costs no query. It travels as an instant
@@ -212,8 +213,10 @@ class SummaryView(BaseModel):
     """§5.1's generated summary for one stream of one week, as E4-06 stored it.
 
     The member is absent — `None` on the stream, not an empty string — for a week
-    the summary job has not run over, which is the ordinary state of a report read
-    before Monday morning.
+    the summary job has not run over. Since a week's report opens at 06:00 on the
+    Monday after its close (ADR 0184) and the summary walk runs earlier that
+    morning, an opened report meets this when that walk failed for the week or a
+    developer moved the clock past the walk.
     """
 
     model_config = ConfigDict(frozen=True)

@@ -3,11 +3,12 @@
 SPEC §13 names this module for §5.1 — "distributions, trend lines, benchmark
 assembly" — and it now holds both halves of that section. E4-06 landed the write
 half first: the walk that *generates* §5.1's per-stream AI summaries, once per
-section-week, after the window closes and before Monday morning. E4-07 added the
-read half beside it — the payload layer that divides the counts E4-03's views
-return, derives §2.2's week axis, and assembles what
-`app.api.instructor` serves. They are the same section of the spec and share the
-same rows, so the name §13 chose is the name used and no second module was made.
+section-week, after the window closes and before the report opens at 06:00 on the
+Monday after (ADR 0184). E4-07 added the read half beside it — the payload layer
+that divides the counts E4-03's views return, derives §2.2's week axis, and
+assembles what `app.api.instructor` serves. They are the same section of the spec
+and share the same rows, so the name §13 chose is the name used and no second
+module was made.
 
 **The two halves and where the line between them is.** Everything down to
 `_responses_that_week` is the summary walk, and everything from `ComparisonFigure`
