@@ -76,23 +76,31 @@ same rule.
 that this module's next denial test inherits it.
 """
 
+from datetime import UTC, date, timedelta
 from typing import Any
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
+from fixtures.landing import ENDED_ON_COLUMN, ENROLLMENT_TABLE, STARTED_ON_COLUMN
 from fixtures.routing import every_route, paths_of, student_visible_routes
 from fixtures.student_read import (
     AUTHENTICATE_HEADER,
     AUTHENTICATE_SCHEME,
+    DEFAULT_INSTITUTION_TIMEZONE,
+    ENROLLED_SINCE,
+    INSIDE_THE_WINDOW,
     OTHER_SECTION_COMMENT,
     OTHER_SECTION_WORKLOAD,
     REFUSED_STATUS,
     STUDENT_READ_PATH,
     StudentReadDoor,
     around,
+    key_of,
     response_surface,
     telling_values,
 )
+from fixtures.supervision import require_table
 
 pytestmark = [pytest.mark.invariant, pytest.mark.integration, pytest.mark.lti]
 
@@ -644,4 +652,139 @@ def test_a_session_that_is_not_this_students_is_refused_exactly_as_no_session_is
             f"The refusal of {what} carries {named} — this student's own section, or the subject "
             f"their responses are keyed to. First occurrence: {around(surface, named[0])!r}. A "
             "refusal says no; it does not describe the person it is refusing on behalf of."
+        )
+
+
+# ---------------------------------------------------------------------------
+# E5.1-12, Part B item 4: an enrollment that is not live today reads as none.
+# ---------------------------------------------------------------------------
+
+# The institution's day at the instant the door pretends. The read path judges an
+# enrollment against the effective clock's day in the institution's zone (ADR 0109
+# for the clock; ADR 0020 for the inclusive window), which is why the door moves
+# the clock before the launch. At 12:00 UTC the default zone and UTC agree on the
+# date, asserted in the test body, so a read that used either names the same day.
+READING_DAY: date = INSIDE_THE_WINDOW.astimezone(ZoneInfo(DEFAULT_INSTITUTION_TIMEZONE)).date()
+
+# The two not-live shapes, as (started_on, ended_on) against `READING_DAY`.
+NOT_LIVE_TODAY = {
+    "ended-yesterday": (ENROLLED_SINCE, READING_DAY - timedelta(days=1)),
+    "starts-tomorrow": (READING_DAY + timedelta(days=1), None),
+}
+
+
+def set_the_students_enrollment(door: StudentReadDoor, *, started_on: Any, ended_on: Any) -> None:
+    """Rewrite the reader's own enrollment window, committed, on the superuser connection."""
+    from sqlalchemy import update
+
+    world = door.world
+    table = require_table(world.tables, ENROLLMENT_TABLE)
+    key = next(iter(table.primary_key.columns))
+    world.rows.session.rollback()
+    world.rows.session.execute(
+        update(table)
+        .where(key == key_of(world.tables, ENROLLMENT_TABLE, world.enrolled_enrollment))
+        .values({STARTED_ON_COLUMN: started_on, ENDED_ON_COLUMN: ended_on})
+    )
+    world.rows.commit()
+
+
+def remove_the_students_enrollment(door: StudentReadDoor) -> None:
+    """Delete the reader's own enrollment row, committed — the "no enrollment" baseline."""
+    from sqlalchemy import delete
+
+    world = door.world
+    table = require_table(world.tables, ENROLLMENT_TABLE)
+    key = next(iter(table.primary_key.columns))
+    world.rows.session.rollback()
+    world.rows.session.execute(
+        delete(table).where(
+            key == key_of(world.tables, ENROLLMENT_TABLE, world.enrolled_enrollment)
+        )
+    )
+    world.rows.commit()
+
+
+@pytest.mark.parametrize("shape", sorted(NOT_LIVE_TODAY))
+def test_an_enrollment_not_live_today_is_answered_exactly_as_no_enrollment(
+    student_read_door: StudentReadDoor, shape: str
+) -> None:
+    """A student whose enrollment ended yesterday, or starts tomorrow, reads what nobody enrolled reads.
+
+    ADR 0020 makes an enrollment's window inclusive at both ends and ADR 0183
+    states the live test: `started_on <= today` and `ended_on` null or
+    `>= today`. Outside it the person is not a student of the section today, so
+    the read path must answer them exactly as it answers someone with no
+    enrollment row at all — same status, same body when the body is stable, and
+    never the section's identifier. The comparison is with the no-enrollment
+    answer rather than with a refusal shape this module would have to guess.
+
+    **The control comes first, in the same test:** the same session, with the
+    enrollment live today (open since the section's first day), is answered 200
+    naming the section. Without it, an answer that names nothing in both states
+    would satisfy every assertion below.
+
+    **The mutations that must turn this red** are both in the read's
+    live-enrollment filter, `_live_enrollments` (named in this module's docstring;
+    the student read service under `backend/app/services/`):
+
+      - `ended-yesterday`: the `ended_on IS NULL OR ended_on >= :today` clause
+        deleted, or `:today` read from the real clock rather than the effective
+        one (the real day is weeks before `READING_DAY`, so yesterday's end is
+        still ahead of it);
+      - `starts-tomorrow`: the `started_on <= :today` clause deleted.
+
+    **The near miss that stays green:** the inclusive comparisons as written. An
+    enrollment ending *today* is live and is
+    `tests/integration/test_landing_resolves_from_assignments.py`'s subject, not
+    this one's.
+    """
+    door = student_read_door
+    world = door.world
+    started_on, ended_on = NOT_LIVE_TODAY[shape]
+    assert INSIDE_THE_WINDOW.astimezone(UTC).date() == READING_DAY, (
+        f"The door's instant falls on {READING_DAY} in {DEFAULT_INSTITUTION_TIMEZONE} and on "
+        f"{INSIDE_THE_WINDOW.astimezone(UTC).date()} in UTC. This test needs one day both readings "
+        "agree on, or 'yesterday' depends on which zone the read path uses."
+    )
+    assert READING_DAY - timedelta(days=1) > ENROLLED_SINCE, (
+        f"The enrollment's first day ({ENROLLED_SINCE}) is not before yesterday ({READING_DAY}), "
+        "so the 'ended yesterday' window would be empty or inverted."
+    )
+
+    door.pretend(INSIDE_THE_WINDOW)
+    live = door.get()
+    assert live.status_code == 200 and str(world.enrolled_section_id) in response_surface(live), (
+        f"With the enrollment live today the read answered {live.status_code} and "
+        f"{'named' if str(world.enrolled_section_id) in response_surface(live) else 'did not name'} "
+        f"the section ({world.enrolled_section_id}). Until a live enrollment reads, the not-live "
+        f"answer below cannot be told from a read that answers nothing. Body begins {live.text[:300]!r}."
+    )
+
+    set_the_students_enrollment(door, started_on=started_on, ended_on=ended_on)
+    not_live = door.get()
+
+    remove_the_students_enrollment(door)
+    nobody = door.get()
+    nobody_again = door.get()
+
+    assert not_live.status_code == nobody.status_code, (
+        f"With the enrollment {shape.replace('-', ' ')} ({started_on} to {ended_on}, read on "
+        f"{READING_DAY}) the read answered {not_live.status_code}; with no enrollment at all it "
+        f"answered {nobody.status_code}. A person outside their enrollment window is not this "
+        "section's student today, and a different answer says the row exists."
+    )
+    surface = response_surface(not_live)
+    assert str(world.enrolled_section_id) not in surface, (
+        f"With the enrollment {shape.replace('-', ' ')} the read still names the section "
+        f"({world.enrolled_section_id}): {around(surface, str(world.enrolled_section_id))!r}. The "
+        "live test is `started_on <= today` and `ended_on` null or `>= today` (ADR 0183), and this "
+        "window fails it."
+    )
+    if nobody.text == nobody_again.text:
+        assert not_live.text == nobody.text, (
+            f"Two no-enrollment reads are byte-identical, so that answer is stable, and the read "
+            f"with the enrollment {shape.replace('-', ' ')} differs from it.\n"
+            f"  not live today: {not_live.text[:300]!r}\n"
+            f"  no enrollment:  {nobody.text[:300]!r}"
         )

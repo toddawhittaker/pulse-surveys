@@ -18,9 +18,15 @@ threshold. Every count is read back before it is relied on.
 **Marked `invariant`**: §4.1 item 3 at the payload boundary, and the module beside
 it on the same payload is in the isolated pass for the same reason.
 
-**Which failure a red is, before E5.1-01 lands.** `report_api_contract.stream_member`
-fails naming the missing `streams.<stream>.small_n` member, and the top-level test
-fails on an assertion that `small_n` is still there.
+**A missing member is a FAILED, not an error.** `report_api_contract.stream_member`
+fails naming the missing `streams.<stream>.small_n` member, so a payload that lost
+it is red on a sentence rather than on a `KeyError`.
+
+**The object carries its two fields and nothing else** (E5.1-12, Part B item 1).
+ADR 0182 gives each stream's `small_n` exactly `suppressed` and `threshold`; a
+third member — a count of commenters, of respondents, of anything — is the number
+the notice exists not to state (SPEC §5.2), arriving one layer down from the copy
+that `test_the_small_n_notice_states_the_threshold_and_no_count.py` guards.
 """
 
 from typing import Any
@@ -31,6 +37,15 @@ from fixtures.report_api import FULL_WEEK, ReportDoor
 pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 
 THRESHOLD_FIELD = "threshold"
+
+# ADR 0182's whole `small_n` object, written out rather than read from the schema
+# it polices (`docs/MISTAKES.md` entry 19): a schema that grew a field would
+# otherwise agree with itself here.
+SMALL_N_FIELDS = frozenset({"suppressed", THRESHOLD_FIELD})
+
+# The schema class `streams.<stream>.small_n` is built from, as E5.1-12 names it
+# (`backend/app/schemas/report.py`).
+SMALL_N_VIEW = "SmallNView"
 
 
 def test_each_stream_carries_its_own_suppression_flag_and_the_threshold(
@@ -168,3 +183,86 @@ def test_each_streams_flag_is_the_comment_services_own_answer(
             f"{carried!r} and `{comment_contract.suppressed_name}` answers {expected!r} for the "
             "same section, week and stream."
         )
+
+
+def test_each_streams_small_n_object_carries_exactly_suppressed_and_threshold(
+    report_door: ReportDoor, report_api_contract: Any, comment_contract: Any
+) -> None:
+    """On the wire, `small_n` is `{suppressed, threshold}` in a shown stream and a suppressed one.
+
+    Both streams of the full week, because they are the two states the object
+    exists to tell apart and a field added on one branch only — a commenter count
+    written when the stream is suppressed, say — is invisible to a test that reads
+    one of them.
+
+    **The control** is the premise that the two flags differ: the instructor
+    stream is shown and the course stream suppressed, so both states are read.
+
+    **The mutation that must turn this red:** a third field on `SmallNView` in
+    `backend/app/schemas/report.py` (near line 248) — for example
+    `commenters: int | None = None`, filled or left `None`; a `None` still
+    serializes as a key. **The near miss that stays green:** the two fields
+    reordered or retyped (`threshold: int` to `threshold: PositiveInt`), which
+    changes no key.
+    """
+    contract = report_api_contract
+    body, answered = report_door.payload(course_week=FULL_WEEK)
+
+    def small_n(stream: str) -> Any:
+        return contract.stream_member(body, stream, contract.small_n_member, answered=answered)
+
+    states = {
+        stream: contract.stream_member(
+            body, stream, contract.small_n_member, contract.suppressed_field, answered=answered
+        )
+        for stream in (contract.instructor_stream, contract.course_stream)
+    }
+    assert set(states.values()) == {True, False}, (
+        f"The full week's two streams carry `small_n.suppressed` of {states}. This world makes the "
+        "instructor stream shown and the course stream suppressed, and until one of each is read the "
+        "field equality below is about one state of the object only."
+    )
+
+    for stream in (contract.instructor_stream, contract.course_stream):
+        found = small_n(stream)
+        assert isinstance(
+            found, dict
+        ), f"`streams.{contract.payload_stream_key[stream]}.small_n` is {found!r}, not an object."
+        assert set(found) == SMALL_N_FIELDS, (
+            f"`streams.{contract.payload_stream_key[stream]}.small_n` carries {sorted(found)} "
+            f"(suppressed: {states[stream]}); ADR 0182 gives it exactly {sorted(SMALL_N_FIELDS)}. "
+            "Any further member on this object is a number or a hint beside the notice, and SPEC "
+            "§5.2 says that below the threshold the instructor sees no count."
+        )
+
+
+def test_the_small_n_schema_declares_exactly_suppressed_and_threshold(
+    report_api_contract: Any,
+) -> None:
+    """`SmallNView.model_fields` is `{suppressed, threshold}`, so no field can ride it unseen.
+
+    The wire test above reads what is serialized; this reads what is declared. A
+    field declared with `exclude=True`, or one the payload builder never fills, is
+    missing from a payload today and present the day somebody fills it — so the
+    declaration is pinned as well as the output.
+
+    **The mutation that must turn this red:** any field added to `SmallNView` in
+    `backend/app/schemas/report.py` (near line 248), including one declared
+    `Field(exclude=True)` that the wire test above cannot see. **The near miss that
+    stays green:** a docstring or validator added to the class, which declares no
+    field.
+    """
+    schema = report_api_contract.schema()
+    view = getattr(schema, SMALL_N_VIEW, None)
+    assert view is not None and hasattr(view, "model_fields"), (
+        f"`{report_api_contract.schema_module_name}` exposes no Pydantic model `{SMALL_N_VIEW}`. "
+        "E5.1-12 names it as the class each stream's `small_n` is built from; if it was renamed, "
+        "the constant at the top of this module is the one place to change."
+    )
+    declared = set(view.model_fields)
+    assert declared, f"`{SMALL_N_VIEW}` declares no fields at all, so the equality below is moot."
+    assert declared == SMALL_N_FIELDS, (
+        f"`{SMALL_N_VIEW}` declares {sorted(declared)}; ADR 0182 gives the object exactly "
+        f"{sorted(SMALL_N_FIELDS)}. A declared field that is excluded or unfilled today is a count "
+        "waiting for someone to fill it."
+    )

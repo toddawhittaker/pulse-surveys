@@ -268,8 +268,8 @@ def set_session_cookie(response: Response, token: str, settings: Settings) -> No
     inside the LMS's cross-site iframe for the whole visit, so `Lax` would drop
     the cookie on every in-iframe request. `Secure` unless this is development,
     where the browser reaches the tool at `http://localhost` and a `Secure`
-    cookie would not be sent at all — the same predicate `app.api.deps` asks of
-    the retired login cookie, over the one value `app.config.is_development`.
+    cookie would not be sent at all — the same predicate `app.api.auth` asks of
+    the web door's login cookie, over the one value `app.config.is_development`.
     """
     response.set_cookie(
         SESSION_COOKIE,

@@ -41,9 +41,10 @@ planted count is read back from the database before anything rests on it.
 **Marked `invariant`**: §4.1 item 3, and ADR 0153's floors on what a release may
 be.
 
-**Which failure a red is, before E5.1-01 lands.** Assertions throughout: on the
-current tree a week of `threshold` responses holds nothing, so the per-stream cut
-answers 0, and a lowered threshold shows a released week's comments again.
+**How a red reads.** Assertions throughout. Under the pre-E5.1-01 rule, which
+counted responses, a week of `threshold` responses held nothing, so the
+per-stream cut answered 0, and a lowered threshold showed a released week's
+comments again.
 """
 
 from collections.abc import Callable

@@ -106,3 +106,12 @@ meets the floor, so the per-card chip stays.
   for the design owner to update.
 - `_held_comments` and `_commenters_by_stream_week` both reach
   `response.user_id`, each only to count.
+
+## Amendment, 2026-10-03 (E5.1-12)
+
+The count above counts only comments holding a character Python's `str.strip()`
+would keep: v001's one-argument `btrim` trimmed only spaces and let a comment of
+tabs and line breaks count its author, v002 (revision `c8b7f89fc195`) used a
+`[:space:]` class that still followed the collation, and v003 (revision
+`ad9da2d96664`) lists the code points `strip` removes and names no class, so
+the rule is the same under every collation (`docs/disputes/E5.1-12-01.md`).

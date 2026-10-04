@@ -30,11 +30,10 @@ reads the same route *with* the instructor's credential and gets 200, so its
 and it is marked there. This module asserts which words the refusal is made
 of.
 
-**Which failure a red is, before E5.1-03 lands.** Each test begins with
-`the_registry_sentence`, a plain call that `pytest.fail`s naming
-`instructor_report.not_an_instructor` as a key the registry does not publish
-(`docs/MISTAKES.md` entry 44). Once the entry exists, a red is the gate
-serving some other text.
+**How a red reads.** Each test begins with `the_registry_sentence`, a plain call
+that `pytest.fail`s if the registry stops publishing
+`instructor_report.not_an_instructor` (`docs/MISTAKES.md` entry 44). Otherwise a
+red is the gate serving some other text.
 """
 
 from collections.abc import Callable

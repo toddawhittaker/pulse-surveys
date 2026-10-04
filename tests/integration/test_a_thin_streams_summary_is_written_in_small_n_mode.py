@@ -29,8 +29,9 @@ tests are broken, not the code.
 **Marked `invariant`**: §4.1 item 3, one layer out — the summary is the surface
 that can hand back words the comment read withholds.
 
-**Which failure a red is, before E5.1-01 lands.** Assertions on stored rows: the
-thin stream is written under `summary.v1`, and its quoting answer is stored.
+**A red is an assertion on stored rows**: a summary walk that chose its mode from
+the week rather than the stream writes the thin stream under `summary.v1`, and
+stores its quoting answer.
 """
 
 from typing import Any

@@ -33,9 +33,8 @@ enrollment, still lands as a student, and can still submit.
 on `enrollment.ended_on`, and a superuser-driven sync would pass whatever that
 grant is.
 
-**Which failure a red is, before E5.1-02 lands.** Every red here is an assertion
-about a row, a landing or a status. The Learner halves are green today and are the
-controls.
+**How a red reads.** Every red here is an assertion about a row, a landing or a
+status. The Learner halves are the controls.
 
 Marked `invariant` at the module level: a person the roster says is staff being
 answered as a student — counted, shown the survey, allowed to write a response —

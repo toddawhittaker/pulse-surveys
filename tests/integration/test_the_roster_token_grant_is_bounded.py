@@ -32,9 +32,9 @@ finite positive numbers.
 sync's return value, which on a token failure says nothing a test can rely on
 (`docs/MISTAKES.md` entry 49).
 
-**Which failure a red is, before E5.1-02 lands.** The two tests that need the
-constant fail at once, naming it, before any socket is opened. The prompt-answer
-control is green today and is what says the harness itself adds no delay.
+**How a red reads.** The two tests that need the constant fail at once, naming
+it, before any socket is opened, if it is missing. The prompt-answer control is
+what says the harness itself adds no delay.
 """
 
 import contextlib

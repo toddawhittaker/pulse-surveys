@@ -46,11 +46,10 @@ heading on the page.
 on sample markup written here, in both directions. **A red in a control means
 these tests are broken, not the code.**
 
-**Which failure a red is, before E5.1-03 lands.** The controls are green. Every
-page test begins with `entry_registry()`, a plain call in the body that
-`pytest.fail`s naming `backend/app/copy/entry.py` and the keys it owes, so the
-red is a FAILED naming the deliverable and never an error at setup
-(`docs/MISTAKES.md` entry 44).
+**A missing registry is a FAILED, not an error.** Every page test begins with
+`entry_registry()`, a plain call in the body that `pytest.fail`s naming
+`backend/app/copy/entry.py` and the keys it owes if they are gone, never an
+error at setup (`docs/MISTAKES.md` entry 44).
 
 **Not marked `invariant`.** This asserts where the pages' words come from; the
 §4.1 rules over those words are the inventory module's, and they are marked
