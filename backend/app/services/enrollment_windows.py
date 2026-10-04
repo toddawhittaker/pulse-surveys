@@ -38,20 +38,25 @@ callers hand in a session and the institution's timezone, which is the zone ever
 window's wall clock is stated in (SPEC §3.1).
 """
 
+from collections.abc import Iterable
 from datetime import date, datetime, time
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.base import Base
 from app.models.identity import Enrollment
+from app.services.authz import section_scoped_assignees
+from app.services.identity import person_for_user
 
 __all__ = [
     "began_by",
     "enrolled_from",
     "first_sync_day",
+    "live_on",
+    "without_staff",
 ]
 
 # Tier 3 compares against the section's earliest roster sync (ADR 0131). The row is
@@ -141,3 +146,46 @@ def began_by(enrolled_from: datetime | None, *, closes_at: datetime) -> bool:
     second copy would get wrong.
     """
     return enrolled_from is None or closes_at >= enrolled_from
+
+
+def live_on(day: date) -> ColumnElement[bool]:
+    """Whether an `enrollment` row is live on `day`, as a SQL condition.
+
+    Inclusive at both ends, matching ADR 0020's `'[]'` convention: somebody whose
+    enrolment ends on `day` is enrolled on `day`. A `NULL` `ended_on` is the open
+    window a roster sync leaves on a member it is still seeing (ADR 0023), and the
+    `IS NULL` arm is what stops three-valued logic answering "unknown" for every
+    current student. `app.services.authz` writes the same rule for the landing
+    decision in its own SQL, and a test holds the two to the same answer on each
+    boundary day.
+
+    §5.1's response-rate denominator is not this rule: it asks about the day a
+    window opened and the instant it closed, and `app.services.reporting` writes
+    that test itself.
+    """
+    return and_(
+        Enrollment.started_on <= day,
+        or_(Enrollment.ended_on.is_(None), Enrollment.ended_on >= day),
+    )
+
+
+def without_staff(session: Session, *, section_id: UUID, user_ids: Iterable[UUID]) -> set[UUID]:
+    """These section members, less the ones who teach or lead this section.
+
+    §3.4 makes a participation score and a response rate a *student's*, and a
+    roster container lists staff too. The test is an assignment scoped to this
+    section, asked in that direction because a student holds no `role_assignment`
+    row at all (ADR 0028): a member whose person holds one is not a student *here*.
+    A person who teaches another section is left alone in this one, which is the
+    two-hat case §2's "people are not roles" exists for.
+
+    **One query, and the per-member hop only when it found somebody.** The section's
+    staff comes through the authorization chokepoint; the hop from a member to
+    their person is a definer call each (ADR 0024, ADR 0094), and it is skipped
+    entirely for the ordinary section whose staff nobody has entered in the people
+    graph.
+    """
+    staff = section_scoped_assignees(session, section_id=section_id)
+    if not staff:
+        return set(user_ids)
+    return {user_id for user_id in user_ids if person_for_user(session, user_id) not in staff}

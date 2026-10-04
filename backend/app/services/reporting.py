@@ -56,7 +56,7 @@ import logging
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -83,11 +83,9 @@ from app.models.survey import (
 from app.models.term import SurveyWindow, Term, Week
 from app.services import clock, enrollment_windows
 from app.services.authz import (
-    section_scoped_assignees,
     taught_section_ids,
     teaching_instructor_assigned,
 )
-from app.services.identity import person_for_user
 from app.services.report_comments import (
     ReportComment,
     n_threshold,
@@ -96,7 +94,7 @@ from app.services.report_comments import (
     stream_is_suppressed,
     visible_comments,
 )
-from app.services.section_codes import week_of_the_term
+from app.services.section_codes import course_label, course_week_of
 
 if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
     # `app.schemas.report` imports `ComparisonFigure` from this module, because
@@ -1097,17 +1095,6 @@ def _readable_section(session: Session, *, person_id: UUID | None, section_id: U
     return section
 
 
-def _course_week_of(term_week: int, *, section_start: date, term_start: date) -> int:
-    """The course week a term week is, for a section starting on `section_start`.
-
-    `week_of_the_term` is this codebase's one reading of §2.2's two axes; this
-    is the one place a report turns a stored term week back into a course week
-    with it. Course weeks count from 1, which is the inclusive `+ 1`.
-    """
-    first_term_week = week_of_the_term(1, section_start=section_start, term_start=term_start)
-    return term_week - first_term_week + 1
-
-
 def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
     """Every week this section has a survey window for, on both of §2.2's axes.
 
@@ -1142,7 +1129,7 @@ def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
         _SectionWeek(
             week_id=week_id,
             term_week=number,
-            course_week=_course_week_of(
+            course_week=course_week_of(
                 number, section_start=section.start_date, term_start=term.start_date
             ),
             opens_at=opens_at,
@@ -1287,7 +1274,7 @@ def _population_cutoffs(
         )
     ).all()
     for number, section_start, closes_at in windows:
-        course_week = _course_week_of(
+        course_week = course_week_of(
             number, section_start=section_start, term_start=term.start_date
         )
         if course_week in cutoffs and closes_at < cutoffs[course_week]:
@@ -1738,13 +1725,7 @@ def _enrolled_students(
             closes_at=week.closes_at,
         )
     }
-    staff = section_scoped_assignees(session, section_id=section.id)
-    if not staff:
-        return len(enrolled)
-    # The hop from a member to their person is a definer call each (ADR 0024,
-    # ADR 0094), so it is skipped entirely for a section nobody has entered in the
-    # people graph — which is the shape `_live_enrollments` takes and why.
-    return sum(1 for user_id in enrolled if person_for_user(session, user_id) not in staff)
+    return len(enrollment_windows.without_staff(session, section_id=section.id, user_ids=enrolled))
 
 
 def _course_label(session: Session, section: Section) -> str:
@@ -1770,7 +1751,10 @@ def _course_label(session: Session, section: Section) -> str:
     prefix = session.get(Prefix, course.prefix_id)
     if prefix is None:  # pragma: no cover - a non-null foreign key
         raise SectionUnavailableError
-    return (
-        f"{prefix.code} {course.lms_number} {section.lms_section_code} — "
-        f"{course.lms_title}, {term.name}"
+    return course_label(
+        prefix_code=prefix.code,
+        lms_number=course.lms_number,
+        lms_title=course.lms_title,
+        section_code=section.lms_section_code,
+        term_name=term.name,
     )

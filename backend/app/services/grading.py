@@ -95,7 +95,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import requests
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -124,8 +124,8 @@ from app.models.org import Section
 from app.models.survey import Answer, Response
 from app.models.term import Term, Week
 from app.services import clock, enrollment_windows
-from app.services.authz import WriteSanction, guard_write, sanction_for, section_scoped_assignees
-from app.services.identity import person_for_user, subject_for_user
+from app.services.authz import WriteSanction, guard_write, sanction_for
+from app.services.identity import subject_for_user
 from app.services.submissions import current_questions
 from app.services.survey_windows import DerivedWindow, windows_for_section
 from app.services.validity import REFUSED_VERDICT_TOKENS
@@ -240,7 +240,7 @@ def _items_per_week(session: Session) -> int:
     written as a literal would be right for exactly as long as one version of the
     set exists.
     """
-    questions = current_questions(session)
+    _, questions = current_questions(session)
     if not questions:
         raise RuntimeError(
             "The question set in force carries no questions. SPEC §3.2 ships five and a week's "
@@ -1227,16 +1227,11 @@ def _live_enrollments(session: Session, section: Section, *, today: date) -> set
     enrolled = set(
         session.scalars(
             select(Enrollment.user_id).where(
-                Enrollment.section_id == section.id,
-                Enrollment.started_on <= today,
-                or_(Enrollment.ended_on.is_(None), Enrollment.ended_on >= today),
+                Enrollment.section_id == section.id, enrollment_windows.live_on(today)
             )
         )
     )
-    staff = section_scoped_assignees(session, section_id=section.id)
-    if not staff:
-        return enrolled
-    return {user_id for user_id in enrolled if person_for_user(session, user_id) not in staff}
+    return enrollment_windows.without_staff(session, section_id=section.id, user_ids=enrolled)
 
 
 def _lms_user_ids(session: Session, user_ids: Sequence[UUID]) -> dict[UUID, str]:

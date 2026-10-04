@@ -75,13 +75,13 @@ conversion lives.
 from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.models.identity import Enrollment
 from app.models.org import Course, Prefix, Section
-from app.models.survey import Answer, Question, QuestionSet, Response
+from app.models.survey import Answer, Question, Response
 from app.models.term import SurveyWindow, Term, Week
 from app.schemas.student import (
     EnrolledSection,
@@ -92,7 +92,9 @@ from app.schemas.student import (
     SurveyQuestion,
 )
 from app.services import clock
-from app.services.section_codes import week_of_the_term
+from app.services.enrollment_windows import live_on
+from app.services.section_codes import course_label, course_week_of
+from app.services.submissions import current_questions
 from app.services.survey_windows import next_window_for_section, open_window_for_section
 
 __all__ = ["survey_for_student"]
@@ -172,8 +174,7 @@ def _live_enrollments(
             .join(Prefix, Prefix.id == Course.prefix_id)
             .where(
                 Enrollment.user_id == user_id,
-                Enrollment.started_on <= today,
-                or_(Enrollment.ended_on.is_(None), Enrollment.ended_on >= today),
+                live_on(today),
             )
             .order_by(Section.lms_section_code, Section.id)
         )
@@ -210,7 +211,13 @@ def _section_view(
     return EnrolledSection(
         section_id=section.id,
         section_code=section.lms_section_code,
-        course_label=_course_label(course=course, prefix=prefix, section=section, term=term),
+        course_label=course_label(
+            prefix_code=prefix.code,
+            lms_number=course.lms_number,
+            lms_title=course.lms_title,
+            section_code=section.lms_section_code,
+            term_name=term.name,
+        ),
         survey_is_open=window is not None,
         next_window_opens_at=_next_window_opens_at(session, section=section, settings=settings)
         if window is None
@@ -250,34 +257,6 @@ def _next_window_opens_at(
     return None if window is None else window.opens_at
 
 
-def _course_label(*, course: Course, prefix: Prefix, section: Section, term: Term) -> str:
-    """How a student's own course names itself on their page — FIX-01 item 2.
-
-    "MATH 140 E1FF — College Algebra, Fall 2026": the prefix code, the LMS
-    number, the §2.2 section code, an em dash, the LMS title, a comma and the
-    term's name. That order is the owner's ruling of 2026-09-03. E2-17 composed
-    "BIOL 215 — Cell Biology" and the heading carried the section code in a
-    separate span beside it; the page never said which term it was about, and
-    the ruling folds the code into the one string and adds the term.
-
-    All five parts are `NOT NULL` on their rows, so there is no absent-part case
-    to fall back from. `lms_title` is `NOT NULL` too and a platform may send a
-    context with no title, which E1-10 handles at ingestion by writing "PREFIX
-    NUMBER" and marking `title_is_fallback` — so the worst this composes is
-    "BIOL 215 R3WW — BIOL 215, Fall 2026", which is the ingestion's stated
-    fallback showing through and not a hole here.
-
-    **The term is the section's own**, handed down from the row
-    `_live_enrollments` joined through `section.term_id`. A term looked up any
-    other way would be a second pairing between a section and its term for the
-    label to get wrong.
-    """
-    return (
-        f"{prefix.code} {course.lms_number} {section.lms_section_code} — "
-        f"{course.lms_title}, {term.name}"
-    )
-
-
 def _open_survey(
     session: Session, *, window: SurveyWindow, section: Section, term: Term, user_id: UUID
 ) -> OpenSurvey:
@@ -293,10 +272,12 @@ def _open_survey(
     letter-to-length map.
     """
     term_week = _term_week_of(session, window)
-    question_set, questions = _current_question_set(session)
+    question_set, questions = current_questions(session)
     return OpenSurvey(
         window_id=window.id,
-        course_week=_course_week(term_week, section=section, term=term),
+        course_week=course_week_of(
+            term_week, section_start=section.start_date, term_start=term.start_date
+        ),
         length_weeks=section.length_weeks,
         term_week=term_week,
         opens_at=window.opens_at,
@@ -337,54 +318,6 @@ def _term_week_of(session: Session, window: SurveyWindow) -> int:
             "than a state this read path can answer around."
         )
     return week.number
-
-
-def _course_week(term_week: int, *, section: Section, term: Term) -> int:
-    """Which week of its own run the section is in, when the term is in `term_week`.
-
-    SPEC §2.2's two axes, read backwards. `week_of_the_term` is the one place the
-    mapping between them is computed, so the section's first course week is asked
-    of it rather than derived here, and this subtracts: a section whose first week
-    is the term's fourth is in its tenth week when the term is in its thirteenth.
-
-    Course weeks count from 1, so the section's own first week is course week 1
-    and not 0 — the inclusive `+ 1` §2.2 numbers a course week by, and the
-    off-by-one this reads as arithmetic rather than as a magic number.
-    """
-    first_term_week = week_of_the_term(
-        1, section_start=section.start_date, term_start=term.start_date
-    )
-    return term_week - first_term_week + 1
-
-
-def _current_question_set(session: Session) -> tuple[QuestionSet, list[Question]]:
-    """The question set a form is answered with today, and its questions in order.
-
-    The highest version there is. SPEC §3.2 ships one — "the five questions
-    (standardized, v1 fixed)" — and versioning is what a later edit gets; which
-    version an *already submitted* week is read back against is a question E2-09
-    leaves open and E8's results view will have to settle.
-
-    A deployment with no question set at all cannot render a form, so this refuses
-    loudly rather than answering an open window with nothing in it: a survey that
-    silently offers no questions looks to a student like a product that is broken
-    and to a log like nothing at all.
-    """
-    question_set = session.scalars(select(QuestionSet).order_by(QuestionSet.version.desc())).first()
-    if question_set is None:
-        raise RuntimeError(
-            "There is no question set in this database, so there is nothing for a student to "
-            "answer. SPEC §3.2's v1 set is seeded by `scripts/seed.py`; a deployment without it "
-            "has an open survey window and no survey."
-        )
-    questions = list(
-        session.scalars(
-            select(Question)
-            .where(Question.question_set_id == question_set.id)
-            .order_by(Question.position)
-        )
-    )
-    return question_set, questions
 
 
 def _own_submission(

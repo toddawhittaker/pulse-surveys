@@ -101,6 +101,7 @@ from app.schemas.comparison_sets import (
 )
 from app.services import clock
 from app.services.benchmarks import resolve_named_set
+from app.services.section_codes import course_label
 
 __all__ = [
     "NotTheSetsDefinerError",
@@ -527,7 +528,7 @@ def definition_options(session: Session) -> SetOptions:
     offered = [
         CourseOption(
             id=course_id,
-            label=f"{prefix_code} {lms_number} — {lms_title}",
+            label=course_label(prefix_code=prefix_code, lms_number=lms_number, lms_title=lms_title),
             level=str(level),
         )
         for course_id, lms_number, lms_title, level, prefix_code in rows

@@ -302,6 +302,48 @@ def week_of_the_term(course_week: int, *, section_start: date, term_start: date)
     return course_week + weeks_in
 
 
+def course_week_of(term_week: int, *, section_start: date, term_start: date) -> int:
+    """Which week of its own run a section is in when the term is in `term_week`.
+
+    `week_of_the_term` read backwards, and the one place that is done: the
+    section's first course week is asked of it rather than derived again, and this
+    subtracts. A section whose first week is the term's fourth is in its tenth week
+    when the term is in its thirteenth. Course weeks count from 1, which is the
+    inclusive `+ 1` (SPEC §2.2).
+    """
+    first_term_week = week_of_the_term(1, section_start=section_start, term_start=term_start)
+    return term_week - first_term_week + 1
+
+
+def course_label(
+    *,
+    prefix_code: str,
+    lms_number: str,
+    lms_title: str,
+    section_code: str | None = None,
+    term_name: str | None = None,
+) -> str:
+    """How a course names itself on every surface that names one.
+
+    Two forms. A section's: "MATH 140 E1FF — College Algebra, Fall 2026", the
+    prefix code, the LMS number, the §2.2 section code, an em dash, the LMS title,
+    a comma and the term's name, which is what a student's page and her
+    instructor's report both print. A course's: "MATH 140 — College Algebra", for a
+    comparison set, which names a course rather than a section (ADR 0164).
+
+    A section code without a term, or a term without a section code, is refused
+    rather than printed half: a label naming a section but not its term reads as
+    every term's section of that code.
+    """
+    if (section_code is None) != (term_name is None):
+        raise ValueError(
+            "A course label names both the section code and the term, or neither of them."
+        )
+    if section_code is None:
+        return f"{prefix_code} {lms_number} — {lms_title}"
+    return f"{prefix_code} {lms_number} {section_code} — {lms_title}, {term_name}"
+
+
 def term_week_for_course_week(session: Session, code: str, term: TermRow, course_week: int) -> int:
     """Which week of the term a code's course week `course_week` falls in.
 
