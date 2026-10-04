@@ -128,6 +128,13 @@ A_TOLERANCE = timedelta(minutes=5)
 # the test would pass having measured nothing.
 A_MEANINGFUL_OFFSET = timedelta(days=1)
 
+# The cohort the real-time test moves the clock in. Cohort E starts on the
+# term's first Monday, 17 August 2026, so its first window closed on 24 August
+# 2026. Real time only moves away from that date. The default cohort starts on
+# 28 September 2026, and its first close (5 October 2026) met real time in
+# October 2026, which made the control below fail.
+A_COHORT_IN_THE_PAST = "E"
+
 
 def score_posts(book: Any) -> list[Any]:
     """Every `POST` the sweep made to this line item's Score service, in order."""
@@ -174,9 +181,10 @@ def a_student_with_a_score(
     committed_clock_overrides: Any,
     *,
     students: int = 1,
+    cohort: str | None = None,
 ) -> tuple[Any, list[Any]]:
     """One section past its first window's close, with `students` fully answered."""
-    book = gradebooks()
+    book = gradebooks() if cohort is None else gradebooks(cohort=cohort)
     people = sweep_contract.students(book, students)
     for student in people:
         sweep_contract.answered_fully(book.world, student, through=1)
@@ -644,7 +652,9 @@ def test_the_score_timestamp_is_real_time_even_while_the_development_clock_is_mo
     indistinguishable and this test would pass having measured nothing — so it
     says so instead.
     """
-    book, _people = a_student_with_a_score(gradebooks, sweep_contract, committed_clock_overrides)
+    book, _people = a_student_with_a_score(
+        gradebooks, sweep_contract, committed_clock_overrides, cohort=A_COHORT_IN_THE_PAST
+    )
     effective = clock_service.now(book.session, settings=window_settings)
     real = datetime.now(UTC)
 
@@ -653,7 +663,7 @@ def test_the_score_timestamp_is_real_time_even_while_the_development_clock_is_mo
         f"{A_MEANINGFUL_OFFSET} apart. This test tells a real-time stamp from an effective-clock "
         "one by which of the two the wire value is near, and it cannot do that while they are the "
         "same value. The override is set from this section's own window calendar, so a machine "
-        "clock inside Fall 2026 is what produces this."
+        "clock within a day of that calendar's first close is what produces this."
     )
     book.wire.calls.clear()
 
