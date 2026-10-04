@@ -125,8 +125,8 @@ defect that several reviews found is listed once.
 
 Where a finding went:
 
-- **E5.1-11** (#274, merged as TODO-SHA), heavy ⚠: the roster fixes.
-- **E5.1-12** (#273, merged as TODO-SHA), heavy: comments in heavy-lane files,
+- **E5.1-11** (#274, merged as 7c82662), heavy ⚠: the roster fixes.
+- **E5.1-12** (#273, merged as e62c081), heavy: comments in heavy-lane files,
   and new invariant tests.
 - **E5.1-13** (#272, merged as 7bea76f), light.
 - **This branch,** by commit.
@@ -172,7 +172,8 @@ Where a finding went:
   input, so this was reachable only by a row written past it. **Fixed in
   E5.1-12:** a new view version with an explicit whitespace class. The PR's own
   `privacy-authz` review found that `[:space:]` depends on the database's
-  character type, so the class lists the whitespace characters explicitly.
+  character type, so v003 (revision ad9da2d96664) lists by code point exactly the characters
+  Python's `strip` removes, and v002 stays as it was pushed (ADR 0041).
 
 ### LOW, fixed
 
@@ -232,6 +233,10 @@ All are entries in the E6 file unless named otherwise.
 - **No total deadline on one LTI call.** It goes with the existing rehoming
   entry in `docs/tickets/e4/carried-from-e3.md`, which gains that done-when
   (c8f297d).
+- **The summary gather's copy of the blank class is not pinned to the view's**
+  (`privacy-authz` re-check on #273). The view's class is tested character by
+  character; the gather's copy only against a return to `btrim`. Owner E6:
+  "The summary gather's blank-comment class is not pinned to the view's".
 
 ### LOW, accepted
 

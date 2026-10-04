@@ -503,6 +503,18 @@ both visible under its week and in a batch, that every shown stream has at
 least the threshold of unreleased commenters, and that every batch slice has the
 threshold of authors over two or more weeks.
 
+## The summary gather's blank-comment class is not pinned to the view's
+
+From the per-PR re-check of E5.1-12 (#273, LOW). `reporting.py`'s summary
+gather carries its own copy of the blank-comment class that
+`report_comment_v003.sql` uses. The view's class is tested character by
+character under two collations; the gather's copy is tested only against a
+return to the one-argument `btrim`. A change that made the gather's copy
+collation-dependent again would pass every test. **Owner:** E6, which reopens
+the summary path with moderation. **Done when:** a test asserts the gather's
+pattern equals the v003 view's literal, or the gather reads blankness from the
+view instead of carrying a copy.
+
 ## The roster reads full role URIs only
 
 From the per-PR security review of E5.1-11 (#274). Both the student rule and the
