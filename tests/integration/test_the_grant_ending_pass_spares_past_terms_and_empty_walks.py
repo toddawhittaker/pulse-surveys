@@ -9,6 +9,11 @@ past-term section and she loses her past reports. `end_date` is the section's
 inclusive last day (ADR 0020): on it the pass still runs; after it, it does
 nothing.
 
+The same boundary governs writing a teaching grant (review ruling on PR #274):
+after the section's last day the sync neither writes nor ends one, and on
+`end_date` itself it still writes. Otherwise a person first listed as Instructor
+after the section ended would get a grant that no later walk could end.
+
 Criterion 3: "A complete walk that read zero members leaves every grant and
 every open enrollment in place; a walk that read one member still ends the
 others' grants (control)." An empty answer from a platform is treated as an
@@ -49,6 +54,7 @@ from fixtures.clock import DEVELOPMENT, ENVIRONMENT_VARIABLE
 from fixtures.report_api import INSTRUCTOR_ROLE
 from fixtures.roster_sync import (
     ENDED_ON_COLUMN,
+    INSTRUCTOR_ROLE_URN,
     LEARNER_ROLE_URN,
     institution_today,
     roster_member,
@@ -389,6 +395,198 @@ def test_a_complete_walk_on_the_sections_last_day_still_ends_the_dropped_instruc
         f"A complete walk on {today}, the section's own last day, left the grant of the instructor "
         "it no longer lists. The pass is skipped only after `end_date`; on it, a removed "
         "instructor still loses the section (E5.1-11, E5.1-02 criterion 1)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The review ruling — after the section's last day, no teaching grant is written
+# either (boundary pair).
+# ---------------------------------------------------------------------------
+
+
+def walk_that_lists_a_new_instructor(
+    *,
+    days_after_end: int,
+    committed_clock_overrides: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    clock_service: Any,
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    committed_rows: Any,
+    metadata_tables: dict[str, Any],
+    roster_rows: Any,
+    application_session: Any,
+    web_identity: Any,
+    a_subject: Any,
+) -> tuple[Any, dict[Any, Any], Any]:
+    """Set `end_date` `days_after_end` days before today, then walk listing a new Instructor.
+
+    The new member has a `person` linked to her `user` row at this registration,
+    because the sync writes a teaching grant only where the member resolves to a
+    person (D5). She holds no grant and no enrollment on the section before the
+    walk, so she has never been on its roster. The walk also lists one Learner, so
+    the zero-member rule cannot be what decides the outcome.
+
+    Answers her person id, the section's grants after the walk, and the day the
+    walk ran on. Shared by both halves of the pair, so they differ in one number.
+    """
+    today = pin_the_clock(committed_clock_overrides, monkeypatch, clock_service, committed_rows)
+    set_section_end_date(
+        committed_rows, metadata_tables, synced_section.id, today - days_after_end * ONE_DAY
+    )
+    term_end = term_end_date_of(committed_rows, metadata_tables, synced_section.id)
+    assert term_end < today - ONE_DAY, (
+        f"The section's term ends on {term_end}, which is not before the day before the walk "
+        f"({today - ONE_DAY}). Its term has to have ended on both sides of this pair, so that a "
+        "rule reading the term's `end_date` instead of the section's writes nothing on either "
+        "side and the `end_date`-day half catches it."
+    )
+
+    subject = a_subject("late-listed-instructor")
+    person_id = web_identity.person()
+    user_id = web_identity.user(
+        platform_id=platform_of(synced_section, metadata_tables), subject=subject
+    )
+    web_identity.link_person_to_user(person_id=person_id, user_id=user_id)
+    assert person_id not in instructor_grants(committed_rows, synced_section.id).values(), (
+        "The new instructor already holds a grant on the section before the walk, so nothing "
+        "below is about what the walk writes."
+    )
+    assert not roster_rows.enrollments_for(subject), (
+        "The new instructor already has an enrollment on the section before the walk, so she is "
+        "not a member the roster lists for the first time."
+    )
+    reads_before = set(roster_reads(roster_rows, synced_section))
+
+    walk_a_synced_section(
+        roster_sync,
+        synced_section,
+        service_wire,
+        application_session,
+        [
+            roster_member(subject, roles=[INSTRUCTOR_ROLE_URN]),
+            roster_member(a_subject("late-walk-learner"), roles=[LEARNER_ROLE_URN]),
+        ],
+    )
+
+    after_walk = the_clocks_day(clock_service, committed_rows)
+    if after_walk != today:
+        pytest.fail(
+            f"The clock's day moved from {today} to {after_walk} while the walk ran, so this case "
+            "did not run on the day it set up. Re-run it; this is a harness condition, not a "
+            "result."
+        )
+    this_walk = {
+        call: code
+        for call, code in roster_reads(roster_rows, synced_section).items()
+        if call not in reads_before
+    }
+    assert any(code is not None and 200 <= code < 300 for code in this_walk.values()), (
+        f"The walk left no successful `nrps_call` row reading the section's roster ({this_walk}), "
+        "so it never completed a read and the grant's absence or presence below says nothing "
+        "about the end date. This is the control; a red here means the test is broken."
+    )
+    return person_id, instructor_grants(committed_rows, synced_section.id), today
+
+
+def test_a_complete_walk_the_day_after_the_section_ends_writes_no_grant_for_a_new_instructor(
+    committed_clock_overrides: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    clock_service: Any,
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    committed_rows: Any,
+    metadata_tables: dict[str, Any],
+    roster_rows: Any,
+    application_session: Any,
+    web_identity: Any,
+    a_subject: Any,
+) -> None:
+    """The ruling, the after side: today = `end_date` + 1, and no grant is written.
+
+    **The mutation this kills:** removing the end-date gate on
+    `_record_the_teaching_instructor`, so the sync writes a grant for a member it
+    first sees as Instructor after the section ended. The grant-ending pass is
+    gated on the same day, so no later walk could ever end that grant. Red at the
+    PR's head before the fix, which gates only the ending pass.
+
+    **Its pair** is the next test: the same walk on `end_date` writes the grant,
+    so a sync that never writes one cannot pass both.
+
+    `committed_clock_overrides` is first in the signature so its teardown runs
+    after the sync's own connections close.
+    """
+    person_id, after, today = walk_that_lists_a_new_instructor(
+        days_after_end=1,
+        committed_clock_overrides=committed_clock_overrides,
+        monkeypatch=monkeypatch,
+        clock_service=clock_service,
+        roster_sync=roster_sync,
+        synced_section=synced_section,
+        service_wire=service_wire,
+        committed_rows=committed_rows,
+        metadata_tables=metadata_tables,
+        roster_rows=roster_rows,
+        application_session=application_session,
+        web_identity=web_identity,
+        a_subject=a_subject,
+    )
+    written = [assignment for assignment, holder in after.items() if holder == person_id]
+    assert not written, (
+        f"A complete walk on {today}, the day after the section's last day ({today - ONE_DAY}), "
+        f"wrote teaching grant(s) {written} for a member it listed as Instructor for the first "
+        "time. After the section's last day the sync neither writes nor ends a teaching grant; "
+        "a grant written now could never be ended by a later walk."
+    )
+
+
+def test_a_complete_walk_on_the_sections_last_day_still_writes_the_grant_for_a_new_instructor(
+    committed_clock_overrides: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    clock_service: Any,
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    committed_rows: Any,
+    metadata_tables: dict[str, Any],
+    roster_rows: Any,
+    application_session: Any,
+    web_identity: Any,
+    a_subject: Any,
+) -> None:
+    """The ruling, the on side: today = `end_date`, and the grant is written.
+
+    `end_date` is the section's last day, inclusive (ADR 0020), so on it the sync
+    still writes.
+
+    **The mutation this kills:** `>` turned to `>=` on the end-date gate of
+    `_record_the_teaching_instructor`, which would refuse a real instructor her
+    section on its last day. Also a gate reading the term's `end_date` (the term
+    ended before this walk, asserted in the shared builder) and a sync that never
+    writes a grant. Green at the PR's head and after the fix.
+    """
+    person_id, after, today = walk_that_lists_a_new_instructor(
+        days_after_end=0,
+        committed_clock_overrides=committed_clock_overrides,
+        monkeypatch=monkeypatch,
+        clock_service=clock_service,
+        roster_sync=roster_sync,
+        synced_section=synced_section,
+        service_wire=service_wire,
+        committed_rows=committed_rows,
+        metadata_tables=metadata_tables,
+        roster_rows=roster_rows,
+        application_session=application_session,
+        web_identity=web_identity,
+        a_subject=a_subject,
+    )
+    written = [assignment for assignment, holder in after.items() if holder == person_id]
+    assert len(written) == 1, (
+        f"A complete walk on {today}, the section's own last day, wrote {len(written)} teaching "
+        f"grant(s) ({written}) for the member it listed as Instructor; it should write exactly "
+        "one. The sync stops writing grants only after `end_date`."
     )
 
 
