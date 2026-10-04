@@ -85,7 +85,7 @@ View behavior:
 
 ### 3.1 Survey window
 
-- Default rhythm (institution configuration): **opens Friday 18:00, closes Sunday 23:59:59, reports available after window close Monday morning** in the institution timezone (default `America/New_York`).
+- Default rhythm (institution configuration): **opens Friday 18:00, closes Sunday 23:59:59, reports available at 06:00 on the Monday after the window closes** in the institution timezone (default `America/New_York`).
 - A section's active weeks derive from its section code and the term calendar (§2.2).
 - Students see exactly one open survey at a time per section. Missed weeks cannot be back-filled (this keeps the signal weekly and the grading unambiguous).
 

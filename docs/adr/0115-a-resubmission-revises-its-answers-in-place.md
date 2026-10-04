@@ -43,6 +43,11 @@ submitted, rather than replacing the set.**
   (`submit.comment_already_judged`, HTTP 409), rather than left to surface as a
   constraint error under a student.
 
+  **Amended 2026-10-03 (E5.1-05):** the status is now **422**, with the same
+  body. The client reads every 409 as "this week has closed" and takes the form
+  away, so the 409 told a student whose window was still open that it had shut.
+  A 422 keeps the form and shows the sentence above it.
+
 `classification.answer_id` keeps `ON DELETE RESTRICT`. The verdicts of a revised
 comment accumulate, which is what `classification` being append-only already means
 (ADR 0055: "re-runs create new rows"), and `response.is_valid` is computed from the
