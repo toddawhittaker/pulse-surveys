@@ -37,22 +37,42 @@ CONTROL_WEEK = 8
 # stores a blank optional comment as no row at all.
 ONLY_WHITESPACE = "   \t\n  \n "
 
+# What Python's `str.strip()` removes but PostgreSQL's `[:space:]` keeps under
+# `en_US.utf8` (docs/disputes/E5.1-12-01.md): U+001C to U+001F, the next-line
+# character, the no-break space, the figure space and the narrow no-break space.
+ONLY_PYTHON_WHITESPACE = "\u001c\u001d\u001e\u001f\u0085\u00a0\u2007\u202f"
+
 A_LABEL = "the lab instructions changed between the handout and the session"
 
 
-def plant(world: CommentWorld, *, term_week: int, real: int, blank: int, stream: str) -> None:
-    """`real` students with a real comment and `blank` with whitespace only, in one stream."""
+def plant(
+    world: CommentWorld,
+    *,
+    term_week: int,
+    real: int,
+    blank: int,
+    stream: str,
+    blank_text: str = ONLY_WHITESPACE,
+) -> None:
+    """`real` students with a real comment and `blank` with `blank_text` only, in one stream."""
     world.close_week(term_week)
     for index in range(real):
         world.submit(
             term_week=term_week, comments={stream: f"{A_LABEL} (week {term_week}, {index + 1})"}
         )
     for _ in range(blank):
-        world.submit(term_week=term_week, comments={stream: ONLY_WHITESPACE})
+        world.submit(term_week=term_week, comments={stream: blank_text})
 
 
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param(ONLY_WHITESPACE, id="ascii-whitespace"),
+        pytest.param(ONLY_PYTHON_WHITESPACE, id="python-strip-only-characters"),
+    ],
+)
 def test_four_real_commenters_and_one_whitespace_answer_leave_the_stream_suppressed(
-    comment_world: CommentWorld, comment_contract: Any
+    comment_world: CommentWorld, comment_contract: Any, answer: str
 ) -> None:
     """Threshold minus one real commenters plus one whitespace-only answer: suppressed, nothing shown.
 
@@ -76,6 +96,16 @@ def test_four_real_commenters_and_one_whitespace_answer_leave_the_stream_suppres
     four real comments (and the blank one) come back. **The near miss that stays
     green:** the same predicate written as `comment_text ~ '\\S'`, which excludes
     the same row.
+
+    **Two blank answers, two mutations.** The ASCII case (spaces, a tab, line
+    breaks) kills "the one-argument `btrim`" put back into the view; it is green
+    at the current head. The second case is made only of the characters Python's
+    `str.strip()` removes and PostgreSQL's `[:space:]` keeps (U+001C to U+001F,
+    U+0085, U+00A0, U+2007, U+202F); it kills "v002's character class reverts to
+    `[^[:space:]]`", and is expected RED at the current head because v002 does not
+    yet cover those characters. Each planted answer is first required to satisfy
+    `answer.strip() == ""`, so the test proves the write path would have treated
+    it as blank.
     """
     contract = comment_contract
     world = comment_world
@@ -83,7 +113,11 @@ def test_four_real_commenters_and_one_whitespace_answer_leave_the_stream_suppres
     assert threshold >= 2, f"The configured n-threshold is {threshold}; nothing is below it."
     stream = contract.instructor_stream
     world.build()
-    plant(world, term_week=THIN_WEEK, real=threshold - 1, blank=1, stream=stream)
+    assert answer.strip() == "", (
+        "The planted answer must be blank to the write path's `str.strip()`, or this test "
+        "plants a comment the write path would have kept."
+    )
+    plant(world, term_week=THIN_WEEK, real=threshold - 1, blank=1, stream=stream, blank_text=answer)
     plant(world, term_week=CONTROL_WEEK, real=threshold, blank=0, stream=stream)
 
     raw_thin = world.commenters_in(term_week=THIN_WEEK, stream=stream)
