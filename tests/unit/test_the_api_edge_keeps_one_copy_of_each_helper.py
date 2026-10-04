@@ -27,10 +27,10 @@ application.
 in both directions, before it is believed about the tree (`docs/MISTAKES.md`
 entry 3). **A red in a control means these tests are broken, not the code.**
 
-**Which failure a red is, before E5.1-03 lands.** The controls are green. Every
-rule is red on an assertion: `_person_of` is defined in two routers, no
-`person_of` exists, `LTI_LOGIN_COOKIE` is still in `deps.py`, and the cookie
-helpers are defined there rather than in `auth.py`.
+**How a red reads.** Every rule is red on an assertion naming what moved back:
+`_person_of` defined in two routers, no `person_of`, `LTI_LOGIN_COOKIE` in
+`deps.py`, or the cookie helpers defined there rather than in `auth.py` — the
+shape the code had before E5.1-03.
 """
 
 from __future__ import annotations

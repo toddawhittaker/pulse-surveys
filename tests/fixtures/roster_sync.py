@@ -1754,8 +1754,8 @@ def require_the_ended_teaching_grant_table(session: Any) -> None:
     """Fail, naming the deliverable, when `ended_teaching_grant` does not exist.
 
     Called as the first statement of a test body and never from a fixture
-    (`docs/MISTAKES.md` entry 44): before E5.1-02 lands this is a FAILED naming the
-    table, not an ERROR in somebody's setup.
+    (`docs/MISTAKES.md` entry 44): if the table is missing this is a FAILED naming
+    it, not an ERROR in somebody's setup.
     """
     from sqlalchemy import text
 

@@ -22,11 +22,10 @@ is read back from the database before anything is asserted about it.
 hidden from instructors and students alike — and the isolated pass is where a skip
 cannot hide it.
 
-**Which failure a red is, before E5.1-01 lands.** The two-stream test fails on an
-assertion: the instructor stream answers its one comment. The
-`stream_is_suppressed` test fails naming the missing function, through
-`comment_contract.is_suppressed()`, inside the test body (`docs/MISTAKES.md`
-entry 44).
+**How a red reads.** A gate counting responses fails the two-stream test on an
+assertion: the instructor stream answers its one comment. A missing
+`stream_is_suppressed` fails by name, through `comment_contract.is_suppressed()`,
+inside the test body (`docs/MISTAKES.md` entry 44).
 """
 
 from typing import Any

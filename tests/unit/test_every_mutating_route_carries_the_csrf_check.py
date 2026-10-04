@@ -1178,9 +1178,6 @@ def test_each_clock_control_is_found_carrying_the_dev_control_currency(
     the route table is not a gate that runs. That the 403 is answered at
     dispatch, in both directions, is
     `tests/integration/test_the_dev_clock_controls_refuse_a_cross_site_post.py`.
-
-    **Expected red before E5.1-03 lands:** an assertion that the path carries
-    nothing — the clock pair is registered as plain `AnyMethodRoute`s today.
     """
     application = application_in(DEVELOPMENT, monkeypatch)
     dependency = csrf_dependencies()

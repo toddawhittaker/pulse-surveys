@@ -39,11 +39,11 @@ assertion about them, which is E4-04's first known trap answered: a "week of fou
 that seeded three is a fixture bug that makes every suppression assertion in this
 epic true for the wrong reason, silently.
 
-**Which failure a red is, before E4-04 lands.** `comment_contract.visible()` is a
+**A missing service is a FAILED, not an error.** `comment_contract.visible()` is a
 `pytest.fail` naming `app.services.report_comments` and the signature the work
-order settles — a FAILED assertion, not a setup error
-(`docs/MISTAKES.md` entry 44). Before E5.1-01 lands, the commenter pair's hidden
-halves fail on an assertion: a read counting responses shows the thin stream.
+order settles (`docs/MISTAKES.md` entry 44). The commenter pair's hidden halves
+are what a read counting responses rather than commenters would fail: it shows
+the thin stream.
 """
 
 from collections.abc import Callable

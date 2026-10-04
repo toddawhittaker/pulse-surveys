@@ -27,14 +27,12 @@ second taught section the walk never touches, so her section list is never empty
 for an unrelated reason, and the section the walk drops answers 200 before the
 walk and the not-found body after it.
 
-**Which failure a red is, before E5.1-02 lands.** Nothing here imports a
-deliverable at module level. The criterion 1 tests go red on an assertion — the
-section is still listed, the report still answers 200, the grant row is still
-there. The tests that read the ended record call
-`require_the_ended_teaching_grant_table` first, so its absence is a FAILED naming
-the table (`docs/MISTAKES.md` entry 44). Criterion 2's tests are green today —
-nothing ends any grant yet — and exist to kill the mutation that ends grants on a
-walk that did not finish.
+**How a red reads.** Nothing here imports a deliverable at module level. A
+criterion 1 red is an assertion — the section still listed, the report still
+answering 200, the grant row still there. The tests that read the ended record
+call `require_the_ended_teaching_grant_table` first, so its absence is a FAILED
+naming the table (`docs/MISTAKES.md` entry 44). Criterion 2's tests exist to kill
+the mutation that ends grants on a walk that did not finish.
 
 **Every walk here runs on a day the walked section has not ended.** E5.1-11
 settles that no teaching grant is ended once a section has ended (`today >

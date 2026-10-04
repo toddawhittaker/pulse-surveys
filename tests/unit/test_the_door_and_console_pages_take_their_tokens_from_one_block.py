@@ -36,10 +36,9 @@ planted wrong value while leaving a correctly spelled one alone. The samples
 are written here. **A red in a control means these tests are broken, not the
 code.**
 
-**Which failure a red is, before E5.1-03 lands.** The controls are green. Every
-rule is red on a `pytest.fail` naming `app.api.deps.DESIGN_TOKENS_CSS` as a
-symbol that module does not expose — a plain call in each test body, never a
-fixture (`docs/MISTAKES.md` entry 44).
+**A missing token block is a FAILED, not an error.** Every rule fails by name if
+`app.api.deps.DESIGN_TOKENS_CSS` is gone — a plain call in each test body, never
+a fixture (`docs/MISTAKES.md` entry 44).
 
 **Not marked `invariant`.** This is a design-system rule, not a SPEC §4.1 one,
 for the reason the focus-ring module gives about itself.

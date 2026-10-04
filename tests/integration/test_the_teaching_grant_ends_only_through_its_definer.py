@@ -37,12 +37,12 @@ instructor(assignment_id uuid, nrps_call_id uuid, ended_on date)`, owned by the
 NOLOGIN role `pulse_grant_end_definer`, refusing with SQLSTATE 42501; and the
 table's six named columns. Nothing here discovers either.
 
-**Which failure a red is, before E5.1-02 lands.** Each test calls
-`require_the_grant_ending_definer` or `require_the_ended_teaching_grant_table`
-as its first statement, so a missing deliverable is a FAILED naming it, never an
-ERROR at setup (`docs/MISTAKES.md` entry 44). The one test that is green today —
-`pulse_app` holds no `DELETE` on `role_assignment` — is the "still" in the
-criterion, and it goes red if the ending is built on a grant instead.
+**How a red reads.** Each test calls `require_the_grant_ending_definer` or
+`require_the_ended_teaching_grant_table` as its first statement, so a missing
+deliverable is a FAILED naming it, never an ERROR at setup (`docs/MISTAKES.md`
+entry 44). The test that `pulse_app` holds no `DELETE` on `role_assignment` is
+the "still" in the criterion, and it goes red if the ending is built on a grant
+instead.
 """
 
 from datetime import UTC, date, datetime

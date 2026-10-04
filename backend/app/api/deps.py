@@ -14,7 +14,11 @@ Today that is four things:
   development console.
 
 §13 names this module for "auth context, role scoping, n-threshold guards"; the
-first two of those are here, and the third arrives with the screens that need it.
+first two of those are here. The n-threshold guards are not: SPEC §4's comment
+threshold is decided in `app.services.report_comments` (`stream_is_suppressed`
+and `visible_comments`, ADR 0182), and the comparison-set minimums in
+`app.services.reporting`. A guard held in `services/` holds for every entry
+point that reads through it, where one held here would hold for HTTP alone.
 
 **The web door's login cookie is not here.** It lived here while both doors used
 it. E1-08 moved the launch door's handshake into a server-side store (ADR 0089),

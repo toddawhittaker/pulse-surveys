@@ -42,9 +42,9 @@ planted offender written in each currency while leaving the near misses alone
 (entry 3). Every sample is written in this module. **A red in a control means
 these tests are broken, not the code.**
 
-**Which failure a red is, before E5.1-03 lands.** The controls are green on
-today's tree. The rule is red on an assertion naming `app/api/dev.py` and the
-lines where it imports and uses `ClockOverride`.
+**How a red reads.** The rule is red on an assertion naming the module and the
+lines where it imports and uses `ClockOverride` — `app/api/dev.py`, before
+E5.1-03 moved those writes into the clock service.
 """
 
 from __future__ import annotations

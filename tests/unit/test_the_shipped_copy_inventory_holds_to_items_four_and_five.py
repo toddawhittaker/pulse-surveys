@@ -2639,7 +2639,7 @@ def test_a_forbidden_word_planted_in_an_entry_sentence_turns_the_item_four_sweep
     inventory reads, which leaves the plant with nothing to plant into; and a
     governance or collection change that drops the prefix from what the rule
     sweeps. **A red here means the entry pages' sentences are not swept, or the
-    plant found no entry to go into, which is the state before E5.1-03.**
+    plant found no entry to go into, which was the state before E5.1-03.**
     """
     inventory = collect_shipped_copy()
     target = next((string for string in inventory if string.key == ENTRY_REFUSED_HEADING_KEY), None)
