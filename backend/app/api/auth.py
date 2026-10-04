@@ -216,10 +216,11 @@ COOKIE_ALGORITHM = "HS256"
 def with_query(url: str, parameters: Mapping[str, str]) -> str:
     """`url` carrying `parameters`, keeping any query it already had.
 
-    Here rather than in either router because both doors build exactly one
-    redirect this way — the launch door's authorization request and the web
-    door's — and two copies of "how a redirect is assembled" is the shape
-    `docs/MISTAKES.md` entry 13 is about.
+    One caller: the web door's authorization request, `/auth/oidc/login` below.
+    The launch door's authorization redirect is built by `pylti1p3`'s
+    `OIDCLogin` (`app.lti.launch.begin_a_launch`) and does not come through
+    here. The grade passback client has its own `_with_query` in `app.lti.ags`
+    for the addresses it reads.
 
     A configured endpoint may legitimately carry a query of its own: a tenant
     identifier, a routing hint. An implementation that appended `?` would

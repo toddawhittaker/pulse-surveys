@@ -111,7 +111,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Close the door, drop the record, empty the owner and keep it."""
+    """Close the door, drop the record, empty the owner and keep it.
+
+    Dropping `ended_teaching_grant` discards every ended-grant record, and the
+    `INSTRUCTOR` rows the function deleted are not restored.
+    """
     op.execute("DROP FUNCTION IF EXISTS public.end_teaching_instructor(uuid, uuid, date)")
     for column in ("nrps_call_id", "person_id", "section_id"):
         op.drop_index(op.f(f"ix_ended_teaching_grant_{column}"), table_name=ENDED_TABLE)
