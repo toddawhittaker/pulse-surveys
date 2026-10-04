@@ -173,9 +173,10 @@ test('the seeded section opens and closes as the development clock crosses its w
     expect(
       closed,
       `With the clock at ${THE_MONDAY_AFTER} — Monday morning, after the window closed — the ` +
-        `console says ${JSON.stringify(closed)}. §3.1 puts the report after the close, so a ` +
-        'section still showing an open window on Monday is a week that can still change under a ' +
-        'report that has already been generated. This is also the half that makes the two ' +
+        `console says ${JSON.stringify(closed)}. The Monday summary job runs in the early ` +
+        'morning and §3.1 opens the report at 06:00, so a section still showing an open window ' +
+        'on Monday is a week that can still change under the summary and the report built from ' +
+        'it. This is also the half that makes the two ' +
         'readings above mean something: a cell that said "open until …" whatever the clock was ' +
         'would pass both of them.',
     ).toBe(CLOSED_TEXT);

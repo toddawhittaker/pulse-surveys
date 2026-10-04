@@ -86,16 +86,15 @@ from fixtures.grading import RESPONSE_SECTION_COLUMN, RESPONSE_WEEK_COLUMN
 from fixtures.report_api import (
     BENCHMARK_MIN_RESPONDENTS,
     BENCHMARK_MIN_SECTIONS,
-    EITHER_SIDE_OF_A_CLOSE,
     INSTRUCTOR_ROLE,
     PAYLOAD_STREAM_KEY,
     PUBLISHED_WEEKS_FIELD,
     STREAMS_MEMBER,
     TAUGHT_COHORT,
-    TERM_WEEK_OF_COURSE_WEEK,
     WEEK_MEMBER,
     ReportDoor,
     member,
+    once_the_report_has_opened,
 )
 from fixtures.report_views import FIRST_VERSION
 from fixtures.submit import (
@@ -119,7 +118,6 @@ from fixtures.survey_windows import (
     WINDOW_CLOSES_COLUMN,
     WINDOW_SECTION_COLUMN,
     WINDOW_WEEK_COLUMN,
-    WINDOWS_BY_TERM_WEEK,
 )
 
 # ---------------------------------------------------------------------------
@@ -860,19 +858,19 @@ def hero_workload_hours(world: BenchmarkWorld, door: ReportDoor, course_week: in
 
 
 def after_the_close_of(course_week: int) -> datetime:
-    """An instant safely after one of the hero's course weeks has closed, and before the next.
+    """An instant safely after one of the hero's course weeks has published, and before the next.
 
     The hero's windows carry SPEC §3.1's own Fall 2026 instants
-    (`tests/fixtures/survey_windows.py`), and a *published* week is one whose
-    window has closed — E4-07's breakdown decision 6 — so where the clock stands
-    decides how much of the hero's own term exists. Six hours past the close,
-    which is `tests/fixtures/report_api.py`'s own distance from an edge and for
-    its reason: ADR 0109's effective instant keeps moving while it is read, so a
-    value placed a second from an edge is a boundary nothing can stand on.
+    (`tests/fixtures/survey_windows.py`), and where the clock stands decides how
+    much of the hero's own term exists. **A week publishes at 06:00 on the first
+    Monday after its close, in the institution's zone** (E5.1-05) — not at the
+    close, as E4-07's breakdown decision 6 first had it. This used to answer six
+    hours past the close, which for a Sunday 23:59:59 close is Monday 05:59:59:
+    the one instant E5.1-05 says the week is *not* published. So it answers
+    `tests/fixtures/report_api.py`'s hand-written opening plus an hour now, and
+    the premise check over that table runs first.
     """
-    term_week = TERM_WEEK_OF_COURSE_WEEK[course_week]
-    _opens_at, closes_at = WINDOWS_BY_TERM_WEEK[term_week]
-    return closes_at + EITHER_SIDE_OF_A_CLOSE
+    return once_the_report_has_opened(course_week)
 
 
 def published_course_weeks(body: Any, answered: Any = None) -> list[int]:

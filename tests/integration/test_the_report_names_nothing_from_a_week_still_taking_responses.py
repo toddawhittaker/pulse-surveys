@@ -22,10 +22,13 @@ report, and an open week hands it over through the report's own front door.
 
 **The ruled behaviour:** the report route refuses a course week that is not in the
 published set, with exactly the refusal it already gives a week the section does
-not run — same status, same body, no oracle. "Published" is E4's breakdown
-decision 6's, unchanged: a course week whose survey window has closed, per the
-clock service. Nothing is stored to make a week published, so this is a comparison
-against the clock and the pair below is driven by moving it.
+not run — same status, same body, no oracle. "Published" was E4's breakdown
+decision 6's — a course week whose survey window has closed, per the clock
+service — and E5.1-05 moved it later: a week's report opens at 06:00 on the first
+Monday after its close, in the institution's zone (SPEC §3.1). A week still taking
+responses is unpublished under both rules, which is this module's subject.
+Nothing is stored to make a week published, so this is a comparison against the
+clock and the pair below is driven by moving it.
 
 **The pair is the unit, and the control sits inside the refusing half.** A route
 that refused every week satisfies the first half; one that refused none satisfies
@@ -40,11 +43,12 @@ pass and satisfies
 **The instants are transcribed, not imported from a sibling test module.** A test
 module importing its sibling resolves only because of where pytest puts `tests/`
 on `sys.path` (`tests/fixtures/report_comments.py` says the same about
-`test_report_schema.py`), so the two constants this shares with
-`test_the_published_week_list_holds_only_the_closed_weeks.py` are spelled in both
+`test_report_schema.py`), so the constant this shares with
+`test_the_published_week_list_holds_only_the_closed_weeks.py` is spelled in both
 and each says so. What is shared for real — the calendar itself — comes from
 `tests/fixtures/survey_windows.py`, which is where SPEC §3.1's Fall 2026 instants
-are written out by hand.
+are written out by hand, and the instant each week's report opens comes from
+`tests/fixtures/report_api.py`, which writes those out by hand too.
 """
 
 from typing import Any
@@ -54,6 +58,7 @@ from fixtures.report_api import (
     EITHER_SIDE_OF_A_CLOSE,
     TERM_WEEK_OF_COURSE_WEEK,
     ReportDoor,
+    once_the_report_has_opened,
 )
 from fixtures.survey_windows import WINDOWS_BY_TERM_WEEK
 
@@ -83,15 +88,25 @@ OPEN_WINDOW_OPENS_AT, OPEN_WINDOW_CLOSES_AT = WINDOWS_BY_TERM_WEEK[
     TERM_WEEK_OF_COURSE_WEEK[OPEN_COURSE_WEEK]
 ]
 
-# Six hours either side of that close, the same offset the published-week
-# boundary pair uses and for the same reason: ADR 0109 makes the effective instant
-# `real + (pretend_now - anchored_at)`, so it keeps moving while it is read and a
-# value placed a second from an edge is a boundary nothing can stand on. Six hours
-# before this close is inside the window — asserted, not assumed, in
+# Six hours before that close, for the reason the published-week boundary pair
+# gives: ADR 0109 makes the effective instant `real + (pretend_now -
+# anchored_at)`, so it keeps moving while it is read and a value placed a second
+# from an edge is a boundary nothing can stand on. Six hours before this close is
+# inside the window — asserted, not assumed, in
 # `assert_the_clock_is_inside_the_window` below — which is what makes this module
 # about an **open** week rather than one that has not begun.
 WHILE_THE_WINDOW_IS_OPEN = OPEN_WINDOW_CLOSES_AT - EITHER_SIDE_OF_A_CLOSE
-ONCE_THE_WINDOW_HAS_CLOSED = OPEN_WINDOW_CLOSES_AT + EITHER_SIDE_OF_A_CLOSE
+
+# **The served half stands after the week's report opens, not six hours after the
+# close.** It used to be the close plus six hours, which is Monday 05:59:59 in the
+# institution's zone — and E5.1-05 opens a week's report at 06:00 on the Monday
+# after its close (SPEC §3.1), so that instant is now one where the week is
+# refused. The served half calls `once_the_report_has_opened` in its own body (the
+# hand-written opening in `tests/fixtures/report_api.py`, plus an hour), so the
+# premise check over that table fails as a test rather than at collection
+# (`docs/MISTAKES.md` entry 44). The hour itself is the subject of
+# `test_a_weeks_report_opens_at_six_on_the_monday_after_its_close.py`, not of this
+# module.
 
 
 def assert_the_clock_is_inside_the_window() -> None:
@@ -153,7 +168,7 @@ def test_a_course_week_whose_window_is_still_open_is_refused(
     )
 
 
-def test_the_same_course_week_is_served_once_its_window_has_closed(
+def test_the_same_course_week_is_served_once_its_report_has_opened(
     report_door: ReportDoor, report_api_contract: Any
 ) -> None:
     """The other half: the refusal is about the clock and not about the week.
@@ -167,15 +182,22 @@ def test_the_same_course_week_is_served_once_its_window_has_closed(
     `opens_at`, or that refused any week carrying an unreleased comment, would
     leave the first half of this pair green and this half red — which is why
     neither half is worth reading alone.
+
+    **Where the clock stands changed in E5.1-05.** This half used to read six
+    hours after the close, which is Monday 05:59:59 in the institution's zone and
+    is now an instant where the week is refused: its report opens at 06:00 that
+    Monday. It reads an hour after that opening instead. Nothing else moved.
     """
-    report_door.pretend(ONCE_THE_WINDOW_HAS_CLOSED)
+    once_opened = once_the_report_has_opened(OPEN_COURSE_WEEK)
+    report_door.pretend(once_opened)
 
     answered = report_door.report(course_week=OPEN_COURSE_WEEK)
     assert answered.status_code == 200, (
-        f"Course week {OPEN_COURSE_WEEK} answered {answered.status_code} six hours after its window "
-        f"closed at {OPEN_WINDOW_CLOSES_AT.isoformat()}. Its response count is final and E4's "
-        "breakdown decision 6 makes it published; the whole report exists to be read then. Body "
-        f"begins {answered.text[:400]!r}."
+        f"Course week {OPEN_COURSE_WEEK} answered {answered.status_code} with the clock at "
+        f"{once_opened.isoformat()}, an hour after its report opened — its window closed at "
+        f"{OPEN_WINDOW_CLOSES_AT.isoformat()} and SPEC §3.1 (E5.1-05) opens the report at 06:00 "
+        "on the Monday after. Its response count is final and the whole report exists to be read "
+        f"then. Body begins {answered.text[:400]!r}."
     )
     body = answered.json()
     published = report_api_contract.member(
