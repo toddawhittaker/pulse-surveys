@@ -64,9 +64,9 @@ export const INSTRUCTOR_REPORT_PAGE_COPY = {
   // A section before its first Monday. `docs/DESIGN_BRIEF.md`'s tone rules apply
   // to it as much as to data: this is most instructors' first sight of the
   // product, so it states the rhythm and asks for nothing.
-  'instructor_report_page.no_published_weeks_title': 'No weeks have closed yet',
+  'instructor_report_page.no_published_weeks_title': 'No reports have opened yet',
   'instructor_report_page.no_published_weeks_body':
-    'Reports arrive here on Monday, once a survey window has closed. Nothing is needed from you before then.',
+    'Each week’s report opens here at 06:00 on the Monday after its survey window closes. Nothing is needed from you before then.',
 
   // A person the teaching grants name no sections for — a new instructor on the
   // day she is hired, or one between terms. Ordinary, and said as such.
