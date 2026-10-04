@@ -318,6 +318,10 @@ now the worked example of exactly this promotion done under review.)
 **Done when:** one function composes the label, both the student read path and the
 report read call it, and no second copy of the format is left under `backend/app/`.
 
+**Closed by E5.1-07 (#267, merged as b1f2ab9, 2026-10-03).** One composer,
+`app.services.section_codes.course_label`, serves every caller, and the copies
+are deleted.
+
 ## E4-07's two keyed routes state `Cache-Control: no-store` and nothing asserts it
 
 **What is not enforced.** `app.api.instructor`'s report route and published-week

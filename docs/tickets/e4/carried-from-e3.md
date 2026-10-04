@@ -131,7 +131,7 @@ machinery; the shape to copy is the AGS client's bounded transport
 (commit 83a18d3). **Done when:** the token dial carries bounded socket
 timeouts, measured against a stalling endpoint the way the AGS fix was.
 
-**Closed by E5.1-02 (2026-10-03).** Every request the sync makes that names no
+**Closed by E5.1-02 (#264, merged as 4d106d1, 2026-10-03).** Every request the sync makes that names no
 timeout, the token grant included, runs under
 `roster_sync.ROSTER_REQUEST_TIMEOUT`, the AGS client's `(3.05, 10.0)`, applied in
 the sync's pinned adapter. It is measured against a loopback endpoint that
@@ -295,6 +295,11 @@ deleted the CSRF ledger's only worked example.
 **Owner:** a candidate ticket for whichever epic next touches the dev-clock
 routes. **Done when:** both routes carry the check and the ledger's
 both-direction assertions are re-proven on what remains.
+
+**Closed by E5.1-03 (#262, merged as 43e97e5, 2026-10-03).** `/dev/clock` and
+`/dev/clock/clear` are `DevControlRoute`s. They answer 403 to a cross-origin
+POST and still work from the same origin, driven over HTTP in both directions
+(`tests/integration/test_the_dev_clock_controls_refuse_a_cross_site_post.py`).
 
 ## The signing-key supply path has no runbook
 

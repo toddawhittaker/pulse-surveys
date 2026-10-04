@@ -108,6 +108,10 @@ proposal, and `app/services/enrollment_windows.py` (ADR 0161) is now the
 worked example of exactly that promotion done under review.
 **Done when:** unchanged.
 
+**Closed by E5.1-07 (#267, merged as b1f2ab9, 2026-10-03).** One composer,
+`app.services.section_codes.course_label`, serves every caller, and the copies
+are deleted.
+
 ## The landing views' sentences sit outside the inventory (`../e4/deferred.md`)
 
 Unchanged; owner: the next epic to touch the landings — E9 first candidate.
