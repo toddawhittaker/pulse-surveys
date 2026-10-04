@@ -29,6 +29,11 @@ updates:
         update-types: [version-update:semver-major]
       - dependency-name: sqlalchemy
         update-types: [version-update:semver-major]
+      # SQLAlchemy 2.1 retypes result rows and deprecates Result.tuples(), which
+      # reds mypy and the suite (#255). The move is its own ticket, #277; the PR
+      # that lands it removes this entry in the same change.
+      - dependency-name: sqlalchemy
+        versions: ['>=2.1']
       - dependency-name: alembic
         update-types: [version-update:semver-major]
       # pydantic pins its compiled core to an exact version, so pydantic-core
