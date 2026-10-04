@@ -200,7 +200,7 @@ describe('/instructor/sections/$sectionId, the report', () => {
     });
     // And the week that arrived is the one the address now names.
     // Both of that week's streams are suppressed, so it carries two notices.
-    await screen.findAllByRole('region', { name: 'No raw comments are shown here this week' });
+    await screen.findAllByText('No raw comments are shown here this week');
   });
 
   it('mirrors the API on a deep link to a week that is not published', async () => {

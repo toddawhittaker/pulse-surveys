@@ -21,6 +21,9 @@ SERVICES = Path(__file__).resolve().parents[2] / "backend" / "app" / "services"
 ONE_HOME = [
     ("Enrollment.started_on <=", "enrollment_windows.py", ()),
     ("section_scoped_assignees(", "enrollment_windows.py", ("authz.py",)),
+    # The question set in force; survey_read, grading and submissions all ask
+    # `submissions.current_questions` for it.
+    ("QuestionSet.version.desc()", "submissions.py", ()),
 ]
 
 
