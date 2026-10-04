@@ -56,7 +56,7 @@ import logging
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -83,11 +83,9 @@ from app.models.survey import (
 from app.models.term import SurveyWindow, Term, Week
 from app.services import clock, enrollment_windows
 from app.services.authz import (
-    section_scoped_assignees,
     taught_section_ids,
     teaching_instructor_assigned,
 )
-from app.services.identity import person_for_user
 from app.services.report_comments import (
     ReportComment,
     n_threshold,
@@ -96,7 +94,7 @@ from app.services.report_comments import (
     stream_is_suppressed,
     visible_comments,
 )
-from app.services.section_codes import week_of_the_term
+from app.services.section_codes import course_label, course_week_of
 
 if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
     # `app.schemas.report` imports `ComparisonFigure` from this module, because
@@ -1045,9 +1043,10 @@ def taught_sections(session: Session, *, person_id: UUID | None) -> list["Taught
     random uuids only by accident, and any order derived from the assignments would
     say when each grant was written.
 
-    The label is `_course_label`, which is the report's own composer and FIX-01 item
-    2's governed form. A second composition written for this list would be a second
-    answer to what a section is called (`docs/MISTAKES.md` entry 13).
+    The label is `_course_label`'s, which hands the section's rows to
+    `app.services.section_codes.course_label`, the one composer. A second
+    composition written for this list would be a second answer to what a section is
+    called (`docs/MISTAKES.md` entry 13).
     """
     from app.schemas.report import TaughtSection
 
@@ -1097,17 +1096,6 @@ def _readable_section(session: Session, *, person_id: UUID | None, section_id: U
     return section
 
 
-def _course_week_of(term_week: int, *, section_start: date, term_start: date) -> int:
-    """The course week a term week is, for a section starting on `section_start`.
-
-    `week_of_the_term` is this codebase's one reading of §2.2's two axes; this
-    is the one place a report turns a stored term week back into a course week
-    with it. Course weeks count from 1, which is the inclusive `+ 1`.
-    """
-    first_term_week = week_of_the_term(1, section_start=section_start, term_start=term_start)
-    return term_week - first_term_week + 1
-
-
 def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
     """Every week this section has a survey window for, on both of §2.2's axes.
 
@@ -1122,7 +1110,8 @@ def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
     the section code.** `week_of_the_term` is this codebase's one reading of §2.2's
     two axes, and a second copy of it here is how a course-level page and an
     aggregate page come to disagree about the same section (`docs/MISTAKES.md`
-    entry 19). Course weeks count from 1, which is the inclusive `+ 1` below.
+    entry 19). `section_codes.course_week_of` reads it backwards, once, for every
+    report that turns a stored term week into a course week.
     """
     term = session.get(Term, section.term_id)
     if term is None:  # pragma: no cover - `section.term_id` is a non-null foreign key
@@ -1142,7 +1131,7 @@ def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
         _SectionWeek(
             week_id=week_id,
             term_week=number,
-            course_week=_course_week_of(
+            course_week=course_week_of(
                 number, section_start=section.start_date, term_start=term.start_date
             ),
             opens_at=opens_at,
@@ -1268,7 +1257,7 @@ def _population_cutoffs(
     week *w* only if its own week-*w* window closed by the earliest close.
 
     One statement over the peers' windows, with each stored term week read back
-    as a course week through `_course_week_of`.
+    as a course week through `section_codes.course_week_of`.
     """
     cutoffs = {week.course_week: week.closes_at for week in published}
     term = session.get(Term, section.term_id)
@@ -1287,7 +1276,7 @@ def _population_cutoffs(
         )
     ).all()
     for number, section_start, closes_at in windows:
-        course_week = _course_week_of(
+        course_week = course_week_of(
             number, section_start=section_start, term_start=term.start_date
         )
         if course_week in cutoffs and closes_at < cutoffs[course_week]:
@@ -1719,8 +1708,8 @@ def _enrolled_students(
     E1-11 writes an `enrollment` row for her, so without this an instructor is one
     of the people her own response rate is divided by. The test is an assignment
     scoped to this section, asked in that direction because a student holds no
-    assignment at all (ADR 0028) — `app.services.grading._live_enrollments` answers
-    the same question about today and applies the same rule.
+    assignment at all (ADR 0028). The filter is `enrollment_windows.without_staff`,
+    which `app.services.grading._live_enrollments` calls too about today.
     """
     zone = ZoneInfo(settings.institution_timezone)
     opened_on = week.opens_at.astimezone(zone).date()
@@ -1738,13 +1727,7 @@ def _enrolled_students(
             closes_at=week.closes_at,
         )
     }
-    staff = section_scoped_assignees(session, section_id=section.id)
-    if not staff:
-        return len(enrolled)
-    # The hop from a member to their person is a definer call each (ADR 0024,
-    # ADR 0094), so it is skipped entirely for a section nobody has entered in the
-    # people graph — which is the shape `_live_enrollments` takes and why.
-    return sum(1 for user_id in enrolled if person_for_user(session, user_id) not in staff)
+    return len(enrollment_windows.without_staff(session, section_id=section.id, user_ids=enrolled))
 
 
 def _course_label(session: Session, section: Section) -> str:
@@ -1755,13 +1738,9 @@ def _course_label(session: Session, section: Section) -> str:
     The owner's ruling of 2026-09-03 settled that order for the student's own page,
     and the instructor reads the same course under the same name.
 
-    **This is a second copy of `app.services.survey_read._course_label`'s
-    composition, and it is one deliberately for now.** That function is private to a
-    module E4-07 was told not to touch, and promoting it is a change to a shared
-    signature — which this ticket proposes in its pull request rather than making.
-    Two copies of a format string is `docs/MISTAKES.md` entry 13's shape and the
-    proposal is what closes it; until then, the two are edited together or the
-    student's page and her instructor's report name the same course differently.
+    **The format is `app.services.section_codes.course_label`'s**, the composer the
+    student's page calls too, so the two cannot name the same course differently.
+    This function only fetches the rows the label is made of.
     """
     term = session.get(Term, section.term_id)
     course = session.get(Course, section.course_id)
@@ -1770,7 +1749,10 @@ def _course_label(session: Session, section: Section) -> str:
     prefix = session.get(Prefix, course.prefix_id)
     if prefix is None:  # pragma: no cover - a non-null foreign key
         raise SectionUnavailableError
-    return (
-        f"{prefix.code} {course.lms_number} {section.lms_section_code} — "
-        f"{course.lms_title}, {term.name}"
+    return course_label(
+        prefix_code=prefix.code,
+        lms_number=course.lms_number,
+        lms_title=course.lms_title,
+        section_code=section.lms_section_code,
+        term_name=term.name,
     )

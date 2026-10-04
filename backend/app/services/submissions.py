@@ -89,6 +89,7 @@ from app.models.org import Section
 from app.models.survey import Answer, Question, QuestionKind, QuestionSet, Response
 from app.schemas.survey import SubmissionRequest, SubmittedAnswer
 from app.services import clock
+from app.services.enrollment_windows import live_on
 from app.services.survey_windows import open_window_for_section
 from app.services.validity import (
     ClassifierUnavailableError,
@@ -220,8 +221,7 @@ def _reachable_section(
         .where(
             Enrollment.user_id == student_id,
             Enrollment.section_id == section_id,
-            Enrollment.started_on <= day,
-            (Enrollment.ended_on.is_(None)) | (Enrollment.ended_on >= day),
+            live_on(day),
         )
         .limit(1)
     ).first()
@@ -235,8 +235,8 @@ def _reachable_section(
 # ---------------------------------------------------------------------------
 
 
-def current_questions(session: Session) -> Sequence[Question]:
-    """The questions of the question set in force, in §3.2's order.
+def current_questions(session: Session) -> tuple[QuestionSet, list[Question]]:
+    """The question set in force, and its questions in §3.2's order.
 
     The set at the highest version. §3.2 ships exactly one — "v1 fixed" — and
     E2-05 deliberately gives `question_set` no `is_active` column because no ticket
@@ -252,13 +252,14 @@ def current_questions(session: Session) -> Sequence[Question]:
             "There is no `question_set` row, so this deployment has no survey to answer. "
             "`scripts/seed.py` writes SPEC §3.2's v1 set."
         )
-    return list(
+    questions = list(
         session.scalars(
             select(Question)
             .where(Question.question_set_id == question_set.id)
             .order_by(Question.position)
         )
     )
+    return question_set, questions
 
 
 def _submitted_value(answer: SubmittedAnswer) -> tuple[str, int | str | Decimal]:
@@ -465,7 +466,7 @@ def store_submission(
     if window is None:
         raise SubmissionRefusedError(RefusalReason.WINDOW_CLOSED)
 
-    questions = current_questions(session)
+    _, questions = current_questions(session)
     try:
         values = _values_by_question(submission, questions)
         _check_required(questions, values)
