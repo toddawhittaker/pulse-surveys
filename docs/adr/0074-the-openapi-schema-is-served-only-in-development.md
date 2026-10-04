@@ -79,8 +79,8 @@ a deployment to be documented as gated while being open.
 - `/docs` is unavailable in staging and production, which is where somebody will
   eventually want it. The unblocking move is the rejected alternative above, not
   a flag.
-- The generated frontend client (§13) is unaffected: it calls `app.openapi()` in
-  process, and that script does not exist yet.
+- The generated frontend wire types (ADR 0185) are unaffected:
+  `scripts/export_openapi.py` calls `app.openapi()` in process.
 - For this to keep working, nothing may start deriving the schema from the HTTP
   route. `tests/unit/test_docs_exposure.py` holds all three halves — served in
   development, not served outside it, and produced in process either way.
