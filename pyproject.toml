@@ -30,7 +30,7 @@ dynamic = ["version"]
 
 dependencies = [
     "fastapi==0.141.1",
-    "uvicorn==0.53.0",
+    "uvicorn==0.54.0",
     "pydantic==2.13.5",
     "pydantic-settings==2.15.0",
     "SQLAlchemy==2.0.54",
@@ -44,7 +44,7 @@ dependencies = [
     # hashed. psycopg is LGPL-3.0: the license gate classifies it "review —
     # weak copyleft, linkage matters", which is the right answer for a library
     # imported unmodified from a wheel rather than vendored into our source.
-    "psycopg[binary]==3.3.5",
+    "psycopg[binary]==3.3.6",
     # Already in the closure under pydantic-settings, and declared here because
     # `backend/migrations/env.py` imports it directly: `alembic` is not started
     # by `Settings`, so it reads `.env` itself, and an import we write is a
@@ -63,7 +63,7 @@ dependencies = [
     # `app.state.http`, which is an `httpx` client — which is why the rule keeps
     # its `httpx` entries, inert unless an `httpx` exception reaches the chain
     # and correct if one does.
-    "httpx2==2.13.0",
+    "httpx2==2.13.1",
     # The JSON Web Token library the web door verifies with (E0-18) and the
     # launch door still reads through `app.services.tokens`. Nothing else in the
     # locked closure verifies an RS256 signature the standard-library way: the
@@ -114,7 +114,7 @@ dependencies = [
     # imports `openai`, and a direct dependency would say something imports it.
     # `make lock` resolves the extra into explicit, hashed lines in both
     # lockfiles, so what ships is still named and pinned.
-    "pydantic-ai-slim[openai]==2.45.0",
+    "pydantic-ai-slim[openai]==2.50.0",
     # The IANA database as a package, so `zoneinfo` resolves
     # INSTITUTION_TIMEZONE identically on a developer's machine and in a slim
     # container that ships no system tzdata (§3.1 — windows are timezone-bound).
@@ -133,7 +133,7 @@ dev = [
     # the wall clock. The §4.1 invariant pass stays serial.
     "pytest-xdist==3.8.0",
     "testcontainers==4.15.0",
-    "hypothesis==6.168.0",
+    "hypothesis==6.168.1",
     # Test-only. `tests/unit/test_compose_stack.py` asserts properties of the
     # Compose files that no running stack can check — chiefly that host port
     # publishing lives in the development override and not in the base file,
