@@ -450,6 +450,49 @@ mockups alone. **Owner:** E6, the first epic after E5.1 that reopens the
 instructor report's interface (its moderation lifecycle lives on that page).
 **Done when:** the mockups show the per-stream rule and per-stream notices.
 
+## A teaching grant with a child edge would stop its section's roster sync
+
+From the E5.1 boundary review. `role_assignment.reports_to` references another
+assignment with `RESTRICT` (`backend/app/models/identity.py:715`). If an
+`INSTRUCTOR` assignment ever had a child edge, the `DELETE` in
+`backend/app/views_sql/teaching_grant_end_v001.sql` would raise, and that
+section's whole roster sync would abort on every run. It cannot happen today:
+the writer sets `reports_to` to NULL, and there is no People editor yet.
+**Owner:** E9, with the People & reporting editor. **Done when:** the editor
+refuses a child edge under a teaching grant, or the definer ends a grant with
+children in a named way that the sync logs and skips, with a test.
+
+## `ended_teaching_grant` has no retention rule
+
+From the E5.1 boundary review. The table holds `person_id`, `section_id` and
+`nrps_call_id`, each with `RESTRICT` (`backend/app/models/identity.py:728`), and
+no retention rule names it, so a purge of the rows it points at would be
+blocked. **Owner:** E13, the retention job. **Done when:** the retention job
+names the table, and a purge test passes.
+
+## The `/dev` controls' origin check trusts the request's own Host header
+
+From the E5.1 boundary review. `DevControlRoute` compares `Origin` with a value
+built from the request's own scheme and Host (`backend/app/api/dev.py:1089`),
+so a DNS-rebinding page, whose Origin and Host agree, passes it in development.
+The routes exist only in development. **Owner:** E13. **Done when:** the check
+compares `Origin` with the origin of the configured `PUBLIC_BASE_URL`, with a
+test that a request whose Host and Origin match each other but name another
+host is refused.
+
+## Six server-required members stay optional in the frontend, and one figure has three names
+
+From the E5.1 boundary review. The frontend wire types keep six members the
+server requires optional: `closes_at`, `question_text`, `benchmark`,
+`workload_benchmark` and `institution_timezone` through `AddedLater`
+(`frontend/src/api/instructor.ts:72`, `:106`, `:206`, `:223`), and
+`section_count` (`frontend/src/api/leadership.ts:96`). ADR 0185 records why.
+The comparison figure type also has three names: `ComparisonFigureView`
+(`instructor.ts:145`), `OverlayFigure` (`components/PulseTrendChart.tsx:43`)
+and `BenchmarkFigure` (`components/StatPair.tsx:30`). **Owner:** E9, whose view
+rework reopens these files. **Done when:** the views alias the generated types
+directly, and one figure type name is imported.
+
 ## The ledger
 
 Every source entry, in its source file's order, with what happened to it.
