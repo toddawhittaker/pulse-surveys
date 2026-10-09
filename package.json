@@ -15,7 +15,7 @@
     "@playwright/test": "1.63.0",
     "@types/node": "26.6.4",
     "eslint": "10.11.0",
-    "license-checker-rseidelsohn": "4.4.2",
+    "license-checker-rseidelsohn": "5.0.1",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.0"
   },
