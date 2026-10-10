@@ -1,6 +1,6 @@
 # 0189 — An instructor decides only on a comment their report returns, and the record names the role
 
-**Status:** Accepted, amending [0187](0187-moderation-verdicts-govern-the-read-path.md) (the close boundary)
+**Status:** Accepted, amending [0187](0187-moderation-verdicts-govern-the-read-path.md) (the close boundary); the shared write's parameters amended by [0190](0190-a-lead-reviews-flagged-text-at-any-threshold-and-the-log-withholds-held-text.md)
 **Date:** 2026-10-10
 **Ticket:** [E6-03](../tickets/e6/E6-03-instructor-decisions.md)
 
@@ -37,7 +37,8 @@ held comment, another section's, a rating, a Care-class comment, an id nothing
 holds) is the same 404 with the same sentence. The shared write,
 `moderation._record_decision`, takes the card, the decider and the role from its
 caller and nothing that widens what it accepts, so E6-05's Lead Faculty door
-cannot loosen this one.
+cannot loosen this one. *Amended by 0190:* it now takes the comment's key and
+flag class instead of the card, which the Lead Faculty door does not have.
 
 **The stored role, and the router's rows.** M2 adds `decided_by_person_id`
 (`RESTRICT`), `decided_as` (`INSTRUCTOR`, `LEAD_FACULTY`, `CHAIR`), `reason` and

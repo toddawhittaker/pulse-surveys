@@ -68,6 +68,19 @@ including an undo of an undo, is refused and writes nothing.
 
 **No audit-log row.** A decision is its own record; SPEC §8's audit log holds no
 exclusion or keep.
+
+## The Lead Faculty review queue and the exclusion log (E6-05)
+
+SPEC §5.2 routes a harmful comment to its course's Lead Faculty review queue, or
+its department chair's for a course nobody leads. `review_queue` reads it over
+`authz.lead_review_courses`, the reader's own leadership grant and nothing else,
+from `report_comment` v004, so the Care-class exclusion has one home. It shows
+the text and the section at any threshold (ruling 1), with no week, time or
+count, in a fresh order on every read. `decide_as_leader` is the second door into
+the shared write, with its own check: the comment is in this reader's queue now,
+asked under the comment's lock. `exclusion_log` lists every exclusion and keep a
+person made inside the same grant, quoting a comment only where its own
+instructor's report shows it under its week (ADR 0190).
 """
 
 import logging

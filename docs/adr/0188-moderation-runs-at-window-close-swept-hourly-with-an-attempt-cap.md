@@ -1,6 +1,6 @@
 # 0188 — Moderation runs at window close, swept hourly, with an attempt cap
 
-**Status:** Accepted; its close-boundary note amended by [0189](0189-an-instructor-decides-only-on-a-comment-their-report-returns.md)
+**Status:** Accepted; its close-boundary note amended by [0189](0189-an-instructor-decides-only-on-a-comment-their-report-returns.md); its lock and its refusal rule amended at E6-05 (below)
 **Date:** 2026-10-10
 **Ticket:** [E6-02](../tickets/e6/E6-02-moderation-at-window-close.md)
 
@@ -36,6 +36,11 @@ happens when it keeps failing, or when the summary walk, which waits for it, run
   that finds the lock held does nothing. Without it, a long pass and the next
   hour's could each ask about the same comment, and one could give a verdict to a
   comment the other had just capped, after its week was read without it.
+  *Amended at E6-05 (decision 5a, from PR #293's re-check):* the lock belongs to
+  one server connection, and a session bound to the pooled engine could run the
+  unlock on another after a commit, stranding the lock. `moderate_closed_windows`
+  now binds its session to one connection for the whole run, and an unlock that
+  answers false is logged at error level.
 - **The sweep commits after each comment**, so a verdict and its Care route are
   stored before the next comment is asked about, and a later error cannot roll
   them back.
@@ -49,7 +54,13 @@ happens when it keeps failing, or when the summary walk, which waits for it, run
   condition lasts. At six the sweep stops asking, logs the
   answer id once at error level, and the comment stays held: never given a verdict,
   never "clear", never accepted on timeout (the validity fail-open of SPEC §3.3 and
-  ADR 0056 does not apply here). `section_week_moderated` counts a capped comment
+  ADR 0056 does not apply here).
+  *Amended at E6-05 (decision 5b, from PR #293's re-check):* a refusal with a
+  request-shaped status (400, 413 or 422) counts toward the cap too, because a
+  hosted provider refuses a content-filtered prompt that way every time it is
+  asked, and such a comment was retried for ever and held its week.
+  `AIProviderRefusedError` carries its HTTP status as `status: int`; 401, 403,
+  404, 429 and 500 still count nothing. `section_week_moderated` counts a capped comment
   as resolved, so its week's other comments show, the release cut proceeds, and
   the summary is written without it. A capped comment is never routed to Care;
   E6-07 carries that to E10.
@@ -74,7 +85,8 @@ happens when it keeps failing, or when the summary walk, which waits for it, run
   can still replace (ADR 0187); it is E10's, with the Care queue.
 - **Counting outages or refusals toward the cap.** A long outage, an expired key
   or six hours of rate limiting would park every comment swept during it for
-  good, Care-class disclosures among them.
+  good, Care-class disclosures among them. (Still rejected for those; E6-05
+  counts only the request-shaped refusals, which are about one comment.)
 - **Selecting `closes_at <= now`.** It matches `route_verdict` today, but the
   product treats a window as open at its closing instant; the sweep follows the
   product, and E6-03 brings `route_verdict` to it.
@@ -98,6 +110,10 @@ happens when it keeps failing, or when the summary walk, which waits for it, run
 - Because refusals are retried rather than counted, the comments that do reach
   the cap are the ones whose text breaks the model's answer, and those may lean
   toward Care-class disclosures. E6-07 carries that skew to E10 with the capped
-  comments themselves.
+  comments themselves. *Amended at E6-05:* the request-shaped refusals now reach
+  the cap as well, and a provider's content filter is likeliest to refuse
+  exactly a threat or a self-harm disclosure, so the skew is stronger; before
+  the amendment such a comment was asked about for ever and reached nobody
+  either.
 - The threat and self-harm recall floor and the moderation floor stay deferred to
   E10's live run; the typed cases ship now. The moderation set ships unregistered: its registry slot and its `floors.py` arrive together in E10's floor-setting pull request, since floor files are owner-reviewed.
