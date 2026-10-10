@@ -337,9 +337,9 @@ class LoggedDecision:
 
     The comment's key, where it was written (section, week and stream, which
     the log's caller needs to ask whether the comment's own report shows it, and
-    never passes on), its text, the role the decision was stored under, the
-    stated reason, the instant, and whether the AI flagged it. The state is not
-    carried: the log's row is the work order's six members (E6-05, decision 1).
+    never passes on), its text, the state it left (`EXCLUDED` or `KEPT`), the
+    role the decision was stored under, the stated reason, the instant, and
+    whether the AI flagged it.
     """
 
     answer_id: UUID
@@ -347,6 +347,7 @@ class LoggedDecision:
     week_id: UUID
     stream: str
     text: str
+    state: str
     decided_as: str
     reason: str | None
     decided_at: datetime
@@ -846,6 +847,7 @@ def logged_decisions(
             COMMENT_VIEW.c.week_id,
             COMMENT_VIEW.c.stream,
             COMMENT_VIEW.c.comment_text,
+            ModerationState.state,
             ModerationState.decided_as,
             ModerationState.reason,
             ModerationState.decided_at,
@@ -867,10 +869,11 @@ def logged_decisions(
             week_id=row[2],
             stream=row[3],
             text=row[4],
-            decided_as=row[5],
-            reason=row[6],
-            decided_at=row[7],
-            flagged=row[8],
+            state=row[5],
+            decided_as=row[6],
+            reason=row[7],
+            decided_at=row[8],
+            flagged=row[9],
         )
         for row in session.execute(asked).all()
     )

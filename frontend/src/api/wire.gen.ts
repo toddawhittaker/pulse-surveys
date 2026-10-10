@@ -986,6 +986,11 @@ export interface components {
             /** Section Label */
             readonly section_label: string;
             /**
+             * Decision
+             * @enum {string}
+             */
+            readonly decision: "EXCLUDED" | "KEPT";
+            /**
              * Decided As
              * @enum {string}
              */

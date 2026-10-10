@@ -705,6 +705,7 @@ class ExclusionLogRow:
     """
 
     section_label: str
+    decision: str
     decided_as: DeciderRole
     flagged: bool
     reason: str | None
@@ -839,6 +840,7 @@ def exclusion_log(
         rows.append(
             ExclusionLogRow(
                 section_label=labels[decision.section_id],
+                decision=decision.state,
                 decided_as=DeciderRole(decision.decided_as),
                 flagged=decision.flagged,
                 reason=decision.reason,

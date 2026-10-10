@@ -1131,6 +1131,14 @@
             "type": "string",
             "title": "Section Label"
           },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "EXCLUDED",
+              "KEPT"
+            ],
+            "title": "Decision"
+          },
           "decided_as": {
             "type": "string",
             "enum": [
@@ -1175,6 +1183,7 @@
         "type": "object",
         "required": [
           "section_label",
+          "decision",
           "decided_as",
           "flagged",
           "reason",

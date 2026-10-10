@@ -8,8 +8,9 @@ no date, no time and no count — the queue shows a lead text from below the
 threshold (ruling 1), and a week or an instant beside it would place the text in
 a week the threshold hides. The order is drawn again on every read.
 
-**A log row is six members** (decision 1): the section label, the role the
-decision was made under, whether the AI flagged the comment, the stated reason,
+**A log row is seven members** (decision 1, and the ruling on dispute
+E6-05-03): the section label, the direction (`EXCLUDED` or `KEPT`), the role
+the decision was made under, whether the AI flagged the comment, the stated reason,
 the date in the institution's zone, and an excerpt of the comment that is null
 whenever its own instructor's report does not show the comment in a week.
 
@@ -74,6 +75,8 @@ class LogRow(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     section_label: str
+    # Which direction the decision went: the stored state it left the comment in.
+    decision: Literal["EXCLUDED", "KEPT"]
     # The role the decision was stored under, not the decider's role today.
     decided_as: Literal["INSTRUCTOR", "LEAD_FACULTY", "CHAIR"]
     # Whether the comment holds a harmful or privacy verdict.

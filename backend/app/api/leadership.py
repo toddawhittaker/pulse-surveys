@@ -433,6 +433,7 @@ def read_exclusion_log(
         rows=[
             LogRow(
                 section_label=row.section_label,
+                decision=row.decision,
                 decided_as=row.decided_as.value,
                 flagged=row.flagged,
                 reason=row.reason,
