@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from tests.evals.declarations import EvalTask
 from tests.evals.live import build_validity_classifier
+from tests.evals.moderation import floors as moderation_floors
 from tests.evals.summary import floors as summary_floors
 from tests.evals.threat import floors as threat_floors
 from tests.evals.validity import cases as validity_cases
@@ -61,6 +62,17 @@ SUMMARY = EvalTask(
 # recall floor". ADR 0030 keeps `THREAT` and `SELF_HARM` two enum members that
 # may never be merged or aliased, so E10 is free to split this into two entries
 # when it builds the set; nothing here depends on it staying one.
+# The cases are in `tests/evals/moderation/cases.py`; the slot carries none until
+# its floor is set, because the runner refuses a deferred slot holding a set.
+MODERATION = EvalTask(
+    name="moderation",
+    floors=moderation_floors.FLOORS,
+    cases=(),
+    positive=None,
+    prompt_version=None,
+    classifier=None,
+)
+
 THREAT = EvalTask(
     name="threat",
     floors=threat_floors.FLOORS,
@@ -70,4 +82,4 @@ THREAT = EvalTask(
     classifier=None,
 )
 
-TASKS: tuple[EvalTask, ...] = (VALIDITY, SUMMARY, THREAT)
+TASKS: tuple[EvalTask, ...] = (VALIDITY, SUMMARY, MODERATION, THREAT)
