@@ -2,15 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { RouterProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 
-import { REVIEW_QUEUE_PATH, queuedCommentDecisionPath } from '../../api/leadership';
-import { routeTree } from '../../router';
 import {
-  A_BIOLOGY_ITEM,
-  A_MATHEMATICS_ITEM,
-  NOT_IN_QUEUE,
-  NO_REVIEW_GRANT,
-  PLANTED,
-} from './moderationFixtures';
+  REVIEW_QUEUE_PATH,
+  queuedCommentDecisionPath,
+  type QueueItemView,
+} from '../../api/leadership';
+import { routeTree } from '../../router';
 import { REVIEW_QUEUE_LIST_TESTID } from './ReviewQueue';
 
 /**
@@ -20,6 +17,44 @@ import { REVIEW_QUEUE_LIST_TESTID } from './ReviewQueue';
  * served answer per address, as the comparison-set tests do. Governed copy is
  * transcribed rather than imported (`docs/MISTAKES.md` entry 19).
  */
+
+// What `api/leadership.py`'s moderation routes answer, written here rather than
+// in a support module beside the route: a module in the route tree that is not a
+// test ships its strings as far as the ungoverned-string sweep can tell. The
+// section labels are in `section_codes.course_label`'s section form, and the
+// refusal sentences are transcribed from `app/copy/leadership_moderation.py`.
+
+const A_BIOLOGY_ITEM: QueueItemView = {
+  answer_id: '0b6c1f9e-3a52-4d0b-9a0e-6f1f2c3d4e51',
+  text: 'The lab instructor is useless and should be fired before the next lab.',
+  section_label: 'BIOL 215 R3WW — Principles of Ecology, Fall 2026',
+};
+
+const A_MATHEMATICS_ITEM: QueueItemView = {
+  answer_id: '7d2e8a14-5c63-4f1e-8b2d-0a1b2c3d4e52',
+  text: 'Nobody in this class respects how badly the worksheets are written.',
+  section_label: 'MATH 140 E1FF — College Algebra, Fall 2026',
+};
+
+const NO_REVIEW_GRANT = 'This leadership role has no review queue or exclusion log to read.';
+const NOT_IN_QUEUE = 'There is no comment awaiting your review here. Nothing was changed.';
+
+/**
+ * Members the wire never carries, planted beside the real ones.
+ *
+ * A page that rendered what it was sent rather than the members it means to
+ * show would print these, so a test that serves them and finds none of them on
+ * screen proves the page chooses its members (SPEC §4: no name, no week, no
+ * time beside a comment).
+ */
+const PLANTED = {
+  instructor_name: 'Dr. M. Ellison',
+  decided_by: 'Margaret Ellison',
+  course_week: 4,
+  week_label: 'COURSE WK 04',
+  submitted_at: '2026-10-02T19:42:00-04:00',
+  decided_at: '2026-10-20T14:32:00-04:00',
+} as const;
 
 afterEach(() => {
   cleanup();

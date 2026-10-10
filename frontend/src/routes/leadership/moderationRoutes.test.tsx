@@ -2,9 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { RouterProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 
-import { EXCLUSION_LOG_PATH, REVIEW_QUEUE_PATH } from '../../api/leadership';
+import {
+  EXCLUSION_LOG_PATH,
+  REVIEW_QUEUE_PATH,
+  type LogRowView,
+  type QueueItemView,
+} from '../../api/leadership';
 import { routeTree } from '../../router';
-import { A_BIOLOGY_ITEM, AN_EXCLUSION_BY_A_LEAD } from './moderationFixtures';
 import { EXCLUSION_LOG_LIST_TESTID } from './ExclusionLog';
 import { REVIEW_QUEUE_LIST_TESTID } from './ReviewQueue';
 
@@ -26,6 +30,23 @@ const LEADERSHIP_LANDING = 'pulse-landing-leadership';
 const INSTRUCTOR_LANDING = 'pulse-landing-instructor';
 const QUEUE_LINK = 'Comments awaiting your review';
 const LOG_LINK = 'Exclusion log';
+
+const A_BIOLOGY_ITEM: QueueItemView = {
+  answer_id: '0b6c1f9e-3a52-4d0b-9a0e-6f1f2c3d4e51',
+  text: 'The lab instructor is useless and should be fired before the next lab.',
+  section_label: 'BIOL 215 R3WW — Principles of Ecology, Fall 2026',
+};
+
+/** An exclusion of an AI-flagged comment, by its Lead Faculty, with an excerpt. */
+const AN_EXCLUSION_BY_A_LEAD: LogRowView = {
+  section_label: 'BIOL 215 R3WW — Principles of Ecology, Fall 2026',
+  decision: 'EXCLUDED',
+  decided_as: 'LEAD_FACULTY',
+  flagged: true,
+  reason: null,
+  decided_on: '2026-10-20',
+  excerpt: 'This professor is clueless and should not be allowed near a classroom.',
+};
 
 function servingTheModerationReads(): void {
   vi.stubGlobal('fetch', (input: string) => {

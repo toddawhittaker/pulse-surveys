@@ -2,15 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { RouterProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 
-import { EXCLUSION_LOG_PATH } from '../../api/leadership';
+import { EXCLUSION_LOG_PATH, type LogRowView } from '../../api/leadership';
 import { routeTree } from '../../router';
-import {
-  AN_EXCLUSION_BY_A_LEAD,
-  AN_UNFLAGGED_EXCLUSION,
-  A_KEEP_WITH_NO_EXCERPT,
-  NO_REVIEW_GRANT,
-  PLANTED,
-} from './moderationFixtures';
 import { EXCLUSION_LOG_LIST_TESTID } from './ExclusionLog';
 
 /**
@@ -21,6 +14,64 @@ import { EXCLUSION_LOG_LIST_TESTID } from './ExclusionLog';
  * Governed copy is transcribed rather than imported (`docs/MISTAKES.md`
  * entry 19).
  */
+
+// What `api/leadership.py`'s moderation routes answer, written here rather than
+// in a support module beside the route: a module in the route tree that is not a
+// test ships its strings as far as the ungoverned-string sweep can tell. The
+// section labels are in `section_codes.course_label`'s section form, and the
+// refusal sentences are transcribed from `app/copy/leadership_moderation.py`.
+
+/** An exclusion of an AI-flagged comment, by its Lead Faculty, with an excerpt. */
+const AN_EXCLUSION_BY_A_LEAD: LogRowView = {
+  section_label: 'BIOL 215 R3WW — Principles of Ecology, Fall 2026',
+  decision: 'EXCLUDED',
+  decided_as: 'LEAD_FACULTY',
+  flagged: true,
+  reason: null,
+  decided_on: '2026-10-20',
+  excerpt: 'This professor is clueless and should not be allowed near a classroom.',
+};
+
+/** An instructor's exclusion of an unflagged comment, with the reason SPEC §5.2 requires. */
+const AN_UNFLAGGED_EXCLUSION: LogRowView = {
+  section_label: 'MATH 140 E1FF — College Algebra, Fall 2026',
+  decision: 'EXCLUDED',
+  decided_as: 'INSTRUCTOR',
+  flagged: false,
+  reason: 'Personal attack with no actionable content.',
+  decided_on: '2026-10-13',
+  excerpt: 'The pace is fine but the grader is a joke.',
+};
+
+/** A chair's keep, whose excerpt the server withheld (ADR 0190). */
+const A_KEEP_WITH_NO_EXCERPT: LogRowView = {
+  section_label: 'BUSA 300 F1WW — Operations Management, Fall 2026',
+  decision: 'KEPT',
+  decided_as: 'CHAIR',
+  flagged: true,
+  reason: null,
+  decided_on: '2026-09-28',
+  excerpt: null,
+};
+
+const NO_REVIEW_GRANT = 'This leadership role has no review queue or exclusion log to read.';
+
+/**
+ * Members the wire never carries, planted beside the real ones.
+ *
+ * A page that rendered what it was sent rather than the members it means to
+ * show would print these, so a test that serves them and finds none of them on
+ * screen proves the page chooses its members (SPEC §4: no name, no week, no
+ * time beside a comment).
+ */
+const PLANTED = {
+  instructor_name: 'Dr. M. Ellison',
+  decided_by: 'Margaret Ellison',
+  course_week: 4,
+  week_label: 'COURSE WK 04',
+  submitted_at: '2026-10-02T19:42:00-04:00',
+  decided_at: '2026-10-20T14:32:00-04:00',
+} as const;
 
 afterEach(() => {
   cleanup();
