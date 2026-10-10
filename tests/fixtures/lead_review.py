@@ -66,7 +66,7 @@ from fixtures.instructor_decisions import (
     require_decision_columns,
 )
 from fixtures.named_sets import LEADERSHIP_LANDING_ROLE
-from fixtures.report_api import PATH_PARAMETER
+from fixtures.report_api import INSTRUCTOR_ROLE, PATH_PARAMETER
 from fixtures.report_comments import decided_at_column
 from fixtures.routing import every_route
 from fixtures.student_read import AUTHENTICATE_SCHEME, COURSE_TABLE, PREFIX_TABLE
@@ -158,6 +158,17 @@ COLLEGE_TABLE = "college"
 # the report world already holds under its own course.
 SIBLING_COHORT = "Y"
 UNMAPPED_COHORT = "4"
+
+# A second section of the unmapped course, planted only by
+# `LeadReviewWorld.a_second_section_of_the_unmapped_course` (ruling 7, PR #296's fix
+# round): a chair who teaches the cohort-`4` section needs a sibling section in the
+# same course, or a rule keyed on the course rather than the section cannot be told
+# apart from the right one. Every cohort starting at term week 7 is taken, so this is
+# `R`, which runs twelve weeks from term week 4 (`SEEDED_COHORTS`). Term weeks 7 to
+# 12 sit inside its run, so `plant(course_week=N)` still lands in term week
+# `TERM_WEEK_OF_COURSE_WEEK[N]`; only the course-week number of that term week is
+# different in this section, and nothing that uses it reads that number.
+UNMAPPED_SECOND_COHORT = "R"
 
 ROUTES_ARE_OWED = (
     f"E6-05's work order (decision 1) puts three routes in `{LEADERSHIP_API_MODULE}`, behind "
@@ -348,6 +359,7 @@ class LeadReviewWorld:
         self.own_course: Any = None
         self.sibling_course: Any = None
         self.unmapped_course: Any = None
+        self.unmapped_course_row: Any = None
         self.department: Any = None
         self.college: Any = None
         self.lead: Reader | None = None
@@ -636,6 +648,53 @@ class LeadReviewWorld:
         self.world.seed("moderation_state", {}, **values)
         self.door.door.commit()
 
+    def a_second_section_of_the_unmapped_course(self) -> Any:
+        """Seed a cohort-`UNMAPPED_SECOND_COHORT` section in the unmapped course; its key.
+
+        The chain is swapped for a copy whose course is the unmapped course and
+        which holds no section, so the walker seeds the section under that course,
+        and is put back afterwards: `_a_course_beside_the_own_one`'s device, with
+        the course kept instead of popped. **The premise check is this fixture's**:
+        the new section's course is read back from its row, so a section that
+        landed anywhere else is a broken world, not a red.
+        """
+        world = self.world
+        calendar = world.calendar
+        saved = calendar.chain
+        branch = dict(saved)
+        branch.pop(SECTION_TABLE, None)
+        branch[COURSE_TABLE] = self.unmapped_course_row
+        calendar.chain = branch
+        try:
+            section = world.section(UNMAPPED_SECOND_COHORT)
+        finally:
+            calendar.chain = saved
+        self.rows.commit()
+        course_of_section = section[world.link(SECTION_TABLE, COURSE_TABLE)]
+        assert str(course_of_section) == str(self.unmapped_course), (
+            f"The cohort-{UNMAPPED_SECOND_COHORT} section was seeded in course {course_of_section}, "
+            f"not in the unmapped course {self.unmapped_course}. A broken world, not a red."
+        )
+        return world.section_id(UNMAPPED_SECOND_COHORT)
+
+    def teaches(self, reader: Reader, cohort: str) -> None:
+        """Give `reader` an `INSTRUCTOR` assignment on the cohort's section, beside their grants.
+
+        `tests/integration/test_the_lead_review_queue_and_log_never_cross_to_a_
+        sibling_lead.py`'s second hat, as a method. The assignment is read
+        back: a reader who still holds only their leadership grant afterwards is a
+        broken world, and a test using it would be the plain one-hat test again.
+        """
+        before = len(self.graph.assignments_of(reader.person_id))
+        section = self.world.section_id(cohort)
+        self.graph.assign(INSTRUCTOR_ROLE, scope=section, person=reader.person_id)
+        self.rows.commit()
+        after = len(self.graph.assignments_of(reader.person_id))
+        assert after == before + 1, (
+            f"{reader.label} held {before} assignments and holds {after} after being given an "
+            f"instructor assignment on the cohort-{cohort} section."
+        )
+
 
 def _token(reader: Any) -> Any:
     return reader.token if isinstance(reader, Reader) else reader
@@ -701,6 +760,7 @@ def build_lead_review_world(
     review.own_course = review.key(COURSE_TABLE, own)
     review.sibling_course = review.key(COURSE_TABLE, sibling)
     review.unmapped_course = review.key(COURSE_TABLE, unmapped)
+    review.unmapped_course_row = unmapped
     review.department = review.key(DEPARTMENT_TABLE, chain[DEPARTMENT_TABLE])
     review.college = review.key(COLLEGE_TABLE, chain[COLLEGE_TABLE])
 
