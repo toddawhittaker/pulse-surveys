@@ -208,8 +208,9 @@ SUMMARY_TIMEOUT_SECONDS = 60.0
 # summary read the same words.
 EMPTY_WEEK_PROMPT_VERSION = "empty-week"
 # **The sentence says nothing about how many comments were written**, because a
-# week whose only comment is withheld (a Care-class verdict, or a comment at the
-# moderation attempt cap) reaches the summary as an empty stream too. "No
+# week whose only comment is withheld (a Care-class verdict) reaches the summary as an
+# empty stream too. A comment at the moderation attempt cap holds its week, so
+# that week gets no summary at all (ruling 8). "No
 # comments were submitted" would then be false, and the difference between it
 # and a week that really had none would be the trace of a withheld comment
 # (SPEC §6.2, ADR 0188). One neutral sentence covers both.
