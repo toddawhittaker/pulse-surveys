@@ -769,7 +769,11 @@ class CommentWorld(ReportWorld):
         read as empty everywhere (`docs/MISTAKES.md` entry 22). The verdict goes
         through `ReportWorld.verdict`, which is the product's definer under the
         seed provenance. `None` for a stream plants no verdict; a tuple routes
-        several in order.
+        several in order. **A week whose window has not closed by the clock gets
+        no verdict yet** (E6-01's fix round: `route_verdict` refuses an open
+        window): an `open_week` comment is owed one, routed by `plant_pending` once
+        a test moves the clock past its close. A `close_week` comment is routed at
+        once — its window closed in 2020.
 
         `comments` maps a stream to the text stored for that stream's comment
         question, so a caller says "one instructor-stream comment" rather than
@@ -834,7 +838,12 @@ class CommentWorld(ReportWorld):
         for stream, body in sorted(comments.items()):
             answer = self.answer(response, COMMENT_POSITION[stream], body, version=version)
             self.classify(answer, SUBSTANTIVE, classified_at=opens_at + CLASSIFIED_AFTER_OPEN)
-            self.verdict(answer, moderation.get(stream, CLEAR))
+            self.pending.route_when_closed(
+                self.session,
+                answer[self.key_of(ANSWER_TABLE)],
+                moderation.get(stream, CLEAR),
+                self.instants[term_week][1],
+            )
             written[stream] = answer
         return response, written
 
@@ -1013,7 +1022,9 @@ class CommentWorld(ReportWorld):
         # like one: since E6-01 a row with no moderation verdict is left out by the
         # view's verdict condition, and the test using this row would then be green
         # for that reason rather than for the kind predicate it is about.
-        self.verdict(planted, CLEAR)
+        self.pending.route_when_closed(
+            self.session, planted[self.key_of(ANSWER_TABLE)], CLEAR, self.instants[term_week][1]
+        )
         return planted
 
     # -- moderation -----------------------------------------------------------

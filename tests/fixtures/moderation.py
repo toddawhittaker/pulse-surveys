@@ -40,6 +40,7 @@ test's (`docs/MISTAKES.md` entry 30).
 """
 
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from importlib import import_module
 from typing import Any
 
@@ -52,6 +53,9 @@ from sqlalchemy import text
 
 MODERATION_SERVICE_MODULE = "app.services.moderation"
 ROUTE_VERDICT = "route_verdict"
+# E6-01's fix round: the refusal `route_verdict` raises for a comment whose survey
+# window has not closed by the app clock. A `ValueError` subclass.
+MODERATION_BEFORE_CLOSE = "ModerationBeforeClose"
 SEED_PROMPT_VERSION_NAME = "SEED_PROMPT_VERSION"
 SEED_MODEL_ID_NAME = "SEED_MODEL_ID"
 
@@ -193,6 +197,63 @@ def plant_verdict(session: Any, answer_id: Any, token: str) -> Any:
         prompt_version=prompt_version,
         model_id=model_id,
     )
+
+
+def the_clock_reads(session: Any) -> datetime:
+    """The instant the product's clock would answer on `session`, as near as a fixture can say.
+
+    **A scheduling aid, never an expectation.** Since E6-01's fix round,
+    `route_verdict` refuses an answer whose survey window has not closed by
+    `app.services.clock.now()` (ADR 0109), so a world must not route a verdict
+    before its window's close by that clock. ADR 0109's development override is an
+    offset — `pretend_now + (real now - anchored_at)` — read off the one
+    `clock_override` row; with no row, the clock is the real one. This reads the
+    row on the caller's own session, which is the session the planting will run
+    on. It is read a moment *before* the product reads it, and the clock only moves
+    forward, so a window this calls closed the product calls closed too.
+    """
+    real = datetime.now(UTC)
+    row = session.execute(
+        text("SELECT pretend_now, anchored_at FROM public.clock_override LIMIT 1")
+    ).first()
+    if row is None:
+        return real
+    return row[0] + (real - row[1])
+
+
+class PendingVerdicts:
+    """Verdicts a world owes comments whose windows had not closed when they were written.
+
+    E6-01's fix round: `route_verdict` refuses a comment whose window is still
+    open, because an answer is revised in place on resubmission (ADR 0115) and a
+    verdict written before the close would vouch for text the student could still
+    replace. So a world routes a comment's verdict at once when its window has
+    closed by the clock, and otherwise holds it here until the test moves the
+    clock past the close (`route_the_closed`), which is when moderation would run
+    (SPEC §7.4: at window close).
+    """
+
+    def __init__(self) -> None:
+        self.waiting: list[tuple[Any, Any, datetime]] = []
+
+    def route_when_closed(
+        self, session: Any, answer_id: Any, tokens: Any, closes_at: datetime
+    ) -> None:
+        if tokens is None:
+            return
+        if closes_at <= the_clock_reads(session):
+            plant_verdicts(session, answer_id, tokens)
+        else:
+            self.waiting.append((answer_id, tokens, closes_at))
+
+    def route_the_closed(self, session: Any) -> None:
+        still_open: list[tuple[Any, Any, datetime]] = []
+        for answer_id, tokens, closes_at in self.waiting:
+            if closes_at <= the_clock_reads(session):
+                plant_verdicts(session, answer_id, tokens)
+            else:
+                still_open.append((answer_id, tokens, closes_at))
+        self.waiting = still_open
 
 
 def plant_verdicts(session: Any, answer_id: Any, tokens: tuple[str, ...] | str | None) -> None:

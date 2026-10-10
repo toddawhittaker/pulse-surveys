@@ -564,7 +564,10 @@ class SummaryWorld:
         comments that hold one, and a section-week is not summarized until every
         comment in it does — so a world that planted no verdicts would be walked and
         summarized as empty. `None` plants no verdict, which is the state E6-01's
-        gather tests are about; a tuple routes several in order.
+        gather tests are about; a tuple routes several in order. The verdict is
+        routed when the week's window has closed by the clock — at once for a
+        closed week, otherwise by `clock_to` when the test moves the clock past the
+        close (E6-01's fix round).
 
         Both ratings are always answered and both comments are optional, which is
         SPEC §3.2's own shape: a comment is required only where its rating is two
@@ -696,6 +699,12 @@ class SummaryWorld:
         closed on the day CI runs.
         """
         self.overrides.set(pretend_now=instant, anchored_at=datetime.now(UTC))
+        # E6-01's fix round: moderation runs once a window closes, and
+        # `route_verdict` refuses one still open — so the verdicts owed to comments
+        # whose windows this move has closed are routed now, on the clock just set,
+        # and committed with it for the task's own connection.
+        self.world.plant_pending()
+        self.rows.commit()
         return instant
 
     def clock_after(self, term_week: int = A_CLOSED_TERM_WEEK) -> datetime:

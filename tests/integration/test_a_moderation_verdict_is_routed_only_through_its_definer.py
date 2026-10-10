@@ -67,7 +67,6 @@ from fixtures.moderation import (
     moderation_states,
     moderation_verdicts,
     named_in_moderation,
-    plant_verdict,
     require_definer_role,
     require_routing_function,
     require_threat_case,
@@ -638,7 +637,7 @@ def test_the_care_role_may_not_route_a_verdict(
 
 
 def test_a_planted_verdict_carries_the_seed_provenance_the_work_order_names(
-    db_session: Any, seed_rows: Any
+    committed_rows: Any,
 ) -> None:
     """Decision 4: fixtures and seeds plant through `route_verdict`, under a provenance that says "seed".
 
@@ -664,10 +663,11 @@ def test_a_planted_verdict_carries_the_seed_provenance_the_work_order_names(
     )
     assert callable(named_in_moderation(ROUTE_VERDICT))
 
-    answer = seed_rows("answer", {}, comment_text="e6-01 a comment a fixture plants a verdict on")
-    plant_verdict(db_session, answer["id"], CLEAR)
+    # Planted the way every world plants one: after its window has closed
+    # (`tests/fixtures/care_subject.py` closes it first), through `route_verdict`.
+    planted = plant_a_comment_answer(committed_rows, verdict=CLEAR)
 
-    rows = moderation_verdicts(db_session, answer["id"])
+    rows = moderation_verdicts(fresh(committed_rows), planted.answer_id)
     assert [(row["verdict"], row["prompt_version"], row["model_id"]) for row in rows] == [
         (CLEAR, SEED_PROVENANCE, SEED_PROVENANCE)
     ], (

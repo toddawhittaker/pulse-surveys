@@ -71,6 +71,7 @@ from fixtures.moderation import (
     ATTEMPTED_AT_COLUMN,
     CLEAR,
     MODERATION_ATTEMPT_TABLE,
+    PendingVerdicts,
     plant_verdicts,
     require_moderation_attempt,
 )
@@ -471,6 +472,10 @@ class ReportWorld:
         # subject and their enrolments (`tests/fixtures/grading.py` shares one for
         # the same reason).
         self.people_chain: dict[str, Any] = {}
+        # The moderation verdicts owed to comments whose windows had not closed by
+        # the clock when they were written (E6-01's fix round). See
+        # `tests/fixtures/moderation.py::PendingVerdicts`.
+        self.pending = PendingVerdicts()
 
     # -- the session and the tables -----------------------------------------
 
@@ -674,6 +679,11 @@ class ReportWorld:
         direct insert — so the route rows land beside it exactly as production's
         would. `None` for a position (`UNMODERATED`) plants no verdict, which is
         the state E6-01's tests are about; a tuple routes several in order.
+
+        **Routed only once the week's window has closed by the clock** (E6-01's fix
+        round: `route_verdict` refuses an open window). A comment written into a
+        week still open is owed its verdict, and `plant_pending` routes it when a
+        test has moved the clock past the close — `SummaryWorld.clock_to` calls it.
         """
         verdicts = {} if verdicts is None else verdicts
         moderation = {} if moderation is None else moderation
@@ -713,8 +723,17 @@ class ReportWorld:
                     verdicts.get(position, SUBSTANTIVE),
                     classified_at=closes_at - CLASSIFIED_BEFORE_CLOSE,
                 )
-                self.verdict(written[position], moderation.get(position, CLEAR))
+                self.pending.route_when_closed(
+                    self.session,
+                    written[position][self.key_of(ANSWER_TABLE)],
+                    moderation.get(position, CLEAR),
+                    closes_at,
+                )
         return response, written
+
+    def plant_pending(self) -> None:
+        """Route every owed verdict whose window has now closed by the clock (E6-01's fix round)."""
+        self.pending.route_the_closed(self.session)
 
     def verdict(self, answer: Mapping[str, Any], tokens: str | tuple[str, ...] | None) -> None:
         """Route moderation verdicts for one comment through the definer (E6-01).

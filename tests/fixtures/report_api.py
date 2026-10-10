@@ -1586,6 +1586,10 @@ def _build_report_door(
 
     overrides = committed_clock_overrides
     overrides.set(pretend_now=AFTER_THE_LAST_WINDOW, anchored_at=datetime.now(UTC))
+    # E6-01's fix round: `route_verdict` refuses a window still open by the app
+    # clock, so the verdicts owed to comments in weeks that had not closed when they
+    # were written are routed now that the clock stands after every window.
+    world.plant_pending()
 
     seeded: dict[str, Any] = {}
     if role == STUDENT_ROLE:

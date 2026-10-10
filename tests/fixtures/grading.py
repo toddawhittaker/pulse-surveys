@@ -65,7 +65,7 @@ from typing import Any, NamedTuple
 import pytest
 
 from fixtures.moderation import CLEAR as MODERATION_CLEAR
-from fixtures.moderation import plant_verdicts
+from fixtures.moderation import PendingVerdicts, plant_verdicts
 from fixtures.submit import (
     ANSWER_ID_COLUMN,
     ANSWER_TABLE,
@@ -438,6 +438,9 @@ class GradingWorld:
         self.shape_of: dict[int, str] = {}
         self.people_chain: dict[str, Any] = {}
         self._graph: SupervisionGraph | None = None
+        # Moderation verdicts owed to comments whose windows had not closed by the
+        # clock when they were answered (E6-01's fix round).
+        self.pending = PendingVerdicts()
 
     # -- the session and the tables -----------------------------------------
 
@@ -906,7 +909,15 @@ class GradingWorld:
                     classified_at=self.closes_at(course_week) - timedelta(minutes=30),
                 )
             if self.shape_of[position] == "comment":
-                self.moderate(rows[position], moderation.get(position, MODERATION_CLEAR))
+                # Routed once the week's window has closed by the clock (E6-01's fix
+                # round: `route_verdict` refuses an open window); until then it is
+                # owed, and `elapsed_through` routes it when it moves the clock.
+                self.pending.route_when_closed(
+                    self.session,
+                    rows[position][self.key_of(ANSWER_TABLE)],
+                    moderation.get(position, MODERATION_CLEAR),
+                    self.closes_at(course_week),
+                )
         return rows
 
     def moderate(self, answer: Mapping[str, Any], tokens: str | tuple[str, ...] | None) -> None:
@@ -1016,6 +1027,7 @@ class GradingWorld:
         """
         pretend_now = self.closes_at(course_week) + A_MINUTE
         overrides.set(pretend_now=pretend_now, anchored_at=datetime.now(UTC))
+        self.pending.route_the_closed(self.session)
         return pretend_now
 
     def not_yet_closed(self, overrides: Any, course_week: int) -> datetime:

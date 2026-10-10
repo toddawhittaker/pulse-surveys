@@ -52,6 +52,7 @@ seed differently or to read on another connection to make a test pass.
 """
 
 import inspect
+from datetime import UTC, datetime
 from typing import Any, NamedTuple
 from uuid import uuid4
 
@@ -229,6 +230,53 @@ def key_of(committed_rows: Any, table_name: str, row: Any) -> Any:
     return row[next(iter(table.primary_key.columns)).name]
 
 
+# A survey window that opened and closed in 2020, so it has closed under any clock
+# — the same instants `tests/fixtures/report_comments.py` gives a closed week.
+A_CLOSED_WINDOW_OPENS = datetime(2020, 1, 3, 23, 0, 0, tzinfo=UTC)
+A_CLOSED_WINDOW_CLOSES = datetime(2020, 1, 6, 4, 59, 59, tzinfo=UTC)
+
+
+def a_closed_window_for(
+    committed_rows: Any, *, section_id: Any, week_id: Any, term_id: Any
+) -> None:
+    """Make the planted comment's section-week a window that has closed, before a verdict is routed.
+
+    E6-01's fix round: `route_verdict` refuses an answer whose survey window has
+    not closed by the app clock, because an answer is revised in place on
+    resubmission (ADR 0115) and a verdict written while the window is open would
+    vouch for text the student can still replace. This helper's comment is seeded
+    through the walker, which may or may not have invented a window for its week;
+    so the window is made closed whichever is true — an existing one's instants are
+    moved into 2020, and a missing one is written there.
+    """
+    from sqlalchemy import text
+
+    parameters = {
+        "section": str(section_id),
+        "week": str(week_id),
+        "term": str(term_id),
+        "opens": A_CLOSED_WINDOW_OPENS,
+        "closes": A_CLOSED_WINDOW_CLOSES,
+    }
+    moved = committed_rows.session.execute(
+        text(
+            "UPDATE public.survey_window SET opens_at = :opens, closes_at = :closes "
+            "WHERE section_id = CAST(:section AS uuid) AND week_id = CAST(:week AS uuid)"
+        ),
+        parameters,
+    ).rowcount
+    if not moved:
+        committed_rows.session.execute(
+            text(
+                "INSERT INTO public.survey_window "
+                "(section_id, week_id, term_id, opens_at, closes_at) VALUES "
+                "(CAST(:section AS uuid), CAST(:week AS uuid), CAST(:term AS uuid), "
+                ":opens, :closes)"
+            ),
+            parameters,
+        )
+
+
 def plant_a_comment_answer(
     committed_rows: Any,
     *,
@@ -307,6 +355,13 @@ def plant_a_comment_answer(
         response_id=key_of(committed_rows, "response", response),
         comment_text=comment,
     )
+    if verdict is not None:
+        a_closed_window_for(
+            committed_rows,
+            section_id=key_of(committed_rows, "section", section),
+            week_id=key_of(committed_rows, "week", week),
+            term_id=key_of(committed_rows, "term", chain["term"]),
+        )
     plant_verdicts(committed_rows.session, key_of(committed_rows, "answer", answer), verdict)
     committed_rows.commit()
 
