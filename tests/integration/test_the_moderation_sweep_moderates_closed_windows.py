@@ -269,60 +269,62 @@ def test_an_unavailable_answer_is_an_outage_and_counts_nothing(
     assert attempts_of(world, answer) == 0
 
 
-def test_six_unusable_answers_cap_the_comment_and_its_week_goes_on_without_it(
+def sweep_to_the_cap(world: CommentWorld, gateway: Any, answers: list[Any]) -> None:
+    """Sweep until each comment in `answers` holds `CAP` attempt rows, then once more.
+
+    Each sweep must add exactly one attempt row to each, and the extra sweep none,
+    so a test that calls this has its comments at the cap and not merely near it.
+    """
+    for done in range(1, CAP + 1):
+        sweep(world, gateway)
+        for answer in answers:
+            assert attempts_of(world, answer) == done, (
+                f"After {done} sweep(s) the comment holds {attempts_of(world, answer)} attempt "
+                "row(s); every sweep against an unusable answer appends one."
+            )
+    sweep(world, gateway)
+    for answer in answers:
+        assert attempts_of(world, answer) == CAP
+        assert verdicts_of(world, answer) == []
+
+
+def test_six_unusable_answers_cap_the_comment_and_the_sweep_stops_asking_about_it(
     comment_world: CommentWorld,
     mock_ai: MockAiProvider,
     mock_ai_endpoint: Endpoint,
     mock_gateway: Any,
-    summary_contracts: Any,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Done-when 4: six counted failures, then no call; held for good; the week moves on.
+    """Done-when 4, the sweep's half: six counted failures, then no call, and no verdict.
 
-    Two held weeks: the first carries `threshold - 1` `clear` comments, the second
-    one `clear` comment and one the mock always answers in the wrong shape (its
-    `malformed` marker, `AIResponseInvalidError` once the gateway's one re-ask
-    fails too). Only an unusable answer counts toward the cap (PR #293's fix
-    round); a refusal or an outage counts nothing and has its own test below.
-    Six sweeps each append one attempt row and each asks the provider again; the
-    seventh sends nothing. Requests are compared sweep to sweep rather than
-    counted, because how many requests one call makes is the gateway's re-ask
-    rule (ADR 0053), not this ticket's. The capped comment then has no verdict and no
-    `moderation_state` row and is absent from the view, from the release batch
-    and from the summary model's input, while its week's `clear` comment is
-    present in all three (entry 3's control). The cap is logged once at error
-    level, by answer id, with no comment text.
+    One closed week holds one `clear` comment and one the mock always answers in
+    the wrong shape (its `malformed` marker, `AIResponseInvalidError` once the
+    gateway's one re-ask fails too). Only an unusable answer counts toward the cap
+    (PR #293's fix round); a refusal or an outage counts nothing and has its own
+    test below. Six sweeps each append one attempt row and each ask the provider
+    again; the seventh sends nothing. Requests are compared sweep to sweep rather
+    than counted, because how many requests one call makes is the gateway's
+    re-ask rule (ADR 0053), not this ticket's. The capped comment then has no
+    verdict and no `moderation_state` row and is not in the `report_comment`
+    view, while the `clear` comment beside it is (entry 3's control). The cap is
+    logged once at error level, by answer id, with no comment text.
 
-    Before the cap the second week waits on the refused comment, so the cut and
-    the walk skip it; at the cap they stop waiting.
+    The cap stops the asking and nothing else: what the capped comment does to
+    its week is the three tests below.
+
+    **The mutations it kills:** the cap not enforced (the seventh sweep asks
+    again); attempts counted per sweep rather than per comment. **Near miss:** a
+    cap at five (the sixth sweep does not ask).
     """
-    from app.config import Settings
-    from app.services.report_comments import cut_due_release_batches
-    from app.services.reporting import generate_missing_summaries
-
     world = comment_world
-    threshold = configured_threshold()
     world.build()
     world.close_week(CLOSED_WEEK)
-    world.close_week(SECOND_CLOSED_WEEK)
-    first_week = [
-        a_comment(
-            world,
-            CLOSED_WEEK,
-            comment_text(INSTRUCTOR_TOKEN, f"E602CAPA{i:02d}Qz"),
-            moderation=CLEAR,
-        )
-        for i in range(threshold - 1)
-    ]
     beside = a_comment(
-        world,
-        SECOND_CLOSED_WEEK,
-        comment_text(INSTRUCTOR_TOKEN, "E602BESIDEQz"),
-        moderation=CLEAR,
+        world, CLOSED_WEEK, comment_text(INSTRUCTOR_TOKEN, "E602BESIDEQz"), moderation=CLEAR
     )
     capped = a_comment(
         world,
-        SECOND_CLOSED_WEEK,
+        CLOSED_WEEK,
         comment_text(INSTRUCTOR_TOKEN, f"E602CAPPEDQz {mock_ai.marker_for('malformed')}"),
     )
 
@@ -343,54 +345,200 @@ def test_six_unusable_answers_cap_the_comment_and_its_week_goes_on_without_it(
 
     assert verdicts_of(world, capped) == []
     assert moderation_states(world.session, capped) == []
-    in_view = view_answer_ids(world, SECOND_CLOSED_WEEK)
+    in_view = view_answer_ids(world, CLOSED_WEEK)
     assert beside in in_view and capped not in in_view
 
     errors = [record for record in caplog.records if record.levelno == logging.ERROR]
     assert [str(capped) in record.getMessage() for record in errors] == [True]
     assert not any("E602CAPPEDQz" in record.getMessage() for record in caplog.records)
 
-    assert cut_due_release_batches(world.session) == 1
+
+def test_a_capped_comment_holds_its_whole_week_from_the_comment_read(
+    comment_world: CommentWorld,
+    comment_contract: Any,
+    mock_ai: MockAiProvider,
+    mock_gateway: Any,
+) -> None:
+    """A capped comment never releases its week: the week read returns nothing of it.
+
+    E6-08's fix round: a comment that reaches the attempt cap holds its
+    section-week for every reader until a person decides it, which no E6 path
+    does. An unusable answer can come back on every request (a proxy answering an
+    HTML page, a model swap), so a cap that released the week would release every
+    week with no threat or self-harm check.
+
+    Two closed weeks, each with `threshold` `clear` comments, so either is large
+    enough to be shown. The second also holds one comment the mock always answers
+    in the wrong shape, swept to the cap. The first week's read returns all its
+    comments (the control, same reader, same arguments). The second week's read
+    returns nothing, **its verdicted comments included**, although those comments
+    are in the `report_comment` view: that view check pins the refusal on the
+    section-week rule rather than on the comments being missing.
+
+    **The mutation it kills:** `under_the_attempt_cap` restored in the
+    section-week rule (`section_week_moderated` / `_unmoderated_section_weeks`),
+    which counts a capped comment as resolved and shows the week without it.
+    **Near miss:** the capped comment left out of the read one by one while its
+    week is shown (the same red: the verdicted siblings appear).
+    """
+    contract = comment_contract
+    world = comment_world
+    threshold = configured_threshold()
+    world.build()
+    world.close_week(CLOSED_WEEK)
+    world.close_week(SECOND_CLOSED_WEEK)
+    control_texts = [
+        comment_text(INSTRUCTOR_TOKEN, f"E608READCTL{i:02d}Qz") for i in range(threshold)
+    ]
+    for body in control_texts:
+        a_comment(world, CLOSED_WEEK, body, moderation=CLEAR)
+    siblings = [
+        a_comment(
+            world,
+            SECOND_CLOSED_WEEK,
+            comment_text(INSTRUCTOR_TOKEN, f"E608READSIB{i:02d}Qz"),
+            moderation=CLEAR,
+        )
+        for i in range(threshold)
+    ]
+    capped = a_comment(
+        world,
+        SECOND_CLOSED_WEEK,
+        comment_text(INSTRUCTOR_TOKEN, f"E608READCAPQz {mock_ai.marker_for('malformed')}"),
+    )
+
+    sweep_to_the_cap(world, mock_gateway, [capped])
+
+    def read(week: int) -> Any:
+        return contract.visible()(
+            world.session,
+            section_id=world.section_id(),
+            week_id=world.week_id(week),
+            stream=INSTRUCTOR_STREAM,
+        )
+
+    assert set(siblings) <= view_answer_ids(world, SECOND_CLOSED_WEEK), (
+        "The capped week's verdicted comments are not in the `report_comment` view, so an empty "
+        "read below would not be the section-week rule refusing them."
+    )
+    shown = {str(comment.text) for comment in read(CLOSED_WEEK)}
+    assert shown == set(control_texts), (
+        f"The fully moderated week returned {sorted(shown)}; it holds {threshold} `clear` "
+        "comments. Until it is returned whole, the empty read below proves nothing."
+    )
+    held = read(SECOND_CLOSED_WEEK)
+    assert tuple(held) == (), (
+        f"A week holding a comment at the cap of {CAP} unusable answers returned "
+        f"{sorted(str(comment.text) for comment in held)}. A capped comment holds its whole week "
+        "until a person decides it (E6-08); the cap stops the asking, not the holding."
+    )
+
+
+def test_a_capped_comment_holds_its_week_out_of_every_release_batch(
+    comment_world: CommentWorld,
+    mock_ai: MockAiProvider,
+    mock_gateway: Any,
+) -> None:
+    """A capped comment never releases its week: the release cut leaves the week out.
+
+    Four closed held weeks in two pairs, each pair carrying enough distinct
+    authors to be cut (the shape E6-01's
+    `test_the_release_cut_skips_a_week_until_its_last_verdict_lands` uses): the
+    control pair, `threshold - 1` and two `clear` comments; then the
+    capped pair, `threshold - 1` `clear` comments and a week holding one `clear`
+    comment beside one swept to the cap. After one cut, every control comment is
+    a batch member (the control, same cut), and neither the capped comment nor
+    the `clear` comment of its week is.
+
+    Nothing is asserted about the capped pair's first week, or about how many
+    batches the cut made: which fully moderated weeks one cut groups is the
+    cutter's, not this ticket's.
+
+    **The mutation it kills:** `under_the_attempt_cap` restored in
+    `_unmoderated_section_weeks`, so the capped week counts as moderated and its
+    `clear` comment is released in a batch, which cannot be taken back (ADR 0146).
+    **Near miss:** the capped comment kept out of the batch while its week is
+    cut (the same red: the `clear` comment beside it is a member).
+    """
+    from app.services.report_comments import cut_due_release_batches
+
+    world = comment_world
+    threshold = configured_threshold()
+    assert threshold >= 2, f"The n-threshold is {threshold}; this world needs 2 or more."
+    control_a, control_b, capped_a, capped_b = 7, 8, 10, 11
+    world.build()
+    for week in (control_a, control_b, capped_a, capped_b):
+        world.close_week(week)
+
+    def clear_comments(week: int, prefix: str, count: int) -> list[Any]:
+        return [
+            a_comment(
+                world,
+                week,
+                comment_text(INSTRUCTOR_TOKEN, f"{prefix}{i:02d}Qz"),
+                moderation=CLEAR,
+            )
+            for i in range(count)
+        ]
+
+    control = clear_comments(control_a, "E608CUTCA", threshold - 1) + clear_comments(
+        control_b, "E608CUTCB", 2
+    )
+    clear_comments(capped_a, "E608CUTKA", threshold - 1)
+    beside = a_comment(
+        world, capped_b, comment_text(INSTRUCTOR_TOKEN, "E608CUTBESIDEQz"), moderation=CLEAR
+    )
+    capped = a_comment(
+        world,
+        capped_b,
+        comment_text(INSTRUCTOR_TOKEN, f"E608CUTCAPQz {mock_ai.marker_for('malformed')}"),
+    )
+
+    sweep_to_the_cap(world, mock_gateway, [capped])
+    cut_due_release_batches(world.session)
+
     members = {
         row[0]
         for row in world.session.execute(
             text("SELECT answer_id FROM public.release_batch_member")
         ).all()
     }
-    assert {*first_week, beside} <= members
-    assert capped not in members
-
-    gateway = StreamAwareGateway(summary_contracts)
-    generate_missing_summaries(world.session, settings=Settings(), gateway=gateway)
-    sent = "\n".join(gateway.prompts)
-    assert "E602BESIDEQz" in sent
-    assert "E602CAPPEDQz" not in sent
-    summarized = world.session.execute(
-        text("SELECT count(*) FROM public.weekly_summary WHERE week_id = :week"),
-        {"week": world.week_id(SECOND_CLOSED_WEEK)},
-    ).scalar_one()
-    assert summarized == 2
+    assert set(control) <= members, (
+        f"The control pair's comments are not all batch members (missing "
+        f"{sorted(map(str, set(control) - members))}), so the absence below would be an absence "
+        "from a cut that cut nothing."
+    )
+    released = members & {beside, capped}
+    assert not released, (
+        f"The cut released {sorted(map(str, released))} from a week holding a comment at the cap "
+        f"of {CAP} unusable answers. A capped comment holds its week out of every batch until a "
+        "person decides it (E6-08), and a released comment cannot be taken back."
+    )
 
 
-def test_a_comment_below_the_cap_still_holds_its_weeks_summary(
+def test_a_refused_comment_holds_its_weeks_summary_below_the_cap_and_at_it(
     comment_world: CommentWorld,
     mock_ai: MockAiProvider,
     mock_gateway: Any,
     summary_contracts: Any,
 ) -> None:
-    """Done-when 4's other half: the walk waits until the sixth failure, not before.
+    """The summary walk never summarizes a week while one of its comments has no verdict.
 
-    One closed week holds a planted `clear` comment (the control the walk must
-    eventually summarize) and one comment the mock always answers in the wrong
-    shape (`malformed`, the unusable answer that counts toward the cap). After each of
-    the first five sweeps a summary walk writes no row for the week, because the
-    refused comment is neither verdicted nor at the cap. After the sixth sweep
-    the walk summarizes the week, with the control and without the refused one.
+    One closed week holds a planted `clear` comment and one comment the mock
+    always answers in the wrong shape (`malformed`, the unusable answer that
+    counts toward the cap). After each of the first five sweeps a summary walk
+    writes no row for the week. After the sixth, which brings the comment to the
+    cap, and after a seventh, the walk still writes none and sends neither
+    comment: a capped comment holds its week until a person decides it (E6-08).
+    A second closed week, given one `clear` comment just before the walk at the
+    cap, is summarized by that same walk (the control: the walk ran and
+    summarizes a fully moderated week).
 
-    The test above checks only the state after the cap, so it cannot tell where
-    the gate draws its line. **The mutations it kills:** the gate counting a
-    comment as resolved below six attempt rows (`>= 1`, or the off-by-one
-    `>= 5`); and the gather not waiting on an unverdicted comment at all.
+    **The mutations it kills:** `under_the_attempt_cap` restored in the
+    section-week rule the walk uses (the week is summarized at the sixth sweep);
+    the gate counting a comment as resolved below the cap (`>= 1`, or the
+    off-by-one `>= 5`); and the gather not waiting on an unverdicted comment at
+    all.
     """
     from app.config import Settings
     from app.services.reporting import generate_missing_summaries
@@ -398,6 +546,7 @@ def test_a_comment_below_the_cap_still_holds_its_weeks_summary(
     world = comment_world
     world.build()
     world.close_week(CLOSED_WEEK)
+    world.close_week(SECOND_CLOSED_WEEK)
     a_comment(
         world,
         CLOSED_WEEK,
@@ -415,14 +564,14 @@ def test_a_comment_below_the_cap_still_holds_its_weeks_summary(
         generate_missing_summaries(world.session, settings=Settings(), gateway=gateway)
         return "\n".join(gateway.prompts)
 
-    def stored_rows() -> int:
+    def stored_rows(week: int) -> int:
         return int(
             world.session.execute(
                 text(
                     "SELECT count(*) FROM public.weekly_summary "
                     "WHERE section_id = :section AND week_id = :week"
                 ),
-                {"section": world.section_id(), "week": world.week_id(CLOSED_WEEK)},
+                {"section": world.section_id(), "week": world.week_id(week)},
             ).scalar_one()
         )
 
@@ -430,21 +579,33 @@ def test_a_comment_below_the_cap_still_holds_its_weeks_summary(
         sweep(world, mock_gateway)
         assert attempts_of(world, refused) == done
         sent = walk()
-        assert stored_rows() == 0, (
+        assert stored_rows(CLOSED_WEEK) == 0, (
             f"The week was summarized after {done} failed moderation call(s) on one of its "
-            f"comments. The walk waits until every comment holds a verdict or has reached the "
-            f"cap of {CAP} failed calls; below the cap the comment may still be moderated."
+            "comments. The walk waits until every comment of the week holds a verdict."
         )
         assert "E602WAITBESIDEQz" not in sent
 
     sweep(world, mock_gateway)
     assert attempts_of(world, refused) == CAP
-    sent = walk()
-    assert stored_rows() > 0, (
-        f"The refused comment reached the cap of {CAP} failed calls, but the walk still did not "
-        "summarize its week. At the cap the gather stops waiting on it."
+    sweep(world, mock_gateway)
+    assert attempts_of(world, refused) == CAP, "The seventh sweep counted another attempt."
+    a_comment(
+        world,
+        SECOND_CLOSED_WEEK,
+        comment_text(INSTRUCTOR_TOKEN, "E608WALKCONTROLQz"),
+        moderation=CLEAR,
     )
-    assert "E602WAITBESIDEQz" in sent
+    sent = walk()
+    assert stored_rows(SECOND_CLOSED_WEEK) > 0 and "E608WALKCONTROLQz" in sent, (
+        "The walk at the cap did not summarize the fully moderated control week, so the absence "
+        "below would be an absence from a walk that summarized nothing."
+    )
+    assert stored_rows(CLOSED_WEEK) == 0, (
+        f"The refused comment reached the cap of {CAP} failed calls and the walk summarized its "
+        "week. A capped comment holds its week until a person decides it (E6-08); the cap stops "
+        "the asking, not the holding."
+    )
+    assert "E602WAITBESIDEQz" not in sent
     assert "E602WAITREFUSEDQz" not in sent
 
 

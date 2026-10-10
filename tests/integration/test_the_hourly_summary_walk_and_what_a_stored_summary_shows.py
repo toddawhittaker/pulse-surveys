@@ -5,7 +5,9 @@ Three properties:
 - the walk summarizes a section-week on the first pass after its last verdict
   lands, and never again;
 - the empty-week sentence is the same whether a week had no comment or its only
-  comment was withheld, so the sentence cannot say which;
+  comment was withheld, so the sentence cannot say which; a week whose only
+  comment is at the moderation attempt cap is held, and gets no summary at all
+  until a person decides the comment (E6-08);
 - an ordinary-mode summary stored for a stream that is now held is not served.
 
 The walk is driven with `StreamAwareGateway`, which records what it was sent;
@@ -176,26 +178,28 @@ def test_the_empty_week_sentence_is_the_same_for_no_comment_and_a_withheld_comme
     assert no_comment["INSTRUCTOR"] == (EMPTY_SENTENCE, "empty-week")
 
 
-def test_the_empty_week_sentence_is_the_same_for_no_comment_and_a_capped_comment(
+def test_a_week_whose_only_comment_is_capped_gets_no_summary_while_a_no_comment_week_does(
     comment_world: CommentWorld,
     mock_ai: MockAiProvider,
     mock_gateway: Any,
     summary_contracts: Any,
 ) -> None:
-    """Done-when 6, for the other way a week's only comment is withheld: the attempt cap.
+    """A capped comment holds its week: no summary for it, not even the empty-week one.
 
     One week whose only respondent wrote no comment; one whose only respondent
     wrote a comment the mock always answers in the wrong shape (`malformed`, the
     unusable answer that counts toward the cap), swept six times until it reaches
-    the cap and stays held with no verdict (ADR 0188). Each stream's stored
-    summary is the same in both weeks, and the capped comment reached no summary
-    call. The self-harm test above covers a Care-class withholding; this covers
-    the held-at-the-cap one, which takes a different path through the gather.
+    the cap with no verdict (ADR 0188). E6-08's fix round: a capped comment holds
+    its section-week until a person decides it, which no E6 path does. So one walk
+    stores the empty-week sentence for the no-comment week (the control: the
+    walk ran and writes that sentence) and nothing at all for the capped week,
+    and the capped comment reached no summary call.
 
-    **The mutation it kills:** the gather counting a capped comment as a comment
-    of the week, so its stream is summarized from nothing or under a sentence
-    that differs from the no-comment week's (for example one saying comments are
-    being held), which tells the reader that someone wrote something.
+    **The mutation it kills:** `under_the_attempt_cap` restored in the
+    section-week rule, so the capped week counts as moderated and is stored under
+    the empty-week sentence, a summary that is never regenerated once a person
+    decides the comment. **Near miss:** a "comments are being held" summary
+    stored for the week instead (any stored row for it reds).
     """
     world = comment_world
     world.build()
@@ -221,12 +225,15 @@ def test_the_empty_week_sentence_is_the_same_for_no_comment_and_a_capped_comment
     assert "E602CAPPEDONLYQz" not in "\n".join(gateway.prompts)
     no_comment = summaries(world, NO_COMMENT_WEEK)
     capped = summaries(world, WITHHELD_WEEK)
-    assert "INSTRUCTOR" in no_comment, (
-        f"The no-comment week has no stored instructor summary (it has {sorted(no_comment)}), "
-        "so the comparison below would be between two empty results and prove nothing."
+    assert no_comment.get("INSTRUCTOR") == (EMPTY_SENTENCE, "empty-week"), (
+        f"The no-comment week's stored summaries are {no_comment}, without the empty-week "
+        "sentence, so the absence below would be an absence from a walk that stored nothing."
     )
-    assert no_comment == capped
-    assert no_comment["INSTRUCTOR"][0] == EMPTY_SENTENCE
+    assert capped == {}, (
+        f"The walk stored {capped} for a week whose only comment is at the attempt cap. A capped "
+        "comment holds its week until a person decides it (E6-08), and a stored summary is never "
+        "regenerated."
+    )
 
 
 def test_an_ordinary_summary_stored_for_a_stream_now_held_is_not_served(
