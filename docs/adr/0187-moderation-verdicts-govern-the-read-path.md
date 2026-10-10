@@ -52,6 +52,22 @@ existing `INSERT` cannot store a threat verdict with no case. Seeds and fixtures
 plant verdicts through the same door, via `app.services.moderation.route_verdict`,
 under the provenance `"seed"`, which no real prompt version can be.
 
+**A verdict judges the text as it stood at close, so it is written only after
+the close.** An answer is revised in place when a student resubmits
+([0115](0115-a-resubmission-revises-its-answers-in-place.md)), and every rule
+above keys "holds a verdict" on the answer id. A verdict written while the window
+was open would vouch for text the student could still replace: `clear` on
+Friday, a self-harm disclosure resubmitted into the same row on Sunday, shown as
+moderated and routed to nobody. So `route_verdict` refuses an answer whose survey
+window has not closed by the app clock (`now >= closes_at` is closed, ADR 0109),
+raising `ModerationBeforeClose` before it writes anything. An answer whose
+response has no survey window is refused the same way: with no close to judge
+against, it is treated as open (fail closed). The definer does not repeat the
+check, because the close is judged by the app clock, which the database cannot
+read, and every writer, seeds and fixtures included, goes through
+`route_verdict`. A seeder that meets an open window leaves that comment
+unmoderated rather than failing.
+
 **The verdict check is per task**: one disjunct per `ClassificationTask` member,
 built from the two verdict enums, so each task holds only its own tokens.
 
@@ -96,8 +112,17 @@ for it.
 - A comment whose moderation never succeeds holds its whole week back from every
   reader. E6-02's attempt cap, counted over `moderation_attempt`, is what releases
   such a week; until it lands, the week waits.
-- Every fixture, seed and end-to-end world plants verdicts; a world that forgets
-  shows no comments.
+- Every fixture, seed and end-to-end world plants verdicts, and only after the
+  comment's window has closed; a world that forgets shows no comments.
+- A caller holding the database role could still call the definer directly for
+  an open window, since only `route_verdict` checks the close. `pulse_app` is the
+  only role with `EXECUTE`, and no code path calls the function except
+  `route_verdict`.
+- Accepted residue: `test_the_cumulative_release_cuts_one_batch_when_volume_crosses.py`'s
+  open-week case no longer kills "release from an open week" on its own, because
+  a comment in an open week can no longer hold a verdict and so is never in the
+  view the cut reads. The cut's own `closes_at < now` condition still stands; the
+  case now passes for two reasons rather than one.
 - `threat_case` has no reader until E10, which is why ruling 5 exists.
 - The migration commits the `MODERATION` enum label before anything names it
   (PostgreSQL refuses a new label in the transaction that added it), and a
