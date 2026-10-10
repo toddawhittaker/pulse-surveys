@@ -31,7 +31,7 @@ here (ADR 0187).
 verdicts: hourly, over every comment whose window has closed and which holds no
 verdict yet (ADR 0188). A failed call is retried by the next sweep, and an
 unusable answer, or a refusal of this particular request, counts toward an
-attempt cap of six, after which the comment stays held for good. Two sweeps never run at once, and each comment's outcome is
+attempt cap of six, after which the comment stays held, and holds its whole week, until a person decides it. Two sweeps never run at once, and each comment's outcome is
 committed before the next is asked about.
 
 ## A person's decision (E6-03)
@@ -141,8 +141,8 @@ MODERATION_ATTEMPT_CAP = 6
 # **No HTTP status counts** (E6-08). E6-05 briefly counted 413 and 422 as refusals
 # of one prompt, but either can come back on every request — a self-hosted
 # endpoint answering 422 to a parameter it rejects, a proxy answering 413 to most
-# bodies — and then every comment would be capped within six sweeps and its week
-# released with no threat or self-harm check. A refused comment stays held, and
+# bodies — and then every comment would be capped within six sweeps, and the cap holds
+# a week rather than releasing it (ruling 8). A refused comment stays held, and
 # its week waits, until E10's Care review (ruling 5 keeps real students away
 # until then).
 COUNTED_FAILURES = (AIResponseInvalidError,)
@@ -258,9 +258,9 @@ def _refuse_before_the_close(session: Session, answer_id: UUID) -> None:
 def under_the_attempt_cap(answer_id: SQLColumnExpression[Any]) -> ColumnElement[bool]:
     """True for an answer with fewer than `MODERATION_ATTEMPT_CAP` failed moderation calls.
 
-    The one statement of the cap as SQL. The sweep reads it to decide what to ask
-    about, and `app.services.report_comments.section_week_moderated` reads it to
-    stop waiting on a comment the sweep has given up on.
+    The one statement of the cap as SQL. Only the sweep reads it, to decide what to ask
+    about. It is not a release: a comment at the cap still holds its week
+    (`section_week_moderated` does not read the cap).
     """
     attempts = (
         select(func.count(ModerationAttempt.id))
@@ -345,8 +345,8 @@ def sweep_unmoderated_comments(session: Session, gateway: AIGateway | None = Non
       or its Care case.
     - An unusable answer (`COUNTED_FAILURES`) appends one `moderation_attempt`
       row. The one that reaches the cap is logged at error
-      level, by answer id only; the comment then stays held, never given a
-      verdict (ADR 0188).
+      level, by answer id only; the comment then stays held, with its whole
+      section-week, until a person decides it (ADR 0188, ruling 8).
     - A refusal, whatever its status, or an outage (`RETRIED_FAILURES`) writes
       nothing and is logged at error level; the next sweep asks again.
 
@@ -422,7 +422,7 @@ def _record_a_failed_attempt(session: Session, answer_id: UUID, failed: Exceptio
     ).scalar_one()
     if attempts == MODERATION_ATTEMPT_CAP:
         logger.error(
-            "answer %s reached the moderation attempt cap of %d and stays held without a verdict",
+            "answer %s reached the moderation attempt cap of %d and stays held, with its whole week, until a person decides it",
             answer_id,
             MODERATION_ATTEMPT_CAP,
         )
