@@ -1055,7 +1055,7 @@ test('the cumulative release carries the held comments with no week attribution'
     expect(
       Object.keys(comment).sort(),
       `A released comment carries the fields ${JSON.stringify(Object.keys(comment).sort())}; ADRs ` +
-        `0153 and 0189 fix them at ${JSON.stringify(COMMENT_FIELDS)} and says why: a released comment ` +
+        `0153 and 0189 fix them at ${JSON.stringify(COMMENT_FIELDS)} and say why: a released comment ` +
         'grouped under a week can be joined to the per-week completion ledger SPEC §3.4 posts ' +
         'into the gradebook, and in a small week that intersection is frequently one person. Any ' +
         'further field is the leak, not a convenience — a stored instant nobody exposes today is ' +
