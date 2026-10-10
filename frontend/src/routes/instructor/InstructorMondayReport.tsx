@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 
 import {
+  decideOnComment,
   readInstructorReport,
   readPublishedWeeks,
   readTaughtSections,
@@ -12,8 +13,13 @@ import {
   type SummaryView,
   type TrendPointView,
 } from '../../api/instructor';
-import { CommentCard, type ReportComment } from '../../components/CommentCard';
-import { CommentGroup } from '../../components/CommentGroup';
+import {
+  CommentCard,
+  type CommentDecision,
+  type DecisionAnswer,
+  type ReportComment,
+} from '../../components/CommentCard';
+import { CommentGroup, type GroupComment } from '../../components/CommentGroup';
 import { PulseDivider } from '../../components/PulseDivider';
 import { RatingHistogram, type RatingDistribution } from '../../components/RatingHistogram';
 import { ResponseRateBar } from '../../components/ResponseRateBar';
@@ -23,6 +29,7 @@ import { TrendPair } from '../../components/TrendPair';
 import type { TrendPoint } from '../../components/PulseTrendChart';
 import { WeekEyebrow } from '../../components/WeekEyebrow';
 import { WeekNav } from '../../components/WeekNav';
+import { copy as commentCopy } from '../../copy/instructorReportCommentCopy';
 import { copy, fillCopy } from '../../copy/instructorReportPageCopy';
 import './instructorReportPage.css';
 
@@ -327,11 +334,11 @@ function ReportBody({ load }: { readonly load: Load }): JSX.Element {
 
   return (
     // **Keyed by the week, so the whole region remounts when one is chosen.**
-    // E4-10's residue: a comment carries no id — an id is a handle on one
-    // student's words — so a card's key is its position in an array the server
-    // randomized, and a flagged card left expanded would stay expanded over
-    // whatever landed in that position next week. Remounting is what makes the
-    // disclosure state belong to the week it was opened in.
+    // A card's key is its position in an array the server randomized — the
+    // comment's handle is a handle on one student's words and goes nowhere the
+    // page renders — so a flagged card left expanded, or a card holding a
+    // decision's answer, would stay over whatever landed in that position next
+    // week. Remounting is what makes card state belong to the week it was made in.
     <div
       className="pulse-report-week"
       data-testid={INSTRUCTOR_REPORT_TESTID}
@@ -443,6 +450,7 @@ function ReportWeek({ report }: { readonly report: InstructorReportView }): JSX.
         comments={cardsOf(streams.instructor.comments)}
         suppressed={streams.instructor.small_n.suppressed}
         threshold={streams.instructor.small_n.threshold}
+        decide={decide}
       />
       <CommentGroup
         stream="course"
@@ -450,6 +458,7 @@ function ReportWeek({ report }: { readonly report: InstructorReportView }): JSX.
         comments={cardsOf(streams.course.comments)}
         suppressed={streams.course.small_n.suppressed}
         threshold={streams.course.small_n.threshold}
+        decide={decide}
       />
 
       <ReleasedFromEarlierWeeks comments={report.released_from_earlier_weeks} />
@@ -490,14 +499,10 @@ function ReleasedFromEarlierWeeks({
       <p className="pulse-report-note">{copy('instructor_report_page.released_body')}</p>
       <ul className="pulse-report-released-cards">
         {comments.map((comment, position) => (
-          // The payload gives a comment no id, by design, so the key is its
-          // position in the array the server randomized. It is not rendered.
+          // The key is the comment's position in the array the server
+          // randomized, never its handle. These cards are read-only.
           <li key={position}>
-            <CommentCard
-              text={comment.text}
-              status={cardStatus(comment.status)}
-              stream={cardStream(comment.stream)}
-            />
+            <CommentCard {...cardOf(comment)} stream={cardStream(comment.stream)} />
           </li>
         ))}
       </ul>
@@ -554,9 +559,43 @@ function summaryOf(
   };
 }
 
-/** One stream's comments in the card's shape. */
-function cardsOf(comments: readonly CommentView[]): ReportComment[] {
-  return comments.map((comment) => ({ text: comment.text, status: cardStatus(comment.status) }));
+/** One stream's comments in the group's shape, each with its handle. */
+function cardsOf(comments: readonly CommentView[]): GroupComment[] {
+  return comments.map((comment) => ({ ...cardOf(comment), answerId: comment.answer_id }));
+}
+
+/**
+ * One comment in the card's shape: its words, its state, its flag class and
+ * whether the latest decision on it was the reader's. Nothing else crosses.
+ */
+function cardOf(comment: CommentView): ReportComment {
+  return {
+    text: comment.text,
+    status: cardStatus(comment.status),
+    ...(comment.flag === null ? {} : { flagReason: comment.flag }),
+    decidedByYou: comment.decided_by_you,
+  };
+}
+
+/**
+ * One moderation decision (SPEC §5.2), answered in the card's terms.
+ *
+ * A refusal the server wrote a sentence for carries that sentence unchanged;
+ * the two outcomes with no sentence of the server's get this surface's own.
+ */
+async function decide(answerId: string, decision: CommentDecision): Promise<DecisionAnswer> {
+  const outcome = await decideOnComment(answerId, decision);
+  if (outcome.kind === 'decided') return { kind: 'decided', comment: cardOf(outcome.card) };
+  if (outcome.kind === 'session-ended') {
+    return {
+      kind: 'refused',
+      detail: commentCopy('instructor_report_comments.comment.decision_session_ended'),
+    };
+  }
+  return {
+    kind: 'refused',
+    detail: outcome.detail ?? commentCopy('instructor_report_comments.comment.decision_unavailable'),
+  };
 }
 
 /**
@@ -567,13 +606,12 @@ function cardsOf(comments: readonly CommentView[]): ReportComment[] {
  * translation.** The wire's is SPEC §5.2's stored lifecycle, lower-cased by
  * `app.services.report_comments.REPORTED_STATUS` out of `MODERATION_STATES`:
  * `published`, `flagged_collapsed`, `excluded`, `kept`. The card's is SPEC §7.6's
- * three drawn variants — `published`, `flagged`, `excluded` — because collapsed
- * and expanded are one variant plus a disclosure's own state, which is UI state
- * and not a lifecycle event.
+ * drawn variants plus §5.2's kept state — `published`, `flagged`, `excluded`,
+ * `kept` — because collapsed and expanded are one variant plus a disclosure's
+ * own state, which is UI state and not a lifecycle event.
  *
- * `kept` maps to the plain card because that is exactly what §5.2's undo means:
- * "Keep for students" *publishes* the comment. `flagged_collapsed` is the one the
- * card draws with a chip and a disclosure.
+ * `kept` is its own card because §5.2 asks for the logged decision on it: the
+ * comment is published to students, and the instructor sees that it was kept.
  *
  * **This function used to compare against `'flagged'`**, a token nothing on the
  * wire has ever carried, so every flagged-held comment fell through to the
@@ -594,6 +632,7 @@ function cardsOf(comments: readonly CommentView[]): ReportComment[] {
 function cardStatus(status: string): ReportComment['status'] {
   if (status === 'flagged_collapsed') return 'flagged';
   if (status === 'excluded') return 'excluded';
+  if (status === 'kept') return 'kept';
   return 'published';
 }
 
