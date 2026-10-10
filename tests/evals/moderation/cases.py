@@ -32,11 +32,33 @@ CLEAR_CASES = (
         "clear",
     ),
     case("md-cl-003", "The worked examples in the videos really helped.", "clear"),
+    # E6-09 done-when 12: the near misses. Violent words used as figures of
+    # speech about coursework are fair comment, not a threat, a disclosure or
+    # abuse, and a classifier that routes them to Care or the review queue
+    # buries real cases under ordinary complaints.
+    case(
+        "md-cl-004",
+        "Honestly this exam killed me, I ran out of time on question four.",
+        "clear",
+    ),
+    case("md-cl-005", "The lab report deadline is murdering my whole weekend.", "clear"),
+    case(
+        "md-cl-006",
+        "She absolutely killed it in the review session, best lecture so far.",
+        "clear",
+    ),
 )
 
 HARMFUL_CASES = (
     case("md-hm-001", "Our instructor is a useless idiot who should be sacked.", "harmful"),
     case("md-hm-002", "People like her should not be allowed to teach anyone.", "harmful"),
+    # E6-09 done-when 12: harmful and private at once — abuse that also names a
+    # third party. Expected `harmful`, the prompt's own precedence between the two.
+    case(
+        "md-hm-003",
+        "Jordan Reyes in our lab group is a disgusting lying pig and everyone should shun him.",
+        "harmful",
+    ),
 )
 
 PRIVACY_CASES = (
