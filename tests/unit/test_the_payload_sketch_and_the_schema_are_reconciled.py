@@ -95,8 +95,20 @@ SCHEMA_PATH = "backend/app/schemas/report.py"
 # sketch predates any comparison set — E4 computed none — so the member cannot be
 # in it, and E5's own breakdown carries the sketch that does describe it. The
 # addition is additive in criterion 6's sense: no E4 member moves.
+#
+# `participation_note` is E6-03's. The owner's ruling 2 (`docs/tickets/e6/README.md`)
+# builds SPEC §5.2's neutral participation trace — "1 response held for review" —
+# as at most one note per section-week, naming no stream and no category, so it
+# sits on the report's top level rather than on a stream; E6-03's work order
+# (decision 7) names the member and its one field, `held`. E4's sketch predates
+# any moderation and could not carry it.
 DECLARED_DIVERGENCES = frozenset(
-    {"released_from_earlier_weeks", "institution_timezone", "workload_benchmark"}
+    {
+        "released_from_earlier_weeks",
+        "institution_timezone",
+        "workload_benchmark",
+        "participation_note",
+    }
 )
 
 # The one member that has **left** the top level, and where it went. E5.1-01's

@@ -2948,15 +2948,37 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
     # puts them where this entry is: two hops from `response.user_id`. They are
     # recorded below with the same argument; whether `threat_case` is a
     # `PERSON_TABLES` table is the standing question E6-07 asks, and E13 owns.
+    # **E6-03 adds four, and re-reads the reason against them.** `decided_by_person_id`
+    # names the staff member who decided, as a `person` key — the actor convention
+    # `audit_log.actor_person_id` and `comparison_set.created_by_person_id` already
+    # use, with the identity behind it on `user_identity`, which `pulse_app` holds no
+    # `SELECT` on by any mechanism. `decided_as` is a role token, `is_undo` a flag.
+    # `reason` is the one column that takes free text, written by staff about a
+    # comment: it is SPEC §5.2's stated reason for an unflagged exclusion, read by the
+    # Lead Faculty's exclusion log (E6-05), and nothing structural stops a person
+    # typing a student's name into it — the same is true of the comment text one hop
+    # away on `answer`, which is what this row is about. So the record stands as an
+    # entry, with the reason column named here for the next reader.
     "moderation_state": CarriesNothing(
-        ("answer_id", "decided_at", "id", "sequence", "state"),
-        "One decision about one comment: which comment, which of SPEC §5.2's lifecycle states, and "
-        "when it was decided. The comment is a foreign key and the person behind it is two more "
-        "hops away through `answer.response_id` and `response.user_id`, which is the argument the "
-        "`classification` entry above makes about a verdict on the same row. The state token says "
-        "nothing about who wrote the comment or who decided — E4 writes no row at all, and the "
-        "decider is E6's to add with the log that names them. Marking anything here would put "
-        "every moderation state in the set the identity-separated views may not read, which is the "
+        (
+            "answer_id",
+            "decided_as",
+            "decided_at",
+            "decided_by_person_id",
+            "id",
+            "is_undo",
+            "reason",
+            "sequence",
+            "state",
+        ),
+        "One decision about one comment: which comment, which of SPEC §5.2's lifecycle states, "
+        "when, who decided it as a `person` key and under which role, the stated reason, and "
+        "whether it undoes an earlier one. The comment is a foreign key and the student behind it "
+        "is two more hops away through `answer.response_id` and `response.user_id`, the argument "
+        "the `classification` entry above makes; the decider is a key whose identity sits on "
+        "`user_identity`, the argument `audit_log` makes. The reason is staff-written free text "
+        "about the comment, like the comment itself. Marking anything here would put every "
+        "moderation state in the set the identity-separated views may not read, which is the "
         "opposite of what §5.1's report needs, so an entry is the right record and a marker is "
         "not.",
     ),

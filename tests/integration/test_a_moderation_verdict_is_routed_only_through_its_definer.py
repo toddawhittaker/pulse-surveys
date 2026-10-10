@@ -12,7 +12,8 @@ The work order's decisions 2, 3 and 9, and the ticket's criteria 4, 5 and 6:
     `pulse_app` holds `EXECUTE` on it.
   - **Verdict and route land together** (criterion 5): a call whose route fails
     leaves neither the verdict nor the route; and `pulse_app` cannot insert into
-    `moderation_state` or `threat_case` directly — asserted on the connection
+    `threat_case` directly, nor into `moderation_state` beyond the decision columns
+    E6-03 grants it for the instructor's door — asserted on the connection
     production uses (`docs/MISTAKES.md` entry 46).
   - **The verdict check is per task** (criterion 6): a `MODERATION` row with a
     validity verdict, and a validity row with a moderation verdict, are both
@@ -403,7 +404,14 @@ def test_the_application_connection_is_refused_a_direct_write_to_either_route_ta
 
     `pulse_app` may write a route only by calling the door. So on its own login:
 
-      - `INSERT`, `UPDATE` and `DELETE` on `moderation_state` are refused with 42501;
+      - `INSERT` naming any column beyond the ones a decision writes, `UPDATE` and
+        `DELETE` on `moderation_state` are refused with 42501. **Amended by E6-03**,
+        whose grants file gives `pulse_app` column-grain `INSERT` on exactly the
+        decision columns (answer, state, decider, role, reason, undo) for the
+        instructor's door; the row's key and E6-01's `sequence` stay the database's,
+        so an insert naming the key is the refusal measured here. What a decision
+        may write, and the accepted half, is
+        `test_the_application_role_inserts_only_a_decisions_columns.py`;
       - `INSERT` on `threat_case` is refused with 42501 — and so is a bare
         `SELECT`, because the application connection holds no privilege on it at
         all (`RUNTIME_BASE_TABLE_PRIVILEGES` in `test_identity_grants.py`);
@@ -447,9 +455,9 @@ def test_the_application_connection_is_refused_a_direct_write_to_either_route_ta
     )
 
     statements = {
-        "insert into moderation_state": (
-            "INSERT INTO public.moderation_state (answer_id, state) "
-            "VALUES (CAST(:answer AS uuid), 'FLAGGED_COLLAPSED')"
+        "insert into moderation_state naming its key": (
+            "INSERT INTO public.moderation_state (id, answer_id, state) "
+            "VALUES (CAST(:key AS uuid), CAST(:answer AS uuid), 'FLAGGED_COLLAPSED')"
         ),
         "update moderation_state": (
             "UPDATE public.moderation_state SET state = 'FLAGGED_COLLAPSED'"
@@ -461,7 +469,7 @@ def test_the_application_connection_is_refused_a_direct_write_to_either_route_ta
         ),
         "select from threat_case": "SELECT count(*) FROM public.threat_case",
     }
-    parameters = {**answer, "classification": str(uuid4())}
+    parameters = {**answer, "classification": str(uuid4()), "key": str(uuid4())}
     answered = {
         name: attempted(application_session, statement, parameters)
         for name, statement in statements.items()

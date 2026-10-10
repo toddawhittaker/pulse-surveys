@@ -256,7 +256,21 @@ PAYLOAD_STREAM_KEY = {INSTRUCTOR_STREAM: "instructor", COURSE_STREAM: "course"}
 # `ReportComment(text, status, stream)` (`tests/fixtures/report_comments.py`). The
 # stream is spelled by the member a comment sits under in `streams`, so it is
 # tolerated on the object and not required.
-COMMENT_FIELDS_PERMITTED = frozenset({COMMENT_TEXT_FIELD, COMMENT_STATUS_FIELD, "stream"})
+#
+# **E6-03 adds exactly three, and the ceiling grows by those three and nothing
+# else** (its work order, decision 6): `answer_id`, the comment's handle, which is
+# what the instructor's decision route names; `flag`, the class of the comment's
+# moderation verdict (`harmful`, `privacy` or null); and `decided_by_you`, whether
+# the latest decision about it was the reader's. No date, no time, no week, no
+# author and no decider — ADRs 0153 and 0162 name the channel a date on a card
+# opens, and the ticket's fifth criterion is this ceiling.
+ANSWER_ID_FIELD = "answer_id"
+FLAG_FIELD = "flag"
+DECIDED_BY_YOU_FIELD = "decided_by_you"
+E6_03_COMMENT_FIELDS = frozenset({ANSWER_ID_FIELD, FLAG_FIELD, DECIDED_BY_YOU_FIELD})
+COMMENT_FIELDS_PERMITTED = (
+    frozenset({COMMENT_TEXT_FIELD, COMMENT_STATUS_FIELD, "stream"}) | E6_03_COMMENT_FIELDS
+)
 
 # ---------------------------------------------------------------------------
 # What a refusal looks like on the wire.
@@ -1836,6 +1850,10 @@ def report_api_contract() -> Any:
         trend_mean_field = TREND_MEAN_FIELD
         suppressed_field = SUPPRESSED_FIELD
         comment_fields_permitted = COMMENT_FIELDS_PERMITTED
+        e6_03_comment_fields = E6_03_COMMENT_FIELDS
+        answer_id_field = ANSWER_ID_FIELD
+        flag_field = FLAG_FIELD
+        decided_by_you_field = DECIDED_BY_YOU_FIELD
 
         out_of_scope_status = OUT_OF_SCOPE_STATUS
         role_refused_status = ROLE_REFUSED_STATUS

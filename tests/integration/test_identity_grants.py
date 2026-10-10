@@ -4319,7 +4319,9 @@ MEMBER_OF_ROLES = """
 #     privilege on it of any kind — the routing definer writes it, and E10's Care
 #     queue reads it on the Care connection — so an instructor's connection cannot
 #     even count the cases. `moderation_state` keeps the `SELECT` E4-06 argued for
-#     and gains nothing: its writer is the definer.
+#     and gained nothing at E6-01: its writer was the definer. E6-03 adds a second
+#     writer — the instructor's decision door — and spends `INSERT` on it at column
+#     grain only; that entry is in `RUNTIME_COLUMN_PRIVILEGES` below.
 #     **What these tables carry, for §4.1.** An answer key and an instant;
 #     `tests/integration/test_identity_column_marker.py` records both tables.
 #     Decided in E6-01; spent by E6-02.
@@ -4523,6 +4525,30 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
 # `RUNTIME_BASE_TABLE_PRIVILEGES` above; the withheld columns are asserted refused
 # on the connection production opens in
 # `test_the_comparison_set_tables_are_refused_to_the_application_connection.py`.
+#
+# **E6-03 spends six, all `INSERT`, all on `moderation_state`**, from its grants file
+# `moderation_decision_grants_v001.sql`. The instructor excludes, keeps and undoes a
+# comment, and each step is one appended row naming the comment, the state, the
+# decider, the role the decision was made under, the reason, and whether it is an
+# undo (the ticket's M2 and its work order's decision 3). Those six are what a
+# decision writes, so they are what is granted:
+#
+#   - `moderation_state(answer_id)`, `(state)` — which comment, and its new state;
+#   - `moderation_state(decided_by_person_id)`, `(decided_as)` — who decided, and as
+#     what (ruling 4 has the exclusion log show the role, so the role is stored rather
+#     than read off today's assignments);
+#   - `moderation_state(reason)` — SPEC §5.2's stated reason for an unflagged
+#     exclusion;
+#   - `moderation_state(is_undo)` — what makes an undo row distinguishable.
+#
+# **What is withheld is the assertion.** The row's `id` (ADR 0016's server default),
+# E6-01's `sequence` (the database's insertion order, SPEC §8) and `decided_at` (a
+# `now()` server default) are the database's to fill, so a decision never names
+# them; and there is no `UPDATE` or `DELETE` on the table at all, because the record
+# is append-only and an undo is a new row. Table-wide `INSERT` would let this
+# connection write a row's key and its place in the order. The server's half —
+# accepted, refused, one column apart — is
+# `test_the_application_role_inserts_only_a_decisions_columns.py`.
 RUNTIME_COLUMN_PRIVILEGES = frozenset(
     {
         (APPLICATION_ROLE, "course", "lms_title", "UPDATE"),
@@ -4539,6 +4565,12 @@ RUNTIME_COLUMN_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "comparison_set", "length_weeks", "UPDATE"),
         (APPLICATION_ROLE, "comparison_set", "level", "UPDATE"),
         (APPLICATION_ROLE, "comparison_set", "updated_at", "UPDATE"),
+        (APPLICATION_ROLE, "moderation_state", "answer_id", "INSERT"),
+        (APPLICATION_ROLE, "moderation_state", "state", "INSERT"),
+        (APPLICATION_ROLE, "moderation_state", "decided_by_person_id", "INSERT"),
+        (APPLICATION_ROLE, "moderation_state", "decided_as", "INSERT"),
+        (APPLICATION_ROLE, "moderation_state", "reason", "INSERT"),
+        (APPLICATION_ROLE, "moderation_state", "is_undo", "INSERT"),
     }
 )
 
