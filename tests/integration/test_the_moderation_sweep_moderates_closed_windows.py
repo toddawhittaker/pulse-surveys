@@ -172,7 +172,15 @@ def test_each_verdict_is_routed_as_its_class_requires(
     mock_ai: MockAiProvider,
     mock_gateway: Any,
 ) -> None:
-    """Done-when 3: harmful and privacy flag, threat and self-harm open a case, the rest publish."""
+    """Done-when 3: harmful and privacy flag, threat and self-harm open a case, the rest publish.
+
+    "Publishes it" is asserted as the comment reaching the comment view, not only
+    as the absence of a flag and a case: a sweep that wrote the `clear` or
+    `nonsense` verdict but left the comment out of the read would otherwise pass.
+    **The mutation it kills:** routing `nonsense` (or `clear`) to a held outcome
+    that writes no `moderation_state` row and opens no case, so the comment is
+    silently never shown.
+    """
     world = comment_world
     world.build()
     world.close_week(CLOSED_WEEK)
@@ -189,6 +197,10 @@ def test_each_verdict_is_routed_as_its_class_requires(
         assert states == [] and len(cases) == 1
     else:
         assert states == [] and cases == []
+        assert answer in view_answer_ids(world, CLOSED_WEEK), (
+            f"The sweep routed a {stored!r} verdict, which publishes the comment, but the "
+            "comment is not in its closed week's comment view."
+        )
 
 
 def test_an_outage_writes_no_attempt_and_the_comment_is_moderated_once_the_provider_returns(
@@ -334,3 +346,78 @@ def test_six_unusable_answers_cap_the_comment_and_its_week_goes_on_without_it(
         {"week": world.week_id(SECOND_CLOSED_WEEK)},
     ).scalar_one()
     assert summarized == 2
+
+
+def test_a_comment_below_the_cap_still_holds_its_weeks_summary(
+    comment_world: CommentWorld,
+    mock_ai: MockAiProvider,
+    mock_gateway: Any,
+    summary_contracts: Any,
+) -> None:
+    """Done-when 4's other half: the walk waits until the sixth failure, not before.
+
+    One closed week holds a planted `clear` comment (the control the walk must
+    eventually summarize) and one comment the mock always refuses. After each of
+    the first five sweeps a summary walk writes no row for the week, because the
+    refused comment is neither verdicted nor at the cap. After the sixth sweep
+    the walk summarizes the week, with the control and without the refused one.
+
+    The test above checks only the state after the cap, so it cannot tell where
+    the gate draws its line. **The mutations it kills:** the gate counting a
+    comment as resolved below six attempt rows (`>= 1`, or the off-by-one
+    `>= 5`); and the gather not waiting on an unverdicted comment at all.
+    """
+    from app.config import Settings
+    from app.services.reporting import generate_missing_summaries
+
+    world = comment_world
+    world.build()
+    world.close_week(CLOSED_WEEK)
+    a_comment(
+        world,
+        CLOSED_WEEK,
+        comment_text(INSTRUCTOR_TOKEN, "E602WAITBESIDEQz"),
+        moderation=CLEAR,
+    )
+    refused = a_comment(
+        world,
+        CLOSED_WEEK,
+        comment_text(INSTRUCTOR_TOKEN, f"E602WAITREFUSEDQz {mock_ai.marker_for('500')}"),
+    )
+
+    def walk() -> str:
+        gateway = StreamAwareGateway(summary_contracts)
+        generate_missing_summaries(world.session, settings=Settings(), gateway=gateway)
+        return "\n".join(gateway.prompts)
+
+    def stored_rows() -> int:
+        return int(
+            world.session.execute(
+                text(
+                    "SELECT count(*) FROM public.weekly_summary "
+                    "WHERE section_id = :section AND week_id = :week"
+                ),
+                {"section": world.section_id(), "week": world.week_id(CLOSED_WEEK)},
+            ).scalar_one()
+        )
+
+    for done in range(1, CAP):
+        sweep(world, mock_gateway)
+        assert attempts_of(world, refused) == done
+        sent = walk()
+        assert stored_rows() == 0, (
+            f"The week was summarized after {done} failed moderation call(s) on one of its "
+            f"comments. The walk waits until every comment holds a verdict or has reached the "
+            f"cap of {CAP} failed calls; below the cap the comment may still be moderated."
+        )
+        assert "E602WAITBESIDEQz" not in sent
+
+    sweep(world, mock_gateway)
+    assert attempts_of(world, refused) == CAP
+    sent = walk()
+    assert stored_rows() > 0, (
+        f"The refused comment reached the cap of {CAP} failed calls, but the walk still did not "
+        "summarize its week. At the cap the gather stops waiting on it."
+    )
+    assert "E602WAITBESIDEQz" in sent
+    assert "E602WAITREFUSEDQz" not in sent

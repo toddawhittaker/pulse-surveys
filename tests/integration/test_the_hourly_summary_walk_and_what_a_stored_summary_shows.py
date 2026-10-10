@@ -176,6 +176,58 @@ def test_the_empty_week_sentence_is_the_same_for_no_comment_and_a_withheld_comme
     assert no_comment["INSTRUCTOR"] == (EMPTY_SENTENCE, "empty-week")
 
 
+def test_the_empty_week_sentence_is_the_same_for_no_comment_and_a_capped_comment(
+    comment_world: CommentWorld,
+    mock_ai: MockAiProvider,
+    mock_gateway: Any,
+    summary_contracts: Any,
+) -> None:
+    """Done-when 6, for the other way a week's only comment is withheld: the attempt cap.
+
+    One week whose only respondent wrote no comment; one whose only respondent
+    wrote a comment the mock always refuses, swept six times until it reaches
+    the cap and stays held with no verdict (ADR 0188). Each stream's stored
+    summary is the same in both weeks, and the capped comment reached no summary
+    call. The self-harm test above covers a Care-class withholding; this covers
+    the held-at-the-cap one, which takes a different path through the gather.
+
+    **The mutation it kills:** the gather counting a capped comment as a comment
+    of the week, so its stream is summarized from nothing or under a sentence
+    that differs from the no-comment week's (for example one saying comments are
+    being held), which tells the reader that someone wrote something.
+    """
+    world = comment_world
+    world.build()
+    world.close_week(NO_COMMENT_WEEK)
+    world.close_week(WITHHELD_WEEK)
+    world.submit(term_week=NO_COMMENT_WEEK, comments={})
+    world.submit(
+        term_week=WITHHELD_WEEK,
+        comments={
+            INSTRUCTOR_STREAM: comment_text(
+                INSTRUCTOR_TOKEN, f"E602CAPPEDONLYQz {mock_ai.marker_for('500')}"
+            )
+        },
+        moderation={INSTRUCTOR_STREAM: UNMODERATED},
+    )
+    # Six counted failures, the ADR 0188 cap, written out rather than imported.
+    for _ in range(6):
+        sweep(world, mock_gateway)
+
+    gateway = StreamAwareGateway(summary_contracts)
+    walk(world, gateway)
+
+    assert "E602CAPPEDONLYQz" not in "\n".join(gateway.prompts)
+    no_comment = summaries(world, NO_COMMENT_WEEK)
+    capped = summaries(world, WITHHELD_WEEK)
+    assert "INSTRUCTOR" in no_comment, (
+        f"The no-comment week has no stored instructor summary (it has {sorted(no_comment)}), "
+        "so the comparison below would be between two empty results and prove nothing."
+    )
+    assert no_comment == capped
+    assert no_comment["INSTRUCTOR"][0] == EMPTY_SENTENCE
+
+
 def test_an_ordinary_summary_stored_for_a_stream_now_held_is_not_served(
     comment_world: CommentWorld,
 ) -> None:
