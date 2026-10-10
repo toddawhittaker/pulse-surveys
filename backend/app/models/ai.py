@@ -44,18 +44,20 @@ from uuid import UUID
 from sqlalchemy import CheckConstraint, Enum, ForeignKey, Index, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.ai.contracts import ValidityVerdict
+from app.ai.contracts import ModerationVerdict, ValidityVerdict
 from app.models.base import AwareDateTime, Base, UuidPrimaryKey
 
 
 class ClassificationTask(StrEnum):
     """Which of SPEC §7.4's tasks produced a row's verdict.
 
-    One member, because comment validity is the only task with a caller today.
-    Each later ticket that classifies something adds its member in the same
-    change as the code that writes it, so the type lists what actually happens
-    rather than what is planned — `AuditAction` in `app/models/audit.py` gives
-    the same reasoning for the same shape.
+    Two members. Comment validity arrived with E0-13; moderation arrived with
+    E6-01, in the same change as its one writer, the routing definer
+    `public.route_moderation_verdict` (`views_sql/moderation_routing_v001.sql`,
+    ADR 0187). Each later ticket that classifies something adds its member in the
+    same change as the code that writes it, so the type lists what actually
+    happens rather than what is planned — `AuditAction` in `app/models/audit.py`
+    gives the same reasoning for the same shape.
 
     The column is not optional and not a convenience. Two of §7.4's five tasks
     produce a verdict, and their vocabularies overlap without agreeing:
@@ -68,6 +70,7 @@ class ClassificationTask(StrEnum):
     """
 
     COMMENT_VALIDITY = "COMMENT_VALIDITY"
+    MODERATION = "MODERATION"
 
 
 # The tokens a comment-validity verdict may be stored as, read off the contract
@@ -77,6 +80,33 @@ class ClassificationTask(StrEnum):
 # `app/ai/contracts.py` moves the constraint with it, and a second copy would
 # have been the one nobody updates (`docs/MISTAKES.md` entry 13).
 VALIDITY_VERDICT_TOKENS = tuple(member.value for member in ValidityVerdict)
+# The moderation task's six, read off its contract the same way (E6-01).
+MODERATION_VERDICT_TOKENS = tuple(member.value for member in ModerationVerdict)
+
+# Which verdicts each task may store. Every member of `ClassificationTask` has an
+# entry, and the verdict `CHECK` below is built from this mapping, so a task with
+# no vocabulary cannot store a row at all rather than storing any word it likes.
+VERDICT_TOKENS_OF_TASK: dict[ClassificationTask, tuple[str, ...]] = {
+    ClassificationTask.COMMENT_VALIDITY: VALIDITY_VERDICT_TOKENS,
+    ClassificationTask.MODERATION: MODERATION_VERDICT_TOKENS,
+}
+
+
+def verdict_is_in_its_tasks_vocabulary() -> str:
+    """The verdict `CHECK`'s body: each task's row holds one of that task's own tokens.
+
+    One disjunct per task, each pairing the task with its own closed set. A single
+    `verdict IN (...)` over the union of the two sets would accept a `MODERATION`
+    row saying `substantive` and a validity row saying `threat`; a validity row
+    that says `threat` routes nothing and counts toward nobody's credit, and a
+    moderation row that says `substantive` would be a comment shown with no
+    moderation decision at all (E6-01 criterion 6). `nonsense` is in both sets
+    and is accepted under both tasks, which is correct.
+    """
+    return " OR ".join(
+        f"(task = '{task.value}' AND verdict IN ({', '.join(repr(token) for token in tokens)}))"
+        for task, tokens in VERDICT_TOKENS_OF_TASK.items()
+    )
 
 
 class Classification(UuidPrimaryKey, Base):
@@ -105,9 +135,11 @@ class Classification(UuidPrimaryKey, Base):
         # this table will ever have — E2's async re-classification, a backfill,
         # a repair script. A `nonsense` from the moderation task in a
         # comment-validity row would read as a §3.3 participation decision.
+        #
+        # Per task since E6-01, which added the second task: the body is built
+        # from `VERDICT_TOKENS_OF_TASK` above, one disjunct per task.
         CheckConstraint(
-            f"task <> '{ClassificationTask.COMMENT_VALIDITY}'"
-            f" OR verdict IN ({', '.join(repr(token) for token in VALIDITY_VERDICT_TOKENS)})",
+            verdict_is_in_its_tasks_vocabulary(),
             name="verdict_is_in_its_tasks_vocabulary",
         ),
         # The pair `app.services.validity`'s re-classification sweep filters on:
@@ -156,3 +188,34 @@ class Classification(UuidPrimaryKey, Base):
     # §9.3's eval floors compare runs of different models, and a normalised name
     # loses the distinction the comparison is about (ADR 0031).
     model_id: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ModerationAttempt(UuidPrimaryKey, Base):
+    """One moderation call about one comment that failed, appended (E6-01, E6-02).
+
+    A comment is shown to no reader until it holds a moderation verdict
+    (`report_comment` v004, ADR 0187), so a comment whose moderation call keeps
+    failing would hold its whole section-week back for ever. E6-02's sweep caps
+    the attempts per comment, and this table is what it counts: one row per failed
+    call, never edited. E6-01 creates it so that E6-02 needs no migration of its
+    own; nothing in E6-01 writes or reads it.
+
+    **Two columns beyond the key, and no model answer**, because a failed call has
+    none. `pulse_app` holds `SELECT` and `INSERT` here and nothing else
+    (`moderation_attempt_grants_v001.sql`), so a failed attempt cannot be erased
+    to reset a cap.
+    """
+
+    __tablename__ = "moderation_attempt"
+
+    # The comment the call was about. `RESTRICT`, like every other foreign key on
+    # the survey tables (see `Classification.answer_id`), and indexed because the
+    # cap's read is "the attempts about this comment".
+    answer_id: Mapped[UUID] = mapped_column(
+        ForeignKey("answer.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    # When the call failed. A server default, as on `classified_at`, so rows can be
+    # ordered by when they were written whatever wrote them.
+    attempted_at: Mapped[datetime] = mapped_column(
+        AwareDateTime, nullable=False, server_default=text("now()")
+    )

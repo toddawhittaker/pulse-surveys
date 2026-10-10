@@ -63,9 +63,11 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
+    Identity,
     Index,
     Integer,
     Text,
@@ -241,6 +243,14 @@ class ModerationState(UuidPrimaryKey, Base):
     decided_at: Mapped[datetime] = mapped_column(
         AwareDateTime, nullable=False, server_default=text("now()")
     )
+    # The order the rows were written in, assigned by the database (E6-01, ADR
+    # 0187). `decided_at` is `now()`, the transaction's timestamp, so two
+    # decisions written in one transaction carry the same instant and cannot be
+    # told apart by it; this column breaks that tie, and `reported_status_of`
+    # orders by it alone. `ALWAYS`, so no writer can choose a value. It orders by
+    # insert, not by commit: two concurrent writers are not a same-transaction
+    # pair, and between them this column records which inserted first.
+    sequence: Mapped[int] = mapped_column(BigInteger, Identity(always=True), nullable=False)
 
 
 class ReleaseBatch(UuidPrimaryKey, Base):
