@@ -13,7 +13,7 @@ feature decisions, system behavior, rationale, status, or history.
 Before adding a line, ask whether it would still be true if the process
 changed; if yes, it belongs elsewhere. Under 150 lines.
 
-**Active epic:** E5.1 — Main review fixes. Tickets: `docs/tickets/e5.1/README.md` (on `epic/e5.1-main-review-fixes`).
+**Active epic:** E6 — Moderation & exclusions. Tickets: `docs/tickets/e6/README.md` (on `epic/e6-moderation-exclusions`).
 
 ## Read before you start
 
