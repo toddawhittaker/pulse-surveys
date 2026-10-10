@@ -40,7 +40,8 @@ The owner ruled on these on 2026-10-09, at the start of the epic. Rulings 1
 to 4 settle the four decisions the architect's design left open; ruling 5 was
 made the same day, on review of this breakdown. Ruling 6, made on 2026-10-10
 during E6-03's review, supersedes ruling 2. Ruling 7 was made on 2026-10-10
-during E6-05's review. No ticket reopens them.
+during E6-05's review. Ruling 8 was made on 2026-10-10 during E6-08's review.
+No ticket reopens them.
 
 1. **The Lead Faculty reviews harmful comments below the threshold.** The Lead
    Faculty sees a harmful comment's text and its section at any threshold. The
@@ -109,6 +110,14 @@ during E6-05's review. No ticket reopens them.
    rule is by section, not by course: the course's other sections stay in the
    queue. E6-05 builds it, SPEC §5.5's exception sentence says it, and ADR 0190
    records it.
+8. **A capped comment never releases its week** (made on 2026-10-10, during
+   E6-08's review). A comment that reaches the moderation attempt cap holds no
+   verdict, and its whole section-week stays out of the week read, the release
+   cut and the summary walk until a person decides the comment. The cap still
+   stops the sweep asking about the comment again. E10's Care review adds the
+   step that decides it. The reason: an unusable answer can be account-wide, so
+   the old rule, which counted a capped comment as resolved, could release every
+   week with no threat or self-harm check.
 
 **A stated limit, not a choice.** "No trace in the instructor view" means the
 Pulse surfaces. A reader who also holds the LMS gradebook can sometimes see
@@ -152,6 +161,7 @@ submitted.
 | 05 | [The Lead Faculty review queue and the exclusion log](E6-05-review-queue-and-exclusion-log.md) | `e6/review-queue-and-exclusion-log` | heavy | 03 | A leadership-only own-grant read in `authz.py`; the review queue (no week, no time, random order); Lead Faculty decisions through 03's service; the exclusion log in both directions; sibling-isolation and Care-absence invariants; SPEC §5.2, §5.5 and §11; ADR 0190. | |
 | 06 | [The leadership queue and log pages](E6-06-leadership-moderation-pages.md) | `e6/leadership-moderation-pages` | light | 04, 05 | The review queue page, the exclusion log page and its row, the routes and landing links. | |
 | 07 | [E6 exit](E6-07-e6-exit.md) | `e6/e6-exit` | light | all | The exit clause driven on the running stack; the carried files closed and `../e7/carried-from-e6.md` written; the boundary reviews; SPEC §14.3. | |
+| 08 | [The exclusion log leaves out taught sections, and no HTTP status caps a comment](E6-08-review-residue.md) | `e6/review-residue` | heavy | 05 | The two MEDs left by PR #296's re-check: the log drops rows from the reader's taught sections, and only an unusable answer counts toward the moderation cap. | |
 
 ## Waves
 

@@ -54,7 +54,11 @@ comment's key and flag class rather than an instructor card.
 the reader's courses, through v004, newest first by `sequence`: the section
 label, the direction (`decision`, the stored `EXCLUDED` or `KEPT`, so the log
 shows both directions as SPEC §5.2 asks), the stored role, whether the AI flagged the comment, the reason, the date
-in the institution's zone, and an excerpt of 140 characters. **The excerpt is
+in the institution's zone, and an excerpt of 140 characters. *Amended at
+E6-08:* the log leaves out every row from a section the reader teaches, by the
+same `taught_section_ids` filter as the queue; the row is removed, not
+redacted, because its section, date and reason say what the reader's own
+report hides. **The excerpt is
 null unless the comment's own report shows it under its week**
 (`visible_cards` for its section, week and stream). That withholds held text,
 text of a week not yet fully moderated, and released text: a decision date

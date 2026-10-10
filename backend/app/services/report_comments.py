@@ -216,7 +216,7 @@ from app.models.report import MODERATION_STATES, ModerationState, ReleaseBatch, 
 from app.models.survey import Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow, Week
 from app.services import clock
-from app.services.moderation import EXCLUDED, KEPT, holds_no_verdict, under_the_attempt_cap
+from app.services.moderation import EXCLUDED, KEPT, holds_no_verdict
 
 # The initial moderation state, and the one a comment carries when nothing has
 # been decided about it (ADR 0145). Taken off the model's own vocabulary rather
@@ -458,9 +458,12 @@ def section_week_moderated(session: Session, *, section_id: UUID, week_id: UUID)
     view leaves it out of every reader.
 
     True for a section-week with no comments at all, which has nothing to wait
-    for. A comment at the moderation attempt cap (ADR 0188) is not waited for
-    either: it will never hold a verdict, so it is never shown, and waiting on it
-    would hold the rest of its week back for ever.
+    for. A comment at the moderation attempt cap (ADR 0188) is still waited
+    for: it holds no verdict and never will until a person decides it (E10's Care
+    review), so its whole section-week stays out of every reader. The cap stops
+    the sweep asking about the comment again; it does not release the week, which
+    an unusable answer that is account-wide could otherwise do for every week
+    unchecked (ruling 8).
     """
     return (section_id, week_id) not in _unmoderated_section_weeks(
         session, Response.section_id == section_id, Response.week_id == week_id
@@ -1079,9 +1082,6 @@ def _unmoderated_section_weeks(
             Question.kind == QuestionKind.COMMENT,
             Answer.comment_text.is_not(None),
             holds_no_verdict(Answer.id),
-            # A comment at the attempt cap is resolved: it is never verdicted, so
-            # it is never shown, and the rest of its week stops waiting on it.
-            under_the_attempt_cap(Answer.id),
             *scope,
         )
     )

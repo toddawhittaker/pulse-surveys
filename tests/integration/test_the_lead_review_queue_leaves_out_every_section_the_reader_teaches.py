@@ -20,14 +20,17 @@ course the reader reviews, and that comment must be in the queue
 miss: a rule keyed on the course rather than the section would hide the sibling
 section too, and reds on the canary.
 
-**The exclusion log keeps its rows.** The ruling leaves the log's scope alone,
-and the log already withholds the excerpt of held text. So the log test asserts
-only that no text of a held comment from the taught section reaches the reader,
-beside a shown row whose excerpt does (the canary), and says nothing about
-whether that section's rows are listed.
+**The exclusion log leaves those sections out too (E6-08).** A log row carries
+the section, the date, the decider's role, the flag and the reason, so a row from
+a taught section tells the reader that their own section held a flagged comment,
+roughly when, and a paraphrase of it, even with the excerpt withheld. E6-08 drops
+every row whose section the reader holds an `INSTRUCTOR` assignment on. The row is
+removed, not redacted. The log tests assert the rows are absent, beside a row
+from another section of the same course in the same read (the canary), for a lead
+and for a chair.
 
-**The mutation every test here kills:** the queue (or the door) built from the
-reader's leadership grant alone, ignoring the instructor grants the same person
+**The mutation every test here kills:** the queue, the door or the log built from
+the reader's leadership grant alone, ignoring the instructor grants the same person
 holds. **The near miss:** the exclusion keyed on the course of a taught section
 rather than the section itself.
 
@@ -41,12 +44,12 @@ from uuid import uuid4
 import pytest
 from fixtures.instructor_decisions import STORED_EXCLUDED
 from fixtures.lead_review import (
+    AS_CHAIR,
     AS_LEAD_FACULTY,
-    EXCERPT_LENGTH,
     EXCLUDE,
     ITEM_ANSWER_ID,
-    LOG_EXCERPT,
     LOG_REASON,
+    LOG_SECTION_LABEL,
     NOT_IN_QUEUE,
     UNMAPPED_COHORT,
     UNMAPPED_SECOND_COHORT,
@@ -285,54 +288,216 @@ def test_a_chair_deciding_on_a_comment_from_a_section_they_teach_gets_the_govern
     )
 
 
-def test_no_held_text_from_a_section_the_lead_teaches_reaches_them_through_the_log(
+def a_logged_exclusion(
+    review: LeadReviewWorld, *, text: str, cohort: str, reason: str, decided_as: str, held: bool
+) -> Any:
+    """One harmful comment in `cohort`, excluded by a person who is not the reader; its answer id.
+
+    `held` puts it in course week 3's course stream with one commenter, below the
+    threshold; otherwise it goes in course week 1's instructor stream. Planting
+    only: nothing here asserts.
+    """
+    comment = review.plant(
+        course_week=FIRST_HELD_WEEK if held else FULL_WEEK,
+        stream=COURSE_STREAM if held else INSTRUCTOR_STREAM,
+        text=text,
+        verdict=HARMFUL,
+        cohort=cohort,
+    )
+    review.plant_decision(
+        comment,
+        STORED_EXCLUDED,
+        decided_by=review.door.a_person(),
+        decided_as=decided_as,
+        reason=reason,
+    )
+    return comment
+
+
+def test_a_lead_who_teaches_a_section_of_their_led_course_finds_none_of_its_rows_in_the_log(
     lead_review: LeadReviewWorld,
 ) -> None:
-    """The log: rows may stay, but no text of a held comment from the taught section is in it.
+    """E6-08 done-when 1, for a lead: the taught section's log rows are absent, not redacted.
 
-    A held harmful comment in the lead's taught section, excluded earlier by
-    another Lead Faculty member; a shown harmful comment in the sibling section,
-    excluded too (the canary, whose excerpt the log carries). Whether the taught
-    section's row is listed is deliberately not asserted.
+    Another Lead Faculty member excluded a held comment in a section of the led
+    course the lead does not teach (the canary), and then two comments in the
+    section the lead does teach, one held and one in another week and stream
+    whose held-ness this test does not rely on. One read of the log must
+    carry the canary row and no row from the taught section. The log read before
+    the taught section's rows were planted must equal the one after, so a row
+    kept with its members blanked is red too.
 
-    **The mutation this kills:** the excerpt taken for every row, which hands the
-    lead the held text of their own section beside a date. **The near miss:** an
-    excerpt dropped from every row, which the canary reds.
+    **The mutation this kills:** `exclusion_log` scoped by the leadership grant
+    alone, ignoring the reader's instructor assignments (the taught section's two
+    rows are listed). **The near misses:** the filter keyed on the taught
+    section's course rather than the section (the canary is lost); the row
+    redacted rather than removed (the before and after reads differ).
     """
     review = lead_review
-    review.teaches(review.lead, LEADS_TAUGHT_COHORT)
-    held_text = "E6-05 ruling 7: held text from the lead's taught section, never in their log"
-    shown_text = "E6-05 ruling 7: a shown comment in the sibling section, its excerpt in the log"
-    shown_reason = "E6-05 ruling 7: the sibling section's shown exclusion, the canary"
-    held = a_held_harmful(review, held_text, LEADS_TAUGHT_COHORT)
-    shown = review.plant(
-        course_week=FULL_WEEK,
-        stream=INSTRUCTOR_STREAM,
-        text=shown_text,
-        verdict=HARMFUL,
+    reader = review.lead
+    review.teaches(reader, LEADS_TAUGHT_COHORT)
+    taught_code = review.code_of(LEADS_TAUGHT_COHORT)
+    canary_code = review.code_of(LEADS_CANARY_COHORT)
+    canary_reason = "E6-08: excluded in the led course's section the lead does not teach"
+    held_text = "E6-08: held harmful text from the lead's taught section, never in the log"
+    held_reason = "E6-08: a held comment excluded in the lead's taught section"
+    second_reason = "E6-08: a second comment excluded in the lead's taught section"
+    a_logged_exclusion(
+        review,
+        text="E6-08: a held harmful comment in the sibling section, the canary",
         cohort=LEADS_CANARY_COHORT,
+        reason=canary_reason,
+        decided_as=AS_LEAD_FACULTY,
+        held=True,
     )
-    for comment, reason in (
-        (held, "E6-05 ruling 7: the taught section's held exclusion"),
-        (shown, shown_reason),
-    ):
-        review.plant_decision(
-            comment,
-            STORED_EXCLUDED,
-            decided_by=review.door.a_person(),
-            decided_as=AS_LEAD_FACULTY,
-            reason=reason,
-        )
+    before = review.log_rows(reader)
+    a_logged_exclusion(
+        review,
+        text=held_text,
+        cohort=LEADS_TAUGHT_COHORT,
+        reason=held_reason,
+        decided_as=AS_LEAD_FACULTY,
+        held=True,
+    )
+    a_logged_exclusion(
+        review,
+        text="E6-08: a second harmful comment in the lead's own taught section",
+        cohort=LEADS_TAUGHT_COHORT,
+        reason=second_reason,
+        decided_as=AS_LEAD_FACULTY,
+        held=False,
+    )
 
-    answered = review.log(review.lead)
-    rows = review.log_rows(review.lead)
-    canary = [row for row in rows if row.get(LOG_REASON) == shown_reason]
-    assert len(canary) == 1 and canary[0].get(LOG_EXCERPT) == shown_text[:EXCERPT_LENGTH], (
-        f"The canary: the lead's log carries {len(canary)} rows for the sibling section's shown "
-        f"exclusion, with excerpts {[row.get(LOG_EXCERPT) for row in canary]}."
+    answered = review.log(reader)
+    assert answered.status_code == 200, (
+        f"The log answered {answered.status_code} to {reader.label}, who holds a leadership "
+        f"grant. Body begins {answered.text[:400]!r}."
     )
-    leaked = [value for value in strings_in(answered.json()) if held_text[:FRAGMENT] in value]
-    assert not leaked, (
-        "The text of a held comment from the section the lead teaches is in their exclusion log. "
-        "Ruling 7: a leader never reads held text from their own taught section."
+    body = answered.json()
+    rows = the_list_in(body, f"The log read for {reader.label}")
+    canary = [row for row in rows if row.get(LOG_REASON) == canary_reason]
+    assert len(canary) == 1, (
+        f"The canary: {reader.label}'s log carries {len(canary)} rows for the exclusion in section "
+        f"{canary_code}, a section of the course they lead that they do not teach. Either the log "
+        "answered nothing, or it left out the whole course rather than the taught section."
+    )
+    canary_label = str(canary[0].get(LOG_SECTION_LABEL))
+    assert canary_code in canary_label and taught_code not in canary_label, (
+        f"The canary row's section label is {canary_label!r}, which should name {canary_code!r} "
+        f"and not {taught_code!r}. Without that, searching labels for the taught section proves "
+        "nothing: a broken test, not a red."
+    )
+    reasons = [row.get(LOG_REASON) for row in rows]
+    assert held_reason not in reasons and second_reason not in reasons, (
+        f"{reader.label}'s log lists decisions from section {taught_code}, which they teach. "
+        "E6-08: the log drops every row whose section the reader holds an instructor assignment "
+        "on, because a row names the section, the date and a paraphrase of a comment the "
+        "instructor report withholds from them."
+    )
+    labels = [str(row.get(LOG_SECTION_LABEL)) for row in rows]
+    assert not [label for label in labels if taught_code in label], (
+        f"{reader.label}'s log carries rows of section {taught_code}, which they teach: "
+        f"{[label for label in labels if taught_code in label]}."
+    )
+    assert not [
+        value for value in strings_in(body) if held_text[:FRAGMENT] in value
+    ], f"The text of a held comment from the section {reader.label} teaches is in their log."
+    assert rows == before, (
+        f"Two exclusions in section {taught_code}, which {reader.label} teaches, changed the "
+        f"log from {before!r} to {rows!r}. E6-08: the row is removed, not redacted, so the taught "
+        "section's decisions add nothing to the log."
+    )
+
+
+def test_a_chair_who_teaches_a_section_of_an_unled_course_finds_none_of_its_rows_in_the_log(
+    lead_review: LeadReviewWorld,
+) -> None:
+    """E6-08 done-when 1, for a chair: the same rule over the chair's grant, one level out.
+
+    The chair's grant is the department's unled courses, a different currency
+    from a lead's course mapping (`docs/MISTAKES.md` entries 35 and 53). Another
+    chair excluded a held comment in the unmapped course's second section (the
+    canary), and then a held and a second comment in the section the chair
+    teaches. One read carries the canary and nothing from the taught section, and
+    equals the read taken before the taught section's rows were planted.
+
+    **The mutation this kills:** the taught-section filter applied to the lead
+    path only, so a chair's log still lists their taught section's rows. **The
+    near misses:** the filter keyed on the course (the canary, in the same
+    course, is lost); the row redacted rather than removed (the before and after
+    reads differ).
+    """
+    review = lead_review
+    review.a_second_section_of_the_unmapped_course()
+    reader = review.chair
+    review.teaches(reader, CHAIRS_TAUGHT_COHORT)
+    taught_code = review.code_of(CHAIRS_TAUGHT_COHORT)
+    canary_code = review.code_of(CHAIRS_CANARY_COHORT)
+    canary_reason = "E6-08: excluded in the unled course's section the chair does not teach"
+    held_text = "E6-08: held harmful text from the chair's taught section, never in the log"
+    held_reason = "E6-08: a held comment excluded in the chair's taught section"
+    second_reason = "E6-08: a second comment excluded in the chair's taught section"
+    a_logged_exclusion(
+        review,
+        text="E6-08: a held harmful comment in the unled course's second section, the canary",
+        cohort=CHAIRS_CANARY_COHORT,
+        reason=canary_reason,
+        decided_as=AS_CHAIR,
+        held=True,
+    )
+    before = review.log_rows(reader)
+    a_logged_exclusion(
+        review,
+        text=held_text,
+        cohort=CHAIRS_TAUGHT_COHORT,
+        reason=held_reason,
+        decided_as=AS_CHAIR,
+        held=True,
+    )
+    a_logged_exclusion(
+        review,
+        text="E6-08: a second harmful comment in the chair's own taught section",
+        cohort=CHAIRS_TAUGHT_COHORT,
+        reason=second_reason,
+        decided_as=AS_CHAIR,
+        held=False,
+    )
+
+    answered = review.log(reader)
+    assert answered.status_code == 200, (
+        f"The log answered {answered.status_code} to {reader.label}, who holds a leadership "
+        f"grant. Body begins {answered.text[:400]!r}."
+    )
+    body = answered.json()
+    rows = the_list_in(body, f"The log read for {reader.label}")
+    canary = [row for row in rows if row.get(LOG_REASON) == canary_reason]
+    assert len(canary) == 1, (
+        f"The canary: {reader.label}'s log carries {len(canary)} rows for the exclusion in section "
+        f"{canary_code}, a section of the unled course they review that they do not teach. Either "
+        "the log answered nothing, or it left out the whole course rather than the taught section."
+    )
+    canary_label = str(canary[0].get(LOG_SECTION_LABEL))
+    assert canary_code in canary_label and taught_code not in canary_label, (
+        f"The canary row's section label is {canary_label!r}, which should name {canary_code!r} "
+        f"and not {taught_code!r}. Without that, searching labels for the taught section proves "
+        "nothing: a broken test, not a red."
+    )
+    reasons = [row.get(LOG_REASON) for row in rows]
+    assert held_reason not in reasons and second_reason not in reasons, (
+        f"{reader.label}'s log lists decisions from section {taught_code}, which they teach. "
+        "E6-08: the log drops every row whose section the reader holds an instructor assignment "
+        "on, for a chair's grant as for a lead's."
+    )
+    labels = [str(row.get(LOG_SECTION_LABEL)) for row in rows]
+    assert not [label for label in labels if taught_code in label], (
+        f"{reader.label}'s log carries rows of section {taught_code}, which they teach: "
+        f"{[label for label in labels if taught_code in label]}."
+    )
+    assert not [
+        value for value in strings_in(body) if held_text[:FRAGMENT] in value
+    ], f"The text of a held comment from the section {reader.label} teaches is in their log."
+    assert rows == before, (
+        f"Two exclusions in section {taught_code}, which {reader.label} teaches, changed the "
+        f"log from {before!r} to {rows!r}. E6-08: the row is removed, not redacted, so the taught "
+        "section's decisions add nothing to the log."
     )
