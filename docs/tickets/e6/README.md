@@ -159,7 +159,7 @@ keeping both sides.
 | `tests/fixtures/report_comments.py`, `tests/fixtures/summary_job.py` | 01, then 03 | 01 plants verdicts; 03 adds decisions. |
 | `scripts/seed_demo_story.py`, `scripts/seed_exit_story.py`, `scripts/seed_benchmark_history.py` | 01, then 07 | 01 plants verdicts; 07 adds the exit story. |
 | `frontend/src/api/openapi.json`, `frontend/src/api/wire.gen.ts` | 03, then 05 | Serial. On conflict, regenerate with `scripts/export_openapi.py` and `npm run gen:wire`; never hand-merge. |
-| `frontend/src/api/instructor.ts` | 04 only | |
+| `frontend/src/api/instructor.ts` | 03, then 04 | 03 edits it only as far as the type check needs after regenerating; 04 owns the rest. |
 | `frontend/src/components/CommentCard.tsx` | 04, then 06 | 06 reuses 04's actions; it does not fork the component. |
 | `frontend/src/api/leadership.ts`, `frontend/src/router.tsx` | 06 only | |
 
