@@ -56,6 +56,7 @@ export function ExclusionLogRoute(): JSX.Element {
         {copy('leadership_moderation.log.heading')}
       </h1>
       <p className="pulse-set-intro">{copy('leadership_moderation.log.intro')}</p>
+      <p className="pulse-set-intro">{copy('leadership_moderation.confidentiality')}</p>
 
       {load.kind === 'loading' ? (
         <p className="pulse-set-status" role="status">
