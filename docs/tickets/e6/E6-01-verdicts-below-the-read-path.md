@@ -45,7 +45,12 @@ world, seed script and Playwright drive disappears. This ticket plants verdicts
 everywhere in the same change. It does not leave that to a later ticket
 (entry 22).
 
-Read first: SPEC §4, §4.1 item 3, §5.2, §6.2, §7.4 and §8; ADRs 0043, 0144,
+**Ruling 5.** Nothing reads a `threat_case` row until E10's Care queue, which
+is Phase 2. The owner ruled on 2026-10-09 that no deployment reaches real
+students until that queue exists. This ticket writes the ruling into SPEC §12's
+phase lines and into ADR 0187. The design here does not change.
+
+Read first: SPEC §4, §4.1 item 3, §5.2, §6.2, §7.4, §8 and §12; ADRs 0043, 0144,
 0145, 0153 and 0162; `../e4/deferred.md`'s three moderation entries whole; and
 this folder's README rulings.
 
@@ -56,6 +61,11 @@ this folder's README rulings.
     per-task verdict `CHECK` built from the enums, the way the validity `CHECK`
     is built (entry 13);
   - `moderation_state.sequence`, an identity column that orders rows;
+  - `moderation_attempt` in `backend/app/models/ai.py` (`answer_id` with
+    `RESTRICT`, `attempted_at`): one append-only row per failed moderation
+    call, which E6-02's attempt cap counts. `pulse_app` gets `INSERT` and
+    `SELECT` on it and nothing else. This ticket only creates it; E6-02 writes
+    and reads it;
   - `backend/app/models/safety.py` with `threat_case` (`answer_id` unique,
     `classification_id`, `opened_at`), in the `models/report.py` style (text
     with `CHECK`, `RESTRICT` foreign keys, `UuidPrimaryKey`). The opening row
@@ -87,8 +97,9 @@ this folder's README rulings.
   provenance (a prompt version that says it is a seed, never a real one).
 - `tests/integration/test_identity_grants.py` (the new owner and grants).
 - SPEC §5.2 (the "harmful … can be a self-harm disclosure" sentence), §8 (a
-  comment is shown only once moderated; `threat_case`; the ordering), and §13
-  (`models/safety.py` and `services/moderation.py` drawn as built).
+  comment is shown only once moderated; `threat_case`; `moderation_attempt`;
+  the ordering), §12 (ruling 5, below), and §13 (`models/safety.py` and
+  `services/moderation.py` drawn as built).
 - ADR **0187**; amendments to ADRs 0144 and 0145.
 
 **Must not touch:** the moderation prompt and the sweep (02), the decision
@@ -153,6 +164,11 @@ From `services/report_comments.py`: `reported_status_of`, `visible_comments`,
     ADR 0187 records the view rule, the definer, the gather's wait, the
     ordering, and that an identity column orders by insert, not by commit.
     ADRs 0144 and 0145 carry amendment lines pointing at it.
+14. **Ruling 5 is in the spec.** SPEC §12's phase lines carry one sentence
+    saying that no deployment reaches real students until E10's Care queue
+    exists, because before it a `threat_case` row has no reader. ADR 0187
+    states the same ruling with its date, 2026-10-09. A grep of §12 for
+    "Care queue" finds the sentence.
 
 ## Shares files with
 

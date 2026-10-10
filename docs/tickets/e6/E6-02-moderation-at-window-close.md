@@ -36,6 +36,20 @@ rule"). And a developer's local `.env` may still hold
 `BENCHMARK_MIN_RESPONDENTS_DEFAULT=15` (the E5 ledger row assigned to "E6's
 first ticket").
 
+**The attempt cap.** A failed moderation call is retried by the next hourly
+sweep. With no cap, one comment the provider always fails on would hold its
+week's summary for ever, because the gather waits for every verdict. So each
+failed call appends a row to E6-01's `moderation_attempt` table, and after
+**six** failed calls (six hourly sweeps) the sweep stops calling for that
+comment. The comment then stays held: it never receives a verdict, so view v004
+keeps it out of every read. It is never given a "clear" verdict and never
+accepted on timeout. The validity classifier's fail-open is sanctioned for
+validity only (SPEC §3.3, ADR 0056) and does not apply here. The gather stops
+waiting on a comment at the cap and summarizes the week without it. Each
+comment that reaches the cap is logged at error level by answer id, never by
+text. Such a comment is also never routed to Care, which E6-07 carries to E10.
+ADR 0188 records the cap and its number.
+
 `EMPTY_WEEK_SUMMARY` (`backend/app/ai/tasks.py:204`) says "No comments were
 submitted this week." Once a Care-class comment is withheld, that can be
 false. The new sentence must be the same in a week with no comments and in a
@@ -51,7 +65,10 @@ Read first: SPEC §5.1, §5.2, §6.2, §7.4 and §9.3; ADRs 0148, 0153 and 0162;
   `classify_comment_moderation` in `backend/app/ai/tasks.py`.
 - `EMPTY_WEEK_SUMMARY` in `backend/app/ai/tasks.py`, replaced by a true,
   neutral sentence (a new token).
-- The sweep in `backend/app/services/moderation.py`, after 01's routing call.
+- The sweep in `backend/app/services/moderation.py`, after 01's routing call,
+  with the attempt cap: it writes `moderation_attempt` rows and stops at six.
+- The gather's wait in `backend/app/services/reporting.py`: it stops waiting on
+  a comment at the cap.
 - `backend/app/jobs/tasks.py` and `backend/app/jobs/schedules.py`: an hourly
   moderation sweep, and the summary walk made hourly.
 - `mock-ai/app/rules.py`: a marker for each of the six verdicts.
@@ -93,22 +110,30 @@ typed cases.
 3. **Routing follows the verdict.** With the mock provider, a harmful or a
    privacy marker leaves the comment flagged-collapsed; a threat or a self-harm
    marker opens a `threat_case`; a clear or a nonsense marker publishes it.
-4. **The summary walk is hourly and waits.** A section-week whose last verdict
+4. **The attempt cap.** With the mock provider failing every call for one
+   comment, six sweeps each append one `moderation_attempt` row, and the
+   seventh makes no call. The comment then has no verdict and no
+   `moderation_state` row, is absent from the report and from every release
+   batch, and the next summary walk summarizes its week without it. The same
+   world holds a moderated comment that does appear (entry 3). The test reads
+   the rows, not the sweep's return (entry 49).
+5. **The summary walk is hourly and waits.** A section-week whose last verdict
    lands after Monday 02:50 is summarized on the next hourly walk, and a week
    already summarized is not summarized again.
-5. **The empty-week sentence holds no trace.** The sentence is the same in a
+6. **The empty-week sentence holds no trace.** The sentence is the same in a
    week with no comments and in a week whose only comment carries a self-harm
    verdict. A test asserts both, side by side.
-6. **The small-N premise is per stream.** The bumped prompt speaks of the
+7. **The small-N premise is per stream.** The bumped prompt speaks of the
    stream, not the week; its eval case is a thin stream in a full week; the
    stored summary row names the new version.
-7. **Old ordinary-mode summaries are withheld.** A stored ordinary-mode
+8. **Old ordinary-mode summaries are withheld.** A stored ordinary-mode
    summary whose stream is now held is not served, and a test plants one.
-8. **Typed eval cases exist.** Moderation cases cover all six verdicts, built
+9. **Typed eval cases exist.** Moderation cases cover all six verdicts, built
    from `ModerationOutput`; threat and self-harm cases sit under
    `tests/evals/threat/`. No floor is set or moved.
-9. **The records match.** SPEC §5.2 says Care routing happens at window close;
-   ADR 0188 records the timing, the flagging rule and the summary wait; the
+10. **The records match.** SPEC §5.2 says Care routing happens at window close;
+   ADR 0188 records the timing, the flagging rule, the summary wait and the
+   attempt cap of six; the
    README line names the value 10.
 
 ## Shares files with

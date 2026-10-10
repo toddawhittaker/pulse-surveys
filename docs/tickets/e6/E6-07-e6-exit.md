@@ -48,7 +48,10 @@ shape), `carried-from-e5.md` whole, `../e5/carried-from-e4.md` and
 - `docs/tickets/e7/carried-from-e6.md` (new), under the completeness rule
   `carried-from-e5.md` was written to, with a ledger in source order. It
   includes a note for E8: student comment reads use `report_comment` v004 and
-  show published and kept comments only.
+  show published and kept comments only. It repeats ruling 5 for E10: no
+  deployment reaches real students until E10's Care queue exists, because
+  until then a `threat_case` row has no reader. And it carries to E10 that a
+  comment which reaches E6-02's attempt cap is never routed to Care.
 - `docs/tickets/e6/boundary-review.md` (new): the boundary reviews and where each
   finding went.
 - `docs/MISTAKES.md`: the note explaining why entries 54 to 57 have no file,

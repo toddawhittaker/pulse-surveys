@@ -27,6 +27,24 @@ chair). Only harmful goes to the queue; privacy stays with the instructor.
 Each item shows the text and the section, in random order. No week, no time,
 no count beside it.
 
+**The queue reads view v004.** It finds its comments through
+`public.report_comment` v004, the one place the Care-class exclusion lives. It
+gets no grant on `answer` and does not rebuild the exclusion in Python, so
+there is one copy of the rule and a Care-class comment cannot reach the queue
+by a second road.
+
+**Each door holds its own visibility check.** The Lead Faculty door is a
+separate entry into E6-03's decision service, with its own check: the comment
+is in the queue this reader may see. It is not a flag or a role argument on
+the shared service, so adding this door cannot loosen E6-03's instructor rule.
+Both checks run before the shared write.
+
+**What the instructor sees of a Lead Faculty decision.** On a comment in a
+shown stream, the instructor's card shows the decision. On a comment in a held
+stream, the instructor sees the decision only through the participation note's
+count: an exclusion leaves the count unchanged, and a keep removes the comment
+from it. There is no per-comment trace.
+
 **The log.** Every `EXCLUDED` and `KEPT` row decided by a person, inside the
 reader's own grant at their leadership roles. Each row shows the section
 (course label and code), the decider's stored role (ruling 4), AI-flagged or
@@ -51,9 +69,10 @@ Read first: SPEC §2.1, §4, §4.1 items 2 and 3, §5.2, §5.5 and §6.2; ADRs 0
 
 - One public leadership-only own-grant function in
   `backend/app/services/authz.py`.
-- The queue read, the log read and the Lead Faculty door into E6-03's decision
-  service, in `backend/app/services/moderation.py`. A Lead Faculty or chair
-  decision is written with that role.
+- The queue read (over view v004), the log read and the Lead Faculty door into
+  E6-03's decision service, in `backend/app/services/moderation.py`. The door
+  holds its own visibility check. A Lead Faculty or chair decision is written
+  with that role.
 - `backend/app/schemas/moderation.py` (new) and
   `backend/app/copy/leadership_moderation.py` (new).
 - The queue, decision and log routes in `backend/app/api/leadership.py`,
@@ -96,15 +115,27 @@ writer of `moderation_state`. `section_codes.course_label` for the section.
    refused by every route here, over HTTP against the built application, and a
    leadership person in the same world is answered (entry 47).
 6. **Lead Faculty decisions.** A Lead Faculty member excludes and keeps a queued
-   comment; each is a row with the decider and the stored role, and the
-   instructor's report shows the decision.
-7. **The log, both directions.** The log shows `EXCLUDED` and `KEPT` rows inside
+   comment; each is a row with the decider and the stored role. In a shown
+   stream, the instructor's card shows the decision. In a held stream, a test
+   shows that the instructor's payload changes only in the participation
+   note's count: an exclusion leaves the count as it was, a keep lowers it by
+   one, and no other member of the payload differs between the two reads.
+7. **The gate runs at dispatch.** A leadership decision POST with no CSRF
+   token, or from another origin, is refused over HTTP against the built
+   application, and the same POST with the token succeeds (entry 47).
+8. **The doors do not share a check.** An instructor decision on a comment in a
+   held stream of their own section is still refused after this ticket, and the
+   same comment is accepted through the Lead Faculty door by its lead.
+9. **One copy of the Care exclusion.** The queue read selects from
+   `public.report_comment`, and this ticket adds no grant to `pulse_app`:
+   `tests/integration/test_identity_grants.py` shows its grant set unchanged.
+10. **The log, both directions.** The log shows `EXCLUDED` and `KEPT` rows inside
    the reader's own grant, with the section, the role, flagged or the reason,
    and the date. A row whose comment its instructor cannot see carries no
    excerpt.
-8. **The assistant dean fails closed.** A person whose only leadership grant is
+11. **The assistant dean fails closed.** A person whose only leadership grant is
    `ASSISTANT_DEAN` gets the refusal, as ADR 0108 says, until E9.
-9. **The records match.** §5.5's exception sentence, §5.2's log sentences and
+12. **The records match.** §5.5's exception sentence, §5.2's log sentences and
    open item, and §11 question 5 are edited. ADR 0190 records who sees what,
    the residual that the queue's arrival time hints at the week, and the
    de-anonymization statement for leadership views, written after reading

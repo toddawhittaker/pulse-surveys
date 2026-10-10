@@ -36,8 +36,9 @@ E5.1-05 did.
 
 ## Rulings this breakdown builds on
 
-The owner ruled on these on 2026-10-09, at the start of the epic. They settle
-the four decisions the architect's design left open. No ticket reopens them.
+The owner ruled on these on 2026-10-09, at the start of the epic. Rulings 1
+to 4 settle the four decisions the architect's design left open; ruling 5 was
+made the same day, on review of this breakdown. No ticket reopens them.
 
 1. **The Lead Faculty reviews harmful comments below the threshold.** The Lead
    Faculty sees a harmful comment's text and its section at any threshold. The
@@ -71,6 +72,13 @@ the four decisions the architect's design left open. No ticket reopens them.
    exclusion or a keep. E6-03 edits SPEC §8 and §13 to match.
 4. **The exclusion log shows the section and the decider's role, not a name.**
    Staff names carry to E9, which builds the staff-name read.
+5. **No deployment reaches real students until E10's Care queue exists.** E6
+   hides threat and self-harm comments from instructors and writes a
+   `threat_case` row for each, but nothing reads those rows until E10's Care
+   queue, which is Phase 2. A student at risk whose comment is held from every
+   view but read by nobody is the outcome this ruling rules out. E6's design
+   stays as planned. E6-01 writes the ruling into SPEC §12's phase lines (the
+   "Delivery phases" section) and into ADR 0187; E6-07's hand-off repeats it.
 
 **A stated limit, not a choice.** "No trace in the instructor view" means the
 Pulse surfaces. A reader who also holds the LMS gradebook can sometimes see
@@ -108,7 +116,7 @@ submitted.
 | # | Ticket | Branch | Lane | Depends on | Summary | Merged |
 |---|---|---|---|---|---|---|
 | 01 | [Moderation verdicts govern the read path](E6-01-verdicts-below-the-read-path.md) | `e6/verdicts-below-the-read-path` | heavy | none | The moderation task and its verdict check; a tie-break column; the `threat_case` table; one definer that writes a verdict and its route; `report_comment` v004 shows only verdicted, non-Care comments; the summary gather reads the view and waits for verdicts; the reveal door narrows to Care-class answers; every fixture and seed plants verdicts; ADR 0187. | |
-| 02 | [Moderation runs when a window closes](E6-02-moderation-at-window-close.md) | `e6/moderation-at-window-close` | light | 01 | The moderation prompt and call; an hourly sweep that moderates closed windows; the summary walk turns hourly; mock-ai verdict markers; typed eval cases; the per-stream small-N premise; a true empty-week sentence; ADR 0188. | |
+| 02 | [Moderation runs when a window closes](E6-02-moderation-at-window-close.md) | `e6/moderation-at-window-close` | light | 01 | The moderation prompt and call; an hourly sweep that moderates closed windows, with a per-comment attempt cap; the summary walk turns hourly; mock-ai verdict markers; typed eval cases; the per-stream small-N premise; a true empty-week sentence; ADR 0188. | |
 | 03 | [The instructor excludes, keeps and undoes](E6-03-instructor-decisions.md) | `e6/instructor-decisions` | heavy | 01 | Decider, role and reason columns; the instructor's decision routes and CSRF gate; a comment handle and flag class on the payload; the closed held-note type and the participation note; SPEC §5.2, §8 and §13; ADR 0189. | |
 | 04 | [Moderation on the instructor report page](E6-04-report-page-moderation.md) | `e6/report-page-moderation` | light | 03 | Comment cards gain the flagged, excluded and kept variants with actions, Undo and the reason prompt; the participation note renders; input boundaries reach 3:1; the chart tables reach sighted readers; the mockups show per-stream notices. | |
 | 05 | [The Lead Faculty review queue and the exclusion log](E6-05-review-queue-and-exclusion-log.md) | `e6/review-queue-and-exclusion-log` | heavy | 03 | A leadership-only own-grant read in `authz.py`; the review queue (no week, no time, random order); Lead Faculty decisions through 03's service; the exclusion log in both directions; sibling-isolation and Care-absence invariants; SPEC §5.2, §5.5 and §11; ADR 0190. | |
@@ -132,7 +140,9 @@ Each was checked in the tree at 9c9ef4ee.
 - **Alembic.** The single head is `ad9da2d96664`
   (`20261003_ad9da2d96664_blank_comment_text_is_the_same_under_every_collation.py`),
   one of 52 revisions. E6-01 owns **M1**, with
-  `down_revision = "ad9da2d96664"`. E6-03 owns **M2**, whose `down_revision` is
+  `down_revision = "ad9da2d96664"`. M1 also creates the `moderation_attempt`
+  table that E6-02's attempt cap counts, so the cap needs no migration of its
+  own. E6-03 owns **M2**, whose `down_revision` is
   M1's revision id as merged. E6-05 owns **M3** only if it needs one, with
   `down_revision` set to M2's id. No other ticket adds a migration.
 - **ADRs.** 0185 is the last file; 0186 is a recorded gap. **0187** is 01's,
@@ -150,7 +160,7 @@ keeping both sides.
 | File | Tickets | How it is shared |
 |---|---|---|
 | `backend/app/services/moderation.py` | 01 creates it; 02 and 03 add to it in parallel; 05 later | 01 creates it with the one Python call to the routing definer, so 02 and 03 meet an existing file rather than an add/add conflict. 02 adds the sweep, 03 the decision service. |
-| `backend/app/services/reporting.py` | 01, then 02 and 03 in parallel | 01 the gather; 02 `_stored_summaries` and the empty-week path; 03 the held-note member in `_payload`. |
+| `backend/app/services/reporting.py` | 01, then 02 and 03 in parallel | 01 the gather and its wait; 02 the wait's attempt cap, `_stored_summaries` and the empty-week path; 03 the held-note member in `_payload`. |
 | `backend/app/services/report_comments.py` | 01, then 03 | 01 the ordering and the view; 03 the handle and flag class. |
 | `backend/app/ai/contracts.py` | 02 and 03 in parallel | 02 may touch `ModerationOutput`; 03 adds `HeldNoteType`. Different classes. |
 | `docs/adr/README.md` | 01, 02, 03, 05 | Merge in ADR order; keep both rows. |

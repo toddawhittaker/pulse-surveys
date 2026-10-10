@@ -32,7 +32,11 @@ the id of a comment the door would answer for. The card carries no dates
 
 An instructor may decide only on a comment their report currently returns: a
 shown stream, or a release batch. The looser rule, any comment in a section
-they teach, would let them act on a comment they cannot see.
+they teach, would let them act on a comment they cannot see. This check lives
+in the instructor's door, not in the shared write. E6-05 adds the Lead Faculty
+door with its own check; neither door passes a flag or a role into the shared
+service to widen what it accepts, so adding the second door cannot loosen this
+rule.
 
 **The participation note (ruling 2).** This ticket builds it and writes its
 rule into SPEC §5.2, replacing "no count" so the section no longer says both:
