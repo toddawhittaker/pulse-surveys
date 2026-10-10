@@ -25,7 +25,7 @@ solve.
   (`gh pr view <N> --json isCrossRepository,author`). The repository is
   public, and a fork can name its branch `e5/anything`.
 - Refuse a PR whose diff touches any of these: `.github/`, `scripts/ci/`,
-  `ci/`, `Makefile`, `.claude/`, `CLAUDE.md`, `CONTRIBUTING.md`,
+  `ci/`, `Makefile`, `.claude/`, the root `CLAUDE.md`, `CONTRIBUTING.md`,
   `pyproject.toml`, any `package.json`, any `tsconfig*.json`, any
   `eslint.config.*`, `playwright.config.ts`, or `tests/evals/*/floors.py`.
   These hold CI gates or their settings. Changes to them ride a `process/`
