@@ -97,7 +97,7 @@ A_MODEL_ID = "e6-01-routing-test-model"
 CLASSIFICATION_INSERT = (
     "INSERT INTO public.classification "
     "(answer_id, task, verdict, prompt_version, model_id, classified_at) VALUES "
-    "(CAST(:answer AS uuid), CAST(:task AS text), CAST(:verdict AS text), "
+    "(CAST(:answer AS uuid), CAST(:task AS classification_task), CAST(:verdict AS text), "
     "CAST(:prompt_version AS text), CAST(:model_id AS text), now())"
 )
 
