@@ -86,10 +86,12 @@ what makes the absent state expressible.
 """
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.ai.contracts import HeldNoteType
 from app.schemas import report_benchmark
 from app.services.reporting import ComparisonFigure, refuse_an_unsealed_comparison
 
@@ -223,17 +225,28 @@ class SummaryView(BaseModel):
 
     text: str
     response_count: int
-    # The sketch carries this and nothing stores it yet: E6 writes the first
-    # moderation state this system will hold, and §5.1's "excludes flagged-held
-    # content" note is what would fill it. Null in every E4 payload.
-    held_note: str | None = None
+    # The sketch carries this and nothing stores it yet: §5.1's "one comment is
+    # held for review" note, with type only. Since E6-03 its type is the closed
+    # `HeldNoteType`, harmful or privacy, so this member cannot carry a threat or
+    # self-harm class whatever reaches it. Null until a ticket stores one.
+    held_note: HeldNoteType | None = None
+
+
+# The two classes a flagged comment's chip can name (SPEC §5.2): the moderation
+# verdicts that collapse a comment for review. Threat and self-harm are not here
+# and cannot be, because those comments reach no instructor view at all (§6.2).
+CommentFlag = Literal["harmful", "privacy"]
 
 
 class CommentView(BaseModel):
-    """One comment, with exactly the three fields the comment service answers with.
+    """One comment as the instructor's report shows it: its words, and what may be done with it.
 
-    No week, no timestamp, no author, no index, at any depth. SPEC §4 and ADR 0153
-    are the argument, and
+    The comment service's three fields (text, status and stream) and, since
+    E6-03, exactly three more (its work order, decision 6): the handle the
+    decision route names, the class of the chip, and whether the latest decision
+    on it was the reader's own. No week, no timestamp, no author, no decider, no
+    index, at any depth. SPEC §4 and ADRs 0153, 0162 and 0189 are the argument,
+    and
     `tests/integration/test_the_report_payload_repeats_nothing_beyond_the_comment_service.py`
     is what holds this shape to it.
     """
@@ -243,6 +256,54 @@ class CommentView(BaseModel):
     text: str
     status: str
     stream: str
+    # The comment's `answer` key: what `POST …/comments/{answer_id}/decisions`
+    # names. Safe to hand over because the report never returns a Care-class
+    # comment, and the reveal door refuses any answer without a Care-class
+    # verdict, so no instructor ever holds an id that door would answer for
+    # (ADR 0189).
+    answer_id: UUID
+    # The class of the comment's moderation verdict when it is one that flags it,
+    # and null otherwise. Only ever on a comment the report shows, so a held
+    # stream's flag class never reaches the page (SPEC §5.2: below the threshold
+    # there is no chip and no flag-type hint).
+    flag: CommentFlag | None
+    # Whether the latest decision about this comment was the reader's own. A
+    # boolean on purpose: it can say "you" and cannot say who else.
+    decided_by_you: bool
+
+
+class ParticipationNote(BaseModel):
+    """SPEC §5.2's neutral participation trace for one week: "1 response held for review".
+
+    One count and nothing else (the owner's ruling 2, E6-03's decision 7). It
+    counts the comments in this week's held streams that carry a harmful or
+    privacy verdict and that a decision has not kept; it names no stream and no
+    category, and it never counts a threat or self-harm comment. At least one:
+    a week with nothing to count carries no note at all, so the note's presence
+    and its number are the same fact. It counts comments, not people, and feeds
+    no threshold (`docs/MISTAKES.md` entry 50).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    held: int = Field(ge=1)
+
+
+class CommentDecision(BaseModel):
+    """What the instructor sends to exclude, keep or undo one comment (E6-03).
+
+    `reason` is checked by the decision service as it was sent, before any
+    trimming (`docs/MISTAKES.md` entry 29), and refused there with a governed
+    sentence: a blank one, one over the bound, or none at all where an
+    unflagged comment is being excluded. It is declared here as a plain optional
+    string so that those refusals are the service's sentences rather than this
+    framework's validation messages.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    action: Literal["exclude", "keep", "undo"]
+    reason: str | None = None
 
 
 class SmallNView(BaseModel):
@@ -364,6 +425,12 @@ class InstructorReport(BaseModel):
     # ADR 0152's release, placed here and nowhere else: a list in every report,
     # populated only in the latest published week's, and carrying no week.
     released_from_earlier_weeks: list[CommentView]
+    # SPEC §5.2's participation note for this week, or null when there is nothing
+    # to count. At most one per section-week, and on the report rather than on a
+    # stream because it names no stream (the owner's ruling 2). A declared
+    # divergence from E4's payload sketch, recorded in
+    # `tests/unit/test_the_payload_sketch_and_the_schema_are_reconciled.py`.
+    participation_note: ParticipationNote | None
     # The IANA name of the institution's zone, from `settings.institution_timezone`
     # — the same member the student payload carries, for the same reason. The
     # week's close instant above is rendered as a weekday and a wall-clock time,

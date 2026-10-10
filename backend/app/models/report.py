@@ -61,6 +61,7 @@ rows be ordered by when they were written whatever wrote them.
 """
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -95,13 +96,22 @@ from app.models.survey import REPORT_STREAMS
 # reached deliberately as well as one reached by never having been touched.
 MODERATION_STATES = ("PUBLISHED", "FLAGGED_COLLAPSED", "EXCLUDED", "KEPT")
 
+
 # The roles a moderation decision is made under (E6-03, its work order's decision
 # 5): the teaching instructor, the course's Lead Faculty, and the department chair,
 # who decides for a course with no lead. Stored on the row because SPEC §5.2's
 # exclusion log shows the decider's role, and a role read off today's assignments
 # would change when the assignments do. E6-03 writes only `INSTRUCTOR`; the other
 # two are here so E6-05's door needs no migration of its own.
-DECIDER_ROLES = ("INSTRUCTOR", "LEAD_FACULTY", "CHAIR")
+class DeciderRole(StrEnum):
+    """A role a moderation decision is made under; the value is the stored token."""
+
+    INSTRUCTOR = "INSTRUCTOR"
+    LEAD_FACULTY = "LEAD_FACULTY"
+    CHAIR = "CHAIR"
+
+
+DECIDER_ROLES = tuple(role.value for role in DeciderRole)
 
 # The longest stated reason a decision may carry, in characters, measured as sent
 # (E6-03's decision 4, `docs/MISTAKES.md` entry 29).

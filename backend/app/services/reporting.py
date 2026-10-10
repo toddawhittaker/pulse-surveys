@@ -90,13 +90,14 @@ from app.services.authz import (
 )
 from app.services.report_comments import (
     COMMENT_VIEW,
-    ReportComment,
+    CommentCard,
     n_threshold,
-    released_comments,
+    participation_count,
+    released_cards,
     reported_status_of,
     section_week_moderated,
     stream_is_suppressed,
-    visible_comments,
+    visible_cards,
 )
 from app.services.section_codes import course_label, course_week_of
 
@@ -107,7 +108,12 @@ if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
     # place this module needs the schema back — `_payload`, which builds the
     # report, `_stored_summaries` under it, and `taught_sections` — imports it
     # inside the function. See `_payload`'s docstring.
-    from app.schemas.report import CommentView, InstructorReport, SummaryView, TaughtSection
+    from app.schemas.report import (
+        CommentView,
+        InstructorReport,
+        SummaryView,
+        TaughtSection,
+    )
     from app.schemas.report_benchmark import (
         BenchmarkSeries,
         StreamBenchmark,
@@ -1019,6 +1025,8 @@ def instructor_report(
     Raises `SectionUnavailableError` and `CourseWeekUnavailableError`; the router
     is what turns each into an HTTP answer.
     """
+    if person_id is None:
+        raise SectionUnavailableError
     section = _readable_section(session, person_id=person_id, section_id=section_id)
     published = _published_weeks(session, section=section, settings=settings)
 
@@ -1027,7 +1035,78 @@ def instructor_report(
         raise CourseWeekUnavailableError(
             "This section has no published report for that course week."
         )
-    return _payload(session, section=section, week=asked, published=published, settings=settings)
+    return _payload(
+        session,
+        section=section,
+        week=asked,
+        published=published,
+        reader=person_id,
+        settings=settings,
+    )
+
+
+def comment_on_instructor_report(
+    session: Session, *, person_id: UUID, answer_id: UUID, settings: Settings
+) -> CommentCard | None:
+    """The card this person's report returns for one answer, or `None` (E6-03).
+
+    **The instructor's decision door asks this and nothing else.** A decision is
+    allowed only on a comment the reader's report currently returns: a comment
+    in a shown stream of one of their published weeks, or one in the
+    from-earlier-weeks release. So this walks what the report reads, with the
+    calls the report makes: their taught sections from `app.services.authz`,
+    each section's published weeks from `_published_weeks`, each week's two
+    streams from `visible_cards`, and the release from `_released_cards`. It
+    never rebuilds the rule from the answer's own section, week or stream
+    (`docs/MISTAKES.md` entries 35 and 53): a comment the report would not show
+    is not found here, whatever it is.
+
+    `None` answers for a held comment, a comment of a section they do not teach,
+    an answer that is not a comment, a Care-class comment and an id nothing
+    holds alike, so the door can refuse them all the same way.
+
+    It reads every published week of every taught section until it finds the
+    comment, which is a few dozen reads on a click. The report pays the same
+    reads one week at a time.
+    """
+    for section_id in sorted(taught_section_ids(session, person_id=person_id)):
+        section = session.get(Section, section_id)
+        if section is None:  # pragma: no cover - the assignment's foreign key holds this
+            continue
+        published = _published_weeks(session, section=section, settings=settings)
+        for week in published:
+            for token in REPORT_STREAMS:
+                for card in visible_cards(
+                    session, section_id=section.id, week_id=week.week_id, stream=token
+                ):
+                    if card.answer_id == answer_id:
+                        return card
+        if published:
+            for card in _released_cards(session, section=section):
+                if card.answer_id == answer_id:
+                    return card
+    return None
+
+
+def comment_view(card: CommentCard, *, reader: UUID) -> "CommentView":
+    """One card as the payload carries it: E4-04's three fields and E6-03's three.
+
+    The one place a `CommentCard` becomes a `CommentView`, used by the report and
+    by the decision route's answer, so the two cannot describe one comment two
+    ways. The latest decider goes no further than here: it becomes
+    `decided_by_you`, which says whether it was the reader and nothing about who
+    else it might have been.
+    """
+    from app.schemas.report import CommentView
+
+    return CommentView(
+        text=card.comment.text,
+        status=card.comment.status,
+        stream=card.comment.stream,
+        answer_id=card.answer_id,
+        flag=None if card.flag is None else card.flag.value,
+        decided_by_you=card.decided_by is not None and card.decided_by == reader,
+    )
 
 
 def published_course_weeks(
@@ -1439,6 +1518,7 @@ def _payload(
     section: Section,
     week: _SectionWeek,
     published: list[_SectionWeek],
+    reader: UUID,
     settings: Settings,
 ) -> "InstructorReport":
     """Assemble one report out of the views, the comment service and the summary table.
@@ -1453,10 +1533,17 @@ def _payload(
     between.
 
     **Nothing is widened at the assembly layer.** The comments are exactly what
-    `visible_comments` and `released_comments` answer with, in the same three
-    fields; the summary is what the row holds, and an absent row is an absent
-    member rather than an empty string. §4.1 item 6's spirit is that a suppression
-    decided one layer down is not undone by the layer that renders it.
+    `visible_cards` and `released_cards` answer with: the comment service's
+    three fields, and E6-03's three (the handle, the flag class and whether the
+    reader made the latest decision), built by `comment_view`. The summary is
+    what the row holds, and an absent row is an absent member rather than an
+    empty string. §4.1 item 6's spirit is that a suppression decided one layer
+    down is not undone by the layer that renders it.
+
+    **The participation note is computed here, at read time** (E6-03), because
+    a comment's state changes and a stored row would not:
+    `app.services.report_comments.participation_count` is the rule, and a count
+    of zero is no note at all.
     """
     from app.schemas import report as schema
 
@@ -1471,6 +1558,7 @@ def _payload(
     )
     summaries = _stored_summaries(session, section_id=section.id, week_id=week.week_id)
     released = _released(session, section=section, week=week, published=published)
+    held = participation_count(session, section_id=section.id, week_id=week.week_id)
     # **The number `visible_comments` applied, read from the one function that
     # applies it, and printed unchanged.** Reading `settings.n_threshold_default`
     # here instead would be a second source: the report would print the value the
@@ -1505,7 +1593,8 @@ def _payload(
             },
             summary=summaries.get(token),
             comments=_comment_views(
-                visible_comments(session, section_id=section.id, week_id=week.week_id, stream=token)
+                visible_cards(session, section_id=section.id, week_id=week.week_id, stream=token),
+                reader=reader,
             ),
             question_text=question_texts[token],
             benchmark=benchmarks_by_stream[token],
@@ -1559,26 +1648,22 @@ def _payload(
         # E4-07's own reconciliation test names it; a later ticket may retire it
         # once nothing reads it.
         comparison=workload_benchmark.comparison.mean,
-        released_from_earlier_weeks=_comment_views(released),
+        released_from_earlier_weeks=_comment_views(released, reader=reader),
+        participation_note=schema.ParticipationNote(held=held) if held else None,
         institution_timezone=settings.institution_timezone,
     )
 
 
-def _comment_views(comments: Sequence[ReportComment]) -> list["CommentView"]:
-    """E4-04's comments, one field for one field and nothing added.
+def _comment_views(cards: Sequence[CommentCard], *, reader: UUID) -> list["CommentView"]:
+    """E4-04's comments, each through `comment_view`, in the order the service gave them.
 
     Written as one function rather than three comprehensions so there is one place
-    a fourth field could ever be introduced, and so the review that forbids one has
-    one line to read. SPEC §4 keeps display order random and timestamps away from
+    a field could ever be introduced, and so the review that forbids one has one
+    line to read. SPEC §4 keeps display order random and timestamps away from
     comments; an index or a submitted-at added for a frontend's convenience would
     hand back the order the suppression exists to remove.
     """
-    from app.schemas.report import CommentView
-
-    return [
-        CommentView(text=comment.text, status=comment.status, stream=comment.stream)
-        for comment in comments
-    ]
+    return [comment_view(card, reader=reader) for card in cards]
 
 
 def _released(
@@ -1587,7 +1672,7 @@ def _released(
     section: Section,
     week: _SectionWeek,
     published: list[_SectionWeek],
-) -> list[ReportComment]:
+) -> list[CommentCard]:
     """The from-earlier-weeks release, in the latest published week's report only.
 
     ADR 0152: "Released comments appear in the latest published week's report under
@@ -1603,10 +1688,19 @@ def _released(
     """
     if not published or week.course_week != max(other.course_week for other in published):
         return []
+    return _released_cards(session, section=section)
+
+
+def _released_cards(session: Session, *, section: Section) -> list[CommentCard]:
+    """Every comment a release batch has surfaced for this section's term, both streams.
+
+    What the latest published week's report carries, and what the decision door
+    searches, from one place.
+    """
     return [
-        comment
+        card
         for token in REPORT_STREAMS
-        for comment in released_comments(
+        for card in released_cards(
             session, section_id=section.id, term_id=section.term_id, stream=token
         )
     ]
