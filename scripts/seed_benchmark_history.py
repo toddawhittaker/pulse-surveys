@@ -119,8 +119,8 @@ with everything else about that week.
 
 **No comments, and both ratings are drawn from 3 upwards.** A benchmark figure is
 a workload statistic or a rating mean (SPEC §5.1); no comment of a prior term's is
-ever shown to anybody, and a seeded comment would need a classification verdict
-and a validity recomputation to be honest. So this world carries none — and
+ever shown to anybody, and a seeded comment would need a validity verdict, a
+validity recomputation and, since E6-01, a moderation verdict to be honest. So this world carries none — and
 because SPEC §3.2 requires a comment when a rating is 2 or lower, every rating
 here starts at 3, which keeps every row one the real submit path would have
 accepted.

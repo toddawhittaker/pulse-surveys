@@ -52,6 +52,14 @@ through `app.services.validity.record_verdict` and every response's column is th
 set by `app.services.validity.recompute_response_validity`, which is that column's
 one writer.
 
+**Every comment is moderated, `clear`, through the product's one writer** (E6-01).
+`report_comment` v004 shows a comment only once it holds a moderation verdict, so
+`moderate_once` routes one through `app.services.moderation.route_verdict` under
+that module's seed provenance, `"seed"` for both halves of the pair. It is a
+different pair from the validity verdicts' below on purpose: a moderation
+verdict is not a model's either, and `"seed"` is what every fixture and seed
+plants one under.
+
 **The planted verdicts do not look floored, deliberately.** ADR 0054 makes
 `(prompt_version, model_id) == ("character-floor", "no-model")` the pair that says
 §3.3's character floor decided rather than a model, and
@@ -729,6 +737,38 @@ def one_answer(
     return answer
 
 
+def moderate_once(session: Session, answer_id: UUID) -> None:
+    """Route a `clear` moderation verdict for one seeded comment, unless it already holds one.
+
+    E6-01: `report_comment` v004 shows a comment only once it holds a moderation
+    verdict, and the summary walk does not summarize a week until every comment
+    in it does, so a seeded comment with none would leave the story's report
+    empty. The verdict goes through the product's one writer,
+    `app.services.moderation.route_verdict`, under that module's seed provenance
+    (`"seed"` for both the prompt version and the model id), so it is never
+    mistaken for a model's. Checked first so that a re-run appends nothing.
+    """
+    from app.ai.contracts import ModerationVerdict
+    from app.models.ai import Classification, ClassificationTask
+    from app.services.moderation import SEED_MODEL_ID, route_verdict
+    from app.services.moderation import SEED_PROMPT_VERSION as MODERATION_SEED_PROMPT_VERSION
+
+    already = session.scalars(
+        select(Classification.id).where(
+            Classification.answer_id == answer_id,
+            Classification.task == ClassificationTask.MODERATION,
+        )
+    ).first()
+    if already is None:
+        route_verdict(
+            session,
+            answer_id,
+            ModerationVerdict.CLEAR,
+            prompt_version=MODERATION_SEED_PROMPT_VERSION,
+            model_id=SEED_MODEL_ID,
+        )
+
+
 def refuse_an_inconsistent_plan() -> None:
     """Refuse if `STORY` above is not internally consistent, before anything is read.
 
@@ -826,6 +866,7 @@ def write_the_story(session: Session) -> Written:
                     answer_id=answer.id,
                 )
                 written.verdicts += 1
+                moderate_once(session, answer.id)
 
             # Every answer of this response the plan does not describe, removed. The
             # one `DELETE` this connection holds, and what makes a re-run over an
