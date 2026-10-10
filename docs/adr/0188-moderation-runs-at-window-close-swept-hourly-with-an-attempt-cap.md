@@ -97,4 +97,4 @@ happens when it keeps failing, or when the summary walk, which waits for it, run
   toward Care-class disclosures. E6-07 carries that skew to E10 with the capped
   comments themselves.
 - The threat and self-harm recall floor and the moderation floor stay deferred to
-  E10's live run; the typed cases ship now.
+  E10's live run; the typed cases ship now. The moderation set ships unregistered: its registry slot and its `floors.py` arrive together in E10's floor-setting pull request, since floor files are owner-reviewed.

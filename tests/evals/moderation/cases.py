@@ -10,8 +10,10 @@ verdicts and the two Care classes keep one home.
 **Every comment is invented.** None is a real submission or names a real person,
 course or instructor.
 
-**No number is declared.** `floors.py` holds the slot deferred until the first
-live run, as the threat slot is.
+**No number is declared, and the set is not registered.** A registry slot needs a
+floor file beside it, and floor files are reviewed by the owner in their own pull
+request, so the moderation slot and its floor arrive together in E10's
+floor-setting pull request, after the first live run.
 """
 
 from __future__ import annotations

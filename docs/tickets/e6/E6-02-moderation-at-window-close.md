@@ -72,8 +72,9 @@ Read first: SPEC §5.1, §5.2, §6.2, §7.4 and §9.3; ADRs 0148, 0153 and 0162;
 - `backend/app/jobs/tasks.py` and `backend/app/jobs/schedules.py`: an hourly
   moderation sweep, and the summary walk made hourly.
 - `mock-ai/app/rules.py`: a marker for each of the six verdicts.
-- `tests/evals/moderation/` (`cases.py`, `floors.py`) registered in
-  `tests/evals/registry.py`; threat and self-harm cases in
+- `tests/evals/moderation/` (`cases.py`), unregistered until E10's
+  floor-setting pull request adds its slot and `floors.py` (floor files are
+  owner-reviewed); threat and self-harm cases in
   `tests/evals/threat/`. Floors stay deferred to E10, as
   `tests/evals/threat/floors.py` already is.
 - The small-N summary prompt under a bumped version (`summary.v3.md`, or the
