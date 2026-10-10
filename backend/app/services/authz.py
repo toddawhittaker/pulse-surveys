@@ -141,6 +141,7 @@ __all__ = [
     "guard_write",
     "holds_care",
     "holds_leadership",
+    "lead_review_courses",
     "leadership_grant_covers",
     "own_grant",
     "raw_comments_permitted",
@@ -513,6 +514,14 @@ _SECTION_SCOPED_ASSIGNEES = text(
 # assignment's own `course_id` is not an answer to "which courses do they lead".
 _LED_COURSES = text("SELECT course_id FROM public.lead_faculty_course WHERE person_id = :person_id")
 
+# Which of a set of courses anybody leads — the other question the same mapping
+# answers. A chair reviews only the courses of their department that nobody
+# leads (`lead_review_courses`, SPEC §2.1: "a course with no mapping falls to its
+# department chair").
+_COURSES_WITH_A_LEAD = text(
+    "SELECT DISTINCT course_id FROM public.lead_faculty_course WHERE course_id = ANY(:course_ids)"
+)
+
 # Every node beneath one node, at every level. Built from one template over
 # `CONTAINMENT_LEVELS` so the projection is written once; nothing a caller
 # supplies is interpolated — the level names are literals in this module and the
@@ -767,6 +776,54 @@ def own_grant(session: Session, *, assignment_id: UUID) -> Purview:
             "rather than answered."
         )
     return _own_grant_of(session, _Assignment.of(row))
+
+
+def lead_review_courses(session: Session, *, person_id: UUID) -> Mapping[UUID, AssignmentRole]:
+    """The courses this person's own leadership grants put under moderation review, and the role.
+
+    SPEC §5.2 routes a harmful comment to "the course's Lead Faculty review
+    queue", and §2.1 sends a course with no mapping to its department chair. So
+    the answer is, for each course, the one role whose grant covers it here
+    (E6-05, decision 3):
+
+      - `LEAD_FACULTY` for every course this person leads, from the mapping and
+        never from the assignment's own course (`_lead_faculty_grant`), and only
+        when they hold a `LEAD_FACULTY` assignment at all;
+      - `CHAIR` for every course in a department they chair **that has no lead**.
+        A chair's own grant is the whole department subtree (`_own_grant_of`),
+        and this is narrower on purpose: a mapped course's comments are its
+        lead's to review, and a chair given them too would be a second reviewer
+        the spec does not name.
+
+    The two sets cannot overlap: a course is led or it is not. A person who both
+    leads a course and chairs its department is answered `LEAD_FACULTY` for it.
+
+    **Leadership grants only, and only these two roles.** `resolve_scope` unions
+    an instructor's sections in, so a lead who also teaches a sibling section
+    would reach that sibling course through it (SPEC §4.1 item 2); every other
+    role is ignored here. An assistant dean's own grant is empty until E9's
+    supervision walk (ADR 0108), and a dean or vice president is not a reviewer
+    §5.2 names, so each answers an empty mapping, which the caller refuses.
+    """
+    assignments = [
+        _Assignment.of(row)
+        for row in session.execute(_ASSIGNMENTS_OF_PERSON, {"person_id": person_id}).mappings()
+    ]
+    covered: dict[UUID, AssignmentRole] = {}
+    if any(held.role is AssignmentRole.LEAD_FACULTY for held in assignments):
+        for course_id in _lead_faculty_grant(session, person_id).course_ids:
+            covered[course_id] = AssignmentRole.LEAD_FACULTY
+    chaired: set[UUID] = set()
+    for held in assignments:
+        if held.role is AssignmentRole.CHAIR and held.department_id is not None:
+            chaired |= _nodes_beneath(session, "department", held.department_id)["course"]
+    if chaired:
+        led_by_somebody = set(
+            session.execute(_COURSES_WITH_A_LEAD, {"course_ids": list(chaired)}).scalars()
+        )
+        for course_id in chaired - led_by_somebody:
+            covered[course_id] = AssignmentRole.CHAIR
+    return covered
 
 
 def transitive_purview(session: Session | None, *, assignment_id: UUID) -> Purview:
