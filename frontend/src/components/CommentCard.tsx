@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { JSX } from 'react';
 
 import './instructorReportComments.css';
@@ -89,6 +89,12 @@ export function CommentCard({
   const [comment, setComment] = useState<ReportComment>(given);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  // The outcome sentence lives here, outside the keyed body, so the status
+  // region exists before anything is decided and a screen reader hears the
+  // change rather than a new node.
+  const [announcement, setAnnouncement] = useState('');
+  const focusAfterDecision = useRef(false);
+  const articleRef = useRef<HTMLElement>(null);
 
   async function send(decision: CommentDecision): Promise<void> {
     if (decide === undefined) return;
@@ -101,10 +107,38 @@ export function CommentCard({
       return;
     }
     setComment(answer.comment);
+    setAnnouncement(
+      copy(
+        decision.action === 'undo'
+          ? 'instructor_report_comments.comment.announce_undone'
+          : answer.comment.status === 'excluded'
+            ? 'instructor_report_comments.comment.announce_excluded'
+            : 'instructor_report_comments.comment.announce_kept',
+      ),
+    );
+    focusAfterDecision.current = true;
   }
 
+  // The control that was pressed has unmounted by now; the article is stable,
+  // so focus parks there instead of falling to the page body. Waiting for the
+  // commit also lets a caller that removes the whole card (the review queue,
+  // which focuses its own heading) keep the focus it chose.
+  useEffect(() => {
+    if (!focusAfterDecision.current) return;
+    focusAfterDecision.current = false;
+    articleRef.current?.focus();
+  }, [comment]);
+
   return (
-    <article className="pulse-comment-card" aria-label={copy('instructor_report_comments.comment.aria_label')}>
+    <article
+      ref={articleRef}
+      tabIndex={-1}
+      className="pulse-comment-card"
+      aria-label={copy('instructor_report_comments.comment.aria_label')}
+    >
+      <p className="sr-only" role="status">
+        {announcement}
+      </p>
       <CardBody
         // Keyed by the status, so a disclosure or a reason prompt left open
         // belongs to the state it was opened in and closes when that changes.
@@ -138,8 +172,19 @@ function CardBody({
 }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [prompting, setPrompting] = useState(false);
+  const excludeRef = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef(false);
   const { text, status, flagReason, decidedByYou = false } = comment;
   const undo = controls && decidedByYou;
+
+  // Cancel unmounts the prompt that held focus; the Exclude button it returns
+  // to only exists once the prompt is gone.
+  useEffect(() => {
+    if (!prompting && returnFocus.current) {
+      returnFocus.current = false;
+      excludeRef.current?.focus();
+    }
+  }, [prompting]);
 
   if (status === 'excluded') {
     return (
@@ -245,6 +290,7 @@ function CardBody({
           refusal={refusal}
           send={send}
           cancel={() => {
+            returnFocus.current = true;
             setPrompting(false);
           }}
         />
@@ -253,6 +299,7 @@ function CardBody({
         <>
           <div className="pulse-comment-card__actions">
             <button
+              ref={excludeRef}
               type="button"
               className="pulse-comment-card__action pulse-comment-card__action--exclude"
               onClick={() => {
@@ -289,6 +336,11 @@ function ReasonPrompt({
 }): JSX.Element {
   const fieldId = useId();
   const counterId = useId();
+  const refusalId = useId();
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    fieldRef.current?.focus();
+  }, []);
   const [reason, setReason] = useState('');
   const blank = reason.trim() === '';
 
@@ -305,10 +357,12 @@ function ReasonPrompt({
       </label>
       <textarea
         id={fieldId}
+        ref={fieldRef}
         className="pulse-comment-card__reason-field"
         required
         maxLength={REASON_MAX_LENGTH}
-        aria-describedby={counterId}
+        aria-invalid={refusal !== null}
+        aria-describedby={refusal === null ? counterId : `${counterId} ${refusalId}`}
         value={reason}
         onChange={(event) => {
           setReason(event.target.value);
@@ -319,7 +373,7 @@ function ReasonPrompt({
           remaining: String(REASON_MAX_LENGTH - reason.length),
         })}
       </span>
-      <Refusal refusal={refusal} />
+      <Refusal refusal={refusal} id={refusalId} />
       <div className="pulse-comment-card__actions">
         <button
           type="submit"
@@ -357,10 +411,16 @@ function UndoButton({
 }
 
 /** The server's sentence for a refused decision, shown as it was sent. */
-function Refusal({ refusal }: { readonly refusal: string | null }): JSX.Element | null {
+function Refusal({
+  refusal,
+  id,
+}: {
+  readonly refusal: string | null;
+  readonly id?: string;
+}): JSX.Element | null {
   if (refusal === null) return null;
   return (
-    <p className="pulse-comment-card__refusal" role="alert">
+    <p className="pulse-comment-card__refusal" role="alert" id={id}>
       {refusal}
     </p>
   );

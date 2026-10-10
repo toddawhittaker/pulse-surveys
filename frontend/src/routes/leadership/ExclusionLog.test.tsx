@@ -127,7 +127,7 @@ describe('the exclusion log', () => {
 
     expect(columns(lead)).toEqual([
       '2026-10-20',
-      'Lead Faculty',
+      'Decided by lead faculty',
       `${AN_EXCLUSION_BY_A_LEAD.section_label}${AN_EXCLUSION_BY_A_LEAD.excerpt ?? ''}`,
       'Excluded · AI-flagged',
     ]);
@@ -136,7 +136,7 @@ describe('the exclusion log', () => {
 
     expect(columns(instructor)).toEqual([
       '2026-10-13',
-      'Instructor',
+      'Decided by the instructor',
       `${AN_UNFLAGGED_EXCLUSION.section_label}${AN_UNFLAGGED_EXCLUSION.excerpt ?? ''}`,
       `Excluded · Unflagged, reason given${AN_UNFLAGGED_EXCLUSION.reason ?? ''}`,
     ]);
@@ -150,7 +150,7 @@ describe('the exclusion log', () => {
     if (keep === undefined) throw new Error('One row was served.');
     expect(columns(keep)).toEqual([
       '2026-09-28',
-      'Chair',
+      'Decided by the chair',
       `${A_KEEP_WITH_NO_EXCERPT.section_label}${NO_EXCERPT}`,
       'Kept · AI-flagged',
     ]);
@@ -201,7 +201,7 @@ describe('the exclusion log shows no name, no week and no time of day', () => {
 
     // The rows first (`docs/MISTAKES.md` entry 3).
     expect(await rows()).toHaveLength(2);
-    expect(screen.getByText('Lead Faculty')).toBeTruthy();
+    expect(screen.getByText('Decided by lead faculty')).toBeTruthy();
 
     const page = document.body.textContent ?? '';
     for (const planted of Object.values(PLANTED)) {

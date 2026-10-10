@@ -61,9 +61,9 @@ export const LEADERSHIP_MODERATION_COPY = {
   // One row. The decider is a role and never a person (SPEC §5.2).
   'leadership_moderation.log.excluded': 'Excluded',
   'leadership_moderation.log.kept': 'Kept',
-  'leadership_moderation.log.role_instructor': 'Instructor',
-  'leadership_moderation.log.role_lead_faculty': 'Lead Faculty',
-  'leadership_moderation.log.role_chair': 'Chair',
+  'leadership_moderation.log.role_instructor': 'Decided by the instructor',
+  'leadership_moderation.log.role_lead_faculty': 'Decided by lead faculty',
+  'leadership_moderation.log.role_chair': 'Decided by the chair',
   'leadership_moderation.log.ai_flagged': 'AI-flagged',
   'leadership_moderation.log.unflagged': 'Unflagged, reason given',
   'leadership_moderation.log.status': '{decision} · {flag}',

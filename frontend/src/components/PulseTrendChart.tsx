@@ -511,7 +511,14 @@ export function PulseTrendChart({
       <button
         type="button"
         className="pulse-trend-numbers-toggle"
-        aria-expanded={numbersShown}
+        // No aria-expanded: the tables are visually hidden, not removed, so
+        // they are readable to a screen reader even while this says "Show".
+        aria-label={fillCopy(
+          numbersShown
+            ? 'instructor_report_trend.hide_numbers_named'
+            : 'instructor_report_trend.show_numbers_named',
+          { stream: label },
+        )}
         onClick={() => {
           setNumbersShown(!numbersShown);
         }}
