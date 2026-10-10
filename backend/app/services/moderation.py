@@ -40,6 +40,7 @@ from app.config import Settings
 from app.models.survey import Answer, Response
 from app.models.term import SurveyWindow
 from app.services import clock
+from app.services.survey_windows import closed_by
 
 # The provenance a seed script or a test fixture plants a verdict under. Never a
 # real prompt version or model id (E6-01 work order, decision 4).
@@ -78,8 +79,9 @@ def route_verdict(
     keeps them together. The stored token is the enum member's value (ADR 0030).
 
     Raises `ModerationBeforeClose`, writing nothing, when the comment's window has
-    not closed by `app.services.clock` — `now >= closes_at` is closed — or when
-    the comment has no window. Otherwise raises whatever the database raises: an
+    not closed by `app.services.clock` — closed is `closes_at < now`, the
+    survey-window module's own `closed_by`, so the closing instant itself is
+    still open — or when the comment has no window. Otherwise raises whatever the database raises: an
     unknown verdict or a failed route each fail the whole call, and the verdict is
     not stored without its route.
     """
@@ -106,9 +108,13 @@ def _refuse_before_the_close(session: Session, answer_id: UUID) -> None:
 
     The clock is read as `clock.now`, through the module, so that ADR 0109's
     effective clock (and a test standing it on an instant) is the one judged.
+    "Closed" is `app.services.survey_windows.closed_by`, the negation of what
+    that module calls open, so the router and the survey cannot disagree about
+    the closing instant (E6-03, decision 8; ADR 0187's amendment).
     """
-    closes_at = session.execute(
-        select(SurveyWindow.closes_at)
+    now = clock.now(session, settings=Settings())
+    closed = session.execute(
+        select(closed_by(now))
         .join_from(Answer, Response, Response.id == Answer.response_id)
         .join(
             SurveyWindow,
@@ -117,12 +123,12 @@ def _refuse_before_the_close(session: Session, answer_id: UUID) -> None:
         )
         .where(Answer.id == answer_id)
     ).scalar_one_or_none()
-    if closes_at is None:
+    if closed is None:
         raise ModerationBeforeClose(
             f"{answer_id} names no comment with a survey window, so there is no close to judge "
             "its text at and no moderation verdict was written."
         )
-    if clock.now(session, settings=Settings()) < closes_at:
+    if not closed:
         raise ModerationBeforeClose(
             f"The survey window of {answer_id} has not closed, so its text can still be "
             "resubmitted and no moderation verdict was written (ADR 0187)."
