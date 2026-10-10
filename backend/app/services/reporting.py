@@ -69,7 +69,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.contracts import CommentStream, WeeklySummaryRecord
 from app.ai.gateway import AIGateway, AIGatewayError
-from app.ai.tasks import summarize_stream
+from app.ai.tasks import SUMMARY_PROMPT_VERSION, summarize_stream
 from app.config import Settings
 from app.models.identity import Enrollment
 from app.models.org import Course, Prefix, Section
@@ -89,12 +89,14 @@ from app.services.authz import (
     teaching_instructor_assigned,
 )
 from app.services.report_comments import (
-    ReportComment,
+    COMMENT_VIEW,
+    CommentCard,
     n_threshold,
-    released_comments,
+    released_cards,
     reported_status_of,
+    section_week_moderated,
     stream_is_suppressed,
-    visible_comments,
+    visible_cards,
 )
 from app.services.section_codes import course_label, course_week_of
 
@@ -105,7 +107,12 @@ if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
     # place this module needs the schema back — `_payload`, which builds the
     # report, `_stored_summaries` under it, and `taught_sections` — imports it
     # inside the function. See `_payload`'s docstring.
-    from app.schemas.report import CommentView, InstructorReport, SummaryView, TaughtSection
+    from app.schemas.report import (
+        CommentView,
+        InstructorReport,
+        SummaryView,
+        TaughtSection,
+    )
     from app.schemas.report_benchmark import (
         BenchmarkSeries,
         StreamBenchmark,
@@ -258,11 +265,18 @@ def generate_missing_summaries(
 def _section_weeks_awaiting_a_summary(
     session: Session, *, closed_by: datetime
 ) -> list[tuple[UUID, UUID]]:
-    """Every section-week whose window has closed and which carries no summary row.
+    """Every section-week whose window has closed, which carries no summary row, and is moderated.
 
     A list of key pairs rather than of rows, for the reason E3-06's walk gives: a
     commit expires every instance the session holds, and the next section-week's
     work begins after one.
+
+    **A section-week is summarized only once every comment in it holds a
+    moderation verdict** (`section_week_moderated`, ADR 0187). A summary is never
+    regenerated (the E4 breakdown's decision 2), so a week summarized before its
+    last verdict landed would carry a comment no reader may see, or leave out one
+    they may, for the rest of the term. Such a week is left for a later walk,
+    which this walk's "has no summary rows" selection already makes the retry.
     """
     summarized = select(WeeklySummary.id).where(
         WeeklySummary.section_id == SurveyWindow.section_id,
@@ -273,7 +287,11 @@ def _section_weeks_awaiting_a_summary(
         .where(SurveyWindow.closes_at < closed_by, ~summarized.exists())
         .order_by(SurveyWindow.section_id, SurveyWindow.week_id)
     ).all()
-    return [(row[0], row[1]) for row in walked]
+    return [
+        (row[0], row[1])
+        for row in walked
+        if section_week_moderated(session, section_id=row[0], week_id=row[1])
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -500,90 +518,51 @@ def _comments_reaching_the_model(
 ) -> Sequence[str]:
     """One stream's comments for one section-week, less the ones a moderator holds.
 
-    **The stream comes from `question.stream` and never from a position.**
-    `question_set` is versioned (§3.2), so the ordinal that carries the instructor
-    comment today is not promised to in the next set — E4-02 added the column to be
-    the fact, and E4-03's distribution view already reads it for the same reason.
+    **Read through `report_comment`, the view every other reader of a comment
+    uses** (E6-01, ADR 0187). So the summary model is sent exactly the comments
+    the view lets a reader reach, and nothing the view withholds: no blank
+    answer, no comment without a moderation verdict, and no comment that has ever
+    held a threat or self-harm verdict (SPEC §6.2: such a comment is never shown
+    to the instructor, and a paraphrase of it in a summary that is never
+    regenerated would show it for the rest of the term). Until E6-01 this gather
+    read `answer` itself and carried its own copy of the view's blank-comment
+    class; that copy is gone, so the two cannot drift.
+
+    **The stream is the view's, which reads `question.stream`**, never a
+    position: `question_set` is versioned (§3.2).
 
     **Under-threshold comments are included.** SPEC §4: comments from
     under-threshold weeks "are not discarded — they feed the summary", and §5.1
     generates a summary "even in small-N weeks — there, the summary is the only
     comment signal". So nothing here counts the week before deciding to read it.
 
-    **Moderation-held comments are excluded, and today that filter is vacuous.**
-    E6 writes the first `moderation_state` row this system will hold. It is written
-    now rather than when the states arrive because a summary is never regenerated
-    (the E4 breakdown's decision 2): a comment an instructor excluded which is
-    already inside a generated summary stays there for the rest of the term, and a
-    filter deferred to the epic that populates the table is a filter discovered
-    missing after that has happened.
+    **Moderation-held comments are excluded**: §5.1's summaries "exclude
+    flagged-held content", read off the one resolution of the current decision,
+    `reported_status_of` (ADR 0145).
 
-    **What is *not* excluded here, stated because the asymmetry is deliberate.**
-    SPEC §5.2's last bullet routes one class of comment around the moderation
-    lifecycle altogether: "Threat/self-harm classifications bypass this flow
-    entirely (§6.2) and are never shown to the instructor." Bypassing the flow
-    means bypassing the record, so such a comment never acquires a
-    `moderation_state` row — and the rule above reads an absent row as published.
-    So the class §6.2 keeps furthest from an instructor is the class this gather
-    would send to a provider, and a paraphrase of it would sit in a summary nothing
-    regenerates. That is the honest shape of what this filter covers and what it
-    does not.
-
-    **No predicate for it is written today, and that is a decision rather than an
-    oversight.** There is nothing to select on. `ClassificationTask` has exactly one
-    member and no writer of a harm verdict exists anywhere in this system, so a
-    closed set written now would be a guess at a vocabulary E6 has not designed — a
-    set built before the thing it closes over, which reads as a guarantee and is
-    not one. The same argument keeps `WeeklySummaryRecord.held_note_type` a string
-    for the length of this epic.
-
-    **What is mechanical instead is the precondition.** While that vocabulary has
-    one member the gap is unreachable, so the run above is safe for the reason
-    stated rather than by luck. `docs/tickets/e4/deferred.md` carries the entry with
-    its owner (E6) and its done-when, and
-    `tests/integration/test_the_summary_job_feeds_no_moderation_held_comment_to_the_model.py::test_no_harm_classification_task_exists_yet_for_this_filter_to_have_missed`
-    is the alarm: it pins that enum's membership as an equality, so a second task
-    reds it *before* any classifier writes a verdict. The repair when it reds is
-    here, in this function, and never in that test's expected set.
+    The walk reaches this only for a section-week whose comments all hold a
+    verdict (`_section_weeks_awaiting_a_summary`), so the set is final.
 
     The order is the answer key's — arbitrary, stable, and carrying nothing. §4
     keeps submission times away from comments, and ordering a prompt by one would
     put the week's arrival sequence in front of a model for no reason.
     """
-    return list(
-        session.scalars(
-            select(Answer.comment_text)
-            .join(Response, Response.id == Answer.response_id)
-            .join(Question, Question.id == Answer.question_id)
+    return [
+        str(text)
+        for text in session.scalars(
+            select(COMMENT_VIEW.c.comment_text)
             .where(
-                Response.section_id == section_id,
-                Response.week_id == week_id,
-                Question.kind == QuestionKind.COMMENT,
-                Question.stream == token,
-                # Two conditions and neither is the other's spare, which is the
-                # note E4-03's distribution view carries: `kind` says what was
-                # asked and the value says what this row holds. `answer`'s own
-                # constraint permits a row filling `comment_text` under a question
-                # of another kind, and a read is not the place to trust a write.
-                Answer.comment_text.is_not(None),
-                # Blank means what Python's `str.strip()` removes, not only
-                # spaces: every such character listed by code point, so no
-                # collation changes the set, and the same class, character for
-                # character, as `report_comment_v003.sql`, whose header lists
-                # them (docs/disputes/E5.1-12-01.md). PostgreSQL's regex engine
-                # reads the escapes; the raw string keeps Python from doing so.
-                Answer.comment_text.regexp_match(
-                    r"[^\u0009-\u000d\u001c-\u001f\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]"
-                ),
+                COMMENT_VIEW.c.section_id == section_id,
+                COMMENT_VIEW.c.week_id == week_id,
+                COMMENT_VIEW.c.stream == token,
                 # The one resolution of "which decision is current", called rather
                 # than written again: `app.services.report_comments` owns it
-                # (ADR 0145), and E4-07 closed the deferral that had this module
-                # carrying a second copy of the ordering and of the default.
-                reported_status_of(Answer.id).not_in(HELD_MODERATION_STATES),
+                # (ADR 0145).
+                reported_status_of(COMMENT_VIEW.c.answer_id).not_in(HELD_MODERATION_STATES),
             )
-            .order_by(Answer.id)
+            .order_by(COMMENT_VIEW.c.answer_id)
         )
-    )
+    ]
 
 
 def _responses_that_week(session: Session, *, section_id: UUID, week_id: UUID) -> int:
@@ -1045,6 +1024,8 @@ def instructor_report(
     Raises `SectionUnavailableError` and `CourseWeekUnavailableError`; the router
     is what turns each into an HTTP answer.
     """
+    if person_id is None:
+        raise SectionUnavailableError
     section = _readable_section(session, person_id=person_id, section_id=section_id)
     published = _published_weeks(session, section=section, settings=settings)
 
@@ -1053,7 +1034,78 @@ def instructor_report(
         raise CourseWeekUnavailableError(
             "This section has no published report for that course week."
         )
-    return _payload(session, section=section, week=asked, published=published, settings=settings)
+    return _payload(
+        session,
+        section=section,
+        week=asked,
+        published=published,
+        reader=person_id,
+        settings=settings,
+    )
+
+
+def comment_on_instructor_report(
+    session: Session, *, person_id: UUID, answer_id: UUID, settings: Settings
+) -> CommentCard | None:
+    """The card this person's report returns for one answer, or `None` (E6-03).
+
+    **The instructor's decision door asks this and nothing else.** A decision is
+    allowed only on a comment the reader's report currently returns: a comment
+    in a shown stream of one of their published weeks, or one in the
+    from-earlier-weeks release. So this walks what the report reads, with the
+    calls the report makes: their taught sections from `app.services.authz`,
+    each section's published weeks from `_published_weeks`, each week's two
+    streams from `visible_cards`, and the release from `_released_cards`. It
+    never rebuilds the rule from the answer's own section, week or stream
+    (`docs/MISTAKES.md` entries 35 and 53): a comment the report would not show
+    is not found here, whatever it is.
+
+    `None` answers for a held comment, a comment of a section they do not teach,
+    an answer that is not a comment, a Care-class comment and an id nothing
+    holds alike, so the door can refuse them all the same way.
+
+    It reads every published week of every taught section until it finds the
+    comment, which is a few dozen reads on a click. The report pays the same
+    reads one week at a time.
+    """
+    for section_id in sorted(taught_section_ids(session, person_id=person_id)):
+        section = session.get(Section, section_id)
+        if section is None:  # pragma: no cover - the assignment's foreign key holds this
+            continue
+        published = _published_weeks(session, section=section, settings=settings)
+        for week in published:
+            for token in REPORT_STREAMS:
+                for card in visible_cards(
+                    session, section_id=section.id, week_id=week.week_id, stream=token
+                ):
+                    if card.answer_id == answer_id:
+                        return card
+        if published:
+            for card in _released_cards(session, section=section):
+                if card.answer_id == answer_id:
+                    return card
+    return None
+
+
+def comment_view(card: CommentCard, *, reader: UUID) -> "CommentView":
+    """One card as the payload carries it: E4-04's three fields and E6-03's three.
+
+    The one place a `CommentCard` becomes a `CommentView`, used by the report and
+    by the decision route's answer, so the two cannot describe one comment two
+    ways. The latest decider goes no further than here: it becomes
+    `decided_by_you`, which says whether it was the reader and nothing about who
+    else it might have been.
+    """
+    from app.schemas.report import CommentView
+
+    return CommentView(
+        text=card.comment.text,
+        status=card.comment.status,
+        stream=card.comment.stream,
+        answer_id=card.answer_id,
+        flag=None if card.flag is None else card.flag.value,
+        decided_by_you=card.decided_by is not None and card.decided_by == reader,
+    )
 
 
 def published_course_weeks(
@@ -1465,6 +1517,7 @@ def _payload(
     section: Section,
     week: _SectionWeek,
     published: list[_SectionWeek],
+    reader: UUID,
     settings: Settings,
 ) -> "InstructorReport":
     """Assemble one report out of the views, the comment service and the summary table.
@@ -1479,10 +1532,12 @@ def _payload(
     between.
 
     **Nothing is widened at the assembly layer.** The comments are exactly what
-    `visible_comments` and `released_comments` answer with, in the same three
-    fields; the summary is what the row holds, and an absent row is an absent
-    member rather than an empty string. §4.1 item 6's spirit is that a suppression
-    decided one layer down is not undone by the layer that renders it.
+    `visible_cards` and `released_cards` answer with: the comment service's
+    three fields, and E6-03's three (the handle, the flag class and whether the
+    reader made the latest decision), built by `comment_view`. The summary is
+    what the row holds, and an absent row is an absent member rather than an
+    empty string. §4.1 item 6's spirit is that a suppression decided one layer
+    down is not undone by the layer that renders it.
     """
     from app.schemas import report as schema
 
@@ -1531,7 +1586,8 @@ def _payload(
             },
             summary=summaries.get(token),
             comments=_comment_views(
-                visible_comments(session, section_id=section.id, week_id=week.week_id, stream=token)
+                visible_cards(session, section_id=section.id, week_id=week.week_id, stream=token),
+                reader=reader,
             ),
             question_text=question_texts[token],
             benchmark=benchmarks_by_stream[token],
@@ -1585,26 +1641,21 @@ def _payload(
         # E4-07's own reconciliation test names it; a later ticket may retire it
         # once nothing reads it.
         comparison=workload_benchmark.comparison.mean,
-        released_from_earlier_weeks=_comment_views(released),
+        released_from_earlier_weeks=_comment_views(released, reader=reader),
         institution_timezone=settings.institution_timezone,
     )
 
 
-def _comment_views(comments: Sequence[ReportComment]) -> list["CommentView"]:
-    """E4-04's comments, one field for one field and nothing added.
+def _comment_views(cards: Sequence[CommentCard], *, reader: UUID) -> list["CommentView"]:
+    """E4-04's comments, each through `comment_view`, in the order the service gave them.
 
     Written as one function rather than three comprehensions so there is one place
-    a fourth field could ever be introduced, and so the review that forbids one has
-    one line to read. SPEC §4 keeps display order random and timestamps away from
+    a field could ever be introduced, and so the review that forbids one has one
+    line to read. SPEC §4 keeps display order random and timestamps away from
     comments; an index or a submitted-at added for a frontend's convenience would
     hand back the order the suppression exists to remove.
     """
-    from app.schemas.report import CommentView
-
-    return [
-        CommentView(text=comment.text, status=comment.status, stream=comment.stream)
-        for comment in comments
-    ]
+    return [comment_view(card, reader=reader) for card in cards]
 
 
 def _released(
@@ -1613,7 +1664,7 @@ def _released(
     section: Section,
     week: _SectionWeek,
     published: list[_SectionWeek],
-) -> list[ReportComment]:
+) -> list[CommentCard]:
     """The from-earlier-weeks release, in the latest published week's report only.
 
     ADR 0152: "Released comments appear in the latest published week's report under
@@ -1629,10 +1680,19 @@ def _released(
     """
     if not published or week.course_week != max(other.course_week for other in published):
         return []
+    return _released_cards(session, section=section)
+
+
+def _released_cards(session: Session, *, section: Section) -> list[CommentCard]:
+    """Every comment a release batch has surfaced for this section's term, both streams.
+
+    What the latest published week's report carries, and what the decision door
+    searches, from one place.
+    """
     return [
-        comment
+        card
         for token in REPORT_STREAMS
-        for comment in released_comments(
+        for card in released_cards(
             session, section_id=section.id, term_id=section.term_id, stream=token
         )
     ]
@@ -1729,17 +1789,30 @@ def _stored_summaries(
     exists to refuse: a blank summary above a comment group reads to an instructor
     as a model that had nothing to say about her week, rather than as a job that
     has not run yet.
+
+    **An ordinary-mode summary of a stream that is now held is withheld.** A row
+    written under `SUMMARY_PROMPT_VERSION` before the threshold became per stream
+    (ADR 0182) may quote a thin stream's commenters, which the small-N prompt
+    forbids. Such a row is never regenerated (the E4 breakdown's decision 2), so
+    it is left out here, at the one place a stored summary is read, and the
+    stream shows the absent state instead.
     """
     from app.schemas.report import SummaryView
 
+    stored = session.execute(
+        select(
+            WeeklySummary.stream,
+            WeeklySummary.summary_text,
+            WeeklySummary.response_count,
+            WeeklySummary.prompt_version,
+        ).where(WeeklySummary.section_id == section_id, WeeklySummary.week_id == week_id)
+    ).all()
     return {
         stream: SummaryView(text=summary_text, response_count=response_count)
-        for stream, summary_text, response_count in session.execute(
-            select(
-                WeeklySummary.stream,
-                WeeklySummary.summary_text,
-                WeeklySummary.response_count,
-            ).where(WeeklySummary.section_id == section_id, WeeklySummary.week_id == week_id)
+        for stream, summary_text, response_count, prompt_version in stored
+        if not (
+            prompt_version == SUMMARY_PROMPT_VERSION
+            and stream_is_suppressed(session, section_id=section_id, week_id=week_id, stream=stream)
         )
     }
 

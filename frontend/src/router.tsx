@@ -12,6 +12,8 @@ import { InstructorLanding } from './routes/instructor';
 import { InstructorReportRoute } from './routes/instructor/InstructorMondayReport';
 import { LeadershipLanding } from './routes/leadership';
 import { ComparisonSetsRoute } from './routes/leadership/ComparisonSets';
+import { EXCLUSION_LOG_ROUTE, ExclusionLogRoute } from './routes/leadership/ExclusionLog';
+import { REVIEW_QUEUE_ROUTE, ReviewQueueRoute } from './routes/leadership/ReviewQueue';
 import {
   COMPARISON_SETS_ROUTE,
   COMPARISON_SET_EDIT_ROUTE,
@@ -23,8 +25,9 @@ import { StudentLanding } from './routes/student';
  * The client route table — SPEC §13's `router.tsx`.
  *
  * The routes are declared one by one rather than generated from a table. There
- * are eight now — the five role areas, the instructor's per-section report under
- * hers, and the two addresses of leadership's comparison sets — and each is the
+ * are ten now — the five role areas, the instructor's per-section report under
+ * hers, the two addresses of leadership's comparison sets, and leadership's
+ * review queue and exclusion log — and each is the
  * file E2 onwards edits; a loop over a list would save a few lines and cost the
  * thing that makes this file readable, which is that you can see which component
  * answers which path.
@@ -150,6 +153,20 @@ const leadershipComparisonSetRoute = createRoute({
   component: ComparisonSetEditRoute,
 });
 
+// SPEC §5.2's review queue and exclusion log, under the leadership area and
+// flat off the root for the reason the comparison sets are.
+const leadershipReviewQueueRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: REVIEW_QUEUE_ROUTE,
+  component: ReviewQueueRoute,
+});
+
+const leadershipExclusionLogRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: EXCLUSION_LOG_ROUTE,
+  component: ExclusionLogRoute,
+});
+
 const careRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/care',
@@ -179,6 +196,8 @@ export const routeTree = rootRoute.addChildren([
   leadershipRoute,
   leadershipComparisonSetsRoute,
   leadershipComparisonSetRoute,
+  leadershipReviewQueueRoute,
+  leadershipExclusionLogRoute,
   careRoute,
   adminRoute,
 ]);

@@ -67,6 +67,13 @@ for — the student's comment, or the week's.
    rule 4 holds: the stream, the theme bound, the counts, and the wrong-answer
    markers ahead of all of it.
 
+6. **Moderation** (E6-02), the third task. A prompt carrying
+   `MODERATION_MARKER_LINE` before any copy of `MARKER_LINE` is asking for
+   SPEC §7.4's moderation verdict about the comment after it. The wrong-answer
+   markers apply first; then a forced moderation verdict, most serious first
+   (`mock-ai:threat`, `mock-ai:self-harm`, `mock-ai:harmful`,
+   `mock-ai:privacy`, `mock-ai:nonsense`, `mock-ai:clear`); otherwise `clear`.
+
 **`nonsense` is reachable only by its marker.** Rule 3 has two outcomes and not
 three. Deciding that a comment is keyboard mashing is a judgement about content
 and this service makes none; a heuristic invented here would make every
@@ -158,6 +165,12 @@ SUMMARY_MARKER_LINE = "The week's comments follow this line, one numbered block 
 # 0039).
 SMALL_N_MARKER = "below the reporting threshold, so name themes"
 
+# The same boundary for SPEC §7.4's moderation task (E6-02): the line the
+# moderation prompt ends its instructions with, right before the comment. A second
+# copy of a line in `backend/app/ai/prompts/moderation.v1.md`, held against it by
+# `tests/unit/test_mock_ai_moderation_rules.py`.
+MODERATION_MARKER_LINE = "The comment to moderate follows this line."
+
 # How the summary prompt names the stream it is asking about, and how this
 # service reads it back. The prompt substitutes the stream token after this
 # prefix, in its instructions — which is *before* the marker line above, so the
@@ -173,6 +186,15 @@ STREAM_LINE_PREFIX = "Stream under review:"
 SUBSTANTIVE = "substantive"
 INSUFFICIENT = "insufficient"
 NONSENSE = "nonsense"
+
+# SPEC §7.4's Output column for the moderation task. `nonsense` is shared with
+# validity, and so is its marker.
+CLEAR = "clear"
+HARMFUL = "harmful"
+PRIVACY = "privacy"
+THREAT = "threat"
+SELF_HARM = "self_harm"
+MODERATION_VERDICTS = (CLEAR, HARMFUL, PRIVACY, NONSENSE, THREAT, SELF_HARM)
 
 # SPEC §5.1's two comment streams, which the weekly summary is produced one of at
 # a time: "grouped under 'About the instructor' / 'About the course'". Transcribed
@@ -227,6 +249,11 @@ STALL_MARKER = "mock-ai:stall"
 SUBSTANTIVE_MARKER = "mock-ai:substantive"
 INSUFFICIENT_MARKER = "mock-ai:insufficient"
 NONSENSE_MARKER = "mock-ai:nonsense"
+CLEAR_MARKER = "mock-ai:clear"
+HARMFUL_MARKER = "mock-ai:harmful"
+PRIVACY_MARKER = "mock-ai:privacy"
+THREAT_MARKER = "mock-ai:threat"
+SELF_HARM_MARKER = "mock-ai:self-harm"
 
 # Every marker, keyed by what it selects. This mapping is what `/mock/rules`
 # publishes and what a caller picks a behaviour out of.
@@ -238,7 +265,16 @@ MARKERS: dict[str, str] = {
     SUBSTANTIVE: SUBSTANTIVE_MARKER,
     INSUFFICIENT: INSUFFICIENT_MARKER,
     NONSENSE: NONSENSE_MARKER,
+    CLEAR: CLEAR_MARKER,
+    HARMFUL: HARMFUL_MARKER,
+    PRIVACY: PRIVACY_MARKER,
+    THREAT: THREAT_MARKER,
+    SELF_HARM: SELF_HARM_MARKER,
 }
+
+# A forced moderation verdict is looked for in this order, most serious first,
+# so a comment carrying two markers gets the one a moderator would act on.
+MODERATION_ORDER = (THREAT, SELF_HARM, HARMFUL, PRIVACY, NONSENSE, CLEAR)
 
 # The two statuses, named rather than written into the branches, because which
 # one each marker answers is the whole of E2-07's near-miss pair.
@@ -399,6 +435,23 @@ def classify(comment: str) -> Answer:
 
     long_enough = len(comment) >= SUBSTANTIVE_MINIMUM_CHARACTERS
     return verdict_answer(SUBSTANTIVE if long_enough else INSUFFICIENT)
+
+
+def moderate(comment: str) -> Answer:
+    """Rule 6: one moderation verdict about one extracted comment.
+
+    The wrong-answer markers first, as for every task; a stall answers `clear`
+    late; then a forced verdict in `MODERATION_ORDER`; otherwise `clear`.
+    """
+    failing = failing_answer(comment)
+    if failing is not None:
+        return failing
+    if STALL_MARKER in comment:
+        return verdict_answer(CLEAR, stall_seconds=STALL_SECONDS)
+    for verdict in MODERATION_ORDER:
+        if MARKERS[verdict] in comment:
+            return verdict_answer(verdict)
+    return verdict_answer(CLEAR)
 
 
 # ---------------------------------------------------------------------------
@@ -626,6 +679,12 @@ def answer_for(prompt: str) -> Answer:
             week_comments(body),
             themes_only=SMALL_N_MARKER in head,
         )
+    moderation = prompt.find(MODERATION_MARKER_LINE)
+    validity = prompt.find(MARKER_LINE)
+    # Whichever task line comes first is the template's own: the comment follows
+    # it, so a copy a student typed into the comment can never precede it.
+    if moderation >= 0 and (validity < 0 or moderation < validity):
+        return moderate(prompt[moderation + len(MODERATION_MARKER_LINE) :].strip())
     return classify(extract_comment(prompt))
 
 
@@ -646,6 +705,8 @@ def served_rules() -> dict[str, Any]:
         "summary_marker_line": SUMMARY_MARKER_LINE,
         "summary_small_n_marker": SMALL_N_MARKER,
         "summary_stream_line_prefix": STREAM_LINE_PREFIX,
+        "moderation_marker_line": MODERATION_MARKER_LINE,
+        "moderation_verdicts": list(MODERATION_VERDICTS),
         "verdicts": [SUBSTANTIVE, INSUFFICIENT, NONSENSE],
         "streams": list(SUMMARY_STREAMS),
         "tasks": [
@@ -659,6 +720,13 @@ def served_rules() -> dict[str, Any]:
             f"{SMALL_N_MARKER!r}. The answer names the comment count and labels its themes by "
             "ordinal, repeating none of the week's words (the ruling of 2026-09-09).",
         ],
+        "moderation_task": (
+            f"moderation — a prompt carrying {MODERATION_MARKER_LINE!r} before any "
+            f"{MARKER_LINE!r}. The comment is everything after the first copy of it. After the "
+            "wrong-answer markers, a forced verdict is looked for most serious first: "
+            + ", ".join(MARKERS[verdict] for verdict in MODERATION_ORDER)
+            + f"; otherwise {CLEAR}."
+        ),
         "rule_order": [
             "1. A wrong-answer marker anywhere in the input decides the answer, for either "
             f"task: {UNAVAILABLE_MARKER} answers HTTP {UNAVAILABLE_STATUS}, {REFUSED_MARKER} "

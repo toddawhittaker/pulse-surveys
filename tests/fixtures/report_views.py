@@ -66,6 +66,15 @@ from fixtures.grading import (
     SUBSTANTIVE,
     single_column_link,
 )
+from fixtures.moderation import ANSWER_ID_COLUMN as MODERATION_ANSWER_ID_COLUMN
+from fixtures.moderation import (
+    ATTEMPTED_AT_COLUMN,
+    CLEAR,
+    MODERATION_ATTEMPT_TABLE,
+    PendingVerdicts,
+    plant_verdicts,
+    require_moderation_attempt,
+)
 from fixtures.submit import (
     ANSWER_ID_COLUMN,
     ANSWER_TABLE,
@@ -463,6 +472,10 @@ class ReportWorld:
         # subject and their enrolments (`tests/fixtures/grading.py` shares one for
         # the same reason).
         self.people_chain: dict[str, Any] = {}
+        # The moderation verdicts owed to comments whose windows had not closed by
+        # the clock when they were written (E6-01's fix round). See
+        # `tests/fixtures/moderation.py::PendingVerdicts`.
+        self.pending = PendingVerdicts()
 
     # -- the session and the tables -----------------------------------------
 
@@ -642,6 +655,7 @@ class ReportWorld:
         cohort: str = DEFAULT_COHORT,
         version: int = FIRST_VERSION,
         verdicts: Mapping[int, str] | None = None,
+        moderation: Mapping[int, str | tuple[str, ...] | None] | None = None,
     ) -> tuple[Any, dict[int, Any]]:
         """One `response` for one student, section and term week, with the answers given.
 
@@ -655,8 +669,24 @@ class ReportWorld:
         `verdicts` names the classification written for a comment position; a
         comment answered without one is classified `substantive`, so a caller
         spells only the verdict it is asking about.
+
+        **`moderation` names the moderation verdict routed for a comment
+        position, and a comment answered without one is routed `clear`** (E6-01).
+        `report_comment` v004 shows a comment only once it holds a moderation
+        verdict, so a world that planted none would show nothing at all
+        (`docs/MISTAKES.md` entry 22). The verdict goes through
+        `app.services.moderation.route_verdict` under the seed provenance — never a
+        direct insert — so the route rows land beside it exactly as production's
+        would. `None` for a position (`UNMODERATED`) plants no verdict, which is
+        the state E6-01's tests are about; a tuple routes several in order.
+
+        **Routed only once the week's window has closed by the clock** (E6-01's fix
+        round: `route_verdict` refuses an open window). A comment written into a
+        week still open is owed its verdict, and `plant_pending` routes it when a
+        test has moved the clock past the close — `SummaryWorld.clock_to` calls it.
         """
         verdicts = {} if verdicts is None else verdicts
+        moderation = {} if moderation is None else moderation
         window = self.window(term_week, cohort)
         _opens_at, closes_at = WINDOWS_BY_TERM_WEEK[term_week]
 
@@ -693,7 +723,45 @@ class ReportWorld:
                     verdicts.get(position, SUBSTANTIVE),
                     classified_at=closes_at - CLASSIFIED_BEFORE_CLOSE,
                 )
+                self.pending.route_when_closed(
+                    self.session,
+                    written[position][self.key_of(ANSWER_TABLE)],
+                    moderation.get(position, CLEAR),
+                    closes_at,
+                )
         return response, written
+
+    def plant_pending(self) -> None:
+        """Route every owed verdict whose window has now closed by the clock (E6-01's fix round)."""
+        self.pending.route_the_closed(self.session)
+
+    def verdict(self, answer: Mapping[str, Any], tokens: str | tuple[str, ...] | None) -> None:
+        """Route moderation verdicts for one comment through the definer (E6-01).
+
+        `None` routes nothing; a token routes one verdict; a tuple routes each in
+        order — a later verdict on the same comment is a second call, which is how
+        "a later verdict is clear" is planted. See `tests/fixtures/moderation.py`.
+        """
+        plant_verdicts(self.session, answer[self.key_of(ANSWER_TABLE)], tokens)
+
+    def failed_moderation(self, answer: Mapping[str, Any], *, attempted_at: Any) -> Any:
+        """One `moderation_attempt` row for one comment: a moderation call that failed.
+
+        E6-01 creates the table and nothing in that ticket writes it; E6-02's
+        sweep appends one row per failed call. A test plants it to pose E6-01's
+        first criterion as the ticket words it — "a failed moderation run" — and
+        the comment it names holds no verdict. Planted on the bootstrap session,
+        because no application writer of it exists yet.
+        """
+        require_moderation_attempt(self.tables)
+        return self.seed(
+            MODERATION_ATTEMPT_TABLE,
+            {},
+            **{
+                MODERATION_ANSWER_ID_COLUMN: answer[self.key_of(ANSWER_TABLE)],
+                ATTEMPTED_AT_COLUMN: attempted_at,
+            },
+        )
 
     def answer(
         self,

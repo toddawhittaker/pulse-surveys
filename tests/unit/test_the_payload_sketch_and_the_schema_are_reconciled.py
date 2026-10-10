@@ -95,8 +95,18 @@ SCHEMA_PATH = "backend/app/schemas/report.py"
 # sketch predates any comparison set — E4 computed none — so the member cannot be
 # in it, and E5's own breakdown carries the sketch that does describe it. The
 # addition is additive in criterion 6's sense: no E4 member moves.
+#
+# There is deliberately no held count here. E6 once planned a top-level
+# `participation_note` ("N responses held for review"); the owner's ruling 6
+# dropped it, because a per-week held count beside a released comment's flag pins
+# that comment to its week (ADR 0153's channel). A top-level member of that kind
+# arriving again is a member this equality reports as unaccounted for.
 DECLARED_DIVERGENCES = frozenset(
-    {"released_from_earlier_weeks", "institution_timezone", "workload_benchmark"}
+    {
+        "released_from_earlier_weeks",
+        "institution_timezone",
+        "workload_benchmark",
+    }
 )
 
 # The one member that has **left** the top level, and where it went. E5.1-01's

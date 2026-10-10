@@ -100,9 +100,9 @@
 }
 
 @layer components {
-  /* One panel: the mono stream label, the plot, the visually hidden table that
-   * carries the same numbers as text, and — on the panel that shows them — the
-   * legend. */
+  /* One panel: the mono stream label, the plot, the table that carries the
+   * same numbers as text (visually hidden until opened), and — on the panel
+   * that shows them — the legend. */
   .pulse-trend {
     margin: 0;
   }
@@ -340,5 +340,48 @@
   .pulse-week-nav-button:disabled {
     opacity: 0.35;
     cursor: default;
+  }
+
+  /* "Show the numbers": the button that opens the chart's tables to sighted
+   * readers. A quiet secondary control, the comment disclosure's twin. */
+  .pulse-trend-numbers-toggle {
+    margin-top: var(--space-2);
+    font-family: var(--font-body);
+    font-size: var(--text-1);
+    font-weight: 500;
+    padding: 4px 10px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-input);
+    background: var(--paper);
+    color: var(--spruce);
+    cursor: pointer;
+  }
+
+  .pulse-trend-numbers-toggle:hover {
+    background: var(--chalk);
+  }
+
+  /* An opened table: mono numerals and hairline rules, as the report's other
+   * tables are drawn. */
+  .pulse-trend-table {
+    margin-top: var(--space-3);
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: var(--text-1);
+    color: var(--spruce);
+  }
+
+  .pulse-trend-table caption {
+    text-align: left;
+    font-family: var(--font-body);
+    font-weight: 500;
+    padding-bottom: var(--space-1);
+  }
+
+  .pulse-trend-table th,
+  .pulse-trend-table td {
+    text-align: left;
+    padding: var(--space-1) var(--space-3) var(--space-1) 0;
+    border-bottom: 1px solid var(--hairline);
   }
 }

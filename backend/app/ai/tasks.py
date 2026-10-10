@@ -63,6 +63,7 @@ from sqlalchemy.orm import Session
 from app.ai.contracts import (
     CommentStream,
     CommentValidityOutput,
+    ModerationOutput,
     ValidityVerdict,
     WeeklySummaryOutput,
     WeeklySummaryRecord,
@@ -161,7 +162,12 @@ SUMMARY_PROMPT_VERSION = "summary.v1"
 # renders and v2 is what a small-N week renders, rather than v2 superseding v1.
 # The gain is that a stored `prompt_version` then says which mode produced the
 # row, with no second column and no inference.
-SMALL_N_SUMMARY_PROMPT_VERSION = "summary.v2"
+#
+# **v3 replaced v2 as the small-N version** because v2 told the model that fewer
+# students answered "this week", which is false for a thin stream in a full week
+# (ADR 0182 made the threshold per stream). v2 stays on disk for the rows that
+# name it.
+SMALL_N_SUMMARY_PROMPT_VERSION = "summary.v3"
 
 # Where the week's comments go, and where the stream they belong to goes. Two
 # placeholders rather than one because they are substituted at opposite ends of
@@ -201,7 +207,28 @@ SUMMARY_TIMEOUT_SECONDS = 60.0
 # One sentence, in one place, so the report and any later reader of a stored
 # summary read the same words.
 EMPTY_WEEK_PROMPT_VERSION = "empty-week"
-EMPTY_WEEK_SUMMARY = "No comments were submitted this week."
+# **The sentence says nothing about how many comments were written**, because a
+# week whose only comment is withheld (a Care-class verdict) reaches the summary as an
+# empty stream too. A comment at the moderation attempt cap holds its week, so
+# that week gets no summary at all (ruling 8). "No
+# comments were submitted" would then be false, and the difference between it
+# and a week that really had none would be the trace of a withheld comment
+# (SPEC §6.2, ADR 0188). One neutral sentence covers both.
+EMPTY_WEEK_SUMMARY = "There are no comments to show for this week."
+
+# ---------------------------------------------------------------------------
+# §7.4's moderation (E6-02)
+# ---------------------------------------------------------------------------
+
+# The prompt the moderation task renders, named as the two versions above are
+# (ADR 0031, ADR 0032). It renders exactly one comment, through `render_prompt`.
+MODERATION_PROMPT_VERSION = "moderation.v1"
+
+# How long one moderation call may take. Nobody waits on it: the hourly sweep
+# runs after the window has closed (ADR 0188), so this is a limit that stops a
+# silent provider holding the sweep open, not a budget a student feels. A call
+# that runs out is an outage, and the next sweep asks again.
+MODERATION_TIMEOUT_SECONDS = 30.0
 
 # The gateway this process uses, built on first classification and kept.
 _GATEWAY_LOCK = threading.Lock()
@@ -415,6 +442,30 @@ def classify_comment_validity(
     output = verdict_for_comment(comment, gateway)
     record_classification(session, ClassificationTask.COMMENT_VALIDITY, output, answer_id=answer_id)
     return output
+
+
+def classify_comment_moderation(
+    comment: str,
+    gateway: AIGateway | None = None,
+) -> ModerationOutput:
+    """§7.4's moderation task for one comment: one call in, one validated verdict out.
+
+    **No row is written here.** A moderation verdict is stored only together with
+    its route, through `app.services.moderation.route_verdict` (ADR 0187), so this
+    function judges and the sweep there records.
+
+    **There is no fail-open.** SPEC §3.3's floor is sanctioned for validity alone
+    (ADR 0056); a comment that cannot be moderated stays unmoderated and therefore
+    unshown. Every gateway failure propagates as its own class, and the sweep
+    decides which of them count toward the attempt cap (ADR 0188).
+    """
+    gateway = gateway or process_gateway()
+    return gateway.run_task(
+        prompt=render_prompt(MODERATION_PROMPT_VERSION, comment),
+        prompt_version=MODERATION_PROMPT_VERSION,
+        output_model=ModerationOutput,
+        timeout=MODERATION_TIMEOUT_SECONDS,
+    )
 
 
 # ---------------------------------------------------------------------------

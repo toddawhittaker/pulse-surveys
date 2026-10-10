@@ -64,6 +64,8 @@ from typing import Any, NamedTuple
 
 import pytest
 
+from fixtures.moderation import CLEAR as MODERATION_CLEAR
+from fixtures.moderation import PendingVerdicts, plant_verdicts
 from fixtures.submit import (
     ANSWER_ID_COLUMN,
     ANSWER_TABLE,
@@ -436,6 +438,9 @@ class GradingWorld:
         self.shape_of: dict[int, str] = {}
         self.people_chain: dict[str, Any] = {}
         self._graph: SupervisionGraph | None = None
+        # Moderation verdicts owed to comments whose windows had not closed by the
+        # clock when they were answered (E6-01's fix round).
+        self.pending = PendingVerdicts()
 
     # -- the session and the tables -----------------------------------------
 
@@ -837,6 +842,7 @@ class GradingWorld:
         verdicts: Mapping[int, str] | None = None,
         unclassified: Sequence[int] = (),
         is_valid: bool | None = None,
+        moderation: Mapping[int, str | tuple[str, ...] | None] | None = None,
     ) -> dict[int, Any]:
         """One `response` for one student and week, with an `answer` row per position.
 
@@ -854,9 +860,19 @@ class GradingWorld:
         `is_valid` writes the column E3-03 must not read. It is set only where the
         caller names it, so an ordinary row carries whatever the schema defaults
         to and no test here depends on that default.
+
+        **Every comment is also routed a moderation verdict, `clear` unless
+        `moderation` names another for its position** (E6-01). Moderation is a
+        second task on the same `classification` table, so every score this world
+        asks for is asked over comments that carry both kinds of row — which is
+        what makes "a moderation verdict leaves participation credit unchanged"
+        (E6-01's eleventh criterion) a property of the whole grading suite rather
+        than of one module. The verdict goes through the definer under the seed
+        provenance (`tests/fixtures/moderation.py`); `None` plants none.
         """
         answered = self.positions if positions is None else list(positions)
         verdicts = {} if verdicts is None else verdicts
+        moderation = {} if moderation is None else moderation
 
         self.require_response_columns()
         values: dict[str, Any] = {
@@ -892,7 +908,21 @@ class GradingWorld:
                     verdicts.get(position, SUBSTANTIVE),
                     classified_at=self.closes_at(course_week) - timedelta(minutes=30),
                 )
+            if self.shape_of[position] == "comment":
+                # Routed once the week's window has closed by the clock (E6-01's fix
+                # round: `route_verdict` refuses an open window); until then it is
+                # owed, and `elapsed_through` routes it when it moves the clock.
+                self.pending.route_when_closed(
+                    self.session,
+                    rows[position][self.key_of(ANSWER_TABLE)],
+                    moderation.get(position, MODERATION_CLEAR),
+                    self.closes_at(course_week),
+                )
         return rows
+
+    def moderate(self, answer: Mapping[str, Any], tokens: str | tuple[str, ...] | None) -> None:
+        """Route moderation verdicts for one comment through the definer (E6-01)."""
+        plant_verdicts(self.session, answer[self.key_of(ANSWER_TABLE)], tokens)
 
     def seed_answer(self, response: Mapping[str, Any], position: int) -> Any:
         """One `answer` row on one response, carrying the value column its shape uses."""
@@ -957,12 +987,20 @@ class GradingWorld:
         )
 
     def classifications_of(self, answer: Mapping[str, Any]) -> list[dict[str, Any]]:
-        """Every `classification` row naming one answer, for the append-only control."""
+        """Every **validity** `classification` row naming one answer, for the append-only control.
+
+        Validity rows only, since E6-01. Moderation is a second task on the same
+        table and `answer_week` routes a moderation verdict for every comment, so a
+        reader of "this comment's classification rows" that took both tasks would
+        hand the validity tests a `clear` beside their `substantive` and
+        `insufficient`. Every caller of this reader asks about §3.3's verdicts.
+        """
         from sqlalchemy import select
 
         table = require_table(self.tables, CLASSIFICATION_TABLE)
         statement = select(table).where(
-            table.c[ANSWER_ID_COLUMN] == answer[self.key_of(ANSWER_TABLE)]
+            table.c[ANSWER_ID_COLUMN] == answer[self.key_of(ANSWER_TABLE)],
+            table.c[CLASSIFICATION_TASK_COLUMN] == COMMENT_VALIDITY_TASK,
         )
         return [dict(row) for row in self.session.execute(statement).mappings()]
 
@@ -989,6 +1027,7 @@ class GradingWorld:
         """
         pretend_now = self.closes_at(course_week) + A_MINUTE
         overrides.set(pretend_now=pretend_now, anchored_at=datetime.now(UTC))
+        self.pending.route_the_closed(self.session)
         return pretend_now
 
     def not_yet_closed(self, overrides: Any, course_week: int) -> datetime:

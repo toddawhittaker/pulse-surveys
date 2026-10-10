@@ -124,6 +124,10 @@ RECORDED_SHA256: dict[str, str] = {
     # module exists to make visible — `summary.v1.md`'s row above is unchanged,
     # because the file it pins is unchanged.
     "summary.v2.md": "2e65779c601bd2fc6956bb8e61c6cc4f9f5a5d66e21a957e04f6fb7ec12141cf",
+    # New versions beside the old, rows above unchanged: the small-N prompt that
+    # speaks of the stream rather than the week, and the moderation prompt.
+    "summary.v3.md": "607d508c8f0717f0ffc8548c3d5bbe25ceb80ff3d88368413b76e1494ca791f4",
+    "moderation.v1.md": "a66c03bf5393173aecc9df4b3d688919d00ddf86060212fa626b68b2e53ee9af",
     "validity.v1.md": "206efdc537c84da2896776c8806a419e83f42e24afe2a13c2a9ede8a6c695989",
     "validity.v2.md": "f642eb02afb09803e1230e9fcf907acc18780cbc949a33320701ce27d22f451e",
 }

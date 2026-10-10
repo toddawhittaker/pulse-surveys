@@ -3,11 +3,14 @@
 //
 // **What is here**, in the order it arrived: the window derivation and the
 // database statement E2-10's spec needed, E4-11's weekly-summary walk, E4-15's
-// two — the exit story's seeder and the release cutter — and E5-10's two, which
-// pipe the other two development seeders the repository already ships. Seven
-// helpers rather than the two this file opened with, so the count is named
-// rather than left as prose that goes stale on the next addition
-// (`docs/MISTAKES.md` entry 1).
+// two — the exit story's seeder and the release cutter — E5-10's two, which
+// pipe the other two development seeders the repository already ships, and
+// E6-01's, which routes seed moderation verdicts through the product's writer,
+// E6-02's, which stops Celery beat so the scheduler cannot race a drive, then
+// one that routes a chosen verdict to one comment, and the two the moderation
+// exit drive needs: the moderation sweep and its story's seeder. Twelve helpers
+// rather than the two this file opened with, so the count is named rather than
+// left as prose that goes stale on the next addition (`docs/MISTAKES.md` entry 1).
 //
 // All of them shell out to `docker compose`, which is how this suite's stack is
 // brought up in the first place (`README.md`'s local sequence and the `e2e` job
@@ -17,9 +20,9 @@
 //
 // **None of these is a shortcut past something the product does.** The window
 // derivation below is the *same* task `app.jobs.schedules` runs hourly, invoked
-// rather than waited for; the summary walk and the release cut are the *same*
-// two Monday tasks the beat schedule runs at 02:50 and 02:40 (ADR 0152), invoked
-// for the same reason; and the query below reads and writes the question set,
+// rather than waited for; the summary walk is the *same* task the beat schedule
+// runs hourly at minute 50 (ADR 0188), and the release cut the *same* Monday
+// 02:40 task (ADR 0152), each invoked for the same reason; and the query below reads and writes the question set,
 // which is the instrument SPEC §3.2 stores in a table precisely so that it can
 // be changed without a deploy. A spec that faked any of them would be asserting
 // against its own fixture (`docs/MISTAKES.md` entry 30).
@@ -68,6 +71,32 @@ function compose(args: string[], input?: string): string {
 }
 
 /**
+ * Stop Celery beat, so the scheduler cannot run a job in the middle of a drive.
+ *
+ * Since ADR 0188 beat runs the summary walk every hour at minute 50 and the
+ * moderation sweep every hour at minute 10. A drive seeds responses into weeks
+ * whose windows have already closed by the real date, then calls the jobs itself
+ * (the helpers below). If beat's walk fires between the two, it stores a
+ * summary of a closed week before the drive's responses are in it, and a stored
+ * summary is never rewritten, so the report shows a 0-response summary for a week
+ * the drive filled. That is the product working as specified and the harness
+ * racing the scheduler; CI's e2e run met it at a 05:50 walk. So the drives that
+ * seed and run the jobs stop beat first and do all the scheduling themselves.
+ *
+ * `docker compose stop` on a stopped service succeeds, so calling this from
+ * every such spec is safe. **It does not start beat again**: Playwright's global
+ * teardown would need `playwright.config.ts`, which this suite does not change
+ * for it. On a developer's machine, `make up` (or `docker compose start beat`)
+ * brings beat back after an e2e run.
+ *
+ * A job beat had already enqueued just before the stop still runs in the worker;
+ * stopping beat closes the window from then on, not retroactively.
+ */
+export function stopTheScheduler(): void {
+  compose(['stop', 'beat']);
+}
+
+/**
  * Derive every section's survey windows, now rather than on the hour.
  *
  * A section provisioned by a launch — which is how the mock platform's four
@@ -95,11 +124,12 @@ export function deriveSurveyWindows(): void {
 
 /**
  * Write §5.1's per-stream summaries for every closed week that has none, now
- * rather than on Monday at 02:50.
+ * rather than at the next minute 50.
  *
  * The same shape and the same argument as `deriveSurveyWindows` above: E4-06's
- * job runs on `app.jobs.schedules`'s weekly beat, and a spec that needed a
- * summary before its report could not wait for Monday and must not write one.
+ * job runs on `app.jobs.schedules`'s beat, hourly since ADR 0188, and a spec that
+ * needed a summary before its report could not wait for the hour and must not
+ * write one.
  * SPEC §5.1 makes a summary a model output with a prompt version and a model id
  * behind it — a hand-written row would be a spec agreeing with its own fixture
  * about the one thing on the report nothing else can produce.
@@ -146,6 +176,122 @@ export function cutReleaseBatches(): void {
     '-c',
     'from app.jobs.tasks import cut_release_batches; print(cut_release_batches())',
   ]);
+}
+
+/**
+ * Route a `clear` moderation verdict for every comment in the named sections
+ * that holds none yet, and answer how many it routed.
+ *
+ * **Why a drive needs this since E6-01.** `report_comment` v004 shows a comment
+ * only once it holds a moderation verdict, and the summary walk does not
+ * summarize a section-week until every comment in it holds one. Moderation runs
+ * at window close (SPEC §7.4) and its sweep is E6-02's, so a drive that submits
+ * comments through the page and reads them back would find none on the report
+ * and no summary above it — `docs/MISTAKES.md` entry 22, one layer out.
+ *
+ * **Through the product's one writer, never a row.** The verdicts go through
+ * `app.services.moderation.route_verdict` — the routing definer, which writes the
+ * verdict and its route together — under the seed provenance the module defines
+ * (`SEED_PROMPT_VERSION`, `SEED_MODEL_ID`), so a planted verdict says it is one
+ * and is never mistaken for a model's. It runs in the `api` container on the
+ * application's own connection, which is also what proves the grant
+ * (`docs/MISTAKES.md` entry 46). A blank comment is left alone: the view does not
+ * show one, so nothing waits for it.
+ *
+ * The count is the control: the caller compares it with the comments it typed.
+ */
+export function routeSeedVerdictsFor(codes: readonly string[]): number {
+  const program = [
+    'import json',
+    'from sqlalchemy import text',
+    'from app.ai.contracts import ModerationVerdict',
+    'from app.db import SessionLocal',
+    'from app.services.moderation import SEED_MODEL_ID, SEED_PROMPT_VERSION, route_verdict',
+    `codes = json.loads(${JSON.stringify(JSON.stringify(codes))})`,
+    'waiting = text(',
+    '    "select a.id from answer a "',
+    '    "join response r on r.id = a.response_id "',
+    '    "join section s on s.id = r.section_id "',
+    '    "where s.lms_section_code = any(:codes) "',
+    '    "and a.comment_text is not null and btrim(a.comment_text) <> \'\' "',
+    '    "and not exists (select 1 from classification c "',
+    '    "where c.answer_id = a.id and c.task = \'MODERATION\')"',
+    ')',
+    'with SessionLocal() as session:',
+    '    answers = list(session.execute(waiting, {"codes": codes}).scalars())',
+    '    for answer_id in answers:',
+    '        route_verdict(session, answer_id, ModerationVerdict.CLEAR,',
+    '                      prompt_version=SEED_PROMPT_VERSION, model_id=SEED_MODEL_ID)',
+    '    session.commit()',
+    'print(len(answers))',
+  ].join('\n');
+  const printed = compose(['exec', '-T', 'api', 'python', '-'], program).trim().split('\n');
+  return Number(printed[printed.length - 1]);
+}
+
+/**
+ * Route one moderation verdict to the comment in the named section whose words
+ * are exactly `commentText`, and answer how many comments it routed.
+ *
+ * The same writer and the same seed provenance as `routeSeedVerdictsFor`, for a
+ * drive that needs one comment held for review (`HARMFUL`, say) before the
+ * rest are cleared. Call it first: a comment that already holds a verdict is
+ * not one this routes again. The count is the control — one sentence, typed
+ * once, should answer one.
+ */
+export function routeSeedVerdictForComment(
+  code: string,
+  commentText: string,
+  verdict: 'HARMFUL' | 'PRIVACY',
+): number {
+  const program = [
+    'import json',
+    'from sqlalchemy import text',
+    'from app.ai.contracts import ModerationVerdict',
+    'from app.db import SessionLocal',
+    'from app.services.moderation import SEED_MODEL_ID, SEED_PROMPT_VERSION, route_verdict',
+    `code, words, verdict = json.loads(${JSON.stringify(JSON.stringify([code, commentText, verdict]))})`,
+    'matching = text(',
+    '    "select a.id from answer a "',
+    '    "join response r on r.id = a.response_id "',
+    '    "join section s on s.id = r.section_id "',
+    '    "where s.lms_section_code = :code and a.comment_text = :words "',
+    '    "and not exists (select 1 from classification c "',
+    '    "where c.answer_id = a.id and c.task = \'MODERATION\')"',
+    ')',
+    'with SessionLocal() as session:',
+    '    answers = list(session.execute(matching, {"code": code, "words": words}).scalars())',
+    '    for answer_id in answers:',
+    '        route_verdict(session, answer_id, ModerationVerdict[verdict],',
+    '                      prompt_version=SEED_PROMPT_VERSION, model_id=SEED_MODEL_ID)',
+    '    session.commit()',
+    'print(len(answers))',
+  ].join('\n');
+  const printed = compose(['exec', '-T', 'api', 'python', '-'], program).trim().split('\n');
+  return Number(printed[printed.length - 1]);
+}
+
+/**
+ * Moderate every comment in a closed window that holds no verdict, now rather
+ * than at the next minute 10, and answer what the task printed.
+ *
+ * The same task `app.jobs.schedules` runs hourly (ADR 0188), invoked for the
+ * reason `generateWeeklySummaries` is: a drive cannot wait for the hour. It asks
+ * the stack's model provider, which on the development stack is the mock model
+ * service, so a comment carrying one of its markers gets that verdict and the
+ * routing that follows from it is the product's own. A planted verdict would be
+ * a drive agreeing with itself about where a comment was routed
+ * (`docs/MISTAKES.md` entry 30).
+ */
+export function moderateClosedWindows(): string {
+  return compose([
+    'exec',
+    '-T',
+    'api',
+    'python',
+    '-c',
+    'from app.jobs.tasks import moderate_closed_windows; print(moderate_closed_windows())',
+  ]).trim();
 }
 
 /** Where E4-15's story seeder lives, relative to the repository root. */
@@ -278,6 +424,22 @@ export function seedThePriorTermBenchmarks(): string {
  */
 export function seedTheDemoStory(): string {
   return pipeTheSeeder(DEMO_STORY_SEEDER);
+}
+
+/** Where the moderation exit story for `BIOL-215-R3WW` lives (SPEC §14.3). */
+export const MODERATION_EXIT_STORY_SEEDER = 'scripts/seed_moderation_exit_story.py';
+
+/**
+ * Write the moderation exit story — course weeks 9 to 11 of `BIOL-215-R3WW` — and answer
+ * what the seeder printed.
+ *
+ * It writes answers and validity verdicts only: no moderation verdict, no
+ * summary and no release, which `moderateClosedWindows`, `generateWeeklySummaries`
+ * and `cutReleaseBatches` produce. It needs the section launched, its roster
+ * synced and its windows derived, and refuses loudly when any is missing.
+ */
+export function seedTheModerationExitStory(): string {
+  return pipeTheSeeder(MODERATION_EXIT_STORY_SEEDER);
 }
 
 /**

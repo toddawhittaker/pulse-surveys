@@ -76,7 +76,14 @@ import {
   sessionToken,
 } from './support/doors';
 import { expectTheTablesMatchTheLines } from './support/reportTables';
-import { databaseStatement, deriveSurveyWindows, generateWeeklySummaries } from './support/stack';
+import {
+  databaseStatement,
+  deriveSurveyWindows,
+  generateWeeklySummaries,
+  routeSeedVerdictForComment,
+  routeSeedVerdictsFor,
+  stopTheScheduler,
+} from './support/stack';
 import {
   INSTRUCTOR_SUBJECT,
   LEARNER_SUBJECT,
@@ -182,9 +189,20 @@ const BIOL_DISTINCTIVE_COMMENT =
 const MATH_DISTINCTIVE_COMMENT =
   'The linear systems worksheet gave us far more practice with substitution than I expected.';
 
+// The one comment this run holds for review (SPEC §5.2). Written by BIOL's last
+// student as her second comment, and routed a `harmful` verdict before the rest
+// are cleared, so the report shows it as a flagged card an instructor can
+// decide on. Its own sentence, typed once, so the routing can be counted.
+const BIOL_FLAGGED_COMMENT =
+  'The quadrat tallies posted on Tuesday look copied from an older term and nobody rechecked them.';
+
 // What everybody else writes. Distinct sentences rather than one repeated, so a
 // failure message names which student's submission is missing, and all of them
 // substantive enough that SPEC §3.3's gate accepts them.
+// SPEC §3.2's two comment questions, both filled by every student below
+// (`answerTheWeek`), which is the count the moderation control compares against.
+const COMMENT_FIELDS_PER_STUDENT = 2;
+
 const OTHER_COMMENTS = [
   'Office hours ran over and nobody was turned away, which made a real difference.',
   'The reading list for this week was long but the ordering made it manageable.',
@@ -248,6 +266,11 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
   test.setTimeout(WORLD_TIMEOUT_MS);
+  // Before anything is submitted: beat's hourly summary walk (minute 50) and
+  // moderation sweep (minute 10) would otherwise be free to run between this
+  // file's submissions and its own calls to the jobs, and a stored summary is
+  // never rewritten. `stopTheScheduler` in `support/stack.ts` has the whole reason.
+  stopTheScheduler();
   const context = await browser.newContext();
   const page = await context.newPage();
   try {
@@ -319,15 +342,45 @@ test.beforeAll(async ({ browser }) => {
     // comes last.
     await setTheClockTo(page, INSIDE_THE_MATH_WINDOW);
     await waitForTheRoster(page, MATH.label, MATH.code, MATH_STUDENTS);
-    await answerTheWeek(page, MATH, MATH_STUDENTS, MATH_DISTINCTIVE_COMMENT);
+    await answerTheWeek(page, MATH, MATH_STUDENTS, MATH_DISTINCTIVE_COMMENT, null);
 
     await setTheClockTo(page, INSIDE_THE_BIOL_WINDOW);
     await waitForTheRoster(page, BIOL.label, BIOL.code, BIOL_STUDENTS);
-    await answerTheWeek(page, BIOL, BIOL_STUDENTS, BIOL_DISTINCTIVE_COMMENT);
+    await answerTheWeek(
+      page,
+      BIOL,
+      BIOL_STUDENTS,
+      BIOL_DISTINCTIVE_COMMENT,
+      BIOL_FLAGGED_COMMENT,
+    );
 
     // Past both closes, which is what makes both weeks published (breakdown
     // decision 6) and what puts the instructor on the Monday the report is for.
     await setTheClockTo(page, AFTER_THE_CLOSE);
+
+    // **Every comment this run typed is moderated before anything reads it**
+    // (E6-01). `report_comment` v004 shows a comment only once it holds a
+    // moderation verdict and the walk below does not summarize a week until every
+    // comment in it does; moderation's own sweep is E6-02's. So each comment gets
+    // a `clear` verdict through the product's writer, under the seed provenance.
+    // The count is the control: two comment fields per student, every one typed,
+    // less the one held for review, which is routed its own verdict first.
+    const flagged = routeSeedVerdictForComment(BIOL.code, BIOL_FLAGGED_COMMENT, 'HARMFUL');
+    expect(
+      flagged,
+      'The comment this run holds for review was not routed exactly once, so the decision drive ' +
+        'below has no flagged card to decide on.',
+    ).toBe(1);
+    const routed = routeSeedVerdictsFor([BIOL.code, MATH.code]);
+    const typed =
+      (BIOL_STUDENTS.length + MATH_STUDENTS.length) * COMMENT_FIELDS_PER_STUDENT - flagged;
+    expect(
+      routed,
+      `${String(routed)} comment(s) were routed a moderation verdict, and this run typed ` +
+        `${String(typed)}. Fewer means some comment holds no verdict and the report will not show ` +
+        'it (nor its week, nor its summary) — every content assertion below would then be about a ' +
+        'report of nothing (`docs/MISTAKES.md` entry 3).',
+    ).toBe(typed);
 
     // E4-06's Monday walk, invoked rather than waited for — the same move the
     // window derivation above makes, and for the same reason.
@@ -701,6 +754,34 @@ test('the trend axis carries SPEC §2.2’s term-week sub-label', async ({ page 
   await expect(report).toContainText(`TERM 0${String(TERM_WEEK)}`);
 });
 
+test('an instructor excludes a flagged comment and undoes it', async ({ page }) => {
+  // SPEC §5.2's lifecycle through the real route: the card the page shows after
+  // each decision is the card the server answered. The Undo puts the comment
+  // back as it was, so the stack is left as the hook built it.
+  test.setTimeout(CASE_TIMEOUT_MS);
+
+  const report = await openTheReport(page, BIOL.code);
+  const held = report.getByRole('article').filter({ hasText: 'Flagged: harmful' });
+  await expect(
+    held,
+    'The comment this run routed a harmful verdict is not on the report as a flagged card.',
+  ).toHaveCount(1);
+  // Collapsed: the words are not on the page until the card is opened.
+  await expect(report.getByText(BIOL_FLAGGED_COMMENT)).toHaveCount(0);
+
+  await held.getByRole('button', { name: 'Review comment' }).click();
+  await expect(held.getByText(BIOL_FLAGGED_COMMENT)).toBeVisible();
+  await held.getByRole('button', { name: 'Exclude from student view' }).click();
+
+  const excluded = report.getByRole('article').filter({ hasText: BIOL_FLAGGED_COMMENT });
+  await expect(excluded.getByText(/^Excluded — students will not see this comment/)).toBeVisible();
+  await expect(excluded.getByText(BIOL_FLAGGED_COMMENT)).toHaveClass(/--muted/);
+
+  await excluded.getByRole('button', { name: 'Undo' }).click();
+  await expect(held).toHaveCount(1);
+  await expect(report.getByText(BIOL_FLAGGED_COMMENT)).toHaveCount(0);
+});
+
 /**
  * Launch the instructor, open one section's report, and answer with it.
  *
@@ -808,6 +889,7 @@ async function answerTheWeek(
   section: { label: string; code: string },
   students: readonly string[],
   distinctive: string,
+  lastSecondComment: string | null,
 ): Promise<void> {
   for (const [position, subject] of students.entries()) {
     const block = await launchAsAStudentOfTheSection(page, subject, section.label).then(() =>
@@ -825,7 +907,10 @@ async function answerTheWeek(
     await chooseRating(block, 0, '4');
     await chooseRating(block, 1, '5');
     await typeComment(block, 0, position === 0 ? distinctive : commentAt(position));
-    await typeComment(block, 1, commentAt(position + 1));
+    const last = position === students.length - 1;
+    const second =
+      last && lastSecondComment !== null ? lastSecondComment : commentAt(position + 1);
+    await typeComment(block, 1, second);
     await setSlider(block, '6.5');
 
     await block.getByTestId(SUBMIT).click();

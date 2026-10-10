@@ -2,9 +2,10 @@
 
 SPEC §5.1: below the n-threshold a stream's summary names themes only and may not
 reuse the commenters' own word strings; above it nothing changes. ADR 0162 builds
-that as two live prompt versions — `summary.v2` for a small-N stream, `summary.v1`
-otherwise — with a store-time guard that refuses a small-N summary sharing a
-twenty-character normalized run with a comment it was fed. "The stored
+that as two live prompt versions — a small-N prompt (`summary.v2`, bumped to
+`summary.v3` by ADR 0188) for a small-N stream, `summary.v1` otherwise — with a
+store-time guard that refuses a small-N summary sharing a twenty-character
+normalized run with a comment it was fed. "The stored
 `prompt_version` then says which mode wrote each row."
 
 **What changes here is what decides the mode.** It read the week's response count.
@@ -22,7 +23,7 @@ from the database first.
 **The gateway double echoes the version it was asked for**, because the stored
 version is read off the record the gateway returns (ADR 0148) and the real gateway
 records the version the call was made under. `StreamAwareGateway` answers one
-constant version whatever it is asked, which cannot tell a v2 call from a v1 call.
+constant version whatever it is asked, which cannot tell a small-N call from an ordinary one.
 The double's echo is a control with its own test below: a red control means these
 tests are broken, not the code.
 
@@ -66,10 +67,11 @@ from sqlalchemy import distinct, func, select
 
 pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 
-# The two live prompt versions, from ADR 0162's decision: "v1 is what an
-# at-or-above-threshold week renders and v2 is what a small-N week renders".
+# The two live prompt versions. ADR 0162 made v1 the ordinary prompt and a
+# separate small-N prompt; ADR 0188 bumped the small-N prompt to `summary.v3`,
+# which speaks of the stream rather than the week (ticket E6-02, done-when 7).
 # Written out rather than read from `app.ai.tasks` (`docs/MISTAKES.md` entry 19).
-SMALL_N_PROMPT_VERSION = "summary.v2"
+SMALL_N_PROMPT_VERSION = "summary.v3"
 ORDINARY_PROMPT_VERSION = "summary.v1"
 
 # The guard's bound, from ADR 0162: twenty characters, case and whitespace normalized.
@@ -249,7 +251,7 @@ def test_the_arithmetic_and_the_double_this_module_rests_on_are_what_they_say(
 def test_a_thin_stream_in_a_full_week_is_summarized_in_small_n_mode_beside_an_ordinary_one(
     summary_world: SummaryWorld, summary_job_contract: Any, summary_contracts: Any
 ) -> None:
-    """Criterion 5: the thin stream's row is `summary.v2`, its sibling's `summary.v1`.
+    """Criterion 5: the thin stream's row is `summary.v3`, its sibling's `summary.v1`.
 
     One student commented about the instructor and `threshold` others about the
     course, in a week of `threshold + 1` responses. The instructor stream is below
@@ -266,7 +268,7 @@ def test_a_thin_stream_in_a_full_week_is_summarized_in_small_n_mode_beside_an_or
     — `threshold + 1` reaches the threshold and the thin stream is written under
     `summary.v1`. **Near misses it kills:** the switch reading the week's
     commenters across both streams (`threshold + 1`); and the switch set for the
-    whole week when any stream is thin, which writes the course row under `v2` and
+    whole week when any stream is thin, which writes the course row under `v3` and
     refuses its quoting answer. **And the stored count:** the row's
     `response_count` stays the week's responses (D4, ADR 0148), not the stream's
     commenters.

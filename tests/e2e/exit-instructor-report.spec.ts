@@ -84,7 +84,9 @@ import {
   databaseStatement,
   deriveSurveyWindows,
   generateWeeklySummaries,
+  routeSeedVerdictsFor,
   seedTheExitStory,
+  stopTheScheduler,
 } from './support/stack';
 import { expectTheTablesMatchTheLines, panelTable } from './support/reportTables';
 import { INSTRUCTOR_SUBJECT, LEARNER_SUBJECT } from './support/survey';
@@ -354,11 +356,13 @@ const WEEK_SIX_WORKLOAD_MEDIAN = 9.5;
 // How many comments the release carries: the seven held ones, and no more.
 const RELEASED_COMMENTS = 7;
 
-// `ReportComment`'s whole field list, per ADR 0153 — "`ReportComment` has three
-// fields — `text`, `status`, `stream` — and is frozen". Asserted as a closed set
-// over what the payload hands back rather than as a search for a `week` member,
-// because the field that names a week is the one nobody has thought of yet.
-const COMMENT_FIELDS = ['status', 'stream', 'text'];
+// A comment card's whole field list: `ReportComment`'s three, per ADR 0153 — "`ReportComment`
+// has three fields — `text`, `status`, `stream` — and is frozen" — plus exactly the three
+// E6-03's decision 6 adds to the card (`answer_id`, `flag`, `decided_by_you`; dispute
+// E6-03-01). Asserted as a closed set over what the payload hands back rather than as a
+// search for a `week` member, because the field that names a week is the one nobody has
+// thought of yet. Sorted, as the assertion sorts the keys it reads.
+const COMMENT_FIELDS = ['answer_id', 'decided_by_you', 'flag', 'status', 'stream', 'text'];
 
 // ---------------------------------------------------------------------------
 // The surfaces this drive reads, and the copy it holds as literals.
@@ -507,6 +511,13 @@ test('the story reaches Pulse’s own database, and the two Monday jobs run over
   // rate and release assertions below are what reach.
   test.setTimeout(WORLD_TIMEOUT_MS);
 
+  // Beat's hourly summary walk (minute 50) would otherwise be free to summarize a
+  // week of this story before the seeder below has written it, and a stored
+  // summary is never rewritten. This drive runs every job itself
+  // (`stopTheScheduler` in `support/stack.ts` has the whole reason). Here rather
+  // than in `beforeAll`, which this file keeps to discovery.
+  stopTheScheduler();
+
   await clearTheClock(page);
 
   await launchAs(page, INSTRUCTOR_SUBJECT, placement);
@@ -540,6 +551,33 @@ test('the story reaches Pulse’s own database, and the two Monday jobs run over
   ).not.toBe('');
 
   await setTheClockTo(page, THE_MONDAY_AFTER_WEEK_SIX);
+
+  // **Every comment of the story is moderated before the walk reads it** (E6-01).
+  // The seeder routes verdicts only for weeks already closed when it ran, because
+  // the writer refuses a window still open; now that the clock stands after week
+  // six, the rest get a `clear` verdict through the same writer. How many that is
+  // depends on the real date the seeder ran, so the control is not a count of what
+  // was routed but what is left: no non-blank comment in the section holds no
+  // verdict. A comment left without one hides its whole week from the report and
+  // from the summary walk.
+  routeSeedVerdictsFor([BIOL.code]);
+  const unmoderated = Number(
+    databaseStatement(
+      'select count(*) from answer a ' +
+        'join response r on r.id = a.response_id ' +
+        'join section s on s.id = r.section_id ' +
+        `where s.lms_section_code = ${quoted(BIOL.code)} ` +
+        "and a.comment_text is not null and btrim(a.comment_text) <> '' " +
+        'and not exists (select 1 from classification c ' +
+        "where c.answer_id = a.id and c.task = 'MODERATION');",
+    ),
+  );
+  expect(
+    unmoderated,
+    `${String(unmoderated)} comment(s) in ${BIOL.code} still hold no moderation verdict after ` +
+      'the seed verdicts were routed. Each one hides its whole week from the report and from the ' +
+      'summary walk, so every assertion below would be about a thinner story than the plan.',
+  ).toBe(0);
 
   generateWeeklySummaries();
   cutReleaseBatches();
@@ -1024,8 +1062,8 @@ test('the cumulative release carries the held comments with no week attribution'
   for (const comment of released) {
     expect(
       Object.keys(comment).sort(),
-      `A released comment carries the fields ${JSON.stringify(Object.keys(comment).sort())}; ADR ` +
-        `0153 freezes them at ${JSON.stringify(COMMENT_FIELDS)} and says why: a released comment ` +
+      `A released comment carries the fields ${JSON.stringify(Object.keys(comment).sort())}; ADRs ` +
+        `0153 and 0189 fix them at ${JSON.stringify(COMMENT_FIELDS)} and say why: a released comment ` +
         'grouped under a week can be joined to the per-week completion ledger SPEC §3.4 posts ' +
         'into the gradebook, and in a small week that intersection is frequently one person. Any ' +
         'further field is the leak, not a convenience — a stored instant nobody exposes today is ' +

@@ -414,6 +414,22 @@ def test_every_named_set_route_declares_one_of_the_two_leadership_dependencies(
     `include_router(..., dependencies=[...])`, which on the pinned FastAPI
     reaches no route at all (ADR 0140).
 
+    **Which routes are counted, and which are held to the gate (the ruling on
+    `docs/disputes/E6-05-04.md`).** The count of seven is the named-set
+    contract's, so it is taken over the routes under the named-set path only:
+    E6-05 puts three moderation routes in the same module, and "every route in
+    `app.api.leadership`" stopped meaning "the named-set routes" the day it did.
+    The dependency check is **not** narrowed with it: every route the module
+    defines, the moderation routes included, must still carry the member its
+    method calls for, so a later leadership write without the CSRF check is red
+    here as well as in its own ticket's tests.
+
+    **The mutations it kills:** a named-set route dropped or a duplicate added
+    under the named-set path (the count); any leadership-module route, named-set
+    or not, whose write lacks `csrf_verified_leadership` or whose read lacks
+    `require_leadership`. **The near miss the narrowing spares:** a correct
+    moderation route in the same module reddening the named-set count.
+
     **Expected red before E5-06 lands:** a FAILED naming `require_leadership` as
     a symbol `app.api.deps` does not expose.
     """
@@ -434,9 +450,16 @@ def test_every_named_set_route_declares_one_of_the_two_leadership_dependencies(
         methods = sorted(str(method).upper() for method in (getattr(route, "methods", None) or []))
         return f"{methods} {getattr(route, 'path', '?')}"
 
-    assert len(routes) == len(ROUTES), (
-        f"`{named_set_contract.api_module}` defines {len(routes)} routes on the built application "
-        f"and the contract fixes {len(ROUTES)}: {[described(route) for route in routes]}."
+    def under_the_named_set_path(route: Any) -> bool:
+        path = str(getattr(route, "path", "")).rstrip("/") + "/"
+        return f"{named_set_contract.sets_path}/" in path
+
+    named_set_routes = [route for route in routes if under_the_named_set_path(route)]
+    assert len(named_set_routes) == len(ROUTES), (
+        f"`{named_set_contract.api_module}` defines {len(named_set_routes)} routes under "
+        f"`{named_set_contract.sets_path}` on the built application and the contract fixes "
+        f"{len(ROUTES)}: {[described(route) for route in named_set_routes]}. (Every route the "
+        f"module defines: {[described(route) for route in routes]}.)"
     )
 
     carried = {}
@@ -449,7 +472,8 @@ def test_every_named_set_route_declares_one_of_the_two_leadership_dependencies(
 
     missing = sorted(name for name, held in carried.items() if not held)
     assert not missing, (
-        f"These named-set routes declare neither of the dependencies their method calls for: "
+        f"These `{named_set_contract.api_module}` routes declare neither of the dependencies their "
+        "method calls for: "
         f"{missing}. A read carries `{named_set_contract.require_leadership_name}` and a write "
         f"carries `{named_set_contract.csrf_leadership_name}`, declared and never called, so that "
         "the session read happens in the one module SPEC §4.1's route inventory is derived from."

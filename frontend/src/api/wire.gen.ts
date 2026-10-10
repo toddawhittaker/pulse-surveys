@@ -429,6 +429,35 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/instructor/comments/{answer_id}/decisions": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Exclude, keep or undo a decision on one comment in my report
+         * @description One decision on one comment the reader's report returns, answered with its new card.
+         *
+         *     **The decider comes from the session**, as the reader does on every route
+         *     here; the body says only what to do and why. Which comments the reader may
+         *     act on, which actions the comment's state allows, and what a reason must be
+         *     are all decided in `app.services.moderation.decide_as_instructor`; this turns
+         *     each refusal into its status and its one sentence.
+         *
+         *     **An answer id that is not a uuid is refused before this runs**, by
+         *     FastAPI's parsing of the path, which says nothing about any comment.
+         */
+        readonly post: operations["decide_on_comment_instructor_comments__answer_id__decisions_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/leadership/comparison-sets": {
         readonly parameters: {
             readonly query?: never;
@@ -554,6 +583,69 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/leadership/moderation/queue": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The comments awaiting my review
+         * @description The reader's review queue: text and section, no week, no time, no count, a fresh order.
+         */
+        readonly get: operations["read_review_queue_leadership_moderation_queue_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/moderation/comments/{answer_id}/decisions": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Exclude or keep one comment in my review queue
+         * @description One decision on one queued comment, written under the role whose grant covers it.
+         *
+         *     204 and no body: the comment leaves the queue, and the queue and the log
+         *     are the two reads that show what happened.
+         */
+        readonly post: operations["decide_on_queued_comment_leadership_moderation_comments__answer_id__decisions_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/moderation/log": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The exclusion log inside my own grant
+         * @description Every exclusion and keep a person made inside the reader's own grant, newest first.
+         */
+        readonly get: operations["read_exclusion_log_leadership_moderation_log_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/dev": {
         readonly parameters: {
             readonly query?: never;
@@ -622,11 +714,35 @@ export interface components {
             readonly mean: components["schemas"]["ComparisonFigure"];
         };
         /**
-         * CommentView
-         * @description One comment, with exactly the three fields the comment service answers with.
+         * CommentDecision
+         * @description What the instructor sends to exclude, keep or undo one comment (E6-03).
          *
-         *     No week, no timestamp, no author, no index, at any depth. SPEC §4 and ADR 0153
-         *     are the argument, and
+         *     `reason` is checked by the decision service as it was sent, before any
+         *     trimming (`docs/MISTAKES.md` entry 29), and refused there with a governed
+         *     sentence: a blank one, one over the bound, or none at all where an
+         *     unflagged comment is being excluded. It is declared here as a plain optional
+         *     string so that those refusals are the service's sentences rather than this
+         *     framework's validation messages.
+         */
+        readonly CommentDecision: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            readonly action: "exclude" | "keep" | "undo";
+            /** Reason */
+            readonly reason?: string | null;
+        };
+        /**
+         * CommentView
+         * @description One comment as the instructor's report shows it: its words, and what may be done with it.
+         *
+         *     The comment service's three fields (text, status and stream) and, since
+         *     E6-03, exactly three more (its work order, decision 6): the handle the
+         *     decision route names, the class of the chip, and whether the latest decision
+         *     on it was the reader's own. No week, no timestamp, no author, no decider, no
+         *     index, at any depth. SPEC §4 and ADRs 0153, 0162 and 0189 are the argument,
+         *     and
          *     `tests/integration/test_the_report_payload_repeats_nothing_beyond_the_comment_service.py`
          *     is what holds this shape to it.
          */
@@ -637,6 +753,15 @@ export interface components {
             readonly status: string;
             /** Stream */
             readonly stream: string;
+            /**
+             * Answer Id
+             * Format: uuid
+             */
+            readonly answer_id: string;
+            /** Flag */
+            readonly flag: ("harmful" | "privacy") | null;
+            /** Decided By You */
+            readonly decided_by_you: boolean;
         };
         /**
          * ComparisonFigure
@@ -761,6 +886,14 @@ export interface components {
             /** @description The open survey, or null when none is open. */
             readonly open_survey: components["schemas"]["OpenSurvey"] | null;
         };
+        /**
+         * ExclusionLog
+         * @description The reader's exclusion log, newest decision first.
+         */
+        readonly ExclusionLog: {
+            /** Rows */
+            readonly rows: readonly components["schemas"]["LogRow"][];
+        };
         /** HTTPValidationError */
         readonly HTTPValidationError: {
             /** Detail */
@@ -792,6 +925,26 @@ export interface components {
             readonly environment: string;
         };
         /**
+         * HeldNoteType
+         * @description The class of a comment held for review, as an instructor may be told it (E6-03).
+         *
+         *     SPEC §5.1 lets a summary note "one comment is held for review" with type
+         *     only, and §6.2 keeps threat and self-harm out of every instructor view. So
+         *     this is the two flagging classes of `ModerationVerdict` and nothing else: a
+         *     type that cannot express `threat` or `self_harm` cannot carry either onto a
+         *     page, whatever a caller passes. The type checker refuses a third member, and
+         *     the runtime refuses an unknown token because the enum has no `_missing_`
+         *     hook — `HeldNoteType("threat")` raises `ValueError`.
+         *
+         *     A `StrEnum` rather than `enum.Enum`, so the stored and served token is the
+         *     value itself (ADR 0030) and a JSON payload carries `"harmful"`, not a member
+         *     name. Each value is the matching `ModerationVerdict` member's value, written
+         *     out because an enum cannot be built from a filtered copy of another one and
+         *     stay a closed set the type checker can read.
+         * @enum {string}
+         */
+        readonly HeldNoteType: "harmful" | "privacy";
+        /**
          * InstructorReport
          * @description One instructor's Monday report, for one of her own sections and one course week.
          */
@@ -807,6 +960,52 @@ export interface components {
             readonly released_from_earlier_weeks: readonly components["schemas"]["CommentView"][];
             /** Institution Timezone */
             readonly institution_timezone: string;
+        };
+        /**
+         * LeadDecision
+         * @description What a lead or chair sends to exclude or keep one queued comment.
+         *
+         *     Two actions: a leader has no undo (decision 1). `reason` is optional, because
+         *     every queued comment was flagged by the AI, and is checked by the decision
+         *     service as it was sent, before any trimming (`docs/MISTAKES.md` entry 29).
+         */
+        readonly LeadDecision: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            readonly action: "exclude" | "keep";
+            /** Reason */
+            readonly reason?: string | null;
+        };
+        /**
+         * LogRow
+         * @description One decision a person made about a comment inside the reader's own grant.
+         */
+        readonly LogRow: {
+            /** Section Label */
+            readonly section_label: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            readonly decision: "EXCLUDED" | "KEPT";
+            /**
+             * Decided As
+             * @enum {string}
+             */
+            readonly decided_as: "INSTRUCTOR" | "LEAD_FACULTY" | "CHAIR";
+            /** Flagged */
+            readonly flagged: boolean;
+            /** Reason */
+            readonly reason: string | null;
+            /**
+             * Decided On
+             * Format: date
+             */
+            readonly decided_on: string;
+            /** Excerpt */
+            readonly excerpt: string | null;
         };
         /**
          * OpenSurvey
@@ -944,6 +1143,21 @@ export interface components {
          */
         readonly QuestionKind: "likert" | "comment" | "workload";
         /**
+         * QueueItem
+         * @description One harmful, undecided comment awaiting this reader's review.
+         */
+        readonly QueueItem: {
+            /**
+             * Answer Id
+             * Format: uuid
+             */
+            readonly answer_id: string;
+            /** Text */
+            readonly text: string;
+            /** Section Label */
+            readonly section_label: string;
+        };
+        /**
          * RatesView
          * @description SPEC §5.1's two rates and the counts they are ratios of.
          *
@@ -962,6 +1176,14 @@ export interface components {
             readonly enrolled: number;
             /** Valid Responses */
             readonly valid_responses: number;
+        };
+        /**
+         * ReviewQueue
+         * @description The reader's review queue, in an order drawn for this request.
+         */
+        readonly ReviewQueue: {
+            /** Items */
+            readonly items: readonly components["schemas"]["QueueItem"][];
         };
         /**
          * SectionView
@@ -1309,8 +1531,7 @@ export interface components {
             readonly text: string;
             /** Response Count */
             readonly response_count: number;
-            /** Held Note */
-            readonly held_note?: string | null;
+            readonly held_note?: components["schemas"]["HeldNoteType"] | null;
         };
         /**
          * SurveyQuestion
@@ -1781,6 +2002,41 @@ export interface operations {
             };
         };
     };
+    readonly decide_on_comment_instructor_comments__answer_id__decisions_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly answer_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CommentDecision"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["CommentView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     readonly read_sets_leadership_comparison_sets_get: {
         readonly parameters: {
             readonly query?: never;
@@ -1976,6 +2232,79 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_review_queue_leadership_moderation_queue_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ReviewQueue"];
+                };
+            };
+        };
+    };
+    readonly decide_on_queued_comment_leadership_moderation_comments__answer_id__decisions_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly answer_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["LeadDecision"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_exclusion_log_leadership_moderation_log_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ExclusionLog"];
                 };
             };
         };

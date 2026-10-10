@@ -1,4 +1,4 @@
-"""The instructor's Monday report: the three reads her page is built on (SPEC §5.1).
+"""The instructor's Monday report: the three reads their page is built on (SPEC §5.1), and one write.
 
 §13's tree gives the instructor-facing API this module, and §13's closing rule
 keeps it thin: a handler here resolves the session, hands the work to a service,
@@ -7,9 +7,12 @@ this session may read, which weeks are published, how a rate divides, what a
 comment may say — is in `app.services.reporting`, and the payload's shape is
 `app.schemas.report`.
 
-**Three routes and no others.** The report for one section and one course week,
-the list of course weeks a reader may page to, and the list of sections she
-teaches. E4-11 consumes all three; E4-15 drives them against the running stack.
+**Three reads and one write.** The report for one section and one course week,
+the list of course weeks a reader may page to, and the list of sections they
+teach; E4-11 consumes all three and E4-15 drives them against the running stack.
+Since E6-03, a decision on one comment of that report: exclude, keep, or undo
+(SPEC §5.2). The write carries `csrf_verified_instructor`, the reads
+`require_instructor`; the decision itself is `app.services.moderation`'s.
 
 **The third one is what makes the other two askable** (E4-18, ADR 0156). Both of
 them take a section key in the path, and until it shipped nothing a client holds
@@ -74,12 +77,34 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import person_of, require_instructor
+from app.api.deps import csrf_verified_instructor, person_of, require_instructor
 from app.config import Settings
+from app.copy.instructor_report import (
+    COMMENT_UNAVAILABLE,
+    DECISION_NOT_ALLOWED,
+    REASON_BLANK,
+    REASON_REQUIRED,
+    REASON_TOO_LONG,
+)
 from app.copy.instructor_report import SECTION_UNAVAILABLE as SECTION_UNAVAILABLE_COPY
 from app.copy.instructor_report import WEEK_UNAVAILABLE as WEEK_UNAVAILABLE_COPY
 from app.db import get_session
-from app.schemas.report import InstructorReport, PublishedWeeks, TaughtSections
+from app.schemas.report import (
+    CommentDecision,
+    CommentView,
+    InstructorReport,
+    PublishedWeeks,
+    TaughtSections,
+)
+from app.services.moderation import (
+    CommentNotOnReportError,
+    DecisionAction,
+    DecisionNotAllowedError,
+    ReasonBlankError,
+    ReasonMissingError,
+    ReasonTooLongError,
+    decide_as_instructor,
+)
 from app.services.reporting import (
     CourseWeekUnavailableError,
     SectionUnavailableError,
@@ -102,6 +127,18 @@ PUBLISHED_WEEKS_PATH = "/instructor/sections/{section_id}/published-weeks"
 # And where a reader finds out which sections those two may be asked about. The
 # same path without the key, written out in full like its two siblings.
 SECTIONS_PATH = "/instructor/sections"
+
+# Where a decision on one comment is made (E6-03). Keyed by the comment's answer
+# id, the handle every `CommentView` carries, and under the same `/instructor`
+# prefix as the reads.
+DECISIONS_PATH = "/instructor/comments/{answer_id}/decisions"
+
+# The decision route's refusals (E6-03's work order, decision 1). 404 for an answer
+# the reader's report does not return, whatever it is, with one sentence; 409 for an
+# action the comment's state does not allow; 422 for the stated reason.
+COMMENT_UNAVAILABLE_STATUS = 404
+DECISION_NOT_ALLOWED_STATUS = 409
+REASON_REFUSED_STATUS = 422
 
 # The refusal both halves of the pair get. 404 rather than 403, and one sentence
 # rather than two: see this module's docstring. It names nothing — no section, no
@@ -230,6 +267,57 @@ def read_taught_sections(
     """
     response.headers["Cache-Control"] = NO_STORE
     return TaughtSections(sections=taught_sections(session, person_id=person_of(claims)))
+
+
+@router.post(DECISIONS_PATH, summary="Exclude, keep or undo a decision on one comment in my report")
+def decide_on_comment(
+    answer_id: UUID,
+    decision: CommentDecision,
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(csrf_verified_instructor),
+    session: Session = Depends(get_session),
+) -> CommentView:
+    """One decision on one comment the reader's report returns, answered with its new card.
+
+    **The decider comes from the session**, as the reader does on every route
+    here; the body says only what to do and why. Which comments the reader may
+    act on, which actions the comment's state allows, and what a reason must be
+    are all decided in `app.services.moderation.decide_as_instructor`; this turns
+    each refusal into its status and its one sentence.
+
+    **An answer id that is not a uuid is refused before this runs**, by
+    FastAPI's parsing of the path, which says nothing about any comment.
+    """
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return decide_as_instructor(
+            session,
+            person_id=person_of(claims),
+            answer_id=answer_id,
+            action=DecisionAction(decision.action),
+            reason=decision.reason,
+            settings=settings,
+        )
+    except CommentNotOnReportError:
+        raise HTTPException(
+            status_code=COMMENT_UNAVAILABLE_STATUS, detail=COMMENT_UNAVAILABLE.text
+        ) from None
+    except DecisionNotAllowedError:
+        raise HTTPException(
+            status_code=DECISION_NOT_ALLOWED_STATUS, detail=DECISION_NOT_ALLOWED.text
+        ) from None
+    except ReasonMissingError:
+        raise HTTPException(
+            status_code=REASON_REFUSED_STATUS, detail=REASON_REQUIRED.text
+        ) from None
+    except ReasonBlankError:
+        raise HTTPException(status_code=REASON_REFUSED_STATUS, detail=REASON_BLANK.text) from None
+    except ReasonTooLongError:
+        raise HTTPException(
+            status_code=REASON_REFUSED_STATUS, detail=REASON_TOO_LONG.text
+        ) from None
 
 
 def _unavailable(detail: str) -> HTTPException:

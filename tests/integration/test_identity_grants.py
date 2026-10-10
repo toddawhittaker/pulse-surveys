@@ -292,10 +292,22 @@ REVEAL_DEFINER_PRIVILEGES = frozenset(
 # table, and what the door returns is fixed by the three function bodies. The
 # narrower grain is still the better one, and the implementer's ADR is where that
 # choice is argued.
+#
+# **E6-01 adds a third read to the same ceiling, on the same terms.**
+# `reveal_subject_for_answer` v002 refuses an answer that holds no threat or
+# self-harm moderation verdict (work order decision 7), so its owner has to read
+# `classification`'s task and verdict for the answer. Same signature, same owner,
+# and the grain — table or column — is again the implementer's, so it joins the
+# ceiling and stays out of the floor. What it widens: the owner can read every
+# classification verdict, which names no person, and the door still returns only a
+# `user` row id or nothing. A door that never received the read fails behaviourally
+# in `tests/integration/test_a_care_class_comment_reaches_no_reader.py`, where the
+# threat-verdict reveal is the accepted half.
 REVEAL_DEFINER_DERIVATION_READS = frozenset(
     {
         ("answer", "SELECT"),
         ("response", "SELECT"),
+        ("classification", "SELECT"),
     }
 )
 
@@ -456,12 +468,31 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 #     no identity. Its owner is a NOLOGIN role of its own,
 #     `pulse_grant_end_definer`, so `pulse_instructor_definer` keeps exactly the
 #     insert it had (ADR 0183). The count moves from eight to nine.
+#   - `route_moderation_verdict(answer_id, verdict, prompt_version, model_id) ->
+#     uuid` — E6-01's, and the one writer of a moderation verdict. One call
+#     writes the `MODERATION` classification row and its route in one statement's
+#     transaction: a `FLAGGED_COLLAPSED` row in `moderation_state` for a harmful or
+#     privacy verdict, a `threat_case` row for threat or self-harm, nothing more
+#     for clear or nonsense (work order decision 2). **Why a door rather than
+#     grants**: a grant cannot make two writes one. `pulse_app` already inserts
+#     `classification`, so with `INSERT` on `moderation_state` and `threat_case`
+#     beside it the application could store a threat verdict with no case — a
+#     student at risk recorded and routed nowhere — and it could write a
+#     `FLAGGED_COLLAPSED` state no verdict justifies. So `pulse_app` holds
+#     `EXECUTE` here, no privilege on `threat_case` and only `SELECT` on
+#     `moderation_state`, and a `BEFORE INSERT` trigger on `classification`
+#     refuses a `MODERATION` row from anyone but the door's owner (decision 3), so
+#     the existing `INSERT` cannot write around it. It takes an answer id, a
+#     verdict token and the provenance pair, and returns a classification id; no
+#     argument can carry a person and no answer names one. Its owner is a NOLOGIN
+#     role of its own, `pulse_moderation_definer` (ADR 0043's pattern, ADR 0187).
+#     The count moves from nine to ten.
 #
 # What is *not* here is the point of the list: the functions of the Care door.
-# `pulse_app` is refused those by name in an `invariant`-marked test below, and a
-# **tenth** entry appearing here is a new door into identity that some later
+# `pulse_app` is refused those by name in an `invariant`-marked test below, and an
+# **eleventh** entry appearing here is a new door into identity that some later
 # ticket opened without arguing for it. The number moves only in a change that
-# writes the sentence admitting the entry, as each of the nine above did; an
+# writes the sentence admitting the entry, as each of the ten above did; an
 # entry arriving without one is the thing this inventory exists to make
 # impossible.
 #
@@ -479,6 +510,7 @@ SANCTIONED_APPLICATION_EXECUTE = (
     "benchmark_set_week",
     "benchmark_set_rating_week",
     "end_teaching_instructor",
+    "route_moderation_verdict",
 )
 
 # What the resolve definer may reach at table grain, and the whole of it.
@@ -773,12 +805,22 @@ THE_CARE_DOOR = (RECORD_FUNCTION, REVEAL_FUNCTION, SUBJECT_RESOLVER_FUNCTION)
 # It is a new role rather than a widening of `pulse_instructor_definer` because a
 # door that may insert a teaching grant and a door that may delete one are two
 # doors, and one owner holding both would make each the other's blast radius.
+#
+# **E6-01 adds a sixth, `pulse_moderation_definer`**, the owner of
+# `route_moderation_verdict`. What it may reach is bounded in
+# `test_the_moderation_definers_reach_is_routing_a_verdict_and_nothing_more`
+# below: inserts into the three tables one verdict and its route are written to,
+# reads of those three at most, and nothing on any person table. It is a new role
+# because the reach is disjoint from every other owner's — none of them writes
+# `classification`, `moderation_state` or `threat_case`.
+MODERATION_DEFINER_ROLE = "pulse_moderation_definer"
 IDENTITY_DEFINER_ROLES = (
     RESOLVE_DEFINER_ROLE,
     "pulse_roster_definer",
     "pulse_instructor_definer",
     "pulse_benchmark_definer",
     "pulse_grant_end_definer",
+    MODERATION_DEFINER_ROLE,
 )
 
 # How the two halves are called. The record's third argument is a null case id:
@@ -4264,6 +4306,26 @@ MEMBER_OF_ROLES = """
 #     route says which rows.
 #     Decided and spent in E5-06.
 
+#   - `pulse_app` **reads and inserts** `moderation_attempt`, and holds no other
+#     verb on it. E6-01 creates the table (one append-only row per failed
+#     moderation call) and E6-02's sweep is its writer and its reader: the attempt
+#     cap counts a comment's failed calls before trying again, on the connection
+#     the worker runs on. The ticket grants the pair with the table so that E6-02
+#     needs no migration of its own (`docs/tickets/e6/README.md`'s counters).
+#     **What is withheld is the assertion**, as on `classification`: no `UPDATE`,
+#     no `DELETE`, no `TRUNCATE`, so a failed attempt cannot be erased to reset a
+#     cap or rewritten to move one.
+#     **And what is not here at all**: `threat_case`. `pulse_app` holds no
+#     privilege on it of any kind — the routing definer writes it, and E10's Care
+#     queue reads it on the Care connection — so an instructor's connection cannot
+#     even count the cases. `moderation_state` keeps the `SELECT` E4-06 argued for
+#     and gained nothing at E6-01: its writer was the definer. E6-03 adds a second
+#     writer — the instructor's decision door — and spends `INSERT` on it at column
+#     grain only; that entry is in `RUNTIME_COLUMN_PRIVILEGES` below.
+#     **What these tables carry, for §4.1.** An answer key and an instant;
+#     `tests/integration/test_identity_column_marker.py` records both tables.
+#     Decided in E6-01; spent by E6-02.
+
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -4322,6 +4384,8 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "comparison_set_member", "SELECT"),
         (APPLICATION_ROLE, "comparison_set_member", "INSERT"),
         (APPLICATION_ROLE, "comparison_set_member", "DELETE"),
+        (APPLICATION_ROLE, "moderation_attempt", "SELECT"),
+        (APPLICATION_ROLE, "moderation_attempt", "INSERT"),
     }
 )
 
@@ -4461,6 +4525,30 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
 # `RUNTIME_BASE_TABLE_PRIVILEGES` above; the withheld columns are asserted refused
 # on the connection production opens in
 # `test_the_comparison_set_tables_are_refused_to_the_application_connection.py`.
+#
+# **E6-03 spends six, all `INSERT`, all on `moderation_state`**, from its grants file
+# `moderation_decision_grants_v001.sql`. The instructor excludes, keeps and undoes a
+# comment, and each step is one appended row naming the comment, the state, the
+# decider, the role the decision was made under, the reason, and whether it is an
+# undo (the ticket's M2 and its work order's decision 3). Those six are what a
+# decision writes, so they are what is granted:
+#
+#   - `moderation_state(answer_id)`, `(state)` — which comment, and its new state;
+#   - `moderation_state(decided_by_person_id)`, `(decided_as)` — who decided, and as
+#     what (ruling 4 has the exclusion log show the role, so the role is stored rather
+#     than read off today's assignments);
+#   - `moderation_state(reason)` — SPEC §5.2's stated reason for an unflagged
+#     exclusion;
+#   - `moderation_state(is_undo)` — what makes an undo row distinguishable.
+#
+# **What is withheld is the assertion.** The row's `id` (ADR 0016's server default),
+# E6-01's `sequence` (the database's insertion order, SPEC §8) and `decided_at` (a
+# `now()` server default) are the database's to fill, so a decision never names
+# them; and there is no `UPDATE` or `DELETE` on the table at all, because the record
+# is append-only and an undo is a new row. Table-wide `INSERT` would let this
+# connection write a row's key and its place in the order. The server's half —
+# accepted, refused, one column apart — is
+# `test_the_application_role_inserts_only_a_decisions_columns.py`.
 RUNTIME_COLUMN_PRIVILEGES = frozenset(
     {
         (APPLICATION_ROLE, "course", "lms_title", "UPDATE"),
@@ -4477,6 +4565,12 @@ RUNTIME_COLUMN_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "comparison_set", "length_weeks", "UPDATE"),
         (APPLICATION_ROLE, "comparison_set", "level", "UPDATE"),
         (APPLICATION_ROLE, "comparison_set", "updated_at", "UPDATE"),
+        (APPLICATION_ROLE, "moderation_state", "answer_id", "INSERT"),
+        (APPLICATION_ROLE, "moderation_state", "state", "INSERT"),
+        (APPLICATION_ROLE, "moderation_state", "decided_by_person_id", "INSERT"),
+        (APPLICATION_ROLE, "moderation_state", "decided_as", "INSERT"),
+        (APPLICATION_ROLE, "moderation_state", "reason", "INSERT"),
+        (APPLICATION_ROLE, "moderation_state", "is_undo", "INSERT"),
     }
 )
 
@@ -6429,4 +6523,217 @@ def test_a_view_the_application_role_cannot_read_is_outside_the_enumeration(
         "With the filter gone, the sanctioned set would have to grow to cover grants made to other "
         "roles entirely, and the equality would stop saying anything about what an instructor's "
         "connection can put on a page."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E6-01 — the moderation definer's reach, and the trigger that keeps it the only writer.
+# ---------------------------------------------------------------------------
+#
+# The work order's decisions 2 and 3: one `SECURITY DEFINER`,
+# `public.route_moderation_verdict`, writes a moderation verdict and its route
+# together, owned by `pulse_moderation_definer`; and a `BEFORE INSERT` trigger on
+# `classification` refuses a `MODERATION` row unless `current_user` is that owner,
+# because `pulse_app`'s existing `INSERT` on `classification` would otherwise store
+# a threat verdict with no `threat_case`. The behaviour of the door itself — what
+# each verdict routes to, a route that fails taking the verdict with it, the view —
+# is `tests/integration/test_a_moderation_verdict_is_routed_only_through_its_definer.py`,
+# driven on `pulse_app`'s own connection. What is here is the grant model's half:
+# what the owner may reach, and who the trigger lets through.
+
+# The three tables one call writes to (decision 2), and the most the owner may do
+# to them. **A floor and a ceiling rather than an equality**, for the reason
+# `REVEAL_DEFINER_DERIVATION_READS` gives: whether the body needs `SELECT` on any
+# of the three — a `RETURNING id`, an existence check before opening a case — is
+# the implementer's, and an equality would decide it. `INSERT` on all three is
+# required, because without it the door cannot do its job; nothing beyond `SELECT`
+# and `INSERT` on those three is permitted, anywhere.
+MODERATION_DEFINER_WRITES = frozenset(
+    {
+        ("classification", "INSERT"),
+        ("moderation_state", "INSERT"),
+        ("threat_case", "INSERT"),
+    }
+)
+MODERATION_DEFINER_CEILING = MODERATION_DEFINER_WRITES | frozenset(
+    {
+        ("classification", "SELECT"),
+        ("moderation_state", "SELECT"),
+        ("threat_case", "SELECT"),
+    }
+)
+
+# A row the trigger is asked about: one classification of one answer, with every
+# column E2's classification carries (`tests/integration/test_identity_column_marker.py`
+# records them) except the key, which the database generates.
+CLASSIFICATION_INSERT = (
+    "INSERT INTO public.classification "
+    "(answer_id, task, verdict, prompt_version, model_id, classified_at) VALUES "
+    "(CAST(:answer AS uuid), CAST(:task AS classification_task), CAST(:verdict AS text), "
+    "CAST(:prompt_version AS text), CAST(:model_id AS text), now())"
+)
+A_TEST_PROMPT_VERSION = "e6-01-grants-test-prompt"
+A_TEST_MODEL_ID = "e6-01-grants-test-model"
+
+
+def test_the_moderation_definers_reach_is_routing_a_verdict_and_nothing_more(
+    db_session: Any,
+) -> None:
+    """`pulse_moderation_definer`'s privileges: inserts on three tables, reads of those three at most.
+
+    A `SECURITY DEFINER` function spends its owner's privileges on behalf of a
+    caller who holds none of them, and the caller here is `pulse_app` — the
+    connection every screen in the product runs on. So the owner's grants are the
+    door's blast radius, and this bounds them from both sides: the three `INSERT`s
+    one verdict and its route need (the floor), and nothing beyond `SELECT` and
+    `INSERT` on those same three, on any relation or column in `public` (the
+    ceiling).
+
+    **The control is the floor.** An owner holding nothing satisfies "nothing
+    beyond" perfectly, so the three inserts are required before the ceiling is
+    read (`docs/MISTAKES.md` entry 35: find the privilege on a subject that
+    certainly holds it).
+
+    **The mutations this kills:** the owner reused from another door (its reads of
+    `user`, `person` or `role_assignment` appear beyond the ceiling); `UPDATE` or
+    `DELETE` on `moderation_state` (the append-only record rewritable through the
+    door); any privilege on `user_identity`; a column grant on any other table; and
+    the function owned by a role that cannot write one of the three, which fails
+    the floor. **The near miss it tolerates:** `SELECT` on the three, in either
+    grain.
+    """
+    require_role(db_session, MODERATION_DEFINER_ROLE)
+    relations = [row[0] for row in db_session.execute(text(PUBLIC_RELATIONS))]
+    held = {
+        (relation, privilege)
+        for relation in relations
+        for privilege in TABLE_PRIVILEGES
+        if db_session.execute(
+            text("SELECT has_table_privilege(:role, :relation, :privilege)"),
+            {
+                "role": MODERATION_DEFINER_ROLE,
+                "relation": f"public.{relation}",
+                "privilege": privilege,
+            },
+        ).scalar_one()
+    }
+    missing = sorted(
+        f"{relation}:{privilege}" for relation, privilege in MODERATION_DEFINER_WRITES - held
+    )
+    assert not missing, (
+        f"`{MODERATION_DEFINER_ROLE}` cannot {missing}. The routing definer writes the verdict "
+        "and its route in one call (work order decision 2), so its owner must insert into all "
+        "three tables; until it can, the ceiling below is about a role that can do nothing."
+    )
+    beyond = sorted(
+        f"{relation}:{privilege}" for relation, privilege in held - MODERATION_DEFINER_CEILING
+    )
+    assert not beyond, (
+        f"`{MODERATION_DEFINER_ROLE}` holds {beyond}, beyond routing a verdict. `pulse_app` may call "
+        "the door this role owns, so every one of those is reachable from the application "
+        "connection through it."
+    )
+
+    columns = {
+        (row["relation"], row["column_name"], row["privilege"])
+        for row in db_session.execute(
+            text(
+                """
+                SELECT c.relname AS relation, a.attname AS column_name, p.privilege
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+                CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'REFERENCES']) AS p(privilege)
+                WHERE n.nspname = 'public'
+                  AND c.relkind IN ('r', 'p', 'v', 'm')
+                  AND has_column_privilege(:role, c.oid, a.attnum, p.privilege)
+                """
+            ),
+            {"role": MODERATION_DEFINER_ROLE},
+        ).mappings()
+    }
+    ceiling_tables = {relation for relation, _privilege in MODERATION_DEFINER_CEILING}
+    beyond_columns = sorted(
+        f"{relation}.{column}:{privilege}"
+        for relation, column, privilege in columns
+        if relation not in ceiling_tables or (relation, privilege) not in MODERATION_DEFINER_CEILING
+    )
+    assert not beyond_columns, (
+        f"`{MODERATION_DEFINER_ROLE}` holds column privileges beyond routing a verdict: "
+        f"{beyond_columns}."
+    )
+
+
+@pytest.mark.invariant
+def test_a_moderation_verdict_written_around_the_definer_is_refused_to_every_role_but_its_owner(
+    db_session: Any, seed_rows: Any
+) -> None:
+    """The trigger (work order decision 3): only the door's owner may write a `MODERATION` row.
+
+    One answer, one row shape, four writers, in one transaction:
+
+      - **`pulse_moderation_definer` — accepted.** The control that makes every
+        refusal below attributable: the row satisfies every constraint the schema
+        has, including the per-task verdict `CHECK`, so the only thing that can
+        refuse it for anybody else is the role rule. Without this, a `MODERATION`
+        row refused by a `CHECK` that does not know the task would read as the
+        trigger working (`docs/MISTAKES.md` entry 3).
+      - **`pulse_app`, a `COMMENT_VALIDITY` row — accepted.** The connection keeps
+        the append it has always had; the trigger is about one task, not the table.
+      - **`pulse_app`, the same `MODERATION` row — refused.** The defect the trigger
+        exists for: a threat verdict stored with no `threat_case`, through a grant
+        the application already holds.
+      - **The bootstrap superuser, the same row — refused.** The near miss:
+        "unless `current_user` is the owner" is not "if `current_user` is
+        `pulse_app`", and a trigger written the second way lets every other role —
+        a seed, a fixture, a later ticket's job — write around the door.
+
+    **The mutations this kills:** no trigger at all (`pulse_app`'s insert is
+    accepted); a trigger keyed on `pulse_app` (the superuser's is accepted); a
+    trigger keyed on `session_user` — which is `pulse_app` inside the door as well,
+    so it refuses the definer's own write; that one is killed by every routing test
+    in `test_a_moderation_verdict_is_routed_only_through_its_definer.py`.
+    """
+    require_role(db_session, MODERATION_DEFINER_ROLE)
+    answer = seed_rows("answer", {}, comment_text="e6-01 a comment the trigger is asked about")
+    values = {
+        "answer": str(answer["id"]),
+        "prompt_version": A_TEST_PROMPT_VERSION,
+        "model_id": A_TEST_MODEL_ID,
+    }
+    moderation = {**values, "task": "MODERATION", "verdict": "threat"}
+    validity = {**values, "task": "COMMENT_VALIDITY", "verdict": "substantive"}
+
+    with acting_as(db_session, MODERATION_DEFINER_ROLE):
+        by_the_owner = refused(db_session, CLASSIFICATION_INSERT, moderation)
+    assert by_the_owner is None, (
+        f"The routing definer's own owner was refused a `MODERATION` classification row: "
+        f"{by_the_owner} (SQLSTATE {sqlstate(by_the_owner)}). Either the per-task `CHECK` refuses "
+        "the moderation vocabulary or the owner holds no `INSERT` on `classification` — and in "
+        "either case the refusals below cannot be attributed to the trigger."
+    )
+
+    with acting_as(db_session, APPLICATION_ROLE):
+        a_validity_row = refused(db_session, CLASSIFICATION_INSERT, validity)
+        a_moderation_row = refused(db_session, CLASSIFICATION_INSERT, moderation)
+    assert a_validity_row is None, (
+        f"`{APPLICATION_ROLE}` was refused a `COMMENT_VALIDITY` row: {a_validity_row}. The submit "
+        "path's classifier writes those on this connection (ADR 0055); the trigger is about one "
+        "task, and refusing the other is a submit path that cannot record a verdict."
+    )
+    assert a_moderation_row is not None, (
+        f"`{APPLICATION_ROLE}` inserted a `MODERATION` classification row directly, around "
+        "`public.route_moderation_verdict`. That is a threat or self-harm verdict that opens no "
+        "`threat_case` — a student at risk recorded and routed to nobody — written through the "
+        "`INSERT` on `classification` this connection already holds. E6-01's work order "
+        "(decision 3): a `BEFORE INSERT` trigger refuses it unless `current_user` is "
+        f"`{MODERATION_DEFINER_ROLE}`."
+    )
+
+    by_the_bootstrap = refused(db_session, CLASSIFICATION_INSERT, moderation)
+    assert by_the_bootstrap is not None, (
+        "The bootstrap identity inserted a `MODERATION` classification row directly. The trigger's "
+        f"rule is 'unless `current_user` is `{MODERATION_DEFINER_ROLE}`', not 'if it is "
+        f"`{APPLICATION_ROLE}`' — every writer but the door, seeds and fixtures included, goes "
+        "through the door."
     )
