@@ -35,7 +35,7 @@ Marked `invariant`: CI runs these in the isolated §4.1 pass, which treats a ski
 as a failure.
 """
 
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import uuid4
 
 import pytest
@@ -102,66 +102,47 @@ def one_queue_read(review: LeadReviewWorld, reader: Reader) -> tuple[set[str], l
     return {str(item.get(ITEM_ANSWER_ID)) for item in items}, strings_in(body)
 
 
-def assert_the_taught_section_is_left_out_of_the_queue(
+class QueueRead(NamedTuple):
+    """What one queue read beside a taught section and its canary returned."""
+
+    in_taught: Any
+    in_canary: Any
+    taught_text: str
+    queued: set[str]
+    strings: list[str]
+
+
+def read_the_queue_beside_a_taught_section(
     review: LeadReviewWorld, reader: Reader, *, taught: str, canary: str
-) -> None:
+) -> QueueRead:
     taught_text = f"E6-05 ruling 7: held harmful in {reader.label}'s own taught section, {taught}"
     canary_text = f"E6-05 ruling 7: held harmful in the sibling section {canary}, the canary"
     in_taught = a_held_harmful(review, taught_text, taught)
     in_canary = a_held_harmful(review, canary_text, canary)
-
     queued, strings = one_queue_read(review, reader)
-    assert str(in_canary) in queued, (
-        f"The canary: {reader.label}'s queue lacks the held harmful comment from section "
-        f"{review.code_of(canary)}, a section of the course they review that they do not teach. "
-        "Either the queue answered nothing, or the rule left out the whole course rather than "
-        "the taught section (ruling 7 is per section)."
-    )
-    assert str(in_taught) not in queued, (
-        f"{reader.label}'s queue carries the held harmful comment from section "
-        f"{review.code_of(taught)}, which they teach. Ruling 7: the queue leaves out every section "
-        "the reader holds an instructor assignment on, because the instructor door refuses them "
-        "that held text (SPEC §5.2, §4.1 item 3)."
-    )
-    assert not [value for value in strings if taught_text[:FRAGMENT] in value], (
-        f"The text of the held comment from {reader.label}'s own taught section is somewhere in "
-        "their queue's body."
-    )
+    return QueueRead(in_taught, in_canary, taught_text, queued, strings)
 
 
-def assert_a_decision_on_the_taught_section_is_refused(
+class DoorReads(NamedTuple):
+    """What the leader door answered, and the taught comment's rows around the refusal."""
+
+    in_taught: Any
+    rows_before: Any
+    refused: Any
+    nothing: Any
+    accepted: Any
+
+
+def decide_beside_a_taught_section(
     review: LeadReviewWorld, reader: Reader, *, taught: str, canary: str
-) -> None:
+) -> DoorReads:
     in_taught = a_held_harmful(review, f"E6-05 ruling 7: {reader.label} teaches this one", taught)
     in_canary = a_held_harmful(review, f"E6-05 ruling 7: {reader.label} may decide this", canary)
-
     before = review.rows_of(in_taught)
     refused = review.decide(reader, in_taught, EXCLUDE)
-    assert refused.status_code == NOT_IN_QUEUE, (
-        f"{reader.label}'s exclusion of a held comment from section {review.code_of(taught)}, "
-        f"which they teach, was answered {refused.status_code}, not {NOT_IN_QUEUE}. Ruling 7: the "
-        "leader door refuses it like any comment outside the queue. Body begins "
-        f"{refused.text[:400]!r}."
-    )
-    lead_sentence_of(refused, f"The refusal of {reader.label}'s own taught section's comment")
-    assert (
-        review.rows_of(in_taught) == before
-    ), f"A refused decision by {reader.label} on their taught section's comment wrote a row."
-
     nothing = review.decide(reader, uuid4(), EXCLUDE)
-    assert (nothing.status_code, nothing.text) == (refused.status_code, refused.text), (
-        f"An id nothing holds was answered {nothing.status_code} {nothing.text[:200]!r} and the "
-        f"taught section's comment {refused.status_code} {refused.text[:200]!r}. Ruling 7: the "
-        "same 404 as any comment outside the queue, so the answer says nothing about existence."
-    )
-
     accepted = review.decide(reader, in_canary, EXCLUDE)
-    assert is_success(accepted.status_code), (
-        f"The control: {reader.label}'s exclusion of the held comment from section "
-        f"{review.code_of(canary)}, which they review and do not teach, was answered "
-        f"{accepted.status_code}. Either the door refuses everything, or it refused the whole "
-        "course rather than the taught section."
-    )
+    return DoorReads(in_taught, before, refused, nothing, accepted)
 
 
 def test_a_lead_who_teaches_a_section_of_their_led_course_does_not_see_its_held_comments(
@@ -174,8 +155,24 @@ def test_a_lead_who_teaches_a_section_of_their_led_course_does_not_see_its_held_
     """
     review = lead_review
     review.teaches(review.lead, LEADS_TAUGHT_COHORT)
-    assert_the_taught_section_is_left_out_of_the_queue(
-        review, review.lead, taught=LEADS_TAUGHT_COHORT, canary=LEADS_CANARY_COHORT
+    reader = review.lead
+    taught, canary = LEADS_TAUGHT_COHORT, LEADS_CANARY_COHORT
+    read = read_the_queue_beside_a_taught_section(review, reader, taught=taught, canary=canary)
+    assert str(read.in_canary) in read.queued, (
+        f"The canary: {reader.label}'s queue lacks the held harmful comment from section "
+        f"{review.code_of(canary)}, a section of the course they review that they do not teach. "
+        "Either the queue answered nothing, or the rule left out the whole course rather than "
+        "the taught section (ruling 7 is per section)."
+    )
+    assert str(read.in_taught) not in read.queued, (
+        f"{reader.label}'s queue carries the held harmful comment from section "
+        f"{review.code_of(taught)}, which they teach. Ruling 7: the queue leaves out every section "
+        "the reader holds an instructor assignment on, because the instructor door refuses them "
+        "that held text (SPEC §5.2, §4.1 item 3)."
+    )
+    assert not [value for value in read.strings if read.taught_text[:FRAGMENT] in value], (
+        f"The text of the held comment from {reader.label}'s own taught section is somewhere in "
+        "their queue's body."
     )
 
 
@@ -191,8 +188,31 @@ def test_a_lead_deciding_on_a_comment_from_a_section_they_teach_gets_the_governe
     """
     review = lead_review
     review.teaches(review.lead, LEADS_TAUGHT_COHORT)
-    assert_a_decision_on_the_taught_section_is_refused(
-        review, review.lead, taught=LEADS_TAUGHT_COHORT, canary=LEADS_CANARY_COHORT
+    reader = review.lead
+    taught, canary = LEADS_TAUGHT_COHORT, LEADS_CANARY_COHORT
+    door = decide_beside_a_taught_section(review, reader, taught=taught, canary=canary)
+    refused = door.refused
+    assert refused.status_code == NOT_IN_QUEUE, (
+        f"{reader.label}'s exclusion of a held comment from section {review.code_of(taught)}, "
+        f"which they teach, was answered {refused.status_code}, not {NOT_IN_QUEUE}. Ruling 7: the "
+        "leader door refuses it like any comment outside the queue. Body begins "
+        f"{refused.text[:400]!r}."
+    )
+    lead_sentence_of(refused, f"The refusal of {reader.label}'s own taught section's comment")
+    assert (
+        review.rows_of(door.in_taught) == door.rows_before
+    ), f"A refused decision by {reader.label} on their taught section's comment wrote a row."
+    nothing = door.nothing
+    assert (nothing.status_code, nothing.text) == (refused.status_code, refused.text), (
+        f"An id nothing holds was answered {nothing.status_code} {nothing.text[:200]!r} and the "
+        f"taught section's comment {refused.status_code} {refused.text[:200]!r}. Ruling 7: the "
+        "same 404 as any comment outside the queue, so the answer says nothing about existence."
+    )
+    assert is_success(door.accepted.status_code), (
+        f"The control: {reader.label}'s exclusion of the held comment from section "
+        f"{review.code_of(canary)}, which they review and do not teach, was answered "
+        f"{door.accepted.status_code}. Either the door refuses everything, or it refused the whole "
+        "course rather than the taught section."
     )
 
 
@@ -209,8 +229,24 @@ def test_a_chair_who_teaches_a_section_of_an_unled_course_does_not_see_its_held_
     review = lead_review
     review.a_second_section_of_the_unmapped_course()
     review.teaches(review.chair, CHAIRS_TAUGHT_COHORT)
-    assert_the_taught_section_is_left_out_of_the_queue(
-        review, review.chair, taught=CHAIRS_TAUGHT_COHORT, canary=CHAIRS_CANARY_COHORT
+    reader = review.chair
+    taught, canary = CHAIRS_TAUGHT_COHORT, CHAIRS_CANARY_COHORT
+    read = read_the_queue_beside_a_taught_section(review, reader, taught=taught, canary=canary)
+    assert str(read.in_canary) in read.queued, (
+        f"The canary: {reader.label}'s queue lacks the held harmful comment from section "
+        f"{review.code_of(canary)}, a section of the course they review that they do not teach. "
+        "Either the queue answered nothing, or the rule left out the whole course rather than "
+        "the taught section (ruling 7 is per section)."
+    )
+    assert str(read.in_taught) not in read.queued, (
+        f"{reader.label}'s queue carries the held harmful comment from section "
+        f"{review.code_of(taught)}, which they teach. Ruling 7: the queue leaves out every section "
+        "the reader holds an instructor assignment on, because the instructor door refuses them "
+        "that held text (SPEC §5.2, §4.1 item 3)."
+    )
+    assert not [value for value in read.strings if read.taught_text[:FRAGMENT] in value], (
+        f"The text of the held comment from {reader.label}'s own taught section is somewhere in "
+        "their queue's body."
     )
 
 
@@ -221,8 +257,31 @@ def test_a_chair_deciding_on_a_comment_from_a_section_they_teach_gets_the_govern
     review = lead_review
     review.a_second_section_of_the_unmapped_course()
     review.teaches(review.chair, CHAIRS_TAUGHT_COHORT)
-    assert_a_decision_on_the_taught_section_is_refused(
-        review, review.chair, taught=CHAIRS_TAUGHT_COHORT, canary=CHAIRS_CANARY_COHORT
+    reader = review.chair
+    taught, canary = CHAIRS_TAUGHT_COHORT, CHAIRS_CANARY_COHORT
+    door = decide_beside_a_taught_section(review, reader, taught=taught, canary=canary)
+    refused = door.refused
+    assert refused.status_code == NOT_IN_QUEUE, (
+        f"{reader.label}'s exclusion of a held comment from section {review.code_of(taught)}, "
+        f"which they teach, was answered {refused.status_code}, not {NOT_IN_QUEUE}. Ruling 7: the "
+        "leader door refuses it like any comment outside the queue. Body begins "
+        f"{refused.text[:400]!r}."
+    )
+    lead_sentence_of(refused, f"The refusal of {reader.label}'s own taught section's comment")
+    assert (
+        review.rows_of(door.in_taught) == door.rows_before
+    ), f"A refused decision by {reader.label} on their taught section's comment wrote a row."
+    nothing = door.nothing
+    assert (nothing.status_code, nothing.text) == (refused.status_code, refused.text), (
+        f"An id nothing holds was answered {nothing.status_code} {nothing.text[:200]!r} and the "
+        f"taught section's comment {refused.status_code} {refused.text[:200]!r}. Ruling 7: the "
+        "same 404 as any comment outside the queue, so the answer says nothing about existence."
+    )
+    assert is_success(door.accepted.status_code), (
+        f"The control: {reader.label}'s exclusion of the held comment from section "
+        f"{review.code_of(canary)}, which they review and do not teach, was answered "
+        f"{door.accepted.status_code}. Either the door refuses everything, or it refused the whole "
+        "course rather than the taught section."
     )
 
 
