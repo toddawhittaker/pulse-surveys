@@ -167,8 +167,10 @@ SMALL_N_MARKER = "below the reporting threshold, so name themes"
 
 # The same boundary for SPEC §7.4's moderation task (E6-02): the line the
 # moderation prompt ends its instructions with, right before the comment. A second
-# copy of a line in `backend/app/ai/prompts/moderation.v1.md`, held against it by
-# `tests/unit/test_mock_ai_moderation_rules.py`.
+# copy of a line in `backend/app/ai/prompts/moderation.v1.md`. No unit test
+# compares the two; what holds them together is the E6 exit drive
+# (`tests/e2e/exit-moderation.spec.ts`), whose sweep sends the real prompt here
+# and needs this service to find the line to answer a verdict at all.
 MODERATION_MARKER_LINE = "The comment to moderate follows this line."
 
 # How the summary prompt names the stream it is asking about, and how this

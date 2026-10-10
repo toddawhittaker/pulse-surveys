@@ -29,10 +29,11 @@ here (ADR 0187).
 
 **The sweep** (`sweep_unmoderated_comments`) is what asks a model for those
 verdicts: hourly, over every comment whose window has closed and which holds no
-verdict yet (ADR 0188). A failed call is retried by the next sweep, and an
-unusable answer, or a refusal of this particular request, counts toward an
-attempt cap of six, after which the comment stays held, and holds its whole week, until a person decides it. Two sweeps never run at once, and each comment's outcome is
-committed before the next is asked about.
+verdict yet (ADR 0188). A failed call is retried by the next sweep. Only an
+unusable answer counts toward an attempt cap of six; a refusal or an outage
+counts nothing. A comment at the cap stays held, and holds its whole week,
+until a person decides it. Two sweeps never run at once, and each comment's
+outcome is committed before the next is asked about.
 
 ## A person's decision (E6-03)
 
@@ -130,8 +131,9 @@ SEED_MODEL_ID = "seed"
 
 # How many unusable answers one comment may get before the sweep stops asking
 # (ADR 0188). Six hourly sweeps: long enough to ride out a bad deploy of a prompt
-# or a model, short enough that a comment no model can answer does not hold its
-# section-week's summary back for days.
+# or a model, short enough that the sweep stops paying every hour for a comment
+# no model can answer. Reaching it releases nothing: the comment, and its whole
+# section-week, stay held until a person decides it (ruling 8).
 MODERATION_ATTEMPT_CAP = 6
 
 # The one failure that counts toward the cap: the provider answered, and the
@@ -162,9 +164,12 @@ RETRIED_FAILURES = (
 )
 
 # The Postgres advisory lock key that keeps two sweeps from running at once
-# (ADR 0188). Any fixed bigint will do as long as no other lock uses it; this is
-# the only advisory lock in the application. The digits are the ticket and the
-# ADR (E6-02, 0188), so a reader of `pg_locks` can tell whose it is.
+# (ADR 0188). Any fixed bigint will do as long as no other lock uses it. The one
+# other advisory lock in the application is `_lock_the_comment`'s, keyed on
+# `hashtextextended` of an answer id; a 64-bit hash landing on this key is
+# possible in principle and would only make one decision wait for a sweep. The
+# digits are the ticket and the ADR (E6-02, 0188), so a reader of `pg_locks` can
+# tell whose it is.
 SWEEP_LOCK_KEY = 6_020_188
 
 
@@ -389,6 +394,17 @@ def _moderate_each(session: Session, gateway: AIGateway | None) -> int:
             _record_a_failed_attempt(session, answer_id, failed)
             session.commit()
             continue
+        except AIProviderRefusedError as refused:
+            # The status says which kind of refusal it was (a key, a rate limit, a
+            # rejected request), and is an `int`, never the provider's body.
+            logger.error(
+                "the moderation sweep left answer %s for the next run after an %s with HTTP "
+                "status %d",
+                answer_id,
+                type(refused).__name__,
+                refused.status,
+            )
+            continue
         except RETRIED_FAILURES as failed:
             logger.error(
                 "the moderation sweep left answer %s for the next run after an %s",
@@ -513,9 +529,9 @@ def decide_as_instructor(
     `ReasonRefusedError`, each having written nothing.
     """
     # Imported here rather than at module scope: `app.services.report_comments`
-    # imports this module for the attempt cap (E6-02), so a module-scope import
-    # back would be a cycle. The same device `app.services.reporting._payload`
-    # uses for its schema.
+    # imports `holds_no_verdict` from this module, and `app.services.reporting`
+    # imports `report_comments`, so a module-scope import back would be a cycle.
+    # The same device `app.services.reporting._payload` uses for its schema.
     from app.services.reporting import comment_on_instructor_report, comment_view
 
     if person_id is None:
