@@ -64,6 +64,9 @@ The reasoning, and the alternative that was rejected, are in
 | `validity.v1.md` | Comment validity | substantive / insufficient / nonsense | E0-12 | no — superseded 2026-09-02 |
 | `validity.v2.md` | Comment validity | substantive / insufficient / nonsense | the 2026-09-02 trim | yes |
 | `summary.v1.md` | Weekly summary | Per-stream, per-node themed summaries under the §5.1 contracts | E4-05 | yes |
+| `summary.v2.md` | Weekly summary, small-N stream | Themes only, no reused words | E4-15 | no — superseded by v3 |
+| `summary.v3.md` | Weekly summary, small-N stream | Themes only, no reused words; speaks of the stream, not the week | E6-02 | yes |
+| `moderation.v1.md` | Moderation | clear / harmful / privacy / nonsense / threat / self_harm | E6-02 | yes |
 
 **Two files for one task is what the rule above looks like when it is used**, and
 the last column is the only place that says which one the tool sends. That is
