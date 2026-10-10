@@ -124,6 +124,12 @@ export const INSTRUCTOR_REPORT_COMMENT_COPY = {
   'instructor_report_comments.comment.keep': 'Keep for students',
   'instructor_report_comments.comment.exclude': 'Exclude from student view',
   'instructor_report_comments.comment.undo': 'Undo',
+  // Read aloud after a decision lands, because the pressed control is gone and
+  // nothing else says what happened.
+  'instructor_report_comments.comment.announce_excluded':
+    'Comment excluded from the student view.',
+  'instructor_report_comments.comment.announce_kept': 'Comment kept for students.',
+  'instructor_report_comments.comment.announce_undone': 'Decision undone.',
   // §5.2's logged decision on a kept comment. "You" is the only attribution any
   // card carries (ADR 0189): another reader's decision is stated without a name.
   'instructor_report_comments.comment.kept_by_you': 'You kept this comment for students.',

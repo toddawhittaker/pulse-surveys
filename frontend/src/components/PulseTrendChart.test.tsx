@@ -776,13 +776,15 @@ describe('the table for sighted readers', () => {
     // visibility to a sighted reader changes.
     const table = screen.getByRole('table', { name: 'Weekly ratings: Instructor' });
     expect(table.className).toBe('sr-only');
-    const toggle = screen.getByRole('button', { name: 'Show the numbers' });
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    // Named by its stream, so two toggles on a page can be told apart; and
+    // with no aria-expanded, because the table is readable while it says Show.
+    const toggle = screen.getByRole('button', { name: 'Show the numbers: Instructor' });
+    expect(toggle.getAttribute('aria-expanded')).toBeNull();
 
     fireEvent.click(toggle);
 
     expect(table.className).toBe('pulse-trend-table');
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.getAttribute('aria-label')).toBe('Hide the numbers: Instructor');
     expect(toggle.textContent).toBe('Hide the numbers');
 
     fireEvent.click(toggle);

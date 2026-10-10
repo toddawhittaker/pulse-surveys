@@ -782,6 +782,30 @@ test('an instructor excludes a flagged comment and undoes it', async ({ page }) 
   await expect(report.getByText(BIOL_FLAGGED_COMMENT)).toHaveCount(0);
 });
 
+test('a keyboard decision on a flagged comment lands focus on its card and announces it', async ({
+  page,
+}) => {
+  // The pressed control unmounts when the card changes state; without managed
+  // focus a keyboard reader would fall to the top of the page.
+  test.setTimeout(CASE_TIMEOUT_MS);
+
+  const report = await openTheReport(page, BIOL.code);
+  const held = report.getByRole('article').filter({ hasText: 'Flagged: harmful' });
+  await held.getByRole('button', { name: 'Review comment' }).click();
+  await held.getByRole('button', { name: 'Exclude from student view' }).focus();
+  await page.keyboard.press('Enter');
+
+  const excluded = report.getByRole('article').filter({ hasText: BIOL_FLAGGED_COMMENT });
+  await expect(excluded.getByText(/^Excluded — students will not see this comment/)).toBeVisible();
+  await expect(excluded).toBeFocused();
+  await expect(excluded.getByRole('status')).toHaveText('Comment excluded from the student view.');
+
+  // Leave the stack as the hook built it.
+  await excluded.getByRole('button', { name: 'Undo' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(held).toHaveCount(1);
+});
+
 /**
  * Launch the instructor, open one section's report, and answer with it.
  *

@@ -117,6 +117,10 @@ export const INSTRUCTOR_REPORT_TREND_COPY = {
   // read rather than seen.
   'instructor_report_trend.show_numbers': 'Show the numbers',
   'instructor_report_trend.hide_numbers': 'Hide the numbers',
+  // The accessible name: the visible words first, then the stream, so two
+  // toggles on one page are told apart when read out of order.
+  'instructor_report_trend.show_numbers_named': 'Show the numbers: {stream}',
+  'instructor_report_trend.hide_numbers_named': 'Hide the numbers: {stream}',
   'instructor_report_trend.table_caption': 'Weekly ratings: {stream}',
   'instructor_report_trend.table_course_week_header': 'Course week',
   'instructor_report_trend.table_term_week_header': 'Term week',
