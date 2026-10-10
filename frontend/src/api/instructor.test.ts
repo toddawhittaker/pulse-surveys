@@ -229,7 +229,7 @@ describe('decideOnComment', () => {
     expect(asked).toHaveLength(1);
     expect(asked[0]?.url).toBe(`/instructor/comments/${ANSWER_ID}/decisions`);
     expect(asked[0]?.init?.method).toBe('POST');
-    expect(JSON.parse(String(asked[0]?.init?.body))).toEqual({
+    expect(JSON.parse(asked[0]?.init?.body as string)).toEqual({
       action: 'exclude',
       reason: 'Off topic.',
     });
