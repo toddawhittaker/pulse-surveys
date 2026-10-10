@@ -235,7 +235,7 @@ test('the instructor’s welfare week shows what a week with no comment shows', 
   const quiet = await reportFor(page, token, sectionId, NO_COMMENT_WEEK);
   const canary = await reportFor(page, token, sectionId, TRAIL_WEEK);
 
-  for (const stream of ['INSTRUCTOR', 'COURSE']) {
+  for (const stream of ['instructor', 'course']) {
     expect(commentBearing(welfare, stream), `The ${stream} stream of week 11`).toEqual(
       commentBearing(quiet, stream),
     );
@@ -244,7 +244,7 @@ test('the instructor’s welfare week shows what a week with no comment shows', 
   expect(JSON.stringify(welfare)).not.toContain(WELFARE_WORDS);
 
   // The canary: the same world's week 10 shows its comments.
-  const courseTexts = streamOf(canary, 'COURSE').comments.map((card) => card.text);
+  const courseTexts = streamOf(canary, 'course').comments.map((card) => card.text);
   expect(courseTexts, 'Week 10 shows no course comments, so the absence above means nothing.').toContain(
     COURSE_VOICE,
   );
