@@ -185,7 +185,8 @@ def test_the_empty_week_sentence_is_the_same_for_no_comment_and_a_capped_comment
     """Done-when 6, for the other way a week's only comment is withheld: the attempt cap.
 
     One week whose only respondent wrote no comment; one whose only respondent
-    wrote a comment the mock always refuses, swept six times until it reaches
+    wrote a comment the mock always answers in the wrong shape (`malformed`, the
+    unusable answer that counts toward the cap), swept six times until it reaches
     the cap and stays held with no verdict (ADR 0188). Each stream's stored
     summary is the same in both weeks, and the capped comment reached no summary
     call. The self-harm test above covers a Care-class withholding; this covers
@@ -205,7 +206,7 @@ def test_the_empty_week_sentence_is_the_same_for_no_comment_and_a_capped_comment
         term_week=WITHHELD_WEEK,
         comments={
             INSTRUCTOR_STREAM: comment_text(
-                INSTRUCTOR_TOKEN, f"E602CAPPEDONLYQz {mock_ai.marker_for('500')}"
+                INSTRUCTOR_TOKEN, f"E602CAPPEDONLYQz {mock_ai.marker_for('malformed')}"
             )
         },
         moderation={INSTRUCTOR_STREAM: UNMODERATED},
