@@ -570,6 +570,15 @@ jobs:
       # the benchmark set functions and cohort views, swept over `backend/app/`
       # through a `REPO_ROOT`-rooted walk. A whole module, because its other
       # tests are the controls that prove the sweep finds a planted caller.
+      #
+      # The eleventh entry is E6-01's, and its subject is `docs/` itself, like
+      # the seventh: it reads SPEC §12 for the sentence that keeps every
+      # deployment away from real students until E10's Care queue exists, and
+      # globs `docs/adr` for ADR 0187 stating the same ruling with its date.
+      # Deleting either sentence is a documentation-only diff, which is exactly
+      # when the conditional job does not run. A whole module, because its other
+      # test is the control that proves the predicate refuses the existing
+      # Phase 2 line.
       - name: Repository-wide sweeps that a docs-only diff must not switch off
         run: |
           pytest -q \
@@ -583,7 +592,8 @@ jobs:
             "tests/unit/test_the_signing_key_custody_record_is_amended.py" \
             "tests/unit/test_the_python_runtime_declarations_agree.py" \
             "tests/unit/test_the_placeholder_era_prose_is_swept_from_the_payload_path.py" \
-            "tests/unit/test_only_the_benchmark_service_names_the_benchmark_relations.py"
+            "tests/unit/test_only_the_benchmark_service_names_the_benchmark_relations.py" \
+            "tests/unit/test_spec_section_12_holds_the_care_queue_ruling.py"
 
   # The job keeps its id and its display name. Branch protection's required-check
   # list keys on the display name, and renaming it is a change to that list
