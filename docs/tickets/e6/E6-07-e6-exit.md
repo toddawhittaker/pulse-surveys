@@ -52,7 +52,8 @@ shape), `carried-from-e5.md` whole, `../e5/carried-from-e4.md` and
   deployment reaches real students until E10's Care queue exists, because
   until then a `threat_case` row has no reader. And it carries to E10 that a
   comment which reaches E6-02's attempt cap is never routed to Care, so capped
-  comments still need E10's Care sweep; and that a comment the provider refuses
+  comments still need E10's Care sweep, and each holds its whole week until a
+  person decides it (ruling 8); and that a comment the provider refuses
   with any HTTP status (a content filter among them, which is likeliest to
   refuse a threat or self-harm disclosure) counts nothing toward the cap, is
   retried every hour, and holds its week until E10's Care review decides it

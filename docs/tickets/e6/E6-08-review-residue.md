@@ -57,6 +57,15 @@ stopped there, as the review tiers set, and this ticket fixes both, tests first.
    its verdict.
 3. An unusable answer still counts toward the cap, and six of them cap the
    comment (the existing test stays green).
+4. A comment at the cap never releases its week (ruling 8). The whole
+   section-week stays out of the comment read, every release batch and the
+   summary walk. Pinned by
+   `test_a_capped_comment_holds_its_whole_week_from_the_comment_read`,
+   `test_a_capped_comment_holds_its_week_out_of_every_release_batch` and
+   `test_a_refused_comment_holds_its_weeks_summary_below_the_cap_and_at_it` in
+   `test_the_moderation_sweep_moderates_closed_windows.py`, and
+   `test_a_week_whose_only_comment_is_capped_gets_no_summary_while_a_no_comment_week_does`
+   in `test_the_hourly_summary_walk_and_what_a_stored_summary_shows.py`.
 
 ## MISTAKES entries to heed
 
