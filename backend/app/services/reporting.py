@@ -1560,6 +1560,11 @@ def _payload(
     # follow. E4-07's security round found exactly that, and
     # `app.services.report_comments.n_threshold` carries the argument.
     threshold = n_threshold()
+    # A section-week not yet fully moderated shows no comment in either stream
+    # (`visible_comments`), so the notice says "held" for it too. Without this a
+    # week above the threshold waiting on one verdict would report itself
+    # unsuppressed and empty, which reads as "nobody commented" (E6-09).
+    moderated = section_week_moderated(session, section_id=section.id, week_id=week.week_id)
     question_texts = _served_question_texts(session, section_id=section.id, week_id=week.week_id)
     benchmarks_by_stream, workload_benchmark = _benchmark_members(
         session,
@@ -1592,10 +1597,12 @@ def _payload(
             question_text=question_texts[token],
             benchmark=benchmarks_by_stream[token],
             # SPEC §4's suppression is per stream (ADR 0182), so the notice is too:
-            # the comment service's own answer for this stream, and the threshold
-            # it compared with. No count of anybody — §5.2's "no count".
+            # the comment service's own answer for this stream, or the week still
+            # waiting on a verdict, and the threshold it compared with. No count of
+            # anybody — §5.2's "no count".
             small_n=schema.SmallNView(
-                suppressed=stream_is_suppressed(
+                suppressed=not moderated
+                or stream_is_suppressed(
                     session, section_id=section.id, week_id=week.week_id, stream=token
                 ),
                 threshold=threshold,
