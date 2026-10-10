@@ -16,6 +16,12 @@ nothing else, so the connection the API and the worker hold cannot `UPDATE` or
 `DELETE` a row however the application is written
 ([ADR 0055](../../../docs/adr/0055-a-classification-row-names-its-task-and-no-comment.md)).
 
+**A moderation row has one writer.** Since E6-01 a `MODERATION` row is written
+only by the routing definer `public.route_moderation_verdict`, which writes its
+route in the same call, and a trigger refuses one written by any other role, so
+the `INSERT` above writes validity rows only (`moderation_routing_v001.sql`,
+ADR 0187).
+
 **The row names the comment it judged, and E2-08 is what made that possible.**
 `classification` shipped without a subject: `response` and `answer` (SPEC §8)
 arrived with E2, so there was nothing for a foreign key to point at, and the two

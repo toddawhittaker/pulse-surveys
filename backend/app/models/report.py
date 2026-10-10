@@ -17,7 +17,9 @@ reason: a privilege lands in the change that spends it, and a `GRANT` written
 for a writer that does not exist yet widens the runtime role for nobody.
 
 **Absence is the initial moderation state, and there is no default.** A comment
-with no `moderation_state` row is published; the latest row governs from there,
+with no `moderation_state` row is published, once it holds a moderation verdict
+at all — since E6-01 a comment with none reaches no reader (`report_comment`
+v004, ADR 0187); the latest row governs from there,
 which is the shape `classification` in `app.models.ai` already has and which
 SPEC §5.2 needs, because its lifecycle has an undo in both directions and §8
 requires both directions logged. A mutable column on `answer` could hold the
@@ -202,8 +204,10 @@ class ModerationState(UuidPrimaryKey, Base):
     nothing else. So there is deliberately **no** unique constraint on
     `answer_id`, and the latest row governs.
 
-    **A comment with no row here is published.** That is the initial state and it
-    is an absence rather than a default, which is what makes "exactly one value
+    **A comment with no row here is published**, once it holds a moderation
+    verdict: since E6-01 a comment with none reaches no reader (`report_comment`
+    v004, ADR 0187). That is the initial state and it is an absence rather than a
+    default, which is what makes "exactly one value
     ever written during E4" (the breakdown's decision 3) a count of zero writes
     and leaves every writer to E6. ADR 0145 records it, and the alternative — a
     `state` column on `answer` beside this table — is rejected there because two

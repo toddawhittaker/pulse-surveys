@@ -75,19 +75,19 @@ comments below the threshold — and E8 writes it in its own module.
 sweeps the four student-facing modules for an import of this one.
 
 **No moderation write.** The status a comment carries is read from the record
-E4-02 shipped; every writer of a moderation decision is E6's, and the runtime
-role holds no `INSERT` on that table (`report_comment_grants_v001.sql`).
+E4-02 shipped; a moderation verdict and its route are written only by the
+routing definer `public.route_moderation_verdict` (`app.services.moderation`),
+and the runtime role holds no `INSERT` on `moderation_state`
+(`report_comment_grants_v001.sql`).
 
-**And no §6.2 suppression, which is a gap rather than a decision.** SPEC §5.2
+**And no §6.2 suppression here, because it is below this module.** SPEC §5.2
 ends "threat/self-harm classifications bypass this flow entirely (§6.2) and are
-never shown to the instructor", and nothing in this module implements that: a
-comment carrying such a verdict is returned by both reads and counted by the
-cutter like any other. It is not reachable today, because nothing in the product
-writes a safety verdict — E4's classification task has one member — so the gap is
-recorded rather than closed here, with an owner and a done-when in
-`docs/tickets/e4/deferred.md`. Whoever adds the first such verdict owns closing
-it, and the suppression belongs **below** this read path rather than in each
-caller.
+never shown to the instructor". Since E6-01 `report_comment` v004 leaves out
+every comment that holds no moderation verdict and every comment any of whose
+verdicts, ever, is threat or self-harm, so neither read here, nor the cutter,
+nor the summary gather, can reach one (ADR 0187). What this module adds is the
+section-week half: `section_week_moderated` keeps a week's comments from any
+reader until every comment in it holds a verdict.
 
 ## The three rules this module reads, and where each is decided
 
@@ -122,7 +122,8 @@ E4-04's and E6's to write once, in `app.services`, not per call site."
 `reported_status_of` below is that once. Both reads go through it, the summary
 gather in `app.services.reporting` calls it since E4-07, and it is shaped so E6
 can call it too. An inner join here would drop every comment nobody has decided
-about, which on today's database is all of them.
+about, which is most of them: only a flag or a decision writes a row. "Latest" is
+`moderation_state.sequence`, the order of insert (E6-01, ADR 0187).
 
 **A week's comments are held only once the week has closed.** A window still
 taking responses has no final count, so a comment released from it may belong to
@@ -631,18 +632,17 @@ def reported_status_of(answer_id: SQLColumnExpression[Any]) -> ColumnElement[str
     Two copies of "the latest row, or published" disagree the first time somebody
     changes one, and §5.2's whole lifecycle is about which decision is current.
 
-    **The ordering below cannot break a same-transaction tie, and that is a
-    recorded gap rather than an oversight.** `decided_at` defaults to `now()`,
-    which is PostgreSQL's *transaction* timestamp, so every row written in one
-    transaction carries the same instant and `LIMIT 1` chooses between them
-    arbitrarily — a comment a moderator excluded can resolve to `published`.
-    Nothing in E4 can reach it: E6 writes the first `moderation_state` row this
-    system will hold, so today this subquery orders nothing and every comment
-    resolves to `INITIAL_STATE` by absence. `docs/tickets/e4/deferred.md` carries
-    the entry, owned by E6 **before** its first writer lands, with the fix stated —
-    an explicit monotonic column, ordered by here. Breaking the tie on the row key
-    is not that fix and is worth naming as a wrong answer: `moderation_state.id` is
-    `gen_random_uuid()`, so it is a coin flip rather than an order.
+    **The ordering is `moderation_state.sequence`, the order of insert** (E6-01,
+    ADR 0187). `decided_at` defaults to `now()`, which is PostgreSQL's
+    *transaction* timestamp, so every row written in one transaction carries the
+    same instant, and ordering by it let `LIMIT 1` choose between two such rows
+    arbitrarily — a comment a moderator excluded could resolve to `published`.
+    `sequence` is an identity column the database assigns, so the second of two
+    decisions written in one transaction is the later one. It records insert
+    order, not commit order: of two concurrent writers, the one that inserted
+    first is earlier even if it committed second. Breaking the tie on the row key
+    instead would have been a wrong answer: `moderation_state.id` is
+    `gen_random_uuid()`, a coin flip rather than an order.
 
     **`SQLColumnExpression` rather than `ColumnElement`**, because the two callers
     hold the answer key in the two forms SQLAlchemy has: this module reads it off a
