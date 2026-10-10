@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 
 import { PulseTrendChart, type TrendPoint } from './PulseTrendChart';
 
@@ -765,5 +765,27 @@ describe('the trend family', () => {
         [],
       );
     }
+  });
+});
+
+describe('the table for sighted readers', () => {
+  it('is visually hidden until "Show the numbers" opens it, and closes again', () => {
+    render(<PulseTrendChart points={THREE_WEEKS} label={INSTRUCTOR} lengthWeeks={THREE_WEEKS.length} />);
+
+    // The table is there from the start, for a screen reader; only its
+    // visibility to a sighted reader changes.
+    const table = screen.getByRole('table', { name: 'Weekly ratings: Instructor' });
+    expect(table.className).toBe('sr-only');
+    const toggle = screen.getByRole('button', { name: 'Show the numbers' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(toggle);
+
+    expect(table.className).toBe('pulse-trend-table');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.textContent).toBe('Hide the numbers');
+
+    fireEvent.click(toggle);
+    expect(table.className).toBe('sr-only');
   });
 });
