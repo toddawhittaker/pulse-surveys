@@ -113,7 +113,7 @@ from app.models.report import REASON_BOUND, DeciderRole, ModerationState
 from app.models.survey import Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow, Term
 from app.services import clock
-from app.services.authz import lead_review_courses
+from app.services.authz import lead_review_courses, taught_section_ids
 from app.services.section_codes import course_label
 from app.services.survey_windows import closed_by
 
@@ -140,16 +140,23 @@ MODERATION_ATTEMPT_CAP = 6
 COUNTED_FAILURES = (AIResponseInvalidError,)
 
 # The refusals that count toward the cap as well (E6-05, decision 5b): the
-# statuses a provider answers about the *request* rather than about the account.
-# A hosted provider refuses a content-filtered prompt with 400 or 422, and 413 is
-# a prompt too large to take; each is answered the same for this comment every
-# time, so a comment drawing one would otherwise be asked about, and hold its
-# week back, for ever.
-REQUEST_SHAPED_REFUSALS = frozenset({400, 413, 422})
+# statuses a provider answers about this one prompt. 422 is how a hosted provider
+# refuses a content-filtered prompt, and 413 is a prompt too large to take; each
+# is answered the same for this comment every time, so a comment drawing one
+# would otherwise be asked about, and hold its week back, for ever.
+#
+# **400 is not here, deliberately** (the fix round on PR #296). A 400 is just as
+# often about the whole account or the request's shape — a bad parameter after a
+# deploy — and then every comment draws it. Counting it would cap every comment
+# for good inside six hours, and a capped comment counts as resolved, so weeks
+# would be released with no threat or self-harm check at all. A 400 is retried
+# and holds its week; a content filter answering 400 holds that comment's week
+# until E10's Care review (carried in E6-07).
+REQUEST_SHAPED_REFUSALS = frozenset({413, 422})
 
 # The failures that count nothing: every other refusal (`AIProviderRefusedError`,
-# HTTP 401, 403, 404, 429, 500 and the like: a key, a permission, a model name, a
-# rate limit, a provider bug) and an outage (`AIProviderUnavailableError`, which
+# HTTP 400, 401, 403, 404, 429, 500 and the like: a malformed request, a key, a
+# permission, a model name, a rate limit, a provider bug) and an outage (`AIProviderUnavailableError`, which
 # includes a read timeout, or `AIProviderUnreachableError`). Each is about the
 # provider or this account, not the comment, and lasts as long as it lasts. A cap
 # that counted them would hold back for good exactly the comments swept during
@@ -730,8 +737,10 @@ def review_queue(session: Session, *, person_id: UUID | None) -> list[QueuedComm
 
     Raises `NoReviewGrantError` for a reader whose own grant covers nothing.
     """
+    if person_id is None:
+        raise NoReviewGrantError
     courses = _review_courses(session, person_id)
-    rows = session.execute(_queue_select(courses)).all()
+    rows = session.execute(_queue_select(session, courses, reader=person_id)).all()
     labels = _section_labels(session, {row.section_id for row in rows})
     queued = [
         QueuedComment(
@@ -778,7 +787,9 @@ def decide_as_leader(
     courses = _review_courses(session, person_id)
     _lock_the_comment(session, answer_id)
     queued = session.execute(
-        _queue_select(courses).where(COMMENT_VIEW.c.answer_id == answer_id)
+        _queue_select(session, courses, reader=person_id).where(
+            COMMENT_VIEW.c.answer_id == answer_id
+        )
     ).first()
     if queued is None:
         raise CommentNotInQueueError
@@ -863,7 +874,9 @@ def _review_courses(session: Session, person_id: UUID | None) -> Mapping[UUID, A
     return courses
 
 
-def _queue_select(courses: Mapping[UUID, AssignmentRole]) -> Select[tuple[UUID, str, UUID, UUID]]:
+def _queue_select(
+    session: Session, courses: Mapping[UUID, AssignmentRole], *, reader: UUID
+) -> Select[tuple[UUID, str, UUID, UUID]]:
     """The review queue's rule, as one select: the one statement of what is queued.
 
     From `public.report_comment` v004, so a comment any of whose verdicts was
@@ -873,9 +886,18 @@ def _queue_select(courses: Mapping[UUID, AssignmentRole]) -> Select[tuple[UUID, 
     still `FLAGGED_COLLAPSED` by `report_comments.reported_status_of` (the one
     home of that ordering), and a course in `courses`. Unordered: the caller
     shuffles, or asks about one comment.
+
+    **Never a section the reader teaches** (ruling 7). A lead or chair who also
+    holds an instructor assignment on a section of a reviewed course would
+    otherwise read that section's held text here, which the instructor door
+    refuses them: one person, two doors, and the wider one would win. The rule
+    is by section, so the course's other sections stay in the queue. Their
+    taught sections come from `authz.taught_section_ids`, the instructor
+    door's own source.
     """
     from app.services.report_comments import COMMENT_VIEW, reported_status_of
 
+    taught = taught_section_ids(session, person_id=reader)
     answer_id = COMMENT_VIEW.c.answer_id
     harmful = (
         select(Classification.id)
@@ -896,6 +918,7 @@ def _queue_select(courses: Mapping[UUID, AssignmentRole]) -> Select[tuple[UUID, 
         .join(Section, Section.id == COMMENT_VIEW.c.section_id)
         .where(
             Section.course_id.in_(list(courses)),
+            COMMENT_VIEW.c.section_id.not_in(list(taught)),
             harmful,
             reported_status_of(answer_id) == FLAGGED_COLLAPSED,
         )
