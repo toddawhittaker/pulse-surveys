@@ -7,8 +7,9 @@ routing definer `public.route_moderation_verdict`
 verdict and its route in one call: a `FLAGGED_COLLAPSED` decision for a harmful
 or privacy verdict, a Care case for a threat or self-harm verdict, nothing more
 for clear or nonsense. A trigger refuses a moderation verdict written any other
-way, so this module holds no insert of its own; it is the
-`services/roster_sync.py` pattern for `end_teaching_instructor`.
+way, so the verdict half of this module holds no insert of its own; it is the
+`services/roster_sync.py` pattern for `end_teaching_instructor`. The one insert
+here is a person's decision, below.
 
 **Seeds and fixtures plant verdicts here too**, under `SEED_PROMPT_VERSION` and
 `SEED_MODEL_ID`. A real prompt version names a prompt file (`moderation.v1`, say,

@@ -35,11 +35,13 @@ its own ticket's pull request rather than only here:
     `app.schemas.report_benchmark`, which says why they are not here, and E5's
     breakdown carries the sketch that does describe them.
 
-**A comment carries three fields and no fourth.** `ReportComment` — what
+**A comment carries six fields and no seventh.** `ReportComment` — what
 `app.services.report_comments` answers with — is `(text, status, stream)`, and
-SPEC §4 is why the absences matter: comment display order is randomized and
-timestamps are never shown beside a comment, so an index, a position, a
-submission instant or a per-week count added here for a frontend's convenience
+E6-03 adds exactly three more for the instructor's decisions: the handle
+`answer_id`, the `flag` class and `decided_by_you` (ADR 0189). SPEC §4 is why
+the absences matter: comment display order is randomized and timestamps are
+never shown beside a comment, so an index, a position, a submission instant, a
+week, a decider or a per-week count added here for a frontend's convenience
 would undo at the assembly layer what the module below was reviewed line by line
 to guarantee.
 
