@@ -8,13 +8,14 @@ weekly rhythm (§3.1), `reclassify_floored_comments` is E2-08's async half of
 §3.3's fail-open, `create_line_item` is E3-05's half of §3.4's line item "created
 by the tool on first launch", `post_participation_scores` is E3-06's weekly
 recompute of §3.4's score, `cut_release_batches` is E4-04's weekly release of the
-comments §4's small-N rule has been holding, and `generate_weekly_summaries` is
-E4-06's Monday walk over §5.1's per-stream AI summaries (§7.4's summary task,
-called per stream). Every one of these is a call into `app/services/` from here
+comments §4's small-N rule has been holding, `moderate_closed_windows` is
+E6-02's hourly moderation sweep (§7.4's moderation task, ADR 0188), and
+`generate_weekly_summaries` is the hourly walk over §5.1's per-stream AI
+summaries (§7.4's summary task, called per stream). Every one of these is a call into `app/services/` from here
 rather than domain logic written in this file — which is exactly the shape every
 task below takes: it opens a session and calls a service.
 
-**Who commits is part of that shape, and three tasks depart from it on purpose.**
+**Who commits is part of that shape, and four tasks depart from it on purpose.**
 Most tasks here open the session and commit it, because the service decides and
 writes while the caller owns the transaction. `post_participation_scores` does
 not: its service commits after each section, because the rows it writes are the
@@ -24,7 +25,9 @@ allowed to depend on a walk over the whole institution finishing.
 service commits after each section-week, so one provider failure costs that
 section-week rather than the institution's Monday. `cut_release_batches` does not
 either, for a weaker reason it states in its own words: nothing it writes leaves
-this system, and what a per-section commit buys is the walk's own progress. Each
+this system, and what a per-section commit buys is the walk's own progress.
+`moderate_closed_windows` does not either: its service commits after each
+comment, so a Care route is stored the moment it is decided. Each
 docstring carries its own argument, and they are the place to read before making
 this file consistent with itself.
 """
@@ -42,6 +45,7 @@ from app.lti.in_flight import purge_expired_launch_states
 from app.lti.replay_guard import purge_expired_nonces
 from app.services import clock
 from app.services.grading import ensure_line_item, post_scores_for_all_sections
+from app.services.moderation import sweep_unmoderated_comments
 from app.services.report_comments import cut_due_release_batches
 from app.services.reporting import generate_missing_summaries
 from app.services.roster_sync import sync_all_rosters, sync_section
@@ -285,6 +289,23 @@ def reclassify_floored_comments() -> int:
 
 
 @celery_app.task
+def moderate_closed_windows(gateway: AIGateway | None = None) -> int:
+    """Moderate every comment in a closed window that has no verdict yet (ADR 0188).
+
+    Run hourly by `app.jobs.schedules`. A thin wrapper: which comments, what
+    counts toward the attempt cap, how a verdict is routed and the lock that keeps
+    two runs apart are all `app.services.moderation`'s.
+
+    **The commit is the service's, not this task's.** It commits after each
+    comment, because a verdict may have opened a Care case, and a Care route must
+    not wait on, or be rolled back by, the rest of a pass that can run for hours.
+    `gateway` is the test seam `generate_weekly_summaries` has.
+    """
+    with SessionLocal() as session:
+        return sweep_unmoderated_comments(session, gateway)
+
+
+@celery_app.task
 def post_participation_scores() -> dict[str, int]:
     """Post every participation score that has changed since it was last sent (E3-06, SPEC §3.4).
 
@@ -385,11 +406,11 @@ def cut_release_batches() -> int:
 def generate_weekly_summaries(gateway: AIGateway | None = None) -> dict[str, int]:
     """Write §5.1's per-stream AI summaries for every closed week that has none (E4-06).
 
-    The Monday walk `app.jobs.schedules` runs on `crontab(day_of_week="mon",
-    hour="2", minute="50")`. SPEC §3.1 closes every survey window on Sunday at
-    23:59:59 institution time and opens the instructor's report at 06:00 on Monday,
-    so Monday is the first day the week that just ended can be summarized and the
-    last day it can be summarized before its reader arrives.
+    The hourly walk `app.jobs.schedules` runs on `crontab(minute="50")`. A
+    section-week is summarized only once every comment in it is moderated (ADR
+    0187), and its last verdict can land at any hour, so the walk runs every hour
+    and summarizes each week on the first pass after that (ADR 0188). A week
+    already summarized is never summarized again.
 
     A thin wrapper, like every task above: the session and the configuration are
     this task's, and every decision — which section-weeks have closed, which

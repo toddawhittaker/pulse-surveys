@@ -86,6 +86,7 @@ import {
   generateWeeklySummaries,
   routeSeedVerdictsFor,
   seedTheExitStory,
+  stopTheScheduler,
 } from './support/stack';
 import { expectTheTablesMatchTheLines, panelTable } from './support/reportTables';
 import { INSTRUCTOR_SUBJECT, LEARNER_SUBJECT } from './support/survey';
@@ -507,6 +508,13 @@ test('the story reaches Pulse’s own database, and the two Monday jobs run over
   // which this test does not catch and does not claim to, and which the comment,
   // rate and release assertions below are what reach.
   test.setTimeout(WORLD_TIMEOUT_MS);
+
+  // Beat's hourly summary walk (minute 50) would otherwise be free to summarize a
+  // week of this story before the seeder below has written it, and a stored
+  // summary is never rewritten. This drive runs every job itself
+  // (`stopTheScheduler` in `support/stack.ts` has the whole reason). Here rather
+  // than in `beforeAll`, which this file keeps to discovery.
+  stopTheScheduler();
 
   await clearTheClock(page);
 

@@ -4,7 +4,7 @@
 **Branch:** `e6/moderation-at-window-close`
 **Depends on:** E6-01 (the task member, the routing definer and its Python
 call)
-**Lane:** light
+**Lane:** heavy (planned light; re-laned during the build because `summary.v3` reaches an invariant-marked test)
 **Size:** M
 **Security-relevant:** moderately. The sweep is what makes 01's rules fire in
 the running system, and the empty-week sentence must not become a trace of a
@@ -72,8 +72,9 @@ Read first: SPEC §5.1, §5.2, §6.2, §7.4 and §9.3; ADRs 0148, 0153 and 0162;
 - `backend/app/jobs/tasks.py` and `backend/app/jobs/schedules.py`: an hourly
   moderation sweep, and the summary walk made hourly.
 - `mock-ai/app/rules.py`: a marker for each of the six verdicts.
-- `tests/evals/moderation/` (`cases.py`, `floors.py`) registered in
-  `tests/evals/registry.py`; threat and self-harm cases in
+- `tests/evals/moderation/` (`cases.py`), unregistered until E10's
+  floor-setting pull request adds its slot and `floors.py` (floor files are
+  owner-reviewed); threat and self-harm cases in
   `tests/evals/threat/`. Floors stay deferred to E10, as
   `tests/evals/threat/floors.py` already is.
 - The small-N summary prompt under a bumped version (`summary.v3.md`, or the

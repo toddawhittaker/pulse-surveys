@@ -5,8 +5,9 @@
 // database statement E2-10's spec needed, E4-11's weekly-summary walk, E4-15's
 // two — the exit story's seeder and the release cutter — E5-10's two, which
 // pipe the other two development seeders the repository already ships, and
-// E6-01's, which routes seed moderation verdicts through the product's writer.
-// Eight helpers rather than the two this file opened with, so the count is named
+// E6-01's, which routes seed moderation verdicts through the product's writer,
+// and E6-02's, which stops Celery beat so the scheduler cannot race a drive.
+// Nine helpers rather than the two this file opened with, so the count is named
 // rather than left as prose that goes stale on the next addition
 // (`docs/MISTAKES.md` entry 1).
 //
@@ -18,9 +19,9 @@
 //
 // **None of these is a shortcut past something the product does.** The window
 // derivation below is the *same* task `app.jobs.schedules` runs hourly, invoked
-// rather than waited for; the summary walk and the release cut are the *same*
-// two Monday tasks the beat schedule runs at 02:50 and 02:40 (ADR 0152), invoked
-// for the same reason; and the query below reads and writes the question set,
+// rather than waited for; the summary walk is the *same* task the beat schedule
+// runs hourly at minute 50 (ADR 0188), and the release cut the *same* Monday
+// 02:40 task (ADR 0152), each invoked for the same reason; and the query below reads and writes the question set,
 // which is the instrument SPEC §3.2 stores in a table precisely so that it can
 // be changed without a deploy. A spec that faked any of them would be asserting
 // against its own fixture (`docs/MISTAKES.md` entry 30).
@@ -69,6 +70,32 @@ function compose(args: string[], input?: string): string {
 }
 
 /**
+ * Stop Celery beat, so the scheduler cannot run a job in the middle of a drive.
+ *
+ * Since ADR 0188 beat runs the summary walk every hour at minute 50 and the
+ * moderation sweep every hour at minute 10. A drive seeds responses into weeks
+ * whose windows have already closed by the real date, then calls the jobs itself
+ * (the helpers below). If beat's walk fires between the two, it stores a
+ * summary of a closed week before the drive's responses are in it, and a stored
+ * summary is never rewritten, so the report shows a 0-response summary for a week
+ * the drive filled. That is the product working as specified and the harness
+ * racing the scheduler; CI's e2e run met it at a 05:50 walk. So the drives that
+ * seed and run the jobs stop beat first and do all the scheduling themselves.
+ *
+ * `docker compose stop` on a stopped service succeeds, so calling this from
+ * every such spec is safe. **It does not start beat again**: Playwright's global
+ * teardown would need `playwright.config.ts`, which this suite does not change
+ * for it. On a developer's machine, `make up` (or `docker compose start beat`)
+ * brings beat back after an e2e run.
+ *
+ * A job beat had already enqueued just before the stop still runs in the worker;
+ * stopping beat closes the window from then on, not retroactively.
+ */
+export function stopTheScheduler(): void {
+  compose(['stop', 'beat']);
+}
+
+/**
  * Derive every section's survey windows, now rather than on the hour.
  *
  * A section provisioned by a launch — which is how the mock platform's four
@@ -96,11 +123,12 @@ export function deriveSurveyWindows(): void {
 
 /**
  * Write §5.1's per-stream summaries for every closed week that has none, now
- * rather than on Monday at 02:50.
+ * rather than at the next minute 50.
  *
  * The same shape and the same argument as `deriveSurveyWindows` above: E4-06's
- * job runs on `app.jobs.schedules`'s weekly beat, and a spec that needed a
- * summary before its report could not wait for Monday and must not write one.
+ * job runs on `app.jobs.schedules`'s beat, hourly since ADR 0188, and a spec that
+ * needed a summary before its report could not wait for the hour and must not
+ * write one.
  * SPEC §5.1 makes a summary a model output with a prompt version and a model id
  * behind it — a hand-written row would be a spec agreeing with its own fixture
  * about the one thing on the report nothing else can produce.

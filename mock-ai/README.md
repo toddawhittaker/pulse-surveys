@@ -106,6 +106,12 @@ heuristic, reused so that the spec's example of a comment that must be bounced �
 three: deciding that a comment is keyboard mashing is a judgement about content,
 and this service makes none.
 
+**Moderation** is a third task, picked by the moderation prompt's own marker
+line (`The comment to moderate follows this line.`). After the wrong-answer
+markers, a forced verdict is looked for most serious first: `mock-ai:threat`,
+`mock-ai:self-harm`, `mock-ai:harmful`, `mock-ai:privacy`, `mock-ai:nonsense`,
+`mock-ai:clear`. An unmarked comment is `clear`.
+
 **4. The summary.** Rules 2 and 3 are the validity task's — a summary has no
 closed set of answers to force and no length rule to apply — so a week carrying
 no wrong-answer marker is answered here. The payload names the stream the prompt

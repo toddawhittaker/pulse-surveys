@@ -65,8 +65,13 @@ runs were voided that way before the two timeouts were separated
   registry slot is deferred and carries no cases: the set is exercised offline by
   `tests/unit/test_the_summary_eval_cases_can_go_red.py`, and the first
   real-provider run sets the numbers.
-- `threat/` — SPEC §9.3's strictest floor, as a slot with no set and no number.
-  E10 sets it.
+- `moderation/` — SPEC §7.4's moderation task as typed cases, one family per
+  verdict, built through `ModerationOutput`. The set is not registered yet: its
+  registry slot and its floor arrive together in E10's floor-setting pull
+  request, because floor files are owner-reviewed.
+- `threat/` — SPEC §9.3's strictest floor: the threat and self-harm cases
+  (`cases.py`, joined into the moderation set) and a slot with no number. E10
+  sets it.
 
 ## The floors
 
