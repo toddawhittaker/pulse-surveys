@@ -212,9 +212,9 @@ def test_keeping_a_held_harmful_comment_changes_nothing_the_instructor_reads(
     before = twice(door, FIRST_HELD_WEEK)
     lead = door.a_person()
     door.plant_a_decision(comment, STORED_KEPT, decided_by=lead, decided_as=AS_LEAD_FACULTY)
-    assert latest(door.rows(comment))[STATE_COLUMN] == STORED_KEPT, (
-        "The keep was not recorded, so an unchanged payload below would be about nothing."
-    )
+    assert (
+        latest(door.rows(comment))[STATE_COLUMN] == STORED_KEPT
+    ), "The keep was not recorded, so an unchanged payload below would be about nothing."
     after = twice(door, FIRST_HELD_WEEK)
 
     reads = [*before, *after]
