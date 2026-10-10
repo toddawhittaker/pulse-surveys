@@ -7,9 +7,9 @@
 and the invariant-marked payload test)
 **Size:** L
 **Security-relevant:** the first write path a person drives on a comment, a
-new handle on the instructor payload, and the participation note. A defect
-here lets an instructor act on a comment they cannot see, or turns the note
-into a category hint.
+new handle on the instructor payload, and the held-note type. A defect
+here lets an instructor act on a comment they cannot see, or puts a count
+or a category hint on a held week.
 
 ## Context
 
@@ -38,20 +38,16 @@ door with its own check; neither door passes a flag or a role into the shared
 service to widen what it accepts, so adding the second door cannot loosen this
 rule.
 
-**The participation note (ruling 2).** This ticket builds it and writes its
-rule into SPEC §5.2, replacing "no count" so the section no longer says both:
-
-- Below the threshold, a flagged comment shows no chip and no flag-type hint,
-  and the instructor sees no count except this note.
-- At most one note per section-week. It names no stream and no category.
-- It counts the comments in that week's held streams that carry a harmful or
-  privacy verdict and that a decision has not kept.
-- It never counts a threat or self-harm comment.
+**No participation note (ruling 6, superseding ruling 2).** This ticket first
+built ruling 2's note ("1 response held for review"); its review found that a
+per-week held count, beside a released comment's chip, tells the instructor
+which week that comment came from (ADR 0153's channel), and that in a small
+week it lowers the effective threshold. Ruling 6 drops it. The week report
+carries no held count of any kind, and SPEC §5.2 says "no count" again,
+with no participation trace.
 
 The held-note type is a free string today (`../e4/deferred.md`). It becomes a
-closed set, harmful and privacy, that cannot express threat or self-harm, and
-the note is computed at read time in `reporting._payload`, because states
-change and a stored summary row does not.
+closed set, harmful and privacy, that cannot express threat or self-harm.
 
 Read first: SPEC §4, §4.1, §5.1, §5.2 and §8; ADRs 0145, 0153, 0162, 0178,
 0179 and 0187; ADR 0185 (the generated wire types); the de-anonymization
@@ -86,8 +82,7 @@ entries in `../e5/carried-from-e4.md` and `carried-from-e5.md`; and
   `CommentView` gains the handle, the flag class (harmful, privacy or none) and
   "decided by you". No date, no decider name, no time.
 - `HeldNoteType` in `backend/app/ai/contracts.py`; `WeeklySummaryRecord.held_note_type`
-  and `SummaryView.held_note` take it; the participation note's payload member;
-  both computed in `reporting._payload`.
+  and `SummaryView.held_note` take it. No participation note (ruling 6).
 - `tests/integration/test_the_report_payload_repeats_nothing_beyond_the_comment_service.py`,
   amended for the new members, and only those.
 - `tests/unit/test_the_moderation_state_ordering_has_one_home_under_backend_app.py`:
@@ -100,7 +95,7 @@ entries in `../e5/carried-from-e4.md` and `carried-from-e5.md`; and
 - `frontend/src/api/openapi.json` and `wire.gen.ts`, regenerated with
   `scripts/export_openapi.py` and `npm run gen:wire`. `frontend/src/api/instructor.ts`
   only as far as the type check needs; E6-04 owns it after.
-- SPEC §5.2 (the participation-note rule above), §8 (no `exclusion_log`; the
+- SPEC §5.2 ("no count" below the threshold, and no participation trace), §8 (no `exclusion_log`; the
   decision columns; `audit_log` holds no exclusion or keep), and §13 (the
   `loop.py` line loses `exclusion_log`).
 - ADR **0189**.
@@ -137,18 +132,19 @@ query. `models/report._in_the_vocabulary` for the role `CHECK`.
 6. **The held-note type is closed.** `HeldNoteType` cannot be built with a
    threat or self-harm value; the type check refuses it, and a test proves the
    runtime refuses it too.
-7. **The participation note.** In a held stream with one harmful comment, the
-   week carries one note with the count 1 and no category or stream. In the
-   same world with one self-harm comment instead, the week carries no note.
-   Keeping the harmful comment removes it from the count. Above the threshold,
-   no note is carried, and the flagged comment shows its chip.
+7. **The week report carries no held count (ruling 6).** The week report's
+   model declares no participation note and the comment service exposes no
+   held count. In a held stream with one harmful comment, the payload names
+   no category and carries no participation member, and keeping that comment
+   changes nothing the instructor reads for the week. Above the threshold, the
+   flagged comment shows its chip.
 8. **The grants hold as production runs them.** `pulse_app` can insert only the
    decision columns, proven through the production connection (entry 46), and
    still holds nothing on `threat_case`.
 9. **The records match.** SPEC §5.2, §8 and §13 are edited as listed above.
    ADR 0189 records the handle and why it is safe, the visibility rule, the
-   no-dates rule, the stored role, the participation note and the cost ruling 2
-   accepted, the gradebook limit stated in the README, and the
+   no-dates rule, the stored role, that there is no participation note and why
+   (ruling 6), the gradebook limit stated in the README, and the
    de-anonymization statement for instructor views. That statement reads ADRs
    0153, 0162, 0178 and 0179 first.
 

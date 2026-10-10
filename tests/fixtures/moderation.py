@@ -231,6 +231,11 @@ class PendingVerdicts:
     closed by the clock, and otherwise holds it here until the test moves the
     clock past the close (`route_the_closed`), which is when moderation would run
     (SPEC §7.4: at window close).
+
+    **Strictly after the close, since E6-03 (its work order's decision 8).** The
+    window is open at its `closes_at` instant itself — `survey_windows.py` reads
+    `closes_at >= instant` as open — and `route_verdict` now refuses that instant
+    too, so a verdict is routed here only once the clock has passed it.
     """
 
     def __init__(self) -> None:
@@ -241,7 +246,7 @@ class PendingVerdicts:
     ) -> None:
         if tokens is None:
             return
-        if closes_at <= the_clock_reads(session):
+        if closes_at < the_clock_reads(session):
             plant_verdicts(session, answer_id, tokens)
         else:
             self.waiting.append((answer_id, tokens, closes_at))
@@ -249,7 +254,7 @@ class PendingVerdicts:
     def route_the_closed(self, session: Any) -> None:
         still_open: list[tuple[Any, Any, datetime]] = []
         for answer_id, tokens, closes_at in self.waiting:
-            if closes_at <= the_clock_reads(session):
+            if closes_at < the_clock_reads(session):
                 plant_verdicts(session, answer_id, tokens)
             else:
                 still_open.append((answer_id, tokens, closes_at))

@@ -356,11 +356,13 @@ const WEEK_SIX_WORKLOAD_MEDIAN = 9.5;
 // How many comments the release carries: the seven held ones, and no more.
 const RELEASED_COMMENTS = 7;
 
-// `ReportComment`'s whole field list, per ADR 0153 — "`ReportComment` has three
-// fields — `text`, `status`, `stream` — and is frozen". Asserted as a closed set
-// over what the payload hands back rather than as a search for a `week` member,
-// because the field that names a week is the one nobody has thought of yet.
-const COMMENT_FIELDS = ['status', 'stream', 'text'];
+// A comment card's whole field list: `ReportComment`'s three, per ADR 0153 — "`ReportComment`
+// has three fields — `text`, `status`, `stream` — and is frozen" — plus exactly the three
+// E6-03's decision 6 adds to the card (`answer_id`, `flag`, `decided_by_you`; dispute
+// E6-03-01). Asserted as a closed set over what the payload hands back rather than as a
+// search for a `week` member, because the field that names a week is the one nobody has
+// thought of yet. Sorted, as the assertion sorts the keys it reads.
+const COMMENT_FIELDS = ['answer_id', 'decided_by_you', 'flag', 'status', 'stream', 'text'];
 
 // ---------------------------------------------------------------------------
 // The surfaces this drive reads, and the copy it holds as literals.
@@ -1060,8 +1062,8 @@ test('the cumulative release carries the held comments with no week attribution'
   for (const comment of released) {
     expect(
       Object.keys(comment).sort(),
-      `A released comment carries the fields ${JSON.stringify(Object.keys(comment).sort())}; ADR ` +
-        `0153 freezes them at ${JSON.stringify(COMMENT_FIELDS)} and says why: a released comment ` +
+      `A released comment carries the fields ${JSON.stringify(Object.keys(comment).sort())}; ADRs ` +
+        `0153 and 0189 fix them at ${JSON.stringify(COMMENT_FIELDS)} and say why: a released comment ` +
         'grouped under a week can be joined to the per-week completion ledger SPEC §3.4 posts ' +
         'into the gradebook, and in a small week that intersection is frequently one person. Any ' +
         'further field is the leak, not a convenience — a stored instant nobody exposes today is ' +

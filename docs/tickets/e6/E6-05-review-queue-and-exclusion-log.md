@@ -41,9 +41,8 @@ Both checks run before the shared write.
 
 **What the instructor sees of a Lead Faculty decision.** On a comment in a
 shown stream, the instructor's card shows the decision. On a comment in a held
-stream, the instructor sees the decision only through the participation note's
-count: an exclusion leaves the count unchanged, and a keep removes the comment
-from it. There is no per-comment trace.
+stream, the instructor sees nothing of the decision: there is no participation
+note and no held count (ruling 6). There is no per-comment trace.
 
 **The log.** Every `EXCLUDED` and `KEPT` row decided by a person, inside the
 reader's own grant at their leadership roles. Each row shows the section
@@ -117,9 +116,8 @@ writer of `moderation_state`. `section_codes.course_label` for the section.
 6. **Lead Faculty decisions.** A Lead Faculty member excludes and keeps a queued
    comment; each is a row with the decider and the stored role. In a shown
    stream, the instructor's card shows the decision. In a held stream, a test
-   shows that the instructor's payload changes only in the participation
-   note's count: an exclusion leaves the count as it was, a keep lowers it by
-   one, and no other member of the payload differs between the two reads.
+   shows that the instructor's payload is the same before and after an
+   exclusion and before and after a keep (ruling 6: there is no held count).
 7. **The gate runs at dispatch.** A leadership decision POST with no CSRF
    token, or from another origin, is refused over HTTP against the built
    application, and the same POST with the token succeeds (entry 47).

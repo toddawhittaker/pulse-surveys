@@ -429,6 +429,35 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/instructor/comments/{answer_id}/decisions": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Exclude, keep or undo a decision on one comment in my report
+         * @description One decision on one comment the reader's report returns, answered with its new card.
+         *
+         *     **The decider comes from the session**, as the reader does on every route
+         *     here; the body says only what to do and why. Which comments the reader may
+         *     act on, which actions the comment's state allows, and what a reason must be
+         *     are all decided in `app.services.moderation.decide_as_instructor`; this turns
+         *     each refusal into its status and its one sentence.
+         *
+         *     **An answer id that is not a uuid is refused before this runs**, by
+         *     FastAPI's parsing of the path, which says nothing about any comment.
+         */
+        readonly post: operations["decide_on_comment_instructor_comments__answer_id__decisions_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/leadership/comparison-sets": {
         readonly parameters: {
             readonly query?: never;
@@ -622,11 +651,35 @@ export interface components {
             readonly mean: components["schemas"]["ComparisonFigure"];
         };
         /**
-         * CommentView
-         * @description One comment, with exactly the three fields the comment service answers with.
+         * CommentDecision
+         * @description What the instructor sends to exclude, keep or undo one comment (E6-03).
          *
-         *     No week, no timestamp, no author, no index, at any depth. SPEC §4 and ADR 0153
-         *     are the argument, and
+         *     `reason` is checked by the decision service as it was sent, before any
+         *     trimming (`docs/MISTAKES.md` entry 29), and refused there with a governed
+         *     sentence: a blank one, one over the bound, or none at all where an
+         *     unflagged comment is being excluded. It is declared here as a plain optional
+         *     string so that those refusals are the service's sentences rather than this
+         *     framework's validation messages.
+         */
+        readonly CommentDecision: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            readonly action: "exclude" | "keep" | "undo";
+            /** Reason */
+            readonly reason?: string | null;
+        };
+        /**
+         * CommentView
+         * @description One comment as the instructor's report shows it: its words, and what may be done with it.
+         *
+         *     The comment service's three fields (text, status and stream) and, since
+         *     E6-03, exactly three more (its work order, decision 6): the handle the
+         *     decision route names, the class of the chip, and whether the latest decision
+         *     on it was the reader's own. No week, no timestamp, no author, no decider, no
+         *     index, at any depth. SPEC §4 and ADRs 0153, 0162 and 0189 are the argument,
+         *     and
          *     `tests/integration/test_the_report_payload_repeats_nothing_beyond_the_comment_service.py`
          *     is what holds this shape to it.
          */
@@ -637,6 +690,15 @@ export interface components {
             readonly status: string;
             /** Stream */
             readonly stream: string;
+            /**
+             * Answer Id
+             * Format: uuid
+             */
+            readonly answer_id: string;
+            /** Flag */
+            readonly flag: ("harmful" | "privacy") | null;
+            /** Decided By You */
+            readonly decided_by_you: boolean;
         };
         /**
          * ComparisonFigure
@@ -791,6 +853,26 @@ export interface components {
              */
             readonly environment: string;
         };
+        /**
+         * HeldNoteType
+         * @description The class of a comment held for review, as an instructor may be told it (E6-03).
+         *
+         *     SPEC §5.1 lets a summary note "one comment is held for review" with type
+         *     only, and §6.2 keeps threat and self-harm out of every instructor view. So
+         *     this is the two flagging classes of `ModerationVerdict` and nothing else: a
+         *     type that cannot express `threat` or `self_harm` cannot carry either onto a
+         *     page, whatever a caller passes. The type checker refuses a third member, and
+         *     the runtime refuses an unknown token because the enum has no `_missing_`
+         *     hook — `HeldNoteType("threat")` raises `ValueError`.
+         *
+         *     A `StrEnum` rather than `enum.Enum`, so the stored and served token is the
+         *     value itself (ADR 0030) and a JSON payload carries `"harmful"`, not a member
+         *     name. Each value is the matching `ModerationVerdict` member's value, written
+         *     out because an enum cannot be built from a filtered copy of another one and
+         *     stay a closed set the type checker can read.
+         * @enum {string}
+         */
+        readonly HeldNoteType: "harmful" | "privacy";
         /**
          * InstructorReport
          * @description One instructor's Monday report, for one of her own sections and one course week.
@@ -1309,8 +1391,7 @@ export interface components {
             readonly text: string;
             /** Response Count */
             readonly response_count: number;
-            /** Held Note */
-            readonly held_note?: string | null;
+            readonly held_note?: components["schemas"]["HeldNoteType"] | null;
         };
         /**
          * SurveyQuestion
@@ -1777,6 +1858,41 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["TaughtSections"];
+                };
+            };
+        };
+    };
+    readonly decide_on_comment_instructor_comments__answer_id__decisions_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly answer_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CommentDecision"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["CommentView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -1,6 +1,6 @@
 # 0187 — Moderation verdicts govern the read path, through one writer
 
-**Status:** Accepted, amending [0144](0144-the-reveal-derives-its-subject-from-the-record-care-is-acting-on.md) and [0145](0145-the-report-schema-has-its-own-module-and-moderation-starts-by-absence.md)
+**Status:** Accepted, amending [0144](0144-the-reveal-derives-its-subject-from-the-record-care-is-acting-on.md) and [0145](0145-the-report-schema-has-its-own-module-and-moderation-starts-by-absence.md); the close boundary amended by [0189](0189-an-instructor-decides-only-on-a-comment-their-report-returns.md)
 **Date:** 2026-10-09
 **Ticket:** [E6-01](../tickets/e6/E6-01-verdicts-below-the-read-path.md)
 
@@ -46,7 +46,9 @@ privacy, a `threat_case` row for threat or self-harm (unique per comment; a
 second Care-class verdict leaves the case alone), nothing more for clear or
 nonsense. There is no exception handler, so a failed route takes the verdict with
 it. `pulse_app` holds `EXECUTE` on it, only `SELECT` on `moderation_state`, and
-nothing on `threat_case`. A `BEFORE INSERT OR UPDATE` trigger on `classification`
+nothing on `threat_case`. (Since [0189](0189-an-instructor-decides-only-on-a-comment-their-report-returns.md),
+`pulse_app` also inserts a person's decision into `moderation_state`, on six
+columns only, and a trigger keeps a row with no decider the definer's.) A `BEFORE INSERT OR UPDATE` trigger on `classification`
 refuses a `MODERATION` row unless `current_user` is the owner, so `pulse_app`'s
 existing `INSERT` cannot store a threat verdict with no case. Seeds and fixtures
 plant verdicts through the same door, via `app.services.moderation.route_verdict`,
@@ -60,7 +62,15 @@ was open would vouch for text the student could still replace: `clear` on
 Friday, a self-harm disclosure resubmitted into the same row on Sunday, shown as
 moderated and routed to nobody. So `route_verdict` refuses an answer whose survey
 window has not closed by the app clock (`now >= closes_at` is closed, ADR 0109),
-raising `ModerationBeforeClose` before it writes anything. An answer whose
+raising `ModerationBeforeClose` before it writes anything.
+
+> **Amended 2026-10-10 by [0189](0189-an-instructor-decides-only-on-a-comment-their-report-returns.md)
+> (E6-03, from PR #292's re-check):** closed is `closes_at < now`, not
+> `now >= closes_at`. The survey still accepts a resubmission at `closes_at`
+> itself (`survey_windows._open_at` reads that instant as open), so a verdict
+> written then could vouch for text the student can still replace.
+> `route_verdict` now asks `survey_windows.closed_by`, which `_open_at` negates,
+> so there is one definition. An answer whose
 response has no survey window is refused the same way: with no close to judge
 against, it is treated as open (fail closed). The definer does not repeat the
 check, because the close is judged by the app clock, which the database cannot

@@ -61,11 +61,13 @@ rows be ordered by when they were written whatever wrote them.
 """
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
@@ -93,6 +95,39 @@ from app.models.survey import REPORT_STREAMS
 # is published by an instructor's decision, so E6 needs a token for a state
 # reached deliberately as well as one reached by never having been touched.
 MODERATION_STATES = ("PUBLISHED", "FLAGGED_COLLAPSED", "EXCLUDED", "KEPT")
+
+
+# The roles a moderation decision is made under (E6-03, its work order's decision
+# 5): the teaching instructor, the course's Lead Faculty, and the department chair,
+# who decides for a course with no lead. Stored on the row because SPEC §5.2's
+# exclusion log shows the decider's role, and a role read off today's assignments
+# would change when the assignments do. E6-03 writes only `INSTRUCTOR`; the other
+# two are here so E6-05's door needs no migration of its own.
+class DeciderRole(StrEnum):
+    """A role a moderation decision is made under; the value is the stored token."""
+
+    INSTRUCTOR = "INSTRUCTOR"
+    LEAD_FACULTY = "LEAD_FACULTY"
+    CHAIR = "CHAIR"
+
+
+DECIDER_ROLES = tuple(role.value for role in DeciderRole)
+
+# The longest stated reason a decision may carry, in characters, measured as sent
+# (E6-03's decision 4, `docs/MISTAKES.md` entry 29).
+REASON_BOUND = 500
+
+# Every character Python's `str.strip()` removes, by code point and with no
+# character class, which is how `report_comment_v003.sql` and its successor define
+# a blank comment so that the test means the same thing under every collation
+# (E5.1-12, migration `ad9da2d96664`). A reason is stated when it holds at least
+# one character outside this set, which is what Python's `reason.strip() != ""`
+# asks in the decision service. `btrim` alone would not do: it removes spaces and nothing
+# else, so a tab would pass as a stated reason.
+NOT_ONLY_WHITESPACE = (
+    "~ '[^\\u0009-\\u000d\\u001c-\\u001f \\u0085\\u00a0\\u1680\\u2000-\\u200a"
+    "\\u2028\\u2029\\u202f\\u205f\\u3000]'"
+)
 
 
 def _in_the_vocabulary(column: str, tokens: tuple[str, ...]) -> str:
@@ -214,12 +249,16 @@ class ModerationState(UuidPrimaryKey, Base):
     places answering one question disagree the first time either is written
     alone.
 
-    **This table carries no decider and no reason**, and both are E6's. §5.2's
-    log records "instructor, excerpt, AI-flagged vs unflagged-with-reason, date",
-    which is a log of who did what; a `decided_by` column added now would be a
-    person reference on a table nothing yet writes, and a person reference is the
-    one kind of column this epic may not add speculatively (SPEC §4). What is
-    here is the comment, the state and when it was decided.
+    **Since E6-03 a row also says who decided, as what, and why** (its M2).
+    SPEC §5.2's exclusion log records "instructor, excerpt, AI-flagged vs
+    unflagged-with-reason, date", and the owner's ruling 3 puts that record here
+    rather than on a table of its own. `decided_by_person_id` is the decider as a
+    `person` key, the actor convention `audit_log.actor_person_id` uses;
+    `decided_as` is the role the decision was made under; `reason` is the stated
+    reason; `is_undo` marks a row that restores the state before the decision it
+    undoes. A row with no decider is the routing definer's flag and nothing else:
+    the `CHECK`s below say so, and a trigger refuses a decider-less row from any
+    role but the definer (`moderation_decision_grants_v001.sql`, ADR 0189).
     """
 
     __tablename__ = "moderation_state"
@@ -227,6 +266,27 @@ class ModerationState(UuidPrimaryKey, Base):
         CheckConstraint(
             _in_the_vocabulary("state", MODERATION_STATES),
             name="state_is_in_the_lifecycle_vocabulary",
+        ),
+        CheckConstraint(
+            _in_the_vocabulary("decided_as", DECIDER_ROLES),
+            name="decided_as_is_a_deciding_role",
+        ),
+        CheckConstraint(
+            "(decided_by_person_id IS NULL) = (decided_as IS NULL)",
+            name="a_decider_and_a_role_come_together",
+        ),
+        CheckConstraint(
+            "decided_by_person_id IS NOT NULL OR state = 'FLAGGED_COLLAPSED'",
+            name="a_row_nobody_decided_is_a_flag",
+        ),
+        CheckConstraint(
+            "reason IS NULL OR decided_by_person_id IS NOT NULL",
+            name="a_reason_needs_a_decider",
+        ),
+        CheckConstraint(
+            f"reason IS NULL OR (length(reason) BETWEEN 1 AND {REASON_BOUND}"
+            f" AND reason {NOT_ONLY_WHITESPACE})",
+            name="a_reason_is_stated_and_bounded",
         ),
     )
 
@@ -255,6 +315,22 @@ class ModerationState(UuidPrimaryKey, Base):
     # insert, not by commit: two concurrent writers are not a same-transaction
     # pair, and between them this column records which inserted first.
     sequence: Mapped[int] = mapped_column(BigInteger, Identity(always=True), nullable=False)
+    # Who decided, as a `person` key, and `RESTRICT` as `audit_log.actor_person_id`
+    # is: deleting a staff member may not erase their decisions. Null on the
+    # routing definer's flag, which nobody decided. Indexed for E6-05's exclusion
+    # log, which reads a person's decisions.
+    decided_by_person_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("person.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    # The role the decision was made under, one of `DECIDER_ROLES`.
+    decided_as: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # SPEC §5.2's stated reason. Required by the decision service when an
+    # unflagged comment is excluded; optional otherwise, and held to the same
+    # bounds when given.
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Whether this row restores the state before a decision it undoes. Undo
+    # appends rather than deletes, so the log keeps both directions (SPEC §8).
+    is_undo: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
 
 
 class ReleaseBatch(UuidPrimaryKey, Base):

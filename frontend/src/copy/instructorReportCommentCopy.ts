@@ -126,9 +126,9 @@ export const INSTRUCTOR_REPORT_COMMENT_COPY = {
   'instructor_report_comments.comment.stream_course': 'Course',
 
   // There is deliberately no entry for a count of what small-N withheld. SPEC
-  // §5.2 allows "an optional neutral participation trace" and nothing in E4
-  // produces one; a sentence here would be a place for a number this surface
-  // must not be given.
+  // §5.2 says "no count" below the threshold and allows no participation trace;
+  // a sentence here would be a place for a number this surface must not be
+  // given.
 } as const satisfies Record<string, string>;
 
 /** Every key this surface publishes. */

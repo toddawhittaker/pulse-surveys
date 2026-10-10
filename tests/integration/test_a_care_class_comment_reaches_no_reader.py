@@ -265,8 +265,9 @@ def test_the_exits_three_response_week_opens_a_case_and_its_payloads_carry_nothi
     `route_verdict` rather than a setup ERROR (`docs/MISTAKES.md` entry 44).
 
     **What this does not assert, stated rather than implied.** The criterion's
-    "no count" — the participation note's count is E6-03's (it never counts a
-    Care-class comment) and the empty-week sentence is E6-02's; the payload's
+    "no count" — that the week report carries no held count of any kind is
+    asserted in `test_the_week_report_carries_no_held_count.py` (E6-03), and the
+    empty-week sentence is E6-02's; the payload's
     `responses` figure counts the week's three *responses*, which SPEC §5.1 makes a
     count of responses rather than of comments, and this test does not pin it. The
     summary's leg is the service-side test in

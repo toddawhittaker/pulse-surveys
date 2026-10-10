@@ -11,7 +11,16 @@ text as moderated while no `threat_case` is ever opened for it.
 whose survey window has not closed by the app clock (`app.services.clock.now()`
 against the window's `closes_at`, ADR 0109). It raises `ModerationBeforeClose`, a
 `ValueError` subclass defined in that module, and writes nothing — no
-classification row and no route. `now == closes_at` counts as closed.
+classification row and no route.
+
+**The boundary, as E6-03 corrected it** (its work order's decision 8, carried from
+PR #292's re-check): the window is **open** at its `closes_at` instant itself and
+closed from the next one. The product already says so twice — `survey_windows.py`
+reads `closes_at >= instant` as open, and `reporting.py` calls a week closed when
+`closes_at < t` — and E6-01's fix round had ruled the opposite for the router
+alone, so a verdict could be written at an instant the survey still accepted a
+resubmission. Closed means `closes_at < now`, by the survey-window module's own
+comparison, so there is one definition.
 
 **How the clock is stood exactly on a boundary.** ADR 0109's development override
 is an offset, so it keeps moving while it is read and no override can land on an
@@ -57,6 +66,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 A_CLOSED_WEEK = 7
 AN_OPEN_WEEK = 8
 CLOCK_MODULE = "app.services.clock"
+SURVEY_WINDOWS_MODULE = "app.services.survey_windows"
 
 AN_HOUR = timedelta(hours=1)
 # The smallest step a `timestamptz` holds.
@@ -101,6 +111,13 @@ def stand_the_clock_at(monkeypatch: pytest.MonkeyPatch, instant: Any) -> None:
 
     monkeypatch.setattr(import_module(CLOCK_MODULE), "now", fixed)
     monkeypatch.setattr(moderation_service(), "now", fixed, raising=False)
+    # E6-03 (decision 8) has the check reuse the survey-window module's comparison;
+    # if that module bound `now` itself, it answers the same instant.
+    try:
+        windows = import_module(SURVEY_WINDOWS_MODULE)
+    except ModuleNotFoundError:  # pragma: no cover - the comparison lives elsewhere
+        return
+    monkeypatch.setattr(windows, "now", fixed, raising=False)
 
 
 @pytest.mark.parametrize("verdict", [HARMFUL, THREAT], ids=["flag-route", "care-route"])
@@ -191,40 +208,41 @@ def test_the_same_comment_is_refused_before_its_close_and_routed_after_it(
     ) == 1, f"An hour after the window closed, the same comment was not routed: {after}."
 
 
-def test_one_tick_before_the_close_is_refused_and_the_close_itself_is_accepted(
+def test_the_close_itself_is_refused_and_one_tick_after_it_is_accepted(
     comment_world: CommentWorld, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The boundary, both sides: `now == closes_at` counts as closed (the fix round's ruling).
+    """The boundary, both sides: `now == closes_at` is still open (E6-03, decision 8).
 
-    Two comments in one closed week. With the app clock one microsecond before the
-    window's `closes_at`, the first is refused and leaves nothing. With the clock
-    at `closes_at` exactly, the second is routed.
+    Two comments in one closed week. With the app clock at the window's `closes_at`
+    exactly, the first is refused and leaves nothing — the survey still accepts a
+    resubmission at that instant (`survey_windows.py`: `closes_at >= instant` is
+    open), so a verdict then would vouch for text the student can still replace.
+    With the clock one microsecond after it, the second is routed.
 
-    **The mutations this kills:** the comparison written `now <= closes_at` as
-    "still open" (the second call is refused — SPEC §3.1 shuts the window at
-    23:59:59, so its last instant is inside it and the next one is not, and the fix
-    round settles the close itself as closed); and `now < closes_at - something`, a
-    grace that lets the last microsecond of a window through (the first call is
-    routed).
+    **The mutations this kills:** the comparison written `closes_at <= now` as
+    closed — E6-01's fix-round ruling, which this test reversed from its
+    predecessor (the first call is routed); and a check that waits a grace period
+    past the close (the second call is refused). **Expected red before E6-03
+    lands:** `pytest.raises` reports that the call at `closes_at` did not raise.
     """
     refusal = the_refusal()
     world = comment_world
     world.build()
     world.close_week(A_CLOSED_WEEK)
-    before = a_comment_in(world, A_CLOSED_WEEK, "e6-01 a comment routed one tick before close")
-    at_close = a_comment_in(world, A_CLOSED_WEEK, "e6-01 a comment routed at the close itself")
+    at_close = a_comment_in(world, A_CLOSED_WEEK, "e6-03 a comment routed at the close itself")
+    after = a_comment_in(world, A_CLOSED_WEEK, "e6-03 a comment routed one tick after close")
     closes_at = world.instants[A_CLOSED_WEEK][1]
 
-    stand_the_clock_at(monkeypatch, closes_at - ONE_TICK)
-    with pytest.raises(refusal):
-        plant_verdict(world.session, before, CLEAR)
-    assert (
-        nothing_was_written(world, before)["verdicts"] == []
-    ), "A call refused one microsecond before the close left a verdict behind."
-
     stand_the_clock_at(monkeypatch, closes_at)
-    plant_verdict(world.session, at_close, CLEAR)
-    assert [row["verdict"] for row in moderation_verdicts(world.session, at_close)] == [CLEAR], (
-        "With the app clock at the window's `closes_at` exactly, the verdict was not routed. The "
-        "fix round settles `now == closes_at` as closed."
+    with pytest.raises(refusal):
+        plant_verdict(world.session, at_close, CLEAR)
+    assert (
+        nothing_was_written(world, at_close)["verdicts"] == []
+    ), "A call refused at the window's `closes_at` exactly left a verdict behind."
+
+    stand_the_clock_at(monkeypatch, closes_at + ONE_TICK)
+    plant_verdict(world.session, after, CLEAR)
+    assert [row["verdict"] for row in moderation_verdicts(world.session, after)] == [CLEAR], (
+        "With the app clock one microsecond after the window's `closes_at`, the verdict was not "
+        "routed. Closed means `closes_at < now` (E6-03, decision 8)."
     )

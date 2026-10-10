@@ -35,11 +35,13 @@ its own ticket's pull request rather than only here:
     `app.schemas.report_benchmark`, which says why they are not here, and E5's
     breakdown carries the sketch that does describe them.
 
-**A comment carries three fields and no fourth.** `ReportComment` — what
+**A comment carries six fields and no seventh.** `ReportComment` — what
 `app.services.report_comments` answers with — is `(text, status, stream)`, and
-SPEC §4 is why the absences matter: comment display order is randomized and
-timestamps are never shown beside a comment, so an index, a position, a
-submission instant or a per-week count added here for a frontend's convenience
+E6-03 adds exactly three more for the instructor's decisions: the handle
+`answer_id`, the `flag` class and `decided_by_you` (ADR 0189). SPEC §4 is why
+the absences matter: comment display order is randomized and timestamps are
+never shown beside a comment, so an index, a position, a submission instant, a
+week, a decider or a per-week count added here for a frontend's convenience
 would undo at the assembly layer what the module below was reviewed line by line
 to guarantee.
 
@@ -86,10 +88,12 @@ what makes the absent state expressible.
 """
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.ai.contracts import HeldNoteType
 from app.schemas import report_benchmark
 from app.services.reporting import ComparisonFigure, refuse_an_unsealed_comparison
 
@@ -223,17 +227,28 @@ class SummaryView(BaseModel):
 
     text: str
     response_count: int
-    # The sketch carries this and nothing stores it yet: E6 writes the first
-    # moderation state this system will hold, and §5.1's "excludes flagged-held
-    # content" note is what would fill it. Null in every E4 payload.
-    held_note: str | None = None
+    # The sketch carries this and nothing stores it yet: §5.1's "one comment is
+    # held for review" note, with type only. Since E6-03 its type is the closed
+    # `HeldNoteType`, harmful or privacy, so this member cannot carry a threat or
+    # self-harm class whatever reaches it. Null until a ticket stores one.
+    held_note: HeldNoteType | None = None
+
+
+# The two classes a flagged comment's chip can name (SPEC §5.2): the moderation
+# verdicts that collapse a comment for review. Threat and self-harm are not here
+# and cannot be, because those comments reach no instructor view at all (§6.2).
+CommentFlag = Literal["harmful", "privacy"]
 
 
 class CommentView(BaseModel):
-    """One comment, with exactly the three fields the comment service answers with.
+    """One comment as the instructor's report shows it: its words, and what may be done with it.
 
-    No week, no timestamp, no author, no index, at any depth. SPEC §4 and ADR 0153
-    are the argument, and
+    The comment service's three fields (text, status and stream) and, since
+    E6-03, exactly three more (its work order, decision 6): the handle the
+    decision route names, the class of the chip, and whether the latest decision
+    on it was the reader's own. No week, no timestamp, no author, no decider, no
+    index, at any depth. SPEC §4 and ADRs 0153, 0162 and 0189 are the argument,
+    and
     `tests/integration/test_the_report_payload_repeats_nothing_beyond_the_comment_service.py`
     is what holds this shape to it.
     """
@@ -243,6 +258,37 @@ class CommentView(BaseModel):
     text: str
     status: str
     stream: str
+    # The comment's `answer` key: what `POST …/comments/{answer_id}/decisions`
+    # names. Safe to hand over because the report never returns a Care-class
+    # comment, and the reveal door refuses any answer without a Care-class
+    # verdict, so no instructor ever holds an id that door would answer for
+    # (ADR 0189).
+    answer_id: UUID
+    # The class of the comment's moderation verdict when it is one that flags it,
+    # and null otherwise. Only ever on a comment the report shows, so a held
+    # stream's flag class never reaches the page (SPEC §5.2: below the threshold
+    # there is no chip and no flag-type hint).
+    flag: CommentFlag | None
+    # Whether the latest decision about this comment was the reader's own. A
+    # boolean on purpose: it can say "you" and cannot say who else.
+    decided_by_you: bool
+
+
+class CommentDecision(BaseModel):
+    """What the instructor sends to exclude, keep or undo one comment (E6-03).
+
+    `reason` is checked by the decision service as it was sent, before any
+    trimming (`docs/MISTAKES.md` entry 29), and refused there with a governed
+    sentence: a blank one, one over the bound, or none at all where an
+    unflagged comment is being excluded. It is declared here as a plain optional
+    string so that those refusals are the service's sentences rather than this
+    framework's validation messages.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    action: Literal["exclude", "keep", "undo"]
+    reason: str | None = None
 
 
 class SmallNView(BaseModel):

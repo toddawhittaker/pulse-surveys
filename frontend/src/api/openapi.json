@@ -315,6 +315,60 @@
         }
       }
     },
+    "/instructor/comments/{answer_id}/decisions": {
+      "post": {
+        "tags": [
+          "instructor"
+        ],
+        "summary": "Exclude, keep or undo a decision on one comment in my report",
+        "description": "One decision on one comment the reader's report returns, answered with its new card.\n\n**The decider comes from the session**, as the reader does on every route\nhere; the body says only what to do and why. Which comments the reader may\nact on, which actions the comment's state allows, and what a reason must be\nare all decided in `app.services.moderation.decide_as_instructor`; this turns\neach refusal into its status and its one sentence.\n\n**An answer id that is not a uuid is refused before this runs**, by\nFastAPI's parsing of the path, which says nothing about any comment.",
+        "operationId": "decide_on_comment_instructor_comments__answer_id__decisions_post",
+        "parameters": [
+          {
+            "name": "answer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Answer Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommentDecision"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/leadership/comparison-sets": {
       "get": {
         "tags": [
@@ -632,6 +686,36 @@
         "title": "BenchmarkSeriesPoint",
         "description": "One course week of one comparison line, and the sealed mean for that week.\n\n**A suppressed week is a point, not an absence.** E5-04 decides suppression\nweek by week from that week's own contributors, so a week below either\nminimum arrives here with a suppressed figure in `mean` rather than being\nleft out of the series: a gap in a chart invites the reader to conclude that\nnothing happened that week, and the notice \u00a74.1 item 5 governs says something\nelse entirely.\n\nNothing else sits on a point. A count of sections or of respondents beside\nthe week would hand back the inference the minimum exists to prevent, whether\nor not the figure beside it is shown."
       },
+      "CommentDecision": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "exclude",
+              "keep",
+              "undo"
+            ],
+            "title": "Action"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "CommentDecision",
+        "description": "What the instructor sends to exclude, keep or undo one comment (E6-03).\n\n`reason` is checked by the decision service as it was sent, before any\ntrimming (`docs/MISTAKES.md` entry 29), and refused there with a governed\nsentence: a blank one, one over the bound, or none at all where an\nunflagged comment is being excluded. It is declared here as a plain optional\nstring so that those refusals are the service's sentences rather than this\nframework's validation messages."
+      },
       "CommentView": {
         "properties": {
           "text": {
@@ -645,16 +729,43 @@
           "stream": {
             "type": "string",
             "title": "Stream"
+          },
+          "answer_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Answer Id"
+          },
+          "flag": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "harmful",
+                  "privacy"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flag"
+          },
+          "decided_by_you": {
+            "type": "boolean",
+            "title": "Decided By You"
           }
         },
         "type": "object",
         "required": [
           "text",
           "status",
-          "stream"
+          "stream",
+          "answer_id",
+          "flag",
+          "decided_by_you"
         ],
         "title": "CommentView",
-        "description": "One comment, with exactly the three fields the comment service answers with.\n\nNo week, no timestamp, no author, no index, at any depth. SPEC \u00a74 and ADR 0153\nare the argument, and\n`tests/integration/test_the_report_payload_repeats_nothing_beyond_the_comment_service.py`\nis what holds this shape to it."
+        "description": "One comment as the instructor's report shows it: its words, and what may be done with it.\n\nThe comment service's three fields (text, status and stream) and, since\nE6-03, exactly three more (its work order, decision 6): the handle the\ndecision route names, the class of the chip, and whether the latest decision\non it was the reader's own. No week, no timestamp, no author, no decider, no\nindex, at any depth. SPEC \u00a74 and ADRs 0153, 0162 and 0189 are the argument,\nand\n`tests/integration/test_the_report_payload_repeats_nothing_beyond_the_comment_service.py`\nis what holds this shape to it."
       },
       "ComparisonFigure": {
         "properties": {
@@ -817,6 +928,15 @@
         ],
         "title": "HealthResponse",
         "description": "What a healthy API answers with.\n\nRead by humans, by the Compose health checks (E0-02), and by whatever\nwatches the deployment, so the three fields are a stable contract rather\nthan a debugging convenience."
+      },
+      "HeldNoteType": {
+        "type": "string",
+        "enum": [
+          "harmful",
+          "privacy"
+        ],
+        "title": "HeldNoteType",
+        "description": "The class of a comment held for review, as an instructor may be told it (E6-03).\n\nSPEC \u00a75.1 lets a summary note \"one comment is held for review\" with type\nonly, and \u00a76.2 keeps threat and self-harm out of every instructor view. So\nthis is the two flagging classes of `ModerationVerdict` and nothing else: a\ntype that cannot express `threat` or `self_harm` cannot carry either onto a\npage, whatever a caller passes. The type checker refuses a third member, and\nthe runtime refuses an unknown token because the enum has no `_missing_`\nhook \u2014 `HeldNoteType(\"threat\")` raises `ValueError`.\n\nA `StrEnum` rather than `enum.Enum`, so the stored and served token is the\nvalue itself (ADR 0030) and a JSON payload carries `\"harmful\"`, not a member\nname. Each value is the matching `ModerationVerdict` member's value, written\nout because an enum cannot be built from a filtered copy of another one and\nstay a closed set the type checker can read."
       },
       "InstructorReport": {
         "properties": {
@@ -1598,13 +1718,12 @@
           "held_note": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/HeldNoteType"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Held Note"
+            ]
           }
         },
         "type": "object",

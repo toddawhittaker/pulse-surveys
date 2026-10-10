@@ -38,13 +38,17 @@ E5.1-05 did.
 
 The owner ruled on these on 2026-10-09, at the start of the epic. Rulings 1
 to 4 settle the four decisions the architect's design left open; ruling 5 was
-made the same day, on review of this breakdown. No ticket reopens them.
+made the same day, on review of this breakdown. Ruling 6, made on 2026-10-10
+during E6-03's review, supersedes ruling 2. No ticket reopens them.
 
 1. **The Lead Faculty reviews harmful comments below the threshold.** The Lead
    Faculty sees a harmful comment's text and its section at any threshold. The
    queue shows no week and no time. The Lead Faculty can exclude or keep the
    comment. SPEC §5.5 gains one exception sentence for this; E6-05 writes it.
-2. **The neutral participation trace is built.** When a comment is held, the
+2. **Superseded by ruling 6: the note below is not built.** The original
+   ruling stays here as the record of what was decided and then reversed.
+
+   **The neutral participation trace is built.** When a comment is held, the
    instructor sees a neutral note such as "1 response held for review". The
    note never names a category (§5.2). The breakdown settles how the note sits
    beside §5.2's "no count" below the threshold. The rule:
@@ -79,6 +83,19 @@ made the same day, on review of this breakdown. No ticket reopens them.
    view but read by nobody is the outcome this ruling rules out. E6's design
    stays as planned. E6-01 writes the ruling into SPEC §12's phase lines (the
    "Delivery phases" section) and into ADR 0187; E6-07's hand-off repeats it.
+6. **There is no participation note, and no held count of any kind** (made on
+   2026-10-10; supersedes ruling 2). Below the threshold the instructor sees
+   no chip, no count and no flag-type hint, as SPEC §5.2 said before ruling 2.
+   E6-03's security review found two reasons the note could not stay:
+   - A per-week held count, read beside a released comment's harmful or
+     privacy chip, tells the instructor which week the released comment came
+     from. That is the attribution ADR 0153 removes from a release batch.
+   - In a small week, a count of held comments lowers the effective small-N
+     threshold: it says how many of the few people who responded wrote
+     something that was held.
+
+   E6-03 removes the note's payload member and its count, and returns SPEC
+   §5.2 to "no count". E6-04 renders no note.
 
 **A stated limit, not a choice.** "No trace in the instructor view" means the
 Pulse surfaces. A reader who also holds the LMS gradebook can sometimes see
@@ -117,8 +134,8 @@ submitted.
 |---|---|---|---|---|---|---|
 | 01 | [Moderation verdicts govern the read path](E6-01-verdicts-below-the-read-path.md) | `e6/verdicts-below-the-read-path` | heavy | none | The moderation task and its verdict check; a tie-break column; the `threat_case` table; one definer that writes a verdict and its route; `report_comment` v004 shows only verdicted, non-Care comments; the summary gather reads the view and waits for verdicts; the reveal door narrows to Care-class answers; every fixture and seed plants verdicts; ADR 0187. | |
 | 02 | [Moderation runs when a window closes](E6-02-moderation-at-window-close.md) | `e6/moderation-at-window-close` | light | 01 | The moderation prompt and call; an hourly sweep that moderates closed windows, with a per-comment attempt cap; the summary walk turns hourly; mock-ai verdict markers; typed eval cases; the per-stream small-N premise; a true empty-week sentence; ADR 0188. | |
-| 03 | [The instructor excludes, keeps and undoes](E6-03-instructor-decisions.md) | `e6/instructor-decisions` | heavy | 01 | Decider, role and reason columns; the instructor's decision routes and CSRF gate; a comment handle and flag class on the payload; the closed held-note type and the participation note; SPEC §5.2, §8 and §13; ADR 0189. | |
-| 04 | [Moderation on the instructor report page](E6-04-report-page-moderation.md) | `e6/report-page-moderation` | light | 03 | Comment cards gain the flagged, excluded and kept variants with actions, Undo and the reason prompt; the participation note renders; input boundaries reach 3:1; the chart tables reach sighted readers; the mockups show per-stream notices. | |
+| 03 | [The instructor excludes, keeps and undoes](E6-03-instructor-decisions.md) | `e6/instructor-decisions` | heavy | 01 | Decider, role and reason columns; the instructor's decision routes and CSRF gate; a comment handle and flag class on the payload; the closed held-note type; no participation note (ruling 6); SPEC §5.2, §8 and §13; ADR 0189. | |
+| 04 | [Moderation on the instructor report page](E6-04-report-page-moderation.md) | `e6/report-page-moderation` | light | 03 | Comment cards gain the flagged, excluded and kept variants with actions, Undo and the reason prompt; no participation note (ruling 6); input boundaries reach 3:1; the chart tables reach sighted readers; the mockups show per-stream notices. | |
 | 05 | [The Lead Faculty review queue and the exclusion log](E6-05-review-queue-and-exclusion-log.md) | `e6/review-queue-and-exclusion-log` | heavy | 03 | A leadership-only own-grant read in `authz.py`; the review queue (no week, no time, random order); Lead Faculty decisions through 03's service; the exclusion log in both directions; sibling-isolation and Care-absence invariants; SPEC §5.2, §5.5 and §11; ADR 0190. | |
 | 06 | [The leadership queue and log pages](E6-06-leadership-moderation-pages.md) | `e6/leadership-moderation-pages` | light | 04, 05 | The review queue page, the exclusion log page and its row, the routes and landing links. | |
 | 07 | [E6 exit](E6-07-e6-exit.md) | `e6/e6-exit` | light | all | The exit clause driven on the running stack; the carried files closed and `../e7/carried-from-e6.md` written; the boundary reviews; SPEC §14.3. | |
@@ -183,7 +200,7 @@ ticket that adds a backend module draws it in SPEC §13 and edits no test.
 | 1 | §13 | `models/safety.py` (`threat_case`) is "not built yet: E10", but §14.3 has E6 write the case records. | 01 draws it as built. |
 | 2 | §5.2 | "Harmful … can be a self-harm disclosure" sends a self-harm disclosure to the instructor and the Lead Faculty. The contract and §6.2 make self-harm its own verdict, routed to Care. | 01 rewrites the sentence. |
 | 3 | §5.2 vs §5.5 | Flags "route immediately" even below the threshold, but leadership sees raw comments only where the threshold is met and never mutates student data. | Ruling 1; 05 adds §5.5's exception sentence. |
-| 4 | §5.2 | "No count" below the threshold, and "1 response held for review". | Ruling 2; 03 writes the rule above into §5.2. |
+| 4 | §5.2 | "No count" below the threshold, and "1 response held for review". | Ruling 6 (superseding ruling 2): no count and no note. 03 removes the optional participation trace from §5.2. |
 | 5 | §8 | Lists `exclusion_log`, and says `audit_log` includes exclusions and kept-decisions. | Ruling 3; 03 edits §8 and §13's `loop.py` line. |
 | 6 | §8 | "A comment with no row is published", against the carried rule that an unmoderated comment is held. | 01 edits §8. |
 | 7 | §5.2 vs §7.4 | "Route to Care immediately" against "Moderation: async at window close". | Moderation runs at window close, swept hourly. 02 edits §5.2's word and records it in ADR 0188. E10 can revisit. |
@@ -197,7 +214,7 @@ ticket that adds a backend module draws it in SPEC §13 and edits no test.
 | Piece of the exit | Rests on |
 |---|---|
 | A welfare-flagged comment in a 3-response week reaches Care: a `threat_case` row exists for it. | 01 (the definer and the proof at the service and payload), 02 (the sweep that calls it), 07 (the drive) |
-| …with no trace in the instructor view: no comment, no count, no note, no summary text, and the same empty-week sentence as a week with no comments. | 01 (v004 and the gather), 02 (the sentence), 03 (the note never counts Care-class), 07 (the drive) |
+| …with no trace in the instructor view: no comment, no count, no note, no summary text, and the same empty-week sentence as a week with no comments. | 01 (v004 and the gather), 02 (the sentence), 03 (the week report carries no held count, ruling 6), 07 (the drive) |
 | The anti-cherry-picking trail is visible up-chain: an unflagged exclusion with its reason, and a keep, appear in the exclusion log for the Lead Faculty and the chair. | 03 (the record), 05 (the log read), 06 (the page), 07 (the drive) |
 
 ## Where the carried work lands

@@ -1119,6 +1119,64 @@ def test_every_named_set_write_route_is_found_carrying_the_leadership_csrf_depen
     )
 
 
+def test_the_instructor_decision_route_is_found_carrying_the_instructor_csrf_dependency(
+    configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Currency 1's canary for the family's third member — E6-03's decision route.
+
+    E6-03 adds `csrf_verified_instructor` "following `csrf_verified_leadership`",
+    and one writing route behind it: `POST …/comments/{answer_id}/decisions` in
+    `app.api.instructor`. The sweep above admits a mutating route that holds *any*
+    member of the family, so a decision route composed from another role's member —
+    or from `require_instructor`, which checks no token — is found here by name
+    rather than by a reader diagnosing a ledger failure.
+
+    **The mutations this kills:** the route composed from `require_instructor` (the
+    one-import mistake the carried E2 entry names); composed from
+    `csrf_verified_leadership` (a dependency whose role gate refuses every
+    instructor, so the route answers nobody); and a `csrf_verified_instructor`
+    that exists and is wired to no route.
+
+    **What it does not kill, and what does:** a `csrf_verified_instructor` that
+    checks nothing. This reads the route table; the cookie-carrier drive in
+    `tests/integration/test_every_csrf_verified_dependency_refuses_a_cookie_borne_write.py`
+    is what executes the check (`docs/MISTAKES.md` entry 47).
+
+    **Expected red before E6-03 lands:** a FAILED naming `csrf_verified_instructor`
+    as a symbol `app.api.deps` does not expose.
+    """
+    member = "csrf_verified_instructor"
+    family = csrf_verified_dependencies()
+    if member not in family:
+        pytest.fail(
+            f"`{DEPS_MODULE}` exposes no `{member}`; the `{CSRF_DEPENDENCY_PREFIX}` family it "
+            f"exposes is {sorted(family)}. E6-03 adds it beside `require_instructor`, following "
+            "`csrf_verified_leadership`, for the instructor's decision route."
+        )
+    application = application_in(DEVELOPMENT, monkeypatch)
+
+    decision_routes = [
+        route
+        for route in mutating_routes(application)
+        if path_of(route).rstrip("/").endswith("/decisions") and "/comments/" in path_of(route)
+    ]
+    assert decision_routes, (
+        "No mutating route ends in `/comments/{answer_id}/decisions`; every mutating route this "
+        f"application serves is {sorted(paths_of(mutating_routes(application)))}. E6-03's work "
+        "order (decision 1) puts the instructor's decision route there."
+    )
+    unguarded = [
+        path_of(route)
+        for route in decision_routes
+        if BY_DEPENDENCY
+        not in currencies_of(route, dependency=family[member], route_class=NoRouteIsThis)
+    ]
+    assert not unguarded, (
+        f"These decision routes carry no `{member}`: {unguarded}. E6-03 guards the instructor's "
+        "decision route with it, the way E5-06 guards leadership's writes."
+    )
+
+
 def test_the_appended_clock_pair_is_in_the_mutating_inventory(
     configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

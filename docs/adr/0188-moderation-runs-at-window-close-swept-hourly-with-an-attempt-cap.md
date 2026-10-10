@@ -1,6 +1,6 @@
 # 0188 — Moderation runs at window close, swept hourly, with an attempt cap
 
-**Status:** Accepted
+**Status:** Accepted; its close-boundary note amended by [0189](0189-an-instructor-decides-only-on-a-comment-their-report-returns.md)
 **Date:** 2026-10-10
 **Ticket:** [E6-02](../tickets/e6/E6-02-moderation-at-window-close.md)
 
@@ -28,6 +28,9 @@ happens when it keeps failing, or when the summary walk, which waits for it, run
   a closed window; a window closing at exactly the sweep's instant waits for the
   next sweep. `route_verdict` (E6-01) still accepts `now == closes_at`, and E6-03
   aligns it to the same rule.
+  *Amended by [0189](0189-an-instructor-decides-only-on-a-comment-their-report-returns.md)
+  at the E6-03 merge:* that alignment is done, and the sweep and `route_verdict`
+  now both ask `app.services.survey_windows.closed_by`, the one definition.
 - **Two sweeps never overlap.** The sweep holds a Postgres session-level advisory
   lock (`SWEEP_LOCK_KEY`) for its whole run and releases it in `finally`; a run
   that finds the lock held does nothing. Without it, a long pass and the next

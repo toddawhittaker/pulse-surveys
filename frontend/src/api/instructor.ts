@@ -186,9 +186,12 @@ export type WorkloadBenchmarkView = Schemas['WorkloadBenchmarkView'];
 export type SummaryView = Schemas['SummaryView'];
 
 /**
- * One comment, with exactly the three fields the comment service answers with.
+ * One comment: the comment service's three fields, and since E6-03 its handle
+ * (`answer_id`), its flag class (`harmful`, `privacy` or null) and whether the
+ * latest decision on it was the reader's (`decided_by_you`).
  *
- * No week, no timestamp, no author, no index, at any depth (SPEC §4, ADR 0153).
+ * No week, no timestamp, no author, no decider, no index, at any depth (SPEC §4,
+ * ADRs 0153 and 0189).
  * `status` and `stream` are strings on the wire rather than closed sets, which
  * is what the schema says; the page narrows them where a component's prop needs
  * one, and says there what it does with a value it does not know.
