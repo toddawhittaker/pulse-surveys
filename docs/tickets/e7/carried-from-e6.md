@@ -285,6 +285,7 @@ Every source entry, in its source file's order, with what happened to it.
 | #296: the log lists rows from sections the reader teaches; 413 and 422 count toward the cap | Closed by E6-08 |
 | #297: the axe scan | Carried (a `process/` pull request, then the next UI epic) |
 | #297: two LOWs on the leadership drive's mapping row | Carried (the next ticket touching that spec) |
+| #298: an unusable answer that comes back on every request caps every comment, and the week released unchecked | Closed by E6-08 (ruling 8: a capped comment holds its week); the person's decision that releases it is carried to E10 in the Care sweep entry |
 
 ### The E6 boundary (`../e6/boundary-review.md`)
 
