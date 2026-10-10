@@ -312,6 +312,14 @@ def sweep_unmoderated_comments(session: Session, gateway: AIGateway | None = Non
     verdict to a comment the other had just capped, after its week had been read
     without it. The lock is released in `finally`, on every path.
 
+    **`session` must be bound to one connection**, not to a pooled engine: the
+    lock belongs to the server connection that took it, and a session on the
+    engine may run the unlock on another one after a commit
+    (`app.jobs.tasks.moderate_closed_windows` binds it; E6-05, decision 5a). An
+    unlock that answers false — the lock was not held where it ran — is logged at
+    error level, because the lock is then stranded and every later sweep does
+    nothing.
+
     - A verdict is routed through `route_verdict`, which writes it with its flag
       or its Care case.
     - An unusable answer (`COUNTED_FAILURES`), or a refusal with a
@@ -335,8 +343,13 @@ def sweep_unmoderated_comments(session: Session, gateway: AIGateway | None = Non
         session.rollback()
         raise
     finally:
-        session.execute(select(func.pg_advisory_unlock(SWEEP_LOCK_KEY)))
+        released = session.execute(select(func.pg_advisory_unlock(SWEEP_LOCK_KEY))).scalar_one()
         session.commit()
+        if not released:
+            logger.error(
+                "the moderation sweep's unlock found no lock held on its own connection, so the "
+                "lock may be stranded on another one and later sweeps will do nothing"
+            )
 
 
 def _moderate_each(session: Session, gateway: AIGateway | None) -> int:
