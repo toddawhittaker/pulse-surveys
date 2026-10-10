@@ -689,7 +689,9 @@ class ExclusionLogRow:
     """One decision in a reader's exclusion log (E6-05, decision 1).
 
     `excerpt` is `None` whenever the comment's own instructor's report does not
-    show it under its week; see `exclusion_log`.
+    show it under its week; see `exclusion_log`. `decision` is the stored state
+    the row left; `is_undo` says the row reverses the decision before it, so the
+    state is the one restored (E6-09).
     """
 
     section_label: str
@@ -699,6 +701,7 @@ class ExclusionLogRow:
     reason: str | None
     decided_on: date
     excerpt: str | None
+    is_undo: bool
 
 
 def review_queue(session: Session, *, person_id: UUID | None) -> list[QueuedComment]:
@@ -789,7 +792,7 @@ def decide_as_leader(
 def exclusion_log(
     session: Session, *, person_id: UUID | None, settings: Settings
 ) -> list[ExclusionLogRow]:
-    """Every exclusion and keep a person made inside this reader's own grant, newest first.
+    """Every exclusion, keep and undo a person made inside this reader's own grant, newest first.
 
     SPEC §5.2's anti-cherry-picking trail, in both directions (§11 question 5,
     settled). The rows are `report_comments.logged_decisions` over the courses
@@ -802,8 +805,9 @@ def exclusion_log(
     not yet fully moderated, or it was surfaced only by a release batch. A
     decision date beside text from a held stream places that text in a week,
     which is what the threshold and the release's missing week withhold
-    (ADR 0153). "Shown under its week" is `visible_cards` for the comment's own
-    section, week and stream, the read the instructor's report makes.
+    (ADR 0153). "Shown under its week" is `report_comments.shown_under_their_week`,
+    the instructor's report's own rule (`visible_cards`) asked once for every
+    decision in the log.
 
     The date is the decision's instant in the institution's zone, and no time.
 
@@ -816,7 +820,7 @@ def exclusion_log(
 
     Raises `NoReviewGrantError` for a reader whose own grant covers nothing.
     """
-    from app.services.report_comments import logged_decisions, visible_cards
+    from app.services.report_comments import logged_decisions, shown_under_their_week
 
     if person_id is None:
         raise NoReviewGrantError
@@ -828,35 +832,23 @@ def exclusion_log(
         if decision.section_id not in taught
     ]
     labels = _section_labels(session, {decision.section_id for decision in decisions})
+    # Once for every decision, in a fixed number of statements, so a log over a
+    # term costs what a log over one week costs (E6-09).
+    shown = shown_under_their_week(session, {decision.answer_id for decision in decisions})
     zone = ZoneInfo(settings.institution_timezone)
-    shown: dict[tuple[UUID, UUID, str], set[UUID]] = {}
-    rows: list[ExclusionLogRow] = []
-    for decision in decisions:
-        where = (decision.section_id, decision.week_id, decision.stream)
-        if where not in shown:
-            shown[where] = {
-                card.answer_id
-                for card in visible_cards(
-                    session,
-                    section_id=decision.section_id,
-                    week_id=decision.week_id,
-                    stream=decision.stream,
-                )
-            }
-        rows.append(
-            ExclusionLogRow(
-                section_label=labels[decision.section_id],
-                decision=decision.state,
-                decided_as=DeciderRole(decision.decided_as),
-                flagged=decision.flagged,
-                reason=decision.reason,
-                decided_on=decision.decided_at.astimezone(zone).date(),
-                excerpt=(
-                    decision.text[:EXCERPT_LENGTH] if decision.answer_id in shown[where] else None
-                ),
-            )
+    return [
+        ExclusionLogRow(
+            section_label=labels[decision.section_id],
+            decision=decision.state,
+            decided_as=DeciderRole(decision.decided_as),
+            flagged=decision.flagged,
+            reason=decision.reason,
+            decided_on=decision.decided_at.astimezone(zone).date(),
+            excerpt=decision.text[:EXCERPT_LENGTH] if decision.answer_id in shown else None,
+            is_undo=decision.is_undo,
         )
-    return rows
+        for decision in decisions
+    ]
 
 
 def _review_courses(session: Session, person_id: UUID | None) -> Mapping[UUID, AssignmentRole]:

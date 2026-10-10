@@ -422,7 +422,7 @@ def read_exclusion_log(
     claims: SessionClaims = Depends(require_leadership),
     session: Session = Depends(get_session),
 ) -> ExclusionLog:
-    """Every exclusion and keep a person made inside the reader's own grant, newest first."""
+    """Every exclusion, keep and undo a person made inside the reader's own grant, newest first."""
     settings: Settings = request.app.state.settings
     response.headers["Cache-Control"] = NO_STORE
     try:
@@ -439,6 +439,7 @@ def read_exclusion_log(
                 reason=row.reason,
                 decided_on=row.decided_on,
                 excerpt=row.excerpt,
+                is_undo=row.is_undo,
             )
             for row in logged
         ]

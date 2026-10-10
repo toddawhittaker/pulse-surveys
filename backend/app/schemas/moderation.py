@@ -8,11 +8,12 @@ no date, no time and no count — the queue shows a lead text from below the
 threshold (ruling 1), and a week or an instant beside it would place the text in
 a week the threshold hides. The order is drawn again on every read.
 
-**A log row is seven members** (decision 1, and the ruling on dispute
-E6-05-03): the section label, the direction (`EXCLUDED` or `KEPT`), the role
-the decision was made under, whether the AI flagged the comment, the stated reason,
-the date in the institution's zone, and an excerpt of the comment that is null
-whenever its own instructor's report does not show the comment in a week.
+**A log row is eight members** (decision 1, the ruling on dispute E6-05-03,
+and E6-09): the section label, the direction (`EXCLUDED` or `KEPT`, or for an
+undo the state it restored), the role the decision was made under, whether the
+AI flagged the comment, the stated reason, the date in the institution's zone,
+an excerpt of the comment that is null whenever its own instructor's report does
+not show the comment in a week, and whether the row is an undo.
 
 Each list travels as the only member of an object, so nothing can sit beside it:
 the obvious thing to put there, a count, is what decision 1 forbids on the queue.
@@ -75,8 +76,10 @@ class LogRow(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     section_label: str
-    # Which direction the decision went: the stored state it left the comment in.
-    decision: Literal["EXCLUDED", "KEPT"]
+    # The stored state the row left the comment in: `EXCLUDED` or `KEPT` for a
+    # decision, and for an undo whatever it restored, which may also be the
+    # router's flag or the published state.
+    decision: Literal["PUBLISHED", "FLAGGED_COLLAPSED", "EXCLUDED", "KEPT"]
     # The role the decision was stored under, not the decider's role today.
     decided_as: Literal["INSTRUCTOR", "LEAD_FACULTY", "CHAIR"]
     # Whether the comment holds a harmful or privacy verdict.
@@ -87,6 +90,9 @@ class LogRow(BaseModel):
     # The first 140 characters of the comment, or null when its instructor's
     # report does not show it in a week.
     excerpt: str | None
+    # Whether the row undoes the decision before it (SPEC §8), so the log shows a
+    # reversal as one rather than as a fresh exclusion or keep (E6-09).
+    is_undo: bool
 
 
 class ExclusionLog(BaseModel):
