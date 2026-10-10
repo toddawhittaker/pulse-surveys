@@ -81,16 +81,17 @@ export function authorizationHeader(): Record<string, string> {
 /**
  * The cookie the double-submit token rides in, and the header it is echoed in.
  *
- * `csrf_verified_student` and `csrf_verified_leadership` (`app.api.deps`)
- * require the header from any request whose session rides the cookie, and
+ * `csrf_verified_student`, `csrf_verified_leadership` and
+ * `csrf_verified_instructor` (`app.api.deps`) require the header from any request whose session rides the cookie, and
  * exempt the Bearer carrier — a Bearer header is not something a cross-site form
  * can be tricked into sending, so there is nothing there for a double submit to
  * protect. The cookie is deliberately not `HttpOnly` (ADR 0089) for exactly this
  * reason: the SPA has to read it.
  *
- * **The two checks share one cookie and one header**, which is why one helper
- * serves both clients: the student's submission and the comparison-set writes
- * in `api/leadership.ts` echo the same token to the same check.
+ * **The checks share one cookie and one header**, which is why one helper
+ * serves every client: the student's submission, the comparison-set writes in
+ * `api/leadership.ts` and the moderation decisions in `api/instructor.ts` echo
+ * the same token.
  */
 const CSRF_COOKIE = 'pulse_csrf';
 const CSRF_HEADER = 'X-Pulse-CSRF';

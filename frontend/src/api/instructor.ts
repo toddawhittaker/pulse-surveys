@@ -1,12 +1,14 @@
 /**
- * The three calls the instructor's Monday report is built on — SPEC §13's
+ * The calls the instructor's Monday report is built on — SPEC §13's
  * `frontend/src/api/`, ticket E4-11.
  *
  * `GET /instructor/sections` (E4-18) answers the sections this session's person
  * teaches, `GET /instructor/sections/{id}/published-weeks` answers the course
- * weeks a report may be read for, and
+ * weeks a report may be read for,
  * `GET /instructor/sections/{id}/report/{week}` answers SPEC §5.1's whole
- * report. `app.api.instructor` is the module all three come from, and its
+ * report, and `POST /instructor/comments/{answer_id}/decisions` (E6-03)
+ * records one moderation decision. `app.api.instructor` is the module all four
+ * come from, and its
  * docstring is the authority on what each refuses and why.
  *
  * **The first call is what makes the other two askable.** Both keyed routes take
@@ -22,10 +24,9 @@
  * **The session rides as a Bearer header** (ADR 0089, `../lib/session.ts`), for
  * the reason `student.ts` gives: the tool's cookie is `SameSite=None` and a
  * browser may refuse it inside the LMS's cross-site iframe, so the header is the
- * carrier that always works. Every call here is a GET, so there is no
- * double-submit token to echo and no cookie to read — the whole of the write
- * path's CSRF machinery in `student.ts` is deliberately absent rather than
- * copied.
+ * carrier that always works. The reads carry `readHeaders()`; the one write,
+ * a moderation decision (SPEC §5.2), carries `writeHeaders()`, which echoes
+ * the double-submit token the way the leadership pages' writes do.
  *
  * **Every type below is the wire's own**, aliased from `wire.gen.ts`, which
  * describes `backend/app/schemas/report.py`. Two departures from the generated
@@ -57,7 +58,7 @@
  */
 
 import type { components } from './wire.gen';
-import { jsonBody, readHeaders, refusalSentence } from '../lib/http';
+import { jsonBody, readHeaders, refusalSentence, writeHeaders } from '../lib/http';
 
 /** The generated wire schemas (ADR 0185); every wire type below is one of these. */
 type Schemas = components['schemas'];
@@ -364,4 +365,60 @@ export async function readInstructorReport(
     return { kind: 'unavailable', detail: null };
   }
   return { kind: 'report', report: body as InstructorReportView };
+}
+
+/** `app.api.instructor.DECISIONS_PATH`, with the comment's handle filled in. */
+export function decisionsPath(answerId: string): string {
+  return `/instructor/comments/${encodeURIComponent(answerId)}/decisions`;
+}
+
+/** What the instructor sends to exclude, keep or undo one comment (SPEC §5.2). */
+export type CommentDecisionView = Schemas['CommentDecision'];
+
+/**
+ * What one decision answered.
+ *
+ * `decided` carries the comment's new card, which the page shows in place of the
+ * old one: the server's card is the record of what was decided, so the page
+ * does not guess at it before the answer arrives. `refused` carries the
+ * server's sentence for a 404, a 409 or a 422 — each refusal is written once,
+ * in `app.copy`, and shown as sent. `session-ended` and `unavailable` are the
+ * reads' two, for the same reasons.
+ */
+export type DecisionOutcome =
+  | { readonly kind: 'decided'; readonly card: CommentView }
+  | { readonly kind: 'refused'; readonly detail: string | null }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'unavailable'; readonly detail: string | null };
+
+/** One decision on one comment of the reader's report. A write, so it echoes the CSRF token. */
+export async function decideOnComment(
+  answerId: string,
+  decision: CommentDecisionView,
+): Promise<DecisionOutcome> {
+  let response: Response;
+  try {
+    response = await fetch(decisionsPath(answerId), {
+      method: 'POST',
+      headers: writeHeaders(),
+      body: JSON.stringify(decision),
+    });
+  } catch {
+    return { kind: 'unavailable', detail: null };
+  }
+
+  if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  const body = await jsonBody(response);
+  if (response.status >= 400 && response.status < 500) {
+    return { kind: 'refused', detail: refusalSentence(body) };
+  }
+  if (!response.ok) return { kind: 'unavailable', detail: refusalSentence(body) };
+
+  // The bound on the cast: the card is rendered from its text and its status.
+  if (typeof body !== 'object' || body === null) return { kind: 'unavailable', detail: null };
+  const card = body as Record<string, unknown>;
+  if (typeof card.text !== 'string' || typeof card.status !== 'string') {
+    return { kind: 'unavailable', detail: null };
+  }
+  return { kind: 'decided', card: body as CommentView };
 }
