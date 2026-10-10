@@ -11,7 +11,7 @@
 
 And decision 1's rules for the door: only from `FLAGGED_COLLAPSED` (the queue
 holds only undecided flags), a comment not in the reader's queue is a 404, the
-reason is optional for a lead with the same 1–500 bounds when present, the row is
+reason is optional for a lead with the same 1-500 bounds when present, the row is
 written as `LEAD_FACULTY` or `CHAIR` by whichever grant covers the course, and a
 lead has no undo.
 
@@ -254,7 +254,7 @@ REASONS = {
 def test_a_leads_reason_is_optional_and_held_to_the_same_bounds_when_present(
     case: str, lead_review: LeadReviewWorld
 ) -> None:
-    """Decision 1: the reason is optional for a lead, with the instructor's 1–500 bounds.
+    """Decision 1: the reason is optional for a lead, with the instructor's 1-500 bounds.
 
     An accepted reason is stored as sent; a refused one writes no row and is not
     the not-in-queue 404 (the comment is in the queue), and the same comment is
