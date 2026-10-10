@@ -79,18 +79,23 @@ E6-05 (#296) and E6-08:
   filter is likeliest to do for a threat or self-harm disclosure, is asked again
   every hour and holds its section-week back from the report and the summary
   until E10's Care review decides it.
-- **A capped comment is never routed to Care.** A comment that reaches the cap
-  through six unusable answers is left with no verdict, so no reader sees it, and
-  `section_week_moderated` counts it resolved so the rest of its week shows. It
-  never opens a `threat_case` row.
+- **A capped comment holds its week until a person decides it.** A comment
+  that reaches the cap through six unusable answers is not asked about again and
+  is left with no verdict. Ruling 8 (E6-08): `section_week_moderated` does not
+  count it resolved, so its whole section-week stays out of the report, the
+  release cut and the summary. An unusable answer can come back for every
+  request (a proxy error page, a model swap), and a week released past it would
+  skip the threat and self-harm check. Nothing in E6 decides a capped comment,
+  and it never opens a `threat_case` row.
 - **Summaries written before a later Care verdict.** A `summary.v1` row above
   the threshold may paraphrase a comment that a later Care verdict removed from
   every view. E6's sweep never re-sends a comment that holds a verdict, so the
   case arises only for rows written before E6.
 
 **Owner:** E10, with the Care queue. **Done when:** E10's Care sweep reviews
-every comment that is refused or capped, so that neither kind waits for ever
-outside Care, with a test for each; and a record decides whether stored summaries
+every comment that is refused or capped, and a person's decision there writes
+the verdict that releases its week, so that neither kind holds its week for
+ever, with a test for each; and a record decides whether stored summaries
 that predate a Care verdict on a comment they drew from are withheld or
 regenerated.
 
