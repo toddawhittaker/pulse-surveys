@@ -26,9 +26,14 @@ default fills them.
 **The constraint text is spelled out rather than read from `app.models.report`**:
 a migration records what was applied on the day it ran (E6-01's reasoning).
 
-**The downgrade** drops the trigger and its function, revokes the six column
-grants by name (and nothing else, so E4-04's `SELECT` survives), then drops the
-`CHECK`s, the index and the columns.
+**The downgrade refuses while any row names a decider.** Going down drops the
+four decision columns, so it would destroy who decided each exclusion and keep,
+under which role, why, and whether it was an undo: the exclusion log's whole
+record (SPEC §8). Below this revision there is nowhere to keep it, so the
+downgrade raises `RuntimeError` before touching anything, as
+`20260904_a7c2f4e18b30` does. Over router rows only, it drops the trigger and its
+function, revokes the six column grants by name (and nothing else, so E4-04's
+`SELECT` survives), then drops the `CHECK`s, the index and the columns.
 """
 
 from collections.abc import Sequence
@@ -111,7 +116,26 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Reverse this revision, leaving E4-04's `SELECT` on the table in place."""
+    """Reverse this revision, leaving E4-04's `SELECT` on the table in place.
+
+    Raises `RuntimeError`, having changed nothing, when any `moderation_state` row
+    names a decider: dropping the decision columns would destroy that record.
+    """
+    decided = (
+        op.get_bind()
+        .execute(
+            sa.text(f"SELECT count(*) FROM public.{TABLE} WHERE decided_by_person_id IS NOT NULL")  # noqa: S608
+        )
+        .scalar_one()
+    )
+    if decided:
+        raise RuntimeError(
+            f"`public.{TABLE}` holds {decided} row(s) naming the person who decided them. Going "
+            "below this revision drops the decision columns, which would destroy who excluded or "
+            "kept each comment, under which role, why, and whether it was an undo: the exclusion "
+            "log's record. Nothing was changed. Keep the database at this revision, or export the "
+            "decisions and remove them deliberately first."
+        )
     for statement in DROP_THE_TRIGGER:
         op.execute(statement)
     op.execute(REVOKE_THE_DECISION_GRANT)
