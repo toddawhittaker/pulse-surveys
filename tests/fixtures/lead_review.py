@@ -101,15 +101,26 @@ ITEM_TEXT = "text"
 ITEM_SECTION_LABEL = "section_label"
 QUEUE_ITEM_FIELDS = frozenset({ITEM_ANSWER_ID, ITEM_TEXT, ITEM_SECTION_LABEL})
 
-# Work order decision 1: the log row, exactly.
+# Work order decision 1: the log row, exactly, with the seventh member the ruling
+# on dispute E6-05-03 adds: `decision`, the stored state token (`EXCLUDED` or
+# `KEPT`), so each row says which direction it is (SPEC §5.2's "Kept / Excluded").
 LOG_SECTION_LABEL = "section_label"
 LOG_DECIDED_AS = "decided_as"
 LOG_FLAGGED = "flagged"
 LOG_REASON = "reason"
 LOG_DECIDED_ON = "decided_on"
 LOG_EXCERPT = "excerpt"
+LOG_DECISION = "decision"
 LOG_ROW_FIELDS = frozenset(
-    {LOG_SECTION_LABEL, LOG_DECIDED_AS, LOG_FLAGGED, LOG_REASON, LOG_DECIDED_ON, LOG_EXCERPT}
+    {
+        LOG_SECTION_LABEL,
+        LOG_DECIDED_AS,
+        LOG_FLAGGED,
+        LOG_REASON,
+        LOG_DECIDED_ON,
+        LOG_EXCERPT,
+        LOG_DECISION,
+    }
 )
 
 # Work order decision 1: "Excerpt = first 140 characters".
@@ -154,7 +165,8 @@ ROUTES_ARE_OWED = (
     f"…{QUEUE_ENDING}` answering the reader's queue items `{{answer_id, text, section_label}}`, "
     f"`POST …{DECISION_SEGMENT}{{answer_id}}{DECISION_ENDING}` taking an action of `exclude` "
     "or `keep` and an optional reason, and `GET "
-    f"…{LOG_ENDING}` answering the exclusion log, newest first."
+    f"…{LOG_ENDING}` answering the exclusion log, newest first, each row carrying its stored "
+    "`decision` (`EXCLUDED` or `KEPT`) as well (ruling on dispute E6-05-03)."
 )
 
 # "Send the double-submit token this session is entitled to", and "send no

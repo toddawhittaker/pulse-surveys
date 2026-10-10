@@ -5,7 +5,9 @@
 > instructor cannot see carries no excerpt.
 
 Decision 1 settles the row exactly — `{section_label, decided_as, flagged, reason,
-decided_on, excerpt}` — and which rows: every `moderation_state` row with a decider
+decided_on, excerpt}`, plus `decision` (the stored state token, `EXCLUDED` or
+`KEPT`), which the ruling on dispute E6-05-03 adds so each row says its direction
+— and which rows: every `moderation_state` row with a decider
 and state `EXCLUDED` or `KEPT`, inside the reader's own leadership grant, newest
 first. `decided_on` is a date in the institution's zone; the excerpt is the first
 140 characters, withheld when the comment is not visible on its own instructor's
@@ -33,6 +35,7 @@ from fixtures.lead_review import (
     EXCERPT_LENGTH,
     LOG_DECIDED_AS,
     LOG_DECIDED_ON,
+    LOG_DECISION,
     LOG_EXCERPT,
     LOG_FLAGGED,
     LOG_REASON,
@@ -103,11 +106,15 @@ def test_a_flagged_exclusion_row_carries_the_section_the_role_the_date_and_the_e
     """Decision 1's row, member by member, for an AI-flagged comment the instructor excluded.
 
     **The mutations this kill:** a row carrying a time, an author, a decider's
-    name or an answer id (the key set is exact); `decided_as` read off today's
-    assignments rather than the stored role; `flagged` false for a harmful
-    comment; the date taken in UTC (it would read `2026-11-10`); the excerpt
-    the whole text, or not the first 140 characters. **The near miss:** an
-    excerpt of 139 or 141 characters.
+    name or an answer id (the key set is exact); a row without `decision`, the
+    six members of the work order before the ruling on dispute E6-05-03 (the key
+    set is exact); `decision` anything but the stored `EXCLUDED`; `decided_as`
+    read off today's assignments rather than the stored role; `flagged` false
+    for a harmful comment; the date taken in UTC (it would read `2026-11-10`);
+    the excerpt the whole text, or not the first 140 characters. **The near
+    misses:** an excerpt of 139 or 141 characters; `decision` in the lower-case
+    form the instructor's card uses for `status` (`excluded`), which the ruling
+    does not settle.
     """
     review = lead_review
     the_zone_is_the_one_these_dates_are_for(review)
@@ -135,12 +142,11 @@ def test_a_flagged_exclusion_row_carries_the_section_the_role_the_date_and_the_e
     assert (
         isinstance(row[LOG_SECTION_LABEL], str) and code in row[LOG_SECTION_LABEL]
     ), f"The row's section label is {row[LOG_SECTION_LABEL]!r}; it names the section {code!r}."
-    described = (row[LOG_DECIDED_AS], row[LOG_FLAGGED], row[LOG_REASON])
-    assert described == (
-        AS_INSTRUCTOR,
-        True,
-        None,
-    ), f"The row is {row!r}: the stored role {AS_INSTRUCTOR!r}, AI-flagged, and no reason."
+    described = (row[LOG_DECISION], row[LOG_DECIDED_AS], row[LOG_FLAGGED], row[LOG_REASON])
+    assert described == (STORED_EXCLUDED, AS_INSTRUCTOR, True, None), (
+        f"The row is {row!r}: the stored decision {STORED_EXCLUDED!r}, the stored role "
+        f"{AS_INSTRUCTOR!r}, AI-flagged, and no reason."
+    )
     assert row[LOG_DECIDED_ON] == ITS_INSTITUTION_DATE, (
         f"The row's date is {row[LOG_DECIDED_ON]!r}. The decision was made at {ACROSS_MIDNIGHT} "
         f"UTC, which is {ITS_INSTITUTION_DATE} in {THE_ZONE_THESE_DATES_ARE_WRITTEN_FOR}; decision "
@@ -183,11 +189,18 @@ def test_the_log_shows_kept_rows_as_well_as_excluded_ones_and_no_undecided_flag(
     comment, in the same shown week, holds only the router's flag — no decider —
     and is not in the log.
 
+    Each row says its own direction in `decision` (ruling on dispute E6-05-03):
+    the excluded row `EXCLUDED`, the kept row `KEPT`.
+
     **The mutations this kill:** a log of exclusions only (the keep is missing —
     the open item left unsettled); a log over every `moderation_state` row (the
-    router's flag appears, excerpt and all). **The near miss:** a log keyed on
-    "has a reason" rather than "has a decider" — the third comment has neither,
-    and the first test in this module has a decider and no reason.
+    router's flag appears, excerpt and all); `decision` written as one constant
+    for every row (one of the two rows reds); `decision` swapped, or read off
+    the comment's moderation verdict rather than its stored state (both
+    comments are harmful, so the kept row would not read `KEPT`). **The near
+    miss:** a log keyed on "has a reason" rather than "has a decider" — the
+    third comment has neither, and the first test in this module has a decider
+    and no reason.
     """
     review = lead_review
     excluded_reason = "E6-05 both directions: excluded by the instructor"
@@ -213,10 +226,21 @@ def test_the_log_shows_kept_rows_as_well_as_excluded_ones_and_no_undecided_flag(
 
     answered = review.log(review.lead)
     rows = review.log_rows(review.lead)
-    assert row_with_reason(rows, excluded_reason)[LOG_DECIDED_AS] == AS_INSTRUCTOR
+    excluded_row = row_with_reason(rows, excluded_reason)
+    kept_row = row_with_reason(rows, kept_reason)
+    assert excluded_row[LOG_DECIDED_AS] == AS_INSTRUCTOR
     assert (
-        row_with_reason(rows, kept_reason)[LOG_DECIDED_AS] == AS_LEAD_FACULTY
+        kept_row[LOG_DECIDED_AS] == AS_LEAD_FACULTY
     ), "The kept row does not carry the role it was decided under."
+    assert excluded_row.get(LOG_DECISION) == STORED_EXCLUDED, (
+        f"The excluded row's `{LOG_DECISION}` is {excluded_row.get(LOG_DECISION)!r}; the ruling on "
+        f"dispute E6-05-03 settles the stored state token, {STORED_EXCLUDED!r}."
+    )
+    assert kept_row.get(LOG_DECISION) == STORED_KEPT, (
+        f"The kept row's `{LOG_DECISION}` is {kept_row.get(LOG_DECISION)!r}; the ruling on dispute "
+        f"E6-05-03 settles the stored state token, {STORED_KEPT!r}. Without it a reader cannot "
+        "tell a kept comment from a dropped one (SPEC §5.2, §11 question 5)."
+    )
     assert not [value for value in strings_in(answered.json()) if undecided_text[:40] in value], (
         "The log carries a comment that holds only the router's flag. Decision 1: the log is the "
         "rows with a decider, in state EXCLUDED or KEPT."

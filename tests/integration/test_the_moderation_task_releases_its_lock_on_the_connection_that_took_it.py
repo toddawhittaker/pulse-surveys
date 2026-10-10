@@ -22,6 +22,19 @@ under which this defect cannot happen.
 the pool to hand back a *different* connection after a commit: SQLAlchemy's
 `QueuePool` returns them first in, first out, so a pool holding only the one the
 task checked out would hand that same one back every time and hide the hazard.
+Before the task runs, the test checks that premise on the pool itself: two
+checkouts in a row must land on two different server connections.
+
+**And the rotation must not come back round (the ruling on
+`docs/disputes/E6-05-01.md`).** With three idle connections taken first in,
+first out, the unlock lands on the lock's own connection exactly when the number
+of commits between the lock and the unlock is a multiple of three. As first
+written this test planted two comments, which with the pooled-engine binding is
+three commits (the lock's, then one per comment), so the unlock came back to the
+lock's connection, answered true, and the test passed against the defect it
+names. The builder measured it: lock on backend 87, the comments on 88 and 89,
+the unlock back on 87. See the test's docstring for why one comment cannot
+realign.
 
 **Two observables, both read on connections the task never held:** no advisory lock
 is held in this database once the task returns, and a second sweep on a fresh
@@ -60,9 +73,13 @@ TASKS_MODULE = "app.jobs.tasks"
 TASK_NAME = "moderate_closed_windows"
 DATABASE_MODULE = "app.db"
 
-# How many idle connections the pool is given before the task runs: enough that
-# a commit followed by a checkout lands on another connection at least twice.
+# How many idle connections the pool is given before the task runs. It must not
+# divide the number of commits between the lock and the unlock, or the rotation
+# brings the unlock back to the lock's connection (dispute E6-05-01). With one
+# comment that number is two, and three does not divide it.
 WARMED = 3
+
+BACKEND_PID = text("SELECT pg_backend_pid()")
 
 ADVISORY_LOCKS_HELD = text(
     "SELECT count(*) FROM pg_locks "
@@ -157,6 +174,27 @@ def warm_the_pool() -> Any:
     return engine
 
 
+def the_pool_rotates(engine: Any) -> None:
+    """Two checkouts in a row land on two different server connections, or the premise fails.
+
+    A pool that hands back the connection it was just given (last in, first out,
+    or a pool of one) carries the lock, the commits and the unlock on one
+    connection whatever the session is bound to, so the defect could not show
+    here and a green would mean nothing. This reads only the pool, never the code
+    under test.
+    """
+    pids = []
+    for _ in range(2):
+        with engine.connect() as connection:
+            pids.append(connection.execute(BACKEND_PID).scalar_one())
+    if pids[0] == pids[1]:
+        pytest.fail(
+            f"`{DATABASE_MODULE}.engine`'s pool handed back backend {pids[0]} twice in a row. "
+            "Decision 5a's defect needs a checkout after a commit to land on another connection; "
+            "this pool does not do that, so this test's premise does not hold."
+        )
+
+
 def test_the_task_leaves_no_lock_held_and_a_later_sweep_on_another_connection_takes_it(
     the_task_on_the_application_role: Any,
     committed_comment_world: CommentWorld,
@@ -166,21 +204,36 @@ def test_the_task_leaves_no_lock_held_and_a_later_sweep_on_another_connection_ta
 ) -> None:
     """Decision 5a: lock, per-comment commits and unlock on one connection, through the task.
 
-    Two closed-window comments, so the task commits between taking the lock and
-    releasing it. The pool is warmed, the task runs, and then:
+    One closed-window comment, so the task commits between taking the lock and
+    releasing it. The pool is warmed and shown to rotate, the task runs, and then:
 
-      - both comments hold their verdict, read on a fresh connection — the
+      - the comment holds its verdict, read on a fresh connection, which is the
         premise that the task ran and committed at all;
       - no advisory lock is held by any server connection in this database;
-      - a third comment is planted, and a sweep on a fresh connection — not one
-        the task's pool ever held — moderates it.
+      - a second comment is planted, and a sweep on a fresh connection (not one
+        the task's pool ever held) moderates it.
+
+    **Why this setup cannot realign (the ruling on dispute E6-05-01).** The pool
+    holds three idle connections and hands them out first in, first out, so with
+    the pooled-engine binding the unlock runs on the connection `c` places past
+    the lock's, where `c` is the number of commits between them; it lands back on
+    the lock's own connection only when three divides `c`. The builder's trace of
+    the shipped binding (lock on backend 87, the two comments on 88 and 89, the
+    unlock on 87) shows the lock's work moves the pool on by one place and each
+    comment by one more. With one comment, `c` is two, which three does not
+    divide, so the unlock runs on a connection that never held the lock, answers
+    false, and the lock is still held when the task returns. Even if the lock
+    took no commit of its own, `c` would be one, which three does not divide
+    either. Adding a comment to this test would bring back the coincidence the
+    dispute found (two comments make `c` three), so the count is pinned at one.
 
     **The mutation this kills:** the session bound to the pooled engine, as PR
     #293 shipped it (the unlock runs on another pooled connection, the lock stays
-    on the first, and the later sweep finds it taken). **The near miss:** a later
-    sweep run through the same pool, which can draw the very connection holding
-    the stale lock and re-enter it — which is why the later sweep here runs on a
-    connection of its own.
+    on the first, and the later sweep finds it taken). The coordinator confirms
+    this red against that binding, at the parent of the fix commit, as the ruling
+    requires. **The near miss:** a later sweep run through the same pool, which
+    can draw the very connection holding the stale lock and re-enter it, which is
+    why the later sweep here runs on a connection of its own.
     """
     from sqlalchemy.orm import Session
 
@@ -191,18 +244,16 @@ def test_the_task_leaves_no_lock_held_and_a_later_sweep_on_another_connection_ta
     world = committed_comment_world
     world.build()
     world.close_week(CLOSED_WEEK)
-    first = a_comment(world, "E605LOCKAQz the lab ran long and the slides were out of date")
-    second = a_comment(world, "E605LOCKBQz the reading list arrived on the Thursday")
+    only = a_comment(world, "E605LOCKAQz the lab ran long and the slides were out of date")
     committed_rows.commit()
 
-    warm_the_pool()
+    the_pool_rotates(warm_the_pool())
     the_task_on_the_application_role()
 
-    for answer in (first, second):
-        assert verdicts_on_a_fresh_connection(fresh_connections, answer) == [CLEAR], (
-            "The task did not moderate a closed-window comment, so it never took the lock and "
-            "committed between taking and releasing it; this test measured nothing."
-        )
+    assert verdicts_on_a_fresh_connection(fresh_connections, only) == [CLEAR], (
+        "The task did not moderate the closed-window comment, so it never took the lock and "
+        "committed between taking and releasing it; this test measured nothing."
+    )
 
     with migrated_engine.connect() as watcher:
         held = watcher.execute(ADVISORY_LOCKS_HELD).scalar_one()
@@ -212,7 +263,7 @@ def test_the_task_leaves_no_lock_held_and_a_later_sweep_on_another_connection_ta
         "the lock was taken; a lock left on a pooled connection stops every later sweep."
     )
 
-    third = a_comment(world, "E605LOCKCQz office hours clashed with the lab")
+    later = a_comment(world, "E605LOCKCQz office hours clashed with the lab")
     committed_rows.commit()
 
     connection = fresh_connections.connect()
@@ -223,7 +274,7 @@ def test_the_task_leaves_no_lock_held_and_a_later_sweep_on_another_connection_ta
         session.close()
         connection.close()
 
-    assert verdicts_on_a_fresh_connection(fresh_connections, third) == [CLEAR], (
+    assert verdicts_on_a_fresh_connection(fresh_connections, later) == [CLEAR], (
         "A sweep on a fresh connection, after the task had finished, did not moderate a comment "
         "planted after it. The task's lock was not released, so every later run does nothing."
     )

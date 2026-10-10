@@ -30,7 +30,8 @@ vocabulary, and it is written from item 5 and §4 rather than from what shipped.
 governed body of shipped strings. There were three prefixes and one surface until
 E4-12 — the survey, arriving as `student_survey` from the frontend and `submit`
 and `student` from the backend — E4-12 made it four, E5-09's comparison-set
-screen made it five, and E5.1-03's entry pages make it six:
+screen made it five, E5.1-03's entry pages made it six, and E6-05's moderation
+refusals make it seven:
 
   - `survey`, unchanged;
   - `report`, the instructor Monday report, arriving under five prefixes for one
@@ -61,7 +62,14 @@ screen made it five, and E5.1-03's entry pages make it six:
     nobody's data, so they owe item 5 no line, for the reason the
     unknown-address screen owes none. That answer is not contested, so it is
     recorded in the map below rather than in an ADR (the work order's ruling
-    R2).
+    R2);
+  - `leadership_moderation`, E6-05's: the refusals the Lead Faculty review
+    queue, its decision door and the exclusion log answer with, registered in
+    `app/copy/leadership_moderation.py`. Each says what is not there for a
+    leader to read or decide, and none tells a student anything about their
+    identity, so they owe item 5 no line (the ruling on dispute E6-05-02). Whether
+    E6-06's moderation pages, when they join this prefix, owe one is E6-06's
+    question.
 
 `GOVERNED_SURFACES` is the whole of that governance, asserted in both directions:
 a key whose prefix no surface governs is red, and a governed prefix that collects
@@ -200,6 +208,7 @@ GRADEBOOK = "gradebook"
 UNKNOWN_ADDRESS = "unknown_address"
 COMPARISON_SETS = "comparison_sets"
 ENTRY = "entry"
+LEADERSHIP_MODERATION = "leadership_moderation"
 
 # `student_survey` is E2-10's frontend copy module; `submit` and `student` are
 # E2-08's and E2-09's registry modules, whose strings are the refusals and the
@@ -253,6 +262,18 @@ GOVERNED_SURFACES = {
     # carries a confidentiality line, so how many screens the prefix spans
     # changes no count in this module.
     "entry": ENTRY,
+    # E6-05's moderation review routes: the refusals the queue, the decision and
+    # the log answer with, registered in `app/copy/leadership_moderation.py` (the
+    # ruling on dispute E6-05-02). E6-06's frontend copy for the same screens
+    # joins this prefix or registers its own row.
+    #
+    # **The mutation this row kills** is the alternative the builder rejected:
+    # the four sentences filed under `leadership_comparison_sets.` to turn the
+    # totality rule green, which would count the moderation screen's refusals
+    # toward the named-set screen. With this row, a module that registers nothing
+    # under `leadership_moderation.` is red in
+    # `test_every_governed_surface_collects_at_least_one_string`.
+    "leadership_moderation": LEADERSHIP_MODERATION,
 }
 
 # Item 5: "Confidentiality copy appears exactly once per surface (survey: once
@@ -311,6 +332,15 @@ SURFACES_WITH_NO_CONFIDENTIALITY_LINE = {
         "nobody's data — a heading and a message about what happened at the door — so, as on "
         "the unknown-address screen, there is nothing about anybody's identity to promise. "
         "Not contested, so recorded here rather than in an ADR (E5.1-03's ruling R2)."
+    ),
+    LEADERSHIP_MODERATION: (
+        "The refusals E6-05's Lead Faculty review routes answer with: no review grant, a "
+        "comment not in this reader's queue, a reason left blank, a reason too long. Each says "
+        "what is not there for a leader to read or decide, to a leader, and none tells a "
+        "student anything about their identity, so item 5's sentence would have no subject "
+        "here. Recorded here rather than in an ADR (the ruling on dispute E6-05-02, which adds "
+        "a confidentiality key only if the surface carries the line). Whether E6-06's "
+        "moderation pages owe one when they join this prefix is that ticket's question."
     ),
 }
 
