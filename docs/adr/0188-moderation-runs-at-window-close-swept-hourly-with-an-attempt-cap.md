@@ -111,6 +111,10 @@ happens when it keeps failing, or when the summary walk, which waits for it, run
   whole pass, and one unexpected error would roll them all back.
 - **No cap.** One comment no model can answer would hold its week's summary back
   for ever.
+  *Amended at E6-09, after ruling 8:* the cap holds the week too, so that is no
+  longer what it prevents. Without a cap the sweep would pay to ask a model
+  about an unanswerable comment every hour for ever, and log an error each
+  time; the cap stops the asking, and the comment waits for a person.
 - **Accepting a capped comment as clear.** That shows text no model has checked
   for a threat or a self-harm disclosure.
 - **A weekly summary walk.** One missing verdict at the Monday walk would leave
@@ -120,6 +124,9 @@ happens when it keeps failing, or when the summary walk, which waits for it, run
 
 - An unusable answer that persists for six hours withholds a comment for good,
   and nobody but the error log hears of it until E10 routes such comments to Care.
+  *Amended at E6-09, after ruling 8:* not for good, and not the comment alone. A
+  capped comment holds its whole section-week out of every reader until a person
+  decides it.
 - Ruling 5 holds: no deployment reaches real students before E10's Care queue.
 - An old `summary.v1` row for a stream above the threshold is still served, and
   it may paraphrase a comment later found Care-class. That is development data

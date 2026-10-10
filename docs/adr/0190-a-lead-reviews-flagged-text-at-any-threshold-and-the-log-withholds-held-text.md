@@ -38,7 +38,11 @@ that hold a harmful verdict and whose latest state is still `FLAGGED_COLLAPSED`
 exclusion lives, so a comment ever verdicted threat or self-harm is absent even
 after a later harmful verdict; `pulse_app` gains no grant. An item is the answer
 id, the text and the section label, shuffled on every read from the operating
-system's source.
+system's source. *Recorded at E6-09:* the queue does not wait for the comment's
+section-week to be moderated, as the week read does (SPEC §5.2's "appear
+together"). A queue item carries no week (ruling 1), so there is no partial week
+to show and nothing to subtract; a harmful comment joins the queue once it holds
+its own verdict. SPEC §5.2 and §5.5 say so.
 
 **Each door holds its own check.** `decide_as_leader` takes the comment's lock,
 re-runs the queue's own select for that answer id, and only then calls the
@@ -64,6 +68,12 @@ null unless the comment's own report shows it under its week**
 text of a week not yet fully moderated, and released text: a decision date
 beside a released comment would give back the week a release drops
 ([0153](0153-a-release-drops-its-week-because-the-gradebook-ledger-would-otherwise-name-the-author.md)).
+*Amended at E6-09:* the log also lists every undo, as its own row marked
+`is_undo` and carrying the state it restored (which may be the router's flag or
+the published state), so an undone keep reads as a reversal rather than as a
+second exclusion. The shown set is computed once for every row, by
+`report_comments.shown_under_their_week` over `visible_cards`' own helpers, in a
+fixed number of statements.
 
 **The de-anonymization statement for leadership views** (read against 0153,
 [0162](0162-the-small-n-summary-is-a-second-live-prompt-version-and-a-store-time-guard.md),

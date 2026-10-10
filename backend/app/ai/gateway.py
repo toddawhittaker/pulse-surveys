@@ -269,8 +269,9 @@ class AIProviderRefusedError(AIGatewayError):
     may want to tell them apart in a log or a later rule: a 401 or a 429 is about
     this account, and a 422 may be a content filter refusing one prompt. No
     status counts toward the moderation sweep's attempt cap (E6-08), because any
-    of them can come back on every request (`app.services.moderation`). The
-    status is an `int`, never the response body.
+    of them can come back on every request (`app.services.moderation`); the
+    sweep names the status in its error log line instead (E6-09). The status is
+    an `int`, never the response body.
     """
 
     def __init__(self, message: str, *, status: int) -> None:
