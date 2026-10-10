@@ -30,8 +30,8 @@ here (ADR 0187).
 **The sweep** (`sweep_unmoderated_comments`) is what asks a model for those
 verdicts: hourly, over every comment whose window has closed and which holds no
 verdict yet (ADR 0188). A failed call is retried by the next sweep, and an
-unusable answer counts toward an attempt cap of six, after which the comment
-stays held for good. Two sweeps never run at once, and each comment's outcome is
+unusable answer, or a refusal of this particular request, counts toward an
+attempt cap of six, after which the comment stays held for good. Two sweeps never run at once, and each comment's outcome is
 committed before the next is asked about.
 
 ## A person's decision (E6-03)
@@ -113,18 +113,27 @@ SEED_MODEL_ID = "seed"
 # section-week's summary back for days.
 MODERATION_ATTEMPT_CAP = 6
 
-# The one failure that counts toward the cap: the provider answered, and the
-# answer was not the contract even after the gateway's re-ask. Something about
+# The failure class that always counts toward the cap: the provider answered, and
+# the answer was not the contract even after the gateway's re-ask. Something about
 # this comment may be what breaks the model, so asking for ever is not safe.
 COUNTED_FAILURES = (AIResponseInvalidError,)
 
-# The failures that count nothing: a refusal (`AIProviderRefusedError`, HTTP 401,
-# 429, 500 and the like: a key, a rate limit, a provider bug) and an outage
-# (`AIProviderUnavailableError`, which includes a read timeout, or
-# `AIProviderUnreachableError`). Each is about the provider or this account, not
-# the comment, and lasts as long as it lasts. A cap that counted them would hold
-# back for good exactly the comments swept during one, Care-class disclosures
-# among them, so the comment is simply asked about again next hour (ADR 0188).
+# The refusals that count toward the cap as well (E6-05, decision 5b): the
+# statuses a provider answers about the *request* rather than about the account.
+# A hosted provider refuses a content-filtered prompt with 400 or 422, and 413 is
+# a prompt too large to take; each is answered the same for this comment every
+# time, so a comment drawing one would otherwise be asked about, and hold its
+# week back, for ever.
+REQUEST_SHAPED_REFUSALS = frozenset({400, 413, 422})
+
+# The failures that count nothing: every other refusal (`AIProviderRefusedError`,
+# HTTP 401, 403, 404, 429, 500 and the like: a key, a permission, a model name, a
+# rate limit, a provider bug) and an outage (`AIProviderUnavailableError`, which
+# includes a read timeout, or `AIProviderUnreachableError`). Each is about the
+# provider or this account, not the comment, and lasts as long as it lasts. A cap
+# that counted them would hold back for good exactly the comments swept during
+# one, Care-class disclosures among them, so the comment is simply asked about
+# again next hour (ADR 0188).
 RETRIED_FAILURES = (
     AIProviderRefusedError,
     AIProviderUnavailableError,
@@ -305,11 +314,13 @@ def sweep_unmoderated_comments(session: Session, gateway: AIGateway | None = Non
 
     - A verdict is routed through `route_verdict`, which writes it with its flag
       or its Care case.
-    - An unusable answer (`COUNTED_FAILURES`) appends one `moderation_attempt`
-      row. The one that reaches the cap is logged at error level, by answer id
-      only; the comment then stays held, never given a verdict (ADR 0188).
-    - A refusal or an outage (`RETRIED_FAILURES`) writes nothing and is logged at
-      error level; the next sweep asks again.
+    - An unusable answer (`COUNTED_FAILURES`), or a refusal with a
+      request-shaped status (`REQUEST_SHAPED_REFUSALS`), appends one
+      `moderation_attempt` row. The one that reaches the cap is logged at error
+      level, by answer id only; the comment then stays held, never given a
+      verdict (ADR 0188).
+    - Any other refusal, or an outage (`RETRIED_FAILURES`), writes nothing and is
+      logged at error level; the next sweep asks again.
 
     Anything else is rolled back to the last commit and propagates.
     """
@@ -341,16 +352,16 @@ def _moderate_each(session: Session, gateway: AIGateway | None) -> int:
             continue
         try:
             output = classify_comment_moderation(comment, gateway)
-        except COUNTED_FAILURES as failed:
-            _record_a_failed_attempt(session, answer_id, failed)
-            session.commit()
-            continue
-        except RETRIED_FAILURES as failed:
-            logger.error(
-                "the moderation sweep left answer %s for the next run after an %s",
-                answer_id,
-                type(failed).__name__,
-            )
+        except (*COUNTED_FAILURES, *RETRIED_FAILURES) as failed:
+            if _counts_toward_the_cap(failed):
+                _record_a_failed_attempt(session, answer_id, failed)
+                session.commit()
+            else:
+                logger.error(
+                    "the moderation sweep left answer %s for the next run after an %s",
+                    answer_id,
+                    type(failed).__name__,
+                )
             continue
         route_verdict(
             session,
@@ -362,6 +373,17 @@ def _moderate_each(session: Session, gateway: AIGateway | None) -> int:
         session.commit()
         routed += 1
     return routed
+
+
+def _counts_toward_the_cap(failed: Exception) -> bool:
+    """Whether one failed call is about this comment, and so counts toward the cap.
+
+    An unusable answer always is; a refusal is when its status is one of
+    `REQUEST_SHAPED_REFUSALS`; anything else in `RETRIED_FAILURES` never is.
+    """
+    if isinstance(failed, AIProviderRefusedError):
+        return failed.status in REQUEST_SHAPED_REFUSALS
+    return isinstance(failed, COUNTED_FAILURES)
 
 
 def _record_a_failed_attempt(session: Session, answer_id: UUID, failed: Exception) -> None:
