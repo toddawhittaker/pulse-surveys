@@ -115,7 +115,7 @@ const EXCLUDED_NOTICE = /^Excluded — students will not see this comment/;
 const KEPT_BY_YOU = 'You kept this comment for students.';
 const EXCLUDED_ROW = 'Excluded · Unflagged, reason given';
 const KEPT_ROW = 'Kept · AI-flagged';
-const AS_INSTRUCTOR = 'Instructor';
+const AS_INSTRUCTOR = 'Decided by the instructor';
 
 const WORLD_TIMEOUT_MS = 300_000;
 const CASE_TIMEOUT_MS = 120_000;
