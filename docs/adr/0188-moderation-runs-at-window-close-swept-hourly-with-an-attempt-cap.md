@@ -24,12 +24,26 @@ happens when it keeps failing, or when the summary walk, which waits for it, run
   comment out of a report already read. SPEC §5.2 now says Care routing happens at
   window close. Only harmful and privacy flag a comment for the instructor;
   nonsense and clear publish it (ADR 0187's definer).
+- **Closed means `closes_at < now`** by the app clock, the product's definition of
+  a closed window; a window closing at exactly the sweep's instant waits for the
+  next sweep. `route_verdict` (E6-01) still accepts `now == closes_at`, and E6-03
+  aligns it to the same rule.
+- **Two sweeps never overlap.** The sweep holds a Postgres session-level advisory
+  lock (`SWEEP_LOCK_KEY`) for its whole run and releases it in `finally`; a run
+  that finds the lock held does nothing. Without it, a long pass and the next
+  hour's could each ask about the same comment, and one could give a verdict to a
+  comment the other had just capped, after its week was read without it.
+- **The sweep commits after each comment**, so a verdict and its Care route are
+  stored before the next comment is asked about, and a later error cannot roll
+  them back.
 - **The attempt cap is six.** Only an unusable answer counts: the provider
-  answered and the answer was not the contract (`AIResponseInvalidError`) or was an
-  error status (`AIProviderRefusedError`). Each appends one `moderation_attempt`
-  row. An outage (`AIProviderUnavailableError`, including a timeout, or
-  `AIProviderUnreachableError`) writes nothing, and the comment is retried every
-  hour however long the outage lasts. At six the sweep stops asking, logs the
+  answered and the answer was not the contract even after the gateway's re-ask
+  (`AIResponseInvalidError`). Each appends one `moderation_attempt` row. A refusal
+  (`AIProviderRefusedError`: HTTP 401, 429, 500 and the like) and an outage
+  (`AIProviderUnavailableError`, including a timeout, or
+  `AIProviderUnreachableError`) write nothing and are logged at error level by
+  answer id and class name; the comment is retried every hour for as long as the
+  condition lasts. At six the sweep stops asking, logs the
   answer id once at error level, and the comment stays held: never given a verdict,
   never "clear", never accepted on timeout (the validity fail-open of SPEC §3.3 and
   ADR 0056 does not apply here). `section_week_moderated` counts a capped comment
@@ -55,8 +69,14 @@ happens when it keeps failing, or when the summary walk, which waits for it, run
 
 - **Moderating on each submit.** The verdict would vouch for text the student
   can still replace (ADR 0187); it is E10's, with the Care queue.
-- **Counting outages toward the cap.** A long outage would park every comment
-  written during it for good, Care-class disclosures among them.
+- **Counting outages or refusals toward the cap.** A long outage, an expired key
+  or six hours of rate limiting would park every comment swept during it for
+  good, Care-class disclosures among them.
+- **Selecting `closes_at <= now`.** It matches `route_verdict` today, but the
+  product treats a window as open at its closing instant; the sweep follows the
+  product, and E6-03 brings `route_verdict` to it.
+- **One commit at the end of the pass.** Every Care route would wait on the
+  whole pass, and one unexpected error would roll them all back.
 - **No cap.** One comment no model can answer would hold its week's summary back
   for ever.
 - **Accepting a capped comment as clear.** That shows text no model has checked
@@ -69,5 +89,12 @@ happens when it keeps failing, or when the summary walk, which waits for it, run
 - An unusable answer that persists for six hours withholds a comment for good,
   and nobody but the error log hears of it until E10 routes such comments to Care.
 - Ruling 5 holds: no deployment reaches real students before E10's Care queue.
+- An old `summary.v1` row for a stream above the threshold is still served, and
+  it may paraphrase a comment later found Care-class. That is development data
+  only under ruling 5; E6-07 carries it to E10.
+- Because refusals are retried rather than counted, the comments that do reach
+  the cap are the ones whose text breaks the model's answer, and those may lean
+  toward Care-class disclosures. E6-07 carries that skew to E10 with the capped
+  comments themselves.
 - The threat and self-harm recall floor and the moderation floor stay deferred to
   E10's live run; the typed cases ship now.
