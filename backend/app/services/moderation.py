@@ -245,6 +245,8 @@ def sweep_unmoderated_comments(session: Session, gateway: AIGateway | None = Non
         comment = session.execute(
             select(Answer.comment_text).where(Answer.id == answer_id)
         ).scalar_one()
+        if comment is None:
+            continue
         savepoint = session.begin_nested()
         try:
             output = classify_comment_moderation(comment, gateway)

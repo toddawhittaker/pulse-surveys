@@ -35,8 +35,8 @@ from fixtures.moderation import (
 )
 from fixtures.report_comments import CommentWorld, configured_threshold
 from fixtures.report_views import INSTRUCTOR_STREAM
-from fixtures.summary_job import StreamAwareGateway, comment_text
 from fixtures.summary_job import INSTRUCTOR_STREAM as INSTRUCTOR_TOKEN
+from fixtures.summary_job import StreamAwareGateway, comment_text
 from sqlalchemy import text
 
 pytestmark = pytest.mark.integration
@@ -276,7 +276,10 @@ def test_six_unusable_answers_cap_the_comment_and_its_week_goes_on_without_it(
     world.close_week(SECOND_CLOSED_WEEK)
     first_week = [
         a_comment(
-            world, CLOSED_WEEK, comment_text(INSTRUCTOR_TOKEN, f"E602CAPA{i:02d}Qz"), moderation=CLEAR
+            world,
+            CLOSED_WEEK,
+            comment_text(INSTRUCTOR_TOKEN, f"E602CAPA{i:02d}Qz"),
+            moderation=CLEAR,
         )
         for i in range(threshold - 1)
     ]

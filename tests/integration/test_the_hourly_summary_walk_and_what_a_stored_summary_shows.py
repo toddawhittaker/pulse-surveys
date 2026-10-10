@@ -23,7 +23,7 @@ from fixtures.mock_ai import (
     Endpoint,
     MockAiProvider,
 )
-from fixtures.moderation import CLEAR, SELF_HARM, UNMODERATED
+from fixtures.moderation import CLEAR, UNMODERATED
 from fixtures.report_comments import CommentWorld, configured_threshold
 from fixtures.report_views import COURSE_STREAM, INSTRUCTOR_STREAM
 from fixtures.summary_job import COURSE_STREAM as COURSE_TOKEN
@@ -132,9 +132,7 @@ def test_a_week_is_summarized_on_the_first_walk_after_its_last_verdict_and_never
 
     third = StreamAwareGateway(summary_contracts)
     walk(world, third)
-    assert not any(
-        nonce in "\n".join(third.prompts) for nonce in ("E602EARLYQz", "E602LATEQz")
-    )
+    assert not any(nonce in "\n".join(third.prompts) for nonce in ("E602EARLYQz", "E602LATEQz"))
     assert {week: summaries(world, week) for week in (EARLY_WEEK, LATE_WEEK)} == stored
 
 
