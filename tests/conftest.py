@@ -283,6 +283,7 @@ pytest_plugins = (
     "fixtures.report_benchmarks",
     "fixtures.named_sets",
     "fixtures.instructor_decisions",
+    "fixtures.lead_review",
 )
 
 
