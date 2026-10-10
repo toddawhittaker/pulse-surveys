@@ -39,6 +39,10 @@ teach the next person to delete it.
 **Marked `invariant` at the module level**, which puts it in the isolated §4.1
 pass and satisfies
 `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`.
+
+**Since E6-09 the same sweep watches `app.services.moderation` as well** (its
+done-when 10), with planted imports of its own; the signature half stays the
+comment path's alone.
 """
 
 import ast
@@ -121,6 +125,31 @@ IMPORTS_MUST_ALLOW = (
     '"""This never reads app.services.report_comments; the instructor path is not a student one."""',
 )
 
+# **The moderation service is watched too, since E6-09** (done-when 10). The E6
+# boundary review found that `app.services.moderation` — which holds the
+# decision service and the exclusion log (E6-03, E6-05, E6-08), reads of flagged
+# text a student never sees — was reachable from these four modules with nothing
+# to say so. Same reader, same
+# four modules, its own planted samples.
+MODERATION_SERVICE_MODULE = "app.services.moderation"
+
+MODERATION_IMPORTS_MUST_CATCH = (
+    f"import {MODERATION_SERVICE_MODULE}",
+    f"from {MODERATION_SERVICE_MODULE} import route_verdict",
+    "from app.services import moderation",
+    f"import {MODERATION_SERVICE_MODULE} as moderation",
+)
+
+# The near misses: a sibling whose name *starts* with the service's (a prefix
+# match on the bare string would take it), the copy module whose name ends in
+# `moderation`, and prose.
+MODERATION_IMPORTS_MUST_ALLOW = (
+    "from app.services.moderation_rules import something",
+    "from app.copy import leadership_moderation",
+    "from app.services import validity",
+    '"""Students never reach app.services.moderation; this page shows published text only."""',
+)
+
 
 @pytest.fixture(autouse=True)
 def _a_stated_environment(configured_env: dict[str, str]) -> None:
@@ -166,12 +195,21 @@ def imports_of(source: str, path: str = "<sample>") -> set[str]:
     return found
 
 
+def reaches(source: str, module: str, path: str = "<sample>") -> bool:
+    """Whether a source imports `module` (or anything under it), by either statement form."""
+    return any(
+        name == module or name.startswith(f"{module}.") for name in imports_of(source, path)
+    )
+
+
 def reaches_the_comment_service(source: str, path: str = "<sample>") -> bool:
     """Whether a source imports the comment service, by either statement form."""
-    return any(
-        name == COMMENT_SERVICE_MODULE or name.startswith(f"{COMMENT_SERVICE_MODULE}.")
-        for name in imports_of(source, path)
-    )
+    return reaches(source, COMMENT_SERVICE_MODULE, path)
+
+
+def reaches_the_moderation_service(source: str, path: str = "<sample>") -> bool:
+    """Whether a source imports the moderation service, by either statement form."""
+    return reaches(source, MODERATION_SERVICE_MODULE, path)
 
 
 def test_the_import_reader_catches_what_it_claims_to_and_spares_what_it_must() -> None:
@@ -260,6 +298,66 @@ def test_no_student_facing_module_imports_the_report_comment_service() -> None:
         "their moderation status, and §5.2 shows an instructor a flagged-collapsed comment that "
         "students never see. §5.4 gives students a different rule over the same rows, and E8 owns "
         "writing it."
+    )
+
+
+def test_the_import_reader_catches_a_planted_moderation_import_and_spares_its_near_misses() -> (
+    None
+):
+    """E6-09 done-when 10's instrument, both directions, before the tree is judged with it.
+
+    The planted imports are the four spellings a student module could use to reach
+    `app.services.moderation`, `from app.services import moderation` among them —
+    the spelling a reader looking only at an `ImportFrom`'s `module` misses.
+
+    **The mutation this kills:** the moderation sweep below written as a text
+    search, or as a bare `startswith("app.services.moderation")` — the near miss
+    `app.services.moderation_rules` is what the second takes. **Green today**: this
+    is arithmetic on strings, and it is what makes the sweep's green mean anything.
+    """
+    for sample in MODERATION_IMPORTS_MUST_CATCH:
+        assert reaches_the_moderation_service(sample), (
+            f"The import reader found no reference to `{MODERATION_SERVICE_MODULE}` in "
+            f"{sample!r}, which imports it, so the sweep below would read a student module that "
+            "did this as clean."
+        )
+    for sample in MODERATION_IMPORTS_MUST_ALLOW:
+        assert not reaches_the_moderation_service(sample), (
+            f"The import reader read `{MODERATION_SERVICE_MODULE}` out of {sample!r}, which does "
+            "not import it; the sweep below would then be red against a correct student module."
+        )
+
+
+def test_no_student_facing_module_imports_the_moderation_service() -> None:
+    """E6-09 done-when 10: the student-path tripwire watches `app.services.moderation`.
+
+    That module holds the decision service and the exclusion log (E6-03, E6-05,
+    E6-08): flagged text, reasons and excerpts that SPEC §5.2 collapses from
+    students. A student-facing module that imported it could put any of them on
+    a student's page. Same four modules, each required to exist first, as the
+    comment-service sweep above requires them.
+
+    **The mutation this kills:** `from app.services.moderation import ...` added
+    to any of the four student-facing modules. **The near miss** is the instrument
+    test above: a reader that cannot see `from app.services import moderation`
+    would leave this green over exactly that import.
+    """
+    missing = [name for name in STUDENT_FACING_MODULES if not (BACKEND_ROOT / name).is_file()]
+    assert not missing, (
+        f"{missing} are not in {BACKEND_ROOT.relative_to(REPO_ROOT)}, so this sweep judged fewer "
+        "modules than it names."
+    )
+    offenders = sorted(
+        name
+        for name in STUDENT_FACING_MODULES
+        if reaches_the_moderation_service(
+            (BACKEND_ROOT / name).read_text(encoding="utf-8"), str(BACKEND_ROOT / name)
+        )
+    )
+    assert not offenders, (
+        f"{offenders} import `{MODERATION_SERVICE_MODULE}`. SPEC §4.1 item 6: no view may ever "
+        "widen a student's visibility, and that module reads flagged text, reasons and excerpts "
+        "that §5.2 collapses from students."
     )
 
 

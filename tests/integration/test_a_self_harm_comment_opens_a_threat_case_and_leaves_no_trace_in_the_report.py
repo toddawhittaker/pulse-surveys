@@ -23,6 +23,11 @@ What is asserted, and through which reader (`docs/MISTAKES.md` entry 58):
     satisfy the absence alone (`docs/MISTAKES.md` entry 3).
 
 `tests/e2e/exit-moderation.spec.ts` drives the same clause on the running stack.
+
+**Marked `invariant` since E6-09** (done-when 9): "no trace in the instructor view"
+is a §4.1 denial, and its name carries the `leaves_no_trace` shape that
+`tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`
+now demands the marker of.
 """
 
 from typing import Any
@@ -54,7 +59,7 @@ from fixtures.report_api import (
 )
 from fixtures.report_views import COURSE_STREAM, INSTRUCTOR_STREAM
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 
 # The week the comment is written in. Two responses before it, three after:
 # the "3-response week" of the exit clause.
