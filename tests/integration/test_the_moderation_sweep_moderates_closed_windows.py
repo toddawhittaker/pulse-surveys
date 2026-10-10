@@ -748,12 +748,12 @@ def test_a_sweep_that_starts_while_another_runs_asks_nothing_and_writes_nothing(
         close_sweep_session(second)
 
 
-class UnexpectedFailure(RuntimeError):
+class UnexpectedFailureError(RuntimeError):
     """Not one of the gateway's error classes: what a bug raises, not what a provider does."""
 
 
 class FailsOnItsSecondCall:
-    """The real gateway, except that the second call carrying `nonce` raises `UnexpectedFailure`.
+    """The real gateway, except that the second call carrying `nonce` raises `UnexpectedFailureError`.
 
     Answers `run_task` and `run_task_with_usage`, the two entry points the
     repository's gateway doubles already answer; anything else is passed to the
@@ -772,7 +772,7 @@ class FailsOnItsSecondCall:
             self.carrying += 1
             if self.carrying == 2:
                 self.raised = True
-                raise UnexpectedFailure("an error that is not a gateway error")
+                raise UnexpectedFailureError("an error that is not a gateway error")
 
     def run_task(self, **kwargs: Any) -> Any:
         self._count(kwargs)
@@ -826,7 +826,7 @@ def test_a_care_route_committed_before_a_later_failure_survives_it(
     session = a_sweep_session(own_connections)
     try:
         # Whether the sweep lets the error out or carries on is not this test's subject.
-        with contextlib.suppress(UnexpectedFailure):
+        with contextlib.suppress(UnexpectedFailureError):
             sweep_unmoderated_comments(session, gateway)
         session.rollback()
     finally:
