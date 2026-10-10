@@ -162,6 +162,7 @@ submitted.
 | 06 | [The leadership queue and log pages](E6-06-leadership-moderation-pages.md) | `e6/leadership-moderation-pages` | light | 04, 05 | The review queue page, the exclusion log page and its row, the routes and landing links. | #297 as 72b062b0, 2026-10-10 |
 | 07 | [E6 exit](E6-07-e6-exit.md) | `e6/e6-exit` | light | all | The exit clause driven on the running stack; the carried files closed and `../e7/carried-from-e6.md` written; the boundary reviews; SPEC §14.3. | |
 | 08 | [The exclusion log leaves out taught sections, and no HTTP status caps a comment](E6-08-review-residue.md) | `e6/review-residue` | heavy | 05 | The two MEDs left by PR #296's re-check: the log drops rows from the reader's taught sections, and only an unusable answer counts toward the moderation cap. | #298 as e4f88b24, 2026-10-10 |
+| 10 | [Keyboard focus survives a moderation decision](E6-10-report-card-focus.md) | `e6/report-card-focus` | light | 04 | Focus and announcements on the instructor's comment cards after Keep, Exclude, Undo and Cancel; the reason refusal tied to its field; the chart toggles named; the log row's role in a sentence. | |
 
 ## Waves
 
