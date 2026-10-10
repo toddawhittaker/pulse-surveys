@@ -184,6 +184,11 @@ shown to sighted readers too (or a record argues the hidden table is enough),
 and input boundaries measure at least 3:1 against their background, pinned the
 way `reportContrastTokens.test.ts` pins the report's colours.
 
+**Closed by E6-04.** Each trend chart has a "Show the numbers" toggle that shows
+its tables to sighted readers; a screen reader has them either way. Text inputs
+draw their boundary in `--input-edge` (3.55:1 on paper, 3.32:1 on chalk), pinned
+by `frontend/src/components/inputBoundaryTokens.test.ts`.
+
 ## A named-set write leaves no audit record
 
 `../e5/deferred.md`'s "a deleted comparison set leaves no trace anywhere"
@@ -457,6 +462,10 @@ commenters, and ADR 0182 records that each held stream shows its own notice.
 mockups alone. **Owner:** E6, the first epic after E5.1 that reopens the
 instructor report's interface (its moderation lifecycle lives on that page).
 **Done when:** the mockups show the per-stream rule and per-stream notices.
+
+**Closed by E6-04.** Each held comment group in the report mockup shows its own
+notice, the notice names no count, and the admin console's threshold helper
+counts students who commented rather than responses.
 
 ## A teaching grant with a child edge would stop its section's roster sync
 

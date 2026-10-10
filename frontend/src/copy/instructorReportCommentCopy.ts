@@ -118,6 +118,29 @@ export const INSTRUCTOR_REPORT_COMMENT_COPY = {
   // the same section describes; it is not a warning and nothing here scolds.
   'instructor_report_comments.comment.excluded_notice':
     'Excluded — students will not see this comment. The exclusion is logged and visible to the Lead Faculty.',
+  // SPEC §5.2's three decisions, in the mockup's words
+  // (`design/CommentCard.dc.html`). Excluding is the one that changes what
+  // students see, so it says so; keeping is the default the instructor confirms.
+  'instructor_report_comments.comment.keep': 'Keep for students',
+  'instructor_report_comments.comment.exclude': 'Exclude from student view',
+  'instructor_report_comments.comment.undo': 'Undo',
+  // §5.2's logged decision on a kept comment. "You" is the only attribution any
+  // card carries (ADR 0189): another reader's decision is stated without a name.
+  'instructor_report_comments.comment.kept_by_you': 'You kept this comment for students.',
+  'instructor_report_comments.comment.kept': 'Kept after review.',
+  // §5.2: excluding a comment the AI did not flag requires a stated reason. The
+  // prompt asks plainly and does not suggest the comment was wrong to write.
+  'instructor_report_comments.comment.reason_label': 'Why should students not see this comment?',
+  'instructor_report_comments.comment.reason_remaining': '{remaining} characters left',
+  'instructor_report_comments.comment.reason_submit': 'Exclude with this reason',
+  'instructor_report_comments.comment.reason_cancel': 'Cancel',
+  // A decision that got no answer the server wrote a sentence for. The server's
+  // own refusals are shown as sent and are not here.
+  'instructor_report_comments.comment.decision_unavailable':
+    'The decision could not be sent. Try again in a moment.',
+  'instructor_report_comments.comment.decision_session_ended':
+    'Your session has ended. Open the report again from your course to make this decision.',
+
   // The optional stream chip (SPEC §7.6: "optional stream chip, default off").
   // It has no use in E4 — the report groups by stream, so a chip inside a group
   // would repeat its heading — and exists for a later surface that lists
@@ -147,9 +170,9 @@ export function copy(key: InstructorReportCommentCopyKey): string {
 /**
  * One entry with its `{placeholders}` filled in.
  *
- * Four entries take them: the flag chip's reason, the summary's response
- * count, the held note's type, and the small-N threshold — each a value the
- * payload supplies. The substitution lives here rather than in the components
+ * Five entries take them: the flag chip's reason, the summary's response
+ * count, the held note's type, the small-N threshold — each a value the
+ * payload supplies — and the reason prompt's remaining characters. The substitution lives here rather than in the components
  * so that a sentence and the shape of its holes stay in one file.
  */
 export function fillCopy(

@@ -3,7 +3,7 @@ import type { JSX } from 'react';
 
 import { AiPanel } from './AiPanel';
 import { CommentCard } from './CommentCard';
-import type { ReportComment } from './CommentCard';
+import type { CommentDecision, DecisionAnswer, ReportComment } from './CommentCard';
 import { SmallNNotice } from './SmallNNotice';
 import './instructorReportComments.css';
 import { copy } from '../copy/instructorReportCommentCopy';
@@ -59,6 +59,11 @@ import { copy } from '../copy/instructorReportCommentCopy';
  * would be a caller showing a below-threshold stream's raw comments, and that is
  * not a default anything should have.
  *
+ * **Decisions are the page's to send** (SPEC §5.2). Given `decide`, each card
+ * whose comment carries its handle is offered the moderation controls, with
+ * `decide` bound to that handle; the card itself never holds the handle, so it
+ * still has nothing it could render one from.
+ *
  * **Order is the order given.** The randomization SPEC §4 requires is the
  * server's; nothing here sorts, shuffles, groups or numbers, and the cards
  * carry no position a reader could read submission order out of.
@@ -69,6 +74,7 @@ export function CommentGroup({
   comments,
   suppressed,
   threshold,
+  decide,
 }: {
   readonly stream: 'instructor' | 'course';
   /** The stream's generated summary, or `null` for a week none was written for. */
@@ -77,7 +83,9 @@ export function CommentGroup({
     readonly responseCount: number;
     readonly heldNote: string | null;
   } | null;
-  readonly comments: readonly ReportComment[];
+  readonly comments: readonly GroupComment[];
+  /** Sends one decision on the comment with this handle. Absent, the cards are read-only. */
+  readonly decide?: (answerId: string, decision: CommentDecision) => Promise<DecisionAnswer>;
   /** Whether this stream is below SPEC §4's threshold this week, as the payload declares it. */
   readonly suppressed: boolean;
   /** The configured threshold the payload compared this stream with. */
@@ -124,14 +132,25 @@ export function CommentGroup({
           <SmallNNotice threshold={threshold} />
         </div>
       ) : (
-        <GroupComments comments={comments} />
+        <GroupComments comments={comments} decide={decide} />
       )}
     </section>
   );
 }
 
+/** One comment of a group: the card's fields, and the handle a decision is sent with. */
+export type GroupComment = ReportComment & { readonly answerId?: string };
+
 /** The cards a group holds, or §5.1's one-line notice when the week produced none. */
-function GroupComments({ comments }: { readonly comments: readonly ReportComment[] }): JSX.Element {
+function GroupComments({
+  comments,
+  decide,
+}: {
+  readonly comments: readonly GroupComment[];
+  readonly decide:
+    | ((answerId: string, decision: CommentDecision) => Promise<DecisionAnswer>)
+    | undefined;
+}): JSX.Element {
   if (comments.length === 0) {
     return (
       <p className="pulse-comment-group__empty">
@@ -142,18 +161,26 @@ function GroupComments({ comments }: { readonly comments: readonly ReportComment
 
   return (
     <ul className="pulse-comment-group__cards">
-      {comments.map((comment, position) => (
-        // The payload gives a comment no id — by design, since an id is a
-        // handle on one student's words — so the key is the position in the
-        // array the server randomized. It is not rendered anywhere.
-        <li key={position}>
-          <CommentCard
-            text={comment.text}
-            status={comment.status}
-            flagReason={comment.flagReason}
-          />
-        </li>
-      ))}
+      {comments.map((comment, position) => {
+        const { answerId } = comment;
+        return (
+          // The key is the position in the array the server randomized, not
+          // the handle: a handle is never put anywhere the page renders.
+          <li key={position}>
+            <CommentCard
+              text={comment.text}
+              status={comment.status}
+              flagReason={comment.flagReason}
+              decidedByYou={comment.decidedByYou}
+              decide={
+                decide === undefined || answerId === undefined
+                  ? undefined
+                  : (decision) => decide(answerId, decision)
+              }
+            />
+          </li>
+        );
+      })}
     </ul>
   );
 }

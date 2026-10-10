@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   SECTIONS_PATH,
+  decideOnComment,
   publishedWeeksPath,
   readInstructorReport,
   readPublishedWeeks,
@@ -191,6 +192,77 @@ describe('reading a report', () => {
     answering(new Response('<html>gateway</html>', { status: 502 }));
     return readInstructorReport(SECTION_ID, 4).then((answer) => {
       expect(answer).toEqual({ kind: 'unavailable', detail: null });
+    });
+  });
+});
+
+describe('decideOnComment', () => {
+  const ANSWER_ID = '0f6c1d2e-3a4b-4c5d-8e9f-a0b1c2d3e4f5';
+
+  /** `app.copy`'s 409 sentence, transcribed. */
+  const NOT_ALLOWED =
+    'That decision does not apply to this comment as it stands, so nothing was changed.';
+
+  afterEach(() => {
+    document.cookie = 'pulse_csrf=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+  });
+
+  it('posts the decision to the comment and answers the new card', async () => {
+    document.cookie = 'pulse_csrf=a-token-the-server-set';
+    const card = {
+      text: 'The labs ran long.',
+      status: 'excluded',
+      stream: 'COURSE',
+      answer_id: ANSWER_ID,
+      flag: null,
+      decided_by_you: true,
+    };
+    const asked: { url: string; init: RequestInit | undefined }[] = [];
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      asked.push({ url, init });
+      return Promise.resolve(json(200, card));
+    });
+
+    const outcome = await decideOnComment(ANSWER_ID, { action: 'exclude', reason: 'Off topic.' });
+
+    expect(outcome).toEqual({ kind: 'decided', card });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.url).toBe(`/instructor/comments/${ANSWER_ID}/decisions`);
+    expect(asked[0]?.init?.method).toBe('POST');
+    expect(JSON.parse(asked[0]?.init?.body as string)).toEqual({
+      action: 'exclude',
+      reason: 'Off topic.',
+    });
+    expect(new Headers(asked[0]?.init?.headers).get('X-Pulse-CSRF')).toBe(
+      'a-token-the-server-set',
+    );
+  });
+
+  it.each([404, 409, 422])('carries the server sentence of a %i as a refusal', async (status) => {
+    answering(json(status, { detail: NOT_ALLOWED }));
+    expect(await decideOnComment(ANSWER_ID, { action: 'undo', reason: null })).toEqual({
+      kind: 'refused',
+      detail: NOT_ALLOWED,
+    });
+  });
+
+  it('answers session-ended for a 401', async () => {
+    answering(json(401, { detail: 'Not authenticated' }));
+    expect(await decideOnComment(ANSWER_ID, { action: 'keep', reason: null })).toEqual({
+      kind: 'session-ended',
+    });
+  });
+
+  it('answers unavailable for a network failure and for a body that is no card', async () => {
+    answering(new Error('offline'));
+    expect(await decideOnComment(ANSWER_ID, { action: 'keep', reason: null })).toEqual({
+      kind: 'unavailable',
+      detail: null,
+    });
+    answering(json(200, { not: 'a card' }));
+    expect(await decideOnComment(ANSWER_ID, { action: 'keep', reason: null })).toEqual({
+      kind: 'unavailable',
+      detail: null,
     });
   });
 });

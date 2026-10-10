@@ -224,6 +224,98 @@
   background: var(--chalk);
 }
 
+/* ---- Moderation controls (SPEC §5.2) ---- */
+
+/* A logged decision and its Undo share a line, as the mockup draws them. */
+.pulse-comment-card__decision-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.pulse-comment-card__decision-row .pulse-comment-card__notice {
+  margin-top: 0;
+  flex: 1;
+}
+
+.pulse-comment-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+/* The mockup's button, the disclosure's twin. */
+.pulse-comment-card__action {
+  white-space: nowrap;
+  font-family: var(--font-body);
+  font-size: var(--text-1);
+  font-weight: 500;
+  padding: 6px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+  background: var(--paper);
+  color: var(--spruce);
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.pulse-comment-card__action:hover {
+  background: var(--chalk);
+}
+
+.pulse-comment-card__action[disabled] {
+  color: var(--spruce-60);
+  cursor: default;
+}
+
+/* Madder on the one action that changes what students see: "attend to this". */
+.pulse-comment-card__action--exclude {
+  color: var(--madder);
+}
+
+/* A sentence the server refused a decision with. */
+.pulse-comment-card__refusal {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-1);
+  line-height: 1.5;
+  color: var(--madder);
+}
+
+.pulse-comment-card__reason {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+
+.pulse-comment-card__reason-label {
+  font-size: var(--text-1);
+  font-weight: 500;
+  color: var(--spruce);
+}
+
+/* A text input: its boundary is the measured input edge, not the hairline. */
+.pulse-comment-card__reason-field {
+  min-height: 72px;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-body);
+  font-size: var(--text-2);
+  line-height: 1.55;
+  color: var(--spruce);
+  background: var(--paper);
+  border: 1px solid var(--input-edge);
+  border-radius: var(--radius-input);
+  resize: vertical;
+}
+
+.pulse-comment-card__reason-counter {
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  color: var(--spruce-60);
+}
+
 /* The optional stream chip, default off — a mono eyebrow in a hairline box. */
 .pulse-comment-card__stream-chip {
   display: inline-block;
