@@ -1,4 +1,4 @@
-"""Leadership's named comparison sets: the seven routes the definition surface is (SPEC §5.1).
+"""Leadership's routes: the named comparison sets (SPEC §5.1) and moderation review (SPEC §5.2).
 
 §13's tree gives the leadership-facing API this module, and §13's closing rule
 keeps it thin: a handler here resolves the session, hands the work to
@@ -6,10 +6,17 @@ keeps it thin: a handler here resolves the session, hands the work to
 Every decision — who may change which set, what a set may be, how wide one is —
 is in that service, and the payload's shape is `app.schemas.comparison_sets`.
 
-**Seven routes and no others.** The institution's sets, one set, the choices a
+**Seven named-set routes.** The institution's sets, one set, the choices a
 set is defined out of, and the three writes; plus the preview, which is how a
 definer sees what a set reaches before anything renders a figure over it. E5-09
 consumes all seven.
+
+**Three moderation review routes** (E6-05), at the end of this file: the
+reader's review queue, a decision on one queued comment, and the exclusion log.
+Unlike the sets, these are scoped to the reader's own leadership grant
+(`app.services.authz.lead_review_courses`), and the module docstring of
+`app.services.moderation` says what each answers; the section at the foot of
+this file says what each refuses.
 
 **`/leadership/comparison-sets/options` is declared before
 `/leadership/comparison-sets/{set_id}`, and that is load-bearing.** FastAPI
@@ -73,6 +80,7 @@ an edit — and `docs/tickets/e5/deferred.md` carries what a delete leaves behin
 which is nothing.
 """
 
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -80,6 +88,12 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import csrf_verified_leadership, person_of, require_leadership
 from app.config import Settings
+from app.copy.leadership_moderation import (
+    NO_REVIEW_GRANT,
+    NOT_IN_QUEUE,
+    REASON_BLANK,
+    REASON_TOO_LONG,
+)
 from app.copy.leadership_sets import NOT_THE_SETS_DEFINER, SET_UNAVAILABLE
 from app.db import get_session
 from app.schemas.comparison_sets import (
@@ -89,6 +103,7 @@ from app.schemas.comparison_sets import (
     SetPreview,
     SetWrite,
 )
+from app.schemas.moderation import ExclusionLog, LeadDecision, LogRow, QueueItem, ReviewQueue
 from app.services.comparison_sets import (
     NotTheSetsDefinerError,
     SetUnavailableError,
@@ -100,6 +115,17 @@ from app.services.comparison_sets import (
     listed_sets,
     preview_of,
     read_set,
+)
+from app.services.moderation import (
+    CommentNotInQueueError,
+    DecisionAction,
+    DecisionNotAllowedError,
+    NoReviewGrantError,
+    ReasonBlankError,
+    ReasonTooLongError,
+    decide_as_leader,
+    exclusion_log,
+    review_queue,
 )
 from app.services.session import SessionClaims
 
@@ -301,3 +327,123 @@ def _not_the_definer() -> HTTPException:
 def _refused(refused: WriteRefusedError) -> HTTPException:
     """One translated constraint refusal, with the status that rule is answered under."""
     return HTTPException(status_code=refused.status_code, detail=refused.detail)
+
+
+# ---------------------------------------------------------------------------
+# Moderation review (E6-05, SPEC §5.2).
+#
+# Every route reads the reader's own leadership grant, and refuses three ways
+# past the role gate: a reader whose grant covers no course is a 403
+# (`NO_REVIEW_GRANT`); a decision on anything not in the reader's queue now is
+# one 404 (`NOT_IN_QUEUE`), the same body for a sibling lead's comment, a decided
+# one, a Care-class one and an id nothing holds, so nothing says the comment
+# exists; and a stated reason that is blank or too long is a 422.
+# ---------------------------------------------------------------------------
+
+MODERATION_PATH = "/leadership/moderation"
+QUEUE_PATH = f"{MODERATION_PATH}/queue"
+DECISIONS_PATH = f"{MODERATION_PATH}/comments/{{answer_id}}/decisions"
+LOG_PATH = f"{MODERATION_PATH}/log"
+
+NO_REVIEW_GRANT_STATUS = 403
+NOT_IN_QUEUE_STATUS = 404
+REASON_REFUSED_STATUS = 422
+
+# What a leader's two actions mean to the decision service. Typed so that the
+# door cannot be handed an undo, which a leader does not have.
+LEAD_ACTIONS: dict[str, Literal[DecisionAction.EXCLUDE, DecisionAction.KEEP]] = {
+    "exclude": DecisionAction.EXCLUDE,
+    "keep": DecisionAction.KEEP,
+}
+
+
+@router.get(QUEUE_PATH, summary="The comments awaiting my review")
+def read_review_queue(
+    response: Response,
+    claims: SessionClaims = Depends(require_leadership),
+    session: Session = Depends(get_session),
+) -> ReviewQueue:
+    """The reader's review queue: text and section, no week, no time, no count, a fresh order."""
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        queued = review_queue(session, person_id=person_of(claims))
+    except NoReviewGrantError:
+        raise _no_review_grant() from None
+    return ReviewQueue(
+        items=[
+            QueueItem(answer_id=item.answer_id, text=item.text, section_label=item.section_label)
+            for item in queued
+        ]
+    )
+
+
+@router.post(
+    DECISIONS_PATH,
+    status_code=NO_CONTENT,
+    summary="Exclude or keep one comment in my review queue",
+)
+def decide_on_queued_comment(
+    answer_id: UUID,
+    decision: LeadDecision,
+    response: Response,
+    claims: SessionClaims = Depends(csrf_verified_leadership),
+    session: Session = Depends(get_session),
+) -> None:
+    """One decision on one queued comment, written under the role whose grant covers it.
+
+    204 and no body: the comment leaves the queue, and the queue and the log
+    are the two reads that show what happened.
+    """
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        decide_as_leader(
+            session,
+            person_id=person_of(claims),
+            answer_id=answer_id,
+            action=LEAD_ACTIONS[decision.action],
+            reason=decision.reason,
+        )
+    except NoReviewGrantError:
+        raise _no_review_grant() from None
+    except (CommentNotInQueueError, DecisionNotAllowedError):
+        raise HTTPException(status_code=NOT_IN_QUEUE_STATUS, detail=NOT_IN_QUEUE.text) from None
+    except ReasonBlankError:
+        raise HTTPException(status_code=REASON_REFUSED_STATUS, detail=REASON_BLANK.text) from None
+    except ReasonTooLongError:
+        raise HTTPException(
+            status_code=REASON_REFUSED_STATUS, detail=REASON_TOO_LONG.text
+        ) from None
+
+
+@router.get(LOG_PATH, summary="The exclusion log inside my own grant")
+def read_exclusion_log(
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(require_leadership),
+    session: Session = Depends(get_session),
+) -> ExclusionLog:
+    """Every exclusion and keep a person made inside the reader's own grant, newest first."""
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        logged = exclusion_log(session, person_id=person_of(claims), settings=settings)
+    except NoReviewGrantError:
+        raise _no_review_grant() from None
+    return ExclusionLog(
+        rows=[
+            LogRow(
+                section_label=row.section_label,
+                decided_as=row.decided_as.value,
+                flagged=row.flagged,
+                reason=row.reason,
+                decided_on=row.decided_on,
+                excerpt=row.excerpt,
+            )
+            for row in logged
+        ]
+    )
+
+
+def _no_review_grant() -> HTTPException:
+    """The 403 for a leader whose own grant puts no course under review."""
+    return HTTPException(status_code=NO_REVIEW_GRANT_STATUS, detail=NO_REVIEW_GRANT.text)

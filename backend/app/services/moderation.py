@@ -71,12 +71,16 @@ exclusion or keep.
 """
 
 import logging
-from collections.abc import Sequence
+import random
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import ColumnElement, SQLColumnExpression, func, insert, select, text
+from sqlalchemy import ColumnElement, Select, SQLColumnExpression, func, insert, select, text
 from sqlalchemy.orm import Session
 
 from app.ai.contracts import HeldNoteType, ModerationVerdict
@@ -90,10 +94,14 @@ from app.ai.gateway import (
 from app.ai.tasks import classify_comment_moderation
 from app.config import Settings
 from app.models.ai import Classification, ClassificationTask, ModerationAttempt
+from app.models.identity import AssignmentRole
+from app.models.org import Course, Prefix, Section
 from app.models.report import REASON_BOUND, DeciderRole, ModerationState
 from app.models.survey import Answer, Question, QuestionKind, Response
-from app.models.term import SurveyWindow
+from app.models.term import SurveyWindow, Term
 from app.services import clock
+from app.services.authz import lead_review_courses
+from app.services.section_codes import course_label
 from app.services.survey_windows import closed_by
 
 if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
@@ -625,3 +633,285 @@ def _refuse_the_reason(reason: str | None, *, required: bool) -> None:
         raise ReasonTooLongError
     if not reason.strip():
         raise ReasonBlankError
+
+
+# ---------------------------------------------------------------------------
+# The Lead Faculty review queue, its door, and the exclusion log (E6-05).
+# ---------------------------------------------------------------------------
+
+# The state a queued comment is in: flagged by the router, decided by nobody yet.
+FLAGGED_COLLAPSED = "FLAGGED_COLLAPSED"
+
+# How much of a comment the exclusion log quotes (E6-05, decision 1).
+EXCERPT_LENGTH = 140
+
+# The stored role a leader's decision is written under, by the grant that covers
+# the comment's course (`authz.lead_review_courses` answers only these two).
+DECIDED_AS_FOR_GRANT = {
+    AssignmentRole.LEAD_FACULTY: DeciderRole.LEAD_FACULTY,
+    AssignmentRole.CHAIR: DeciderRole.CHAIR,
+}
+
+
+class NoReviewGrantError(LookupError):
+    """The reader's own leadership grants put no course under review; nothing was read or written.
+
+    An assistant dean until E9 (ADR 0108), a dean, a vice president, a lead with
+    no mapped course, or a leadership session naming somebody who holds only an
+    instructor grant.
+    """
+
+
+class CommentNotInQueueError(LookupError):
+    """The answer is not in this reader's review queue now; nothing was written.
+
+    One error for every case (a sibling lead's comment, a decided one, a
+    Care-class one, a privacy flag, an id nothing holds), so the door answers
+    them alike and says nothing about whether the comment exists.
+    """
+
+
+@dataclass(frozen=True)
+class QueuedComment:
+    """One comment in a reader's review queue: its key, its text and its section's label.
+
+    No week, no instant and no count, by construction (E6-05, decision 1).
+    """
+
+    answer_id: UUID
+    text: str
+    section_label: str
+
+
+@dataclass(frozen=True)
+class ExclusionLogRow:
+    """One decision in a reader's exclusion log (E6-05, decision 1).
+
+    `excerpt` is `None` whenever the comment's own instructor's report does not
+    show it under its week; see `exclusion_log`.
+    """
+
+    section_label: str
+    decided_as: DeciderRole
+    flagged: bool
+    reason: str | None
+    decided_on: date
+    excerpt: str | None
+
+
+def review_queue(session: Session, *, person_id: UUID | None) -> list[QueuedComment]:
+    """The comments awaiting this reader's review, in an order drawn for this call.
+
+    SPEC §5.2 routes a harmful comment to its course's Lead Faculty review queue,
+    and an unled course's to its department chair (§2.1); ruling 1 shows the
+    text at any threshold. So a comment is queued when it holds a harmful
+    moderation verdict, its latest state is still the router's flag, and its
+    course is one this reader's own leadership grant covers
+    (`authz.lead_review_courses`). The rule is written once, in `_queue_select`,
+    and the Lead Faculty door reads the same select.
+
+    **Shuffled on every call**, from the operating system's source: an order
+    that held between reads would be arrival order, and a reader who looks
+    every hour would learn when each comment came, which says which week.
+
+    Raises `NoReviewGrantError` for a reader whose own grant covers nothing.
+    """
+    courses = _review_courses(session, person_id)
+    rows = session.execute(_queue_select(courses)).all()
+    labels = _section_labels(session, {row.section_id for row in rows})
+    queued = [
+        QueuedComment(
+            answer_id=row.answer_id,
+            text=row.comment_text,
+            section_label=labels[row.section_id],
+        )
+        for row in rows
+    ]
+    random.SystemRandom().shuffle(queued)
+    return queued
+
+
+def decide_as_leader(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    answer_id: UUID,
+    action: Literal[DecisionAction.EXCLUDE, DecisionAction.KEEP],
+    reason: str | None,
+) -> None:
+    """The Lead Faculty's door: one decision on a comment in this reader's queue, committed.
+
+    **This door holds its own check** (E6-05, decision 4): the comment is in
+    the queue this reader may see, found by the select `review_queue` reads,
+    taken under the comment's lock so a concurrent decision cannot change its
+    state between the check and the write. It is not a flag on the instructor's
+    door and passes nothing to the shared write that could widen what that
+    door accepts. A leader has no undo, and the role written is the one whose
+    grant covers the comment's course: `LEAD_FACULTY` or `CHAIR`.
+
+    The reason is optional, because every queued comment was flagged by the AI,
+    and is held to the same bounds as the instructor's when given.
+
+    Raises `NoReviewGrantError`, `CommentNotInQueueError` or a
+    `ReasonRefusedError`, each having written nothing.
+    """
+    from app.services.report_comments import COMMENT_VIEW
+
+    if action not in LEAVES:
+        raise DecisionNotAllowedError
+    if person_id is None:
+        raise NoReviewGrantError
+    courses = _review_courses(session, person_id)
+    _lock_the_comment(session, answer_id)
+    queued = session.execute(
+        _queue_select(courses).where(COMMENT_VIEW.c.answer_id == answer_id)
+    ).first()
+    if queued is None:
+        raise CommentNotInQueueError
+    _record_decision(
+        session,
+        answer_id=answer_id,
+        flag=HeldNoteType.HARMFUL,
+        action=action,
+        reason=reason,
+        decided_by=person_id,
+        decided_as=DECIDED_AS_FOR_GRANT[courses[queued.course_id]],
+    )
+    session.commit()
+
+
+def exclusion_log(
+    session: Session, *, person_id: UUID | None, settings: Settings
+) -> list[ExclusionLogRow]:
+    """Every exclusion and keep a person made inside this reader's own grant, newest first.
+
+    SPEC §5.2's anti-cherry-picking trail, in both directions (§11 question 5,
+    settled). The rows are `report_comments.logged_decisions` over the courses
+    `authz.lead_review_courses` gives this reader, so a Care-class comment's
+    decision is never a row (view v004 leaves it out) and a sibling lead's
+    course is never read.
+
+    **The excerpt is withheld when the comment's own instructor's report does
+    not show it under its week**: the comment is in a held stream, its week is
+    not yet fully moderated, or it was surfaced only by a release batch. A
+    decision date beside text from a held stream places that text in a week,
+    which is what the threshold and the release's missing week withhold
+    (ADR 0153). "Shown under its week" is `visible_cards` for the comment's own
+    section, week and stream, the read the instructor's report makes.
+
+    The date is the decision's instant in the institution's zone, and no time.
+
+    Raises `NoReviewGrantError` for a reader whose own grant covers nothing.
+    """
+    from app.services.report_comments import logged_decisions, visible_cards
+
+    courses = _review_courses(session, person_id)
+    decisions = logged_decisions(session, course_ids=courses.keys())
+    labels = _section_labels(session, {decision.section_id for decision in decisions})
+    zone = ZoneInfo(settings.institution_timezone)
+    shown: dict[tuple[UUID, UUID, str], set[UUID]] = {}
+    rows: list[ExclusionLogRow] = []
+    for decision in decisions:
+        where = (decision.section_id, decision.week_id, decision.stream)
+        if where not in shown:
+            shown[where] = {
+                card.answer_id
+                for card in visible_cards(
+                    session,
+                    section_id=decision.section_id,
+                    week_id=decision.week_id,
+                    stream=decision.stream,
+                )
+            }
+        rows.append(
+            ExclusionLogRow(
+                section_label=labels[decision.section_id],
+                decided_as=DeciderRole(decision.decided_as),
+                flagged=decision.flagged,
+                reason=decision.reason,
+                decided_on=decision.decided_at.astimezone(zone).date(),
+                excerpt=(
+                    decision.text[:EXCERPT_LENGTH] if decision.answer_id in shown[where] else None
+                ),
+            )
+        )
+    return rows
+
+
+def _review_courses(session: Session, person_id: UUID | None) -> Mapping[UUID, AssignmentRole]:
+    """This reader's reviewed courses and the role covering each, or `NoReviewGrantError`."""
+    if person_id is None:
+        raise NoReviewGrantError
+    courses = lead_review_courses(session, person_id=person_id)
+    if not courses:
+        raise NoReviewGrantError
+    return courses
+
+
+def _queue_select(courses: Mapping[UUID, AssignmentRole]) -> Select[tuple[UUID, str, UUID, UUID]]:
+    """The review queue's rule, as one select: the one statement of what is queued.
+
+    From `public.report_comment` v004, so a comment any of whose verdicts was
+    ever threat or self-harm is never here (the one place SPEC §6.2's
+    suppression lives, ADR 0187; E6-05, decision 2). Then: a harmful
+    `MODERATION` verdict (privacy stays with the instructor), the latest state
+    still `FLAGGED_COLLAPSED` by `report_comments.reported_status_of` (the one
+    home of that ordering), and a course in `courses`. Unordered: the caller
+    shuffles, or asks about one comment.
+    """
+    from app.services.report_comments import COMMENT_VIEW, reported_status_of
+
+    answer_id = COMMENT_VIEW.c.answer_id
+    harmful = (
+        select(Classification.id)
+        .where(
+            Classification.answer_id == answer_id,
+            Classification.task == ClassificationTask.MODERATION,
+            Classification.verdict == ModerationVerdict.HARMFUL.value,
+        )
+        .exists()
+    )
+    return (
+        select(
+            answer_id.label("answer_id"),
+            COMMENT_VIEW.c.comment_text.label("comment_text"),
+            COMMENT_VIEW.c.section_id.label("section_id"),
+            Section.course_id.label("course_id"),
+        )
+        .join(Section, Section.id == COMMENT_VIEW.c.section_id)
+        .where(
+            Section.course_id.in_(list(courses)),
+            harmful,
+            reported_status_of(answer_id) == FLAGGED_COLLAPSED,
+        )
+    )
+
+
+def _section_labels(session: Session, section_ids: set[UUID]) -> dict[UUID, str]:
+    """Each section's label, the way the instructor's report names it (`course_label`)."""
+    if not section_ids:
+        return {}
+    rows = session.execute(
+        select(
+            Section.id,
+            Prefix.code,
+            Course.lms_number,
+            Course.lms_title,
+            Section.lms_section_code,
+            Term.name,
+        )
+        .join(Course, Course.id == Section.course_id)
+        .join(Prefix, Prefix.id == Course.prefix_id)
+        .join(Term, Term.id == Section.term_id)
+        .where(Section.id.in_(list(section_ids)))
+    ).all()
+    return {
+        section_id: course_label(
+            prefix_code=prefix_code,
+            lms_number=lms_number,
+            lms_title=lms_title,
+            section_code=section_code,
+            term_name=term_name,
+        )
+        for section_id, prefix_code, lms_number, lms_title, section_code, term_name in rows
+    }

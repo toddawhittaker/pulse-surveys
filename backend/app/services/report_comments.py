@@ -184,7 +184,7 @@ against the module.
 """
 
 import random
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -211,11 +211,12 @@ from sqlalchemy.orm import Session
 from app.ai.contracts import HeldNoteType
 from app.config import Settings
 from app.models.ai import Classification, ClassificationTask
+from app.models.org import Section
 from app.models.report import MODERATION_STATES, ModerationState, ReleaseBatch, ReleaseBatchMember
 from app.models.survey import Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow, Week
 from app.services import clock
-from app.services.moderation import holds_no_verdict, under_the_attempt_cap
+from app.services.moderation import EXCLUDED, KEPT, holds_no_verdict, under_the_attempt_cap
 
 # The initial moderation state, and the one a comment carries when nothing has
 # been decided about it (ADR 0145). Taken off the model's own vocabulary rather
@@ -328,6 +329,28 @@ class LatestDecision:
     decided_as: str | None
     is_undo: bool
     state_before: str
+
+
+@dataclass(frozen=True)
+class LoggedDecision:
+    """One decision a person made about a comment, as the exclusion log reads it (E6-05).
+
+    The comment's key, where it was written (section, week and stream, which
+    the log's caller needs to ask whether the comment's own report shows it, and
+    never passes on), its text, the role the decision was stored under, the
+    stated reason, the instant, and whether the AI flagged it. The state is not
+    carried: the log's row is the work order's six members (E6-05, decision 1).
+    """
+
+    answer_id: UUID
+    section_id: UUID
+    week_id: UUID
+    stream: str
+    text: str
+    decided_as: str
+    reason: str | None
+    decided_at: datetime
+    flagged: bool
 
 
 def n_threshold() -> int:
@@ -793,6 +816,63 @@ def latest_decision(session: Session, answer_id: UUID) -> LatestDecision | None:
         decided_as=latest.decided_as,
         is_undo=latest.is_undo,
         state_before=rows[1].state if len(rows) > 1 else INITIAL_STATE,
+    )
+
+
+def logged_decisions(
+    session: Session, *, course_ids: Collection[UUID]
+) -> tuple[LoggedDecision, ...]:
+    """Every exclusion and keep a person made about a comment in these courses, newest first.
+
+    E6-05's exclusion log (decision 1): every `moderation_state` row with a
+    decider whose state is `EXCLUDED` or `KEPT`. The router's flag has no
+    decider and is not here; an undo that restores an exclusion or a keep is a
+    decision row like any other and is.
+
+    **The comments come through `report_comment` v004**, so a decision row about
+    a threat or self-harm comment is not a log row: the view is the one place
+    SPEC §6.2's suppression lives (ADR 0187), and a log joined to the answer
+    instead would carry the row and its reason for a Care-class comment.
+
+    **Newest is the order of insert**, `moderation_state.sequence`, the order
+    every reader of this relation uses; it is here because this module is the
+    one home of that ordering (E4-07's deferral).
+    """
+    answer_id = COMMENT_VIEW.c.answer_id
+    asked = (
+        select(
+            answer_id,
+            COMMENT_VIEW.c.section_id,
+            COMMENT_VIEW.c.week_id,
+            COMMENT_VIEW.c.stream,
+            COMMENT_VIEW.c.comment_text,
+            ModerationState.decided_as,
+            ModerationState.reason,
+            ModerationState.decided_at,
+            _flag_of(answer_id).is_not(None),
+        )
+        .join(ModerationState, ModerationState.answer_id == answer_id)
+        .join(Section, Section.id == COMMENT_VIEW.c.section_id)
+        .where(
+            Section.course_id.in_(list(course_ids)),
+            ModerationState.decided_by_person_id.is_not(None),
+            ModerationState.state.in_((EXCLUDED, KEPT)),
+        )
+        .order_by(ModerationState.sequence.desc())
+    )
+    return tuple(
+        LoggedDecision(
+            answer_id=row[0],
+            section_id=row[1],
+            week_id=row[2],
+            stream=row[3],
+            text=row[4],
+            decided_as=row[5],
+            reason=row[6],
+            decided_at=row[7],
+            flagged=row[8],
+        )
+        for row in session.execute(asked).all()
     )
 
 
