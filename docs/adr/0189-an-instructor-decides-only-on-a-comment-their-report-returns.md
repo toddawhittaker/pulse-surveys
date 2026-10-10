@@ -10,10 +10,9 @@ SPEC §5.2 gives the instructor exclude and keep, each with an Undo, and asks fo
 a stated reason when the AI did not flag the comment. Nothing could name a
 comment: `CommentView` had no handle. The owner's rulings for E6
 (`../tickets/e6/README.md`) put the record on `moderation_state` (ruling 3),
-have the log show the decider's role rather than a name (ruling 4), and build a
-participation note (ruling 2). The spec does not say how the door finds a
-comment, how Undo behaves after somebody else's decision, what a released
-comment does to the note, or where the handle may travel.
+and have the log show the decider's role rather than a name (ruling 4). The
+spec does not say how the door finds a comment, how Undo behaves after
+somebody else's decision, or where the handle may travel.
 
 ## Decision
 
@@ -57,26 +56,23 @@ the state before that row with `is_undo`. Decisions on one comment are serialize
 by a transaction-scoped advisory lock, so an undo is never judged against a row a
 colleague is replacing.
 
-**The participation note** is computed in `reporting._payload` from
-`report_comments.participation_count`: the comments in the week's held streams
-holding a harmful or privacy verdict that a decision has not kept, zero until the
-week is moderated whole, absent at zero. **A released comment is counted as it
-was while held, whatever is decided about it.** Otherwise its release, or the
-instructor keeping it in the from-earlier-weeks list, would move one week's
-number and attribute the comment to that week, which is ADR 0153's channel.
+**There is no participation note.** Ruling 2 had this ticket build one ("1
+response held for review" per week); ruling 6 dropped it after review, because
+a per-week held count read beside a released comment's chip tells the
+instructor which week that comment came from (ADR 0153's channel), and in a
+small week it says how many of the few respondents wrote something held, which
+lowers the effective threshold. The week report carries no held count of any
+kind, and SPEC §5.2 says "no count".
 
 **The de-anonymization statement for instructor views** (read against ADRs 0153,
 0162, 0178 and 0179). The handle, the flag class and `decided_by_you` carry no
-week and no instant, and a chip appears only where the comment itself does. The
-note is the one count, and across consecutive reads it moves only when the week
-becomes moderated or a reviewer keeps (or undoes keeping) a still-held comment;
-it never moves when a comment is released or decided in the release list, so a
-reader subtracting reports learns that a reviewer acted, never which released
-comment came from which week. It is a count within the reader's own section-week
-and feeds no threshold or comparison figure, so 0178's and 0179's subtraction
-across populations does not reach it. **The accepted cost (ruling 2):** in a thin
-week, the note beside the gradebook ledger can help an instructor guess who wrote
-a held comment. **The stated limit:** "no trace" means Pulse's surfaces; the LMS
+week and no instant, and a chip appears only where the comment itself does. A
+held stream contributes no comment, no chip and no count, so nothing on the week
+report moves when a held comment is flagged, kept or excluded, and a reader
+subtracting consecutive reports cannot tie a released comment to its week. An
+earlier draft of this statement said a per-week held count could sit beside the
+release without attributing it; that was wrong, which is why the note was
+dropped. **The stated limit:** "no trace" means Pulse's surfaces; the LMS
 gradebook can show that a student completed the survey with a comment that never
 reached the report, and nothing in Pulse closes that without changing §3.4.
 
@@ -94,7 +90,9 @@ still open at `closes_at` itself.
   of the report's rule, wrong one level out (entries 35 and 53).
 - **Undo as "the reader's latest decision".** Reverses past a colleague's later
   decision, or walks back through history one click at a time.
-- **Excluding released comments from the note.** Their release moves the count.
+- **The participation note (ruling 2).** Built, then dropped by ruling 6: a
+  per-week held count attributes a released comment to its week and lowers the
+  effective small-N threshold.
 
 ## Consequences
 

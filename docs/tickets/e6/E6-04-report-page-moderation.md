@@ -10,8 +10,9 @@ must not add a date, a count or a category of its own.
 
 ## Context
 
-E6-03 puts the comment handle, the flag class, "decided by you" and the
-participation note on the instructor payload, and adds the decision routes.
+E6-03 puts the comment handle, the flag class and "decided by you" on the
+instructor payload, and adds the decision routes. It carries no participation
+note: ruling 6 dropped it, so this page renders no count of held comments.
 This ticket builds the page side of SPEC §5.2's lifecycle:
 
 - A flagged-collapsed card shows its chip and reason, and offers Exclude and
@@ -20,8 +21,6 @@ This ticket builds the page side of SPEC §5.2's lifecycle:
   the exclusion notice, with Undo.
 - A kept comment shows a quiet logged-decision line, with Undo.
 - Excluding an unflagged comment asks for a reason first.
-- The participation note renders once per week, with no stream and no
-  category.
 
 Three carried items land here, because this is the next ticket to open the
 report's interface:
@@ -73,9 +72,8 @@ copy); the CSRF token handling the leadership pages already use.
    does not send without one; the server's refusal sentence shows inline.
 3. **No date and no name.** No card shows a date, a time or a decider's name.
    "Decided by you" is the only attribution (vitest).
-4. **The note.** The participation note renders once per week, with the count
-   and no stream or category; a week with no note renders nothing in its
-   place.
+4. **Dropped (ruling 6).** This was the participation note; there is no note
+   to render. The number is kept so the criteria below keep their numbers.
 5. **Input boundaries reach 3:1.** Every text input's boundary measures at
    least 3:1 against its background, pinned by a stylesheet test.
 6. **The chart table.** A sighted reader can open the trend chart's data
