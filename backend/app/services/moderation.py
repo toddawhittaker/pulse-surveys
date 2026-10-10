@@ -134,29 +134,22 @@ SEED_MODEL_ID = "seed"
 # section-week's summary back for days.
 MODERATION_ATTEMPT_CAP = 6
 
-# The failure class that always counts toward the cap: the provider answered, and
-# the answer was not the contract even after the gateway's re-ask. Something about
+# The one failure that counts toward the cap: the provider answered, and the
+# answer was not the contract even after the gateway's re-ask. Something about
 # this comment may be what breaks the model, so asking for ever is not safe.
+#
+# **No HTTP status counts** (E6-08). E6-05 briefly counted 413 and 422 as refusals
+# of one prompt, but either can come back on every request — a self-hosted
+# endpoint answering 422 to a parameter it rejects, a proxy answering 413 to most
+# bodies — and then every comment would be capped within six sweeps and its week
+# released with no threat or self-harm check. A refused comment stays held, and
+# its week waits, until E10's Care review (ruling 5 keeps real students away
+# until then).
 COUNTED_FAILURES = (AIResponseInvalidError,)
 
-# The refusals that count toward the cap as well (E6-05, decision 5b): the
-# statuses a provider answers about this one prompt. 422 is how a hosted provider
-# refuses a content-filtered prompt, and 413 is a prompt too large to take; each
-# is answered the same for this comment every time, so a comment drawing one
-# would otherwise be asked about, and hold its week back, for ever.
-#
-# **400 is not here, deliberately** (the fix round on PR #296). A 400 is just as
-# often about the whole account or the request's shape — a bad parameter after a
-# deploy — and then every comment draws it. Counting it would cap every comment
-# for good inside six hours, and a capped comment counts as resolved, so weeks
-# would be released with no threat or self-harm check at all. A 400 is retried
-# and holds its week; a content filter answering 400 holds that comment's week
-# until E10's Care review (carried in E6-07).
-REQUEST_SHAPED_REFUSALS = frozenset({413, 422})
-
-# The failures that count nothing: every other refusal (`AIProviderRefusedError`,
-# HTTP 400, 401, 403, 404, 429, 500 and the like: a malformed request, a key, a
-# permission, a model name, a rate limit, a provider bug) and an outage (`AIProviderUnavailableError`, which
+# The failures that count nothing: every refusal (`AIProviderRefusedError`, any
+# HTTP status: a malformed request, a content filter, a key, a permission, a
+# model name, a rate limit, a provider bug) and an outage (`AIProviderUnavailableError`, which
 # includes a read timeout, or `AIProviderUnreachableError`). Each is about the
 # provider or this account, not the comment, and lasts as long as it lasts. A cap
 # that counted them would hold back for good exactly the comments swept during
@@ -350,13 +343,12 @@ def sweep_unmoderated_comments(session: Session, gateway: AIGateway | None = Non
 
     - A verdict is routed through `route_verdict`, which writes it with its flag
       or its Care case.
-    - An unusable answer (`COUNTED_FAILURES`), or a refusal with a
-      request-shaped status (`REQUEST_SHAPED_REFUSALS`), appends one
-      `moderation_attempt` row. The one that reaches the cap is logged at error
+    - An unusable answer (`COUNTED_FAILURES`) appends one `moderation_attempt`
+      row. The one that reaches the cap is logged at error
       level, by answer id only; the comment then stays held, never given a
       verdict (ADR 0188).
-    - Any other refusal, or an outage (`RETRIED_FAILURES`), writes nothing and is
-      logged at error level; the next sweep asks again.
+    - A refusal, whatever its status, or an outage (`RETRIED_FAILURES`) writes
+      nothing and is logged at error level; the next sweep asks again.
 
     Anything else is rolled back to the last commit and propagates.
     """
@@ -393,16 +385,16 @@ def _moderate_each(session: Session, gateway: AIGateway | None) -> int:
             continue
         try:
             output = classify_comment_moderation(comment, gateway)
-        except (*COUNTED_FAILURES, *RETRIED_FAILURES) as failed:
-            if _counts_toward_the_cap(failed):
-                _record_a_failed_attempt(session, answer_id, failed)
-                session.commit()
-            else:
-                logger.error(
-                    "the moderation sweep left answer %s for the next run after an %s",
-                    answer_id,
-                    type(failed).__name__,
-                )
+        except COUNTED_FAILURES as failed:
+            _record_a_failed_attempt(session, answer_id, failed)
+            session.commit()
+            continue
+        except RETRIED_FAILURES as failed:
+            logger.error(
+                "the moderation sweep left answer %s for the next run after an %s",
+                answer_id,
+                type(failed).__name__,
+            )
             continue
         route_verdict(
             session,
@@ -414,17 +406,6 @@ def _moderate_each(session: Session, gateway: AIGateway | None) -> int:
         session.commit()
         routed += 1
     return routed
-
-
-def _counts_toward_the_cap(failed: Exception) -> bool:
-    """Whether one failed call is about this comment, and so counts toward the cap.
-
-    An unusable answer always is; a refusal is when its status is one of
-    `REQUEST_SHAPED_REFUSALS`; anything else in `RETRIED_FAILURES` never is.
-    """
-    if isinstance(failed, AIProviderRefusedError):
-        return failed.status in REQUEST_SHAPED_REFUSALS
-    return isinstance(failed, COUNTED_FAILURES)
 
 
 def _record_a_failed_attempt(session: Session, answer_id: UUID, failed: Exception) -> None:
@@ -826,12 +807,26 @@ def exclusion_log(
 
     The date is the decision's instant in the institution's zone, and no time.
 
+    **No row from a section the reader teaches** (E6-08, after ruling 7). A row
+    names the section, the date, the role, the flag and another reviewer's
+    reason, so it would tell a reader who teaches that section that it held a
+    flagged comment, and roughly when, which their own report hides. The row is
+    removed, not redacted; the filter is `authz.taught_section_ids`, the same
+    one `_queue_select` applies.
+
     Raises `NoReviewGrantError` for a reader whose own grant covers nothing.
     """
     from app.services.report_comments import logged_decisions, visible_cards
 
+    if person_id is None:
+        raise NoReviewGrantError
     courses = _review_courses(session, person_id)
-    decisions = logged_decisions(session, course_ids=courses.keys())
+    taught = taught_section_ids(session, person_id=person_id)
+    decisions = [
+        decision
+        for decision in logged_decisions(session, course_ids=courses.keys())
+        if decision.section_id not in taught
+    ]
     labels = _section_labels(session, {decision.section_id for decision in decisions})
     zone = ZoneInfo(settings.institution_timezone)
     shown: dict[tuple[UUID, UUID, str], set[UUID]] = {}

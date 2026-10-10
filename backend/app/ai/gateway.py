@@ -266,11 +266,10 @@ class AIProviderRefusedError(AIGatewayError):
 
     **It carries the HTTP status the endpoint answered** (E6-05, decision 5b),
     because the statuses in this class are about different things and a caller
-    may need to tell them apart: a 401 or a 429 is about this account and passes,
-    while a 422 is how a hosted provider refuses one particular prompt — a
-    content filter — and answers the same for that prompt every time. The
-    moderation sweep counts 413 and 422 toward its attempt cap, and not 400,
-    which can as easily be about every request (`app.services.moderation`). The
+    may want to tell them apart in a log or a later rule: a 401 or a 429 is about
+    this account, and a 422 may be a content filter refusing one prompt. No
+    status counts toward the moderation sweep's attempt cap (E6-08), because any
+    of them can come back on every request (`app.services.moderation`). The
     status is an `int`, never the response body.
     """
 
