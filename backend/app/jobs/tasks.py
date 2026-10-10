@@ -15,7 +15,7 @@ summaries (§7.4's summary task, called per stream). Every one of these is a cal
 rather than domain logic written in this file — which is exactly the shape every
 task below takes: it opens a session and calls a service.
 
-**Who commits is part of that shape, and three tasks depart from it on purpose.**
+**Who commits is part of that shape, and four tasks depart from it on purpose.**
 Most tasks here open the session and commit it, because the service decides and
 writes while the caller owns the transaction. `post_participation_scores` does
 not: its service commits after each section, because the rows it writes are the
@@ -25,7 +25,9 @@ allowed to depend on a walk over the whole institution finishing.
 service commits after each section-week, so one provider failure costs that
 section-week rather than the institution's Monday. `cut_release_batches` does not
 either, for a weaker reason it states in its own words: nothing it writes leaves
-this system, and what a per-section commit buys is the walk's own progress. Each
+this system, and what a per-section commit buys is the walk's own progress.
+`moderate_closed_windows` does not either: its service commits after each
+comment, so a Care route is stored the moment it is decided. Each
 docstring carries its own argument, and they are the place to read before making
 this file consistent with itself.
 """
@@ -291,15 +293,16 @@ def moderate_closed_windows(gateway: AIGateway | None = None) -> int:
     """Moderate every comment in a closed window that has no verdict yet (ADR 0188).
 
     Run hourly by `app.jobs.schedules`. A thin wrapper: which comments, what
-    counts toward the attempt cap and how a verdict is routed are all
-    `app.services.moderation`'s. One commit at the end; each comment runs in its
-    own savepoint in the service, so the commit stores every verdict and attempt
-    the pass managed. `gateway` is the test seam `generate_weekly_summaries` has.
+    counts toward the attempt cap, how a verdict is routed and the lock that keeps
+    two runs apart are all `app.services.moderation`'s.
+
+    **The commit is the service's, not this task's.** It commits after each
+    comment, because a verdict may have opened a Care case, and a Care route must
+    not wait on, or be rolled back by, the rest of a pass that can run for hours.
+    `gateway` is the test seam `generate_weekly_summaries` has.
     """
     with SessionLocal() as session:
-        routed = sweep_unmoderated_comments(session, gateway)
-        session.commit()
-        return routed
+        return sweep_unmoderated_comments(session, gateway)
 
 
 @celery_app.task

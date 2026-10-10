@@ -30,7 +30,9 @@ here (ADR 0187).
 verdicts: hourly, over every comment whose window has closed and which holds no
 verdict yet (ADR 0188). A failed call is retried by the next sweep, and an
 unusable answer counts toward an attempt cap of six, after which the comment
-stays held for good. E6-03 adds the instructor's decisions beside this.
+stays held for good. Two sweeps never run at once, and each comment's outcome is
+committed before the next is asked about. E6-03 adds the instructor's decisions
+beside this.
 """
 
 import logging
@@ -70,14 +72,29 @@ SEED_MODEL_ID = "seed"
 # section-week's summary back for days.
 MODERATION_ATTEMPT_CAP = 6
 
-# The failures that count toward the cap: the provider answered and the answer
-# could not be used. An outage (`AIProviderUnavailableError`, which includes a
-# read timeout, or `AIProviderUnreachableError`) writes no attempt, so a comment
-# is retried for as long as an outage lasts and is never parked by one. A cap
-# that counted outages would hold back for good exactly the comments written
-# during one, Care-class disclosures among them (ADR 0188).
-COUNTED_FAILURES = (AIResponseInvalidError, AIProviderRefusedError)
-OUTAGES = (AIProviderUnavailableError, AIProviderUnreachableError)
+# The one failure that counts toward the cap: the provider answered, and the
+# answer was not the contract even after the gateway's re-ask. Something about
+# this comment may be what breaks the model, so asking for ever is not safe.
+COUNTED_FAILURES = (AIResponseInvalidError,)
+
+# The failures that count nothing: a refusal (`AIProviderRefusedError`, HTTP 401,
+# 429, 500 and the like: a key, a rate limit, a provider bug) and an outage
+# (`AIProviderUnavailableError`, which includes a read timeout, or
+# `AIProviderUnreachableError`). Each is about the provider or this account, not
+# the comment, and lasts as long as it lasts. A cap that counted them would hold
+# back for good exactly the comments swept during one, Care-class disclosures
+# among them, so the comment is simply asked about again next hour (ADR 0188).
+RETRIED_FAILURES = (
+    AIProviderRefusedError,
+    AIProviderUnavailableError,
+    AIProviderUnreachableError,
+)
+
+# The Postgres advisory lock key that keeps two sweeps from running at once
+# (ADR 0188). Any fixed bigint will do as long as no other lock uses it; this is
+# the only advisory lock in the application. The digits are the ticket and the
+# ADR (E6-02, 0188), so a reader of `pg_locks` can tell whose it is.
+SWEEP_LOCK_KEY = 6_020_188
 
 
 class ModerationBeforeClose(ValueError):  # noqa: N818 - the name the fix round settles
@@ -194,8 +211,9 @@ def comments_awaiting_moderation(session: Session) -> Sequence[UUID]:
 
     A comment (an answer to a `comment` question with text that is not blank)
     whose survey window has closed by the app clock, which holds no moderation
-    verdict and is under the attempt cap. Closed is `now >= closes_at`, the test
-    `route_verdict` applies. The anti-join is `NOT EXISTS`, the shape
+    verdict and is under the attempt cap. Closed is `closes_at < now`, the
+    product's definition of a closed window (ADR 0188); `route_verdict` still
+    accepts `now == closes_at`, and E6-03 aligns it. The anti-join is `NOT EXISTS`, the shape
     `app.services.validity.unresolved_floored_answers` argues for.
 
     Blank is `str.strip()`, decided in Python as `report_comment_v003.sql` and
@@ -214,7 +232,7 @@ def comments_awaiting_moderation(session: Session) -> Sequence[UUID]:
         .where(
             Question.kind == QuestionKind.COMMENT,
             Answer.comment_text.is_not(None),
-            SurveyWindow.closes_at <= now,
+            SurveyWindow.closes_at < now,
             holds_no_verdict(Answer.id),
             under_the_attempt_cap(Answer.id),
         )
@@ -226,18 +244,44 @@ def comments_awaiting_moderation(session: Session) -> Sequence[UUID]:
 def sweep_unmoderated_comments(session: Session, gateway: AIGateway | None = None) -> int:
     """Ask a model about every comment awaiting moderation, and route each verdict.
 
-    Answers how many verdicts were routed, for a log line. Each comment runs in
-    its own savepoint, so one failure costs that comment and the walk moves on.
+    Answers how many verdicts were routed, for a log line. **This function owns
+    the transaction**: it commits once it holds the lock, and again after each
+    comment, so a verdict and its Care route are stored before the next comment
+    is asked about and a later error cannot take them back.
+
+    **Two sweeps never overlap.** The sweep first takes a Postgres session-level
+    advisory lock on `SWEEP_LOCK_KEY`. If another run holds it, this one answers
+    0 and touches nothing: two runs at once would ask twice, and one could give a
+    verdict to a comment the other had just capped, after its week had been read
+    without it. The lock is released in `finally`, on every path.
 
     - A verdict is routed through `route_verdict`, which writes it with its flag
       or its Care case.
     - An unusable answer (`COUNTED_FAILURES`) appends one `moderation_attempt`
       row. The one that reaches the cap is logged at error level, by answer id
       only; the comment then stays held, never given a verdict (ADR 0188).
-    - An outage (`OUTAGES`) writes nothing; the next sweep asks again.
+    - A refusal or an outage (`RETRIED_FAILURES`) writes nothing and is logged at
+      error level; the next sweep asks again.
 
-    Anything else propagates. Commits nothing; the caller owns the transaction.
+    Anything else is rolled back to the last commit and propagates.
     """
+    locked = session.execute(select(func.pg_try_advisory_lock(SWEEP_LOCK_KEY))).scalar_one()
+    if not locked:
+        logger.info("the moderation sweep found another run holding its lock and did nothing")
+        return 0
+    try:
+        session.commit()
+        return _moderate_each(session, gateway)
+    except BaseException:
+        session.rollback()
+        raise
+    finally:
+        session.execute(select(func.pg_advisory_unlock(SWEEP_LOCK_KEY)))
+        session.commit()
+
+
+def _moderate_each(session: Session, gateway: AIGateway | None) -> int:
+    """The sweep's walk, under its lock: one comment at a time, one commit each."""
     answer_ids = comments_awaiting_moderation(session)
     logger.info("the moderation sweep found %d comment(s) awaiting a verdict", len(answer_ids))
     routed = 0
@@ -247,32 +291,27 @@ def sweep_unmoderated_comments(session: Session, gateway: AIGateway | None = Non
         ).scalar_one()
         if comment is None:
             continue
-        savepoint = session.begin_nested()
         try:
             output = classify_comment_moderation(comment, gateway)
-            route_verdict(
-                session,
-                answer_id,
-                output.verdict,
-                prompt_version=output.prompt_version,
-                model_id=output.model_id,
-            )
         except COUNTED_FAILURES as failed:
-            savepoint.rollback()
             _record_a_failed_attempt(session, answer_id, failed)
+            session.commit()
             continue
-        except OUTAGES as outage:
-            savepoint.rollback()
-            logger.warning(
+        except RETRIED_FAILURES as failed:
+            logger.error(
                 "the moderation sweep left answer %s for the next run after an %s",
                 answer_id,
-                type(outage).__name__,
+                type(failed).__name__,
             )
             continue
-        except BaseException:
-            savepoint.rollback()
-            raise
-        savepoint.commit()
+        route_verdict(
+            session,
+            answer_id,
+            output.verdict,
+            prompt_version=output.prompt_version,
+            model_id=output.model_id,
+        )
+        session.commit()
         routed += 1
     return routed
 
