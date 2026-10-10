@@ -44,7 +44,8 @@ comment's key and flag class rather than an instructor card.
 
 **The log** lists every row with a decider in state `EXCLUDED` or `KEPT` inside
 the reader's courses, through v004, newest first by `sequence`: the section
-label, the stored role, whether the AI flagged the comment, the reason, the date
+label, the direction (`decision`, the stored `EXCLUDED` or `KEPT`, so the log
+shows both directions as SPEC §5.2 asks), the stored role, whether the AI flagged the comment, the reason, the date
 in the institution's zone, and an excerpt of 140 characters. **The excerpt is
 null unless the comment's own report shows it under its week**
 (`visible_cards` for its section, week and stream). That withholds held text,
@@ -82,7 +83,8 @@ stated reason is free text shown beside a date, and could quote a held comment.
 
 - An assistant dean, a dean and a vice president read no queue and no log
   until E9 decides what their purview reaches here.
-- `../disputes/E6-05-02.md`, `-03.md` and `-04.md` ask the test author for the
-  copy surface's governance row, a direction member on the log row, and two
-  route inventories that now see a second leadership write; `-01.md` asks for
-  the lock test to be made able to fail.
+- Disputes `../disputes/E6-05-01.md` to `-04.md` are ruled: the lock test was
+  rewritten so it can fail, the copy surface `leadership_moderation.` is
+  governed, the log row gained `decision` (seven members, not the work order's
+  six), and the two route inventories now expect a CSRF member per decision
+  door and the moderation routes beside the named sets.
