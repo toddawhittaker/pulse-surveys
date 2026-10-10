@@ -104,6 +104,17 @@ messages point at it. So a gap here means a reservation that went unused, never 
 deleted entry — and 32 is not free for the next entry to take. The same note in
 `docs/adr/README.md` explains the identical gap at 0029, 0033 and 0034.
 
+**There are no entries 54 to 57 either, and none was deleted.** Git history holds
+no heading and no detail file numbered 54 to 57, on any branch. The E5 breakdown
+(b57eeb37, 2026-09-13) named 54 as the next entry. The next day, while E5's first
+wave was being built in parallel worktrees, the seed fix e3c0b66a added the next
+entry as 58, and its commit message says nothing about the four numbers it
+passed. Entries 59 and 60 followed at the E5.1 exit (649c82b5). The likeliest
+reading is that 54 to 57 were held back for entries the parallel tickets might
+propose, and those proposals were then not written as entries; no commit records
+it. Like 32, the four numbers stay unused, and the next entry takes the next
+number after the highest one here.
+
 **One caution on the tail counters.** Two branches cut from the same commit that
 both bump the same entry merge without conflicting and count once. If work has
 been running in parallel, re-derive each bumped tail counter from each branch's
@@ -171,7 +182,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 26** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 27** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 16. A mutation harness reported kills it had not made
 
@@ -529,17 +540,6 @@ difference small enough to attribute.
 
 **Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/52-a-module-level-engine-was-bound-at-import-by-whichever-test-imported-it-first.md)
 
-## 53. A closed-set guard is defeated one level out
-
-**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/53-a-closed-set-guard-is-defeated-one-level-out.md)
-
-**Rule.** When you build or review a closed-set or inventory guard, attack the
-whole class in the first pass: name what encloses the set — the directory above
-the glob, the link kind the walk skips, the caller above the constructor, the
-configuration that merges over the file — and bring each enclosure inside the
-guard or record it as a disclosed limit with an owner, in the same change. The
-coverage check must not be built from the guard's own enumeration.
-
 **Rule.** A process-global built at import — an engine, a client, a Celery
 application, anything a module constructs at the top level from configuration — is
 bound by whoever imports it first, and `sys.modules` keeps that binding for the
@@ -553,6 +553,17 @@ worker drew which file, and pointing at whichever ticket is newest. Read the
 connection out of the traceback before believing any of that — the database name in
 `psycopg`'s message names the test that did the binding, and a throwaway database
 that no longer exists names it exactly.
+
+## 53. A closed-set guard is defeated one level out
+
+**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/53-a-closed-set-guard-is-defeated-one-level-out.md)
+
+**Rule.** When you build or review a closed-set or inventory guard, attack the
+whole class in the first pass: name what encloses the set — the directory above
+the glob, the link kind the walk skips, the caller above the constructor, the
+configuration that merges over the file — and bring each enclosure inside the
+guard or record it as a disclosed limit with an owner, in the same change. The
+coverage check must not be built from the guard's own enumeration.
 
 ## 58. A seeded world's claim was verified by the writer that made it
 

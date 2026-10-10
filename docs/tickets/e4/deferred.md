@@ -31,6 +31,12 @@ self-harm, enforced where the note is written rather than where it is rendered �
 so a caller cannot construct the excluded value at all, and §6.2's suppression
 does not depend on every reader remembering it.
 
+**Closed by E6-03 (#294, merged as f55774c2).** `HeldNoteType` in
+`backend/app/ai/contracts.py` holds the two flagging classes, harmful and
+privacy, and nothing else, and `WeeklySummaryRecord.held_note_type` takes it, so
+a threat or self-harm value cannot be constructed where a note is written.
+`tests/unit/test_the_weekly_summary_contract.py` pins the set.
+
 ## A comment can forge block boundaries and inflate a theme's count within the week's total
 
 **What is not enforced.** The summary prompt renders a week's comments as
@@ -142,7 +148,7 @@ a test plants two decisions about one comment inside a single transaction and
 requires the second to be the one reported — driven both ways round, since a tie
 broken arbitrarily passes half of such a test by luck.
 
-**Closed by E6-01**, before the routing definer wrote the first row.
+**Closed by E6-01 (#292, merged as fd08ef75)**, before the routing definer wrote the first row.
 `moderation_state.sequence` is an identity column (`GENERATED ALWAYS`), and
 `reported_status_of` orders by it alone.
 `tests/integration/test_two_moderation_decisions_in_one_transaction_resolve_to_the_second.py`
@@ -218,7 +224,7 @@ value, at the batch's membership, and at the gather's model-facing input. That t
 can only be written once a verdict of that kind can exist, which is why the
 writer's ticket owns it.
 
-**Closed by E6-01**, which added `ClassificationTask.MODERATION` and its one
+**Closed by E6-01 (#292, merged as fd08ef75)**, which added `ClassificationTask.MODERATION` and its one
 writer in the same change. `report_comment` v004 leaves out every comment any of
 whose moderation verdicts, ever, is threat or self-harm, which is below every
 reader: the week read, the cut and the summary gather, which now reads the view.

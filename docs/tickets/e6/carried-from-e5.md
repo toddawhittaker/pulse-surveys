@@ -51,13 +51,15 @@ rewound-clock resubmission 500, the model identifier in three untied places,
 the floor-headroom variance point, and the bounced-comment-before-harm-screening
 hook. Their detail lives in `../e4/carried-from-e3.md` and the files it points
 back to. From `carried-from-e4.md`'s own sections, also unchanged: the held-note
-type (E6), the forged summary block boundaries (E7's draft work first), the
+type (E6; closed by E6-03, #294, merged as f55774c2), the forged summary block boundaries (E7's draft work first), the
 `moderation_state` tie-break (E6), the §6.2 threat class (E6), the landing
 views' sentences (E9), the serial summary walk (E13), the reveal door's
 harm-class narrowing (E6), the aggregate-ordering gate (E9), the summary eval
 floor (E10 at the latest), and the quiet-week summary a commenter can have
 refused for ever (E11). None of them is restated below; `carried-from-e4.md`
-holds each one.
+holds each one. **Of the E6 ones, the tie-break, the threat class and the reveal
+door's narrowing are closed by E6-01 (#292, merged as fd08ef75), and the
+held-note type by E6-03; each closure is recorded in its source file.**
 
 **Re-carried below with a new fact from E5:** the de-anonymization statement's
 E6 half; the course label's composers (now three); the frontend
@@ -184,7 +186,7 @@ shown to sighted readers too (or a record argues the hidden table is enough),
 and input boundaries measure at least 3:1 against their background, pinned the
 way `reportContrastTokens.test.ts` pins the report's colours.
 
-**Closed by E6-04.** Each trend chart has a "Show the numbers" toggle that shows
+**Closed by E6-04 (#295, merged as 9a400202).** Each trend chart has a "Show the numbers" toggle that shows
 its tables to sighted readers; a screen reader has them either way. Text inputs
 draw their boundary in `--input-edge` (3.55:1 on paper, 3.32:1 on chalk), pinned
 by `frontend/src/components/inputBoundaryTokens.test.ts`.
@@ -233,6 +235,12 @@ freeze-and-seal rules for comparison figures (ADRs 0178 and 0179), both about
 a reader subtracting published numbers to isolate a small group. E6's
 moderation views should read both before the first view that shows a count
 beside a released comment. **Owner:** E6. **Done when:** unchanged.
+
+**Closed by E6-03 (#294, merged as f55774c2) and E6-05 (#296, merged as
+233d3739).** ADR 0189 carries the statement for the instructor's views and ADR
+0190 for the leadership views, each read against ADRs 0153, 0162, 0178 and 0179.
+Ruling 6 dropped the participation note because the first draft of that
+statement was wrong about a held count beside a released comment.
 
 ## The frontend confidentiality tests have no structural floor
 
@@ -375,7 +383,7 @@ that is not harm. A comment whose moderation run failed or never ran is held,
 and a test plants a failed run and asserts the comment reaches neither the
 report nor the summary provider.
 
-**Closed by E6-01.** `report_comment` v004 shows a comment only once it holds a
+**Closed by E6-01 (#292, merged as fd08ef75).** `report_comment` v004 shows a comment only once it holds a
 moderation verdict, and never once any of its verdicts is threat or self-harm;
 the week read, the release cut and the summary gather all read through it, and
 `section_week_moderated` holds a whole section-week back until its last verdict
@@ -410,6 +418,12 @@ well-answered week. **Owner:** E6, which reopens the summary path with
 moderation. **Done when:** the small-N prompt's premise is per stream, under a
 bumped prompt version, with an eval case for a thin stream in a full week; and
 any stored summary whose stream is now held is regenerated or withheld.
+
+**Closed by E6-02 (#293, merged as e6b5a56c).** `summary.v3` speaks of the
+stream rather than the week, `tests/evals/summary/cases.py` adds a thin stream
+in a full week, and an ordinary-mode summary stored for a stream that is now held
+is not served
+(`tests/integration/test_the_hourly_summary_walk_and_what_a_stored_summary_shows.py`).
 
 ## A week's item total uses today's question set
 
@@ -463,7 +477,7 @@ mockups alone. **Owner:** E6, the first epic after E5.1 that reopens the
 instructor report's interface (its moderation lifecycle lives on that page).
 **Done when:** the mockups show the per-stream rule and per-stream notices.
 
-**Closed by E6-04.** Each held comment group in the report mockup shows its own
+**Closed by E6-04 (#295, merged as 9a400202).** Each held comment group in the report mockup shows its own
 notice, the notice names no count, and the admin console's threshold helper
 counts students who commented rather than responses.
 
@@ -520,6 +534,11 @@ both visible under its week and in a batch, that every shown stream has at
 least the threshold of unreleased commenters, and that every batch slice has the
 threshold of authors over two or more weeks.
 
+**Closed by E6-01 (#292, merged as fd08ef75).**
+`tests/integration/test_the_per_stream_gate_holds_over_generated_moderated_worlds.py`
+is the Hypothesis property, over random moderated worlds, with all three
+assertions.
+
 ## The summary gather's blank-comment class is not pinned to the view's
 
 From the per-PR re-check of E5.1-12 (#273, LOW). `reporting.py`'s summary
@@ -531,6 +550,10 @@ collation-dependent again would pass every test. **Owner:** E6, which reopens
 the summary path with moderation. **Done when:** a test asserts the gather's
 pattern equals the v003 view's literal, or the gather reads blankness from the
 view instead of carrying a copy.
+
+**Closed by E6-01 (#292, merged as fd08ef75).** The summary gather reads
+`report_comment` through `app.services.report_comments.COMMENT_VIEW`, so it
+takes blankness from the view, and its own copy of the class is deleted.
 
 ## The roster reads full role URIs only
 
@@ -621,7 +644,7 @@ Every source entry, in its source file's order, with what happened to it.
 | Frontend round: the hero line's scaling stroke | Carried (the trend chart's next ticket, E8 first) |
 | Frontend round: the test-edit hook misses its exemption in a worktree | Carried (a `process/` pull request) |
 | epic-exit (bf729fc) HIGH: the university line equalled the comparison line on the seeded world | Closed by E5-14 (cb5f05f seeds BIOL-215-U8FF; the drive asserts different, SQL-measured university figures) |
-| epic-exit LOW: a local `.env` written before the ruling keeps `BENCHMARK_MIN_RESPONDENTS_DEFAULT=15` | Carried. **Owner:** E6's first ticket. **Done when** a developer's stack warns when `.env` and `.env.example` disagree on the benchmark minimums, or the dev runbook tells every developer to set 10. `.env.example` already says 10 |
+| epic-exit LOW: a local `.env` written before the ruling keeps `BENCHMARK_MIN_RESPONDENTS_DEFAULT=15` | Carried. **Owner:** E6's first ticket. **Done when** a developer's stack warns when `.env` and `.env.example` disagree on the benchmark minimums, or the dev runbook tells every developer to set 10. `.env.example` already says 10. **Closed by E6-02 (#293, merged as e6b5a56c)**: `README.md`'s local runbook tells every developer to set 10 |
 | epic-exit LOW: no university-only withholding is driven | Carried (already listed above) |
-| Gate run: `test_the_submit_path_follows_adr_0056s_taxonomy.py::test_a_submission_is_prompt_while_the_broker_is_unreachable` measured 2.95 s against its 2.5 s budget once, under a load average near 3, then passed alone and on a full rerun | Carried: E6's first ticket touching the submit path decides whether the budget measures the code or the machine. Done when the test cannot fail on load alone, or a record says why its budget is right |
+| Gate run: `test_the_submit_path_follows_adr_0056s_taxonomy.py::test_a_submission_is_prompt_while_the_broker_is_unreachable` measured 2.95 s against its 2.5 s budget once, under a load average near 3, then passed alone and on a full rerun | Carried: E6's first ticket touching the submit path decides whether the budget measures the code or the machine. Done when the test cannot fail on load alone, or a record says why its budget is right. **Closed by E5.1-10 (#269, merged as 413905a)** before E6 began: the test asserts the median of three submissions, so one slow sample cannot fail it |
 | The per-PR security review of E5-14 (`app-security` on ce9df73) | Nothing found; nothing carried |

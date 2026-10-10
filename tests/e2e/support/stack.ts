@@ -6,10 +6,11 @@
 // two — the exit story's seeder and the release cutter — E5-10's two, which
 // pipe the other two development seeders the repository already ships, and
 // E6-01's, which routes seed moderation verdicts through the product's writer,
-// and E6-02's, which stops Celery beat so the scheduler cannot race a drive.
-// Nine helpers rather than the two this file opened with, so the count is named
-// rather than left as prose that goes stale on the next addition
-// (`docs/MISTAKES.md` entry 1).
+// E6-02's, which stops Celery beat so the scheduler cannot race a drive, then
+// one that routes a chosen verdict to one comment, and the two the moderation
+// exit drive needs: the moderation sweep and its story's seeder. Twelve helpers
+// rather than the two this file opened with, so the count is named rather than
+// left as prose that goes stale on the next addition (`docs/MISTAKES.md` entry 1).
 //
 // All of them shell out to `docker compose`, which is how this suite's stack is
 // brought up in the first place (`README.md`'s local sequence and the `e2e` job
@@ -270,6 +271,29 @@ export function routeSeedVerdictForComment(
   return Number(printed[printed.length - 1]);
 }
 
+/**
+ * Moderate every comment in a closed window that holds no verdict, now rather
+ * than at the next minute 10, and answer what the task printed.
+ *
+ * The same task `app.jobs.schedules` runs hourly (ADR 0188), invoked for the
+ * reason `generateWeeklySummaries` is: a drive cannot wait for the hour. It asks
+ * the stack's model provider, which on the development stack is the mock model
+ * service, so a comment carrying one of its markers gets that verdict and the
+ * routing that follows from it is the product's own. A planted verdict would be
+ * a drive agreeing with itself about where a comment was routed
+ * (`docs/MISTAKES.md` entry 30).
+ */
+export function moderateClosedWindows(): string {
+  return compose([
+    'exec',
+    '-T',
+    'api',
+    'python',
+    '-c',
+    'from app.jobs.tasks import moderate_closed_windows; print(moderate_closed_windows())',
+  ]).trim();
+}
+
 /** Where E4-15's story seeder lives, relative to the repository root. */
 export const EXIT_STORY_SEEDER = 'scripts/seed_exit_story.py';
 
@@ -400,6 +424,22 @@ export function seedThePriorTermBenchmarks(): string {
  */
 export function seedTheDemoStory(): string {
   return pipeTheSeeder(DEMO_STORY_SEEDER);
+}
+
+/** Where the moderation exit story for `BIOL-215-R3WW` lives (SPEC §14.3). */
+export const MODERATION_EXIT_STORY_SEEDER = 'scripts/seed_moderation_exit_story.py';
+
+/**
+ * Write the moderation exit story — course weeks 9 to 11 of `BIOL-215-R3WW` — and answer
+ * what the seeder printed.
+ *
+ * It writes answers and validity verdicts only: no moderation verdict, no
+ * summary and no release, which `moderateClosedWindows`, `generateWeeklySummaries`
+ * and `cutReleaseBatches` produce. It needs the section launched, its roster
+ * synced and its windows derived, and refuses loudly when any is missing.
+ */
+export function seedTheModerationExitStory(): string {
+  return pipeTheSeeder(MODERATION_EXIT_STORY_SEEDER);
 }
 
 /**
