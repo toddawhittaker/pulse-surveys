@@ -109,11 +109,14 @@ export const INSTRUCTOR_REPORT_TREND_COPY = {
     'University: no line on this chart. The set behind it is too small to report on.',
 
   // The accessible alternative. `docs/DESIGN_BRIEF.md` requires one for every
-  // chart, and the shape here is a visually hidden table carrying the same
-  // weeks and values the line is drawn from, so the chart's data is reachable
-  // as text (SPEC §14.2 item 4). The caption is filled with the panel's own
+  // chart, and the shape here is a table carrying the same weeks and values the
+  // line is drawn from, so the chart's data is reachable as text (SPEC §14.2
+  // item 4). It is visually hidden until a reader opens it with the toggle
+  // below, so a sighted reader who cannot read the chart can read the numbers. The caption is filled with the panel's own
   // label, which is how the two tables in a pair are told apart when they are
   // read rather than seen.
+  'instructor_report_trend.show_numbers': 'Show the numbers',
+  'instructor_report_trend.hide_numbers': 'Hide the numbers',
   'instructor_report_trend.table_caption': 'Weekly ratings: {stream}',
   'instructor_report_trend.table_course_week_header': 'Course week',
   'instructor_report_trend.table_term_week_header': 'Term week',

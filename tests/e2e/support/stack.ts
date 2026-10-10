@@ -228,6 +228,48 @@ export function routeSeedVerdictsFor(codes: readonly string[]): number {
   return Number(printed[printed.length - 1]);
 }
 
+/**
+ * Route one moderation verdict to the comment in the named section whose words
+ * are exactly `commentText`, and answer how many comments it routed.
+ *
+ * The same writer and the same seed provenance as `routeSeedVerdictsFor`, for a
+ * drive that needs one comment held for review (`HARMFUL`, say) before the
+ * rest are cleared. Call it first: a comment that already holds a verdict is
+ * not one this routes again. The count is the control — one sentence, typed
+ * once, should answer one.
+ */
+export function routeSeedVerdictForComment(
+  code: string,
+  commentText: string,
+  verdict: 'HARMFUL' | 'PRIVACY',
+): number {
+  const program = [
+    'import json',
+    'from sqlalchemy import text',
+    'from app.ai.contracts import ModerationVerdict',
+    'from app.db import SessionLocal',
+    'from app.services.moderation import SEED_MODEL_ID, SEED_PROMPT_VERSION, route_verdict',
+    `code, words, verdict = json.loads(${JSON.stringify(JSON.stringify([code, commentText, verdict]))})`,
+    'matching = text(',
+    '    "select a.id from answer a "',
+    '    "join response r on r.id = a.response_id "',
+    '    "join section s on s.id = r.section_id "',
+    '    "where s.lms_section_code = :code and a.comment_text = :words "',
+    '    "and not exists (select 1 from classification c "',
+    '    "where c.answer_id = a.id and c.task = \'MODERATION\')"',
+    ')',
+    'with SessionLocal() as session:',
+    '    answers = list(session.execute(matching, {"code": code, "words": words}).scalars())',
+    '    for answer_id in answers:',
+    '        route_verdict(session, answer_id, ModerationVerdict[verdict],',
+    '                      prompt_version=SEED_PROMPT_VERSION, model_id=SEED_MODEL_ID)',
+    '    session.commit()',
+    'print(len(answers))',
+  ].join('\n');
+  const printed = compose(['exec', '-T', 'api', 'python', '-'], program).trim().split('\n');
+  return Number(printed[printed.length - 1]);
+}
+
 /** Where E4-15's story seeder lives, relative to the repository root. */
 export const EXIT_STORY_SEEDER = 'scripts/seed_exit_story.py';
 

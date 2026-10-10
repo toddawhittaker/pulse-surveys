@@ -358,7 +358,7 @@ class Component extends DCLogic {
         { id: 'tz', label: 'Timezone', value: 'America/New_York', helper: 'All window times use this zone, regardless of where students are.' }
       ],
       fThresholds: [
-        { id: 'nthresh', label: 'Comment threshold (N)', value: '5', helper: 'Reports hide raw comments below this number of responses.', confirm: 'Lowering this exposes comments in sections currently below the threshold. Raising it hides comments instructors can see today. Takes effect at the next Monday report build.' },
+        { id: 'nthresh', label: 'Comment threshold (N)', value: '5', helper: 'Reports hide a comment group\u2019s raw comments in any week fewer than this many students commented in it.', confirm: 'Lowering this exposes comments in sections currently below the threshold. Raising it hides comments instructors can see today. Takes effect at the next Monday report build.' },
         { id: 'benchmin', label: 'Benchmark minimum', value: '8', helper: 'Comparable-course lines render only when at least this many matching sections exist.' }
       ],
       fRetention: [
