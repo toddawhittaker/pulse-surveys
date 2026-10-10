@@ -152,6 +152,7 @@ submitted.
 | 05 | [The Lead Faculty review queue and the exclusion log](E6-05-review-queue-and-exclusion-log.md) | `e6/review-queue-and-exclusion-log` | heavy | 03 | A leadership-only own-grant read in `authz.py`; the review queue (no week, no time, random order); Lead Faculty decisions through 03's service; the exclusion log in both directions; sibling-isolation and Care-absence invariants; SPEC §5.2, §5.5 and §11; ADR 0190. | |
 | 06 | [The leadership queue and log pages](E6-06-leadership-moderation-pages.md) | `e6/leadership-moderation-pages` | light | 04, 05 | The review queue page, the exclusion log page and its row, the routes and landing links. | |
 | 07 | [E6 exit](E6-07-e6-exit.md) | `e6/e6-exit` | light | all | The exit clause driven on the running stack; the carried files closed and `../e7/carried-from-e6.md` written; the boundary reviews; SPEC §14.3. | |
+| 08 | [The exclusion log leaves out taught sections, and no HTTP status caps a comment](E6-08-review-residue.md) | `e6/review-residue` | heavy | 05 | The two MEDs left by PR #296's re-check: the log drops rows from the reader's taught sections, and only an unusable answer counts toward the moderation cap. | |
 
 ## Waves
 
