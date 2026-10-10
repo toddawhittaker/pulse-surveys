@@ -274,23 +274,6 @@ class CommentView(BaseModel):
     decided_by_you: bool
 
 
-class ParticipationNote(BaseModel):
-    """SPEC §5.2's neutral participation trace for one week: "1 response held for review".
-
-    One count and nothing else (the owner's ruling 2, E6-03's decision 7). It
-    counts the comments in this week's held streams that carry a harmful or
-    privacy verdict and that a decision has not kept; it names no stream and no
-    category, and it never counts a threat or self-harm comment. At least one:
-    a week with nothing to count carries no note at all, so the note's presence
-    and its number are the same fact. It counts comments, not people, and feeds
-    no threshold (`docs/MISTAKES.md` entry 50).
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    held: int = Field(ge=1)
-
-
 class CommentDecision(BaseModel):
     """What the instructor sends to exclude, keep or undo one comment (E6-03).
 
@@ -427,12 +410,6 @@ class InstructorReport(BaseModel):
     # ADR 0152's release, placed here and nowhere else: a list in every report,
     # populated only in the latest published week's, and carrying no week.
     released_from_earlier_weeks: list[CommentView]
-    # SPEC §5.2's participation note for this week, or null when there is nothing
-    # to count. At most one per section-week, and on the report rather than on a
-    # stream because it names no stream (the owner's ruling 2). A declared
-    # divergence from E4's payload sketch, recorded in
-    # `tests/unit/test_the_payload_sketch_and_the_schema_are_reconciled.py`.
-    participation_note: ParticipationNote | None
     # The IANA name of the institution's zone, from `settings.institution_timezone`
     # — the same member the student payload carries, for the same reason. The
     # week's close instant above is rendered as a weekday and a wall-clock time,

@@ -968,16 +968,6 @@
             "type": "array",
             "title": "Released From Earlier Weeks"
           },
-          "participation_note": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ParticipationNote"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "institution_timezone": {
             "type": "string",
             "title": "Institution Timezone"
@@ -993,7 +983,6 @@
           "workload_benchmark",
           "comparison",
           "released_from_earlier_weeks",
-          "participation_note",
           "institution_timezone"
         ],
         "title": "InstructorReport",
@@ -1107,21 +1096,6 @@
         ],
         "title": "OwnSubmission",
         "description": "What this reader has already submitted for this week, if anything.\n\nTheir own and only ever their own. SPEC \u00a75.4 gives a student their own section\nand never another individual's raw data, and \u00a74 keys every response to its\nauthor; the lookup behind this is over the reader, the section and the week\ntogether, and the denial suite is what proves the reader is in that key."
-      },
-      "ParticipationNote": {
-        "properties": {
-          "held": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Held"
-          }
-        },
-        "type": "object",
-        "required": [
-          "held"
-        ],
-        "title": "ParticipationNote",
-        "description": "SPEC \u00a75.2's neutral participation trace for one week: \"1 response held for review\".\n\nOne count and nothing else (the owner's ruling 2, E6-03's decision 7). It\ncounts the comments in this week's held streams that carry a harmful or\nprivacy verdict and that a decision has not kept; it names no stream and no\ncategory, and it never counts a threat or self-harm comment. At least one:\na week with nothing to count carries no note at all, so the note's presence\nand its number are the same fact. It counts comments, not people, and feeds\nno threshold (`docs/MISTAKES.md` entry 50)."
       },
       "PublishedWeeks": {
         "properties": {

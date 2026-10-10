@@ -887,7 +887,6 @@ export interface components {
             readonly comparison: components["schemas"]["ComparisonFigure"];
             /** Released From Earlier Weeks */
             readonly released_from_earlier_weeks: readonly components["schemas"]["CommentView"][];
-            readonly participation_note: components["schemas"]["ParticipationNote"] | null;
             /** Institution Timezone */
             readonly institution_timezone: string;
         };
@@ -987,22 +986,6 @@ export interface components {
              * @description The answers, in question order.
              */
             readonly answers: readonly components["schemas"]["SubmittedAnswer-Output"][];
-        };
-        /**
-         * ParticipationNote
-         * @description SPEC §5.2's neutral participation trace for one week: "1 response held for review".
-         *
-         *     One count and nothing else (the owner's ruling 2, E6-03's decision 7). It
-         *     counts the comments in this week's held streams that carry a harmful or
-         *     privacy verdict and that a decision has not kept; it names no stream and no
-         *     category, and it never counts a threat or self-harm comment. At least one:
-         *     a week with nothing to count carries no note at all, so the note's presence
-         *     and its number are the same fact. It counts comments, not people, and feeds
-         *     no threshold (`docs/MISTAKES.md` entry 50).
-         */
-        readonly ParticipationNote: {
-            /** Held */
-            readonly held: number;
         };
         /**
          * PublishedWeeks

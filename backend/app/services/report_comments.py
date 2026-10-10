@@ -201,7 +201,6 @@ from sqlalchemy import (
     distinct,
     func,
     insert,
-    or_,
     select,
     table,
     true,
@@ -213,7 +212,7 @@ from app.ai.contracts import HeldNoteType
 from app.config import Settings
 from app.models.ai import Classification, ClassificationTask
 from app.models.report import MODERATION_STATES, ModerationState, ReleaseBatch, ReleaseBatchMember
-from app.models.survey import REPORT_STREAMS, Answer, Question, QuestionKind, Response
+from app.models.survey import Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow, Week
 from app.services import clock
 from app.services.moderation import holds_no_verdict, under_the_attempt_cap
@@ -230,12 +229,6 @@ INITIAL_STATE = MODERATION_STATES[0]
 # here instead of arriving as a status nobody defined — the `CHECK` makes that
 # unwritable, and this is what says so if it ever stops being true.
 REPORTED_STATUS = {stored: stored.lower() for stored in MODERATION_STATES}
-
-# The state a keep leaves a comment in, which takes a held flagged comment out of
-# the participation note's count (E6-03, the owner's ruling 2).
-KEPT_STATE = "KEPT"
-if KEPT_STATE not in MODERATION_STATES:  # pragma: no cover - fails loudly at import if renamed
-    raise RuntimeError("The moderation lifecycle vocabulary no longer holds `KEPT`.")
 
 # How many distinct closed weeks one stream's held comments must draw from before
 # that stream may be released — the third leg of the gate, counted per stream
@@ -801,60 +794,6 @@ def latest_decision(session: Session, answer_id: UUID) -> LatestDecision | None:
         is_undo=latest.is_undo,
         state_before=rows[1].state if len(rows) > 1 else INITIAL_STATE,
     )
-
-
-def participation_count(session: Session, *, section_id: UUID, week_id: UUID) -> int:
-    """How many held flagged comments one section-week's participation note counts (E6-03).
-
-    SPEC §5.2's participation note, under the owner's ruling 2: the comments in
-    this week's **held** streams that carry a harmful or privacy verdict and
-    that a decision has not kept. One number for the week, naming no stream and
-    no category. It counts comments, not people, and nothing compares it with a
-    threshold (`docs/MISTAKES.md` entry 50).
-
-    **Read from `report_comment`, so a threat or self-harm comment is never
-    counted**: v004 leaves out every comment any of whose verdicts is Care-class
-    (ADR 0187), and the flag test below asks only for harmful or privacy.
-
-    **Zero until the week is moderated whole**, the rule `visible_comments`
-    follows, so the number does not climb as verdicts land one at a time and
-    let a reader attribute the newest one by subtraction (`docs/MISTAKES.md`
-    entry 51).
-
-    **A released comment still counts, whatever has been decided about it.**
-    The ruling's "a decision has not kept" is read for the comments that are
-    still held. A comment a release batch has surfaced sits in the report's
-    from-earlier-weeks list with its chip, and the instructor can keep it there.
-    If its release, or that keep, changed this week's number, the change would
-    tell the instructor which week the released comment came from, which is the
-    attribution ADR 0153 removes. So a released comment is counted as it was
-    while it was held, and neither event moves the note (ADR 0189).
-    """
-    if not section_week_moderated(session, section_id=section_id, week_id=week_id):
-        return 0
-    held_streams = [
-        stream
-        for stream in REPORT_STREAMS
-        if stream_is_suppressed(session, section_id=section_id, week_id=week_id, stream=stream)
-    ]
-    if not held_streams:
-        return 0
-    answer_id = COMMENT_VIEW.c.answer_id
-    counted = (
-        select(func.count())
-        .select_from(COMMENT_VIEW)
-        .where(
-            COMMENT_VIEW.c.section_id == section_id,
-            COMMENT_VIEW.c.week_id == week_id,
-            COMMENT_VIEW.c.stream.in_(held_streams),
-            _flag_of(answer_id).is_not(None),
-            or_(
-                ~_in_no_release_batch(answer_id),
-                reported_status_of(answer_id) != KEPT_STATE,
-            ),
-        )
-    )
-    return int(session.execute(counted).scalar_one())
 
 
 def _flag_of(answer_id: SQLColumnExpression[Any]) -> ColumnElement[str | None]:

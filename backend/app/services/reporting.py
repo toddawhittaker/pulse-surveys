@@ -92,7 +92,6 @@ from app.services.report_comments import (
     COMMENT_VIEW,
     CommentCard,
     n_threshold,
-    participation_count,
     released_cards,
     reported_status_of,
     section_week_moderated,
@@ -1539,11 +1538,6 @@ def _payload(
     what the row holds, and an absent row is an absent member rather than an
     empty string. §4.1 item 6's spirit is that a suppression decided one layer
     down is not undone by the layer that renders it.
-
-    **The participation note is computed here, at read time** (E6-03), because
-    a comment's state changes and a stored row would not:
-    `app.services.report_comments.participation_count` is the rule, and a count
-    of zero is no note at all.
     """
     from app.schemas import report as schema
 
@@ -1558,7 +1552,6 @@ def _payload(
     )
     summaries = _stored_summaries(session, section_id=section.id, week_id=week.week_id)
     released = _released(session, section=section, week=week, published=published)
-    held = participation_count(session, section_id=section.id, week_id=week.week_id)
     # **The number `visible_comments` applied, read from the one function that
     # applies it, and printed unchanged.** Reading `settings.n_threshold_default`
     # here instead would be a second source: the report would print the value the
@@ -1649,7 +1642,6 @@ def _payload(
         # once nothing reads it.
         comparison=workload_benchmark.comparison.mean,
         released_from_earlier_weeks=_comment_views(released, reader=reader),
-        participation_note=schema.ParticipationNote(held=held) if held else None,
         institution_timezone=settings.institution_timezone,
     )
 

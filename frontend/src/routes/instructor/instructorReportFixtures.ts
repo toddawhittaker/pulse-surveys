@@ -312,7 +312,6 @@ export const A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS = {
   workload: { mean: 9.46, median: 8.04 },
   comparison: { suppressed: true, reason: 'below-minimum' },
   released_from_earlier_weeks: [],
-  participation_note: null,
   institution_timezone: INSTITUTION_TIMEZONE,
 } satisfies InstructorReportView & { comparison: unknown };
 
