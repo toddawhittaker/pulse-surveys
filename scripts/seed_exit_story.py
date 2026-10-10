@@ -747,10 +747,17 @@ def moderate_once(session: Session, answer_id: UUID) -> None:
     `app.services.moderation.route_verdict`, under that module's seed provenance
     (`"seed"` for both the prompt version and the model id), so it is never
     mistaken for a model's. Checked first so that a re-run appends nothing.
+
+    **A comment whose window has not closed by the app clock is left unmoderated.**
+    `route_verdict` refuses it (`ModerationBeforeClose`, before writing anything),
+    because an answer is revised in place on resubmission and a verdict written
+    before the close would vouch for text that can still change (ADR 0187). Such a
+    comment is moderated after its close, by whatever routes verdicts then, and a
+    re-run of this seeder after the close moderates it here.
     """
     from app.ai.contracts import ModerationVerdict
     from app.models.ai import Classification, ClassificationTask
-    from app.services.moderation import SEED_MODEL_ID, route_verdict
+    from app.services.moderation import SEED_MODEL_ID, ModerationBeforeClose, route_verdict
     from app.services.moderation import SEED_PROMPT_VERSION as MODERATION_SEED_PROMPT_VERSION
 
     already = session.scalars(
@@ -759,7 +766,9 @@ def moderate_once(session: Session, answer_id: UUID) -> None:
             Classification.task == ClassificationTask.MODERATION,
         )
     ).first()
-    if already is None:
+    if already is not None:
+        return
+    try:
         route_verdict(
             session,
             answer_id,
@@ -767,6 +776,9 @@ def moderate_once(session: Session, answer_id: UUID) -> None:
             prompt_version=MODERATION_SEED_PROMPT_VERSION,
             model_id=SEED_MODEL_ID,
         )
+    except ModerationBeforeClose:
+        # Raised before anything is written, so the session is untouched.
+        return
 
 
 def refuse_an_inconsistent_plan() -> None:
