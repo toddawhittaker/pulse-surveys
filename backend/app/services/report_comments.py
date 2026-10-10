@@ -216,6 +216,7 @@ from app.models.report import MODERATION_STATES, ModerationState, ReleaseBatch, 
 from app.models.survey import REPORT_STREAMS, Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow, Week
 from app.services import clock
+from app.services.moderation import holds_no_verdict, under_the_attempt_cap
 
 # The initial moderation state, and the one a comment carries when nothing has
 # been decided about it (ADR 0145). Taken off the model's own vocabulary rather
@@ -440,7 +441,9 @@ def section_week_moderated(session: Session, *, section_id: UUID, week_id: UUID)
     view leaves it out of every reader.
 
     True for a section-week with no comments at all, which has nothing to wait
-    for. E6-02 extends this rule for the attempt cap.
+    for. A comment at the moderation attempt cap (ADR 0188) is not waited for
+    either: it will never hold a verdict, so it is never shown, and waiting on it
+    would hold the rest of its week back for ever.
     """
     return (section_id, week_id) not in _unmoderated_section_weeks(
         session, Response.section_id == section_id, Response.week_id == week_id
@@ -1053,12 +1056,10 @@ def _unmoderated_section_weeks(
         .where(
             Question.kind == QuestionKind.COMMENT,
             Answer.comment_text.is_not(None),
-            ~select(Classification.id)
-            .where(
-                Classification.answer_id == Answer.id,
-                Classification.task == ClassificationTask.MODERATION,
-            )
-            .exists(),
+            holds_no_verdict(Answer.id),
+            # A comment at the attempt cap is resolved: it is never verdicted, so
+            # it is never shown, and the rest of its week stops waiting on it.
+            under_the_attempt_cap(Answer.id),
             *scope,
         )
     )

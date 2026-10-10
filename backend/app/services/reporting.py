@@ -69,7 +69,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.contracts import CommentStream, WeeklySummaryRecord
 from app.ai.gateway import AIGateway, AIGatewayError
-from app.ai.tasks import summarize_stream
+from app.ai.tasks import SUMMARY_PROMPT_VERSION, summarize_stream
 from app.config import Settings
 from app.models.identity import Enrollment
 from app.models.org import Course, Prefix, Section
@@ -1797,17 +1797,30 @@ def _stored_summaries(
     exists to refuse: a blank summary above a comment group reads to an instructor
     as a model that had nothing to say about her week, rather than as a job that
     has not run yet.
+
+    **An ordinary-mode summary of a stream that is now held is withheld.** A row
+    written under `SUMMARY_PROMPT_VERSION` before the threshold became per stream
+    (ADR 0182) may quote a thin stream's commenters, which the small-N prompt
+    forbids. Such a row is never regenerated (the E4 breakdown's decision 2), so
+    it is left out here, at the one place a stored summary is read, and the
+    stream shows the absent state instead.
     """
     from app.schemas.report import SummaryView
 
+    stored = session.execute(
+        select(
+            WeeklySummary.stream,
+            WeeklySummary.summary_text,
+            WeeklySummary.response_count,
+            WeeklySummary.prompt_version,
+        ).where(WeeklySummary.section_id == section_id, WeeklySummary.week_id == week_id)
+    ).all()
     return {
         stream: SummaryView(text=summary_text, response_count=response_count)
-        for stream, summary_text, response_count in session.execute(
-            select(
-                WeeklySummary.stream,
-                WeeklySummary.summary_text,
-                WeeklySummary.response_count,
-            ).where(WeeklySummary.section_id == section_id, WeeklySummary.week_id == week_id)
+        for stream, summary_text, response_count, prompt_version in stored
+        if not (
+            prompt_version == SUMMARY_PROMPT_VERSION
+            and stream_is_suppressed(session, section_id=section_id, week_id=week_id, stream=stream)
         )
     }
 

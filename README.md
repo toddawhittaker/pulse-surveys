@@ -52,6 +52,10 @@ make logs           # follow the logs
 make down           # docker compose down -v — discards the database too
 ```
 
+If your `.env` was copied before the benchmark minimum changed, set
+`BENCHMARK_MIN_RESPONDENTS_DEFAULT=10` in it, the value `.env.example` now
+carries; an older `.env` may still hold 15.
+
 `GET http://localhost:8000/healthz` answers with the service name, the version,
 and the environment it was configured with. The interactive API documentation is
 at `/docs`, the captured mail is at <http://localhost:8025>, the mock LMS is at

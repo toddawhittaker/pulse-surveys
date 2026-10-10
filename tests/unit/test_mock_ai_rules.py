@@ -113,6 +113,12 @@ STALL_MARKER = "mock-ai:stall"
 SUBSTANTIVE_MARKER = "mock-ai:substantive"
 INSUFFICIENT_MARKER = "mock-ai:insufficient"
 NONSENSE_MARKER = "mock-ai:nonsense"
+# The moderation task's forced verdicts (`nonsense` shares the validity marker).
+CLEAR_MARKER = "mock-ai:clear"
+HARMFUL_MARKER = "mock-ai:harmful"
+PRIVACY_MARKER = "mock-ai:privacy"
+THREAT_MARKER = "mock-ai:threat"
+SELF_HARM_MARKER = "mock-ai:self-harm"
 
 COPIED_MARKERS: tuple[str, ...] = (
     UNAVAILABLE_MARKER,
@@ -122,6 +128,11 @@ COPIED_MARKERS: tuple[str, ...] = (
     SUBSTANTIVE_MARKER,
     INSUFFICIENT_MARKER,
     NONSENSE_MARKER,
+    CLEAR_MARKER,
+    HARMFUL_MARKER,
+    PRIVACY_MARKER,
+    THREAT_MARKER,
+    SELF_HARM_MARKER,
 )
 
 # The length rule, copied for the same reason and diffed by the same kind of test.

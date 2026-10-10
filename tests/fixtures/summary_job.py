@@ -102,14 +102,13 @@ SUMMARY_JOB_TASK = "generate_weekly_summaries"
 # service module by a guessed name would be deciding that.
 GATEWAY_PARAMETER = "gateway"
 
-# The beat entry, and the slot the ticket settles: Monday 02:50, after E3-06's
-# provider-free passback at 02:20 and before instructors read (SPEC §3.1's
-# "reports available after window close Monday morning").
+# The beat entry, and its slot: every hour at minute 50, so a section-week is
+# summarized on the first walk after its last moderation verdict lands (ADR 0188).
 SCHEDULES_MODULE = "app.jobs.schedules"
 BEAT_SCHEDULE_NAME = "BEAT_SCHEDULE"
 BEAT_ENTRY_NAME = "generate-weekly-summaries"
-BEAT_DAY_OF_WEEK = "mon"
-BEAT_HOUR = "2"
+BEAT_DAY_OF_WEEK = "*"
+BEAT_HOUR = "*"
 BEAT_MINUTE = "50"
 
 # ---------------------------------------------------------------------------

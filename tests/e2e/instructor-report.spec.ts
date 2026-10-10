@@ -81,6 +81,7 @@ import {
   deriveSurveyWindows,
   generateWeeklySummaries,
   routeSeedVerdictsFor,
+  stopTheScheduler,
 } from './support/stack';
 import {
   INSTRUCTOR_SUBJECT,
@@ -257,6 +258,11 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
   test.setTimeout(WORLD_TIMEOUT_MS);
+  // Before anything is submitted: beat's hourly summary walk (minute 50) and
+  // moderation sweep (minute 10) would otherwise be free to run between this
+  // file's submissions and its own calls to the jobs, and a stored summary is
+  // never rewritten. `stopTheScheduler` in `support/stack.ts` has the whole reason.
+  stopTheScheduler();
   const context = await browser.newContext();
   const page = await context.newPage();
   try {

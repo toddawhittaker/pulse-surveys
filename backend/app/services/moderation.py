@@ -27,7 +27,12 @@ anything. The definer does not repeat the check, because the close is judged by
 the app clock, which the database cannot read, and every writer comes through
 here (ADR 0187).
 
-E6-02 adds the model call and the sweep that use this.
+**The sweep** (`sweep_unmoderated_comments`) is what asks a model for those
+verdicts: hourly, over every comment whose window has closed and which holds no
+verdict yet (ADR 0188). A failed call is retried by the next sweep, and an
+unusable answer counts toward an attempt cap of six, after which the comment
+stays held for good. Two sweeps never run at once, and each comment's outcome is
+committed before the next is asked about.
 
 ## A person's decision (E6-03)
 
@@ -65,30 +70,73 @@ including an undo of an undo, is refused and writes nothing.
 exclusion or keep.
 """
 
+import logging
+from collections.abc import Sequence
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import func, insert, select, text
+from sqlalchemy import ColumnElement, SQLColumnExpression, func, insert, select, text
 from sqlalchemy.orm import Session
 
 from app.ai.contracts import ModerationVerdict
+from app.ai.gateway import (
+    AIGateway,
+    AIProviderRefusedError,
+    AIProviderUnavailableError,
+    AIProviderUnreachableError,
+    AIResponseInvalidError,
+)
+from app.ai.tasks import classify_comment_moderation
 from app.config import Settings
+from app.models.ai import Classification, ClassificationTask, ModerationAttempt
 from app.models.report import REASON_BOUND, DeciderRole, ModerationState
-from app.models.survey import Answer, Response
+from app.models.survey import Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow
 from app.services import clock
-from app.services.report_comments import INITIAL_STATE, CommentCard, latest_decision
-from app.services.reporting import comment_on_instructor_report, comment_view
 from app.services.survey_windows import closed_by
 
 if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
     from app.schemas.report import CommentView
+    from app.services.report_comments import CommentCard
+
+logger = logging.getLogger(__name__)
 
 # The provenance a seed script or a test fixture plants a verdict under. Never a
 # real prompt version or model id (E6-01 work order, decision 4).
 SEED_PROMPT_VERSION = "seed"
 SEED_MODEL_ID = "seed"
+
+
+# How many unusable answers one comment may get before the sweep stops asking
+# (ADR 0188). Six hourly sweeps: long enough to ride out a bad deploy of a prompt
+# or a model, short enough that a comment no model can answer does not hold its
+# section-week's summary back for days.
+MODERATION_ATTEMPT_CAP = 6
+
+# The one failure that counts toward the cap: the provider answered, and the
+# answer was not the contract even after the gateway's re-ask. Something about
+# this comment may be what breaks the model, so asking for ever is not safe.
+COUNTED_FAILURES = (AIResponseInvalidError,)
+
+# The failures that count nothing: a refusal (`AIProviderRefusedError`, HTTP 401,
+# 429, 500 and the like: a key, a rate limit, a provider bug) and an outage
+# (`AIProviderUnavailableError`, which includes a read timeout, or
+# `AIProviderUnreachableError`). Each is about the provider or this account, not
+# the comment, and lasts as long as it lasts. A cap that counted them would hold
+# back for good exactly the comments swept during one, Care-class disclosures
+# among them, so the comment is simply asked about again next hour (ADR 0188).
+RETRIED_FAILURES = (
+    AIProviderRefusedError,
+    AIProviderUnavailableError,
+    AIProviderUnreachableError,
+)
+
+# The Postgres advisory lock key that keeps two sweeps from running at once
+# (ADR 0188). Any fixed bigint will do as long as no other lock uses it; this is
+# the only advisory lock in the application. The digits are the ticket and the
+# ADR (E6-02, 0188), so a reader of `pg_locks` can tell whose it is.
+SWEEP_LOCK_KEY = 6_020_188
 
 
 class ModerationBeforeClose(ValueError):  # noqa: N818 - the name the fix round settles
@@ -178,6 +226,173 @@ def _refuse_before_the_close(session: Session, answer_id: UUID) -> None:
         )
 
 
+def under_the_attempt_cap(answer_id: SQLColumnExpression[Any]) -> ColumnElement[bool]:
+    """True for an answer with fewer than `MODERATION_ATTEMPT_CAP` failed moderation calls.
+
+    The one statement of the cap as SQL. The sweep reads it to decide what to ask
+    about, and `app.services.report_comments.section_week_moderated` reads it to
+    stop waiting on a comment the sweep has given up on.
+    """
+    attempts = (
+        select(func.count(ModerationAttempt.id))
+        .where(ModerationAttempt.answer_id == answer_id)
+        .scalar_subquery()
+    )
+    return attempts < MODERATION_ATTEMPT_CAP
+
+
+def holds_no_verdict(answer_id: SQLColumnExpression[Any]) -> ColumnElement[bool]:
+    """True for an answer with no `MODERATION` classification."""
+    return ~(
+        select(Classification.id)
+        .where(
+            Classification.answer_id == answer_id,
+            Classification.task == ClassificationTask.MODERATION,
+        )
+        .exists()
+    )
+
+
+def comments_awaiting_moderation(session: Session) -> Sequence[UUID]:
+    """Every comment the sweep should ask about now.
+
+    A comment (an answer to a `comment` question with text that is not blank)
+    whose survey window has closed by the app clock, which holds no moderation
+    verdict and is under the attempt cap. Closed is
+    `app.services.survey_windows.closed_by`, the product's one definition of a
+    closed window (`closes_at < now`, ADRs 0188 and 0189), which `route_verdict`
+    asks too, so the sweep never picks a comment the router would refuse. The
+    anti-join is `NOT EXISTS`, the shape
+    `app.services.validity.unresolved_floored_answers` argues for.
+
+    Blank is `str.strip()`, decided in Python as `report_comment_v003.sql` and
+    `section_week_moderated` decide it; the text is read for that and nothing else.
+    """
+    now = clock.now(session, settings=Settings())
+    rows = session.execute(
+        select(Answer.id, Answer.comment_text)
+        .join(Response, Response.id == Answer.response_id)
+        .join(Question, Question.id == Answer.question_id)
+        .join(
+            SurveyWindow,
+            (SurveyWindow.section_id == Response.section_id)
+            & (SurveyWindow.week_id == Response.week_id),
+        )
+        .where(
+            Question.kind == QuestionKind.COMMENT,
+            Answer.comment_text.is_not(None),
+            closed_by(now),
+            holds_no_verdict(Answer.id),
+            under_the_attempt_cap(Answer.id),
+        )
+        .order_by(Answer.id)
+    ).all()
+    return [answer_id for answer_id, written in rows if written is not None and written.strip()]
+
+
+def sweep_unmoderated_comments(session: Session, gateway: AIGateway | None = None) -> int:
+    """Ask a model about every comment awaiting moderation, and route each verdict.
+
+    Answers how many verdicts were routed, for a log line. **This function owns
+    the transaction**: it commits once it holds the lock, and again after each
+    comment, so a verdict and its Care route are stored before the next comment
+    is asked about and a later error cannot take them back.
+
+    **Two sweeps never overlap.** The sweep first takes a Postgres session-level
+    advisory lock on `SWEEP_LOCK_KEY`. If another run holds it, this one answers
+    0 and touches nothing: two runs at once would ask twice, and one could give a
+    verdict to a comment the other had just capped, after its week had been read
+    without it. The lock is released in `finally`, on every path.
+
+    - A verdict is routed through `route_verdict`, which writes it with its flag
+      or its Care case.
+    - An unusable answer (`COUNTED_FAILURES`) appends one `moderation_attempt`
+      row. The one that reaches the cap is logged at error level, by answer id
+      only; the comment then stays held, never given a verdict (ADR 0188).
+    - A refusal or an outage (`RETRIED_FAILURES`) writes nothing and is logged at
+      error level; the next sweep asks again.
+
+    Anything else is rolled back to the last commit and propagates.
+    """
+    locked = session.execute(select(func.pg_try_advisory_lock(SWEEP_LOCK_KEY))).scalar_one()
+    if not locked:
+        logger.info("the moderation sweep found another run holding its lock and did nothing")
+        return 0
+    try:
+        session.commit()
+        return _moderate_each(session, gateway)
+    except BaseException:
+        session.rollback()
+        raise
+    finally:
+        session.execute(select(func.pg_advisory_unlock(SWEEP_LOCK_KEY)))
+        session.commit()
+
+
+def _moderate_each(session: Session, gateway: AIGateway | None) -> int:
+    """The sweep's walk, under its lock: one comment at a time, one commit each."""
+    answer_ids = comments_awaiting_moderation(session)
+    logger.info("the moderation sweep found %d comment(s) awaiting a verdict", len(answer_ids))
+    routed = 0
+    for answer_id in answer_ids:
+        comment = session.execute(
+            select(Answer.comment_text).where(Answer.id == answer_id)
+        ).scalar_one()
+        if comment is None:
+            continue
+        try:
+            output = classify_comment_moderation(comment, gateway)
+        except COUNTED_FAILURES as failed:
+            _record_a_failed_attempt(session, answer_id, failed)
+            session.commit()
+            continue
+        except RETRIED_FAILURES as failed:
+            logger.error(
+                "the moderation sweep left answer %s for the next run after an %s",
+                answer_id,
+                type(failed).__name__,
+            )
+            continue
+        route_verdict(
+            session,
+            answer_id,
+            output.verdict,
+            prompt_version=output.prompt_version,
+            model_id=output.model_id,
+        )
+        session.commit()
+        routed += 1
+    return routed
+
+
+def _record_a_failed_attempt(session: Session, answer_id: UUID, failed: Exception) -> None:
+    """Append one attempt row, and log once at error level when it reaches the cap.
+
+    Logged by answer id and the failure's class name only: the text of the
+    comment, and whatever the provider put in its error, stay out of the log
+    (SPEC §10).
+    """
+    session.add(ModerationAttempt(answer_id=answer_id))
+    session.flush()
+    attempts = session.execute(
+        select(func.count(ModerationAttempt.id)).where(ModerationAttempt.answer_id == answer_id)
+    ).scalar_one()
+    if attempts == MODERATION_ATTEMPT_CAP:
+        logger.error(
+            "answer %s reached the moderation attempt cap of %d and stays held without a verdict",
+            answer_id,
+            MODERATION_ATTEMPT_CAP,
+        )
+    else:
+        logger.warning(
+            "the moderation sweep could not use the answer for answer %s (%s), attempt %d of %d",
+            answer_id,
+            type(failed).__name__,
+            attempts,
+            MODERATION_ATTEMPT_CAP,
+        )
+
+
 # ---------------------------------------------------------------------------
 # A person's decision (E6-03).
 # ---------------------------------------------------------------------------
@@ -254,6 +469,12 @@ def decide_as_instructor(
     Raises `CommentNotOnReportError`, `DecisionNotAllowedError` or a
     `ReasonRefusedError`, each having written nothing.
     """
+    # Imported here rather than at module scope: `app.services.report_comments`
+    # imports this module for the attempt cap (E6-02), so a module-scope import
+    # back would be a cycle. The same device `app.services.reporting._payload`
+    # uses for its schema.
+    from app.services.reporting import comment_on_instructor_report, comment_view
+
     if person_id is None:
         raise CommentNotOnReportError
     card = comment_on_instructor_report(
@@ -281,7 +502,7 @@ def decide_as_instructor(
 def _record_decision(
     session: Session,
     *,
-    card: CommentCard,
+    card: "CommentCard",
     action: DecisionAction,
     reason: str | None,
     decided_by: UUID,
@@ -304,6 +525,9 @@ def _record_decision(
     Raises `DecisionNotAllowedError` or a `ReasonRefusedError`, having written
     nothing. Commits nothing.
     """
+    # At call time, for the cycle `decide_as_instructor` describes.
+    from app.services.report_comments import INITIAL_STATE, latest_decision
+
     session.execute(
         select(func.pg_advisory_xact_lock(func.hashtextextended(str(card.answer_id), 0)))
     )
