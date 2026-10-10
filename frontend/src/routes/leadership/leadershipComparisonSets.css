@@ -112,7 +112,7 @@
 
 /* A link looks like one: marigold-deep, the brief's text-safe link colour, and
    underlined, because colour alone does not tell a link from the text around it
-   (WCAG 1.4.1). The leadership landing's one link uses this rule too. */
+   (WCAG 1.4.1). The leadership landing's links use this rule too. */
 .pulse-set-link {
   color: var(--marigold-deep);
   text-decoration: underline;

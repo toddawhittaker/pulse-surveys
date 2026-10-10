@@ -25,11 +25,11 @@ const HEADING_ID = 'pulse-landing-heading';
 /**
  * `children` is what a landing grows before it becomes a screen of its own.
  *
- * E5-09 is the first caller: the leadership landing is still the empty roll-up
- * view, and it now carries one link to the comparison-set surface beneath its
- * line. The alternative was the instructor area's move — replace the component
- * with a page of its own — which is right when there is a screen to build and
- * heavy for one link. Anything rendered here sits inside the landmark and below
+ * The leadership landing is the caller: it is still the empty roll-up view, and
+ * it carries three links beneath its line, to the comparison sets, the review
+ * queue and the exclusion log. The alternative was the instructor area's move —
+ * replace the component with a page of its own — which is right when there is a
+ * screen to build and heavy for a few links. Anything rendered here sits inside the landmark and below
  * the empty-state line, so the heading still labels the whole of it.
  */
 export function LandingView({
