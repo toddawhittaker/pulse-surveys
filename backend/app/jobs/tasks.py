@@ -38,7 +38,7 @@ from uuid import UUID
 
 from app.ai.gateway import AIGateway
 from app.config import Settings
-from app.db import SessionLocal
+from app.db import SessionLocal, engine
 from app.jobs.celery_app import celery_app
 from app.lti.ags import AgsError
 from app.lti.in_flight import purge_expired_launch_states
@@ -300,8 +300,19 @@ def moderate_closed_windows(gateway: AIGateway | None = None) -> int:
     comment, because a verdict may have opened a Care case, and a Care route must
     not wait on, or be rolled back by, the rest of a pass that can run for hours.
     `gateway` is the test seam `generate_weekly_summaries` has.
+
+    **The session is bound to one connection for the whole run** (E6-05,
+    decision 5a, from PR #293's re-check). The sweep's lock is a Postgres
+    session-level advisory lock, which belongs to the server connection that took
+    it. A session bound to the engine hands its connection back to the pool at
+    every commit and may draw a different one for the next statement, so the
+    unlock could run where the lock was never taken: `pg_advisory_unlock` answers
+    false and the lock stays on an idle pooled connection, and every later sweep
+    finds it taken and does nothing. One connection checked out here, and the
+    session made on it by the same factory, keeps the lock, every per-comment
+    commit and the unlock on the same server connection.
     """
-    with SessionLocal() as session:
+    with engine.connect() as connection, SessionLocal(bind=connection) as session:
         return sweep_unmoderated_comments(session, gateway)
 
 

@@ -597,7 +597,7 @@ def stand_the_clock_at(monkeypatch: pytest.MonkeyPatch, instant: Any) -> None:
     monkeypatch.setattr(moderation_service(), "now", fixed, raising=False)
 
 
-@pytest.mark.parametrize("status", [401, 429, 500])
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 429, 500])
 def test_a_refusing_provider_writes_no_attempt_and_strands_no_comment(
     status: int,
     comment_world: CommentWorld,
@@ -606,17 +606,26 @@ def test_a_refusing_provider_writes_no_attempt_and_strands_no_comment(
     mock_gateway: Any,
     stub_providers: Callable[..., StubProvider],
 ) -> None:
-    """Only an unusable answer counts toward the cap; a refusal is retried like an outage.
+    """A refusal about the provider, not the request, is retried like an outage.
 
     PR #293's fix round: `AIProviderRefusedError` (HTTP 401, 429, 500) writes no
-    `moderation_attempt` row. Seven sweeps against a provider answering `status`
+    `moderation_attempt` row. E6-05's work order (decision 5b) splits the
+    refusals by status: only 413 and 422 count toward the cap and have their own
+    test below; 400, 401, 403, 404, 429 and 500 say nothing certain about the
+    comment and count nothing. 403 and 404 were added here with that split,
+    because a fix that counted "every 4xx" is its natural near miss. 400 was
+    moved here by PR #296's fix round: a 400 can be account-wide (a deprecated
+    parameter, a schema change), and counting it would cap every comment for
+    good and release every week with no threat or self-harm check.
+    Seven sweeps against a provider answering `status`
     to everything, one more than the cap, each ask about both comments and leave
     neither an attempt row nor a verdict. One sweep against the healthy mock then
     gives each its verdict, and the self-harm disclosure its Care case.
 
     **The mutation it kills:** a refusal counted toward the cap, which after six
     sweeps parks the comment for good, and a self-harm disclosure parked that way
-    reaches nobody. **Near misses:** counting only some refusal statuses (one case
+    reaches nobody. In particular, 400 counted again (put back in the counting
+    set) reds the 400 case. **Near misses:** counting only some refusal statuses (one case
     per status, so a fix that exempted 500 alone still reds on 401 and 429); and a
     sweep that stops asking after some refusals without writing a row (the
     request count must rise on every sweep, and the last sweep must verdict both).
@@ -656,6 +665,122 @@ def test_a_refusing_provider_writes_no_attempt_and_strands_no_comment(
         "still holds no verdict. A refusal must never park a comment."
     )
     assert len(threat_cases(world.session, disclosure)) == 1
+
+
+@pytest.mark.parametrize("status", [413, 422])
+def test_a_request_shaped_refusal_counts_toward_the_cap_and_caps_the_comment(
+    status: int,
+    comment_world: CommentWorld,
+    gateways: Callable[[str], Any],
+    stub_providers: Callable[..., StubProvider],
+) -> None:
+    """E6-05 decision 5b: a 413 or 422 refusal is about the comment, so it is counted.
+
+    A hosted provider answers a content-filtered prompt with 422, and 413 is a
+    request too large to take. Each is the provider saying "not this comment",
+    every time it is asked, so before the fix such a comment was retried forever
+    and held its week. 400 is not in this set (PR #296's fix round): it can be
+    account-wide, so it is retried with the refusals in the test above. Six sweeps against a provider answering `status` to
+    everything each write one `moderation_attempt` row and each ask again; the
+    seventh asks nothing and writes nothing; the comment holds no verdict.
+
+    **The mutation this kills:** every `AIProviderRefusedError` treated alike, as
+    PR #293 left it (no row is ever written, and the comment is asked about
+    forever). **Near misses:** counting only 422 (one case per status), and
+    counting the refusal but not stopping at the cap (the seventh sweep's request
+    count must not rise).
+    """
+    world = comment_world
+    world.build()
+    world.close_week(CLOSED_WEEK)
+    nonce = f"E605FILTERED{status}Qz"
+    answer = a_comment(world, CLOSED_WEEK, f"{nonce} the lab ran long")
+    refusing = stub_providers(status)
+    refused = gateways(refusing.base_url)
+
+    asked = 0
+    for done in range(1, CAP + 1):
+        sweep(world, refused)
+        assert attempts_of(world, answer) == done, (
+            f"After {done} sweep(s) against a provider answering HTTP {status}, the comment has "
+            f"{attempts_of(world, answer)} attempt row(s). Decision 5b: a request-shaped refusal "
+            "writes one per sweep and counts toward the cap."
+        )
+        now_asked = refusing.carrying(nonce)
+        assert now_asked > asked, f"Sweep {done} did not ask the provider about the comment."
+        asked = now_asked
+
+    sweep(world, refused)
+    assert attempts_of(world, answer) == CAP
+    assert (
+        refusing.carrying(nonce) == asked
+    ), f"The seventh sweep asked the provider about a comment already at the cap of {CAP}."
+    assert verdicts_of(world, answer) == []
+
+
+class RecordsRefusals:
+    """The real gateway, recording every `AIProviderRefusedError` it raises on the way out.
+
+    Answers `run_task` and `run_task_with_usage`, the two entry points
+    `FailsOnItsSecondCall` above answers; anything else is passed through. The
+    error is re-raised untouched, so the sweep sees exactly what it would have.
+    """
+
+    def __init__(self, real: Any, refused: type[BaseException]) -> None:
+        self.real = real
+        self.refused = refused
+        self.raised: list[BaseException] = []
+
+    def _call(self, name: str, kwargs: dict[str, Any]) -> Any:
+        try:
+            return getattr(self.real, name)(**kwargs)
+        except self.refused as error:
+            self.raised.append(error)
+            raise
+
+    def run_task(self, **kwargs: Any) -> Any:
+        return self._call("run_task", kwargs)
+
+    def run_task_with_usage(self, **kwargs: Any) -> Any:
+        return self._call("run_task_with_usage", kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.real, name)
+
+
+@pytest.mark.parametrize("status", [422, 429])
+def test_a_refusal_carries_the_http_status_the_provider_answered(
+    status: int,
+    comment_world: CommentWorld,
+    gateways: Callable[[str], Any],
+    stub_providers: Callable[..., StubProvider],
+) -> None:
+    """E6-05 decision 5b: `AIProviderRefusedError` carries its HTTP status as `status: int`.
+
+    The sweep can only split refusals by status if the error says which status
+    it was. **The mutation this kills:** the status left off the error, or set to
+    a constant. **The near miss:** the status carried as a string — `"422"` is
+    not `422`, and a sweep comparing it to a set of ints counts nothing.
+    """
+    from app.ai.gateway import AIProviderRefusedError
+
+    world = comment_world
+    world.build()
+    world.close_week(CLOSED_WEEK)
+    a_comment(world, CLOSED_WEEK, f"E605STATUS{status}Qz the lab ran long")
+    gateway = RecordsRefusals(gateways(stub_providers(status).base_url), AIProviderRefusedError)
+
+    sweep(world, gateway)
+
+    assert gateway.raised, (
+        f"The gateway raised no `AIProviderRefusedError` against a provider answering HTTP "
+        f"{status}, so this test measured nothing."
+    )
+    carried = [getattr(error, "status", None) for error in gateway.raised]
+    assert all(type(value) is int and value == status for value in carried), (
+        f"The refusals carried `status` {carried!r} for a provider answering HTTP {status}. "
+        "Decision 5b: the error carries its HTTP status as an int."
+    )
 
 
 def test_a_sweep_that_starts_while_another_runs_asks_nothing_and_writes_nothing(

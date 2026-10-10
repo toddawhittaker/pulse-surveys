@@ -46,7 +46,8 @@ note and no held count (ruling 6). There is no per-comment trace.
 
 **The log.** Every `EXCLUDED` and `KEPT` row decided by a person, inside the
 reader's own grant at their leadership roles. Each row shows the section
-(course label and code), the decider's stored role (ruling 4), AI-flagged or
+(course label and code), whether it was an exclusion or a keep (the ruling on
+dispute E6-05-03), the decider's stored role (ruling 4), AI-flagged or
 unflagged with its reason, the decision date, and an excerpt. The excerpt is
 withheld when the comment is not visible to its own instructor, because a date
 beside text from a held stream would place that text in a week. Both
@@ -128,8 +129,8 @@ writer of `moderation_state`. `section_codes.course_label` for the section.
    `public.report_comment`, and this ticket adds no grant to `pulse_app`:
    `tests/integration/test_identity_grants.py` shows its grant set unchanged.
 10. **The log, both directions.** The log shows `EXCLUDED` and `KEPT` rows inside
-   the reader's own grant, with the section, the role, flagged or the reason,
-   and the date. A row whose comment its instructor cannot see carries no
+   the reader's own grant, with the section, the direction (`EXCLUDED` or
+   `KEPT`), the role, flagged or the reason, and the date. A row whose comment its instructor cannot see carries no
    excerpt.
 11. **The assistant dean fails closed.** A person whose only leadership grant is
    `ASSISTANT_DEAN` gets the refusal, as ADR 0108 says, until E9.

@@ -30,8 +30,8 @@ here (ADR 0187).
 **The sweep** (`sweep_unmoderated_comments`) is what asks a model for those
 verdicts: hourly, over every comment whose window has closed and which holds no
 verdict yet (ADR 0188). A failed call is retried by the next sweep, and an
-unusable answer counts toward an attempt cap of six, after which the comment
-stays held for good. Two sweeps never run at once, and each comment's outcome is
+unusable answer, or a refusal of this particular request, counts toward an
+attempt cap of six, after which the comment stays held for good. Two sweeps never run at once, and each comment's outcome is
 committed before the next is asked about.
 
 ## A person's decision (E6-03)
@@ -49,8 +49,8 @@ reader's own report currently returns, found by
 `app.services.reporting.comment_on_instructor_report`, which walks the report's
 own reads rather than rebuilding the rule from the answer. `_record_decision`
 is the shared write: the transition table, the undo rule, the reason rule and
-the insert. It takes the comment's card and the decider and role from its
-caller, and nothing that widens what it accepts. E6-05 adds the Lead Faculty's
+the insert. It takes the comment's key, the class of its flag, and the decider
+and role from its caller, and nothing that widens what it accepts. E6-05 adds the Lead Faculty's
 door with a check of its own; a second door calls the same write and cannot
 loosen the first.
 
@@ -68,18 +68,35 @@ including an undo of an undo, is refused and writes nothing.
 
 **No audit-log row.** A decision is its own record; SPEC §8's audit log holds no
 exclusion or keep.
+
+## The Lead Faculty review queue and the exclusion log (E6-05)
+
+SPEC §5.2 routes a harmful comment to its course's Lead Faculty review queue, or
+its department chair's for a course nobody leads. `review_queue` reads it over
+`authz.lead_review_courses`, the reader's own leadership grant and nothing else,
+from `report_comment` v004, so the Care-class exclusion has one home. It shows
+the text and the section at any threshold (ruling 1), with no week, time or
+count, in a fresh order on every read. `decide_as_leader` is the second door into
+the shared write, with its own check: the comment is in this reader's queue now,
+asked under the comment's lock. `exclusion_log` lists every exclusion and keep a
+person made inside the same grant, quoting a comment only where its own
+instructor's report shows it under its week (ADR 0190).
 """
 
 import logging
-from collections.abc import Sequence
+import random
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import ColumnElement, SQLColumnExpression, func, insert, select, text
+from sqlalchemy import ColumnElement, Select, SQLColumnExpression, func, insert, select, text
 from sqlalchemy.orm import Session
 
-from app.ai.contracts import ModerationVerdict
+from app.ai.contracts import HeldNoteType, ModerationVerdict
 from app.ai.gateway import (
     AIGateway,
     AIProviderRefusedError,
@@ -90,15 +107,18 @@ from app.ai.gateway import (
 from app.ai.tasks import classify_comment_moderation
 from app.config import Settings
 from app.models.ai import Classification, ClassificationTask, ModerationAttempt
+from app.models.identity import AssignmentRole
+from app.models.org import Course, Prefix, Section
 from app.models.report import REASON_BOUND, DeciderRole, ModerationState
 from app.models.survey import Answer, Question, QuestionKind, Response
-from app.models.term import SurveyWindow
+from app.models.term import SurveyWindow, Term
 from app.services import clock
+from app.services.authz import lead_review_courses, taught_section_ids
+from app.services.section_codes import course_label
 from app.services.survey_windows import closed_by
 
 if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
     from app.schemas.report import CommentView
-    from app.services.report_comments import CommentCard
 
 logger = logging.getLogger(__name__)
 
@@ -114,18 +134,34 @@ SEED_MODEL_ID = "seed"
 # section-week's summary back for days.
 MODERATION_ATTEMPT_CAP = 6
 
-# The one failure that counts toward the cap: the provider answered, and the
-# answer was not the contract even after the gateway's re-ask. Something about
+# The failure class that always counts toward the cap: the provider answered, and
+# the answer was not the contract even after the gateway's re-ask. Something about
 # this comment may be what breaks the model, so asking for ever is not safe.
 COUNTED_FAILURES = (AIResponseInvalidError,)
 
-# The failures that count nothing: a refusal (`AIProviderRefusedError`, HTTP 401,
-# 429, 500 and the like: a key, a rate limit, a provider bug) and an outage
-# (`AIProviderUnavailableError`, which includes a read timeout, or
-# `AIProviderUnreachableError`). Each is about the provider or this account, not
-# the comment, and lasts as long as it lasts. A cap that counted them would hold
-# back for good exactly the comments swept during one, Care-class disclosures
-# among them, so the comment is simply asked about again next hour (ADR 0188).
+# The refusals that count toward the cap as well (E6-05, decision 5b): the
+# statuses a provider answers about this one prompt. 422 is how a hosted provider
+# refuses a content-filtered prompt, and 413 is a prompt too large to take; each
+# is answered the same for this comment every time, so a comment drawing one
+# would otherwise be asked about, and hold its week back, for ever.
+#
+# **400 is not here, deliberately** (the fix round on PR #296). A 400 is just as
+# often about the whole account or the request's shape — a bad parameter after a
+# deploy — and then every comment draws it. Counting it would cap every comment
+# for good inside six hours, and a capped comment counts as resolved, so weeks
+# would be released with no threat or self-harm check at all. A 400 is retried
+# and holds its week; a content filter answering 400 holds that comment's week
+# until E10's Care review (carried in E6-07).
+REQUEST_SHAPED_REFUSALS = frozenset({413, 422})
+
+# The failures that count nothing: every other refusal (`AIProviderRefusedError`,
+# HTTP 400, 401, 403, 404, 429, 500 and the like: a malformed request, a key, a
+# permission, a model name, a rate limit, a provider bug) and an outage (`AIProviderUnavailableError`, which
+# includes a read timeout, or `AIProviderUnreachableError`). Each is about the
+# provider or this account, not the comment, and lasts as long as it lasts. A cap
+# that counted them would hold back for good exactly the comments swept during
+# one, Care-class disclosures among them, so the comment is simply asked about
+# again next hour (ADR 0188).
 RETRIED_FAILURES = (
     AIProviderRefusedError,
     AIProviderUnavailableError,
@@ -304,13 +340,23 @@ def sweep_unmoderated_comments(session: Session, gateway: AIGateway | None = Non
     verdict to a comment the other had just capped, after its week had been read
     without it. The lock is released in `finally`, on every path.
 
+    **`session` must be bound to one connection**, not to a pooled engine: the
+    lock belongs to the server connection that took it, and a session on the
+    engine may run the unlock on another one after a commit
+    (`app.jobs.tasks.moderate_closed_windows` binds it; E6-05, decision 5a). An
+    unlock that answers false — the lock was not held where it ran — is logged at
+    error level, because the lock is then stranded and every later sweep does
+    nothing.
+
     - A verdict is routed through `route_verdict`, which writes it with its flag
       or its Care case.
-    - An unusable answer (`COUNTED_FAILURES`) appends one `moderation_attempt`
-      row. The one that reaches the cap is logged at error level, by answer id
-      only; the comment then stays held, never given a verdict (ADR 0188).
-    - A refusal or an outage (`RETRIED_FAILURES`) writes nothing and is logged at
-      error level; the next sweep asks again.
+    - An unusable answer (`COUNTED_FAILURES`), or a refusal with a
+      request-shaped status (`REQUEST_SHAPED_REFUSALS`), appends one
+      `moderation_attempt` row. The one that reaches the cap is logged at error
+      level, by answer id only; the comment then stays held, never given a
+      verdict (ADR 0188).
+    - Any other refusal, or an outage (`RETRIED_FAILURES`), writes nothing and is
+      logged at error level; the next sweep asks again.
 
     Anything else is rolled back to the last commit and propagates.
     """
@@ -325,8 +371,13 @@ def sweep_unmoderated_comments(session: Session, gateway: AIGateway | None = Non
         session.rollback()
         raise
     finally:
-        session.execute(select(func.pg_advisory_unlock(SWEEP_LOCK_KEY)))
+        released = session.execute(select(func.pg_advisory_unlock(SWEEP_LOCK_KEY))).scalar_one()
         session.commit()
+        if not released:
+            logger.error(
+                "the moderation sweep's unlock found no lock held on its own connection, so the "
+                "lock may be stranded on another one and later sweeps will do nothing"
+            )
 
 
 def _moderate_each(session: Session, gateway: AIGateway | None) -> int:
@@ -342,16 +393,16 @@ def _moderate_each(session: Session, gateway: AIGateway | None) -> int:
             continue
         try:
             output = classify_comment_moderation(comment, gateway)
-        except COUNTED_FAILURES as failed:
-            _record_a_failed_attempt(session, answer_id, failed)
-            session.commit()
-            continue
-        except RETRIED_FAILURES as failed:
-            logger.error(
-                "the moderation sweep left answer %s for the next run after an %s",
-                answer_id,
-                type(failed).__name__,
-            )
+        except (*COUNTED_FAILURES, *RETRIED_FAILURES) as failed:
+            if _counts_toward_the_cap(failed):
+                _record_a_failed_attempt(session, answer_id, failed)
+                session.commit()
+            else:
+                logger.error(
+                    "the moderation sweep left answer %s for the next run after an %s",
+                    answer_id,
+                    type(failed).__name__,
+                )
             continue
         route_verdict(
             session,
@@ -363,6 +414,17 @@ def _moderate_each(session: Session, gateway: AIGateway | None) -> int:
         session.commit()
         routed += 1
     return routed
+
+
+def _counts_toward_the_cap(failed: Exception) -> bool:
+    """Whether one failed call is about this comment, and so counts toward the cap.
+
+    An unusable answer always is; a refusal is when its status is one of
+    `REQUEST_SHAPED_REFUSALS`; anything else in `RETRIED_FAILURES` never is.
+    """
+    if isinstance(failed, AIProviderRefusedError):
+        return failed.status in REQUEST_SHAPED_REFUSALS
+    return isinstance(failed, COUNTED_FAILURES)
 
 
 def _record_a_failed_attempt(session: Session, answer_id: UUID, failed: Exception) -> None:
@@ -484,7 +546,8 @@ def decide_as_instructor(
         raise CommentNotOnReportError
     _record_decision(
         session,
-        card=card,
+        answer_id=card.answer_id,
+        flag=card.flag,
         action=action,
         reason=reason,
         decided_by=person_id,
@@ -502,7 +565,8 @@ def decide_as_instructor(
 def _record_decision(
     session: Session,
     *,
-    card: "CommentCard",
+    answer_id: UUID,
+    flag: HeldNoteType | None,
     action: DecisionAction,
     reason: str | None,
     decided_by: UUID,
@@ -511,7 +575,9 @@ def _record_decision(
     """The shared write: judge one action on one comment, and append its row.
 
     The caller has already decided this person may act on this comment; this
-    decides whether the action is allowed now, and writes it. In order:
+    decides whether the action is allowed now, and writes it. It is handed the
+    comment's key and the class of its flag (what the reason rule asks) and
+    nothing else about it. In order:
 
       1. the comment is locked against a concurrent decision, for this
          transaction;
@@ -528,10 +594,8 @@ def _record_decision(
     # At call time, for the cycle `decide_as_instructor` describes.
     from app.services.report_comments import INITIAL_STATE, latest_decision
 
-    session.execute(
-        select(func.pg_advisory_xact_lock(func.hashtextextended(str(card.answer_id), 0)))
-    )
-    latest = latest_decision(session, card.answer_id)
+    _lock_the_comment(session, answer_id)
+    latest = latest_decision(session, answer_id)
     if action is DecisionAction.UNDO:
         if (
             latest is None
@@ -547,11 +611,11 @@ def _record_decision(
             raise DecisionNotAllowedError
         state, is_undo = LEAVES[action], False
 
-    _refuse_the_reason(reason, required=action is DecisionAction.EXCLUDE and card.flag is None)
+    _refuse_the_reason(reason, required=action is DecisionAction.EXCLUDE and flag is None)
 
     session.execute(
         insert(ModerationState).values(
-            answer_id=card.answer_id,
+            answer_id=answer_id,
             state=state,
             decided_by_person_id=decided_by,
             decided_as=decided_as.value,
@@ -559,6 +623,17 @@ def _record_decision(
             is_undo=is_undo,
         )
     )
+
+
+def _lock_the_comment(session: Session, answer_id: UUID) -> None:
+    """Serialize decisions about one comment until this transaction ends.
+
+    A transaction-scoped advisory lock keyed on the answer, so two decisions
+    about one comment are judged one after the other and never against a row the
+    other is replacing. Taking it twice in one transaction is harmless: Postgres
+    stacks a transaction lock and releases every hold at the end.
+    """
+    session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(str(answer_id), 0))))
 
 
 def _refuse_the_reason(reason: str | None, *, required: bool) -> None:
@@ -578,3 +653,303 @@ def _refuse_the_reason(reason: str | None, *, required: bool) -> None:
         raise ReasonTooLongError
     if not reason.strip():
         raise ReasonBlankError
+
+
+# ---------------------------------------------------------------------------
+# The Lead Faculty review queue, its door, and the exclusion log (E6-05).
+# ---------------------------------------------------------------------------
+
+# The state a queued comment is in: flagged by the router, decided by nobody yet.
+FLAGGED_COLLAPSED = "FLAGGED_COLLAPSED"
+
+# How much of a comment the exclusion log quotes (E6-05, decision 1).
+EXCERPT_LENGTH = 140
+
+# The stored role a leader's decision is written under, by the grant that covers
+# the comment's course (`authz.lead_review_courses` answers only these two).
+DECIDED_AS_FOR_GRANT = {
+    AssignmentRole.LEAD_FACULTY: DeciderRole.LEAD_FACULTY,
+    AssignmentRole.CHAIR: DeciderRole.CHAIR,
+}
+
+
+class NoReviewGrantError(LookupError):
+    """The reader's own leadership grants put no course under review; nothing was read or written.
+
+    An assistant dean until E9 (ADR 0108), a dean, a vice president, a lead with
+    no mapped course, or a leadership session naming somebody who holds only an
+    instructor grant.
+    """
+
+
+class CommentNotInQueueError(LookupError):
+    """The answer is not in this reader's review queue now; nothing was written.
+
+    One error for every case (a sibling lead's comment, a decided one, a
+    Care-class one, a privacy flag, an id nothing holds), so the door answers
+    them alike and says nothing about whether the comment exists.
+    """
+
+
+@dataclass(frozen=True)
+class QueuedComment:
+    """One comment in a reader's review queue: its key, its text and its section's label.
+
+    No week, no instant and no count, by construction (E6-05, decision 1).
+    """
+
+    answer_id: UUID
+    text: str
+    section_label: str
+
+
+@dataclass(frozen=True)
+class ExclusionLogRow:
+    """One decision in a reader's exclusion log (E6-05, decision 1).
+
+    `excerpt` is `None` whenever the comment's own instructor's report does not
+    show it under its week; see `exclusion_log`.
+    """
+
+    section_label: str
+    decision: str
+    decided_as: DeciderRole
+    flagged: bool
+    reason: str | None
+    decided_on: date
+    excerpt: str | None
+
+
+def review_queue(session: Session, *, person_id: UUID | None) -> list[QueuedComment]:
+    """The comments awaiting this reader's review, in an order drawn for this call.
+
+    SPEC §5.2 routes a harmful comment to its course's Lead Faculty review queue,
+    and an unled course's to its department chair (§2.1); ruling 1 shows the
+    text at any threshold. So a comment is queued when it holds a harmful
+    moderation verdict, its latest state is still the router's flag, and its
+    course is one this reader's own leadership grant covers
+    (`authz.lead_review_courses`). The rule is written once, in `_queue_select`,
+    and the Lead Faculty door reads the same select.
+
+    **Shuffled on every call**, from the operating system's source: an order
+    that held between reads would be arrival order, and a reader who looks
+    every hour would learn when each comment came, which says which week.
+
+    Raises `NoReviewGrantError` for a reader whose own grant covers nothing.
+    """
+    if person_id is None:
+        raise NoReviewGrantError
+    courses = _review_courses(session, person_id)
+    rows = session.execute(_queue_select(session, courses, reader=person_id)).all()
+    labels = _section_labels(session, {row.section_id for row in rows})
+    queued = [
+        QueuedComment(
+            answer_id=row.answer_id,
+            text=row.comment_text,
+            section_label=labels[row.section_id],
+        )
+        for row in rows
+    ]
+    random.SystemRandom().shuffle(queued)
+    return queued
+
+
+def decide_as_leader(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    answer_id: UUID,
+    action: Literal[DecisionAction.EXCLUDE, DecisionAction.KEEP],
+    reason: str | None,
+) -> None:
+    """The Lead Faculty's door: one decision on a comment in this reader's queue, committed.
+
+    **This door holds its own check** (E6-05, decision 4): the comment is in
+    the queue this reader may see, found by the select `review_queue` reads,
+    taken under the comment's lock so a concurrent decision cannot change its
+    state between the check and the write. It is not a flag on the instructor's
+    door and passes nothing to the shared write that could widen what that
+    door accepts. A leader has no undo, and the role written is the one whose
+    grant covers the comment's course: `LEAD_FACULTY` or `CHAIR`.
+
+    The reason is optional, because every queued comment was flagged by the AI,
+    and is held to the same bounds as the instructor's when given.
+
+    Raises `NoReviewGrantError`, `CommentNotInQueueError` or a
+    `ReasonRefusedError`, each having written nothing.
+    """
+    from app.services.report_comments import COMMENT_VIEW
+
+    if action not in LEAVES:
+        raise DecisionNotAllowedError
+    if person_id is None:
+        raise NoReviewGrantError
+    courses = _review_courses(session, person_id)
+    _lock_the_comment(session, answer_id)
+    queued = session.execute(
+        _queue_select(session, courses, reader=person_id).where(
+            COMMENT_VIEW.c.answer_id == answer_id
+        )
+    ).first()
+    if queued is None:
+        raise CommentNotInQueueError
+    _record_decision(
+        session,
+        answer_id=answer_id,
+        flag=HeldNoteType.HARMFUL,
+        action=action,
+        reason=reason,
+        decided_by=person_id,
+        decided_as=DECIDED_AS_FOR_GRANT[courses[queued.course_id]],
+    )
+    session.commit()
+
+
+def exclusion_log(
+    session: Session, *, person_id: UUID | None, settings: Settings
+) -> list[ExclusionLogRow]:
+    """Every exclusion and keep a person made inside this reader's own grant, newest first.
+
+    SPEC §5.2's anti-cherry-picking trail, in both directions (§11 question 5,
+    settled). The rows are `report_comments.logged_decisions` over the courses
+    `authz.lead_review_courses` gives this reader, so a Care-class comment's
+    decision is never a row (view v004 leaves it out) and a sibling lead's
+    course is never read.
+
+    **The excerpt is withheld when the comment's own instructor's report does
+    not show it under its week**: the comment is in a held stream, its week is
+    not yet fully moderated, or it was surfaced only by a release batch. A
+    decision date beside text from a held stream places that text in a week,
+    which is what the threshold and the release's missing week withhold
+    (ADR 0153). "Shown under its week" is `visible_cards` for the comment's own
+    section, week and stream, the read the instructor's report makes.
+
+    The date is the decision's instant in the institution's zone, and no time.
+
+    Raises `NoReviewGrantError` for a reader whose own grant covers nothing.
+    """
+    from app.services.report_comments import logged_decisions, visible_cards
+
+    courses = _review_courses(session, person_id)
+    decisions = logged_decisions(session, course_ids=courses.keys())
+    labels = _section_labels(session, {decision.section_id for decision in decisions})
+    zone = ZoneInfo(settings.institution_timezone)
+    shown: dict[tuple[UUID, UUID, str], set[UUID]] = {}
+    rows: list[ExclusionLogRow] = []
+    for decision in decisions:
+        where = (decision.section_id, decision.week_id, decision.stream)
+        if where not in shown:
+            shown[where] = {
+                card.answer_id
+                for card in visible_cards(
+                    session,
+                    section_id=decision.section_id,
+                    week_id=decision.week_id,
+                    stream=decision.stream,
+                )
+            }
+        rows.append(
+            ExclusionLogRow(
+                section_label=labels[decision.section_id],
+                decision=decision.state,
+                decided_as=DeciderRole(decision.decided_as),
+                flagged=decision.flagged,
+                reason=decision.reason,
+                decided_on=decision.decided_at.astimezone(zone).date(),
+                excerpt=(
+                    decision.text[:EXCERPT_LENGTH] if decision.answer_id in shown[where] else None
+                ),
+            )
+        )
+    return rows
+
+
+def _review_courses(session: Session, person_id: UUID | None) -> Mapping[UUID, AssignmentRole]:
+    """This reader's reviewed courses and the role covering each, or `NoReviewGrantError`."""
+    if person_id is None:
+        raise NoReviewGrantError
+    courses = lead_review_courses(session, person_id=person_id)
+    if not courses:
+        raise NoReviewGrantError
+    return courses
+
+
+def _queue_select(
+    session: Session, courses: Mapping[UUID, AssignmentRole], *, reader: UUID
+) -> Select[tuple[UUID, str, UUID, UUID]]:
+    """The review queue's rule, as one select: the one statement of what is queued.
+
+    From `public.report_comment` v004, so a comment any of whose verdicts was
+    ever threat or self-harm is never here (the one place SPEC §6.2's
+    suppression lives, ADR 0187; E6-05, decision 2). Then: a harmful
+    `MODERATION` verdict (privacy stays with the instructor), the latest state
+    still `FLAGGED_COLLAPSED` by `report_comments.reported_status_of` (the one
+    home of that ordering), and a course in `courses`. Unordered: the caller
+    shuffles, or asks about one comment.
+
+    **Never a section the reader teaches** (ruling 7). A lead or chair who also
+    holds an instructor assignment on a section of a reviewed course would
+    otherwise read that section's held text here, which the instructor door
+    refuses them: one person, two doors, and the wider one would win. The rule
+    is by section, so the course's other sections stay in the queue. Their
+    taught sections come from `authz.taught_section_ids`, the instructor
+    door's own source.
+    """
+    from app.services.report_comments import COMMENT_VIEW, reported_status_of
+
+    taught = taught_section_ids(session, person_id=reader)
+    answer_id = COMMENT_VIEW.c.answer_id
+    harmful = (
+        select(Classification.id)
+        .where(
+            Classification.answer_id == answer_id,
+            Classification.task == ClassificationTask.MODERATION,
+            Classification.verdict == ModerationVerdict.HARMFUL.value,
+        )
+        .exists()
+    )
+    return (
+        select(
+            answer_id.label("answer_id"),
+            COMMENT_VIEW.c.comment_text.label("comment_text"),
+            COMMENT_VIEW.c.section_id.label("section_id"),
+            Section.course_id.label("course_id"),
+        )
+        .join(Section, Section.id == COMMENT_VIEW.c.section_id)
+        .where(
+            Section.course_id.in_(list(courses)),
+            COMMENT_VIEW.c.section_id.not_in(list(taught)),
+            harmful,
+            reported_status_of(answer_id) == FLAGGED_COLLAPSED,
+        )
+    )
+
+
+def _section_labels(session: Session, section_ids: set[UUID]) -> dict[UUID, str]:
+    """Each section's label, the way the instructor's report names it (`course_label`)."""
+    if not section_ids:
+        return {}
+    rows = session.execute(
+        select(
+            Section.id,
+            Prefix.code,
+            Course.lms_number,
+            Course.lms_title,
+            Section.lms_section_code,
+            Term.name,
+        )
+        .join(Course, Course.id == Section.course_id)
+        .join(Prefix, Prefix.id == Course.prefix_id)
+        .join(Term, Term.id == Section.term_id)
+        .where(Section.id.in_(list(section_ids)))
+    ).all()
+    return {
+        section_id: course_label(
+            prefix_code=prefix_code,
+            lms_number=lms_number,
+            lms_title=lms_title,
+            section_code=section_code,
+            term_name=term_name,
+        )
+        for section_id, prefix_code, lms_number, lms_title, section_code, term_name in rows
+    }

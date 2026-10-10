@@ -583,6 +583,69 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/leadership/moderation/queue": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The comments awaiting my review
+         * @description The reader's review queue: text and section, no week, no time, no count, a fresh order.
+         */
+        readonly get: operations["read_review_queue_leadership_moderation_queue_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/moderation/comments/{answer_id}/decisions": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Exclude or keep one comment in my review queue
+         * @description One decision on one queued comment, written under the role whose grant covers it.
+         *
+         *     204 and no body: the comment leaves the queue, and the queue and the log
+         *     are the two reads that show what happened.
+         */
+        readonly post: operations["decide_on_queued_comment_leadership_moderation_comments__answer_id__decisions_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/moderation/log": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The exclusion log inside my own grant
+         * @description Every exclusion and keep a person made inside the reader's own grant, newest first.
+         */
+        readonly get: operations["read_exclusion_log_leadership_moderation_log_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/dev": {
         readonly parameters: {
             readonly query?: never;
@@ -823,6 +886,14 @@ export interface components {
             /** @description The open survey, or null when none is open. */
             readonly open_survey: components["schemas"]["OpenSurvey"] | null;
         };
+        /**
+         * ExclusionLog
+         * @description The reader's exclusion log, newest decision first.
+         */
+        readonly ExclusionLog: {
+            /** Rows */
+            readonly rows: readonly components["schemas"]["LogRow"][];
+        };
         /** HTTPValidationError */
         readonly HTTPValidationError: {
             /** Detail */
@@ -889,6 +960,52 @@ export interface components {
             readonly released_from_earlier_weeks: readonly components["schemas"]["CommentView"][];
             /** Institution Timezone */
             readonly institution_timezone: string;
+        };
+        /**
+         * LeadDecision
+         * @description What a lead or chair sends to exclude or keep one queued comment.
+         *
+         *     Two actions: a leader has no undo (decision 1). `reason` is optional, because
+         *     every queued comment was flagged by the AI, and is checked by the decision
+         *     service as it was sent, before any trimming (`docs/MISTAKES.md` entry 29).
+         */
+        readonly LeadDecision: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            readonly action: "exclude" | "keep";
+            /** Reason */
+            readonly reason?: string | null;
+        };
+        /**
+         * LogRow
+         * @description One decision a person made about a comment inside the reader's own grant.
+         */
+        readonly LogRow: {
+            /** Section Label */
+            readonly section_label: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            readonly decision: "EXCLUDED" | "KEPT";
+            /**
+             * Decided As
+             * @enum {string}
+             */
+            readonly decided_as: "INSTRUCTOR" | "LEAD_FACULTY" | "CHAIR";
+            /** Flagged */
+            readonly flagged: boolean;
+            /** Reason */
+            readonly reason: string | null;
+            /**
+             * Decided On
+             * Format: date
+             */
+            readonly decided_on: string;
+            /** Excerpt */
+            readonly excerpt: string | null;
         };
         /**
          * OpenSurvey
@@ -1026,6 +1143,21 @@ export interface components {
          */
         readonly QuestionKind: "likert" | "comment" | "workload";
         /**
+         * QueueItem
+         * @description One harmful, undecided comment awaiting this reader's review.
+         */
+        readonly QueueItem: {
+            /**
+             * Answer Id
+             * Format: uuid
+             */
+            readonly answer_id: string;
+            /** Text */
+            readonly text: string;
+            /** Section Label */
+            readonly section_label: string;
+        };
+        /**
          * RatesView
          * @description SPEC §5.1's two rates and the counts they are ratios of.
          *
@@ -1044,6 +1176,14 @@ export interface components {
             readonly enrolled: number;
             /** Valid Responses */
             readonly valid_responses: number;
+        };
+        /**
+         * ReviewQueue
+         * @description The reader's review queue, in an order drawn for this request.
+         */
+        readonly ReviewQueue: {
+            /** Items */
+            readonly items: readonly components["schemas"]["QueueItem"][];
         };
         /**
          * SectionView
@@ -2092,6 +2232,79 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_review_queue_leadership_moderation_queue_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ReviewQueue"];
+                };
+            };
+        };
+    };
+    readonly decide_on_queued_comment_leadership_moderation_comments__answer_id__decisions_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly answer_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["LeadDecision"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_exclusion_log_leadership_moderation_log_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ExclusionLog"];
                 };
             };
         };

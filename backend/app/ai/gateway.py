@@ -263,7 +263,20 @@ class AIProviderRefusedError(AIGatewayError):
     account behind it is. §3.3's fail-open does not cover this, and a caller that
     treated it as one would turn a permanently misconfigured credential into
     every comment being classified by the character floor with nothing saying so.
+
+    **It carries the HTTP status the endpoint answered** (E6-05, decision 5b),
+    because the statuses in this class are about different things and a caller
+    may need to tell them apart: a 401 or a 429 is about this account and passes,
+    while a 422 is how a hosted provider refuses one particular prompt — a
+    content filter — and answers the same for that prompt every time. The
+    moderation sweep counts 413 and 422 toward its attempt cap, and not 400,
+    which can as easily be about every request (`app.services.moderation`). The
+    status is an `int`, never the response body.
     """
+
+    def __init__(self, message: str, *, status: int) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 @dataclass(frozen=True)
@@ -791,6 +804,9 @@ class AIGateway:
         """
         bound = self._bound()
         agent = bound.agent_for(output_model)
+        # The status of a refusal, kept for the error it is raised as below; set
+        # only on that branch.
+        refused_status: int | None = None
         try:
             result = bound.loop.run_until_complete(
                 agent.run(prompt, model_settings=ModelSettings(timeout=timeout))
@@ -834,6 +850,7 @@ class AIGateway:
             else:
                 failure = AIProviderRefusedError
                 message = f"The model endpoint answered HTTP {answered.status_code}."
+                refused_status = answered.status_code
         except ModelAPIError as unanswered:
             # The library's wrapper for a request that got no answer at all, and
             # it covers everything from "the response was late" to "the name does
@@ -846,6 +863,8 @@ class AIGateway:
             # attempts in the loop above.
             return result.output, self._reported_model(result), result.usage
 
+        if refused_status is not None:
+            raise AIProviderRefusedError(message, status=refused_status)
         raise failure(message)
 
     def _reported_model(self, result: Any) -> str:

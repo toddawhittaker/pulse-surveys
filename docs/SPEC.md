@@ -155,10 +155,10 @@ Each of these is an automated assertion in the test suite (§9), not a conventio
 
 - The classifier tags each comment: **clear / harmful / privacy** (names third parties or reveals identifying detail) / **nonsense** / **threat** / **self-harm**. "Harmful" is not only abuse aimed at the instructor, so copy and flows never assume the instructor is the target. A self-harm disclosure or a threat of harm is not "harmful": it carries its own verdict and takes the §6.2 route below, never this flow.
 - **A comment reaches no reader until it holds a moderation verdict.** No instructor or leadership view, release batch or summary carries a comment before its verdict lands, and a section-week's comments appear together once every comment in it holds one, so no report shows part of a week.
-- **Routing by harm type:** abuse or attacks on the instructor route to the course's Lead Faculty review queue in addition to the instructor's own moderation view; self-harm or student-welfare signals route to Care (§6.2) at window close, when moderation runs (§7.4), regardless of small-N or anonymity — severe safety escalations bypass the supervision graph and are never gated on response thresholds.
+- **Routing by harm type:** abuse or attacks on the instructor route to the course's Lead Faculty review queue (the department chair's, for a course with no lead) in addition to the instructor's own moderation view; self-harm or student-welfare signals route to Care (§6.2) at window close, when moderation runs (§7.4), regardless of small-N or anonymity — severe safety escalations bypass the supervision graph and are never gated on response thresholds.
 - **Moderation lifecycle:** `published` → `flagged-collapsed` (hidden from students; chip and reason visible to the instructor above small-N) → instructor review → `excluded` (with Undo) or `kept` ("Keep for students" publishes the comment with a quiet logged-decision line; Undo returns it to review). Excluded comments keep their text visible to the instructor, muted, above the exclusion notice. An instructor decides only on a comment their report currently returns (a shown stream or a release batch); a comment in a held stream or another section is refused exactly as an id nothing holds is. Undo reverses only the reader's own latest decision, and only while it is still the comment's latest.
 - **Small-N concealment:** below the threshold, flagged comments are hidden from the instructor entirely — no chip, no count, no flag-type hint — while flags still route to the appropriate reviewer as soon as moderation runs at window close. If the section later crosses the threshold, the comment appears flagged-collapsed carrying any reviewer decision already made. There is no participation trace either: a per-week count of held comments, read beside a released comment's chip, would tell the instructor which week that comment came from (§4's release carries no week), and in a small week it would say how many of the few who responded wrote something that was held.
-- Excluding a comment the AI did *not* flag requires a stated reason. All exclusions are logged (instructor, excerpt, AI-flagged vs unflagged-with-reason, date); the log is visible at the Lead Faculty prefix scope and above — an accountability record, not a feed. This is the anti-cherry-picking mechanism: the escape valve for genuinely harmful comments stays open, but quietly dropping fair criticism leaves a trail. *Open item:* kept decisions are logged but not yet surfaced in the roll-up log; production should show both directions (Kept / Excluded).
+- Excluding a comment the AI did *not* flag requires a stated reason. Every exclusion and every keep a person makes is logged, and the log shows both directions: each row carries the section, whether it was an exclusion or a keep, the role the decision was made under, AI-flagged or unflagged-with-reason, the decision date in the institution's time zone, and an excerpt of the comment. The excerpt is withheld when the comment's own instructor's report does not show it under its week (a held stream, or a release batch), because a date beside that text would place it in a week. A leader reads the log over their own leadership grant: a Lead Faculty member over the courses they lead, a chair over the courses of their department that have no lead. The assistant dean's, the dean's and the VP of Academics' view of it arrives with the supervision walk (E9); until then they are refused. It is an accountability record, not a feed. This is the anti-cherry-picking mechanism: the escape valve for genuinely harmful comments stays open, but quietly dropping fair criticism leaves a trail.
 - Threat/self-harm classifications bypass this flow entirely (§6.2) and are never shown to the instructor.
 
 ### 5.3 Instructor response
@@ -177,7 +177,7 @@ On next LTI launch (and via the Monday-after notification), students see their o
 - One template for all leadership roles; role changes only the tree root and aggregation breadth. Two-pane (hierarchy nav + content), stacking at tablet width. Aggregate pages plot the term axis with per-cohort lines and a cohort selector (§2.2).
 - **Tree modes:** hierarchy view for everyone; a by-lead-faculty pivot additionally for chair and above over their purview — never for Lead Faculty (sibling isolation, invariant §4.1.2). Trees default fully collapsed with expand/collapse-all; breadcrumbs are clickable; roots and row labels per §2.1.
 - Drill-down terminates at a section, rendering the Instructor Monday Report wholesale, read-only, with a context bar ("Viewing as Dean · read-only").
-- Attention surfacing uses the exact predicates of §5.6; raw comments appear up-chain only de-identified and only where the n-threshold is met at the aggregation being viewed. All leadership views are read-only with respect to student data; the only mutating powers are policy settings at the appropriate scope.
+- Attention surfacing uses the exact predicates of §5.6; raw comments appear up-chain only de-identified and only where the n-threshold is met at the aggregation being viewed. The one exception is §5.2's review queue: the Lead Faculty member (or, for a course with no lead, the chair) sees a harmful, undecided comment's text and its section at any threshold, with no week, time or count beside it, and may exclude or keep it. The queue leaves out every section the reader teaches, where the instructor's own view governs. All leadership views are read-only with respect to student data; the only mutating powers are policy settings at the appropriate scope.
 
 ### 5.6 Attention rules (exact predicates)
 
@@ -376,7 +376,7 @@ Selected constraints:
 2. **Numeric workload outliers.** Trim/winsorize the displayed mean, show median as headline, or cap the slider lower? Leaning: median as headline, mean secondary.
 3. **Care role sourcing at pilot.** Office of Community Standards owns the queue in production; for a pilot before that office is wired in, who holds Care? (A named pilot owner, not Admin-by-default.)
 4. **Production "substantive" definition** (§3.3). Settled for v1 during E2: the classifier's eval set is one hundred and eight typed cases pinned to `validity.v2` (ninety-eight at settlement; FIX-02 added ten fluent off-topic negatives on 2026-09-03), and the enforcing floors are precision 0.92 and recall 0.90, measured against the live provider; `tests/evals/validity/floors.py` carries the measurement and headroom sentences. Reopens with a model or prompt change.
-5. **Kept-decision surfacing** (§5.2 open item). Kept decisions are logged; production should show both directions (Kept / Excluded) in the roll-up moderation log.
+5. **Kept-decision surfacing** (§5.2 open item). Settled at E6-05 (2026-10-10): the exclusion log shows both directions, every exclusion and every keep a person made, inside the reader's own leadership grant (§5.2).
 6. **Reveal audit grain** (§4, §6.2). Does "every identity access is automatically audit-logged" count accesses or authorizations? Measured during E0: one committed reveal record returned the name five times and left one audit row. E10 settles the wording and the mechanism together, before or with the first screen that shows a reveal id; the "done when" is in E0's carried-out table (`docs/tickets/e0/README.md`).
 
 ## 12. Delivery phases
@@ -439,7 +439,8 @@ pulse-surveys/
 │       │   ├── student.py          # what a student's weekly survey read answers with
 │       │   ├── report.py           # the instructor's Monday report
 │       │   ├── report_benchmark.py # the report's comparison and university figures
-│       │   └── comparison_sets.py  # the named-set management API
+│       │   ├── comparison_sets.py  # the named-set management API
+│       │   └── moderation.py       # the Lead Faculty review queue, a leader's decision, the exclusion log
 │       │
 │       ├── copy/                   # every sentence the backend shows a person, keyed (§4.1)
 │       │   ├── entry.py            # the four pages a door answers with when there is no landing
@@ -447,6 +448,7 @@ pulse-surveys/
 │       │   ├── student_read.py     # the student read path
 │       │   ├── instructor_report.py # the instructor report's refusals
 │       │   ├── leadership_sets.py  # the named-set API's refusals
+│       │   ├── leadership_moderation.py # the review queue's and the exclusion log's refusals
 │       │   └── gradebook.py        # the strings written into a platform's gradebook
 │       │
 │       ├── api/                    # HTTP routers, thin — delegate to services
@@ -457,7 +459,7 @@ pulse-surveys/
 │       │   ├── dev.py              # the development-only test console
 │       │   ├── student.py          # survey fetch/submit
 │       │   ├── instructor.py       # the Monday report reads
-│       │   ├── leadership.py       # named comparison sets
+│       │   ├── leadership.py       # named comparison sets; the review queue and exclusion log
 │       │   ├── care.py             # threat queue, audited re-identify — not built yet: E10
 │       │   └── admin.py            # observability, config, hierarchy, roles — not built yet: E11
 │       │
@@ -481,7 +483,7 @@ pulse-surveys/
 │       │   ├── benchmarks.py       # comparison-set resolution, length/level matching, min-N
 │       │   ├── comparison_sets.py  # defining, editing and deleting a named comparison set
 │       │   ├── safety.py           # the Care queue, and the only connection that can reach identity (§6.2)
-│       │   ├── moderation.py       # moderation verdict routing, the hourly sweep, exclusion rules (§5.2)
+│       │   ├── moderation.py       # moderation verdict routing, the hourly sweep, decisions, the review queue and log (§5.2)
 │       │   ├── response_loop.py    # draft/coach/publish, required-response holds (§5.3) — not built yet: E7
 │       │   └── retention.py        # configurable purge jobs (§4) — not built yet: E13
 │       │
