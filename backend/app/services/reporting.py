@@ -89,10 +89,12 @@ from app.services.authz import (
     teaching_instructor_assigned,
 )
 from app.services.report_comments import (
+    COMMENT_VIEW,
     ReportComment,
     n_threshold,
     released_comments,
     reported_status_of,
+    section_week_moderated,
     stream_is_suppressed,
     visible_comments,
 )
@@ -258,11 +260,18 @@ def generate_missing_summaries(
 def _section_weeks_awaiting_a_summary(
     session: Session, *, closed_by: datetime
 ) -> list[tuple[UUID, UUID]]:
-    """Every section-week whose window has closed and which carries no summary row.
+    """Every section-week whose window has closed, which carries no summary row, and is moderated.
 
     A list of key pairs rather than of rows, for the reason E3-06's walk gives: a
     commit expires every instance the session holds, and the next section-week's
     work begins after one.
+
+    **A section-week is summarized only once every comment in it holds a
+    moderation verdict** (`section_week_moderated`, ADR 0187). A summary is never
+    regenerated (the E4 breakdown's decision 2), so a week summarized before its
+    last verdict landed would carry a comment no reader may see, or leave out one
+    they may, for the rest of the term. Such a week is left for a later walk,
+    which this walk's "has no summary rows" selection already makes the retry.
     """
     summarized = select(WeeklySummary.id).where(
         WeeklySummary.section_id == SurveyWindow.section_id,
@@ -273,7 +282,11 @@ def _section_weeks_awaiting_a_summary(
         .where(SurveyWindow.closes_at < closed_by, ~summarized.exists())
         .order_by(SurveyWindow.section_id, SurveyWindow.week_id)
     ).all()
-    return [(row[0], row[1]) for row in walked]
+    return [
+        (row[0], row[1])
+        for row in walked
+        if section_week_moderated(session, section_id=row[0], week_id=row[1])
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -500,90 +513,51 @@ def _comments_reaching_the_model(
 ) -> Sequence[str]:
     """One stream's comments for one section-week, less the ones a moderator holds.
 
-    **The stream comes from `question.stream` and never from a position.**
-    `question_set` is versioned (§3.2), so the ordinal that carries the instructor
-    comment today is not promised to in the next set — E4-02 added the column to be
-    the fact, and E4-03's distribution view already reads it for the same reason.
+    **Read through `report_comment`, the view every other reader of a comment
+    uses** (E6-01, ADR 0187). So the summary model is sent exactly the comments
+    the view lets a reader reach, and nothing the view withholds: no blank
+    answer, no comment without a moderation verdict, and no comment that has ever
+    held a threat or self-harm verdict (SPEC §6.2: such a comment is never shown
+    to the instructor, and a paraphrase of it in a summary that is never
+    regenerated would show it for the rest of the term). Until E6-01 this gather
+    read `answer` itself and carried its own copy of the view's blank-comment
+    class; that copy is gone, so the two cannot drift.
+
+    **The stream is the view's, which reads `question.stream`**, never a
+    position: `question_set` is versioned (§3.2).
 
     **Under-threshold comments are included.** SPEC §4: comments from
     under-threshold weeks "are not discarded — they feed the summary", and §5.1
     generates a summary "even in small-N weeks — there, the summary is the only
     comment signal". So nothing here counts the week before deciding to read it.
 
-    **Moderation-held comments are excluded, and today that filter is vacuous.**
-    E6 writes the first `moderation_state` row this system will hold. It is written
-    now rather than when the states arrive because a summary is never regenerated
-    (the E4 breakdown's decision 2): a comment an instructor excluded which is
-    already inside a generated summary stays there for the rest of the term, and a
-    filter deferred to the epic that populates the table is a filter discovered
-    missing after that has happened.
+    **Moderation-held comments are excluded**: §5.1's summaries "exclude
+    flagged-held content", read off the one resolution of the current decision,
+    `reported_status_of` (ADR 0145).
 
-    **What is *not* excluded here, stated because the asymmetry is deliberate.**
-    SPEC §5.2's last bullet routes one class of comment around the moderation
-    lifecycle altogether: "Threat/self-harm classifications bypass this flow
-    entirely (§6.2) and are never shown to the instructor." Bypassing the flow
-    means bypassing the record, so such a comment never acquires a
-    `moderation_state` row — and the rule above reads an absent row as published.
-    So the class §6.2 keeps furthest from an instructor is the class this gather
-    would send to a provider, and a paraphrase of it would sit in a summary nothing
-    regenerates. That is the honest shape of what this filter covers and what it
-    does not.
-
-    **No predicate for it is written today, and that is a decision rather than an
-    oversight.** There is nothing to select on. `ClassificationTask` has exactly one
-    member and no writer of a harm verdict exists anywhere in this system, so a
-    closed set written now would be a guess at a vocabulary E6 has not designed — a
-    set built before the thing it closes over, which reads as a guarantee and is
-    not one. The same argument keeps `WeeklySummaryRecord.held_note_type` a string
-    for the length of this epic.
-
-    **What is mechanical instead is the precondition.** While that vocabulary has
-    one member the gap is unreachable, so the run above is safe for the reason
-    stated rather than by luck. `docs/tickets/e4/deferred.md` carries the entry with
-    its owner (E6) and its done-when, and
-    `tests/integration/test_the_summary_job_feeds_no_moderation_held_comment_to_the_model.py::test_no_harm_classification_task_exists_yet_for_this_filter_to_have_missed`
-    is the alarm: it pins that enum's membership as an equality, so a second task
-    reds it *before* any classifier writes a verdict. The repair when it reds is
-    here, in this function, and never in that test's expected set.
+    The walk reaches this only for a section-week whose comments all hold a
+    verdict (`_section_weeks_awaiting_a_summary`), so the set is final.
 
     The order is the answer key's — arbitrary, stable, and carrying nothing. §4
     keeps submission times away from comments, and ordering a prompt by one would
     put the week's arrival sequence in front of a model for no reason.
     """
-    return list(
-        session.scalars(
-            select(Answer.comment_text)
-            .join(Response, Response.id == Answer.response_id)
-            .join(Question, Question.id == Answer.question_id)
+    return [
+        str(text)
+        for text in session.scalars(
+            select(COMMENT_VIEW.c.comment_text)
             .where(
-                Response.section_id == section_id,
-                Response.week_id == week_id,
-                Question.kind == QuestionKind.COMMENT,
-                Question.stream == token,
-                # Two conditions and neither is the other's spare, which is the
-                # note E4-03's distribution view carries: `kind` says what was
-                # asked and the value says what this row holds. `answer`'s own
-                # constraint permits a row filling `comment_text` under a question
-                # of another kind, and a read is not the place to trust a write.
-                Answer.comment_text.is_not(None),
-                # Blank means what Python's `str.strip()` removes, not only
-                # spaces: every such character listed by code point, so no
-                # collation changes the set, and the same class, character for
-                # character, as `report_comment_v003.sql`, whose header lists
-                # them (docs/disputes/E5.1-12-01.md). PostgreSQL's regex engine
-                # reads the escapes; the raw string keeps Python from doing so.
-                Answer.comment_text.regexp_match(
-                    r"[^\u0009-\u000d\u001c-\u001f\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]"
-                ),
+                COMMENT_VIEW.c.section_id == section_id,
+                COMMENT_VIEW.c.week_id == week_id,
+                COMMENT_VIEW.c.stream == token,
                 # The one resolution of "which decision is current", called rather
                 # than written again: `app.services.report_comments` owns it
-                # (ADR 0145), and E4-07 closed the deferral that had this module
-                # carrying a second copy of the ordering and of the default.
-                reported_status_of(Answer.id).not_in(HELD_MODERATION_STATES),
+                # (ADR 0145).
+                reported_status_of(COMMENT_VIEW.c.answer_id).not_in(HELD_MODERATION_STATES),
             )
-            .order_by(Answer.id)
+            .order_by(COMMENT_VIEW.c.answer_id)
         )
-    )
+    ]
 
 
 def _responses_that_week(session: Session, *, section_id: UUID, week_id: UUID) -> int:

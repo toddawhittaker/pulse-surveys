@@ -153,7 +153,8 @@ Each of these is an automated assertion in the test suite (§9), not a conventio
 
 ### 5.2 Comment moderation
 
-- The classifier tags each comment: **clear / harmful / privacy** (names third parties or reveals identifying detail) / **nonsense**. "Harmful" is not only abuse aimed at the instructor — it can be a self-harm disclosure; copy and flows never assume the instructor is the target.
+- The classifier tags each comment: **clear / harmful / privacy** (names third parties or reveals identifying detail) / **nonsense** / **threat** / **self-harm**. "Harmful" is not only abuse aimed at the instructor, so copy and flows never assume the instructor is the target. A self-harm disclosure or a threat of harm is not "harmful": it carries its own verdict and takes the §6.2 route below, never this flow.
+- **A comment reaches no reader until it holds a moderation verdict.** No instructor or leadership view, release batch or summary carries a comment before its verdict lands, and a section-week's comments appear together once every comment in it holds one, so no report shows part of a week.
 - **Routing by harm type:** abuse or attacks on the instructor route to the course's Lead Faculty review queue in addition to the instructor's own moderation view; self-harm or student-welfare signals route to Care (§6.2) immediately, regardless of small-N or anonymity — severe safety escalations bypass the supervision graph and are never gated on response thresholds.
 - **Moderation lifecycle:** `published` → `flagged-collapsed` (hidden from students; chip and reason visible to the instructor above small-N) → instructor review → `excluded` (with Undo) or `kept` ("Keep for students" publishes the comment with a quiet logged-decision line; Undo returns it to review). Excluded comments keep their text visible to the instructor, muted, above the exclusion notice.
 - **Small-N concealment:** below the threshold, flagged comments are hidden from the instructor entirely — no chip, no count, no flag-type hint — while flags still route immediately to the appropriate reviewer. If the section later crosses the threshold, the comment appears flagged-collapsed carrying any reviewer decision already made. An optional neutral participation trace ("1 response held for review") never reveals category.
@@ -304,7 +305,7 @@ The Claude Design prototype is the visual and interaction contract; the frontend
 
 ## 8. Data model (core tables)
 
-`institution, college, department, prefix, course, section, term, week, start_letter_map, lti_platform, lti_deployment, nrps_call, ags_call, user, user_identity, person, role_assignment, lead_faculty_mapping, enrollment, question_set, question, survey_window, response, answer, classification, weekly_summary, moderation_state, release_batch, release_batch_member, instructor_response, exclusion_log, comparison_set, grade_sync, threat_case, audit_log, notification`
+`institution, college, department, prefix, course, section, term, week, start_letter_map, lti_platform, lti_deployment, nrps_call, ags_call, user, user_identity, person, role_assignment, lead_faculty_mapping, enrollment, question_set, question, survey_window, response, answer, classification, moderation_attempt, weekly_summary, moderation_state, release_batch, release_batch_member, instructor_response, exclusion_log, comparison_set, grade_sync, threat_case, audit_log, notification`
 
 Selected constraints:
 
@@ -325,7 +326,10 @@ Selected constraints:
 - `lead_faculty_mapping` maps a person to the courses they lead (one lead per course); a course with no mapping resolves to its department chair.
 - `response` is unique per (student, section, week); `answer` rows link to versioned `question` rows; workload is stored as a decimal.
 - `grade_sync` is **append-only, at the grain of one row per post**: each row records the score as it was sent, the timestamp sent with it, the outcome, and the student and section it concerns, and a failed attempt is a row too. The latest row for a `(section_id, user_id)` pair is what identifies a retry and what the recompute compares against. The grain is append-only because the gradebook is a third-party system of record Pulse writes to and cannot reliably read back, and an already-posted score can be lowered later by an asynchronous re-classification (§3.3) — so a row updated in place would destroy the number a student was previously shown. The stored string matters as much as the number: an equal score timestamp is accepted by a platform as a retry of the same delivery, so a re-sent value has to be byte-identical to the one it retries, and a value the poster re-derives is not provably that. `ags_call` sits beside it at the grain of one HTTP call (§6.1), the AGS counterpart of the roster sync's `nrps_call`.
-- `classification` is append-only (re-runs create new rows) with prompt/model versioning; moderation state transitions (`flagged-collapsed` → `excluded`/`kept`, with undo) are recorded as `moderation_state` rows, both directions logged. That record is append-only too and the latest row for a comment governs, so a comment with no row is published — the initial state is an absence rather than a stored default, which is what keeps the trail intact through an undo in either direction.
+- `classification` is append-only (re-runs create new rows) with prompt/model versioning, and each row names its task: comment validity (§3.3) or moderation (§5.2), each holding only its own verdicts. **A comment is shown to a reader only once it holds a moderation verdict, and never once any of its moderation verdicts, ever, is threat or self-harm**; the comment read view enforces both. A moderation verdict is written only after the comment's survey window has closed, because an answer is revised in place on resubmission and a verdict judges the text as it stood at close; it is written only through one database function, which writes the verdict and its route in the same call: a `flagged-collapsed` `moderation_state` row for harmful or privacy, a `threat_case` row for threat or self-harm, nothing more for clear or nonsense. A trigger refuses a moderation verdict written any other way.
+- Moderation state transitions (`flagged-collapsed` → `excluded`/`kept`, with undo) are recorded as `moderation_state` rows, both directions logged. That record is append-only too and the latest row for a comment governs, so a moderated comment with no row is published — the initial state is an absence rather than a stored default, which is what keeps the trail intact through an undo in either direction. "Latest" is the order the rows were inserted in, held in a database-assigned sequence column, because two decisions written in one transaction share its timestamp; two concurrent writers are ordered by which inserted first, not which committed first.
+- `threat_case` is the row a Care case opens with: one per comment, naming the moderation verdict that routed it. The application connection holds no privilege on it; E10's Care queue reads it and designs the rest of a case.
+- `moderation_attempt` holds one row per failed moderation call about a comment, append-only, so a comment whose moderation keeps failing can be capped rather than retried for ever.
 - `weekly_summary` holds one AI summary per section, course week and stream (§5.1), with the prompt version and model ID §7.4 requires of every model output; a summary states the response count it drew from, and zero is a count it may state.
 - The cumulative release §4 describes is stored, not recomputed: `release_batch` records the section, the term the threshold is counted over, and the time the batch was cut, and `release_batch_member` records which comments went out in it. The batch's cut time is the only release time in the schema — a comment carries none of its own, so that timing cannot identify an author.
 - `comparison_set` holds named leadership-defined sets; the default per section (same lead's courses, matched length+level, past-referencing) is computed, not stored.
@@ -379,7 +383,7 @@ Selected constraints:
 
 Phase boundaries below describe *what ships to users when*; §14 is the operative development plan and decomposes into tickets.
 
-- **Phase 1 (MVP):** Epics E0–E4 and E6–E8 — a student can take the survey, credit posts, the instructor gets the Monday report, responds, and the loop closes.
+- **Phase 1 (MVP):** Epics E0–E4 and E6–E8 — a student can take the survey, credit posts, the instructor gets the Monday report, responds, and the loop closes. No deployment reaches real students until E10's Care queue exists, because before it a `threat_case` row has no reader: a student at risk whose comment is held from every view would be read by nobody (ruled 2026-10-09).
 - **Phase 2:** Epics E5, E9–E12 — benchmarks, leadership roll-ups, Care queue, admin console, notifications; E13 hardening gates release.
 - **Phase 3 (roadmap):** Per-level custom questions; MCP server; multi-language.
 ## 13. Repository layout
@@ -417,12 +421,12 @@ pulse-surveys/
 │       │   ├── identity.py         # user, user_identity, person, enrollment, role_assignment, lead_faculty_mapping
 │       │   ├── lti.py              # platform registrations, signing keys, launch nonces and handshakes, NRPS/AGS call logs
 │       │   ├── survey.py           # question_set, question, response, answer
-│       │   ├── ai.py               # classification
+│       │   ├── ai.py               # classification, moderation_attempt
 │       │   ├── report.py           # weekly_summary, moderation_state, release_batch, release_batch_member
 │       │   ├── loop.py             # instructor_response, exclusion_log — not built yet: E6, E7
 │       │   ├── benchmark.py        # comparison_set, comparison_set_member
 │       │   ├── grades.py           # grade_sync
-│       │   ├── safety.py           # threat_case — not built yet: E10
+│       │   ├── safety.py           # threat_case (its opening row; E10 adds the case lifecycle)
 │       │   ├── audit.py            # audit_log
 │       │   └── clock.py            # the development clock override
 │       │
@@ -477,7 +481,7 @@ pulse-surveys/
 │       │   ├── benchmarks.py       # comparison-set resolution, length/level matching, min-N
 │       │   ├── comparison_sets.py  # defining, editing and deleting a named comparison set
 │       │   ├── safety.py           # the Care queue, and the only connection that can reach identity (§6.2)
-│       │   ├── moderation.py       # classification routing, exclusion rules (§5.2) — not built yet: E6
+│       │   ├── moderation.py       # moderation verdict routing, exclusion rules (§5.2)
 │       │   ├── response_loop.py    # draft/coach/publish, required-response holds (§5.3) — not built yet: E7
 │       │   └── retention.py        # configurable purge jobs (§4) — not built yet: E13
 │       │

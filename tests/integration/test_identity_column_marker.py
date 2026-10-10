@@ -2940,8 +2940,16 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
     # says so. Their columns are pinned in
     # `tests/integration/test_report_schema.py` instead, where the reason is
     # written out.
+    # **E6-01 adds `sequence` and two tables the walk reaches.** `sequence` is an
+    # identity column that orders this table's rows (work order decision 9), an
+    # integer the database assigns that says nothing about anybody, so the entry's
+    # reason stands and its column list is re-read here rather than expired
+    # silently. `threat_case` and `moderation_attempt` each name an `answer`, which
+    # puts them where this entry is: two hops from `response.user_id`. They are
+    # recorded below with the same argument; whether `threat_case` is a
+    # `PERSON_TABLES` table is the standing question E6-07 asks, and E13 owns.
     "moderation_state": CarriesNothing(
-        ("answer_id", "decided_at", "id", "state"),
+        ("answer_id", "decided_at", "id", "sequence", "state"),
         "One decision about one comment: which comment, which of SPEC §5.2's lifecycle states, and "
         "when it was decided. The comment is a foreign key and the person behind it is two more "
         "hops away through `answer.response_id` and `response.user_id`, which is the argument the "
@@ -3010,6 +3018,25 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
         "The column list is asserted from the other side as well, in "
         "`tests/integration/test_report_schema.py`, because a column added here is a "
         "confidentiality change rather than a schema tidy-up.",
+    ),
+    "threat_case": CarriesNothing(
+        ("answer_id", "classification_id", "id", "opened_at"),
+        "The opening row of a Care case (E6-01): which comment, which moderation verdict routed "
+        "it, and when the case opened. The comment is a foreign key and the student is two more "
+        "hops away through `answer.response_id` and `response.user_id`; the identity behind them "
+        "sits on `user_identity`, which no runtime role reads, and the only route from a case to "
+        "a name is the audited Care reveal (SPEC §4, §6.2). `pulse_app` holds no privilege on "
+        "this table at all — the routing definer writes it — so nothing an instructor's "
+        "connection can select names a case. The lifecycle columns, and the staff who act on a "
+        "case, are E10's to add, and a column arriving here expires this entry so that the "
+        "reason is read again when they do.",
+    ),
+    "moderation_attempt": CarriesNothing(
+        ("answer_id", "attempted_at", "id"),
+        "One failed moderation call about one comment, append-only (E6-01; E6-02's attempt cap "
+        "counts them): the comment as a foreign key and the instant of the attempt. Nothing about "
+        "the author beyond the two hops every comment table has, and nothing about the model's "
+        "answer — a failed call has none.",
     ),
 }
 

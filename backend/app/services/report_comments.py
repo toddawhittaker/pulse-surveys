@@ -75,19 +75,19 @@ comments below the threshold — and E8 writes it in its own module.
 sweeps the four student-facing modules for an import of this one.
 
 **No moderation write.** The status a comment carries is read from the record
-E4-02 shipped; every writer of a moderation decision is E6's, and the runtime
-role holds no `INSERT` on that table (`report_comment_grants_v001.sql`).
+E4-02 shipped; a moderation verdict and its route are written only by the
+routing definer `public.route_moderation_verdict` (`app.services.moderation`),
+and the runtime role holds no `INSERT` on `moderation_state`
+(`report_comment_grants_v001.sql`).
 
-**And no §6.2 suppression, which is a gap rather than a decision.** SPEC §5.2
+**And no §6.2 suppression here, because it is below this module.** SPEC §5.2
 ends "threat/self-harm classifications bypass this flow entirely (§6.2) and are
-never shown to the instructor", and nothing in this module implements that: a
-comment carrying such a verdict is returned by both reads and counted by the
-cutter like any other. It is not reachable today, because nothing in the product
-writes a safety verdict — E4's classification task has one member — so the gap is
-recorded rather than closed here, with an owner and a done-when in
-`docs/tickets/e4/deferred.md`. Whoever adds the first such verdict owns closing
-it, and the suppression belongs **below** this read path rather than in each
-caller.
+never shown to the instructor". Since E6-01 `report_comment` v004 leaves out
+every comment that holds no moderation verdict and every comment any of whose
+verdicts, ever, is threat or self-harm, so neither read here, nor the cutter,
+nor the summary gather, can reach one (ADR 0187). What this module adds is the
+section-week half: `section_week_moderated` keeps a week's comments from any
+reader until every comment in it holds a verdict.
 
 ## The three rules this module reads, and where each is decided
 
@@ -122,7 +122,8 @@ E4-04's and E6's to write once, in `app.services`, not per call site."
 `reported_status_of` below is that once. Both reads go through it, the summary
 gather in `app.services.reporting` calls it since E4-07, and it is shaped so E6
 can call it too. An inner join here would drop every comment nobody has decided
-about, which on today's database is all of them.
+about, which is most of them: only a flag or a decision writes a row. "Latest" is
+`moderation_state.sequence`, the order of insert (E6-01, ADR 0187).
 
 **A week's comments are held only once the week has closed.** A window still
 taking responses has no final count, so a comment released from it may belong to
@@ -188,12 +189,15 @@ from sqlalchemy import (
     insert,
     select,
     table,
+    true,
+    tuple_,
 )
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.models.ai import Classification, ClassificationTask
 from app.models.report import MODERATION_STATES, ModerationState, ReleaseBatch, ReleaseBatchMember
-from app.models.survey import Answer, Response
+from app.models.survey import Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow, Week
 from app.services import clock
 
@@ -347,6 +351,35 @@ def stream_is_suppressed(
     return (commenters or 0) < n_threshold()
 
 
+def section_week_moderated(session: Session, *, section_id: UUID, week_id: UUID) -> bool:
+    """Whether every comment of one section-week that a reader could see holds a moderation verdict.
+
+    **The one home of this rule** (ADR 0187). Three readers ask it: the week read
+    (`visible_comments` shows nothing of a section-week until it is true), the
+    release cut (`cut_due_release_batches` skips such a section-week whole, and
+    its comments join a later cut) and the summary walk in
+    `app.services.reporting` (which does not summarize the week until it is
+    true). So a reader sees nothing of a week's comments before its last verdict
+    lands and all of them after, and no read shows part of a week: a week shown
+    one comment at a time as verdicts arrive would let a reader who keeps each
+    report attribute the newest comment by subtraction (`docs/MISTAKES.md`
+    entry 51).
+
+    **"A comment a reader could see" is a comment `report_comment` would show if
+    the verdict did not matter**: an answer to a comment question with text that
+    is not blank. A blank answer is not waited for, because no moderator will
+    ever classify it and it would hold its week back for ever. A comment holding a
+    threat or self-harm verdict counts as moderated: it holds a verdict, and the
+    view leaves it out of every reader.
+
+    True for a section-week with no comments at all, which has nothing to wait
+    for. E6-02 extends this rule for the attempt cap.
+    """
+    return (section_id, week_id) not in _unmoderated_section_weeks(
+        session, Response.section_id == section_id, Response.week_id == week_id
+    )
+
+
 def visible_comments(
     session: Session,
     *,
@@ -387,6 +420,11 @@ def visible_comments(
     a threshold reads the same function.** E4-07's report prints one beside the
     comments this gate hid; that record says why the two may not be separate reads.
     """
+    # A section-week is shown whole or not at all: until every comment in it
+    # holds a moderation verdict, no stream of it shows anything, in the same
+    # empty shape a suppressed stream answers (ADR 0187).
+    if not section_week_moderated(session, section_id=section_id, week_id=week_id):
+        return ()
     if stream_is_suppressed(session, section_id=section_id, week_id=week_id, stream=stream):
         return ()
 
@@ -525,7 +563,11 @@ def cut_due_release_batches(session: Session) -> int:
     # the weeks it has been walked past.
     now = clock.now(session, settings=settings)
 
-    held = _held_comments(threshold=threshold, now=now)
+    # A section-week whose comments are not all moderated yet is skipped whole;
+    # its comments join a later cut once the last verdict lands (ADR 0187).
+    held = _held_comments(
+        threshold=threshold, now=now, unmoderated=_unmoderated_section_weeks(session)
+    )
     due = _streams_whose_release_is_due(session, held, threshold=threshold)
     answers = _held_answers_by_section_term_and_stream(session, held)
 
@@ -590,18 +632,17 @@ def reported_status_of(answer_id: SQLColumnExpression[Any]) -> ColumnElement[str
     Two copies of "the latest row, or published" disagree the first time somebody
     changes one, and §5.2's whole lifecycle is about which decision is current.
 
-    **The ordering below cannot break a same-transaction tie, and that is a
-    recorded gap rather than an oversight.** `decided_at` defaults to `now()`,
-    which is PostgreSQL's *transaction* timestamp, so every row written in one
-    transaction carries the same instant and `LIMIT 1` chooses between them
-    arbitrarily — a comment a moderator excluded can resolve to `published`.
-    Nothing in E4 can reach it: E6 writes the first `moderation_state` row this
-    system will hold, so today this subquery orders nothing and every comment
-    resolves to `INITIAL_STATE` by absence. `docs/tickets/e4/deferred.md` carries
-    the entry, owned by E6 **before** its first writer lands, with the fix stated —
-    an explicit monotonic column, ordered by here. Breaking the tie on the row key
-    is not that fix and is worth naming as a wrong answer: `moderation_state.id` is
-    `gen_random_uuid()`, so it is a coin flip rather than an order.
+    **The ordering is `moderation_state.sequence`, the order of insert** (E6-01,
+    ADR 0187). `decided_at` defaults to `now()`, which is PostgreSQL's
+    *transaction* timestamp, so every row written in one transaction carries the
+    same instant, and ordering by it let `LIMIT 1` choose between two such rows
+    arbitrarily — a comment a moderator excluded could resolve to `published`.
+    `sequence` is an identity column the database assigns, so the second of two
+    decisions written in one transaction is the later one. It records insert
+    order, not commit order: of two concurrent writers, the one that inserted
+    first is earlier even if it committed second. Breaking the tie on the row key
+    instead would have been a wrong answer: `moderation_state.id` is
+    `gen_random_uuid()`, a coin flip rather than an order.
 
     **`SQLColumnExpression` rather than `ColumnElement`**, because the two callers
     hold the answer key in the two forms SQLAlchemy has: this module reads it off a
@@ -613,7 +654,7 @@ def reported_status_of(answer_id: SQLColumnExpression[Any]) -> ColumnElement[str
     latest = (
         select(ModerationState.state)
         .where(ModerationState.answer_id == answer_id)
-        .order_by(ModerationState.decided_at.desc())
+        .order_by(ModerationState.sequence.desc())
         .limit(1)
         .scalar_subquery()
     )
@@ -735,6 +776,55 @@ def _in_no_release_batch(answer_id: SQLColumnExpression[Any]) -> ColumnElement[b
     return ~released
 
 
+def _unmoderated_section_weeks(
+    session: Session, *scope: ColumnElement[bool]
+) -> set[tuple[UUID, UUID]]:
+    """The section-weeks holding a comment a reader could see that has no moderation verdict.
+
+    `section_week_moderated` above is the rule in words; this is its one
+    implementation, which the release cut reads as a set and the week read and
+    the summary walk read one section-week at a time. `scope` narrows the walk
+    (to one section-week, for those two).
+
+    **What counts as a comment is `report_comment`'s own test, before its
+    moderation conditions**: an answer to a `comment` question whose text is not
+    null and not blank. Blank is decided by `str.strip()` on the text, which is
+    the write path's test and the definition `report_comment_v003.sql` lists by
+    code point (its header says so), so this is the definition the view copies
+    rather than a second copy beside it. Only answers with no `MODERATION`
+    classification are fetched, and their text is read only to be stripped: it
+    is never returned, logged or kept.
+    """
+    unverdicted = (
+        select(Response.section_id, Response.week_id, Answer.comment_text)
+        .join_from(Answer, Response, Response.id == Answer.response_id)
+        .join(Question, Question.id == Answer.question_id)
+        .where(
+            Question.kind == QuestionKind.COMMENT,
+            Answer.comment_text.is_not(None),
+            ~select(Classification.id)
+            .where(
+                Classification.answer_id == Answer.id,
+                Classification.task == ClassificationTask.MODERATION,
+            )
+            .exists(),
+            *scope,
+        )
+    )
+    return {
+        (section_id, week_id)
+        for section_id, week_id, written in session.execute(unverdicted).all()
+        if written.strip()
+    }
+
+
+def _outside(section_weeks: set[tuple[UUID, UUID]]) -> ColumnElement[bool]:
+    """True for a `report_comment` row in none of `section_weeks`."""
+    if not section_weeks:
+        return true()
+    return tuple_(COMMENT_VIEW.c.section_id, COMMENT_VIEW.c.week_id).not_in(sorted(section_weeks))
+
+
 def _commenters_by_stream_week() -> Subquery:
     """How many distinct students commented in each section, week and stream.
 
@@ -766,7 +856,9 @@ def _commenters_by_stream_week() -> Subquery:
     )
 
 
-def _held_comments(*, threshold: int, now: datetime) -> Subquery:
+def _held_comments(
+    *, threshold: int, now: datetime, unmoderated: set[tuple[UUID, UUID]]
+) -> Subquery:
     """The comments SPEC §4 has been holding back — the one definition of "held".
 
     Three conditions, one per concern, and none of them is another's spare: the
@@ -855,6 +947,9 @@ def _held_comments(*, threshold: int, now: datetime) -> Subquery:
             SurveyWindow.closes_at < now,
             # ADR 0146: a comment is released at most once.
             _in_no_release_batch(COMMENT_VIEW.c.answer_id),
+            # ADR 0187: a section-week is released only once every comment in it
+            # holds a moderation verdict, so a batch never carries part of a week.
+            _outside(unmoderated),
         )
         .subquery()
     )

@@ -370,6 +370,14 @@ that is not harm. A comment whose moderation run failed or never ran is held,
 and a test plants a failed run and asserts the comment reaches neither the
 report nor the summary provider.
 
+**Closed by E6-01.** `report_comment` v004 shows a comment only once it holds a
+moderation verdict, and never once any of its verdicts is threat or self-harm;
+the week read, the release cut and the summary gather all read through it, and
+`section_week_moderated` holds a whole section-week back until its last verdict
+lands (ADR 0187).
+`tests/integration/test_a_comment_with_no_moderation_verdict_reaches_no_reader.py`
+plants a failed run and asserts the comment is absent from all four readers.
+
 ## Raising the comment threshold re-holds weeks the instructor already saw
 
 From the E5.1 review of `main` (privacy), and confirmed by the E5.1 boundary's

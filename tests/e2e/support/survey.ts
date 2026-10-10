@@ -322,7 +322,7 @@ export async function expectTheFormIsShowing(block: Locator): Promise<void> {
 /**
  * Delete these sections' stored responses, so their weeks are unanswered again.
  *
- * **Five statements now, and they have to be in this order.** Three tables carry
+ * **Eight statements now, and they have to be in this order.** Five tables carry
  * a restricting reference to `answer`, and the database refuses to let any of
  * them lose the row it is about, so every one of them goes before the answers and
  * the answers go before the responses holding them:
@@ -334,9 +334,16 @@ export async function expectTheFormIsShowing(block: Locator): Promise<void> {
  *      membership points at it there is nothing holding it.
  *   3. `moderation_state.answer_id` — E4-02's append-only lifecycle record
  *      (ADR 0145), one row per decision about one comment.
- *   4. `classification.answer_id` — `ON DELETE RESTRICT` (ADR 0055, ADR 0115),
- *      the database refusing to let a verdict lose the comment it judged.
- *   5. then the answers, then the responses.
+ *   4. `threat_case.answer_id` — E6-01's opening row of a Care case. It also
+ *      names the classification that routed it, so it goes before
+ *      `classification`.
+ *   5. `moderation_attempt.answer_id` — E6-01's record of a failed moderation
+ *      call (`RESTRICT`).
+ *   6. `classification.answer_id` — `ON DELETE RESTRICT` (ADR 0055, ADR 0115),
+ *      the database refusing to let a verdict lose the comment it judged. Since
+ *      E6-01 this includes the `MODERATION` verdicts; the trigger on the table
+ *      guards inserts only, so the stack's superuser can still delete them.
+ *   7. then the answers, then the responses.
  *
  * **The first three were missing and this is what they cost**, which is worth
  * writing down rather than quietly adding: before E4 a section had no batches and
@@ -365,6 +372,8 @@ export function clearTheWeek(codes: readonly string[]): void {
     `delete from release_batch_member where answer_id in (${theirAnswers});\n` +
       `delete from release_batch where section_id in (${theseSections});\n` +
       `delete from moderation_state where answer_id in (${theirAnswers});\n` +
+      `delete from threat_case where answer_id in (${theirAnswers});\n` +
+      `delete from moderation_attempt where answer_id in (${theirAnswers});\n` +
       `delete from classification where answer_id in (${theirAnswers});\n` +
       `delete from answer where response_id in (${ofTheseSections});\n` +
       `delete from response where id in (${ofTheseSections});`,

@@ -97,6 +97,14 @@ every response's column is then set by
 `app.services.validity.recompute_response_validity`, which is that column's one
 writer (ADR 0147).
 
+**Every comment is moderated, `clear`, through the product's one writer** (E6-01).
+`report_comment` v004 shows a comment only once it holds a moderation verdict, so
+`moderate_once` routes one through `app.services.moderation.route_verdict` under
+that module's seed provenance, `"seed"` for both halves of the pair. It is a
+different pair from the validity verdicts' below on purpose: a moderation
+verdict is not a model's either, and `"seed"` is what every fixture and seed
+plants one under.
+
 **The planted verdicts do not look floored.** ADR 0054 makes
 `("character-floor", "no-model")` the pair that says §3.3's character floor
 decided rather than a model, and `reclassify_floored_comments` hunts exactly that
@@ -739,6 +747,50 @@ def one_answer(
     return answer
 
 
+def moderate_once(session: Session, answer_id: UUID) -> None:
+    """Route a `clear` moderation verdict for one seeded comment, unless it already holds one.
+
+    E6-01: `report_comment` v004 shows a comment only once it holds a moderation
+    verdict, and the summary walk does not summarize a week until every comment
+    in it does, so a seeded comment with none would leave the story's report
+    empty. The verdict goes through the product's one writer,
+    `app.services.moderation.route_verdict`, under that module's seed provenance
+    (`"seed"` for both the prompt version and the model id), so it is never
+    mistaken for a model's. Checked first so that a re-run appends nothing.
+
+    **A comment whose window has not closed by the app clock is left unmoderated.**
+    `route_verdict` refuses it (`ModerationBeforeClose`, before writing anything),
+    because an answer is revised in place on resubmission and a verdict written
+    before the close would vouch for text that can still change (ADR 0187). Such a
+    comment is moderated after its close, by whatever routes verdicts then, and a
+    re-run of this seeder after the close moderates it here.
+    """
+    from app.ai.contracts import ModerationVerdict
+    from app.models.ai import Classification, ClassificationTask
+    from app.services.moderation import SEED_MODEL_ID, ModerationBeforeClose, route_verdict
+    from app.services.moderation import SEED_PROMPT_VERSION as MODERATION_SEED_PROMPT_VERSION
+
+    already = session.scalars(
+        select(Classification.id).where(
+            Classification.answer_id == answer_id,
+            Classification.task == ClassificationTask.MODERATION,
+        )
+    ).first()
+    if already is not None:
+        return
+    try:
+        route_verdict(
+            session,
+            answer_id,
+            ModerationVerdict.CLEAR,
+            prompt_version=MODERATION_SEED_PROMPT_VERSION,
+            model_id=SEED_MODEL_ID,
+        )
+    except ModerationBeforeClose:
+        # Raised before anything is written, so the session is untouched.
+        return
+
+
 def _submitted_at(week: WeekOfTheSection, subject: str) -> datetime:
     """When this student answered: some moment inside this week's own window.
 
@@ -828,6 +880,7 @@ def write_the_story(session: Session, *, effective_now: datetime) -> Written:
                     ),
                     answer_id=answer.id,
                 )
+                moderate_once(session, answer.id)
 
             # Every answer of this response the plan does not describe, removed.
             # The one `DELETE` this connection holds, and what makes a re-run over

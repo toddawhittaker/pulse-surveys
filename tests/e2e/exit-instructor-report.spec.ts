@@ -84,6 +84,7 @@ import {
   databaseStatement,
   deriveSurveyWindows,
   generateWeeklySummaries,
+  routeSeedVerdictsFor,
   seedTheExitStory,
 } from './support/stack';
 import { expectTheTablesMatchTheLines, panelTable } from './support/reportTables';
@@ -540,6 +541,33 @@ test('the story reaches Pulse’s own database, and the two Monday jobs run over
   ).not.toBe('');
 
   await setTheClockTo(page, THE_MONDAY_AFTER_WEEK_SIX);
+
+  // **Every comment of the story is moderated before the walk reads it** (E6-01).
+  // The seeder routes verdicts only for weeks already closed when it ran, because
+  // the writer refuses a window still open; now that the clock stands after week
+  // six, the rest get a `clear` verdict through the same writer. How many that is
+  // depends on the real date the seeder ran, so the control is not a count of what
+  // was routed but what is left: no non-blank comment in the section holds no
+  // verdict. A comment left without one hides its whole week from the report and
+  // from the summary walk.
+  routeSeedVerdictsFor([BIOL.code]);
+  const unmoderated = Number(
+    databaseStatement(
+      'select count(*) from answer a ' +
+        'join response r on r.id = a.response_id ' +
+        'join section s on s.id = r.section_id ' +
+        `where s.lms_section_code = ${quoted(BIOL.code)} ` +
+        "and a.comment_text is not null and btrim(a.comment_text) <> '' " +
+        'and not exists (select 1 from classification c ' +
+        "where c.answer_id = a.id and c.task = 'MODERATION');",
+    ),
+  );
+  expect(
+    unmoderated,
+    `${String(unmoderated)} comment(s) in ${BIOL.code} still hold no moderation verdict after ` +
+      'the seed verdicts were routed. Each one hides its whole week from the report and from the ' +
+      'summary walk, so every assertion below would be about a thinner story than the plan.',
+  ).toBe(0);
 
   generateWeeklySummaries();
   cutReleaseBatches();

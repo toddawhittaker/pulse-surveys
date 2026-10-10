@@ -17,7 +17,9 @@ reason: a privilege lands in the change that spends it, and a `GRANT` written
 for a writer that does not exist yet widens the runtime role for nobody.
 
 **Absence is the initial moderation state, and there is no default.** A comment
-with no `moderation_state` row is published; the latest row governs from there,
+with no `moderation_state` row is published, once it holds a moderation verdict
+at all — since E6-01 a comment with none reaches no reader (`report_comment`
+v004, ADR 0187); the latest row governs from there,
 which is the shape `classification` in `app.models.ai` already has and which
 SPEC §5.2 needs, because its lifecycle has an undo in both directions and §8
 requires both directions logged. A mutable column on `answer` could hold the
@@ -63,9 +65,11 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
+    Identity,
     Index,
     Integer,
     Text,
@@ -200,8 +204,10 @@ class ModerationState(UuidPrimaryKey, Base):
     nothing else. So there is deliberately **no** unique constraint on
     `answer_id`, and the latest row governs.
 
-    **A comment with no row here is published.** That is the initial state and it
-    is an absence rather than a default, which is what makes "exactly one value
+    **A comment with no row here is published**, once it holds a moderation
+    verdict: since E6-01 a comment with none reaches no reader (`report_comment`
+    v004, ADR 0187). That is the initial state and it is an absence rather than a
+    default, which is what makes "exactly one value
     ever written during E4" (the breakdown's decision 3) a count of zero writes
     and leaves every writer to E6. ADR 0145 records it, and the alternative — a
     `state` column on `answer` beside this table — is rejected there because two
@@ -241,6 +247,14 @@ class ModerationState(UuidPrimaryKey, Base):
     decided_at: Mapped[datetime] = mapped_column(
         AwareDateTime, nullable=False, server_default=text("now()")
     )
+    # The order the rows were written in, assigned by the database (E6-01, ADR
+    # 0187). `decided_at` is `now()`, the transaction's timestamp, so two
+    # decisions written in one transaction carry the same instant and cannot be
+    # told apart by it; this column breaks that tie, and `reported_status_of`
+    # orders by it alone. `ALWAYS`, so no writer can choose a value. It orders by
+    # insert, not by commit: two concurrent writers are not a same-transaction
+    # pair, and between them this column records which inserted first.
+    sequence: Mapped[int] = mapped_column(BigInteger, Identity(always=True), nullable=False)
 
 
 class ReleaseBatch(UuidPrimaryKey, Base):

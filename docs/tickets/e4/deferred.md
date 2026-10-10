@@ -142,6 +142,13 @@ a test plants two decisions about one comment inside a single transaction and
 requires the second to be the one reported — driven both ways round, since a tie
 broken arbitrarily passes half of such a test by luck.
 
+**Closed by E6-01**, before the routing definer wrote the first row.
+`moderation_state.sequence` is an identity column (`GENERATED ALWAYS`), and
+`reported_status_of` orders by it alone.
+`tests/integration/test_two_moderation_decisions_in_one_transaction_resolve_to_the_second.py`
+plants the pair both ways round. It orders by insert, not by commit; ADR 0187
+says why two concurrent writers are not a same-transaction pair.
+
 ## SPEC §6.2's threat and self-harm class is suppressed in neither the comment read path nor the summary gather
 
 **What is not enforced.** SPEC §5.2 ends "threat/self-harm classifications bypass
@@ -210,6 +217,17 @@ a week at the threshold and asserts the forbidden state at the service's return
 value, at the batch's membership, and at the gather's model-facing input. That test
 can only be written once a verdict of that kind can exist, which is why the
 writer's ticket owns it.
+
+**Closed by E6-01**, which added `ClassificationTask.MODERATION` and its one
+writer in the same change. `report_comment` v004 leaves out every comment any of
+whose moderation verdicts, ever, is threat or self-harm, which is below every
+reader: the week read, the cut and the summary gather, which now reads the view.
+The tripwire was replaced by planted-verdict tests:
+`tests/integration/test_a_care_class_comment_reaches_no_reader.py` (the service's
+return and the batch's members) and
+`tests/integration/test_the_summary_job_feeds_no_moderation_held_comment_to_the_model.py`
+(the gather's model-facing input), each with a later `clear` verdict as well.
+ADR 0187.
 
 ## The report's three copy modules sit outside the collector, so nothing sweeps their strings
 

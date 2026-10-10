@@ -1,18 +1,10 @@
-"""Which of a week's comments reach the model — ticket E4-06.
+"""Which of a week's comments reach the model — tickets E4-06 and E6-01.
 
 The ticket's scope: "per stream, gather the week's comments (under-threshold
 included, **moderation-held excluded** — vacuously today, structurally forever)".
 SPEC §5.1 says it of the summary itself: the summaries "exclude flagged-held
-content". §5.2 is where the states come from and E6 is what writes them; E4 writes
-none at all (ADR 0145 — the initial state is the absence of a row), so **every
-`moderation_state` row in this module is planted by the test**.
-
-That is the whole reason this module exists rather than being deferred to E6.
-"Vacuously today" is how a filter comes to be written as a convention and
-discovered missing two epics later, when a comment an instructor excluded is
-already sitting inside a generated summary — and a summary is not regenerated
-(breakdown decision 2), so it stays there. Planting the rows now makes the filter
-a behaviour with a test rather than a sentence in a scope.
+content". §5.2 is where the states come from and E6 is what writes them, so
+**every `moderation_state` row in this module is planted by the test**.
 
 **What is asserted is the prompt, not the row.** A summary's text is the model's
 and this suite cannot read a held comment out of it; what it can say exactly is
@@ -27,28 +19,46 @@ anywhere" refuses it while passing every other assertion here. E4-02's record is
 append-only precisely so that history exists (ADR 0145), and reading only the
 latest row is the whole of what makes it usable.
 
-**And there is a third subject in here, which is not a filter but an alarm on the
-one this filter does not have.** SPEC §5.2's last bullet routes threat and
-self-harm classifications *around* the moderation lifecycle entirely — they go
-straight to Care (§6.2) and are "never shown to the instructor" — so a comment in
-that class never acquires a `moderation_state` row at all, and the filter above,
-which reads an absent row as published, would send it to the provider. That is not
-a defect today and cannot be: `ClassificationTask` has one member and nothing
-writes a harm verdict. It becomes one the moment E6's classifier does. The last
-test in this module is the tripwire that fires first, and its docstring carries the
-instruction.
+**E6-01 replaced this module's tripwire with what the tripwire was waiting for.**
+Until E6-01 the last test here pinned `ClassificationTask` to one member, because
+SPEC §5.2's last bullet routes threat and self-harm classifications *around* the
+moderation lifecycle (they reach Care, §6.2, and never acquire a
+`moderation_state` row) and the gather then read an absent row as published — so
+the day a moderation task arrived, the class of comment §6.2 keeps furthest from an
+instructor would have been the one this job sent to a provider. E6-01 adds that
+task, and its own instruction was that widening the tripwire's set is not the
+repair. The repair is below, as planted verdicts:
 
-**Which failure a red here is.** Before E4-06 lands, expected red on
-`pytest.fail` naming `app.jobs.tasks` as a module with no
-`generate_weekly_summaries`; before E4-02, on the `moderation_state` table. Both
-are plain calls in a test body (`docs/MISTAKES.md` entry 44). The tripwire is
-green today and is required to be.
+  - a threat or self-harm comment never reaches the model, including when a later
+    verdict on it is `clear` (E6-01's second criterion, the gather's leg);
+  - a section-week with a comment that holds no verdict is not summarized at all,
+    and the next walk after the verdict lands summarizes it whole (criterion 8,
+    asserted over the sequence of walks — `docs/MISTAKES.md` entry 51);
+  - the exit's three-response week: the definer opens a `threat_case` and the
+    summary's call carries nothing of that comment (criterion 3's service half).
+
+**Every comment here is routed a `clear` verdict by the world unless a test names
+another** (`tests/fixtures/summary_job.py`), which is what keeps the two E4-06
+tests meaningful under `report_comment` v004: an unverdicted comment would not
+feed for a reason having nothing to do with `moderation_state`.
+
+**Which failure a red here is.** Before E6-01 lands, every test fails in its own
+body on `pytest.fail` naming `app.services.moderation.route_verdict` — the world
+plants verdicts through it (`docs/MISTAKES.md` entry 44: a FAILED, not an ERROR).
 """
 
 from datetime import timedelta
 from typing import Any
 
 import pytest
+from fixtures.moderation import (
+    CLEAR,
+    SELF_HARM,
+    THREAT,
+    UNMODERATED,
+    moderation_verdicts,
+    threat_cases,
+)
 from fixtures.summary_job import (
     A_CLOSED_TERM_WEEK,
     INSTRUCTOR_COMMENT_POSITION,
@@ -61,21 +71,13 @@ from fixtures.summary_job import (
 # **Marked `invariant`, which puts this module in CI's isolated §4.1 pass** where a
 # skip or an empty collection is a failure (`scripts/ci/check_invariants.py`).
 # SPEC §5.1's "exclude flagged-held content" and §5.2's small-N concealment, which
-# §4.1 item 3 is the general form of. A held comment fed to the model comes back
+# §4.1 item 3 is the general form of, and since E6-01 §6.2's "suppressed from all
+# instructor and leadership views". A held comment fed to the model comes back
 # paraphrased inside a summary the instructor reads — the suppression defeated one
 # layer out, in prose nothing else in this suite inspects, and on a surface where
 # the words no longer look like a comment. That the boundary is a prompt rather
 # than a payload is exactly why it needs the pass that cannot be skipped.
 pytestmark = [pytest.mark.integration, pytest.mark.invariant]
-
-# The module the classification vocabulary lives in, and the one member it has
-# today. **Written out here rather than read off the enum** (`docs/MISTAKES.md`
-# entry 19): an expectation taken from the thing it checks agrees with it whatever
-# either says, and the whole point of the assertion below is to notice the enum
-# changing.
-CLASSIFICATION_MODELS_MODULE = "app.models.ai"
-CLASSIFICATION_TASK_ENUM = "ClassificationTask"
-CLASSIFICATION_TASKS_TODAY = frozenset({"COMMENT_VALIDITY"})
 
 # The five comments, by the nonce each carries. Tokens that appear nowhere else
 # in this repository, so finding one in a prompt is evidence and not a
@@ -91,6 +93,32 @@ LATEST_PUBLISHED = "Wp7VbLk3Ty"
 # near miss: the later one governs.
 A_FIRST_DECISION = timedelta(hours=1)
 A_LATER_DECISION = timedelta(hours=2)
+
+# E6-01's planted-verdict worlds, by nonce. Same rule as above: tokens found
+# nowhere else in the repository.
+A_CARE_CLASS_COMMENT = "Vb3NqLp8Ws"
+CLEAR_BESIDE_IT = ("Hd6RtYk2Mf", "Qc9ZwJn4Ux")
+NOT_YET_MODERATED = ("Tz5GmWc7Pk", "Ry2LsFd9Nh")
+MODERATED_BESIDE_THEM = "Kw8BvXq3Jt"
+A_LATER_WEEKS_COMMENT = "Mn4CzHy6Ga"
+
+# The verdict sequences E6-01's second criterion names, routed in order on one
+# comment: each Care-class verdict alone, and each followed by a later `clear`.
+# The second form is the near miss — "the latest verdict governs" is the rule for
+# `moderation_state`, and carried over to Care-class verdicts it would publish a
+# self-harm disclosure the moment a re-run answered `clear`. The criterion says
+# "never when any of its verdicts, ever, is threat or self-harm".
+CARE_SEQUENCES = {
+    "threat": (THREAT,),
+    "self-harm": (SELF_HARM,),
+    "threat-then-clear": (THREAT, CLEAR),
+    "self-harm-then-clear": (SELF_HARM, CLEAR),
+}
+
+# The week E6-01's gather-wait test pairs with the week under test. Inside cohort
+# `Q`'s run (term weeks 7 to 18), so it closes after `A_CLOSED_TERM_WEEK` and both
+# are closed when the clock stands after it.
+A_LATER_CLOSED_TERM_WEEK = A_CLOSED_TERM_WEEK + 1
 
 
 def a_week_with_five_decided_comments(world: SummaryWorld, contract: Any) -> None:
@@ -116,8 +144,10 @@ def a_week_with_five_decided_comments(world: SummaryWorld, contract: Any) -> Non
     def comment_of(nonce: str) -> Any:
         return written[nonce][INSTRUCTOR_COMMENT_POSITION]
 
-    # `UNDECIDED` gets no row at all: ADR 0145 makes the absence of a row the
-    # initial state, and that is the state every comment in shipped E4 is in.
+    # `UNDECIDED` gets no `moderation_state` row at all: ADR 0145 makes the absence
+    # of a row the initial state. It holds the `clear` moderation verdict the world
+    # routes for every comment (E6-01), which is a classification and not a
+    # decision, so it is still a comment nobody has decided anything about.
     world.decide(
         comment_of(LATEST_EXCLUDED), contract.excluded, decided_at=decided_at + A_FIRST_DECISION
     )
@@ -154,9 +184,11 @@ def test_the_call_carries_the_comments_no_moderator_is_holding_and_none_of_the_o
     on the wrong column, fails on a named nonce rather than on a count.
 
       - **No `moderation_state` row at all → feeds.** ADR 0145: the initial state
-        is the absence of a row, which is the state every comment in shipped E4 is
-        in. A filter written as an inner join to the record sends nothing at all,
-        and would pass a test that only asserted the two exclusions.
+        is the absence of a row. Since E6-01 the comment also holds the `clear`
+        moderation verdict the world routes for it, which is what makes it a
+        comment the view returns at all. A filter written as an inner join to the
+        record sends nothing at all, and would pass a test that only asserted the
+        two exclusions.
       - **Latest row `PUBLISHED` → feeds**, which is E6's explicit form of the
         same thing.
       - **Latest row `EXCLUDED` → does not feed.** §5.1: summaries exclude
@@ -259,116 +291,312 @@ def test_a_held_comment_does_not_change_the_response_count_the_summary_states(
     )
 
 
-def test_no_harm_classification_task_exists_yet_for_this_filter_to_have_missed(
+# ---------------------------------------------------------------------------
+# E6-01 — the planted-verdict tests that replace the tripwire.
+# ---------------------------------------------------------------------------
+
+
+def answer_key(world: SummaryWorld, written: dict[int, Any]) -> Any:
+    """The `answer` key of the instructor comment one `respond` call wrote."""
+    return written[INSTRUCTOR_COMMENT_POSITION][world.world.key_of("answer")]
+
+
+def summaries_for_week(world: SummaryWorld, *, cohort: str, term_week: int) -> list[dict[str, Any]]:
+    """Every stored summary of one section-week, read on a connection that sees commits."""
+    week = world.week_id(term_week)
+    return [
+        row
+        for row in world.summaries(section_id=world.section_id(cohort))
+        if str(row["week_id"]) == str(week)
+    ]
+
+
+@pytest.mark.parametrize("sequence", list(CARE_SEQUENCES.values()), ids=list(CARE_SEQUENCES))
+def test_a_threat_or_self_harm_comment_is_never_sent_to_the_model(
+    sequence: tuple[str, ...],
+    summary_world: SummaryWorld,
+    summary_job_contract: Any,
     summary_contracts: Any,
 ) -> None:
-    """The tripwire on the exclusion this gather does **not** have. Green today, and required to be.
+    """E6-01 criterion 2, the gather's leg: a Care-class comment never reaches the provider.
 
-    **What the gap is.** SPEC §5.2's last bullet: "Threat/self-harm classifications
-    bypass this flow entirely (§6.2) and are never shown to the instructor." Bypass
-    the flow means bypass the record: a comment routed to Care never acquires a
-    `moderation_state` row, because no moderator ever decided anything about it.
-    The filter this module's other tests measure reads an absent row as published —
-    ADR 0145's absence rule, and correct for every state that exists — so the day a
-    harm classifier writes its first verdict, the one class of comment §6.2 keeps
-    furthest from an instructor becomes the one class this walk sends to the
-    provider and paraphrases into instructor-visible prose. Generation is
-    once-and-done (E4's breakdown decision 2), so it stays there for the term.
+    One closed section-week, three instructor comments. Two hold a `clear`
+    verdict; the third holds the Care-class sequence this case names, routed
+    through the definer in order. The job runs with a double that records every
+    prompt.
 
-    **Why the answer is this test and not a filter.** There is no harm vocabulary
-    to filter on. `ClassificationTask` has exactly one member and nothing in the
-    system writes a harm verdict, so a predicate written now would be a guess at an
-    enum E6 has not designed — asserted against nothing, unfalsifiable, and
-    `docs/MISTAKES.md` entry 24's shape (a test asserting a property no
-    implementation can satisfy). What can be made mechanical is the *precondition*
-    of the deferral: while the vocabulary has one member the gap cannot fire, and
-    the moment it gains a second it can. So the deferral is recorded with an owner
-    in `docs/tickets/e4/deferred.md` (owner E6) and this is the alarm that goes off
-    before, rather than after, the thing it is about becomes reachable.
+    **The controls, asserted first.** A call was made, and both `clear` comments of
+    the same week are in it. So the week was walked, it was not held back as
+    unmoderated (every comment in it holds a verdict), and the gather is reading
+    comments at all — an absence in a walk that sent nothing would be an absence in
+    nothing (`docs/MISTAKES.md` entry 3). And the Care-class comment is read back
+    holding exactly the verdicts planted, so the case under test is the one named.
 
-    **This is a §6.2 confidentiality tripwire, not enum bookkeeping**, and the
-    difference is what the red means. A test that merely pinned an enum would be
-    satisfied by anyone editing the expected set to match reality — that is the
-    ordinary way an inventory test is resolved. Here that resolution is the defect:
-    widening `CLASSIFICATION_TASKS_TODAY` makes this green while leaving a
-    self-harm disclosure on the path to a model and to a paraphrase an instructor
-    reads. **When this reds, the repair is in the gather**, in
-    `docs/tickets/e4/deferred.md`'s terms, and it lands *before* the classifier
-    writes its first verdict — not in the same pull request as the classifier, and
-    not after it.
+    **The assertion.** The Care-class comment's nonce is in no prompt.
 
-    **The mutation it kills:** a second `ClassificationTask` member — a moderation
-    or harm task — added with no change to the summary gather. That is a diff no
-    other test in this repository has anything to say about: it adds a vocabulary,
-    breaks nothing, and silently widens what crosses to the provider.
-
-    **The near miss it must not be resolved by:** this test's own set widened to
-    match the enum. It is written as a literal at the top of this module rather
-    than derived from `ClassificationTask` for exactly that reason
-    (`docs/MISTAKES.md` entry 19) — a set read off the thing it checks agrees with
-    it whatever either says — and the failure message says so in as many words, so
-    the cheap fix cannot be made without reading why it is wrong.
-
-    **Not marked `invariant`, deliberately, and the reason is what the marker
-    means.** SPEC §4.1 is seven enumerated visibility rules and this is not one of
-    them; `tests/integration/test_application_role_privileges.py` draws the same
-    line for the same reason ("preconditions for the §4.1 invariants rather than
-    instances of them"). More decisively, every test in that pass asserts a
-    *denial* — a query refused, a column unreadable — and this asserts an
-    inventory. Marking it would put a claim in the isolated §4.1 pass that the §6.2
-    exclusion is enforced, and it is not: it is deferred, with this as the alarm.
-    What replaces the marker's protection is that the assertion is unconditional
-    and an equality — no skip path, no xfail, no floor — in a module CI runs on
-    every pull request.
-
-    **The token the schema stores is pinned elsewhere** and is not this test's
-    subject: `COMMENT_VALIDITY_TASK` in `tests/fixtures/grading.py` carries it,
-    held by ADR 0055's per-task `CHECK`. What is asserted here is how many kinds of
-    classification exist, which is the only fact the gap depends on.
+    **The mutations this kills:** `report_comment` v004 written with the verdict
+    condition and without the Care-class exclusion (every case); the exclusion
+    written against the *latest* moderation verdict rather than any verdict ever
+    (the two `-then-clear` cases); and the gather keeping its own copy of the
+    comment read instead of reading the view (every case, because the copy has no
+    Care-class rule). **The near miss it must not be resolved by:** excluding the
+    comment by giving it no verdict — the read-back control fails first.
     """
-    module = summary_contracts.module(
-        CLASSIFICATION_MODELS_MODULE,
-        "SPEC §13 puts the classification rows there, and ADR 0055 gives them a `task` column "
-        "typed as an enum with one member today.",
+    summary_job_contract.require_table(summary_world.world.tables)
+    cohort = summary_job_contract.a_cohort
+    summary_world.build(cohort)
+    care = summary_world.respond(
+        "e6-01-care-class-subject",
+        cohort=cohort,
+        term_week=A_CLOSED_TERM_WEEK,
+        instructor_comment=comment_text(INSTRUCTOR_STREAM, A_CARE_CLASS_COMMENT),
+        instructor_moderation=sequence,
     )
-    tasks = summary_contracts.named(
-        module,
-        CLASSIFICATION_TASK_ENUM,
-        "ADR 0055 settles the classification vocabulary as an enum of tasks, with the verdict set "
-        "closed per task by a check constraint.",
+    for index, nonce in enumerate(CLEAR_BESIDE_IT):
+        summary_world.respond(
+            f"e6-01-clear-subject-{index}",
+            cohort=cohort,
+            term_week=A_CLOSED_TERM_WEEK,
+            instructor_comment=comment_text(INSTRUCTOR_STREAM, nonce),
+        )
+    summary_world.clock_after(A_CLOSED_TERM_WEEK)
+    summary_world.commit()
+
+    held = sorted(
+        row["verdict"]
+        for row in moderation_verdicts(summary_world.rows.session, answer_key(summary_world, care))
+    )
+    assert held == sorted(sequence), (
+        f"The Care-class comment holds the moderation verdicts {held}; this case planted "
+        f"{list(sequence)} through the definer. Until it holds them, the absence below says nothing "
+        "about Care-class verdicts."
     )
 
-    try:
-        members = frozenset(member.name for member in tasks)
-    except TypeError:  # pragma: no cover - a red, not a branch
-        pytest.fail(
-            f"`{CLASSIFICATION_MODELS_MODULE}.{CLASSIFICATION_TASK_ENUM}` is {tasks!r}, which does "
-            "not enumerate its members. ADR 0055 settles the classification vocabulary as an enum; "
-            "if it has become something else, this tripwire has to be rewritten around whatever "
-            "now answers 'how many kinds of classification are there' — not deleted, because the "
-            "§6.2 gap it watches is unchanged."
-        )
-    assert members, (
-        f"`{CLASSIFICATION_MODELS_MODULE}.{CLASSIFICATION_TASK_ENUM}` has no members at all, so "
-        "the equality below holds of an empty enum and this tripwire is asserting nothing. "
-        "Something is being read that is not the classification vocabulary."
+    gateway = StreamAwareGateway(summary_contracts)
+    summary_job_contract.run(gateway=gateway)
+
+    assert gateway.prompts, (
+        "The walk made no model call for a closed week carrying three verdicted instructor "
+        "comments, so there is no prompt to search and the absence below would be an absence in "
+        "nothing."
     )
-    assert members == CLASSIFICATION_TASKS_TODAY, (
-        f"`{CLASSIFICATION_TASK_ENUM}` offers {sorted(members)} and this tripwire was written when "
-        f"it offered {sorted(CLASSIFICATION_TASKS_TODAY)}.\n\n"
-        "**Do not resolve this by editing the set above.** That is the near miss this test exists "
-        "to refuse. A second classification task means a moderation or harm classifier is "
-        "arriving, and SPEC §5.2's last bullet routes threat and self-harm classifications around "
-        "the moderation lifecycle entirely — they reach Care (§6.2) and never acquire a "
-        "`moderation_state` row. This walk's gather reads an absent row as published, so from the "
-        "moment that classifier writes its first verdict the comments §6.2 keeps furthest from an "
-        "instructor are the ones this job sends to a provider and paraphrases into a summary the "
-        "instructor reads — and nothing regenerates a summary (E4's breakdown decision 2), so it "
-        "stays there for the term.\n\n"
-        "**The repair is in the gather, and it lands before the classifier does.** "
-        "`docs/tickets/e4/deferred.md` carries the entry with its owner (E6) and its done-when: "
-        "the summary gather excludes comments whose current classification is in the threat or "
-        "self-harm set, asserted with a planted verdict of that class, before any writer of one "
-        "exists. Widening the set here makes this test green and changes nothing about what "
-        "crosses to the provider."
+    sent = "\n".join(gateway.prompts)
+    missing = [nonce for nonce in CLEAR_BESIDE_IT if nonce not in sent]
+    assert not missing, (
+        f"The `clear` comments {missing} of the same section-week did not reach the model. Every "
+        "comment of the week holds a verdict, so the week is moderated and is summarized whole; a "
+        "Care-class verdict is a verdict, and must not hold the rest of its week back."
+    )
+    assert A_CARE_CLASS_COMMENT not in sent, (
+        f"A comment holding the moderation verdicts {list(sequence)} reached the summary model. "
+        "SPEC §6.2: threat-of-harm and self-harm comments are 'routed here immediately and "
+        "suppressed from all instructor and leadership views', and a summary is an instructor view "
+        "of the week's comments in the model's words. E6-01: a comment never appears when any of "
+        "its verdicts, ever, is threat or self-harm — a later `clear` does not publish it."
+    )
+
+
+def test_a_section_week_is_summarized_only_once_its_last_verdict_has_landed(
+    summary_world: SummaryWorld,
+    summary_job_contract: Any,
+    summary_contracts: Any,
+) -> None:
+    """E6-01 criterion 8, over three walks: the gather waits, never summarizes a part, then runs.
+
+    One closed section-week holds three instructor comments: one verdicted, two
+    holding no verdict. A second closed week of the same section is fully
+    verdicted and is the control. Then three walks, with a verdict landing between
+    each:
+
+      1. **No verdicts on two of three.** The control week is summarized and its
+         comment fed; the week under test has no `weekly_summary` row at all.
+      2. **One verdict of the two lands.** Still no row. A walk that summarized the
+         two comments now holding verdicts would write a summary of part of a
+         week, and — because summaries are written once and never regenerated
+         (E4's breakdown decision 2) — the third comment would never reach a
+         summary at all. This is the step a per-comment filter fails.
+      3. **The last verdict lands.** The week is summarized, and its call carries
+         all three comments.
+
+    That is the work order's decision 5 for the gather: before every verdict lands
+    a reader sees nothing of that week's comments, after it, all at once
+    (`docs/MISTAKES.md` entries 50 and 51 — the property is over the sequence of
+    walks, not one walk).
+
+    **The mutations this kills:** no wait at all (walk 1 summarizes the week with
+    the verdicted comment); a wait that counts verdicted comments rather than
+    requiring every comment to hold one (walk 2); a wait that never ends because
+    it counts a comment the view does not show, or because the walk does not
+    revisit an unsummarized week (walk 3).
+    """
+    summary_job_contract.require_table(summary_world.world.tables)
+    cohort = summary_job_contract.a_cohort
+    summary_world.build(cohort)
+
+    waiting = [
+        summary_world.respond(
+            f"e6-01-waiting-subject-{index}",
+            cohort=cohort,
+            term_week=A_CLOSED_TERM_WEEK,
+            instructor_comment=comment_text(INSTRUCTOR_STREAM, nonce),
+            instructor_moderation=UNMODERATED,
+        )
+        for index, nonce in enumerate(NOT_YET_MODERATED)
+    ]
+    summary_world.respond(
+        "e6-01-moderated-subject",
+        cohort=cohort,
+        term_week=A_CLOSED_TERM_WEEK,
+        instructor_comment=comment_text(INSTRUCTOR_STREAM, MODERATED_BESIDE_THEM),
+    )
+    summary_world.respond(
+        "e6-01-later-week-subject",
+        cohort=cohort,
+        term_week=A_LATER_CLOSED_TERM_WEEK,
+        instructor_comment=comment_text(INSTRUCTOR_STREAM, A_LATER_WEEKS_COMMENT),
+    )
+    summary_world.clock_after(A_LATER_CLOSED_TERM_WEEK)
+    summary_world.commit()
+
+    # Walk 1.
+    first = StreamAwareGateway(summary_contracts)
+    summary_job_contract.run(gateway=first)
+    assert summaries_for_week(summary_world, cohort=cohort, term_week=A_LATER_CLOSED_TERM_WEEK), (
+        f"The walk wrote no summary for term week {A_LATER_CLOSED_TERM_WEEK}, whose one comment "
+        "holds a verdict. That week is this test's control: until it is summarized, the absence of "
+        "a summary for the week under test is what this walk does to every week."
+    )
+    assert A_LATER_WEEKS_COMMENT in "\n".join(
+        first.prompts
+    ), "The control week was summarized and its verdicted comment is not in any prompt."
+    after_first = summaries_for_week(summary_world, cohort=cohort, term_week=A_CLOSED_TERM_WEEK)
+    assert not after_first, (
+        f"The walk summarized term week {A_CLOSED_TERM_WEEK} while two of its three comments held no "
+        f"moderation verdict: it wrote {[row['stream'] for row in after_first]}. A section-week is "
+        "not summarized until every comment in it holds a verdict (E6-01 criterion 8)."
+    )
+    leaked = [
+        nonce
+        for nonce in (*NOT_YET_MODERATED, MODERATED_BESIDE_THEM)
+        if nonce in "\n".join(first.prompts)
+    ]
+    assert not leaked, f"Comments of the waiting week reached the model in walk 1: {leaked}."
+
+    # Walk 2: one of the two verdicts lands.
+    summary_world.verdict(waiting[0][INSTRUCTOR_COMMENT_POSITION], CLEAR)
+    summary_world.commit()
+    second = StreamAwareGateway(summary_contracts)
+    summary_job_contract.run(gateway=second)
+    after_second = summaries_for_week(summary_world, cohort=cohort, term_week=A_CLOSED_TERM_WEEK)
+    assert not after_second, (
+        f"With two of the week's three comments verdicted and one still waiting, the walk "
+        f"summarized term week {A_CLOSED_TERM_WEEK} ({[row['stream'] for row in after_second]}). "
+        "That summary is of part of a week and is never regenerated, so the waiting comment never "
+        "reaches a summary — and a reader who sees this week's summary now and its comments later "
+        "has two views that differ by exactly one comment (`docs/MISTAKES.md` entry 51)."
+    )
+
+    # Walk 3: the last verdict lands.
+    summary_world.verdict(waiting[1][INSTRUCTOR_COMMENT_POSITION], CLEAR)
+    summary_world.commit()
+    third = StreamAwareGateway(summary_contracts)
+    summary_job_contract.run(gateway=third)
+    after_third = summaries_for_week(summary_world, cohort=cohort, term_week=A_CLOSED_TERM_WEEK)
+    assert after_third, (
+        f"Every comment of term week {A_CLOSED_TERM_WEEK} now holds a verdict and the next walk "
+        "wrote no summary for it. The wait has to end: E6-01 criterion 8, 'once the verdict lands, "
+        "the next walk summarizes it'."
+    )
+    sent = "\n".join(third.prompts)
+    absent = [nonce for nonce in (*NOT_YET_MODERATED, MODERATED_BESIDE_THEM) if nonce not in sent]
+    assert not absent, (
+        f"The walk that summarized term week {A_CLOSED_TERM_WEEK} did not send {absent}. Once every "
+        "verdict has landed the week is summarized whole, all at once."
+    )
+
+
+def test_the_exits_three_response_week_opens_a_case_and_sends_the_model_nothing_of_it(
+    summary_world: SummaryWorld,
+    summary_job_contract: Any,
+    summary_contracts: Any,
+) -> None:
+    """E6-01 criterion 3, the service half: a self-harm comment in a 3-response week.
+
+    The E6 exit's own world: three students answer a week, one of them writes a
+    comment the moderator classifies `self_harm`, the other two `clear`. Routed
+    through the definer, as every verdict is.
+
+      - **The route.** Exactly one `threat_case` row names the self-harm comment,
+        and it names the classification row that holds the verdict; the two
+        `clear` comments have none (the pair: the definer opens a case for a
+        Care-class verdict and only for one).
+      - **The summary.** The week is summarized — a Care-class verdict is a verdict,
+        so the week is moderated — and the call carries the two `clear` comments
+        and nothing of the self-harm one.
+
+    The payload half — what the instructor's report carries — is
+    `tests/integration/test_a_care_class_comment_reaches_no_reader.py`.
+
+    **The mutations this kills:** a definer that writes the verdict and no case
+    (or a case for every verdict); a case naming the wrong classification; and any
+    gather that sends a Care-class comment (see the test above).
+    """
+    summary_job_contract.require_table(summary_world.world.tables)
+    cohort = summary_job_contract.a_cohort
+    summary_world.build(cohort)
+    disclosed = summary_world.respond(
+        "e6-01-self-harm-subject",
+        cohort=cohort,
+        term_week=A_CLOSED_TERM_WEEK,
+        instructor_comment=comment_text(INSTRUCTOR_STREAM, A_CARE_CLASS_COMMENT),
+        instructor_moderation=SELF_HARM,
+    )
+    beside = [
+        summary_world.respond(
+            f"e6-01-exit-clear-subject-{index}",
+            cohort=cohort,
+            term_week=A_CLOSED_TERM_WEEK,
+            instructor_comment=comment_text(INSTRUCTOR_STREAM, nonce),
+        )
+        for index, nonce in enumerate(CLEAR_BESIDE_IT)
+    ]
+    summary_world.clock_after(A_CLOSED_TERM_WEEK)
+    summary_world.commit()
+
+    session = summary_world.rows.session
+    disclosed_key = answer_key(summary_world, disclosed)
+    cases = threat_cases(session, disclosed_key)
+    verdicts = moderation_verdicts(session, disclosed_key)
+    assert len(cases) == 1, (
+        f"The self-harm comment carries {len(cases)} `threat_case` rows. The routing definer opens "
+        "exactly one for a threat or self-harm verdict, in the same call that writes the verdict "
+        "(work order decision 2); none means the comment reached nobody — not the instructor, and "
+        "not Care either."
+    )
+    assert [row["id"] for row in verdicts] == [cases[0]["classification_id"]], (
+        f"The case names classification {cases[0]['classification_id']}, and the comment's "
+        f"moderation verdicts are {[(row['id'], row['verdict']) for row in verdicts]}. The case is "
+        "opened by the verdict that routed it, and says which one."
+    )
+    for written in beside:
+        assert not threat_cases(session, answer_key(summary_world, written)), (
+            "A `clear` comment of the same week has a `threat_case`. The definer opens a case for a "
+            "threat or self-harm verdict and for nothing else."
+        )
+
+    gateway = StreamAwareGateway(summary_contracts)
+    summary_job_contract.run(gateway=gateway)
+    assert summaries_for_week(summary_world, cohort=cohort, term_week=A_CLOSED_TERM_WEEK), (
+        "The three-response week was not summarized. Every comment in it holds a verdict, so it is "
+        "moderated; a week held back forever by its Care-class comment is a week whose instructor "
+        "never gets the summary §5.1 promises a thin week."
+    )
+    sent = "\n".join(gateway.prompts)
+    assert all(nonce in sent for nonce in CLEAR_BESIDE_IT), (
+        "The week was summarized and its two `clear` comments are not both in the call, so the "
+        "absence below would be an absence from a call that carried nothing."
+    )
+    assert A_CARE_CLASS_COMMENT not in sent, (
+        "The self-harm comment of the exit's three-response week reached the summary model, and a "
+        "summary of a three-response week is exactly the surface a reader can attribute."
     )

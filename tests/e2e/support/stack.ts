@@ -3,9 +3,10 @@
 //
 // **What is here**, in the order it arrived: the window derivation and the
 // database statement E2-10's spec needed, E4-11's weekly-summary walk, E4-15's
-// two — the exit story's seeder and the release cutter — and E5-10's two, which
-// pipe the other two development seeders the repository already ships. Seven
-// helpers rather than the two this file opened with, so the count is named
+// two — the exit story's seeder and the release cutter — E5-10's two, which
+// pipe the other two development seeders the repository already ships, and
+// E6-01's, which routes seed moderation verdicts through the product's writer.
+// Eight helpers rather than the two this file opened with, so the count is named
 // rather than left as prose that goes stale on the next addition
 // (`docs/MISTAKES.md` entry 1).
 //
@@ -146,6 +147,57 @@ export function cutReleaseBatches(): void {
     '-c',
     'from app.jobs.tasks import cut_release_batches; print(cut_release_batches())',
   ]);
+}
+
+/**
+ * Route a `clear` moderation verdict for every comment in the named sections
+ * that holds none yet, and answer how many it routed.
+ *
+ * **Why a drive needs this since E6-01.** `report_comment` v004 shows a comment
+ * only once it holds a moderation verdict, and the summary walk does not
+ * summarize a section-week until every comment in it holds one. Moderation runs
+ * at window close (SPEC §7.4) and its sweep is E6-02's, so a drive that submits
+ * comments through the page and reads them back would find none on the report
+ * and no summary above it — `docs/MISTAKES.md` entry 22, one layer out.
+ *
+ * **Through the product's one writer, never a row.** The verdicts go through
+ * `app.services.moderation.route_verdict` — the routing definer, which writes the
+ * verdict and its route together — under the seed provenance the module defines
+ * (`SEED_PROMPT_VERSION`, `SEED_MODEL_ID`), so a planted verdict says it is one
+ * and is never mistaken for a model's. It runs in the `api` container on the
+ * application's own connection, which is also what proves the grant
+ * (`docs/MISTAKES.md` entry 46). A blank comment is left alone: the view does not
+ * show one, so nothing waits for it.
+ *
+ * The count is the control: the caller compares it with the comments it typed.
+ */
+export function routeSeedVerdictsFor(codes: readonly string[]): number {
+  const program = [
+    'import json',
+    'from sqlalchemy import text',
+    'from app.ai.contracts import ModerationVerdict',
+    'from app.db import SessionLocal',
+    'from app.services.moderation import SEED_MODEL_ID, SEED_PROMPT_VERSION, route_verdict',
+    `codes = json.loads(${JSON.stringify(JSON.stringify(codes))})`,
+    'waiting = text(',
+    '    "select a.id from answer a "',
+    '    "join response r on r.id = a.response_id "',
+    '    "join section s on s.id = r.section_id "',
+    '    "where s.lms_section_code = any(:codes) "',
+    '    "and a.comment_text is not null and btrim(a.comment_text) <> \'\' "',
+    '    "and not exists (select 1 from classification c "',
+    '    "where c.answer_id = a.id and c.task = \'MODERATION\')"',
+    ')',
+    'with SessionLocal() as session:',
+    '    answers = list(session.execute(waiting, {"codes": codes}).scalars())',
+    '    for answer_id in answers:',
+    '        route_verdict(session, answer_id, ModerationVerdict.CLEAR,',
+    '                      prompt_version=SEED_PROMPT_VERSION, model_id=SEED_MODEL_ID)',
+    '    session.commit()',
+    'print(len(answers))',
+  ].join('\n');
+  const printed = compose(['exec', '-T', 'api', 'python', '-'], program).trim().split('\n');
+  return Number(printed[printed.length - 1]);
 }
 
 /** Where E4-15's story seeder lives, relative to the repository root. */
