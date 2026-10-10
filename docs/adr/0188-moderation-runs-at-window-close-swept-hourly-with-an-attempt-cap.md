@@ -60,7 +60,14 @@ happens when it keeps failing, or when the summary walk, which waits for it, run
   hosted provider refuses a content-filtered prompt that way every time it is
   asked, and such a comment was retried for ever and held its week.
   `AIProviderRefusedError` carries its HTTP status as `status: int`; 401, 403,
-  404, 429 and 500 still count nothing. `section_week_moderated` counts a capped comment
+  404, 429 and 500 still count nothing.
+  *Amended again in E6-05's review round:* 400 no longer counts; only 413 and
+  422 do. A 400 is as often about every request (a bad parameter after a
+  deploy) as about one prompt, and counting it would cap every comment within
+  six hours; a capped comment counts as resolved, so weeks would be released
+  with no threat or self-harm check. A 400 is retried and holds its week, and a
+  content filter that answers 400 holds that comment's week until E10's Care
+  review. `section_week_moderated` counts a capped comment
   as resolved, so its week's other comments show, the release cut proceeds, and
   the summary is written without it. A capped comment is never routed to Care;
   E6-07 carries that to E10.

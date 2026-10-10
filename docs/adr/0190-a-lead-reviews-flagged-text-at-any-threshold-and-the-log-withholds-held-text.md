@@ -20,7 +20,15 @@ role covering it: `LEAD_FACULTY` for the courses a person leads (from the
 mapping, and only with a `LEAD_FACULTY` assignment), `CHAIR` for the courses of
 a chaired department that nobody leads. Instructor grants are never unioned in,
 so a lead who also teaches a sibling section does not reach it (SPEC §4.1 item
-2). Every other role answers nothing and is refused with a 403: an assistant
+2). **And the queue leaves out every section the reader teaches** (ruling 7,
+from this ticket's review): a lead or chair who also holds an instructor
+assignment on a section of a reviewed course would otherwise read that
+section's held text here, which the instructor door refuses them. The first
+draft of this record considered only the sibling-section case and missed the
+own-section one. The exclusion is by section (`authz.taught_section_ids`, the
+instructor door's own source), so the course's other sections stay in the
+queue, and the leader door, which reads the same select, refuses such a comment
+with the queue's 404. Every other role answers nothing and is refused with a 403: an assistant
 dean until E9's supervision walk ([0108](0108-the-leadership-limb-is-scoped-by-the-launchers-own-grant.md)),
 and a dean or vice president, whom §5.2 does not name as a reviewer.
 
@@ -36,8 +44,8 @@ system's source.
 re-runs the queue's own select for that answer id, and only then calls the
 shared write with the covering role. The instructor's door is untouched, so a
 held comment is still refused to its instructor and accepted from its lead.
-Anything not in the reader's queue now (a sibling's comment, a decided or
-Care-class one, an id nothing holds) is one 404 with one sentence. A lead has
+Anything not in the reader's queue now (a sibling's comment, a comment of a
+section the reader teaches, a decided or Care-class one, an id nothing holds) is one 404 with one sentence. A lead has
 no undo, and the reason is optional (every queued comment was AI-flagged) with
 the instructor's bounds. *Amending 0189:* the shared write now takes the
 comment's key and flag class rather than an instructor card.

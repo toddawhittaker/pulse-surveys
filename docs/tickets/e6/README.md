@@ -39,7 +39,8 @@ E5.1-05 did.
 The owner ruled on these on 2026-10-09, at the start of the epic. Rulings 1
 to 4 settle the four decisions the architect's design left open; ruling 5 was
 made the same day, on review of this breakdown. Ruling 6, made on 2026-10-10
-during E6-03's review, supersedes ruling 2. No ticket reopens them.
+during E6-03's review, supersedes ruling 2. Ruling 7 was made on 2026-10-10
+during E6-05's review. No ticket reopens them.
 
 1. **The Lead Faculty reviews harmful comments below the threshold.** The Lead
    Faculty sees a harmful comment's text and its section at any threshold. The
@@ -96,6 +97,18 @@ during E6-03's review, supersedes ruling 2. No ticket reopens them.
 
    E6-03 removes the note's payload member and its count, and returns SPEC
    §5.2 to "no count". E6-04 renders no note.
+7. **The review queue leaves out every section the reader teaches** (made on
+   2026-10-10, during E6-05's review). A Lead Faculty member or chair who also
+   holds an instructor assignment on a section of a course they review does not
+   see that section's comments in the queue, and the leader door refuses a
+   decision on one with the same 404 as any comment outside the queue, writing
+   no row. The reason: the instructor door refuses that person a held comment of
+   their own section, because below the threshold the instructor may not read
+   it. One person must not read through a second door what the first refuses
+   them, or the threshold protects nobody in the sections a leader teaches. The
+   rule is by section, not by course: the course's other sections stay in the
+   queue. E6-05 builds it, SPEC §5.5's exception sentence says it, and ADR 0190
+   records it.
 
 **A stated limit, not a choice.** "No trace in the instructor view" means the
 Pulse surfaces. A reader who also holds the LMS gradebook can sometimes see

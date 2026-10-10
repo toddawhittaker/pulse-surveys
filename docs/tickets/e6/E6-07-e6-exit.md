@@ -51,7 +51,11 @@ shape), `carried-from-e5.md` whole, `../e5/carried-from-e4.md` and
   show published and kept comments only. It repeats ruling 5 for E10: no
   deployment reaches real students until E10's Care queue exists, because
   until then a `threat_case` row has no reader. And it carries to E10 that a
-  comment which reaches E6-02's attempt cap is never routed to Care.
+  comment which reaches E6-02's attempt cap is never routed to Care, so capped
+  comments still need E10's Care sweep (a 413 or 422 refusal now counts toward
+  the cap, and a content filter is likeliest to refuse a threat or self-harm
+  disclosure); and that a comment a content filter rejects with HTTP 400 is
+  retried every hour and holds its week until E10's Care review decides it.
 - `docs/tickets/e6/boundary-review.md` (new): the boundary reviews and where each
   finding went.
 - `docs/MISTAKES.md`: the note explaining why entries 54 to 57 have no file,
