@@ -4,7 +4,7 @@
 **Branch:** `e6/moderation-at-window-close`
 **Depends on:** E6-01 (the task member, the routing definer and its Python
 call)
-**Lane:** light
+**Lane:** heavy (planned light; re-laned during the build because `summary.v3` reaches an invariant-marked test)
 **Size:** M
 **Security-relevant:** moderately. The sweep is what makes 01's rules fire in
 the running system, and the empty-week sentence must not become a trace of a
