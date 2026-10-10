@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import { useState, type JSX } from 'react';
 
 import { copy, fillCopy } from '../copy/instructorReportTrendCopy';
 import { type ComparisonFigureView, isShownFigure } from '../lib/shownFigure';
@@ -335,8 +335,11 @@ function axisTicks(weeks: number, points: readonly TrendPoint[]): readonly AxisT
  * **The chart's data is reachable as text.** `docs/DESIGN_BRIEF.md` requires an
  * accessible alternative for every chart, and SPEC §14.2 item 4 puts keyboard
  * and screen-reader basics in-slice. The drawing is `aria-hidden` and a
- * visually hidden table beside it carries the same weeks and the same values,
- * so nothing about the week's story is available only as a picture. The
+ * table beside it carries the same weeks and the same values, so nothing about
+ * the week's story is available only as a picture. The tables are visually
+ * hidden until a reader presses "Show the numbers": a sighted reader who cannot
+ * read the chart needs them as much as a screen-reader user, who has them
+ * either way. The
  * alternative is a table rather than a sentence assembled from the numbers:
  * this component writes no strings, and a spoken summary of a chart is a string
  * a component would have to write.
@@ -392,6 +395,8 @@ export function PulseTrendChart({
   // What each comparison series actually contributes to the drawing. Absent and
   // suppressed both come out empty here, and they part company below: absent
   // renders nothing anywhere, suppressed renders a notice.
+  const [numbersShown, setNumbersShown] = useState(false);
+  const tableClass = numbersShown ? 'pulse-trend-table' : 'sr-only';
   const comparisonPoints = drawnPoints(comparison);
   const universityPoints = drawnPoints(university);
 
@@ -503,7 +508,21 @@ export function PulseTrendChart({
             </g>
           ))}
       </svg>
-      <table className="sr-only">
+      <button
+        type="button"
+        className="pulse-trend-numbers-toggle"
+        aria-expanded={numbersShown}
+        onClick={() => {
+          setNumbersShown(!numbersShown);
+        }}
+      >
+        {copy(
+          numbersShown
+            ? 'instructor_report_trend.hide_numbers'
+            : 'instructor_report_trend.show_numbers',
+        )}
+      </button>
+      <table className={tableClass}>
         <caption>
           {fillCopy('instructor_report_trend.table_caption', { stream: label })}
         </caption>
@@ -537,10 +556,20 @@ export function PulseTrendChart({
         </tbody>
       </table>
       {comparisonPoints.length > 0 && (
-        <OverlayTable stream={label} series={comparisonLabel} points={comparisonPoints} />
+        <OverlayTable
+          stream={label}
+          series={comparisonLabel}
+          points={comparisonPoints}
+          className={tableClass}
+        />
       )}
       {universityPoints.length > 0 && (
-        <OverlayTable stream={label} series={universityLabel} points={universityPoints} />
+        <OverlayTable
+          stream={label}
+          series={universityLabel}
+          points={universityPoints}
+          className={tableClass}
+        />
       )}
       {/* The notice and the line are decided by one list (`drawnPoints`), so
           there is no gap between them for a malformed payload to fall into: a
@@ -658,15 +687,18 @@ function OverlayTable({
   stream,
   series,
   points,
+  className,
 }: {
   /** The panel's own label, which is what tells two panels' tables apart. */
   readonly stream: string;
   /** This series' name, in the same words the legend gives it. */
   readonly series: string;
   readonly points: readonly DrawnPoint[];
+  /** Visually hidden, or shown, with the section's own table. */
+  readonly className: string;
 }): JSX.Element {
   return (
-    <table className="sr-only">
+    <table className={className}>
       <caption>
         {fillCopy('instructor_report_trend.overlay_table_caption', { stream, series })}
       </caption>
