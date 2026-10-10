@@ -96,18 +96,16 @@ SCHEMA_PATH = "backend/app/schemas/report.py"
 # in it, and E5's own breakdown carries the sketch that does describe it. The
 # addition is additive in criterion 6's sense: no E4 member moves.
 #
-# `participation_note` is E6-03's. The owner's ruling 2 (`docs/tickets/e6/README.md`)
-# builds SPEC §5.2's neutral participation trace — "1 response held for review" —
-# as at most one note per section-week, naming no stream and no category, so it
-# sits on the report's top level rather than on a stream; E6-03's work order
-# (decision 7) names the member and its one field, `held`. E4's sketch predates
-# any moderation and could not carry it.
+# There is deliberately no held count here. E6 once planned a top-level
+# `participation_note` ("N responses held for review"); the owner's ruling 6
+# dropped it, because a per-week held count beside a released comment's flag pins
+# that comment to its week (ADR 0153's channel). A top-level member of that kind
+# arriving again is a member this equality reports as unaccounted for.
 DECLARED_DIVERGENCES = frozenset(
     {
         "released_from_earlier_weeks",
         "institution_timezone",
         "workload_benchmark",
-        "participation_note",
     }
 )
 
