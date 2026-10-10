@@ -217,6 +217,7 @@ from app.models.survey import Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow, Week
 from app.services import clock
 from app.services.moderation import holds_no_verdict
+from app.services.survey_windows import closed_by
 
 # The initial moderation state, and the one a comment carries when nothing has
 # been decided about it (ADR 0145). Taken off the model's own vocabulary rather
@@ -1183,10 +1184,11 @@ def _held_comments(
 ) -> Subquery:
     """The comments SPEC §4 has been holding back — the one definition of "held".
 
-    Three conditions, one per concern, and none of them is another's spare: the
+    Four conditions, one per concern, and none of them is another's spare: the
     comment's **stream** was below the threshold of distinct commenters that week
     (counted by `_commenters_by_stream_week`, the count `stream_is_suppressed`
-    reads), its window has closed, and it is in no batch. The
+    reads), its window has closed, it is in no batch, and its section-week is
+    moderated (ADR 0187). The
     predicate is written once, as a subquery, and `cut_due_release_batches` selects
     from it twice: `_streams_whose_release_is_due` counts it to decide which
     `(section, term, stream)` the gate opens for, and
@@ -1266,7 +1268,7 @@ def _held_comments(
             # responses may yet reach the threshold, and a comment released from
             # it would then be shown twice — once in a batch and once under its
             # own week.
-            SurveyWindow.closes_at < now,
+            closed_by(now),
             # ADR 0146: a comment is released at most once.
             _in_no_release_batch(COMMENT_VIEW.c.answer_id),
             # ADR 0187: a section-week is released only once every comment in it
