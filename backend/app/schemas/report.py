@@ -234,10 +234,11 @@ class SummaryView(BaseModel):
     held_note: HeldNoteType | None = None
 
 
-# The two classes a flagged comment's chip can name (SPEC §5.2): the moderation
-# verdicts that collapse a comment for review. Threat and self-harm are not here
-# and cannot be, because those comments reach no instructor view at all (§6.2).
-CommentFlag = Literal["harmful", "privacy"]
+# The class a flagged comment's chip can name (SPEC §5.2), or none: the moderation
+# verdicts that collapse a comment for review, as the contract's one closed type
+# spells them. Threat and self-harm are not members and cannot be, because those
+# comments reach no instructor view at all (§6.2).
+CommentFlag = HeldNoteType | None
 
 
 class CommentView(BaseModel):
@@ -268,7 +269,7 @@ class CommentView(BaseModel):
     # and null otherwise. Only ever on a comment the report shows, so a held
     # stream's flag class never reaches the page (SPEC §5.2: below the threshold
     # there is no chip and no flag-type hint).
-    flag: CommentFlag | None
+    flag: CommentFlag
     # Whether the latest decision about this comment was the reader's own. A
     # boolean on purpose: it can say "you" and cannot say who else.
     decided_by_you: bool
