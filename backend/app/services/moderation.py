@@ -49,8 +49,8 @@ reader's own report currently returns, found by
 `app.services.reporting.comment_on_instructor_report`, which walks the report's
 own reads rather than rebuilding the rule from the answer. `_record_decision`
 is the shared write: the transition table, the undo rule, the reason rule and
-the insert. It takes the comment's card and the decider and role from its
-caller, and nothing that widens what it accepts. E6-05 adds the Lead Faculty's
+the insert. It takes the comment's key, the class of its flag, and the decider
+and role from its caller, and nothing that widens what it accepts. E6-05 adds the Lead Faculty's
 door with a check of its own; a second door calls the same write and cannot
 loosen the first.
 
@@ -79,7 +79,7 @@ from uuid import UUID
 from sqlalchemy import ColumnElement, SQLColumnExpression, func, insert, select, text
 from sqlalchemy.orm import Session
 
-from app.ai.contracts import ModerationVerdict
+from app.ai.contracts import HeldNoteType, ModerationVerdict
 from app.ai.gateway import (
     AIGateway,
     AIProviderRefusedError,
@@ -98,7 +98,6 @@ from app.services.survey_windows import closed_by
 
 if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
     from app.schemas.report import CommentView
-    from app.services.report_comments import CommentCard
 
 logger = logging.getLogger(__name__)
 
@@ -484,7 +483,8 @@ def decide_as_instructor(
         raise CommentNotOnReportError
     _record_decision(
         session,
-        card=card,
+        answer_id=card.answer_id,
+        flag=card.flag,
         action=action,
         reason=reason,
         decided_by=person_id,
@@ -502,7 +502,8 @@ def decide_as_instructor(
 def _record_decision(
     session: Session,
     *,
-    card: "CommentCard",
+    answer_id: UUID,
+    flag: HeldNoteType | None,
     action: DecisionAction,
     reason: str | None,
     decided_by: UUID,
@@ -511,7 +512,9 @@ def _record_decision(
     """The shared write: judge one action on one comment, and append its row.
 
     The caller has already decided this person may act on this comment; this
-    decides whether the action is allowed now, and writes it. In order:
+    decides whether the action is allowed now, and writes it. It is handed the
+    comment's key and the class of its flag (what the reason rule asks) and
+    nothing else about it. In order:
 
       1. the comment is locked against a concurrent decision, for this
          transaction;
@@ -528,10 +531,8 @@ def _record_decision(
     # At call time, for the cycle `decide_as_instructor` describes.
     from app.services.report_comments import INITIAL_STATE, latest_decision
 
-    session.execute(
-        select(func.pg_advisory_xact_lock(func.hashtextextended(str(card.answer_id), 0)))
-    )
-    latest = latest_decision(session, card.answer_id)
+    _lock_the_comment(session, answer_id)
+    latest = latest_decision(session, answer_id)
     if action is DecisionAction.UNDO:
         if (
             latest is None
@@ -547,11 +548,11 @@ def _record_decision(
             raise DecisionNotAllowedError
         state, is_undo = LEAVES[action], False
 
-    _refuse_the_reason(reason, required=action is DecisionAction.EXCLUDE and card.flag is None)
+    _refuse_the_reason(reason, required=action is DecisionAction.EXCLUDE and flag is None)
 
     session.execute(
         insert(ModerationState).values(
-            answer_id=card.answer_id,
+            answer_id=answer_id,
             state=state,
             decided_by_person_id=decided_by,
             decided_as=decided_as.value,
@@ -559,6 +560,17 @@ def _record_decision(
             is_undo=is_undo,
         )
     )
+
+
+def _lock_the_comment(session: Session, answer_id: UUID) -> None:
+    """Serialize decisions about one comment until this transaction ends.
+
+    A transaction-scoped advisory lock keyed on the answer, so two decisions
+    about one comment are judged one after the other and never against a row the
+    other is replacing. Taking it twice in one transaction is harmless: Postgres
+    stacks a transaction lock and releases every hold at the end.
+    """
+    session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(str(answer_id), 0))))
 
 
 def _refuse_the_reason(reason: str | None, *, required: bool) -> None:
