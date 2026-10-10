@@ -110,6 +110,7 @@ from fixtures.grading import (
     SUBSTANTIVE,
     single_column_link,
 )
+from fixtures.moderation import CLEAR
 from fixtures.report_views import (
     COURSE_STREAM,
     DEFAULT_COHORT,
@@ -758,8 +759,17 @@ class CommentWorld(ReportWorld):
         cohort: str = DEFAULT_COHORT,
         version: int = FIRST_VERSION,
         student: Mapping[str, Any] | None = None,
+        moderation: Mapping[str, str | tuple[str, ...] | None] | None = None,
     ) -> tuple[Any, dict[str, Any]]:
         """One student's whole response for one week, answering the comments given.
+
+        **Every comment is routed a `clear` moderation verdict unless `moderation`
+        says otherwise for its stream** (E6-01). `report_comment` v004 shows only a
+        comment holding a moderation verdict, so a world that planted none would
+        read as empty everywhere (`docs/MISTAKES.md` entry 22). The verdict goes
+        through `ReportWorld.verdict`, which is the product's definer under the
+        seed provenance. `None` for a stream plants no verdict; a tuple routes
+        several in order.
 
         `comments` maps a stream to the text stored for that stream's comment
         question, so a caller says "one instructor-stream comment" rather than
@@ -791,6 +801,7 @@ class CommentWorld(ReportWorld):
         """
         comments = {} if comments is None else comments
         ratings = {} if ratings is None else ratings
+        moderation = {} if moderation is None else moderation
         window = self.window(term_week, cohort)
         opens_at, _closes_at = self.instants[term_week]
 
@@ -823,6 +834,7 @@ class CommentWorld(ReportWorld):
         for stream, body in sorted(comments.items()):
             answer = self.answer(response, COMMENT_POSITION[stream], body, version=version)
             self.classify(answer, SUBSTANTIVE, classified_at=opens_at + CLASSIFIED_AFTER_OPEN)
+            self.verdict(answer, moderation.get(stream, CLEAR))
             written[stream] = answer
         return response, written
 
@@ -997,6 +1009,11 @@ class CommentWorld(ReportWorld):
         )
         opens_at, _closes_at = self.instants[term_week]
         self.classify(planted, SUBSTANTIVE, classified_at=opens_at + CLASSIFIED_AFTER_OPEN)
+        # And moderated like a real comment, for the same reason it is classified
+        # like one: since E6-01 a row with no moderation verdict is left out by the
+        # view's verdict condition, and the test using this row would then be green
+        # for that reason rather than for the kind predicate it is about.
+        self.verdict(planted, CLEAR)
         return planted
 
     # -- moderation -----------------------------------------------------------

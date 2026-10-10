@@ -65,6 +65,7 @@ import pytest
 
 from fixtures.clock import DEVELOPMENT, ENVIRONMENT_VARIABLE, INSTITUTION_TIMEZONE_VARIABLE
 from fixtures.line_item_creation import named_in, tasks_module
+from fixtures.moderation import CLEAR
 from fixtures.report_views import ReportWorld
 from fixtures.summary_task import COMMENT_THEME as COMMENT_THEME_CONTRACT
 from fixtures.summary_task import (
@@ -553,8 +554,17 @@ class SummaryWorld:
         term_week: int = A_CLOSED_TERM_WEEK,
         instructor_comment: str | None = None,
         course_comment: str | None = None,
+        instructor_moderation: str | tuple[str, ...] | None = CLEAR,
+        course_moderation: str | tuple[str, ...] | None = CLEAR,
     ) -> dict[int, Any]:
         """One student's whole response for a section-week, with the comments given.
+
+        **Each comment is routed a moderation verdict, `clear` unless the caller
+        names another** (E6-01). Since `report_comment` v004 the gather reads only
+        comments that hold one, and a section-week is not summarized until every
+        comment in it does — so a world that planted no verdicts would be walked and
+        summarized as empty. `None` plants no verdict, which is the state E6-01's
+        gather tests are about; a tuple routes several in order.
 
         Both ratings are always answered and both comments are optional, which is
         SPEC §3.2's own shape: a comment is required only where its rating is two
@@ -573,9 +583,24 @@ class SummaryWorld:
         if course_comment is not None:
             answers[COURSE_COMMENT_POSITION] = course_comment
         _response, written = self.world.respond(
-            student, term_week=term_week, answers=answers, cohort=cohort
+            student,
+            term_week=term_week,
+            answers=answers,
+            cohort=cohort,
+            moderation={
+                INSTRUCTOR_COMMENT_POSITION: instructor_moderation,
+                COURSE_COMMENT_POSITION: course_moderation,
+            },
         )
         return written
+
+    def verdict(self, answer: Any, tokens: str | tuple[str, ...] | None) -> None:
+        """Route moderation verdicts for one comment, after it was written (E6-01)."""
+        self.world.verdict(answer, tokens)
+
+    def failed_moderation(self, answer: Any, *, attempted_at: datetime) -> Any:
+        """One `moderation_attempt` row for one comment: a moderation call that failed."""
+        return self.world.failed_moderation(answer, attempted_at=attempted_at)
 
     def decide(self, answer: Any, state: str, *, decided_at: datetime) -> Any:
         """Append one `moderation_state` row about one comment.

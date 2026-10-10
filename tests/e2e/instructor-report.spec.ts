@@ -76,7 +76,12 @@ import {
   sessionToken,
 } from './support/doors';
 import { expectTheTablesMatchTheLines } from './support/reportTables';
-import { databaseStatement, deriveSurveyWindows, generateWeeklySummaries } from './support/stack';
+import {
+  databaseStatement,
+  deriveSurveyWindows,
+  generateWeeklySummaries,
+  routeSeedVerdictsFor,
+} from './support/stack';
 import {
   INSTRUCTOR_SUBJECT,
   LEARNER_SUBJECT,
@@ -185,6 +190,10 @@ const MATH_DISTINCTIVE_COMMENT =
 // What everybody else writes. Distinct sentences rather than one repeated, so a
 // failure message names which student's submission is missing, and all of them
 // substantive enough that SPEC §3.3's gate accepts them.
+// SPEC §3.2's two comment questions, both filled by every student below
+// (`answerTheWeek`), which is the count the moderation control compares against.
+const COMMENT_FIELDS_PER_STUDENT = 2;
+
 const OTHER_COMMENTS = [
   'Office hours ran over and nobody was turned away, which made a real difference.',
   'The reading list for this week was long but the ordering made it manageable.',
@@ -328,6 +337,22 @@ test.beforeAll(async ({ browser }) => {
     // Past both closes, which is what makes both weeks published (breakdown
     // decision 6) and what puts the instructor on the Monday the report is for.
     await setTheClockTo(page, AFTER_THE_CLOSE);
+
+    // **Every comment this run typed is moderated before anything reads it**
+    // (E6-01). `report_comment` v004 shows a comment only once it holds a
+    // moderation verdict and the walk below does not summarize a week until every
+    // comment in it does; moderation's own sweep is E6-02's. So each comment gets
+    // a `clear` verdict through the product's writer, under the seed provenance.
+    // The count is the control: two comment fields per student, every one typed.
+    const routed = routeSeedVerdictsFor([BIOL.code, MATH.code]);
+    const typed = (BIOL_STUDENTS.length + MATH_STUDENTS.length) * COMMENT_FIELDS_PER_STUDENT;
+    expect(
+      routed,
+      `${String(routed)} comment(s) were routed a moderation verdict, and this run typed ` +
+        `${String(typed)}. Fewer means some comment holds no verdict and the report will not show ` +
+        'it (nor its week, nor its summary) — every content assertion below would then be about a ' +
+        'report of nothing (`docs/MISTAKES.md` entry 3).',
+    ).toBe(typed);
 
     // E4-06's Monday walk, invoked rather than waited for — the same move the
     // window derivation above makes, and for the same reason.
