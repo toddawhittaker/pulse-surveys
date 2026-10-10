@@ -1,6 +1,7 @@
 import type {
   BenchmarkSeriesPointView,
   BenchmarkSeriesView,
+  CommentView,
   InstructorReportView,
   StreamBenchmarkView,
   TaughtSectionView,
@@ -125,6 +126,22 @@ export const RELEASED_INSTRUCTOR_COMMENT =
  */
 export const HELD_COMMENT =
   'Quadrat transect week was a shambles and the demonstrator said so out loud.';
+
+/**
+ * One comment card as the wire carries it since E6-03: the comment service's three
+ * fields, and the handle, the flag class and whether the reader made the latest
+ * decision. Every card here is one nobody has decided on, so `decided_by_you` is
+ * false; the handle is a fixed key so a test can name the card it means.
+ */
+function card(
+  answerId: string,
+  text: string,
+  status: string,
+  stream: string,
+  flag: CommentView['flag'] = null,
+): CommentView {
+  return { text, status, stream, answer_id: answerId, flag, decided_by_you: false };
+}
 
 /**
  * The zone the institution keeps its calendar in, as the payload names it.
@@ -270,7 +287,9 @@ export const A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS = {
         response_count: 13,
         held_note: null,
       },
-      comments: [{ text: INSTRUCTOR_COMMENT, status: 'published', stream: 'INSTRUCTOR' }],
+      comments: [
+        card('0f6b3c1e-2d4a-4e8b-9c7d-1a2b3c4d5e01', INSTRUCTOR_COMMENT, 'published', 'INSTRUCTOR'),
+      ],
       question_text: INSTRUCTOR_QUESTION_TEXT,
       small_n: SHOWN,
     },
@@ -285,7 +304,7 @@ export const A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS = {
         response_count: 13,
         held_note: null,
       },
-      comments: [{ text: COURSE_COMMENT, status: 'published', stream: 'COURSE' }],
+      comments: [card('0f6b3c1e-2d4a-4e8b-9c7d-1a2b3c4d5e02', COURSE_COMMENT, 'published', 'COURSE')],
       question_text: COURSE_QUESTION_TEXT,
       small_n: SHOWN,
     },
@@ -293,6 +312,7 @@ export const A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS = {
   workload: { mean: 9.46, median: 8.04 },
   comparison: { suppressed: true, reason: 'below-minimum' },
   released_from_earlier_weeks: [],
+  participation_note: null,
   institution_timezone: INSTITUTION_TIMEZONE,
 } satisfies InstructorReportView & { comparison: unknown };
 
@@ -548,8 +568,13 @@ export const A_WEEK_WITH_ONE_THIN_STREAM = {
 export const A_WEEK_WITH_A_RELEASE = {
   ...A_PUBLISHED_WEEK,
   released_from_earlier_weeks: [
-    { text: RELEASED_COMMENT, status: 'published', stream: 'COURSE' },
-    { text: RELEASED_INSTRUCTOR_COMMENT, status: 'published', stream: 'INSTRUCTOR' },
+    card('0f6b3c1e-2d4a-4e8b-9c7d-1a2b3c4d5e03', RELEASED_COMMENT, 'published', 'COURSE'),
+    card(
+      '0f6b3c1e-2d4a-4e8b-9c7d-1a2b3c4d5e04',
+      RELEASED_INSTRUCTOR_COMMENT,
+      'published',
+      'INSTRUCTOR',
+    ),
   ],
 } satisfies InstructorReportView & { comparison: unknown };
 
@@ -577,8 +602,14 @@ export const A_WEEK_WITH_A_HELD_COMMENT = {
     instructor: {
       ...A_PUBLISHED_WEEK.streams.instructor,
       comments: [
-        { text: INSTRUCTOR_COMMENT, status: 'published', stream: 'INSTRUCTOR' },
-        { text: HELD_COMMENT, status: 'flagged_collapsed', stream: 'INSTRUCTOR' },
+        card('0f6b3c1e-2d4a-4e8b-9c7d-1a2b3c4d5e01', INSTRUCTOR_COMMENT, 'published', 'INSTRUCTOR'),
+        card(
+          '0f6b3c1e-2d4a-4e8b-9c7d-1a2b3c4d5e05',
+          HELD_COMMENT,
+          'flagged_collapsed',
+          'INSTRUCTOR',
+          'harmful',
+        ),
       ],
     },
   },
