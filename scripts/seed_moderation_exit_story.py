@@ -1,4 +1,4 @@
-"""E6's exit story for `BIOL-215-R3WW`: three late weeks of answers, written into a development stack.
+"""The moderation exit story for `BIOL-215-R3WW`: three late weeks of answers, for a dev stack.
 
 SPEC §14.3's E6 exit: "the anti-cherry-picking trail is visible up-chain, and a
 welfare-flagged comment in a 3-response week provably reaches Care with no trace
