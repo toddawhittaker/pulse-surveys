@@ -1,6 +1,6 @@
 # 44. A guard raised in a fixture turned a module's reds into setup errors
 
-**Caught: 9**
+**Caught: 10**
 
 *This file keeps the founding incident (it carries the root cause) and the
 three most recent catches. Two older catches were trimmed 2026-09-07 — E4-03's
@@ -10,7 +10,24 @@ file's history. A third was trimmed 2026-09-08 when E4-15's catch was added —
 E4-04's comment suite (2026-09-06), which shared its date with the E4-01
 paragraph inside the founding incident and was the removable one of the two.
 E4-15's exit drive (2026-09-08) and E4-18's section-list suite (2026-09-07)
-were trimmed on 2026-10-03, when the two E5.1 catches were added.*
+were trimmed on 2026-10-03, when the two E5.1 catches were added. E4-20's
+seeder reds (2026-09-09) were trimmed on 2026-10-09, when E6-01's catch was
+added.*
+
+## A catch: E6-01's payload test builds its world in the body, not in `report_door` (2026-10-09)
+
+E6-01 makes every test world plant moderation verdicts through
+`app.services.moderation.route_verdict`, which does not exist until the ticket
+lands. Most worlds in this suite are handed back unbuilt and built in the test
+body, so that missing name is a FAILED. `tests/fixtures/report_api.py`'s
+`report_door` is not: it builds E4-07's canonical world inside the fixture, so
+every test asking for it errors at setup on the unbuilt tree. The test for
+criterion 3 (the three-response week's payload) was first drafted on
+`report_door`; the entry is why it calls the `report_door_as` factory as its first
+statement instead, so its red names `route_verdict` as a FAILED. Counted as a
+catch: without it the ticket's own payload criterion would have reported as a
+setup ERROR. The existing `report_door` tests still error until the
+implementation lands, which is entry 22's cost and is reported, not hidden.
 
 ## A catch: E5.1-03's red run was all FAILED and no ERROR (2026-10-03)
 
@@ -26,31 +43,6 @@ At the red commit (9acc9dc), E5.1-05's eight test modules gave 25 failed and 46
 passed, 18 unit and 7 integration reds, every one a FAILED with no ERROR. As
 above, the entry is why the suite was written so that its reds report in the
 test body.
-
-## A catch: E4-20's seeder reds name the missing script instead of missing it (2026-09-09)
-
-E4-20's two red tests run `scripts/seed_demo_story.py` as a process, and the
-machinery they follow — `DemoSeed` in `tests/fixtures/seed.py` — already answers
-the fixture half of this entry: when the script is absent it hands back a
-*synthetic* run, exit 127 with the reason on stderr, rather than failing from
-inside setup. Copying that alone would have avoided the ERROR wall and still
-produced the wrong red. The refusal assertions read what the run printed, so on
-the unbuilt tree each test would have failed on "the run refused and did not say
-the environment was why", with the sentence that actually explains the tree —
-the script does not exist — folded into a tailed stream underneath it.
-
-Acting on the entry's rule as written, the guard is `require_the_story_seeder`, a
-plain function called as the first statement of both bodies, naming the script
-and the ticket that owes it. Today's red is therefore a FAILED whose message is
-the deliverable, and the assertions about what a refusal says only ever run
-against a refusal that exists.
-
-Counted as a catch: without the entry the module would have inherited the shared
-runner's fallback and reported two reds about the *content* of a refusal on a
-tree with no script in it, which is a red that reads as a wrong assertion rather
-than as a missing deliverable. The lesson the earlier catches did not carry: a
-fixture that avoids raising is not the same as a body guard that names the thing,
-and shared machinery which softens the absence can hide it just as well.
 
 ## Instance: E3-01's rotation module errored at setup instead of failing (2026-09-04)
 
