@@ -477,7 +477,7 @@ def student_week_results(
             for token in REPORT_STREAMS
         },
     )
-    _mean, workload_median = reporting._workload(
+    workload_median = reporting.student_workload_median(
         session, section_id=section.id, week_id=week.week_id
     )
     # Ruling 1 (ADR 0197): the release group only on the latest published week's
