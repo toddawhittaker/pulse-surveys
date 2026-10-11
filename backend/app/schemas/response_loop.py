@@ -54,11 +54,18 @@ class StudentResponse(BaseModel):
 
 
 class StudentWeekResults(BaseModel):
-    """One week's state for one of the student's own sections, and its response if any."""
+    """One week's state for one of the student's own sections, its response if any, and the
+    course weeks a student may page through (SPEC §5.4: published weeks only)."""
 
     model_config = ConfigDict(extra="forbid")
 
     state: WeekState = Field(description="Whether the week is held, answered, or neither.")
     response: StudentResponse | None = Field(
         description="The published response; absent while awaiting and when unanswered."
+    )
+    published_weeks: list[int] = Field(
+        description=(
+            "The section's course weeks whose report has opened, ascending: the weeks the "
+            "page may page through."
+        )
     )
