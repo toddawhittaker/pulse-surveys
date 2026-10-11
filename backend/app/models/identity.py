@@ -685,13 +685,13 @@ class RoleAssignment(UuidPrimaryKey, Base):
     # None of the five is indexed. Most reads this table serves start from a
     # person or walk an edge, not from a node: "who chairs this department" is a
     # display label on a roll-up (§2.1) rather than a hot path, and five indexes
-    # on five mostly-null columns would be paid for on every write. **Since E7
-    # one read starts from a section on a student's path**: the staff-name
-    # definer (`views_sql/section_staff_names_v001.sql`) and
+    # on five mostly-null columns would be paid for on every write. **One read
+    # starts from a section on a student's path**: the staff-name definer
+    # (`views_sql/section_staff_names_v001.sql`) and
     # `authz.teaching_instructors_of` look up a section's instructors by
-    # `section_id`. Whether that wants a partial index on `section_id` for
-    # `INSTRUCTOR` rows is carried, with a measurement to make, in
-    # `docs/tickets/e8/carried-from-e7.md`.
+    # `section_id`. ADR 0191 records its `EXPLAIN` at twenty thousand rows (a
+    # sequential scan of about a millisecond) and the partial index on
+    # `section_id` for `INSTRUCTOR` rows to add if the table grows far past that.
     institution_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("institution.id", ondelete="RESTRICT"), nullable=True
     )

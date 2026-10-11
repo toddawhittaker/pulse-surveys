@@ -42,6 +42,7 @@ __all__ = [
     "PolicyWrite",
     "ResponseWrite",
     "StudentComment",
+    "StudentParticipation",
     "StudentReleasedComment",
     "StudentResponse",
     "StudentStream",
@@ -78,17 +79,26 @@ class StudentResponse(BaseModel):
 
 
 class StudentParticipation(BaseModel):
-    """The student's own latest accepted participation score, exactly as it was posted.
+    """The student's own participation score from the last post Pulse knows the platform took.
 
-    Both strings are the characters sent to the platform (SPEC §3.4, ADR 0125);
-    nothing here is recomputed. It is the student's own record and not an
-    aggregate of the week, so it does not follow the week's hold.
+    `score_text` is Pulse's canonical percentage, the text stored with the post,
+    before AGS scales it to the gradebook column's maximum
+    (`scoreGiven = percentage / 100 x scoreMaximum`), so it is not necessarily
+    the characters the gradebook shows. `ledger_text` is the per-week ledger as
+    posted (SPEC §3.4, ADR 0125). Nothing is recomputed. It is the student's own
+    record and not an aggregate of the week, so it does not follow the week's
+    hold (SPEC §5.4).
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    score_text: str = Field(description="The score as it was sent to the gradebook.")
-    ledger_text: str = Field(description="The per-week ledger sent beside the score.")
+    score_text: str = Field(
+        description=(
+            "The canonical percentage posted, before the platform scales it to the "
+            "column's maximum."
+        )
+    )
+    ledger_text: str = Field(description="The per-week ledger as posted beside the score.")
 
 
 StudentStreamName = Literal["instructor", "course"]
