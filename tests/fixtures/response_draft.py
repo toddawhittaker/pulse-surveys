@@ -261,6 +261,82 @@ HELD_SUMMARY_RESPONSES = 1
 # A theme no summary holds.
 AN_INVENTED_THEME = "E7-04 parking near the science building"
 
+# ---------------------------------------------------------------------------
+# The fix round's count rule (work order G1), as drafts. In a week with a held
+# stream a draft states no number of anything except a named course structure:
+# a count token is a digit run, a cardinal word from zero to ninety-nine (with
+# hyphenated compounds) or "hundred", or one of both, half, couple, several, few,
+# dozen, pair, handful, majority, minority — allowed only when the word right
+# before it is week(s), chapter, lab, unit, module, section, page(s), question,
+# assignment, quiz, exam, day(s), hour(s), minute(s), part, step, problem or
+# version. Ordinals are not count tokens.
+#
+# Every phrasing the fix-round review found is here, by name, and so is one draft
+# per token class G1 lists. Each is the clause before a frame that itself carries
+# no count token.
+# ---------------------------------------------------------------------------
+
+STATES_A_COUNT = "states_a_count_of_people"
+
+
+def a_draft_saying(clause: str) -> str:
+    """A draft made of `clause` and a frame carrying no count token."""
+    return f"Thank you for writing. {clause}, so I will post worked steps after each class."
+
+
+COUNTING_CLAUSES: dict[str, str] = {
+    # The review's phrasings.
+    "two-of-your-classmates": "Two of your classmates asked for slower derivations",
+    "digit-learners-said": "2 learners said the derivations went too fast",
+    "the-7-who-responded": "The 7 who responded asked for slower derivations",
+    "twenty-students": "Twenty students asked for slower derivations",
+    "both-students": "Both students asked for slower derivations",
+    "half-the-class": "Half the class asked for slower derivations",
+    "a-few-of-you": "A few of you asked for slower derivations",
+    # The residue-A pair this module began with.
+    "three-of-you": "Three of you asked for slower derivations",
+    "digit-students": "3 students asked for slower derivations",
+    # One per remaining token class G1 lists.
+    "zero": "Zero complaints were about the office hours",
+    "ninety-nine": "Ninety-nine of you asked for slower derivations",
+    "hyphenated-compound": "Twenty-one of you asked for slower derivations",
+    "hundred": "A hundred comments asked for slower derivations",
+    "several": "Several of you asked for slower derivations",
+    "couple": "A couple of you asked for slower derivations",
+    "dozen": "A dozen of you asked for slower derivations",
+    "pair": "A pair of you asked for slower derivations",
+    "handful": "A handful of you asked for slower derivations",
+    "majority": "The majority of you asked for slower derivations",
+    "minority": "A minority of you asked for slower derivations",
+    # Not a count of people, and still refused: G1 forbids "a number of anything".
+    "a-number-of-things": "You asked for slower derivations and I will add 3 worked examples",
+    # A structure word before the first number does not license the second.
+    "and-after-weeks": "Weeks 3 and 4 drew requests for slower derivations",
+}
+
+# The accepted twins: a number naming a course structure, an ordinal, or none.
+ALLOWED_CLAUSES: dict[str, str] = {
+    "in-week-3": "In week 3 we will slow the derivations down",
+    "capital-week": "From Week 4 the derivations will be slower",
+    "chapter-five": "Chapter five has the derivations worked out",
+    "chapter-hyphenated": "Chapter twenty-one covers the derivations",
+    "first-the-lab": "First, the lab notes; second, slower derivations",
+    "lab-and-question": "Lab 2 and question 4 will carry worked derivations",
+    "no-number": "You asked for slower derivations",
+}
+
+
+def count_rule() -> Any:
+    """`reporting.states_a_count_of_people`, or a failure naming it (fix-round G1)."""
+    found = getattr(reporting_module(), STATES_A_COUNT, None)
+    if not callable(found):
+        pytest.fail(
+            f"`{REPORTING_MODULE}` exposes no `{STATES_A_COUNT}(text) -> bool`. The fix round's G1: "
+            "'One function in `services/reporting.py` holds the rule'; G2 has the eval grader call "
+            "the same function, so there is one copy of it."
+        )
+    return found
+
 
 def assert_the_planted_texts_are_what_this_file_says() -> None:
     """The control every module calls first. **A red here means this file is wrong.**
@@ -359,6 +435,29 @@ NUMBER_WORDS = (
     "several",
     "couple",
     "few",
+    # Fix-round G1's remaining count tokens, so this control stays at least as broad.
+    "zero",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+    "twenty",
+    "thirty",
+    "forty",
+    "fifty",
+    "sixty",
+    "seventy",
+    "eighty",
+    "ninety",
+    "hundred",
+    "both",
+    "pair",
+    "handful",
+    "majority",
+    "minority",
 )
 
 

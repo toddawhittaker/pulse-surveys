@@ -14,10 +14,12 @@ that works.
 good checks is a distribution, and SPEC §9.3 answers it with a floor after a live
 run. Nothing here reaches a provider, and no floor is declared.
 
-**The grader controls are green on any tree** — they import no application module.
-The typed and pinned tests reach `app.ai.contracts` and the prompt directory, and
-are red before E7-04 on a named failure: no `CheckTheme`, or no prompt file at the
-version the set is pinned to.
+**Since the fix round the draft grader reaches the product** (G2: the held-week count
+is graded by `app.services.reporting.states_a_count_of_people`, the one copy of the
+rule). So the draft-set tests that grade a held case are red until that function
+exists — an `ImportError` raised in the test body, naming it. The check-set grader
+controls import no application module and are green on any tree. The typed and
+pinned tests reach `app.ai.contracts` and the prompt directory.
 """
 
 from __future__ import annotations
@@ -61,7 +63,7 @@ def checks() -> ModuleType:
 
 
 def test_every_draft_cases_exemplar_passes_its_grader() -> None:
-    """The control for the draft set: a faithful draft holds. **Green on any tree.**
+    """The control for the draft set: a faithful draft holds.
 
     **The mutation this kills:** a grader too strict to pass anything, which would
     make every breach test below vacuous.
@@ -75,11 +77,13 @@ def test_every_draft_cases_exemplar_passes_its_grader() -> None:
 
 
 def test_every_draft_breach_fails_its_grader() -> None:
-    """Deflection, and a count beside a held stream: each fails. **Green on any tree.**
+    """Deflection, an empty promise, a mention in passing, and every count phrasing: each fails.
 
     **The mutations this kills:** a grader matching topics without a commitment (the
-    deflection passes), and a count check that is absent or reads only one spelling
-    (one of the two held-week breaches passes).
+    deflection passes); one accepting a commitment with no action verb ("I will
+    consider your feedback", fix-round G3); one accepting the problem named with no
+    action (the in-passing breach, G4); and a count check that misses any of the
+    fix-round review's phrasings or "a few of you" (G2).
     """
     module = drafts()
     by_id = {case.case_id: case for case in module.CASES}
@@ -89,6 +93,45 @@ def test_every_draft_breach_fails_its_grader() -> None:
             assert module.grade(
                 by_id[case_id], answer
             ), f"{case_id}'s breach {answer!r} passes its grader."
+
+
+def test_each_held_week_breach_fails_on_its_count_alone() -> None:
+    """The held breaches address every criticism, so their only failure is the count.
+
+    **Without this**, a breach that also failed to address a criticism would pass
+    `test_every_draft_breach_fails_its_grader` against a grader with no count check
+    at all (`docs/MISTAKES.md` entry 3). **The mutation this kills:** the count leg
+    of `grade` deleted, or `states_a_count` answering False for a phrasing.
+    """
+    module = drafts()
+    by_id = {case.case_id: case for case in module.CASES}
+    held = [case_id for case_id in module.BREACHES if by_id[case_id].has_a_held_stream]
+    assert held, "No breach is planted in a held week, so the count leg is untested."
+    for case_id in held:
+        for answer in module.BREACHES[case_id]:
+            failures = module.grade(by_id[case_id], answer)
+            assert len(failures) == 1 and "number" in failures[0], (
+                f"{case_id}'s breach {answer!r} fails as {failures}; it is planted to fail on "
+                "its count alone."
+            )
+
+
+def test_each_deflection_breach_fails_on_addressing_alone() -> None:
+    """The shown-week breaches fail for not addressing a criticism, and for nothing else.
+
+    **The mutation this kills:** `addresses` gutted to a topic match — every
+    deflection names its topic, so each would pass.
+    """
+    module = drafts()
+    by_id = {case.case_id: case for case in module.CASES}
+    shown = [case_id for case_id in module.BREACHES if not by_id[case_id].has_a_held_stream]
+    assert shown, "No deflection breach is planted."
+    for case_id in shown:
+        for answer in module.BREACHES[case_id]:
+            failures = module.grade(by_id[case_id], answer)
+            assert failures and all(
+                "address" in failure for failure in failures
+            ), f"{case_id}'s breach {answer!r} fails as {failures}."
 
 
 def test_a_count_is_graded_only_in_a_week_with_a_held_stream() -> None:

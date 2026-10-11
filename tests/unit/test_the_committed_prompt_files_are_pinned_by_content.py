@@ -133,6 +133,7 @@ RECORDED_SHA256: dict[str, str] = {
     # E7-04's two new prompts: the response draft and the draft check.
     "draft_check.v1.md": "6289f2d21996f4f0db888362ad41d566c778d055df6510292c2b901125a03eda",
     "response_draft.v1.md": "6d8539faa86c175dd18bc2df959fff96634967f0cf6acebc517aab0847289c72",
+    # TODO(E7-04 fix round, G1): the "response_draft.v2.md" row goes here once its hash is given.
 }
 
 

@@ -1,10 +1,13 @@
-"""A draft that states a count of commenters in a week with a held stream is refused — residue A.
+"""In a week with a held stream, a draft states no number of anything — residue A, fix-round G1.
 
-E7-04's work order, residue A from the breakdown review (PR #306): "for a held
-stream, a draft that states a number of comments or students (digits or number
-words next to comment/student/response/classmate/of you) is refused as an invalid
-answer, tested with a planted summary whose prose carries a count; its twin, a
-shown stream's draft stating a count, is accepted."
+E7-04's work order, residue A from the breakdown review (PR #306), began as "a draft
+that states a number of comments or students ... is refused ... its twin, a shown
+stream's draft stating a count, is accepted." The fix-round review then found the
+phrase list missing "two of your classmates", "2 learners said", "the 7 who
+responded", "Twenty students", "Both students" and "Half the class" — a phrase
+list never closes — and the work order settled G1 instead: in a week with a held
+stream the draft states no number of anything except one naming a course structure
+("week 3", "chapter five"). Ordinals are not counts.
 
 **Why it exists.** Decision 12 keeps a held stream's per-theme counts out of the
 prompt. A summary's *prose* is not a count field, and a `summary.v3` paragraph may
@@ -13,15 +16,21 @@ the number the theme path withholds, and a draft can repeat it to every student.
 SPEC §5.2: in a small week "a per-week count ... would say how many of the few who
 responded" did something.
 
+**Where each phrasing is tested.** The rule itself is one function
+(`reporting.states_a_count_of_people`), and every phrasing and every twin is driven
+through it in `tests/unit/test_the_held_week_count_rule_reads_every_phrasing.py`.
+This module drives the route — one world per case — over one phrasing per token
+class and every accepted twin, so the function is shown to be the one the route
+calls and to be called only when a stream is held.
+
 **The two worlds differ in one thing.** Both plant a course-stream summary whose
 prose states a count. In the first the course stream holds one commenter and is
-held; in the second it holds the configured threshold of commenters and is shown.
-Which is which is read off the instructor's report (work-order decision 4), never
-assumed.
+held; in the second it holds the configured threshold and is shown. Which is which
+is read off the instructor's report (work-order decision 4), never assumed.
 
-**What the drafts lift.** Nothing: every draft here shares fewer than twenty
-normalized characters with every comment in the week (asserted), so a refusal is
-the count rule's and not the reuse guard's.
+**What the drafts lift.** Nothing: every draft shares fewer than twenty normalized
+characters with every comment in the week (asserted), so a refusal is the count
+rule's and not the reuse guard's.
 
 **Marked `invariant`**: the number of commenters in a held stream reaching every
 student is §4.1 item 3's threshold crossed by arithmetic rather than by text.
@@ -33,6 +42,8 @@ import pytest
 from fixtures.report_comments import configured_threshold
 from fixtures.report_views import COURSE_STREAM, INSTRUCTOR_STREAM
 from fixtures.response_draft import (
+    ALLOWED_CLAUSES,
+    COUNTING_CLAUSES,
     HELD_COMMENT,
     ORDINARY_SUMMARY_VERSION,
     SHOWN_SUMMARY_RESPONSES,
@@ -43,6 +54,7 @@ from fixtures.response_draft import (
     THE_GUARD_BOUND,
     UNUSABLE_ANSWER_STATUS,
     DraftDoor,
+    a_draft_saying,
     assert_the_planted_texts_are_what_this_file_says,
     assert_unusable,
     draft_answer,
@@ -60,29 +72,27 @@ A_SUMMARY_STATING_A_COUNT = (
 A_COURSE_THEME = "E7-04 the dataset question"
 A_COURSE_THEME_COUNT = 2
 
-# The drafts. The counting pair spells the count both ways the residue names.
-COUNTING_IN_WORDS = (
-    "Thank you for writing. Three of you asked for slower derivations, so I will post "
-    "worked steps after each class."
+# One refused phrasing per token class G1 lists, driven through the route. The
+# full list is driven through the function in the unit module.
+THROUGH_THE_ROUTE = (
+    "digit-students",
+    "three-of-you",
+    "two-of-your-classmates",
+    "hyphenated-compound",
+    "both-students",
+    "half-the-class",
+    "a-few-of-you",
+    "a-number-of-things",
+    "and-after-weeks",
 )
-COUNTING_IN_DIGITS = (
-    "Thank you for writing. 3 students asked for slower derivations, so I will post "
-    "worked steps after each class."
-)
-COUNTING_DRAFTS = (COUNTING_IN_WORDS, COUNTING_IN_DIGITS)
 
-# The near misses in the held week: no count at all, and a number that counts
-# worked examples rather than people — the residue's rule is a number "next to
-# comment/student/response/classmate/of you", and a guard refusing any digit would
-# refuse a response promising "3 worked examples".
-COUNTING_NOBODY = (
-    "Thank you for writing. You asked for slower derivations, so I will post worked steps "
-    "after each class."
-)
-A_NUMBER_OF_THINGS = (
-    "Thank you for writing. You asked for slower derivations, so I will post 3 worked "
-    "examples after each class."
-)
+# The shown twin: "two of you" in a week where no stream is held (the coordinator's
+# brief), and two more spellings of the same.
+SHOWN_TWINS = {
+    "two-of-you": "Two of you asked for slower derivations",
+    "digit-students": COUNTING_CLAUSES["digit-students"],
+    "half-the-class": COUNTING_CLAUSES["half-the-class"],
+}
 
 
 def a_week(door: DraftDoor, *, course_commenters: int) -> None:
@@ -141,58 +151,63 @@ def drafted(door: DraftDoor, draft: str) -> Any:
     return answered
 
 
-@pytest.mark.parametrize("draft", COUNTING_DRAFTS, ids=("number-word-of-you", "digit-students"))
+@pytest.mark.parametrize("case", THROUGH_THE_ROUTE)
 def test_a_draft_stating_a_count_in_a_week_with_a_held_stream_is_refused(
-    draft_door: DraftDoor, draft: str
+    draft_door: DraftDoor, case: str
 ) -> None:
-    """The held world: a draft telling students how many of them said something. 502.
+    """The held world: a draft carrying a count token. 502.
 
-    **The mutation this kills:** the count rule absent, so the prose path carries
-    the held stream's number straight into a published response. One parameter
-    per spelling the residue names, so a rule matching digits only, or number
-    words only, is red on the other. **The near misses:** the shown twin below,
-    and the two non-counting drafts in this same held world.
+    **The mutations this kills, one per parameter:** the rule absent; a rule that
+    matches only digits, or only number words; one that misses a quantity word
+    (both, half, few), a hyphenated compound, or "classmates" in place of
+    "students"; one scoped to counts of people ("3 worked examples" is a number of
+    anything, which G1 forbids); and one that lets a structure word license every
+    later number ("Weeks 3 and 4"). **The near misses:** the accepted twins below,
+    in the same held world, and the shown-week twin.
     """
     door = draft_door
     a_held_week(door)
-    answered = drafted(door, draft)
+    answered = drafted(door, a_draft_saying(COUNTING_CLAUSES[case]))
     assert_unusable(
         answered,
         "draft",
-        "states a count of students beside a stream held below the threshold, in a week whose "
-        "held summary's prose carries a count",
+        f"carries a count token ({COUNTING_CLAUSES[case]!r}) in a week with a stream held below "
+        "the threshold, whose held summary's prose carries a count",
     )
     assert answered.status_code == UNUSABLE_ANSWER_STATUS
 
 
-@pytest.mark.parametrize("draft", COUNTING_DRAFTS, ids=("number-word-of-you", "digit-students"))
-def test_a_draft_stating_a_count_in_a_week_with_every_stream_shown_is_accepted(
-    draft_door: DraftDoor, draft: str
+@pytest.mark.parametrize("case", tuple(ALLOWED_CLAUSES))
+def test_a_draft_naming_a_course_structure_or_no_number_in_a_held_week_is_accepted(
+    draft_door: DraftDoor, case: str
 ) -> None:
-    """The residue's twin: the same drafts when no stream is held. 200, the draft served.
+    """The held world's twins: "week 3", "chapter five", ordinals, and no number. 200.
 
-    **The mutation this kills:** the count rule applied to every week — the
-    safe-looking over-reach that forbids "five of you asked for..." in a week of
-    thirty, where the comments are on the page anyway.
-    """
-    door = draft_door
-    a_shown_week(door)
-    assert text_of(drafted(door, draft)) == draft, "The draft route rewrote the model's draft."
-
-
-@pytest.mark.parametrize(
-    "draft", (COUNTING_NOBODY, A_NUMBER_OF_THINGS), ids=("no-number", "a-number-of-things")
-)
-def test_a_draft_counting_nobody_in_a_week_with_a_held_stream_is_accepted(
-    draft_door: DraftDoor, draft: str
-) -> None:
-    """The held world's own near misses: no number, and a number of worked examples.
-
-    **The mutations this kills:** a rule that refuses every draft in a week with a
-    held stream (the first parameter), and one that refuses any digit at all (the
-    second) — the residue scopes the rule to a number next to comment, student,
-    response, classmate or "of you".
+    **The mutations this kills, one per parameter:** a rule refusing every digit or
+    number word (no exceptions); an exception list that is case-sensitive ("Week
+    4"); one that does not reach a hyphenated compound ("chapter twenty-one"); one
+    that treats ordinals as counts ("first", "second"); one that misses "lab" or
+    "question"; and a rule refusing every draft in a held week ("no-number").
     """
     door = draft_door
     a_held_week(door)
-    assert text_of(drafted(door, draft)) == draft, "The draft route rewrote the model's draft."
+    draft = a_draft_saying(ALLOWED_CLAUSES[case])
+    served = text_of(drafted(door, draft))
+    assert served == draft, f"The draft route served {served!r} for the model's {draft!r}."
+
+
+@pytest.mark.parametrize("case", tuple(SHOWN_TWINS))
+def test_a_draft_stating_a_count_in_a_week_with_every_stream_shown_is_accepted(
+    draft_door: DraftDoor, case: str
+) -> None:
+    """The residue's twin: "two of you" when no stream is held. 200, the draft served.
+
+    **The mutation this kills:** the count rule applied to every week — the
+    safe-looking over-reach that forbids "two of you asked for..." in a week where
+    the comments are on the page anyway.
+    """
+    door = draft_door
+    a_shown_week(door)
+    draft = a_draft_saying(SHOWN_TWINS[case])
+    served = text_of(drafted(door, draft))
+    assert served == draft, f"The draft route served {served!r} for the model's {draft!r}."
