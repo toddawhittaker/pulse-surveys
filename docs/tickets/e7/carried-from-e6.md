@@ -243,6 +243,41 @@ moderation slot, in `tests/unit/test_the_moderation_eval_cases_cover_every_verdi
 `survey_windows.closed_by` (`closes_at < now`). **Owner:** the next grading
 ticket. **Done when:** it uses `<` and a comment says it matches `closed_by`.
 
+## Two findings from driving E6 by hand
+
+Found on 2026-10-10 by driving the E6 story on the local stack after the epic
+merged, with screenshots; neither is a defect in what E6 shipped to its readers.
+
+### A stored summary can carry a comment excluded after it was written
+
+The weekly summary is written once, before the instructor decides on the
+week's comments. A clean comment the instructor later excludes stays in that
+stored summary's text. Today only the instructor reads a summary, and the
+instructor already sees the excluded comment's text, muted (SPEC §5.2), so
+nothing new reaches anyone. It becomes a leak the moment a second reader is
+given a summary: SPEC §5.3's student page lists no summary today, but any
+change that adds one, or a leadership roll-up that shows one, would hand an
+excluded comment to a reader it was excluded from. **Owner:** the first ticket
+that shows a stored summary to anyone but the section's instructor (E8 or E9).
+**Done when:** no reader other than the instructor receives a summary written
+from a comment that now holds an exclusion, with a test that excludes a
+summarized comment and reads the summary as that reader.
+
+### A signed-in reader without the role is told their session ended
+
+A student or plain instructor who opens `/app/leadership/review-queue` sees
+"This page is not signed in. The session this page was opened with has
+ended." The server refuses a session that is not a leadership session with a
+401 on purpose (`backend/app/api/leadership.py`, the module docstring), and the
+page reads every 401 as an ended session, so the sentence is untrue for a
+reader who is signed in but holds no leadership role. The comparison-set pages
+share the pattern. Changing the status is sign-in code and rides the heavy
+lane; changing only the words cannot tell the two cases apart. **Owner:** E7's
+breakdown, as one ticket. **Done when:** a signed-in reader without a
+leadership role, opening either leadership page, reads a sentence that says
+the page is not part of their role, a reader whose session really ended still
+reads the ended-session sentence, and an e2e case drives both.
+
 ## Two mockups still pass a count to the small-N notice
 
 E6-04 (#295) made `design/SmallNNotice.dc.html` state no count.
