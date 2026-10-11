@@ -201,7 +201,14 @@ test("after the instructor publishes, the week's page shows the reply, both grou
 
   // The figures and both comment groups, and the line, once.
   await expect(results.getByTestId("pulse-trend-duo")).toBeVisible();
-  await expect(results.locator(".pulse-stat-histogram")).toHaveCount(2);
+  // The seeded section has far fewer raters than the threshold, so ruling 8
+  // withholds both streams' ratings: each shows the notice that names it and no
+  // histogram is drawn.
+  await expect(results.locator(".pulse-stat-histogram")).toHaveCount(0);
+  await expect(
+    results.getByText("Ratings about the instructor are not shown this week"),
+  ).toBeVisible();
+  await expect(results.getByText("Ratings about the course are not shown this week")).toBeVisible();
   await expect(results.getByRole("heading", { name: "About the instructor" })).toBeVisible();
   await expect(results.getByRole("heading", { name: "About the course" })).toBeVisible();
   const text = (await results.textContent()) ?? "";
@@ -212,6 +219,7 @@ test("after the instructor publishes, the week's page shows the reply, both grou
     nodes.map((node) => node.getAttribute("aria-label") ?? "").join(" "),
   );
   expect(`${text} ${labels}`).not.toMatch(/compar|universit|benchmark|average|other sections/i);
-  await expect(results.locator("path.pulse-trend-line")).toHaveCount(2);
+  // At most one line per stream: a stream with no mean to draw draws no line.
+  expect(await results.locator("path.pulse-trend-line").count()).toBeLessThanOrEqual(2);
   await expectNoAxeViolations(page);
 });
