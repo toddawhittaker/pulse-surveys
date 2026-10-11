@@ -24,7 +24,7 @@ import { copy as studentCopy } from '../copy/studentResults';
  * written into a component is a second, wrong copy of a configured value the
  * day anybody changes it.
  *
- * **Nothing here counts anybody** (E5.1-01). §5.2 forbids a count below the
+ * **Nothing here counts anybody**. §5.2 forbids a count below the
  * threshold, and the notice now sits inside one group, where any count reads as
  * that group's: in a stream of one commenter, a count of commenters is the
  * whole disclosure, and a count of the week's respondents beside it is a
