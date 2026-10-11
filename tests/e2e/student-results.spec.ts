@@ -13,7 +13,8 @@
 // response is inserted as the section's own instructor, so the table's guard
 // trigger judges it exactly as it judges the real writer's. The policy row goes
 // in with its guard on: the instructor is first given the course's lead grant and
-// mapping, which is what the guard checks.
+// mapping, which is what the guard checks, and the grant is removed again
+// straight after, so no other spec's launch lands somewhere new.
 //
 // **No date is pinned.** The reading day is the section's start day (the seeded
 // calendar, via `sectionStartClock`) plus seven days, which is the Monday the
@@ -119,7 +120,12 @@ test("a required-mode week with no reply shows the closed door and nothing about
       `select ${INSTRUCTOR}, s.course_id from section s where s.id = ${SECTION};\n` +
       "insert into response_policy (course_id, prefix_id, set_by_person_id, role, mode, set_at)\n" +
       `select s.course_id, c.prefix_id, ${INSTRUCTOR}, 'LEAD_FACULTY', 'REQUIRED', '1970-01-01T00:00Z'\n` +
-      `from section s join course c on c.id = s.course_id where s.id = ${SECTION};`,
+      `from section s join course c on c.id = s.course_id where s.id = ${SECTION};\n` +
+      // The grant is only needed while the guard looks at it. Left in place it
+      // would send this person to the leadership landing on every later launch
+      // as the instructor, and other specs wait for the instructor's.
+      `delete from lead_faculty_mapping where person_id = ${INSTRUCTOR};\n` +
+      `delete from role_assignment where person_id = ${INSTRUCTOR} and role = 'LEAD_FACULTY';`,
   );
 
   const block = await landOnTheSurvey(page, placement, MATHEMATICS.code);
