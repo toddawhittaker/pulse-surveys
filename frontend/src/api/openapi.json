@@ -2932,12 +2932,12 @@
           "score_text": {
             "type": "string",
             "title": "Score Text",
-            "description": "The score as it was sent to the gradebook."
+            "description": "The canonical percentage posted, before the platform scales it to the column's maximum."
           },
           "ledger_text": {
             "type": "string",
             "title": "Ledger Text",
-            "description": "The per-week ledger sent beside the score."
+            "description": "The per-week ledger as posted beside the score."
           }
         },
         "additionalProperties": false,
@@ -2947,7 +2947,7 @@
           "ledger_text"
         ],
         "title": "StudentParticipation",
-        "description": "The student's own latest accepted participation score, exactly as it was posted.\n\nBoth strings are the characters sent to the platform (SPEC \u00a73.4, ADR 0125);\nnothing here is recomputed. It is the student's own record and not an\naggregate of the week, so it does not follow the week's hold."
+        "description": "The student's own participation score from the last post Pulse knows the platform took.\n\n`score_text` is Pulse's canonical percentage, the text stored with the post,\nbefore AGS scales it to the gradebook column's maximum\n(`scoreGiven = percentage / 100 x scoreMaximum`), so it is not necessarily\nthe characters the gradebook shows. `ledger_text` is the per-week ledger as\nposted (SPEC \u00a73.4, ADR 0125). Nothing is recomputed. It is the student's own\nrecord and not an aggregate of the week, so it does not follow the week's\nhold (SPEC \u00a75.4)."
       },
       "StudentReleasedComment": {
         "properties": {
