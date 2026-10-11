@@ -139,7 +139,7 @@ if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
         WorkloadBenchmarkFigures,
         WorkloadBenchmarkView,
     )
-    from app.schemas.response_loop import OnBehalfStream
+    from app.schemas.response_loop import OnBehalfStream, StudentStream
     from app.services.benchmarks import BenchmarkPoint, WorkloadComparison
 
 logger = logging.getLogger(__name__)
@@ -1969,6 +1969,61 @@ def on_behalf_streams(
                 str(value): ratings.get((week_id, token), {}).get(value, 0)
                 for value in LIKERT_VALUES
             },
+        )
+        for token in REPORT_STREAMS
+    ]
+
+
+def student_streams(
+    session: Session,
+    *,
+    section_id: UUID,
+    week_id: UUID,
+    trend: Sequence[tuple[int, UUID]],
+    comments: Mapping[str, Sequence[str]],
+) -> list["StudentStream"]:
+    """One released section-week's two streams as its students read them (SPEC §5.4).
+
+    Per stream, in the report's order (instructor, then course): the trend over
+    `trend`, the `(course_week, week_id)` pairs the caller may show, each a point
+    whose mean is `None` for a week nobody rated; this week's rating distribution
+    keyed "1" to "5", as the instructor report's; and either `comments` for the
+    stream or the small-N state. The small-N state is `_held_streams`' answer,
+    the report's own, so a stream below the threshold or a week still awaiting a
+    verdict carries no comment here whatever the caller passed.
+
+    **Who may read, and which weeks, is the caller's.**
+    `app.services.response_loop.student_week_results` checks the reader, leaves
+    every `awaiting` week out of `trend`, and reads `comments` through the
+    student comment reads (ADR 0197). Nothing here reads a comment, a count of
+    anybody or a benchmark.
+    """
+    from app.schemas.response_loop import StudentComment, StudentStream, TrendPoint
+
+    ratings = _rating_counts(
+        session,
+        section_id=section_id,
+        week_ids=[week_id, *(trend_week_id for _course_week, trend_week_id in trend)],
+    )
+    held = _held_streams(session, section_id=section_id, week_id=week_id)
+    return [
+        StudentStream(
+            # Spelled as the on-behalf read spells a stream: the stored token,
+            # lower-cased. `StudentStream` refuses any other spelling.
+            stream=token.lower(),
+            trend=[
+                TrendPoint(
+                    course_week=course_week,
+                    mean=_mean_of(ratings.get((trend_week_id, token), {})),
+                )
+                for course_week, trend_week_id in trend
+            ],
+            distribution={
+                str(value): ratings.get((week_id, token), {}).get(value, 0)
+                for value in LIKERT_VALUES
+            },
+            small_n=held[token],
+            comments=[] if held[token] else [StudentComment(text=text) for text in comments[token]],
         )
         for token in REPORT_STREAMS
     ]

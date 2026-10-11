@@ -4,11 +4,10 @@
  *
  * Same shape as `studentSurvey.ts`, under a key prefix of its own,
  * `student_results.`: the copy inventory (SPEC §4.1 items 4 and 5) collects by
- * prefix, and the results page is its own surface (E7-10). It shows only text
- * staff wrote, so it owes item 5 no confidentiality line today;
- * `docs/tickets/e8/carried-from-e7.md` reopens that when E8 adds anything
- * derived from students to the page. The keys the survey page uses for its
- * heading and its link to this page are filed here with the rest.
+ * prefix, and the results page is its own surface. It shows what classmates
+ * wrote and how they rated the week, so it carries item 5's line exactly once:
+ * `student_results.confidentiality` (ADR 0197). The keys the survey page uses
+ * for its heading and its link to this page are filed here with the rest.
  *
  * **The words state facts and blame nobody** (`design/Usage Rules.md` §4). A
  * response written by someone other than the instructor is attributed by name
@@ -49,6 +48,11 @@ export const STUDENT_RESULTS_COPY = {
   'student_results.author_lead_faculty': '{name}, Lead Faculty',
   'student_results.author_chair': '{name}, Department Chair',
   'student_results.published_on': 'Published {day}',
+
+  // SPEC §4.1 item 5: the page's one confidentiality line. There is exactly one
+  // entry for it here, which is the form the inventory reads it in.
+  'student_results.confidentiality':
+    'Comments are shown without the names of the students who wrote them.',
 
 } as const satisfies Record<string, string>;
 

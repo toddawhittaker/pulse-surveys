@@ -122,8 +122,12 @@ export type RatesView = Schemas['RatesView'];
  * `mean` is `null` for a week nobody rated — zero is a rating nobody can give,
  * so a zero here would draw a line to the floor of a chart for a week that has
  * no line at all.
+ *
+ * The long name is the OpenAPI document's: the student results payload has a
+ * `TrendPoint` of its own (`app.schemas.response_loop`), so FastAPI names both
+ * components by their module.
  */
-export type TrendPointView = Schemas['TrendPoint'];
+export type TrendPointView = Schemas['app__schemas__report__TrendPoint'];
 
 /**
  * One benchmark number, sealed — `app.services.reporting.ComparisonFigure`.

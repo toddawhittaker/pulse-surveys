@@ -76,6 +76,7 @@ from app.ai.contracts import CheckTheme
 from app.config import Settings
 from app.models.loop import InstructorResponse, PolicyMode, PolicyRole, ResponsePolicy, ResponseRole
 from app.models.org import Course, Prefix, Section
+from app.models.survey import REPORT_STREAMS
 from app.models.term import SurveyWindow, Term, Week
 from app.schemas.response_loop import (
     OnBehalfWeek,
@@ -84,6 +85,7 @@ from app.schemas.response_loop import (
     PolicyOverview,
     PolicyPrefix,
     ResponseWrite,
+    StudentReleasedComment,
     StudentResponse,
     StudentWeekResults,
     WeekResponseView,
@@ -95,6 +97,7 @@ from app.services.authz import (
     lead_review_courses,
     taught_or_once_taught_section_ids,
 )
+from app.services.report_comments import student_comments, student_released_comments
 from app.services.reporting import SectionUnavailableError
 from app.services.section_codes import course_label, course_week_of, week_of_the_term
 
@@ -417,6 +420,8 @@ def student_week_results(
         raise ResultsUnavailableError
     published_weeks = [opened.course_week for opened in published]
 
+    label = reporting._course_label(session, section)
+
     state, response = _state_and_response(
         session,
         section=section,
@@ -425,7 +430,75 @@ def student_week_results(
         settings=settings,
         reader_user_id=user_id,
     )
-    return StudentWeekResults(state=state, response=response, published_weeks=published_weeks)
+    if state == "awaiting":
+        # The hold (SPEC §5.3): nothing about the week, read or served, until a
+        # response releases it. Decided before any figure or comment is read.
+        return StudentWeekResults(
+            course_label=label,
+            state=state,
+            response=response,
+            published_weeks=published_weeks,
+            streams=None,
+            workload_median=None,
+            released=None,
+        )
+
+    held_week_ids = {
+        clock_.week_id
+        for clock_ in _week_clocks(session, sections=[section], settings=settings)
+        if clock_.required and not clock_.answered
+    }
+    readable = [opened for opened in published if opened.week_id not in held_week_ids]
+    streams = reporting.student_streams(
+        session,
+        section_id=section.id,
+        week_id=week.week_id,
+        trend=[
+            (opened.course_week, opened.week_id)
+            for opened in readable
+            if opened.course_week <= week.course_week
+        ],
+        comments={
+            token: [
+                comment.text
+                for comment in student_comments(
+                    session, section_id=section.id, week_id=week.week_id, stream=token
+                )
+            ]
+            for token in REPORT_STREAMS
+        },
+    )
+    _mean, workload_median = reporting._workload(
+        session, section_id=section.id, week_id=week.week_id
+    )
+    # Ruling 1 (ADR 0197): the release group only on the latest published week's
+    # page, only while no published week is held, and only the batches cut
+    # before this week's report opened.
+    released = None
+    if week.course_week == published[-1].course_week and len(readable) == len(published):
+        as_of = reporting.report_opens_at(
+            week.closes_at, zone=ZoneInfo(settings.institution_timezone)
+        )
+        released = [
+            StudentReleasedComment(text=comment.text, stream=comment.stream.lower())
+            for token in REPORT_STREAMS
+            for comment in student_released_comments(
+                session,
+                section_id=section.id,
+                term_id=section.term_id,
+                stream=token,
+                as_of=as_of,
+            )
+        ]
+    return StudentWeekResults(
+        course_label=label,
+        state=state,
+        response=response,
+        published_weeks=published_weeks,
+        streams=streams,
+        workload_median=workload_median,
+        released=released,
+    )
 
 
 def _state_and_response(
