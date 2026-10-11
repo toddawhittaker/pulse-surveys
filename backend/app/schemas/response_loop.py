@@ -77,6 +77,20 @@ class StudentResponse(BaseModel):
     published_at: datetime = Field(description="When the text now shown was published.")
 
 
+class StudentParticipation(BaseModel):
+    """The student's own latest accepted participation score, exactly as it was posted.
+
+    Both strings are the characters sent to the platform (SPEC §3.4, ADR 0125);
+    nothing here is recomputed. It is the student's own record and not an
+    aggregate of the week, so it does not follow the week's hold.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    score_text: str = Field(description="The score as it was sent to the gradebook.")
+    ledger_text: str = Field(description="The per-week ledger sent beside the score.")
+
+
 StudentStreamName = Literal["instructor", "course"]
 
 
@@ -171,6 +185,13 @@ class StudentWeekResults(BaseModel):
             "Comments released from earlier weeks, with no week named. Present on the "
             "latest published week only, and only while no published week is awaiting."
         )
+    )
+    participation: StudentParticipation | None = Field(
+        default=None,
+        description=(
+            "The student's latest accepted participation score; absent before any score "
+            "has been posted. Shown in every state."
+        ),
     )
 
 

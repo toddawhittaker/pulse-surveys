@@ -135,16 +135,16 @@ RESPONSE = "response"
 # The amendment before review, A1: the section's course weeks whose report has
 # opened at `now`, ascending, in every state (E7-06's page pages through them).
 PUBLISHED_WEEKS = "published_weeks"
-PAYLOAD_MEMBERS = frozenset({STATE, RESPONSE, PUBLISHED_WEEKS})
-# E8-01's work order adds four members, on every state: the course label, the two
-# streams, the workload median and the release group (each of the last three
-# `None` on a held week); E8-03 adds `participation`, in parallel. They are
-# **admitted** here by name and required by nothing in this file, so an E7 test
-# goes red only for an E7 reason: E8-01's tests require their members through
-# `tests/fixtures/student_week.py::read`, and E8-03's member is that ticket's to
-# assert (`docs/MISTAKES.md` entry 22: a new member reaches every fixture).
+PARTICIPATION = "participation"
+PAYLOAD_MEMBERS = frozenset({STATE, RESPONSE, PUBLISHED_WEEKS, PARTICIPATION})
+# E8-01 adds four members, on every state: the course label, the two streams,
+# the workload median and the release group (each of the last three `None` on a
+# held week). They are **admitted** here by name and required by nothing in this
+# file, so an E7 test goes red only for an E7 reason: E8-01's tests require their
+# members through `tests/fixtures/student_week.py::read` (`docs/MISTAKES.md`
+# entry 22: a new member reaches every fixture).
 E8_01_MEMBERS = frozenset({"course_label", "streams", "workload_median", "released"})
-MEMBERS_LATER_TICKETS_ADD = E8_01_MEMBERS | frozenset({"participation"})
+MEMBERS_LATER_TICKETS_ADD = E8_01_MEMBERS
 TEXT = "text"
 AUTHOR_NAME = "author_name"
 AUTHOR_ROLE = "author_role"

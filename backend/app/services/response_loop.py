@@ -80,6 +80,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.contracts import CheckTheme
 from app.config import Settings
+from app.models.grades import GradeSyncOutcome, latest_grade_sync
 from app.models.loop import InstructorResponse, PolicyMode, PolicyRole, ResponsePolicy, ResponseRole
 from app.models.org import Course, Prefix, Section
 from app.models.survey import REPORT_STREAMS
@@ -92,6 +93,7 @@ from app.schemas.response_loop import (
     PolicyPrefix,
     ResponseWrite,
     StudentReleasedComment,
+    StudentParticipation,
     StudentResponse,
     StudentWeekResults,
     WeekResponseView,
@@ -435,6 +437,7 @@ def student_week_results(
         settings=settings,
         reader_user_id=user_id,
     )
+    participation = _own_participation(session, user_id=user_id, section_id=section.id)
     if state == "awaiting":
         # The hold (SPEC §5.3): nothing about the week, read or served, until a
         # response releases it. Decided before any figure or comment is read.
@@ -446,6 +449,7 @@ def student_week_results(
             streams=None,
             workload_median=None,
             released=None,
+            participation=participation,
         )
 
     held_week_ids = {
@@ -503,7 +507,25 @@ def student_week_results(
         streams=streams,
         workload_median=workload_median,
         released=released,
+        participation=participation,
     )
+
+
+def _own_participation(
+    session: Session, *, user_id: UUID, section_id: UUID
+) -> StudentParticipation | None:
+    """The reader's own newest accepted score for the section, as posted, or `None`.
+
+    Keyed by the session's user and the section already found among that user's
+    live enrollments, so no other student's row and no other section's row is
+    reachable. A `failed` row is never a score (ADR 0198).
+    """
+    latest = latest_grade_sync(
+        session, section_id=section_id, user_id=user_id, outcome=GradeSyncOutcome.POSTED
+    )
+    if latest is None:
+        return None
+    return StudentParticipation(score_text=latest.score_text, ledger_text=latest.ledger_text)
 
 
 def _state_and_response(

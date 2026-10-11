@@ -42,12 +42,12 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import Enum, ForeignKey, Index, Integer, Text, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Enum, ForeignKey, Index, Integer, Text, select, text
+from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.models.base import AwareDateTime, Base, UuidPrimaryKey
 
-__all__ = ["GradeSync", "GradeSyncOutcome"]
+__all__ = ["GradeSync", "GradeSyncOutcome", "latest_grade_sync"]
 
 
 class GradeSyncOutcome(StrEnum):
@@ -203,3 +203,26 @@ class GradeSync(UuidPrimaryKey, Base):
     created_at: Mapped[datetime] = mapped_column(
         AwareDateTime, nullable=False, server_default=text("now()")
     )
+
+
+def latest_grade_sync(
+    session: Session,
+    *,
+    section_id: UUID,
+    user_id: UUID,
+    outcome: GradeSyncOutcome | None = None,
+) -> GradeSync | None:
+    """The newest `grade_sync` row for one student in one section, or `None`.
+
+    Ordered by `created_at` descending, the order ADR 0124 gives every reader of
+    this table and the one `ix_grade_sync_section_id_user_id_created_at` serves.
+    With `outcome`, only rows of that outcome are considered: the newest `posted`
+    row is the last score the platform accepted, which a later `failed` row does
+    not replace.
+    """
+    statement = select(GradeSync).where(
+        GradeSync.section_id == section_id, GradeSync.user_id == user_id
+    )
+    if outcome is not None:
+        statement = statement.where(GradeSync.outcome == outcome)
+    return session.scalars(statement.order_by(GradeSync.created_at.desc()).limit(1)).first()

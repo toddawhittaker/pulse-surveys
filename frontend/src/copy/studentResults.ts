@@ -54,6 +54,17 @@ export const STUDENT_RESULTS_COPY = {
   'student_results.confidentiality':
     'Comments are shown without the names of the students who wrote them.',
 
+  // The student's own posted participation score, shown in every state. The one
+  // sentence says only that a count can change; it names no cause and no fault.
+  'student_results.participation_heading': 'Your participation score',
+  'student_results.participation_score': 'Score posted to your gradebook: {score}',
+  'student_results.participation_note':
+    'A comment counted when you submitted it can be re-checked later, so a week’s count can go down.',
+
+  // The landing's lead for a section with no survey open: the newest results.
+  'student_results.results_lead': 'Week {week} results are in',
+  'student_results.results_lead_link': 'See Week {week} results',
+  'student_results.results_lead_link_named': 'See Week {week} results for {course}',
 } as const satisfies Record<string, string>;
 
 /** Every key this surface publishes. */
