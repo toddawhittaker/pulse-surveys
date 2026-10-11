@@ -703,7 +703,7 @@
           "leadership"
         ],
         "summary": "The exclusion log inside my own grant",
-        "description": "Every exclusion and keep a person made inside the reader's own grant, newest first.",
+        "description": "Every exclusion, keep and undo a person made inside the reader's own grant, newest first.",
         "operationId": "read_exclusion_log_leadership_moderation_log_get",
         "responses": {
           "200": {
@@ -829,17 +829,12 @@
           "flag": {
             "anyOf": [
               {
-                "type": "string",
-                "enum": [
-                  "harmful",
-                  "privacy"
-                ]
+                "$ref": "#/components/schemas/HeldNoteType"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Flag"
+            ]
           },
           "decided_by_you": {
             "type": "boolean",
@@ -1134,6 +1129,8 @@
           "decision": {
             "type": "string",
             "enum": [
+              "PUBLISHED",
+              "FLAGGED_COLLAPSED",
               "EXCLUDED",
               "KEPT"
             ],
@@ -1178,6 +1175,10 @@
               }
             ],
             "title": "Excerpt"
+          },
+          "is_undo": {
+            "type": "boolean",
+            "title": "Is Undo"
           }
         },
         "type": "object",
@@ -1188,7 +1189,8 @@
           "flagged",
           "reason",
           "decided_on",
-          "excerpt"
+          "excerpt",
+          "is_undo"
         ],
         "title": "LogRow",
         "description": "One decision a person made about a comment inside the reader's own grant."

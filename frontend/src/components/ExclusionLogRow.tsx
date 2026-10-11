@@ -20,6 +20,10 @@ import './exclusionLogRow.css';
  * and no time of day can appear; the year stays because a record read across
  * terms needs it.
  *
+ * **An undo reads as a reversal** (E6-09). Its row carries the state the undo
+ * restored, so without `is_undo` an undone keep would read as a second
+ * exclusion. The status line names it "Undo, back to …" instead.
+ *
  * **A row with no excerpt says so.** The server withholds the excerpt when the
  * comment's own report does not show it (ADR 0190), and an empty quotation mark
  * would look like a comment with no words.
@@ -45,9 +49,7 @@ export function ExclusionLogRow({ row }: { readonly row: LogRowView }): JSX.Elem
         <span className="pulse-log-row__status" data-flagged={row.flagged ? 'true' : 'false'}>
           {fillCopy('leadership_moderation.log.status', {
             decision: copy(
-              row.decision === 'EXCLUDED'
-                ? 'leadership_moderation.log.excluded'
-                : 'leadership_moderation.log.kept',
+              row.is_undo ? UNDO_WORDS[row.decision] : DECISION_WORDS[row.decision],
             ),
             flag: copy(
               row.flagged
@@ -61,6 +63,26 @@ export function ExclusionLogRow({ row }: { readonly row: LogRowView }): JSX.Elem
     </li>
   );
 }
+
+/**
+ * The word for a decision's stored state. A decision leaves only `EXCLUDED` or
+ * `KEPT`; the other two states reach the log only on an undo, so they have no
+ * word of their own here and fall back to the undo's.
+ */
+const DECISION_WORDS: Readonly<Record<LogRowView['decision'], LeadershipModerationCopyKey>> = {
+  EXCLUDED: 'leadership_moderation.log.excluded',
+  KEPT: 'leadership_moderation.log.kept',
+  FLAGGED_COLLAPSED: 'leadership_moderation.log.undone_to_flagged',
+  PUBLISHED: 'leadership_moderation.log.undone_to_published',
+};
+
+/** An undo, named by the state it restored, so it reads as a reversal. */
+const UNDO_WORDS: Readonly<Record<LogRowView['decision'], LeadershipModerationCopyKey>> = {
+  EXCLUDED: 'leadership_moderation.log.undone_to_excluded',
+  KEPT: 'leadership_moderation.log.undone_to_kept',
+  FLAGGED_COLLAPSED: 'leadership_moderation.log.undone_to_flagged',
+  PUBLISHED: 'leadership_moderation.log.undone_to_published',
+};
 
 /** The plain word for each stored role token. */
 const ROLE_WORDS: Readonly<Record<LogRowView['decided_as'], LeadershipModerationCopyKey>> = {

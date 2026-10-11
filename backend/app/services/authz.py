@@ -149,6 +149,7 @@ __all__ = [
     "resolve_scope",
     "sanction_for",
     "scoped_reader",
+    "taught_or_once_taught_section_ids",
     "taught_section_ids",
     "teaching_instructor_assigned",
     "teaching_instructor_grants",
@@ -463,6 +464,14 @@ _TEACHING_INSTRUCTOR_SECTIONS = text(
     " WHERE granted.person_id = :person_id"
     " AND granted.role = CAST(:role AS public.assignment_role)"
     " AND granted.section_id IS NOT NULL"
+)
+
+# The sections a roster walk ended this person's teaching grant on (ADR 0183's
+# record). `pulse_app` reads these two columns of it and nothing else (E6-09).
+_ONCE_TAUGHT_SECTIONS = text(
+    "SELECT DISTINCT ended.section_id"
+    " FROM public.ended_teaching_grant AS ended"
+    " WHERE ended.person_id = :person_id"
 )
 
 # Everybody holding the teaching-instructor grant over one section — the people
@@ -1034,6 +1043,27 @@ def teaching_instructor_assigned(session: Session, *, person_id: UUID, section_i
         },
     ).scalar_one()
     return bool(answer)
+
+
+def taught_or_once_taught_section_ids(session: Session, *, person_id: UUID) -> set[UUID]:
+    """Which sections does this person teach now, or did they teach before the roster ended it?
+
+    `taught_section_ids` (the live grants) united with every section whose
+    teaching grant a roster walk ended, from `ended_teaching_grant` (ADR 0183).
+    ADR 0190's rule keeps a leader's own taught sections out of their review
+    queue, their leader door and their exclusion log, because the instructor
+    door refused them that held text; a grant the roster ended last week does not
+    make them a stranger to the section, so it stays out too (E6-09, done-when 5).
+
+    **An authorization decision, and it only narrows.** A false *yes* hides a
+    section from one leader's review, which another reviewer of the course still
+    sees; a false *no* would show a former instructor the held text of their own
+    section. The reverse case, a leader who starts teaching a section after
+    reviewing it, is ADR 0190's accepted residual.
+    """
+    return taught_section_ids(session, person_id=person_id) | set(
+        session.execute(_ONCE_TAUGHT_SECTIONS, {"person_id": person_id}).scalars()
+    )
 
 
 def taught_section_ids(session: Session, *, person_id: UUID) -> set[UUID]:

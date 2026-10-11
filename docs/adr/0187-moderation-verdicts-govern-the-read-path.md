@@ -62,7 +62,13 @@ was open would vouch for text the student could still replace: `clear` on
 Friday, a self-harm disclosure resubmitted into the same row on Sunday, shown as
 moderated and routed to nobody. So `route_verdict` refuses an answer whose survey
 window has not closed by the app clock (`now >= closes_at` is closed, ADR 0109),
-raising `ModerationBeforeClose` before it writes anything.
+raising `ModerationBeforeClose` before it writes anything. An answer whose
+response has no survey window is refused the same way: with no close to judge
+against, it is treated as open (fail closed). The definer does not repeat the
+check, because the close is judged by the app clock, which the database cannot
+read, and every writer, seeds and fixtures included, goes through
+`route_verdict`. A seeder that meets an open window leaves that comment
+unmoderated rather than failing.
 
 > **Amended 2026-10-10 by [0189](0189-an-instructor-decides-only-on-a-comment-their-report-returns.md)
 > (E6-03, from PR #292's re-check):** closed is `closes_at < now`, not
@@ -70,13 +76,7 @@ raising `ModerationBeforeClose` before it writes anything.
 > itself (`survey_windows._open_at` reads that instant as open), so a verdict
 > written then could vouch for text the student can still replace.
 > `route_verdict` now asks `survey_windows.closed_by`, which `_open_at` negates,
-> so there is one definition. An answer whose
-response has no survey window is refused the same way: with no close to judge
-against, it is treated as open (fail closed). The definer does not repeat the
-check, because the close is judged by the app clock, which the database cannot
-read, and every writer, seeds and fixtures included, goes through
-`route_verdict`. A seeder that meets an open window leaves that comment
-unmoderated rather than failing.
+> so there is one definition.
 
 **The verdict check is per task**: one disjunct per `ClassificationTask` member,
 built from the two verdict enums, so each task holds only its own tokens.
@@ -120,8 +120,15 @@ for it.
 ## Consequences
 
 - A comment whose moderation never succeeds holds its whole week back from every
-  reader. E6-02's attempt cap, counted over `moderation_attempt`, is what releases
-  such a week; until it lands, the week waits.
+  reader.
+
+  > **Amended 2026-10-10 by ruling 8 (E6-08, recorded by E6-09):** E6-02's
+  > attempt cap releases nothing. It stops the sweep asking about a comment that
+  > has had six unusable answers; the comment still holds no verdict, so its
+  > whole section-week stays out of every reader until a person decides it
+  > (E10's Care review). A cap that released the week would let an
+  > account-wide fault release every week unmoderated
+  > ([0188](0188-moderation-runs-at-window-close-swept-hourly-with-an-attempt-cap.md)).
 - Every fixture, seed and end-to-end world plants verdicts, and only after the
   comment's window has closed; a world that forgets shows no comments.
 - A caller holding the database role could still call the definer directly for
@@ -135,5 +142,7 @@ for it.
   case now passes for two reasons rather than one.
 - `threat_case` has no reader until E10, which is why ruling 5 exists.
 - The migration commits the `MODERATION` enum label before anything names it
-  (PostgreSQL refuses a new label in the transaction that added it), and a
-  downgrade leaves the label and any moderation rows in place.
+  (PostgreSQL refuses a new label in the transaction that added it). The
+  downgrade leaves the label and any `MODERATION` classification rows in place,
+  and since E6-09 it refuses, changing nothing, while `threat_case` or
+  `moderation_state` holds a row, because going down would destroy them.

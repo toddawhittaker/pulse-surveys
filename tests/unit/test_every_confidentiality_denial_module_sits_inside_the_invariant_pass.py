@@ -169,6 +169,13 @@ MODULE_MARKS = "pytestmark"
 # carries the shape today. Its planted samples are below: one demanded and
 # unmarked, so the shape is shown to report, and the opposite claim
 # (`states_the_count`) as the near miss it must spare.
+#
+# **`leaves_no_trace` is E6-09's** (done-when 9). The E6 boundary review found
+# `test_a_self_harm_comment_opens_a_threat_case_and_leaves_no_trace_in_the_report.py`,
+# SPEC §14.3's exit clause ("no trace in the instructor view"), unmarked, and no
+# shape here reached it. Its planted samples are below: one demanded and unmarked,
+# so the shape is shown to report, and the opposite claim (`leaves_a_trace`) as
+# the near miss it must spare — a matcher reading for a bare "trace" takes both.
 DENIAL_NAME_SHAPES = (
     "_names_nobody",
     "_name_nobody",
@@ -179,6 +186,7 @@ DENIAL_NAME_SHAPES = (
     "_trigger_exposure",
     "_control_exposure",
     "_no_count",
+    "leaves_no_trace",
 )
 
 # Two real modules that certainly carry the module-level marker, used as the
@@ -328,6 +336,15 @@ PLANTED_MODULES = {
     # notice *states* a count is the opposite claim, and a matcher reading for a
     # bare "count" would take it.
     "test_a_planted_notice_states_the_count.py": f"import pytest\n\n\n{A_DENIAL_TEST}",
+    # Demanded, and E6-09's exit-clause shape — unmarked, so it is demanded *and*
+    # flagged: the half that shows the shape reports rather than only matches.
+    "test_a_planted_comment_leaves_no_trace_in_the_report.py": (
+        f"import pytest\n\n\n{A_DENIAL_TEST}"
+    ),
+    # Not demanded, and the near miss for `leaves_no_trace`: a module asserting a
+    # decision *leaves* a trace is the opposite claim (the exclusion log exists to
+    # leave one), and a matcher reading for a bare "trace" would take it.
+    "test_a_planted_decision_leaves_a_trace_in_the_log.py": (f"import pytest\n\n\n{A_DENIAL_TEST}"),
 }
 
 PLANTED_DEMANDED = {
@@ -341,6 +358,7 @@ PLANTED_DEMANDED = {
     "test_a_planted_dev_passback_trigger_exposure.py",
     "test_a_planted_dev_clock_control_exposure.py",
     "test_a_planted_notice_states_the_threshold_and_no_count.py",
+    "test_a_planted_comment_leaves_no_trace_in_the_report.py",
 }
 
 PLANTED_CARRYING_THE_MARKER = {

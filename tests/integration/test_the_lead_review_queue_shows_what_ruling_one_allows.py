@@ -20,6 +20,11 @@ absences (`docs/MISTAKES.md` entry 3).
 **Which failure a red is, before E6-05 lands.** `lead_routes` fails inside the
 test body naming the three routes the work order owes — a FAILED, never an ERROR
 (`docs/MISTAKES.md` entry 44). The world itself is built from existing machinery.
+
+**Marked `invariant` since E6-09** (done-when 9): the queue's absences — a decided,
+a privacy and a clear comment, and a chair's course kept from every lead — are
+§4.1 denials over what a leader may read, so CI runs them in the isolated pass,
+which treats a skip as a failure.
 """
 
 from typing import Any
@@ -41,7 +46,7 @@ from fixtures.report_api import FIRST_HELD_WEEK, FULL_WEEK, TAUGHT_COHORT, UNTAU
 from fixtures.report_comments import configured_threshold
 from fixtures.report_views import COURSE_STREAM, INSTRUCTOR_STREAM
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 
 # How many reads the order test makes. With three queued items there are six
 # orders; a uniform shuffle shows the same one on all twenty reads with

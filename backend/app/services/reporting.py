@@ -99,6 +99,7 @@ from app.services.report_comments import (
     visible_cards,
 )
 from app.services.section_codes import course_label, course_week_of
+from app.services.survey_windows import closed_by
 
 if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
     # `app.schemas.report` imports `ComparisonFigure` from this module, because
@@ -164,7 +165,8 @@ def generate_missing_summaries(
     **A window that has closed, and the comparison is the complement of the one
     E2-06 already wrote.** `app.services.survey_windows._open_at` makes a window
     open when `opens_at <= t <= closes_at`, both ends inclusive, so closed is
-    `closes_at < t` and no instant is ever both. The instant is the *effective*
+    `closes_at < t` (`survey_windows.closed_by`, the one definition) and no
+    instant is ever both. The instant is the *effective*
     clock (ADR 0109), because which weeks have closed is exactly what a developer
     moves the clock to change — beat's own firing is outside that override, which
     is why this walk decides what to do from the database rather than from the day
@@ -188,9 +190,7 @@ def generate_missing_summaries(
     section-weeks whose provider call refused, which is what §6.1's console reads.
     """
     started = time.monotonic()
-    awaiting = _section_weeks_awaiting_a_summary(
-        session, closed_by=clock.now(session, settings=settings)
-    )
+    awaiting = _section_weeks_awaiting_a_summary(session, now=clock.now(session, settings=settings))
     logger.info(
         "the summary walk found %d closed section-week(s) with no summary yet", len(awaiting)
     )
@@ -263,7 +263,7 @@ def generate_missing_summaries(
 
 
 def _section_weeks_awaiting_a_summary(
-    session: Session, *, closed_by: datetime
+    session: Session, *, now: datetime
 ) -> list[tuple[UUID, UUID]]:
     """Every section-week whose window has closed, which carries no summary row, and is moderated.
 
@@ -284,7 +284,7 @@ def _section_weeks_awaiting_a_summary(
     )
     walked = session.execute(
         select(SurveyWindow.section_id, SurveyWindow.week_id)
-        .where(SurveyWindow.closes_at < closed_by, ~summarized.exists())
+        .where(closed_by(now), ~summarized.exists())
         .order_by(SurveyWindow.section_id, SurveyWindow.week_id)
     ).all()
     return [
@@ -1560,6 +1560,11 @@ def _payload(
     # follow. E4-07's security round found exactly that, and
     # `app.services.report_comments.n_threshold` carries the argument.
     threshold = n_threshold()
+    # A section-week not yet fully moderated shows no comment in either stream
+    # (`visible_comments`), so the notice says "held" for it too. Without this a
+    # week above the threshold waiting on one verdict would report itself
+    # unsuppressed and empty, which reads as "nobody commented" (E6-09).
+    moderated = section_week_moderated(session, section_id=section.id, week_id=week.week_id)
     question_texts = _served_question_texts(session, section_id=section.id, week_id=week.week_id)
     benchmarks_by_stream, workload_benchmark = _benchmark_members(
         session,
@@ -1592,10 +1597,12 @@ def _payload(
             question_text=question_texts[token],
             benchmark=benchmarks_by_stream[token],
             # SPEC §4's suppression is per stream (ADR 0182), so the notice is too:
-            # the comment service's own answer for this stream, and the threshold
-            # it compared with. No count of anybody — §5.2's "no count".
+            # the comment service's own answer for this stream, or the week still
+            # waiting on a verdict, and the threshold it compared with. No count of
+            # anybody — §5.2's "no count".
             small_n=schema.SmallNView(
-                suppressed=stream_is_suppressed(
+                suppressed=not moderated
+                or stream_is_suppressed(
                     session, section_id=section.id, week_id=week.week_id, stream=token
                 ),
                 threshold=threshold,

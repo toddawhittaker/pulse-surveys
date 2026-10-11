@@ -29,10 +29,11 @@ here (ADR 0187).
 
 **The sweep** (`sweep_unmoderated_comments`) is what asks a model for those
 verdicts: hourly, over every comment whose window has closed and which holds no
-verdict yet (ADR 0188). A failed call is retried by the next sweep, and an
-unusable answer, or a refusal of this particular request, counts toward an
-attempt cap of six, after which the comment stays held, and holds its whole week, until a person decides it. Two sweeps never run at once, and each comment's outcome is
-committed before the next is asked about.
+verdict yet (ADR 0188). A failed call is retried by the next sweep. Only an
+unusable answer counts toward an attempt cap of six; a refusal or an outage
+counts nothing. A comment at the cap stays held, and holds its whole week,
+until a person decides it. Two sweeps never run at once, and each comment's
+outcome is committed before the next is asked about.
 
 ## A person's decision (E6-03)
 
@@ -113,7 +114,7 @@ from app.models.report import REASON_BOUND, DeciderRole, ModerationState
 from app.models.survey import Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow, Term
 from app.services import clock
-from app.services.authz import lead_review_courses, taught_section_ids
+from app.services.authz import lead_review_courses, taught_or_once_taught_section_ids
 from app.services.section_codes import course_label
 from app.services.survey_windows import closed_by
 
@@ -130,8 +131,9 @@ SEED_MODEL_ID = "seed"
 
 # How many unusable answers one comment may get before the sweep stops asking
 # (ADR 0188). Six hourly sweeps: long enough to ride out a bad deploy of a prompt
-# or a model, short enough that a comment no model can answer does not hold its
-# section-week's summary back for days.
+# or a model, short enough that the sweep stops paying every hour for a comment
+# no model can answer. Reaching it releases nothing: the comment, and its whole
+# section-week, stay held until a person decides it (ruling 8).
 MODERATION_ATTEMPT_CAP = 6
 
 # The one failure that counts toward the cap: the provider answered, and the
@@ -162,9 +164,12 @@ RETRIED_FAILURES = (
 )
 
 # The Postgres advisory lock key that keeps two sweeps from running at once
-# (ADR 0188). Any fixed bigint will do as long as no other lock uses it; this is
-# the only advisory lock in the application. The digits are the ticket and the
-# ADR (E6-02, 0188), so a reader of `pg_locks` can tell whose it is.
+# (ADR 0188). Any fixed bigint will do as long as no other lock uses it. The one
+# other advisory lock in the application is `_lock_the_comment`'s, keyed on
+# `hashtextextended` of an answer id; a 64-bit hash landing on this key is
+# possible in principle and would only make one decision wait for a sweep. The
+# digits are the ticket and the ADR (E6-02, 0188), so a reader of `pg_locks` can
+# tell whose it is.
 SWEEP_LOCK_KEY = 6_020_188
 
 
@@ -389,6 +394,17 @@ def _moderate_each(session: Session, gateway: AIGateway | None) -> int:
             _record_a_failed_attempt(session, answer_id, failed)
             session.commit()
             continue
+        except AIProviderRefusedError as refused:
+            # The status says which kind of refusal it was (a key, a rate limit, a
+            # rejected request), and is an `int`, never the provider's body.
+            logger.error(
+                "the moderation sweep left answer %s for the next run after an %s with HTTP "
+                "status %d",
+                answer_id,
+                type(refused).__name__,
+                refused.status,
+            )
+            continue
         except RETRIED_FAILURES as failed:
             logger.error(
                 "the moderation sweep left answer %s for the next run after an %s",
@@ -513,9 +529,9 @@ def decide_as_instructor(
     `ReasonRefusedError`, each having written nothing.
     """
     # Imported here rather than at module scope: `app.services.report_comments`
-    # imports this module for the attempt cap (E6-02), so a module-scope import
-    # back would be a cycle. The same device `app.services.reporting._payload`
-    # uses for its schema.
+    # imports `holds_no_verdict` from this module, and `app.services.reporting`
+    # imports `report_comments`, so a module-scope import back would be a cycle.
+    # The same device `app.services.reporting._payload` uses for its schema.
     from app.services.reporting import comment_on_instructor_report, comment_view
 
     if person_id is None:
@@ -689,7 +705,9 @@ class ExclusionLogRow:
     """One decision in a reader's exclusion log (E6-05, decision 1).
 
     `excerpt` is `None` whenever the comment's own instructor's report does not
-    show it under its week; see `exclusion_log`.
+    show it under its week; see `exclusion_log`. `decision` is the stored state
+    the row left; `is_undo` says the row reverses the decision before it, so the
+    state is the one restored (E6-09).
     """
 
     section_label: str
@@ -699,6 +717,7 @@ class ExclusionLogRow:
     reason: str | None
     decided_on: date
     excerpt: str | None
+    is_undo: bool
 
 
 def review_queue(session: Session, *, person_id: UUID | None) -> list[QueuedComment]:
@@ -789,7 +808,7 @@ def decide_as_leader(
 def exclusion_log(
     session: Session, *, person_id: UUID | None, settings: Settings
 ) -> list[ExclusionLogRow]:
-    """Every exclusion and keep a person made inside this reader's own grant, newest first.
+    """Every exclusion, keep and undo a person made inside this reader's own grant, newest first.
 
     SPEC §5.2's anti-cherry-picking trail, in both directions (§11 question 5,
     settled). The rows are `report_comments.logged_decisions` over the courses
@@ -802,8 +821,9 @@ def exclusion_log(
     not yet fully moderated, or it was surfaced only by a release batch. A
     decision date beside text from a held stream places that text in a week,
     which is what the threshold and the release's missing week withhold
-    (ADR 0153). "Shown under its week" is `visible_cards` for the comment's own
-    section, week and stream, the read the instructor's report makes.
+    (ADR 0153). "Shown under its week" is `report_comments.shown_under_their_week`,
+    the instructor's report's own rule (`visible_cards`) asked once for every
+    decision in the log.
 
     The date is the decision's instant in the institution's zone, and no time.
 
@@ -811,52 +831,44 @@ def exclusion_log(
     names the section, the date, the role, the flag and another reviewer's
     reason, so it would tell a reader who teaches that section that it held a
     flagged comment, and roughly when, which their own report hides. The row is
-    removed, not redacted; the filter is `authz.taught_section_ids`, the same
-    one `_queue_select` applies.
+    removed, not redacted; the filter is `authz.taught_or_once_taught_section_ids`,
+    the same one `_queue_select` applies, so a section whose teaching grant the
+    roster ended stays out too (E6-09).
 
     Raises `NoReviewGrantError` for a reader whose own grant covers nothing.
     """
-    from app.services.report_comments import logged_decisions, visible_cards
+    from app.services.report_comments import logged_decisions, shown_under_their_week
 
     if person_id is None:
         raise NoReviewGrantError
     courses = _review_courses(session, person_id)
-    taught = taught_section_ids(session, person_id=person_id)
+    taught = taught_or_once_taught_section_ids(session, person_id=person_id)
     decisions = [
         decision
         for decision in logged_decisions(session, course_ids=courses.keys())
         if decision.section_id not in taught
     ]
     labels = _section_labels(session, {decision.section_id for decision in decisions})
+    # Once for every decision, in a fixed number of statements, so a log over a
+    # term costs what a log over one week costs (E6-09).
+    shown = shown_under_their_week(
+        session,
+        {(decision.answer_id, decision.section_id, decision.week_id) for decision in decisions},
+    )
     zone = ZoneInfo(settings.institution_timezone)
-    shown: dict[tuple[UUID, UUID, str], set[UUID]] = {}
-    rows: list[ExclusionLogRow] = []
-    for decision in decisions:
-        where = (decision.section_id, decision.week_id, decision.stream)
-        if where not in shown:
-            shown[where] = {
-                card.answer_id
-                for card in visible_cards(
-                    session,
-                    section_id=decision.section_id,
-                    week_id=decision.week_id,
-                    stream=decision.stream,
-                )
-            }
-        rows.append(
-            ExclusionLogRow(
-                section_label=labels[decision.section_id],
-                decision=decision.state,
-                decided_as=DeciderRole(decision.decided_as),
-                flagged=decision.flagged,
-                reason=decision.reason,
-                decided_on=decision.decided_at.astimezone(zone).date(),
-                excerpt=(
-                    decision.text[:EXCERPT_LENGTH] if decision.answer_id in shown[where] else None
-                ),
-            )
+    return [
+        ExclusionLogRow(
+            section_label=labels[decision.section_id],
+            decision=decision.state,
+            decided_as=DeciderRole(decision.decided_as),
+            flagged=decision.flagged,
+            reason=decision.reason,
+            decided_on=decision.decided_at.astimezone(zone).date(),
+            excerpt=decision.text[:EXCERPT_LENGTH] if decision.answer_id in shown else None,
+            is_undo=decision.is_undo,
         )
-    return rows
+        for decision in decisions
+    ]
 
 
 def _review_courses(session: Session, person_id: UUID | None) -> Mapping[UUID, AssignmentRole]:
@@ -887,12 +899,14 @@ def _queue_select(
     otherwise read that section's held text here, which the instructor door
     refuses them: one person, two doors, and the wider one would win. The rule
     is by section, so the course's other sections stay in the queue. Their
-    taught sections come from `authz.taught_section_ids`, the instructor
-    door's own source.
+    taught sections are `authz.taught_or_once_taught_section_ids`: the
+    instructor door's own source, plus every section whose teaching grant the
+    roster has since ended (E6-09). The leader door reads this select, so it
+    refuses those sections too.
     """
     from app.services.report_comments import COMMENT_VIEW, reported_status_of
 
-    taught = taught_section_ids(session, person_id=reader)
+    taught = taught_or_once_taught_section_ids(session, person_id=reader)
     answer_id = COMMENT_VIEW.c.answer_id
     harmful = (
         select(Classification.id)

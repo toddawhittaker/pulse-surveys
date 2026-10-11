@@ -149,7 +149,7 @@ View behavior:
 - Flags: `harmful`, `privacy`, `nonsense` (validity).
 - "Harmful" is not only abuse aimed at the instructor — it can be a self-harm disclosure. Copy and flows must not assume the instructor is the target.
 - Routing by harm type: abuse/attacks on instructor → the course's LEAD_FACULTY review queue; self-harm or student-welfare signals → CARE (Office of Community Standards) immediately, regardless of N or anonymity. Severe safety escalations bypass the graph and are never gated on response thresholds.
-- Small-N: flagged comments stay hidden from the instructor entirely (no chip, no count, no flag-type hint); flags still route immediately to the appropriate reviewer. If the section later crosses the threshold, the comment appears flagged-collapsed carrying any reviewer decision. Optional neutral trace: "1 response held for review" in participation, category never revealed.
+- Small-N: flagged comments stay hidden from the instructor entirely (no chip, no count, no flag-type hint); flags still route immediately to the appropriate reviewer. If the section later crosses the threshold, the comment appears flagged-collapsed carrying any reviewer decision.
 
 ### C3. Moderation lifecycle (comment)
 `published` → `flagged-collapsed` (hidden from students, chip + reason visible to instructor above small-N) → instructor review → `flagged-expanded` → `excluded` (with Undo) or `kept` ("Keep for students": comment publishes; quiet logged-decision line; Undo returns it to review). Excluded comments keep their text visible to the instructor (muted) above the exclusion notice.

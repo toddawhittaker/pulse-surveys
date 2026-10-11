@@ -63,21 +63,23 @@ refusals make it seven:
     unknown-address screen owes none. That answer is not contested, so it is
     recorded in the map below rather than in an ADR (the work order's ruling
     R2);
-  - `leadership_moderation`, E6-05's: the refusals the Lead Faculty review
-    queue, its decision door and the exclusion log answer with, registered in
-    `app/copy/leadership_moderation.py`. Each says what is not there for a
-    leader to read or decide, and none tells a student anything about their
-    identity, so they owe item 5 no line (the ruling on dispute E6-05-02). Whether
-    E6-06's moderation pages, when they join this prefix, owe one is E6-06's
-    question.
+  - `leadership_moderation`, E6-05's and E6-06's: the refusals the Lead Faculty
+    review queue, its decision door and the exclusion log answer with, registered
+    in `app/copy/leadership_moderation.py`, and the queue and log pages' own copy
+    in `frontend/src/copy/leadershipModerationCopy.ts`. **Since E6-09 it carries
+    item 5's line** (done-when 11): the two pages show students' comment text to
+    staff, as the instructor report does, so they carry the line as the report
+    does. Until then it sat in the no-line map on the ruling on dispute E6-05-02,
+    which was about the four refusals alone, and E6-06's pages joined the prefix
+    without the question being asked again (`docs/MISTAKES.md` entry 22).
 
 `GOVERNED_SURFACES` is the whole of that governance, asserted in both directions:
 a key whose prefix no surface governs is red, and a governed prefix that collects
 nothing is red.
 
 **And a surface either carries item 5's line or is named as owing none.** The
-survey and the report carry one, and `CONFIDENTIALITY_KEY_OF_SURFACE` says which
-entry it is. The gradebook is rendered by another product and says only what a
+survey, the report and (since E6-09) the moderation pages carry one, and
+`CONFIDENTIALITY_KEY_OF_SURFACE` says which entry it is. The gradebook is rendered by another product and says only what a
 score is made of; the unknown-address screen shows nobody's data at all; the
 comparison-set screen shows the definitions of sets and two counts, and no
 response of anybody's; the entry pages say what happened at a door before anybody
@@ -264,8 +266,9 @@ GOVERNED_SURFACES = {
     "entry": ENTRY,
     # E6-05's moderation review routes: the refusals the queue, the decision and
     # the log answer with, registered in `app/copy/leadership_moderation.py` (the
-    # ruling on dispute E6-05-02). E6-06's frontend copy for the same screens
-    # joins this prefix or registers its own row.
+    # ruling on dispute E6-05-02). E6-06's frontend copy for the same screens,
+    # `leadershipModerationCopy.ts`, joined this prefix, and since E6-09 the
+    # surface carries item 5's line (see `CONFIDENTIALITY_KEY_OF_SURFACE`).
     #
     # **The mutation this row kills** is the alternative the builder rejected:
     # the four sentences filed under `leadership_comparison_sets.` to turn the
@@ -293,9 +296,16 @@ GOVERNED_SURFACES = {
 # the same thing as being unreadable to the recogniser and is the correction the
 # security round made. `CONFIDENTIALITY_EXEMPT_KEYS` below carries the key and the
 # reason.
+#
+# **The moderation pages' line is `leadership_moderation.confidentiality`**
+# (E6-09 done-when 11), an entry in `leadershipModerationCopy.ts` that both the
+# queue page and the log page render. Both pages are one surface here because
+# they share one prefix, exactly as the report's regions are one surface, so the
+# surface carries one string and each page renders it.
 CONFIDENTIALITY_KEY_OF_SURFACE = {
     SURVEY: "student_survey.confidentiality",
     REPORT: "instructor_report_page.comments_note",
+    LEADERSHIP_MODERATION: "leadership_moderation.confidentiality",
 }
 
 # The other half of the surface model: a governed surface that owes item 5 no
@@ -332,15 +342,6 @@ SURFACES_WITH_NO_CONFIDENTIALITY_LINE = {
         "nobody's data — a heading and a message about what happened at the door — so, as on "
         "the unknown-address screen, there is nothing about anybody's identity to promise. "
         "Not contested, so recorded here rather than in an ADR (E5.1-03's ruling R2)."
-    ),
-    LEADERSHIP_MODERATION: (
-        "The refusals E6-05's Lead Faculty review routes answer with: no review grant, a "
-        "comment not in this reader's queue, a reason left blank, a reason too long. Each says "
-        "what is not there for a leader to read or decide, to a leader, and none tells a "
-        "student anything about their identity, so item 5's sentence would have no subject "
-        "here. Recorded here rather than in an ADR (the ruling on dispute E6-05-02, which adds "
-        "a confidentiality key only if the surface carries the line). Whether E6-06's "
-        "moderation pages owe one when they join this prefix is that ticket's question."
     ),
 }
 
@@ -489,6 +490,11 @@ ENTRY_NO_ACCESS_MESSAGE_KEY = "entry.no_access.message"
 # into the report surface's registry module beside its two siblings. The prefix
 # is `instructor_report.`, already governed, so it needs no row of its own.
 NOT_AN_INSTRUCTOR_KEY = "instructor_report.not_an_instructor"
+
+# E6-06's frontend copy module for the queue and log pages (its ticket's "Owns"),
+# by filename, so the canary below can require strings *from that file* rather
+# than from the prefix, which the backend refusals share.
+MODERATION_PAGES_COPY_FILENAME = "leadershipModerationCopy.ts"
 
 # The word SPEC §4.1 item 4 forbids by name ("'needs attention,' never
 # 'underperforming'"), appended to one entry's text by the planted-word test
@@ -2650,6 +2656,50 @@ def test_the_collector_finds_the_instructor_gates_refusal() -> None:
         (NOT_AN_INSTRUCTOR_KEY,),
         "The instructor gate answers this sentence to every student and every caller with no "
         "session at an instructor route. Until it is an entry, the vocabulary rules pass over it.",
+    )
+
+
+def test_the_collector_reads_the_moderation_pages_copy_module_and_its_confidentiality_line() -> (
+    None
+):
+    """E6-09 done-when 11's canary: the collector reads `leadershipModerationCopy.ts`.
+
+    The moderation surface collects from two sources, the backend refusals and
+    the pages' frontend file, and either source keeps
+    `test_every_governed_surface_collects_at_least_one_string` green alone. So
+    the frontend half is required in its own currency, by the file it came from:
+    the surface's confidentiality key is collected **from that file**, and the
+    file contributes at least one other entry under the prefix, so a file that
+    held nothing but the line would not pass for the pages' copy either.
+
+    Keys and sources only, never the sentence (`docs/MISTAKES.md` entry 19):
+    E6-09 owns the wording, which must carry one of `CONFIDENTIALITY_MARKERS` or
+    the exactly-once rule reads zero.
+
+    **The mutation it kills:** the line registered in the backend registry
+    instead of the pages' copy file (the pages render the frontend file, so the
+    registry entry would be an inventory line no page shows), and the file
+    dropping out of the collector's walk. **The near miss it spares:** the four
+    backend refusals, which share the prefix and are not read here. **A red here
+    means the moderation pages' copy is not collected, or the line is not in it.**
+    """
+    prefix = prefix_of(CONFIDENTIALITY_KEY_OF_SURFACE[LEADERSHIP_MODERATION])
+    from_the_pages = [
+        string
+        for string in collect_frontend_copy(FRONTEND_COPY_DIRECTORY)
+        if string.source.endswith(MODERATION_PAGES_COPY_FILENAME)
+    ]
+    keys = sorted(string.key for string in from_the_pages)
+    assert CONFIDENTIALITY_KEY_OF_SURFACE[LEADERSHIP_MODERATION] in keys, (
+        f"`{CONFIDENTIALITY_KEY_OF_SURFACE[LEADERSHIP_MODERATION]}` is not collected from "
+        f"`{MODERATION_PAGES_COPY_FILENAME}`, which yields {keys}. E6-09 done-when 11: the queue "
+        "and log pages show students' comment text to staff and carry item 5's line, as the "
+        "instructor report does, from the copy module they render."
+    )
+    others = [key for key in keys if key != CONFIDENTIALITY_KEY_OF_SURFACE[LEADERSHIP_MODERATION]]
+    assert others and all(prefix_of(key) == prefix for key in keys), (
+        f"`{MODERATION_PAGES_COPY_FILENAME}` yields {keys}. Its entries are the pages' own copy "
+        f"under `{prefix}.`, and the line beside nothing else is not the file the pages render."
     )
 
 

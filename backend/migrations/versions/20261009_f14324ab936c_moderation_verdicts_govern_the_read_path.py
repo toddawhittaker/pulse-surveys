@@ -32,7 +32,13 @@ in an autocommit block, and everything after it runs in the next transaction.
 The two tables are created before the SQL files, because the routing file grants
 on `threat_case` and its function inserts into it.
 
-**The downgrade** restores v003 of the view and v001 of the reveal, drops the
+**The downgrade refuses while `threat_case`, `moderation_attempt` or
+`moderation_state` holds a row.** Going down drops `threat_case`, the row a Care
+case opens with, `moderation_attempt`, the count that caps a comment no model
+can answer, and `moderation_state.sequence`, the only order two decisions
+written in one transaction have, so it would destroy all three. It raises `RuntimeError` before
+touching anything, as `20260904_a7c2f4e18b30` does. Over empty tables it
+restores v003 of the view and v001 of the reveal, drops the
 function, the trigger, both tables and the identity column, puts back the
 validity-only `CHECK`, and empties the owner role and keeps it (E0-10's decision
 for `pulse_reveal_definer`). The `MODERATION` label stays on the enum, because
@@ -179,7 +185,25 @@ def downgrade() -> None:
 
     A database walked back to here shows every comment unmoderated, which is the
     defect this revision corrects, and its reveal door answers for any comment.
+
+    Raises `RuntimeError`, having changed nothing, when `threat_case`,
+    `moderation_attempt` or `moderation_state` holds a row: going down would
+    destroy them.
     """
+    connection = op.get_bind()
+    held = {
+        table: connection.execute(sa.text(f"SELECT count(*) FROM public.{table}")).scalar_one()  # noqa: S608
+        for table in (THREAT_CASE, MODERATION_ATTEMPT, MODERATION_STATE)
+    }
+    if any(held.values()):
+        counts = ", ".join(f"{count} in `public.{table}`" for table, count in held.items())
+        raise RuntimeError(
+            f"This database holds moderation rows ({counts}). Going below this revision drops "
+            "`threat_case`, the row each Care case opens with, `moderation_attempt`, the count "
+            "that caps a comment no model can answer, and `moderation_state.sequence`, the only "
+            "order of two decisions written in one transaction, so it would destroy them. Nothing was changed. Keep the database at this revision, or export those rows "
+            "and remove them deliberately first."
+        )
     op.execute(DROP_THE_REVEAL)
     op.execute(read_sql("reveal_subject_for_answer_v001"))
     op.execute(REVOKE_THE_REVEALS_NEW_READ)

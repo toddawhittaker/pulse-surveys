@@ -10,7 +10,6 @@
   - Self-harm or student-welfare signals → the "Care" person in the Office of Community Standards, immediately, regardless of N or survey anonymity.
 - Small-N state: flagged comments stay hidden from the instructor (no chip, no count, no flag-type hint). Flags still route immediately to the appropriate reviewer. If the comment's stream later reaches the threshold of distinct commenters (SPEC §4, ADR 0182), the comment appears in flagged-collapsed state carrying any reviewer decision.
 - Severe/safety escalations are never gated on the commenter threshold and live outside the Monday Report.
-- Optional visible trace in small-N: a neutral "1 response held for review" line in participation, with no category revealed.
 
 ## Structure
 - Design system, session 1 of ~7. Handoff target: React/Tailwind via Claude Code.

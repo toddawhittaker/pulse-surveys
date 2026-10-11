@@ -635,7 +635,7 @@ export interface paths {
         };
         /**
          * The exclusion log inside my own grant
-         * @description Every exclusion and keep a person made inside the reader's own grant, newest first.
+         * @description Every exclusion, keep and undo a person made inside the reader's own grant, newest first.
          */
         readonly get: operations["read_exclusion_log_leadership_moderation_log_get"];
         readonly put?: never;
@@ -758,8 +758,7 @@ export interface components {
              * Format: uuid
              */
             readonly answer_id: string;
-            /** Flag */
-            readonly flag: ("harmful" | "privacy") | null;
+            readonly flag: components["schemas"]["HeldNoteType"] | null;
             /** Decided By You */
             readonly decided_by_you: boolean;
         };
@@ -989,7 +988,7 @@ export interface components {
              * Decision
              * @enum {string}
              */
-            readonly decision: "EXCLUDED" | "KEPT";
+            readonly decision: "PUBLISHED" | "FLAGGED_COLLAPSED" | "EXCLUDED" | "KEPT";
             /**
              * Decided As
              * @enum {string}
@@ -1006,6 +1005,8 @@ export interface components {
             readonly decided_on: string;
             /** Excerpt */
             readonly excerpt: string | null;
+            /** Is Undo */
+            readonly is_undo: boolean;
         };
         /**
          * OpenSurvey

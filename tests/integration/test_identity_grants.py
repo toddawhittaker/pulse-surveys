@@ -4549,6 +4549,22 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
 # connection write a row's key and its place in the order. The server's half —
 # accepted, refused, one column apart — is
 # `test_the_application_role_inserts_only_a_decisions_columns.py`.
+#
+# **E6-09 spends two, both `SELECT`, on `ended_teaching_grant`** (ADR 0183's
+# amendment, the ruling on dispute E6-09-01). ADR 0190's taught-section rule keeps a
+# section the reader teaches out of their review queue, their decision door and their
+# exclusion log, and E6-09 extends it to a section they *once* taught: the roster
+# deletes an ended teaching grant, so the only record that the reader taught the
+# section is this table. The application reads exactly the two columns that rule
+# needs:
+#
+#   - `ended_teaching_grant(person_id)`, `(section_id)` — who taught which section.
+#
+# **Writes stay only through the definer.** No `INSERT`, `UPDATE` or `DELETE` here,
+# and no read of the assignment, the date or the roster call: the record's
+# protection is that the application cannot forge, re-date or erase an ending, and a
+# two-column read leaves all three refused. The server's half is
+# `test_the_teaching_grant_ends_only_through_its_definer.py`.
 RUNTIME_COLUMN_PRIVILEGES = frozenset(
     {
         (APPLICATION_ROLE, "course", "lms_title", "UPDATE"),
@@ -4571,6 +4587,8 @@ RUNTIME_COLUMN_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "moderation_state", "decided_as", "INSERT"),
         (APPLICATION_ROLE, "moderation_state", "reason", "INSERT"),
         (APPLICATION_ROLE, "moderation_state", "is_undo", "INSERT"),
+        (APPLICATION_ROLE, "ended_teaching_grant", "person_id", "SELECT"),
+        (APPLICATION_ROLE, "ended_teaching_grant", "section_id", "SELECT"),
     }
 )
 

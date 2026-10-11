@@ -19,12 +19,20 @@
  * from below SPEC §4's threshold, and a week or an hour beside it would place
  * it (ADR 0190). The log carries a date and nothing finer.
  *
- * **A confidentiality promise.** These pages show comments to the people who
- * review them; item 5's sentence is a promise to the person answering a survey
- * and has no subject here.
+ * ## The confidentiality line
+ *
+ * `leadership_moderation.confidentiality` is SPEC §4.1 item 5's line for these
+ * two pages, and the only entry here that carries a confidentiality word. Both
+ * pages show students' comment text to staff, as the instructor report does, so
+ * both render it, as the report renders `instructor_report_page.comments_note`
+ * (E6-09).
  */
 
 export const LEADERSHIP_MODERATION_COPY = {
+  // Item 5's line, rendered under the intro on both pages.
+  'leadership_moderation.confidentiality':
+    'Comments are shown without the names of the students who wrote them.',
+
   // The two headings double as the leadership landing's link words, so a link
   // and the page it opens name the same thing identically.
   'leadership_moderation.queue.heading': 'Comments awaiting your review',
@@ -49,7 +57,7 @@ export const LEADERSHIP_MODERATION_COPY = {
 
   'leadership_moderation.log.heading': 'Exclusion log',
   'leadership_moderation.log.intro':
-    'Every exclusion and every keep made in the courses you review, newest first. It records both directions, so a fair comment that was quietly dropped leaves a trail.',
+    'Every exclusion and every keep made in the courses you review, and every undo of one, newest first. It records both directions, so a fair comment that was quietly dropped leaves a trail.',
   'leadership_moderation.log.loading': 'Opening the exclusion log…',
   'leadership_moderation.log.unavailable':
     'The exclusion log could not be loaded just now. Reload the page to try again.',
@@ -61,6 +69,11 @@ export const LEADERSHIP_MODERATION_COPY = {
   // One row. The decider is a role and never a person (SPEC §5.2).
   'leadership_moderation.log.excluded': 'Excluded',
   'leadership_moderation.log.kept': 'Kept',
+  // An undo, by the state it restored: a reversal, never a fresh decision.
+  'leadership_moderation.log.undone_to_excluded': 'Undo, back to excluded',
+  'leadership_moderation.log.undone_to_kept': 'Undo, back to kept',
+  'leadership_moderation.log.undone_to_flagged': 'Undo, back to flagged for review',
+  'leadership_moderation.log.undone_to_published': 'Undo, back to published',
   'leadership_moderation.log.role_instructor': 'Decided by the instructor',
   'leadership_moderation.log.role_lead_faculty': 'Decided by lead faculty',
   'leadership_moderation.log.role_chair': 'Decided by the chair',

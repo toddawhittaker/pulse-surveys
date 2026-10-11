@@ -111,6 +111,9 @@ LOG_REASON = "reason"
 LOG_DECIDED_ON = "decided_on"
 LOG_EXCERPT = "excerpt"
 LOG_DECISION = "decision"
+# The eighth, E6-09's done-when 7: whether the row undoes an earlier decision, so the
+# log shows an undo as a reversal rather than as a fresh exclusion or keep.
+LOG_IS_UNDO = "is_undo"
 LOG_ROW_FIELDS = frozenset(
     {
         LOG_SECTION_LABEL,
@@ -120,6 +123,7 @@ LOG_ROW_FIELDS = frozenset(
         LOG_DECIDED_ON,
         LOG_EXCERPT,
         LOG_DECISION,
+        LOG_IS_UNDO,
     }
 )
 

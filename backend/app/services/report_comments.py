@@ -216,7 +216,8 @@ from app.models.report import MODERATION_STATES, ModerationState, ReleaseBatch, 
 from app.models.survey import Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow, Week
 from app.services import clock
-from app.services.moderation import EXCLUDED, KEPT, holds_no_verdict
+from app.services.moderation import holds_no_verdict
+from app.services.survey_windows import closed_by
 
 # The initial moderation state, and the one a comment carries when nothing has
 # been decided about it (ADR 0145). Taken off the model's own vocabulary rather
@@ -337,9 +338,10 @@ class LoggedDecision:
 
     The comment's key, where it was written (section, week and stream, which
     the log's caller needs to ask whether the comment's own report shows it, and
-    never passes on), its text, the state it left (`EXCLUDED` or `KEPT`), the
-    role the decision was stored under, the stated reason, the instant, and
-    whether the AI flagged it.
+    never passes on), its text, the state it left (`EXCLUDED` or `KEPT` for a
+    decision; for an undo, whatever state it restored), the role the decision
+    was stored under, the stated reason, the instant, whether the AI flagged it,
+    and whether the row undoes an earlier decision.
     """
 
     answer_id: UUID
@@ -352,6 +354,7 @@ class LoggedDecision:
     reason: str | None
     decided_at: datetime
     flagged: bool
+    is_undo: bool
 
 
 def n_threshold() -> int:
@@ -826,12 +829,15 @@ def latest_decision(session: Session, answer_id: UUID) -> LatestDecision | None:
 def logged_decisions(
     session: Session, *, course_ids: Collection[UUID]
 ) -> tuple[LoggedDecision, ...]:
-    """Every exclusion and keep a person made about a comment in these courses, newest first.
+    """Every decision and undo a person made about a comment in these courses, newest first.
 
     E6-05's exclusion log (decision 1): every `moderation_state` row with a
-    decider whose state is `EXCLUDED` or `KEPT`. The router's flag has no
-    decider and is not here; an undo that restores an exclusion or a keep is a
-    decision row like any other and is.
+    decider. A decision leaves `EXCLUDED` or `KEPT`; an undo restores whatever
+    the comment held before, which may also be the router's flag or the
+    published state, and is marked `is_undo` (SPEC §8: "whether it undoes an
+    earlier decision"), so the log shows it as a reversal rather than as a fresh
+    decision or not at all (E6-09). The router's flag has no decider and is not
+    here.
 
     **The comments come through `report_comment` v004**, so a decision row about
     a threat or self-harm comment is not a log row: the view is the one place
@@ -855,13 +861,13 @@ def logged_decisions(
             ModerationState.reason,
             ModerationState.decided_at,
             _flag_of(answer_id).is_not(None),
+            ModerationState.is_undo,
         )
         .join(ModerationState, ModerationState.answer_id == answer_id)
         .join(Section, Section.id == COMMENT_VIEW.c.section_id)
         .where(
             Section.course_id.in_(list(course_ids)),
             ModerationState.decided_by_person_id.is_not(None),
-            ModerationState.state.in_((EXCLUDED, KEPT)),
         )
         .order_by(ModerationState.sequence.desc())
     )
@@ -877,9 +883,65 @@ def logged_decisions(
             reason=row[7],
             decided_at=row[8],
             flagged=row[9],
+            is_undo=row[10],
         )
         for row in session.execute(asked).all()
     )
+
+
+def shown_under_their_week(
+    session: Session, decided: Collection[tuple[UUID, UUID, UUID]]
+) -> set[UUID]:
+    """Which of these comments their own instructor's report shows under their week.
+
+    `visible_cards`'s rule, asked about many comments at once for the exclusion
+    log (E6-09), in at most two statements however many sections, weeks and
+    streams they span: a comment is shown when it is in `report_comment`, in no
+    release batch, its stream that week reached `n_threshold()` distinct
+    commenters (the count `stream_is_suppressed` reads), and its section-week is
+    moderated (the set `section_week_moderated` reads). Those are the helpers
+    `visible_cards` asks one section-week at a time, so the two answer alike
+    about one comment, and the log's excerpt invariant test holds every case.
+
+    `decided` is each comment's `(answer_id, section_id, week_id)`. The sections
+    and weeks narrow the grouped commenter count before it is grouped, so a read
+    costs what its own section-weeks cost rather than every section-week ever
+    written (E6-09's review round); a pair outside them is never joined to, so
+    the answer is the same.
+    """
+    if not decided:
+        return set()
+    answer_ids = sorted({answer_id for answer_id, _, _ in decided})
+    section_ids = sorted({section_id for _, section_id, _ in decided})
+    week_ids = sorted({week_id for _, _, week_id in decided})
+    commenters = _commenters_by_stream_week()
+    candidates = session.execute(
+        select(COMMENT_VIEW.c.answer_id, COMMENT_VIEW.c.section_id, COMMENT_VIEW.c.week_id)
+        .join(
+            commenters,
+            (commenters.c.section_id == COMMENT_VIEW.c.section_id)
+            & (commenters.c.week_id == COMMENT_VIEW.c.week_id)
+            & (commenters.c.stream == COMMENT_VIEW.c.stream),
+        )
+        .where(
+            COMMENT_VIEW.c.answer_id.in_(answer_ids),
+            commenters.c.section_id.in_(section_ids),
+            commenters.c.week_id.in_(week_ids),
+            commenters.c.commenters >= n_threshold(),
+            _in_no_release_batch(COMMENT_VIEW.c.answer_id),
+        )
+    ).all()
+    if not candidates:
+        return set()
+    section_weeks = sorted({(section_id, week_id) for _, section_id, week_id in candidates})
+    unmoderated = _unmoderated_section_weeks(
+        session, tuple_(Response.section_id, Response.week_id).in_(section_weeks)
+    )
+    return {
+        answer_id
+        for answer_id, section_id, week_id in candidates
+        if (section_id, week_id) not in unmoderated
+    }
 
 
 def _flag_of(answer_id: SQLColumnExpression[Any]) -> ColumnElement[str | None]:
@@ -1135,10 +1197,11 @@ def _held_comments(
 ) -> Subquery:
     """The comments SPEC §4 has been holding back — the one definition of "held".
 
-    Three conditions, one per concern, and none of them is another's spare: the
+    Four conditions, one per concern, and none of them is another's spare: the
     comment's **stream** was below the threshold of distinct commenters that week
     (counted by `_commenters_by_stream_week`, the count `stream_is_suppressed`
-    reads), its window has closed, and it is in no batch. The
+    reads), its window has closed, it is in no batch, and its section-week is
+    moderated (ADR 0187). The
     predicate is written once, as a subquery, and `cut_due_release_batches` selects
     from it twice: `_streams_whose_release_is_due` counts it to decide which
     `(section, term, stream)` the gate opens for, and
@@ -1218,7 +1281,7 @@ def _held_comments(
             # responses may yet reach the threshold, and a comment released from
             # it would then be shown twice — once in a batch and once under its
             # own week.
-            SurveyWindow.closes_at < now,
+            closed_by(now),
             # ADR 0146: a comment is released at most once.
             _in_no_release_batch(COMMENT_VIEW.c.answer_id),
             # ADR 0187: a section-week is released only once every comment in it

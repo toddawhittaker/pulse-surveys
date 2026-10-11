@@ -121,6 +121,7 @@ export function ReviewQueueRoute(): JSX.Element {
         {copy('leadership_moderation.queue.heading')}
       </h1>
       <p className="pulse-set-intro">{copy('leadership_moderation.queue.intro')}</p>
+      <p className="pulse-set-intro">{copy('leadership_moderation.confidentiality')}</p>
       {/* In the page from the first render, so what arrives in it is announced. */}
       <p className="pulse-set-announcement" role="status">
         {announcement}

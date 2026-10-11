@@ -95,7 +95,16 @@ SMALL_N_THEMES_ONLY = "small_n_themes_only"
 # the model "few students answered this week" would be false here. Pinned to the
 # prompt version that says so, and held to the same no-quotation rule.
 THIN_STREAM = "thin_stream_in_a_full_week"
-THIN_STREAM_PROMPT_VERSION = "summary.v3"
+
+# The prompt a stream below the threshold is summarized under (ADR 0162, bumped
+# by ADR 0188), written down for the same reason `PROMPT_VERSION` is. **Every
+# small-N case is pinned to it, not only the thin stream's** (E6-09 done-when 14):
+# `SMALL_N` and `SMALL_N_THEMES_ONLY` are below the threshold too, so the product
+# summarizes them under this prompt, and a case measured under `summary.v1` was
+# measuring a prompt no thin stream is ever sent.
+# `test_the_small_n_cases_are_pinned_to_the_small_n_prompt_the_application_renders`
+# holds it against `app.ai.tasks.SMALL_N_SUMMARY_PROMPT_VERSION`.
+SMALL_N_PROMPT_VERSION = "summary.v3"
 
 # How long a shared run of characters has to be before it is a quotation rather
 # than a coincidence — the same bound D9 gives the store-time guard, written out
@@ -243,6 +252,7 @@ SMALL_N_CASE = SummaryCase(
         ),
     ),
     family=SMALL_N,
+    prompt_version=SMALL_N_PROMPT_VERSION,
 )
 
 EMPTY_WEEK_CASE = SummaryCase(
@@ -350,6 +360,7 @@ SMALL_N_THEMES_ONLY_CASE = SummaryCase(
         ),
     ),
     family=SMALL_N_THEMES_ONLY,
+    prompt_version=SMALL_N_PROMPT_VERSION,
 )
 
 THIN_STREAM_CASE = SummaryCase(
@@ -376,7 +387,7 @@ THIN_STREAM_CASE = SummaryCase(
         ),
     ),
     family=THIN_STREAM,
-    prompt_version=THIN_STREAM_PROMPT_VERSION,
+    prompt_version=SMALL_N_PROMPT_VERSION,
 )
 
 CASES: tuple[SummaryCase, ...] = (

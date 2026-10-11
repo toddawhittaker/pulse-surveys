@@ -79,6 +79,12 @@ AN_ENDING_DAY = date(2026, 10, 2)
 
 CURRENT_ROLE = "SELECT current_user"
 HAS_TABLE_PRIVILEGE = "SELECT has_table_privilege(:relation, :privilege)"
+HAS_COLUMN_PRIVILEGE = "SELECT has_column_privilege(:relation, :column, :privilege)"
+
+# What `pulse_app` may do with `ended_teaching_grant`, from the ruling on dispute
+# E6-09-01 (option A) and not from the migration it polices (`docs/MISTAKES.md`
+# entry 19): read who taught which section, and nothing more.
+READ_OF_THE_ENDED_RECORD = frozenset({("person_id", "SELECT"), ("section_id", "SELECT")})
 # The columns of one relation the current role holds a privilege on, at column
 # grain. `has_column_privilege` answers for privileges held by membership and for
 # a whole-table grant as well, so a role holding either is found.
@@ -314,24 +320,30 @@ def test_the_application_role_still_holds_no_delete_on_role_assignment(
     ), "The teaching grant this test seeded is gone after a statement that should have been refused."
 
 
-def test_the_application_role_holds_nothing_on_the_ended_record(
+def test_the_application_role_reads_two_columns_of_the_ended_record_and_writes_nothing(
     application_session: Any, a_teaching_grant: dict[str, Any], committed_rows: Any
 ) -> None:
-    """ "It holds no `UPDATE` or `DELETE` on it", and inserts "only through the function".
+    """No write to the ended record but through the function, and a read of two columns.
 
-    E5.1-02's work order (D2) makes the record append-only by grant: `pulse_app`
-    holds nothing on it at all, and the only writer is the definer. So every
-    table privilege is asked about, every column, and three statements are tried
-    and must be refused — an insert of a well-formed row, an update and a delete,
-    each needing only the privilege it is about (no `RETURNING`, no `WHERE`).
+    Criterion 3: "it holds no `UPDATE` or `DELETE` on it", and inserts "only
+    through the function". E5.1-02's work order (D2) made the record append-only by grant, and gave
+    `pulse_app` nothing on it. The ruling on dispute E6-09-01 (option A) adds
+    exactly one thing: `SELECT (person_id, section_id)`, which E6-09 done-when 5
+    reads to keep a section a leader has taught out of their review. So: no
+    table-level privilege of any kind, column privileges exactly `SELECT` on those
+    two columns, and three statements tried and refused — an insert of a
+    well-formed row, an update and a delete, each needing only the privilege it is
+    about (no `RETURNING`, no `WHERE`).
 
     **The control** is `INSERT` on `nrps_call` and `pulse_app`'s columns of it,
     found by the same two queries (`docs/MISTAKES.md` entry 35).
 
-    **The mutations this kills:** any grant to `pulse_app` on the table — an
-    `INSERT` that lets the application forge an ending, an `UPDATE` that lets it
-    re-date one, a `DELETE` that lets it erase one, a `SELECT` that the record
-    does not need to be read through.
+    **The mutations this kills:** any grant beyond the ruling's — an `INSERT`
+    that lets the application forge an ending, an `UPDATE` that lets it re-date
+    one, a `DELETE` that lets it erase one, a whole-table `SELECT`, or a read of
+    another column (the assignment, the date, the roster call). **The near miss:**
+    the two-column read itself, which must be present, so a migration that
+    forgot the grant is red here as well as in done-when 5's tests.
     """
     require_the_ended_teaching_grant_table(committed_rows.session)
     require_the_application_role(application_session)
@@ -355,11 +367,25 @@ def test_the_application_role_holds_nothing_on_the_ended_record(
             text(HAS_TABLE_PRIVILEGE), {"relation": relation, "privilege": privilege}
         ).scalar_one()
     ]
-    assert not held, f"`pulse_app` holds {held} on `{relation}`; the work order gives it nothing."
-    columns = sorted(
-        application_session.execute(text(HELD_COLUMNS), {"relation": relation}).scalars()
+    assert not held, (
+        f"`pulse_app` holds {held} on the whole of `{relation}`; the ruling on dispute E6-09-01 "
+        "gives it no table-level privilege of any kind."
     )
-    assert not columns, f"`pulse_app` holds a column privilege on `{relation}`: {columns}."
+    column_privileges = {
+        (column, privilege)
+        for column in application_session.execute(
+            text(HELD_COLUMNS), {"relation": relation}
+        ).scalars()
+        for privilege in COLUMN_PRIVILEGES
+        if application_session.execute(
+            text(HAS_COLUMN_PRIVILEGE),
+            {"relation": relation, "column": column, "privilege": privilege},
+        ).scalar_one()
+    }
+    assert column_privileges == READ_OF_THE_ENDED_RECORD, (
+        f"`pulse_app` holds {sorted(column_privileges)} on the columns of `{relation}`; the ruling "
+        f"on dispute E6-09-01 gives it exactly {sorted(READ_OF_THE_ENDED_RECORD)}."
+    )
 
     values = {
         "assignment_id": uuid4(),
