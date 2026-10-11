@@ -42,7 +42,10 @@ type Load =
  * **The page reads what the server stores and shows no comment.** Each stream is
  * its summary, or a calm line where none is served, and its rating
  * distribution. The composer is the instructor's own, pointed at the on-behalf
- * doors, so the card students will see carries the reader's name and role.
+ * doors, so the card students will see carries the reader's name and role. It
+ * starts from the server's `response`: empty while the week is unanswered, and
+ * the published response, with its Edit, when the reader is the one who first
+ * published it and has come back.
  *
  * **Every refusal is the one 404**, which renders as the not-found state and
  * names nothing of the section: the server gives this page no way to tell a
@@ -122,7 +125,7 @@ export function OnBehalfPage({
           ))}
           <InstructorResponse
             onBehalf
-            initial={{ state: 'unanswered', response: null }}
+            initial={load.week.response ?? { state: 'unanswered', response: null, can_edit: false }}
             actions={actionsFor(sectionId, load.week.course_week)}
           />
           <p className="pulse-set-row-actions">
