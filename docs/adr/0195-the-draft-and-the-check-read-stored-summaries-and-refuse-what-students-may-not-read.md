@@ -98,3 +98,9 @@ owner's endpoint (SPEC §9.3).
 - Every model failure, an outage included, reads as the same 502.
 - `RESPONSE_TEXT_MAX` (4000) bounds the check's draft in `app.schemas.report`
   until E7-01's bound merges and replaces it.
+
+**Amended by E7-03 (ADR 0194's ticket).** The count rule also counts a
+hyphenated word when any part of it is a cardinal ("two-thirds"), adds
+"single", "dozens", "hundreds" and "tens" to the quantity words, and counts
+"third", "thirds", "quarter" and "quarters" only when the next word is "of"
+("a third of you"), so the ordinal in "the third week" stays allowed.

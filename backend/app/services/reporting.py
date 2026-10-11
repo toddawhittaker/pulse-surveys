@@ -2020,8 +2020,15 @@ _CARDINALS = frozenset(
     ).split()
 )
 _QUANTITY_WORDS = frozenset(
-    "hundred both half couple several few dozen pair handful majority minority".split()
+    (
+        "hundred hundreds tens both half couple several few dozen dozens pair handful majority "
+        "minority single"
+    ).split()
 )
+# The fraction words (E7-03, work order decision 8, as refined): a count token only
+# when the next word is "of" ("a third of you", "a quarter of the class"), because
+# without it "third" is the ordinal of "the third week", which is allowed.
+_FRACTION_WORDS = frozenset("third thirds quarter quarters".split())
 # The words that may stand immediately before a count token and make it the name
 # of a course structure rather than a count. Only the word immediately before, so
 # "Weeks 3 and 4" still counts at "4".
@@ -2036,22 +2043,31 @@ _STRUCTURE_WORDS = frozenset(
 _TOKEN = re.compile(r"\d+|[A-Za-z]+(?:-[A-Za-z]+)*")
 
 
-def _is_count_token(token: str) -> bool:
-    """A digit run, a cardinal word (compounds included), or a quantity word. Not an ordinal."""
+def _is_count_token(token: str, *, following: str) -> bool:
+    """A digit run, a quantity word, a fraction word before "of", or a word with a cardinal part.
+
+    A hyphenated word counts when **any** of its parts is a cardinal, so
+    "two-thirds" counts as surely as "twenty-one" (E7-03, work order decision 8).
+    Not an ordinal: "third" counts only as a fraction, with "of" after it.
+    """
     word = token.lower()
     if word.isdigit() or word in _QUANTITY_WORDS:
         return True
-    return all(part in _CARDINALS for part in word.split("-"))
+    if word in _FRACTION_WORDS:
+        return following.lower() == "of"
+    return any(part in _CARDINALS for part in word.split("-"))
 
 
 def states_a_count_of_people(text: str) -> bool:
     """Whether `text` carries a count token that no course-structure word licenses.
 
-    A count token is a digit run; a cardinal word from zero to ninety-nine,
-    hyphenated compounds included, or "hundred"; or one of both, half, couple,
-    several, few, dozen, pair, handful, majority and minority. It is allowed only
-    when the word immediately before it, in any case, is one of
-    `_STRUCTURE_WORDS`. Ordinals ("first", "second") are not count tokens.
+    A count token is a digit run; a cardinal word from zero to ninety-nine, or a
+    hyphenated word any part of which is one ("twenty-one", "two-thirds"); one of
+    hundred, hundreds, tens, both, half, couple, several, few, dozen, dozens,
+    pair, handful, majority, minority and single; or third, thirds, quarter or
+    quarters when the next word is "of". It is allowed only when the word
+    immediately before it, in any case, is one of `_STRUCTURE_WORDS`. Ordinals
+    ("first", "second", "the third week") are not count tokens.
 
     The rule is about any number, not only numbers of people, because nothing
     short of that closes (see the comment above). The name says what it protects.
@@ -2059,12 +2075,15 @@ def states_a_count_of_people(text: str) -> bool:
     (`refuse_a_draft_students_should_not_read`); the eval grader calls this same
     function, so there is one copy of the rule.
     """
-    previous = ""
-    for match in _TOKEN.finditer(text):
-        token = match.group(0)
-        if _is_count_token(token) and previous.lower() not in _STRUCTURE_WORDS:
+    tokens = [match.group(0) for match in _TOKEN.finditer(text)]
+    for index, token in enumerate(tokens):
+        previous = tokens[index - 1] if index > 0 else ""
+        following = tokens[index + 1] if index + 1 < len(tokens) else ""
+        if (
+            _is_count_token(token, following=following)
+            and previous.lower() not in _STRUCTURE_WORDS
+        ):
             return True
-        previous = token
     return False
 
 
