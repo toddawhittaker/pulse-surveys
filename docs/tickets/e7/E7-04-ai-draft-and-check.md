@@ -25,9 +25,17 @@ object out. `ResponseDraftOutput` and `DraftCheckOutput` already exist in
 `backend/app/ai/contracts.py`; nothing calls them yet.
 
 **The gather sends no comment.** Both tasks are fed the section-week's stored
-summaries (`_stored_summaries`, so a stored `summary.v1` row for a held stream
-is not served) with their stored themes and counts, and the rating
-distributions and response counts. Never raw comments. That is what keeps the
+summaries and their stored themes, and the rating distributions and response
+counts. Never raw comments. `_stored_summaries` returns no themes, so this
+ticket adds a themes read that applies the same filter: an old-format
+(`summary.v1`) row of a held stream gives no themes, as it gives no summary.
+
+**No per-theme count below the threshold (decision 12).** For a stream held
+below the threshold, the themes carry no count anywhere: not in either task's
+prompt, not in the check's payload, and so not on any path to published text.
+The check names such a theme without a count. A count of comments in a small
+week is the count §5.2 rules out as a participation trace. A shown stream's
+themes keep their stored counts. That is what keeps the
 no-quoting rule (§5.1) and the threshold (§4) intact for a draft students will
 read. Because no comment is rendered into these prompts, the carried entry on
 forged summary block boundaries does not trigger here; ADR 0195 says so.
@@ -37,8 +45,9 @@ pattern of `summarize_stream` (refuse an overclaimed count; never log comment
 or draft text):
 
 - **The check names only stored themes.** Every theme in `DraftCheckOutput` must
-  be one of the section-week's stored themes, with its stored count. Anything
-  else is refused as an invalid answer.
+  be one of the section-week's stored themes, with its stored count for a
+  shown stream and with no count for a held one. Anything else is refused as
+  an invalid answer.
 - **The draft reuses no word run from a comment students will not see.** Those
   are the section-week's comments that `report_comment` v004 returns and that
   are excluded, still flagged, or in a stream held below the threshold. The
@@ -65,8 +74,9 @@ task in `backend/app/ai/tasks.py` and its refusals in `services/reporting.py`;
   `backend/app/ai/prompts/draft_check.v1.md`.
 - `backend/app/ai/tasks.py`: the two task functions, through
   `AIGateway.run_task` and `load_prompt`.
-- `backend/app/ai/contracts.py`, only if the two contracts need a field
-  description corrected.
+- `backend/app/ai/contracts.py`: `CommentTheme.comment_count` is required today,
+  so the check's output gains a way to name a held stream's theme with no
+  count (decision 12). The weekly summary's contract keeps its required count.
 - `backend/app/services/reporting.py`: the gather and the two refusals.
 - `backend/app/api/instructor.py` and `backend/app/schemas/report.py`: the two
   routes and their payloads.
@@ -93,26 +103,36 @@ through `report_comment` v004).
    section-week and asserts it appears in neither task's rendered prompt, for a
    shown stream and a held one.
 2. **Draft-check themes equal stored ones.** A check answer naming a theme the
-   stored summary does not hold, or a stored theme with a different count, is
-   refused; an answer naming stored themes with their stored counts is
+   stored summary does not hold, or a shown stream's stored theme with a
+   different count, is refused; an answer naming stored themes with their stored counts is
    accepted. An empty list is accepted.
-3. **A draft that quotes a hidden comment is refused.** A draft reusing a word
+3. **No per-theme count below the threshold.** For a stream held below the
+   threshold, neither task's prompt nor the check's payload carries a
+   per-theme count. The check names the theme without a count, and the
+   published-text path gets no count to repeat. Themes are read through the
+   same filter as `_stored_summaries`: an old-format (`summary.v1`) row of a
+   held stream gives no themes. Each case is tested beside a shown stream that
+   does carry its counts. Marked `invariant`.
+4. **A draft that quotes a hidden comment is refused.** A draft reusing a word
    run from an excluded comment, from a still-flagged comment, and from a
    comment in a held stream is each refused, beside a draft reusing a run from
    a published comment in a shown stream, which is accepted. Marked
    `invariant`.
-4. **Nothing is logged.** Neither task logs a comment, a summary or the draft
-   text, on success or on refusal.
-5. **Only the instructor's own section.** Draft and check refuse a section the
+5. **Nothing is logged, and the refusal names nothing.** Neither task logs a
+   comment, a summary or the draft text, on success or on refusal. The
+   refusal of a draft is byte-identical whichever hidden comment matched, and
+   contains no word of the comment or the draft; this is tested with a planted
+   distinctive run.
+6. **Only the instructor's own section.** Draft and check refuse a section the
    instructor does not teach and a week not yet published, with one refusal
    that names nothing of the section, and run no model call. The gate runs at
    dispatch: no CSRF token is refused over HTTP beside the same request with it.
-6. **Mock answers exist.** `mock-ai` answers both tasks, so 05's page and 09's
+7. **Mock answers exist.** `mock-ai` answers both tasks, so 05's page and 09's
    drive run without a provider.
-7. **Typed eval cases.** Each task has typed cases for the behaviours above, and
+8. **Typed eval cases.** Each task has typed cases for the behaviours above, and
    ships no floor.
-8. **The records match.** ADR 0195 records the gather, the two refusals, the
-   instructor's summary rule beside 03's, why no floor, and why the forged
+9. **The records match.** ADR 0195 records the gather, the two refusals, the
+   count rule below the threshold, the instructor's summary rule beside 03's, why no floor, and why the forged
    block boundaries entry does not trigger.
 
 ## Shares files with
