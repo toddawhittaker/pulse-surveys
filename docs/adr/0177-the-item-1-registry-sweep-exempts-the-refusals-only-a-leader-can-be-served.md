@@ -1,6 +1,6 @@
 # 0177 — The item 1 registry sweep exempts, by key, the refusals only a leader can be served
 
-**Status:** Accepted — E5-13, narrowing a SPEC §4.1 item 1 gate. Settles `docs/disputes/E5-13-01.md`.
+**Status:** Accepted — E5-13, narrowing a SPEC §4.1 item 1 gate. Settles `docs/disputes/E5-13-01.md`. **Amended by [0196](0196-the-leadership-gate-answers-another-role-403-marked-insufficient-scope.md) (E7-08):** `require_leadership` now answers `not_leadership` only to a token that does not verify, and a real session in another role gets a second sentence, `leadership_comparison_sets.not_your_role`; both are sentences a student can be served, so both stay inside the sweep and neither is in the exempt tuple.
 
 ## Context
 
