@@ -69,8 +69,7 @@ The reasoning, and the alternative that was rejected, are in
 | `summary.v2.md` | Weekly summary, small-N stream | Themes only, no reused words | E4-15 | no — superseded by v3 |
 | `summary.v3.md` | Weekly summary, small-N stream | Themes only, no reused words; speaks of the stream, not the week | E6-02 | yes |
 | `moderation.v1.md` | Moderation | clear / harmful / privacy / nonsense / threat / self_harm | E6-02 | yes |
-| `response_draft.v1.md` | Response draft | A draft response from the week's stored summaries, themes and ratings | E7-04 | no — superseded by v2 |
-| `response_draft.v2.md` | Response draft | The same; a week with a held stream uses no number but a course structure's | E7-04's fix round | yes |
+| `response_draft.v3.md` | Response draft | A draft response from the week's stored summaries, themes and ratings, in its author's role; a week with a held stream uses no number but a course structure's | E7-10 | yes |
 | `draft_check.v1.md` | Draft check | The week's stored themes a draft does not address, each with its count or none | E7-04 | yes |
 
 **Two files for one task is what the rule above looks like when it is used**, and
@@ -89,6 +88,17 @@ forbidding keys that the gateway's structured-output schema already makes
 impossible to return. ADR 0120 records the trim and its reason.
 
 Every task in `app/ai/contracts.py` now has a prompt here.
+
+**`response_draft.v1.md` and `v2.md` were deleted, which the rule above
+forbids for a reason that does not reach them.** A version is kept because a
+stored output cites it; a draft is never stored, so no row names either
+version, and keeping them only kept an instructor-voiced prompt on disk beside
+the one that replaced it. E7-10 deleted both with their pinned hashes (ADR 0195).
+
+**The draft has a second slot that is not student text either**:
+`[[AUTHOR_ROLE]]`, the role the response will be published under, filled from
+a fixed phrase per role in `app.ai.tasks.AUTHOR_ROLE_PHRASES` and placed in the
+instructions, before the week.
 
 **The response draft and the draft check carry no student text**, and their
 input is shaped differently from every other prompt's for that reason. Each is
