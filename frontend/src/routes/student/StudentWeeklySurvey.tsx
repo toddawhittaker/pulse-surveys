@@ -256,7 +256,12 @@ function SectionSurvey({
         </p>
       )}
       <p className="pulse-section-reply-link">
-        <a href={resultsAddress(section.section_id)}>
+        <a
+          href={resultsAddress(section.section_id)}
+          aria-label={fillResultsCopy('student_survey.results_see_reply_link_named', {
+            course: section.course_label,
+          })}
+        >
           {resultsCopy('student_survey.results_see_reply_link')}
         </a>
       </p>

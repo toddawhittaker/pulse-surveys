@@ -102,7 +102,7 @@ test("draft, check, edit clears the check, publish, read as students do, then ed
   const panel = composer.getByRole("region", { name: CHECK_PANEL });
 
   // The draft fills the editor and the page posts nothing.
-  await composer.getByRole("button", { name: "Use draft" }).click();
+  await composer.getByRole("button", { name: "Draft with AI", exact: true }).click();
   await expect(editor).not.toHaveValue("");
 
   // A check shows for the text it ran on, and goes at the next keystroke.

@@ -21,6 +21,9 @@ export const STUDENT_RESULTS_COPY = {
   // the reply. `{names}` is the instructors' own names, comma-joined.
   'student_survey.results_with_instructors': 'with {names}',
   'student_survey.results_see_reply_link': 'See your instructor’s reply',
+  // The link's accessible name: the visible text first, then the course, so
+  // several links on one page are told apart.
+  'student_survey.results_see_reply_link_named': 'See your instructor’s reply for {course}',
 
   // The page.
   'student_survey.results_heading': 'Your instructor’s reply',

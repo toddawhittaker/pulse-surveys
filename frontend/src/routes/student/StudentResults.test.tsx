@@ -162,6 +162,10 @@ describe('paging', () => {
     await screen.findByText(UNANSWERED);
     expect(router.state.location.pathname).toBe(WEEK(1));
     expect(asked).toContain(WEEK(1));
+    // The student's place is the page, not the button that is now disabled.
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1 }));
+    });
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Previous week' }).disabled).toBe(
       true,
     );

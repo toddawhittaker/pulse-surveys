@@ -7,12 +7,8 @@
   margin-top: var(--space-6);
 }
 
-.pulse-instructor-response__live:empty {
-  display: none;
-}
-
-.pulse-instructor-response__live,
-.pulse-instructor-response__busy {
+.pulse-instructor-response__busy,
+.pulse-instructor-response__advisory {
   margin: var(--space-2) 0;
   font-size: var(--text-1);
   color: var(--spruce-60);
@@ -90,7 +86,7 @@
   background: var(--spruce);
 }
 
-.pulse-instructor-response__button[disabled] {
+.pulse-instructor-response__button[aria-disabled='true'] {
   opacity: 0.6;
   cursor: default;
 }
@@ -112,6 +108,12 @@
   font-size: var(--text-1);
   line-height: 1.5;
   color: var(--madder);
+}
+
+.pulse-instructor-response__advisory {
+  margin: 0;
+  font-size: var(--text-1);
+  line-height: 1.5;
 }
 
 .pulse-instructor-response__themes {

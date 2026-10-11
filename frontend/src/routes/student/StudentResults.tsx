@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { useNavigate, useParams } from '@tanstack/react-router';
 
 import {
@@ -40,12 +40,27 @@ import { copy, fillCopy } from '../../copy/studentResults';
 export const LATEST_RESULTS_ROUTE = '/student/sections/$sectionId/results';
 export const WEEK_RESULTS_ROUTE = '/student/sections/$sectionId/weeks/$courseWeek/results';
 
+/**
+ * Set when the student picks a week, so that focus moves to the heading once
+ * that week's answer is drawn, not on the first load. Module-level because
+ * moving between the "latest" and a named week changes the route, which
+ * mounts a new page; a flag held by the old one would be lost with it.
+ */
+let focusHeadingOnLoad = false;
+
 const HEADING_ID = 'pulse-student-results-heading';
 
 type Load =
   | { readonly kind: 'loading' }
-  | { readonly kind: 'read'; readonly answer: Exclude<ResultsRead, { kind: 'results' }> }
-  | { readonly kind: 'results'; readonly results: StudentWeekResults; readonly week: number | null };
+  | {
+      readonly kind: 'read';
+      readonly answer: Exclude<ResultsRead, { kind: 'results' }>;
+    }
+  | {
+      readonly kind: 'results';
+      readonly results: StudentWeekResults;
+      readonly week: number | null;
+    };
 
 /** A course week from an address, or `null` for anything that is not a positive whole number. */
 function weekOfAddress(raw: string | undefined): number | null | undefined {
@@ -66,6 +81,7 @@ export function StudentResults({
 }): JSX.Element {
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
   const [timeZone, setTimeZone] = useState<string | undefined>(undefined);
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     let live = true;
@@ -80,9 +96,18 @@ export function StudentResults({
     }
     void readStudentResults(sectionId, courseWeek).then((answer) => {
       if (!live) return;
+      if (focusHeadingOnLoad) {
+        focusHeadingOnLoad = false;
+        // After the state below renders; the heading exists in every state.
+        requestAnimationFrame(() => headingRef.current?.focus());
+      }
       setLoad(
         answer.kind === 'results'
-          ? { kind: 'results', results: answer.results, week: courseWeek ?? null }
+          ? {
+              kind: 'results',
+              results: answer.results,
+              week: courseWeek ?? null,
+            }
           : { kind: 'read', answer },
       );
     });
@@ -104,9 +129,18 @@ export function StudentResults({
 
   return (
     <main className="pulse-survey" data-testid="pulse-student-results" aria-labelledby={HEADING_ID}>
-      <h1 id={HEADING_ID}>{copy('student_survey.results_heading')}</h1>
+      <h1 id={HEADING_ID} ref={headingRef} tabIndex={-1}>
+        {copy('student_survey.results_heading')}
+      </h1>
       <PulseDivider />
-      <Body load={load} timeZone={timeZone} onSelectWeek={onSelectWeek} />
+      <Body
+        load={load}
+        timeZone={timeZone}
+        onSelectWeek={(week) => {
+          focusHeadingOnLoad = true;
+          onSelectWeek(week);
+        }}
+      />
     </main>
   );
 }
@@ -160,7 +194,9 @@ function Body({
           {/* A held week shows no number, not even its own week's. */}
           {results.state === 'awaiting' ? null : (
             <p className="pulse-eyebrow">
-              {fillCopy('student_survey.results_week_label', { week: String(current) })}
+              {fillCopy('student_survey.results_week_label', {
+                week: String(current),
+              })}
             </p>
           )}
           <WeekNav
