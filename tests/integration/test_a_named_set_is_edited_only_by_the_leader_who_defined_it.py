@@ -16,7 +16,8 @@ refuses every PUT, so it is paired with her own set being edited. "Her own set
 is deleted" is satisfied by a route that deletes anything, so it is paired with
 the other leader's set surviving. And the refusal is read through the body: a
 403 carrying `NOT_THE_SETS_DEFINER` is the service's scope read, where a 404
-would be the set lookup and a 401 the role gate.
+would be the set lookup, and a 401 or the gate's own not-your-role 403 (E7-08)
+the role gate.
 
 **The stored row is asserted, not the return value.** A route that answered 403
 and wrote anyway would pass a status-only test, and the set it changed is the
@@ -65,7 +66,8 @@ def test_another_leaders_set_is_refused_on_a_write_and_survives_it(
     The set planted for the second leader is a set this session may read and may
     not change. The refusal carries `NOT_THE_SETS_DEFINER`, which is the
     sentence the work order puts on the service's scope read — a 404 here would
-    say the set could not be found and a 401 that the session is not leadership,
+    say the set could not be found and a 401 or the gate's 403 that the session
+    is not leadership,
     and neither is the fact under test.
 
     **The mutations this kills:** a scope check written as "the session is

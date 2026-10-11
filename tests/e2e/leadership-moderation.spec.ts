@@ -20,9 +20,14 @@
 // out, so the queue it reads is hers by SPEC §2.1's own rule and the comment is
 // in a course she leads and does not teach.
 //
+// **And who the pages turn away (E7-08).** The learner, signed in as a student,
+// opens each leadership page and reads that it is not part of their role; with
+// the same session's signature broken, each page says the session ended.
+//
 // **Shared state.** The scheduler is stopped first (`stopTheScheduler` says
 // why), the clock is moved and cleared inside a `finally`, and every row this
-// file writes is deleted afterwards. Staff launches happen at the real clock,
+// file writes is deleted afterwards — only a row this run wrote, after a stale
+// one from a killed run is removed first (E6-06's two LOWs, closed by E7-08). Staff launches happen at the real clock,
 // for the reason `instructor-report.spec.ts` measured: a roster sync that first
 // sights a member while the clock is moved dates the enrollment in the future.
 //
@@ -37,7 +42,14 @@
 import { test, expect, type Page } from '@playwright/test';
 
 import { clearTheClock, setTheClockTo } from './support/clock';
-import { launchAs, placementInto, signInAs } from './support/doors';
+import {
+  SESSION_STORAGE_KEY,
+  TOOL_ORIGIN,
+  launchAs,
+  placementInto,
+  sessionToken,
+  signInAs,
+} from './support/doors';
 import {
   databaseStatement,
   deriveSurveyWindows,
@@ -49,6 +61,7 @@ import {
   INSTRUCTOR_SUBJECT,
   INSTRUCTOR_VIEW,
   LEARNER_SUBJECT,
+  STUDENT_VIEW,
   SUBMIT,
   chooseRating,
   clearTheWeek,
@@ -103,6 +116,28 @@ const MAX_TABS = 40;
 const THE_COURSE = `(select distinct course_id from section where lms_section_code = '${BIOL.code}')`;
 const THE_LEAD = `(select id from person where identity_name = '${LEAD_PERSON_NAME}')`;
 
+// The three leadership pages and the read each one makes on load (E7-08,
+// criteria 5 and 6). The page paths are the router's (`exit-moderation.spec.ts`
+// reaches the log the same way); the read paths are the application's, matched
+// on the path's end because the browser reaches them under its own prefix.
+const LEADERSHIP_PAGES = [
+  { page: '/app/leadership/review-queue', read: '/leadership/moderation/queue' },
+  { page: '/app/leadership/exclusion-log', read: '/leadership/moderation/log' },
+  { page: '/app/leadership/comparison-sets', read: '/leadership/comparison-sets' },
+] as const;
+
+// Ruling 11's two answers, and the two sentences a page renders for them. The
+// role sentence is matched on the words the ticket settles ("not part of your
+// role") and not on a whole sentence it does not; the ended sentence is the one
+// the ticket quotes the pages rendering today.
+const NOT_YOUR_ROLE_STATUS = 403;
+const SIGNED_OUT_STATUS = 401;
+const NOT_YOUR_ROLE = /not part of your role/i;
+const SESSION_ENDED = 'The session this page was opened with has ended.';
+
+let placement = '';
+let mappedTheLead = false;
+
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
@@ -111,7 +146,7 @@ test.beforeAll(async ({ browser }) => {
   const context = await browser.newContext();
   const page = await context.newPage();
   try {
-    const placement = await placementInto(page, LEARNER_SUBJECT, BIOL.label);
+    placement = await placementInto(page, LEARNER_SUBJECT, BIOL.label);
     expect(
       await placementInto(page, INSTRUCTOR_SUBJECT, BIOL.label),
       `The mock platform should offer the instructor and the learner the same link into ${BIOL.label}.`,
@@ -151,10 +186,27 @@ test.beforeAll(async ({ browser }) => {
     ).toBe(1);
 
     // The reviewer leads the course for this run (SPEC §2.1's mapping).
+    //
+    // **A row a killed run left behind is removed first** (E6-06's review, LOW
+    // 1). The seed maps `BIOL 215` to nobody and this pairing exists only in
+    // the e2e suite, so a `(BIOL 215, the lead)` row found here is a stale one;
+    // the suite runs on one worker (`playwright.config.ts`), so no other file
+    // is holding it at this moment. Without this, a stale row made the insert
+    // below a no-op and the `afterAll` of this run deleted a row it never wrote.
     databaseStatement(
-      `insert into lead_faculty_mapping (person_id, course_id) ` +
-        `select ${THE_LEAD}, ${THE_COURSE} on conflict (course_id) do nothing;`,
+      `delete from lead_faculty_mapping where course_id = ${THE_COURSE} ` +
+        `and person_id = ${THE_LEAD};`,
     );
+    // **Only a row this run wrote is recorded for deletion** (LOW 2). The count
+    // comes from the insert's own `returning`, so a conflict with somebody
+    // else's lead of the course records nothing, and the check after it fails
+    // naming that.
+    mappedTheLead =
+      databaseStatement(
+        `with inserted as (insert into lead_faculty_mapping (person_id, course_id) ` +
+          `select ${THE_LEAD}, ${THE_COURSE} on conflict (course_id) do nothing returning 1) ` +
+          `select count(*) from inserted;`,
+      ) === '1';
     expect(
       databaseStatement(
         `select count(*) from lead_faculty_mapping where course_id = ${THE_COURSE} ` +
@@ -172,10 +224,13 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext();
   try {
     try {
-      databaseStatement(
-        `delete from lead_faculty_mapping where course_id = ${THE_COURSE} ` +
-          `and person_id = ${THE_LEAD};`,
-      );
+      if (mappedTheLead) {
+        databaseStatement(
+          `delete from lead_faculty_mapping where course_id = ${THE_COURSE} ` +
+            `and person_id = ${THE_LEAD};`,
+        );
+        mappedTheLead = false;
+      }
       clearTheWeek([BIOL.code]);
     } finally {
       await clearTheClock(await context.newPage());
@@ -240,4 +295,111 @@ test('a lead excludes a queued comment from the keyboard and finds it in the log
   await expect(row).toContainText(NO_EXCERPT);
   await expect(row).not.toContainText(HELD_COMMENT);
   await expect(row).not.toContainText(/\d{1,2}:\d{2}/);
+});
+
+/** Launch the learner into `BIOL-215-R3WW` and answer the session the page now holds. */
+async function signedInAsTheLearner(page: Page): Promise<string> {
+  await launchAs(page, LEARNER_SUBJECT, placement);
+  await expect(page.getByTestId(STUDENT_VIEW)).toBeVisible();
+  const token = await sessionToken(page);
+  expect(token, 'The learner’s launch left no session in the page.').not.toBeNull();
+  return token ?? '';
+}
+
+/**
+ * Open one leadership page and answer the status of the read it makes on load.
+ *
+ * The status is read off the wire, so a sentence on the page is tied to the
+ * answer the server gave rather than to anything the page decided by itself —
+ * a page that guessed "not your role" from the token's own claims would render
+ * the sentence and never ask (`docs/MISTAKES.md` entry 3).
+ */
+async function openAndReadItsStatus(page: Page, path: string, read: string): Promise<number> {
+  // Only the page's own API read: the document navigation to
+  // `/app/leadership/comparison-sets` ends with that read's path too, and is the
+  // SPA's HTML answered 200 to anybody.
+  const answered = page.waitForResponse((response) => {
+    const pathname = new URL(response.url()).pathname;
+    const kind = response.request().resourceType();
+    return (
+      (kind === 'fetch' || kind === 'xhr') &&
+      !pathname.startsWith('/app/') &&
+      pathname.endsWith(read) &&
+      response.request().method() === 'GET'
+    );
+  });
+  await page.goto(`${TOOL_ORIGIN}${path}`);
+  return (await answered).status();
+}
+
+/**
+ * The same token with its signature broken: a session the server will not verify.
+ *
+ * The first character of the signature is changed, never the last: the last
+ * base64url character of a 32-byte signature carries padding bits, and a
+ * decoder that ignores them would read a changed last character as the same
+ * signature.
+ */
+function withABrokenSignature(token: string): string {
+  const [header, claims, signature] = token.split('.');
+  const first = signature.startsWith('A') ? 'B' : 'A';
+  return `${header}.${claims}.${first}${signature.slice(1)}`;
+}
+
+test('a signed-in student opening each leadership page reads that it is not part of their role', async ({
+  page,
+}) => {
+  // E7-08, criteria 5 and 6. The learner is signed in, in another role: the
+  // server answers each page's read 403 (ruling 11), and the page says the page
+  // is not part of their role rather than that the session ended — which was
+  // untrue, and was what every 401 rendered.
+  test.setTimeout(CASE_TIMEOUT_MS);
+  await signedInAsTheLearner(page);
+
+  for (const { page: path, read } of LEADERSHIP_PAGES) {
+    const status = await openAndReadItsStatus(page, path, read);
+    expect(status, `${path}'s read answered the learner's live session ${status}.`).toBe(
+      NOT_YOUR_ROLE_STATUS,
+    );
+    await expect(
+      page.getByText(NOT_YOUR_ROLE).first(),
+      `${path} did not say the page is not part of the learner's role.`,
+    ).toBeVisible();
+    await expect(
+      page.getByText(SESSION_ENDED),
+      `${path} told a signed-in learner that their session ended.`,
+    ).toHaveCount(0);
+  }
+});
+
+test('a leadership page opened with a session the server will not verify reads the ended-session sentence', async ({
+  page,
+}) => {
+  // E7-08, criteria 5 and 6, the other way round, and the near miss for the
+  // case above: the same learner and the same tab, and the only change is the
+  // token's signature. The server answers 401, and the page says the session
+  // ended and never that the page is not part of the reader's role.
+  test.setTimeout(CASE_TIMEOUT_MS);
+  const token = await signedInAsTheLearner(page);
+  await page.evaluate(
+    ([key, value]) => {
+      window.sessionStorage.setItem(key, value);
+    },
+    [SESSION_STORAGE_KEY, withABrokenSignature(token)],
+  );
+
+  for (const { page: path, read } of LEADERSHIP_PAGES) {
+    const status = await openAndReadItsStatus(page, path, read);
+    expect(status, `${path}'s read answered a session it cannot verify ${status}.`).toBe(
+      SIGNED_OUT_STATUS,
+    );
+    await expect(
+      page.getByText(SESSION_ENDED).first(),
+      `${path} did not say the session ended.`,
+    ).toBeVisible();
+    await expect(
+      page.getByText(NOT_YOUR_ROLE),
+      `${path} told a reader whose session ended that the page is not part of their role.`,
+    ).toHaveCount(0);
+  }
 });

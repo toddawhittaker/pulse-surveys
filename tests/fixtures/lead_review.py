@@ -414,8 +414,26 @@ class LeadReviewWorld:
             single_primary_key(require_table(self.world.tables, "lti_platform"))
         ]
 
-    def minted(self, *, role: str, person_id: Any, user_id: Any, subject: str) -> str:
-        """`tests/fixtures/named_sets.py::NamedSetWorld.minted`, copied (entry 37)."""
+    def minted(
+        self,
+        *,
+        role: str,
+        person_id: Any,
+        user_id: Any,
+        subject: str,
+        now: int | None = None,
+        secret: bytes | None = None,
+    ) -> str:
+        """`tests/fixtures/named_sets.py::NamedSetWorld.minted`, copied (entry 37).
+
+        **`now` and `secret` are E7-08's two additions**, both optional and both
+        passed through untouched. `now` is `issue_session`'s own injectable issue
+        instant (epoch seconds, E1-08's interface ruling, which
+        `tests/unit/test_session_module.py` drives), so an expired token is a token
+        the module itself signed in the past rather than one this file assembled.
+        `secret` replaces the application's secret, for a token that is correctly
+        shaped and wrongly signed. Left at `None`, each is exactly what it was.
+        """
         import inspect
 
         import app.services.session as session_module
@@ -446,10 +464,17 @@ class LeadReviewWorld:
             "role": member,
             "sub": subject,
             "iss": registration.platform_row[registration.issuer_column],
-            "secret": session_secret(self.configured),
+            "secret": session_secret(self.configured) if secret is None else secret,
             "user_id": None if user_id is None else str(user_id),
             naming_a_person[0]: None if person_id is None else str(person_id),
         }
+        if now is not None:
+            if "now" not in parameters:
+                pytest.fail(
+                    f"`issue_session{inspect.signature(issue)}` takes no `now`. E1-08's interface "
+                    "ruling gives it one (epoch seconds), and an expired token is minted through it."
+                )
+            values["now"] = now
         unfilled = [
             name
             for name, parameter in parameters.items()
