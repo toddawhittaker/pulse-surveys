@@ -58,7 +58,7 @@ sentence from `app.copy`, whatever triggered it and whatever the model did:
 instructor already reads that summary on the report, and is the author of
 whatever is published; the run refusal blocks quoting the excluded comment.
 The on-behalf gather, which E7-03 builds behind `for_on_behalf=True`, leaves
-such a summary out (the E7 breakdown's ruling 9). Until 03 lands, that flag raises.
+such a summary out (the E7 breakdown's ruling 9). E7-03 built it (ADR 0194).
 
 **The forged summary block boundaries entry does not trigger here.** No comment
 is rendered into either prompt. The summaries and labels that are rendered are

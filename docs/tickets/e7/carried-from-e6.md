@@ -261,7 +261,10 @@ excluded comment to a reader it was excluded from. **Owner:** the first ticket
 that shows a stored summary to anyone but the section's instructor (E8 or E9).
 **Done when:** no reader other than the instructor receives a summary written
 from a comment that now holds an exclusion, with a test that excludes a
-summarized comment and reads the summary as that reader.
+summarized comment and reads the summary as that reader. **Closed for the
+on-behalf reader by E7-03** (ADR 0194): the on-behalf read and draft gather
+leave out a summary not strictly later than the week's latest exclusion or undo
+of a keep. E8 and E9 inherit the rule for their own readers.
 
 ### A signed-in reader without the role is told their session ended
 
