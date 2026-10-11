@@ -1903,10 +1903,13 @@ def _served_summary_rows(session: Session, *, section_id: UUID, week_id: UUID) -
     ]
 
 
-def _on_behalf_summary_rows(session: Session, *, section_id: UUID, week_id: UUID) -> list[Any]:
+def _summary_rows_since_latest_removal(
+    session: Session, *, section_id: UUID, week_id: UUID
+) -> list[Any]:
     """The rows `_served_summary_rows` serves, less any written before the week's latest removal.
 
-    E7's ruling 9, for the on-behalf reader (E7-03, done-when 10). A summary is
+    E7's ruling 9, for the on-behalf reader (E7-03, done-when 10), and since
+    E7-10 for every draft and check, the instructor's included. A summary is
     generated over the comments a moderator was not holding at the time. A
     decision that later takes a comment out of that set — an exclusion, or the
     undo of a keep, which returns the comment to review — leaves a summary that
@@ -1917,7 +1920,9 @@ def _on_behalf_summary_rows(session: Session, *, section_id: UUID, week_id: UUID
     "Out of the set" is `HELD_MODERATION_STATES`, the states the summary walk
     itself leaves out, and the decision instants are read by
     `report_comments.latest_decision_into`, the module that owns reading
-    `moderation_state`. The instructor's own reads keep such a summary (ADR 0195).
+    `moderation_state`. The instructor's report keeps such a summary: they read
+    it there already, and nothing is published from it unless they write it
+    themselves. What a model writes for students never starts from one (ADR 0195).
     """
     removed_at = latest_decision_into(
         session, section_id=section_id, week_id=week_id, states=HELD_MODERATION_STATES
@@ -1933,7 +1938,7 @@ def on_behalf_streams(
 ) -> list["OnBehalfStream"]:
     """One section-week's streams as the on-behalf reader reads them (E7-03, decision 5).
 
-    Per stream: the stored summary (through `_on_behalf_summary_rows`, so a
+    Per stream: the stored summary (through `_summary_rows_since_latest_removal`, so a
     summary written before the week's latest removal is absent), the week's
     response count, and the rating distribution as the report shows it. **No
     comment text, at any threshold** (ruling 9): `OnBehalfStream` has no member a
@@ -1946,7 +1951,9 @@ def on_behalf_streams(
 
     rows = {
         row.stream: row
-        for row in _on_behalf_summary_rows(session, section_id=section_id, week_id=week_id)
+        for row in _summary_rows_since_latest_removal(
+            session, section_id=section_id, week_id=week_id
+        )
     }
     ratings = _rating_counts(session, section_id=section_id, week_ids=[week_id])
     responses, _ = _response_counts(session, section_id=section_id, week_id=week_id)
@@ -2180,7 +2187,7 @@ def response_gather(
     (E7-10 done-when 2, ADR 0195). Such a summary may paraphrase the comment the
     removal took out, and the draft's run refusal catches a quoted run, never a
     paraphrase, so a draft written from it could carry an excluded comment's
-    substance to every student. The rows come from `_on_behalf_summary_rows`
+    substance to every student. The rows come from `_summary_rows_since_latest_removal`
     whoever asks, with their themes. `for_on_behalf` no longer changes what is
     read; it stays in the signature E7-04's decision 3 pinned, and the E7-10
     pull request proposes dropping it.
@@ -2192,7 +2199,9 @@ def response_gather(
     held = _held_streams(session, section_id=section_id, week_id=week_id)
     rows = {
         row.stream: row
-        for row in _on_behalf_summary_rows(session, section_id=section_id, week_id=week_id)
+        for row in _summary_rows_since_latest_removal(
+            session, section_id=section_id, week_id=week_id
+        )
     }
     ratings = _rating_counts(session, section_id=section_id, week_ids=[week_id])
     responses, _ = _response_counts(session, section_id=section_id, week_id=week_id)
