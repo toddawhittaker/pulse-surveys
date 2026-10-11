@@ -351,36 +351,65 @@ def student_week_results(
         raise ResultsUnavailableError
     published_weeks = [opened.course_week for opened in published]
 
-    opens_at = reporting.report_opens_at(
-        week.closes_at, zone=ZoneInfo(settings.institution_timezone)
+    state, response = _state_and_response(
+        session,
+        section=section,
+        week_id=week.week_id,
+        closes_at=week.closes_at,
+        settings=settings,
+        reader_user_id=user_id,
     )
+    return StudentWeekResults(state=state, response=response, published_weeks=published_weeks)
+
+
+def _state_and_response(
+    session: Session,
+    *,
+    section: Section,
+    week_id: UUID,
+    closes_at: datetime,
+    settings: Settings,
+    reader_user_id: UUID | None = None,
+    reader_person_id: UUID | None = None,
+) -> tuple[WeekState, StudentResponse | None]:
+    """One published section-week's state, and its response as students read it.
+
+    The caller has already decided the reader may read this week. The author's
+    name comes through the staff-name definer, asked as that reader (exactly one
+    of the two keys, as `section_staff_names` requires). The definer answers
+    anyone who has published to the section, so a response whose author it does
+    not answer is a broken invariant, and raises rather than serving the response
+    unattributed.
+    """
+    opens_at = reporting.report_opens_at(closes_at, zone=ZoneInfo(settings.institution_timezone))
     policy = policy_of_record(session, course_id=section.course_id, report_opens_at=opens_at)
-    first = first_response(session, section_id=section.id, week_id=week.week_id)
+    first = first_response(session, section_id=section.id, week_id=week_id)
     state = week_state(policy=policy, first=first)
     if first is None:
-        return StudentWeekResults(state=state, response=None, published_weeks=published_weeks)
+        return state, None
 
-    latest = latest_response(session, section_id=section.id, week_id=week.week_id)
+    latest = latest_response(session, section_id=section.id, week_id=week_id)
     if latest is None:  # pragma: no cover - the first row exists, so a latest one does
         raise RuntimeError("A section-week has a first response row and no latest one.")
     names = {
         staff.person_id: staff.display_name
-        for staff in section_staff_names(session, section_id=section.id, reader_user_id=user_id)
+        for staff in section_staff_names(
+            session,
+            section_id=section.id,
+            reader_user_id=reader_user_id,
+            reader_person_id=reader_person_id,
+        )
     }
     if first.author_person_id not in names:
         raise RuntimeError(
             f"The staff-name definer did not answer the author of a response to section "
             f"{section.id}, though it answers anyone who has published to it."
         )
-    return StudentWeekResults(
-        state=state,
-        response=StudentResponse(
-            text=latest.body,
-            author_name=names[first.author_person_id],
-            author_role=ResponseRole(first.role),
-            published_at=latest.published_at,
-        ),
-        published_weeks=published_weeks,
+    return state, StudentResponse(
+        text=latest.body,
+        author_name=names[first.author_person_id],
+        author_role=ResponseRole(first.role),
+        published_at=latest.published_at,
     )
 
 
