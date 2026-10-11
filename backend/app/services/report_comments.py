@@ -794,6 +794,40 @@ def reported_status_of(answer_id: SQLColumnExpression[Any]) -> ColumnElement[str
     return resolved
 
 
+def latest_decision_into(
+    session: Session, *, section_id: UUID, week_id: UUID, states: Collection[str]
+) -> datetime | None:
+    """When a person last moved a comment of this section-week into one of `states`, or `None`.
+
+    E7-03's summary filter asks it (`app.services.reporting`, ruling 9): a stored
+    summary written at or before the latest decision that took a comment out of
+    the set a summary may carry might carry that comment. `states` is the
+    caller's own set of states a summary leaves out
+    (`reporting.HELD_MODERATION_STATES`), passed rather than spelled here, so
+    there is one answer to which states those are.
+
+    **Decisions only**: rows a person wrote, an exclusion, a keep, or an undo,
+    whose stored state is one of `states`. An undo of a keep stores the state it
+    restores (`FLAGGED_COLLAPSED`), so it counts; an undo of an exclusion that
+    restores `PUBLISHED` does not. The routing definer's flag is not a decision:
+    a comment starts flagged rather than leaving a shown set.
+
+    Every comment of the section-week is read, Care-class ones included, so the
+    answer can only be later than the report's view of the week, never earlier.
+    """
+    return session.execute(
+        select(func.max(ModerationState.decided_at))
+        .join(Answer, Answer.id == ModerationState.answer_id)
+        .join(Response, Response.id == Answer.response_id)
+        .where(
+            Response.section_id == section_id,
+            Response.week_id == week_id,
+            ModerationState.decided_by_person_id.is_not(None),
+            ModerationState.state.in_(list(states)),
+        )
+    ).scalar_one_or_none()
+
+
 def latest_decision(session: Session, answer_id: UUID) -> LatestDecision | None:
     """The latest decision row about one comment and the state before it, or `None` (E6-03).
 

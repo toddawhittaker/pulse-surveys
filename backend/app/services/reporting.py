@@ -106,6 +106,7 @@ from app.services.authz import (
 from app.services.report_comments import (
     COMMENT_VIEW,
     CommentCard,
+    latest_decision_into,
     n_threshold,
     released_cards,
     reported_status_of,
@@ -135,6 +136,7 @@ if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
         WorkloadBenchmarkFigures,
         WorkloadBenchmarkView,
     )
+    from app.schemas.response_loop import OnBehalfStream, OnBehalfStreamName
     from app.services.benchmarks import BenchmarkPoint, WorkloadComparison
 
 logger = logging.getLogger(__name__)
@@ -148,6 +150,20 @@ logger = logging.getLogger(__name__)
 STREAM_ASKED_ABOUT: dict[str, CommentStream] = {
     token: CommentStream[token] for token in REPORT_STREAMS
 }
+
+# How a stored stream token is spelled on the on-behalf read (E7-03): the member
+# names the report's own `StreamsView` already uses for the two streams. Written
+# out because the wire type is a closed `Literal`; the check below fails at import
+# if `REPORT_STREAMS` ever gains a stream this does not spell.
+STREAM_ON_THE_WIRE: dict[str, "OnBehalfStreamName"] = {
+    "INSTRUCTOR": "instructor",
+    "COURSE": "course",
+}
+if set(STREAM_ON_THE_WIRE) != set(REPORT_STREAMS):  # pragma: no cover - a broken edit, not a branch
+    raise RuntimeError(
+        f"STREAM_ON_THE_WIRE spells {sorted(STREAM_ON_THE_WIRE)}; the report's streams are "
+        f"{sorted(REPORT_STREAMS)}."
+    )
 
 # The two states a moderator is holding a comment in. SPEC §5.1: the summaries
 # "exclude flagged-held content". `FLAGGED_COLLAPSED` is where a comment waits for
@@ -1883,6 +1899,7 @@ def _served_summary_rows(session: Session, *, section_id: UUID, week_id: UUID) -
             WeeklySummary.response_count,
             WeeklySummary.themes,
             WeeklySummary.prompt_version,
+            WeeklySummary.generated_at,
         ).where(WeeklySummary.section_id == section_id, WeeklySummary.week_id == week_id)
     ).all()
     return [
@@ -1894,6 +1911,67 @@ def _served_summary_rows(session: Session, *, section_id: UUID, week_id: UUID) -
                 session, section_id=section_id, week_id=week_id, stream=row.stream
             )
         )
+    ]
+
+
+def _on_behalf_summary_rows(session: Session, *, section_id: UUID, week_id: UUID) -> list[Any]:
+    """The rows `_served_summary_rows` serves, less any written before the week's latest removal.
+
+    E7's ruling 9, for the on-behalf reader (E7-03, done-when 10). A summary is
+    generated over the comments a moderator was not holding at the time. A
+    decision that later takes a comment out of that set — an exclusion, or the
+    undo of a keep, which returns the comment to review — leaves a summary that
+    may carry it. So a row whose `generated_at` is not strictly later than the
+    latest such decision in the section-week is left out, with its themes. A tie
+    withholds: the two instants cannot say which came first.
+
+    "Out of the set" is `HELD_MODERATION_STATES`, the states the summary walk
+    itself leaves out, and the decision instants are read by
+    `report_comments.latest_decision_into`, the module that owns reading
+    `moderation_state`. The instructor's own reads keep such a summary (ADR 0195).
+    """
+    removed_at = latest_decision_into(
+        session, section_id=section_id, week_id=week_id, states=HELD_MODERATION_STATES
+    )
+    rows = _served_summary_rows(session, section_id=section_id, week_id=week_id)
+    if removed_at is None:
+        return rows
+    return [row for row in rows if row.generated_at > removed_at]
+
+
+def on_behalf_streams(
+    session: Session, *, section_id: UUID, week_id: UUID
+) -> list["OnBehalfStream"]:
+    """One section-week's streams as the on-behalf reader reads them (E7-03, decision 5).
+
+    Per stream: the stored summary (through `_on_behalf_summary_rows`, so a
+    summary written before the week's latest removal is absent), the week's
+    response count, and the rating distribution as the report shows it. **No
+    comment text, at any threshold** (ruling 9): `OnBehalfStream` has no member a
+    comment could be put in, and nothing here reads one.
+
+    Authorization is the caller's: `app.services.response_loop`'s on-behalf
+    door decides who may ask, before this reads anything.
+    """
+    from app.schemas.response_loop import OnBehalfStream
+
+    rows = {
+        row.stream: row
+        for row in _on_behalf_summary_rows(session, section_id=section_id, week_id=week_id)
+    }
+    ratings = _rating_counts(session, section_id=section_id, week_ids=[week_id])
+    responses, _ = _response_counts(session, section_id=section_id, week_id=week_id)
+    return [
+        OnBehalfStream(
+            stream=STREAM_ON_THE_WIRE[token],
+            summary_text=None if token not in rows else str(rows[token].summary_text),
+            response_count=responses,
+            rating_distribution={
+                str(value): ratings.get((week_id, token), {}).get(value, 0)
+                for value in LIKERT_VALUES
+            },
+        )
+        for token in REPORT_STREAMS
     ]
 
 
@@ -2079,10 +2157,7 @@ def states_a_count_of_people(text: str) -> bool:
     for index, token in enumerate(tokens):
         previous = tokens[index - 1] if index > 0 else ""
         following = tokens[index + 1] if index + 1 < len(tokens) else ""
-        if (
-            _is_count_token(token, following=following)
-            and previous.lower() not in _STRUCTURE_WORDS
-        ):
+        if _is_count_token(token, following=following) and previous.lower() not in _STRUCTURE_WORDS:
             return True
     return False
 
@@ -2111,24 +2186,18 @@ def response_gather(
     **The instructor's gather keeps a summary written before an exclusion**
     (ADR 0195): the instructor already reads that summary on the report and is
     the author of whatever is published, and the draft's run refusal blocks
-    quoting the excluded comment. The on-behalf gather leaves such a summary out
-    (the E7 breakdown's ruling 9); E7-03 builds it, and until then
-    `for_on_behalf=True` is refused rather than answered with the instructor's
-    gather.
+    quoting the excluded comment. **The on-behalf gather leaves such a summary
+    out**, with its themes (the E7 breakdown's ruling 9, ADR 0194): with
+    `for_on_behalf=True` the rows come from `_on_behalf_summary_rows`.
 
     Authorization is the caller's: this answers any section-week it is asked
     about, and every caller reaches it through `_published_section_week` or its
     on-behalf equivalent.
     """
-    if for_on_behalf:
-        raise NotImplementedError(
-            "The on-behalf gather leaves out a summary written before the week's latest "
-            "exclusion (E7 ruling 9). E7-03 builds it; it is not the instructor's gather."
-        )
     held = _held_streams(session, section_id=section_id, week_id=week_id)
+    summary_rows = _on_behalf_summary_rows if for_on_behalf else _served_summary_rows
     rows = {
-        row.stream: row
-        for row in _served_summary_rows(session, section_id=section_id, week_id=week_id)
+        row.stream: row for row in summary_rows(session, section_id=section_id, week_id=week_id)
     }
     ratings = _rating_counts(session, section_id=section_id, week_ids=[week_id])
     responses, _ = _response_counts(session, section_id=section_id, week_id=week_id)
@@ -2202,12 +2271,31 @@ def instructor_response_draft(
         course_week=course_week,
         settings=settings,
     )
+    return week_response_draft(
+        session, section_id=section_id, week_id=week.week_id, for_on_behalf=False, gateway=gateway
+    )
+
+
+def week_response_draft(
+    session: Session,
+    *,
+    section_id: UUID,
+    week_id: UUID,
+    for_on_behalf: bool,
+    gateway: AIGateway | None = None,
+) -> str:
+    """The draft for one section-week, after its reader's gate: the gather, one call, two refusals.
+
+    The body `instructor_response_draft` describes, shared with E7-03's on-behalf
+    door, which passes `for_on_behalf=True` after its own gate. **The caller's
+    gate runs first**, so no refused request reaches the model.
+    """
     gather = response_gather(
-        session, section_id=section_id, week_id=week.week_id, for_on_behalf=False
+        session, section_id=section_id, week_id=week_id, for_on_behalf=for_on_behalf
     )
     draft = draft_response(gather, gateway).draft
     refuse_a_draft_students_should_not_read(
-        session, draft=draft, section_id=section_id, week_id=week.week_id, gather=gather
+        session, draft=draft, section_id=section_id, week_id=week_id, gather=gather
     )
     return draft
 
@@ -2237,8 +2325,32 @@ def instructor_draft_check(
         course_week=course_week,
         settings=settings,
     )
+    return week_draft_check(
+        session,
+        section_id=section_id,
+        week_id=week.week_id,
+        draft=draft,
+        for_on_behalf=False,
+        gateway=gateway,
+    )
+
+
+def week_draft_check(
+    session: Session,
+    *,
+    section_id: UUID,
+    week_id: UUID,
+    draft: str,
+    for_on_behalf: bool,
+    gateway: AIGateway | None = None,
+) -> tuple[CheckTheme, ...]:
+    """The check for one section-week, after its reader's gate: the gather, one call, one refusal.
+
+    Shared by `instructor_draft_check` and E7-03's on-behalf door, as
+    `week_response_draft` is.
+    """
     gather = response_gather(
-        session, section_id=section_id, week_id=week.week_id, for_on_behalf=False
+        session, section_id=section_id, week_id=week_id, for_on_behalf=for_on_behalf
     )
     answer = check_draft(gather, draft, gateway)
     refuse_a_check_naming_an_unstored_theme(answer, gather=gather)

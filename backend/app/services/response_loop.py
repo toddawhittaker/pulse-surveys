@@ -40,29 +40,84 @@ copies:
     setter does not hold the role it names.
   - **`student_week_results`**: the student results route's read, through the
     student's live enrollment, as the survey read reaches a section.
+
+## The doors (E7-03, ADR 0194)
+
+Every door here decides who may write or read, then calls the writers above.
+
+  - **The instructor's publish, edit and read** of one of their own published
+    weeks, behind the report's own gate (`reporting._published_section_week`),
+    so they refuse exactly what the report refuses. One response per
+    section-week: a publish when one exists is refused, and only the person who
+    first published may edit (ruling 3).
+  - **The policy read and switch** over `authz.lead_review_courses` (ruling 1),
+    and, for a chair, the read of the department's led courses
+    (`authz.chaired_courses_with_a_lead`, ruling 5).
+  - **`is_owed` and `on_behalf_open`**: a week required by its policy of record,
+    unanswered, and 48 or 96 hours past its report opening (ruling 2).
+  - **`responses_owed`**: the reader's owed section-weeks, set-based.
+  - **The on-behalf doors**: one gate (`_on_behalf_door`) decides every refusal
+    before anything that varies with the week's state is read, and every
+    refusal is `OnBehalfUnavailableError`, which the route answers with one 404.
 """
 
+from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from app.ai.contracts import CheckTheme
 from app.config import Settings
 from app.models.loop import InstructorResponse, PolicyMode, PolicyRole, ResponsePolicy, ResponseRole
-from app.models.org import Course, Section
-from app.models.term import Term, Week
-from app.schemas.response_loop import StudentResponse, StudentWeekResults, WeekState
+from app.models.org import Course, Prefix, Section
+from app.models.term import SurveyWindow, Term, Week
+from app.schemas.response_loop import (
+    OnBehalfWeek,
+    OwedWeek,
+    PolicyCourse,
+    PolicyOverview,
+    PolicyPrefix,
+    ResponseWrite,
+    StudentResponse,
+    StudentWeekResults,
+    WeekResponseView,
+    WeekState,
+)
 from app.services import clock, reporting, survey_read
-from app.services.authz import lead_review_courses
-from app.services.section_codes import week_of_the_term
+from app.services.authz import (
+    chaired_courses_with_a_lead,
+    lead_review_courses,
+    taught_or_once_taught_section_ids,
+)
+from app.services.reporting import SectionUnavailableError
+from app.services.section_codes import course_label, course_week_of, week_of_the_term
 
 __all__ = [
+    "NoPolicyToSetError",
+    "NotYoursToEditError",
+    "OnBehalfUnavailableError",
+    "ResponseAlreadyPublishedError",
     "ResultsUnavailableError",
     "StaffName",
+    "edit_as_instructor",
+    "edit_on_behalf",
     "first_response",
+    "instructor_week_response",
+    "is_owed",
+    "on_behalf_check",
+    "on_behalf_draft",
+    "on_behalf_open",
+    "on_behalf_week",
+    "policy_overview",
+    "publish_as_instructor",
+    "publish_on_behalf",
+    "responses_owed",
+    "set_policy",
     "latest_response",
     "policy_of_record",
     "publish_response",
@@ -430,3 +485,663 @@ def _week_id_of(session: Session, *, section: Section, course_week: int) -> UUID
             "its term does not have."
         )
     return week_id
+
+
+# ---------------------------------------------------------------------------
+# The doors (E7-03, ADR 0194).
+# ---------------------------------------------------------------------------
+
+# SPEC §5.3 and ruling 2: owed from report open + 48 hours (§5.6 rule 4), and
+# open on behalf from report open + 96 hours.
+OWED_AFTER = timedelta(hours=48)
+ON_BEHALF_AFTER = timedelta(hours=96)
+
+
+class ResponseAlreadyPublishedError(Exception):
+    """The instructor's publish, for a week that already has a response (ruling 3)."""
+
+
+class NotYoursToEditError(Exception):
+    """An edit of a week with no response, or of one the reader did not first publish.
+
+    One exception for both causes, and the route one sentence: telling them
+    apart would tell the reader whether somebody else had published.
+    """
+
+
+class NoPolicyToSetError(Exception):
+    """A policy switch for a prefix where the reader sets no course, or no such prefix."""
+
+
+class OnBehalfUnavailableError(Exception):
+    """Every refusal of every on-behalf door, carrying nothing (E7-03, decision 5).
+
+    A course outside the reader's own, a section they teach or taught, a week
+    not published, not required, already answered or not yet 96 hours past its
+    report opening, an edit by anyone but the first publisher, and a key nothing
+    holds all leave by this one exception, so the one 404 cannot say which.
+    """
+
+
+# -- the instructor's doors --------------------------------------------------
+
+
+def publish_as_instructor(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    write: ResponseWrite,
+    settings: Settings,
+) -> WeekResponseView:
+    """Publish the week's response for one of this person's own published weeks.
+
+    The report's gate first, so a section they do not teach, one that does not
+    exist and a week not yet published are refused with the report's own
+    exceptions (`SectionUnavailableError`, `CourseWeekUnavailableError`). A week
+    that already has a response, whoever wrote it, raises
+    `ResponseAlreadyPublishedError` and writes nothing.
+    """
+    section, week, author = _instructors_week(
+        session,
+        person_id=person_id,
+        section_id=section_id,
+        course_week=course_week,
+        settings=settings,
+    )
+    if first_response(session, section_id=section.id, week_id=week.week_id) is not None:
+        raise ResponseAlreadyPublishedError
+    return _write_and_view(
+        session,
+        section=section,
+        week=week,
+        author=author,
+        role=ResponseRole.INSTRUCTOR,
+        write=write,
+        settings=settings,
+    )
+
+
+def edit_as_instructor(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    write: ResponseWrite,
+    settings: Settings,
+) -> WeekResponseView:
+    """Append an edit to the week's response, for the person who first published it.
+
+    The report's gate first. A week with no response, or one somebody else
+    first published (a lead on the instructor's behalf, say), raises
+    `NotYoursToEditError` and writes nothing. An edit never holds the week
+    again: the first row decides the state (ruling 3, `week_state`).
+    """
+    section, week, author = _instructors_week(
+        session,
+        person_id=person_id,
+        section_id=section_id,
+        course_week=course_week,
+        settings=settings,
+    )
+    first = first_response(session, section_id=section.id, week_id=week.week_id)
+    if first is None or first.author_person_id != author:
+        raise NotYoursToEditError
+    return _write_and_view(
+        session,
+        section=section,
+        week=week,
+        author=author,
+        role=ResponseRole.INSTRUCTOR,
+        write=write,
+        settings=settings,
+    )
+
+
+def instructor_week_response(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    settings: Settings,
+) -> WeekResponseView:
+    """The week's state and response as students read them, for one of this person's weeks."""
+    section, week, author = _instructors_week(
+        session,
+        person_id=person_id,
+        section_id=section_id,
+        course_week=course_week,
+        settings=settings,
+    )
+    return _view(session, section=section, week=week, reader=author, settings=settings)
+
+
+def _instructors_week(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    settings: Settings,
+) -> tuple[Section, "reporting._SectionWeek", UUID]:
+    """The report's own gate, and the reader's `person` key, which it has just checked."""
+    if person_id is None:
+        raise SectionUnavailableError
+    section, week, _ = reporting._published_section_week(
+        session,
+        person_id=person_id,
+        section_id=section_id,
+        course_week=course_week,
+        settings=settings,
+    )
+    return section, week, person_id
+
+
+def _write_and_view(
+    session: Session,
+    *,
+    section: Section,
+    week: "reporting._SectionWeek",
+    author: UUID,
+    role: ResponseRole,
+    write: ResponseWrite,
+    settings: Settings,
+) -> WeekResponseView:
+    """Append one row through the one writer, commit, and answer the week as students now read it."""
+    publish_response(
+        session,
+        section_id=section.id,
+        course_week=week.course_week,
+        author_person_id=author,
+        role=role,
+        ai_seeded=write.ai_seeded,
+        body=write.text,
+    )
+    session.commit()
+    return _view(session, section=section, week=week, reader=author, settings=settings)
+
+
+def _view(
+    session: Session,
+    *,
+    section: Section,
+    week: "reporting._SectionWeek",
+    reader: UUID,
+    settings: Settings,
+) -> WeekResponseView:
+    state, response = _state_and_response(
+        session,
+        section=section,
+        week_id=week.week_id,
+        closes_at=week.closes_at,
+        settings=settings,
+        reader_person_id=reader,
+    )
+    return WeekResponseView(state=state, response=response)
+
+
+# -- the policy (rulings 1 and 5) ----------------------------------------------
+
+
+def policy_overview(session: Session, *, person_id: UUID | None) -> PolicyOverview:
+    """Every course whose policy this reader sets or reads, by prefix (E7-03, decision 2).
+
+    The courses `lead_review_courses` gives the reader, which they set, and for a
+    chair the department's courses that have a lead, which they read and cannot
+    set. Nothing else: a sibling lead's course is in neither set. A reader with
+    neither reads an empty list, as an assistant dean, a dean and a vice
+    president do until E9.
+
+    `mode` is each course's latest row now, by `sequence`; the policy of record
+    for a week is a different question (`policy_of_record`). `set_by_role` is
+    carried only on a course the reader cannot set, so nothing on a course the
+    reader sets moves with anybody else's change (done-when 4).
+    """
+    if person_id is None:
+        return PolicyOverview(prefixes=[])
+    settable = lead_review_courses(session, person_id=person_id)
+    readable = set(settable) | chaired_courses_with_a_lead(session, person_id=person_id)
+    if not readable:
+        return PolicyOverview(prefixes=[])
+    latest: dict[UUID, ResponsePolicy] = {}
+    for row in session.scalars(
+        select(ResponsePolicy)
+        .where(ResponsePolicy.course_id.in_(list(readable)))
+        .order_by(ResponsePolicy.sequence)
+    ):
+        latest[row.course_id] = row
+    by_prefix: dict[UUID, tuple[str, list[PolicyCourse]]] = {}
+    for course, prefix in session.execute(
+        select(Course, Prefix)
+        .join(Prefix, Prefix.id == Course.prefix_id)
+        .where(Course.id.in_(list(readable)))
+    ).tuples():
+        current = latest.get(course.id)
+        can_set = course.id in settable
+        entry = PolicyCourse(
+            course_id=course.id,
+            course_label=course_label(
+                prefix_code=prefix.code, lms_number=course.lms_number, lms_title=course.lms_title
+            ),
+            mode=PolicyMode.ENCOURAGED if current is None else PolicyMode(current.mode),
+            can_set=can_set,
+            set_by_role=None if can_set or current is None else PolicyRole(current.role),
+        )
+        by_prefix.setdefault(prefix.id, (prefix.code, []))[1].append(entry)
+    return PolicyOverview(
+        prefixes=[
+            PolicyPrefix(
+                prefix_id=prefix_id,
+                prefix_code=code,
+                courses=sorted(courses, key=lambda c: (c.course_label, str(c.course_id))),
+            )
+            for prefix_id, (code, courses) in sorted(
+                by_prefix.items(), key=lambda item: (item[1][0], str(item[0]))
+            )
+        ]
+    )
+
+
+def set_policy(
+    session: Session, *, person_id: UUID | None, prefix_id: UUID, mode: PolicyMode
+) -> PolicyOverview:
+    """Switch the policy of every course in the prefix this reader sets it for, and commit.
+
+    One `record_policy` call per role the reader holds a course of the prefix
+    under, so a lead who also chairs writes a `LEAD_FACULTY` row for the course
+    they lead and a `CHAIR` row for the department's unled course, each the role
+    `lead_review_courses` gives for it. A reader who sets no course of the
+    prefix, and a prefix that does not exist, raise `NoPolicyToSetError` before
+    anything is written.
+    """
+    if person_id is None:
+        raise NoPolicyToSetError
+    settable = lead_review_courses(session, person_id=person_id)
+    in_prefix = session.scalars(
+        select(Course.id).where(Course.prefix_id == prefix_id, Course.id.in_(list(settable)))
+    ).all()
+    if not in_prefix:
+        raise NoPolicyToSetError
+    for role in sorted({settable[course_id].value for course_id in in_prefix}):
+        record_policy(
+            session,
+            setter_person_id=person_id,
+            role=PolicyRole(role),
+            prefix_id=prefix_id,
+            mode=mode,
+        )
+    session.commit()
+    return policy_overview(session, person_id=person_id)
+
+
+# -- the clocks (ruling 2) ------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _WeekClock:
+    """One published-or-not week of one section: when its report opens, and its two facts."""
+
+    section: Section
+    week_id: UUID
+    course_week: int
+    opens_at: datetime
+    required: bool
+    answered: bool
+
+    def owed(self, now: datetime) -> bool:
+        return self.required and not self.answered and now >= self.opens_at + OWED_AFTER
+
+    def open_on_behalf(self, now: datetime) -> bool:
+        return self.required and not self.answered and now >= self.opens_at + ON_BEHALF_AFTER
+
+
+def is_owed(session: Session, *, section_id: UUID, course_week: int, now: datetime) -> bool:
+    """Whether a response to this section's course week is owed at `now` (§5.6 rule 4).
+
+    True when the week's policy of record is required, nobody has published a
+    response, and `now` is at or after report open + 48 hours. Computed on read
+    from `now`, so a caller pins the clock; E9's attention list calls this.
+    False for a section or a course week that does not exist.
+    """
+    week = _clock_of(session, section_id=section_id, course_week=course_week, settings=Settings())
+    return week is not None and week.owed(now)
+
+
+def on_behalf_open(session: Session, *, section_id: UUID, course_week: int, now: datetime) -> bool:
+    """Whether the responsible lead may respond on behalf at `now`: `is_owed`, at + 96 hours."""
+    week = _clock_of(session, section_id=section_id, course_week=course_week, settings=Settings())
+    return week is not None and week.open_on_behalf(now)
+
+
+def _clock_of(
+    session: Session, *, section_id: UUID, course_week: int, settings: Settings
+) -> _WeekClock | None:
+    section = session.get(Section, section_id)
+    if section is None:
+        return None
+    return next(
+        (
+            week
+            for week in _week_clocks(session, sections=[section], settings=settings)
+            if week.course_week == course_week
+        ),
+        None,
+    )
+
+
+def _week_clocks(
+    session: Session, *, sections: Sequence[Section], settings: Settings
+) -> list[_WeekClock]:
+    """Every week of these sections that has a window, with its opening and its two facts.
+
+    **Set-based**: one read of the windows, one of the policy rows of the
+    sections' courses, one of which section-weeks have a response, however many
+    sections are asked about. The policy of record is `policy_of_record`'s rule
+    applied to the rows read once: the latest by `sequence` among the course's
+    rows set at or before the week's report opening, and encouraged with none
+    (ADR 0193). The opening is `reporting.report_opens_at` over the stored close,
+    as the report computes it (ADR 0184).
+    """
+    if not sections:
+        return []
+    by_id = {section.id: section for section in sections}
+    zone = ZoneInfo(settings.institution_timezone)
+    windows = session.execute(
+        select(
+            SurveyWindow.section_id,
+            SurveyWindow.week_id,
+            Week.number,
+            SurveyWindow.closes_at,
+            Term.start_date,
+        )
+        .join(Week, Week.id == SurveyWindow.week_id)
+        .join(Term, Term.id == Week.term_id)
+        .where(SurveyWindow.section_id.in_(list(by_id)))
+    ).all()
+    policies: dict[UUID, list[tuple[datetime, str]]] = defaultdict(list)
+    for course_id, set_at, mode in session.execute(
+        select(ResponsePolicy.course_id, ResponsePolicy.set_at, ResponsePolicy.mode)
+        .where(ResponsePolicy.course_id.in_({section.course_id for section in sections}))
+        .order_by(ResponsePolicy.sequence)
+    ):
+        policies[course_id].append((set_at, mode))
+    answered = set(
+        session.execute(
+            select(InstructorResponse.section_id, InstructorResponse.week_id)
+            .where(InstructorResponse.section_id.in_(list(by_id)))
+            .distinct()
+        ).tuples()
+    )
+    clocks = []
+    for section_id, week_id, number, closes_at, term_start in windows:
+        section = by_id[section_id]
+        opens_at = reporting.report_opens_at(closes_at, zone=zone)
+        in_force = [mode for set_at, mode in policies[section.course_id] if set_at <= opens_at]
+        clocks.append(
+            _WeekClock(
+                section=section,
+                week_id=week_id,
+                course_week=course_week_of(
+                    number, section_start=section.start_date, term_start=term_start
+                ),
+                opens_at=opens_at,
+                required=bool(in_force) and in_force[-1] == PolicyMode.REQUIRED.value,
+                answered=(section_id, week_id) in answered,
+            )
+        )
+    return clocks
+
+
+def responses_owed(
+    session: Session, *, person_id: UUID | None, settings: Settings
+) -> list[OwedWeek]:
+    """The section-weeks owed a response now, in the courses this reader answers for (decision 4).
+
+    Over `lead_review_courses`, less every section the reader teaches or has
+    taught (`taught_or_once_taught_section_ids`), on the effective clock (ADR
+    0109). No instructor name and no time stamp. Ordered by label, course week
+    and key, so the order says nothing about when anything happened.
+    """
+    if person_id is None:
+        return []
+    courses = lead_review_courses(session, person_id=person_id)
+    if not courses:
+        return []
+    excluded = taught_or_once_taught_section_ids(session, person_id=person_id)
+    sections = [
+        section
+        for section in session.scalars(select(Section).where(Section.course_id.in_(list(courses))))
+        if section.id not in excluded
+    ]
+    now = clock.now(session, settings=settings)
+    owed = [
+        OwedWeek(
+            section_id=week.section.id,
+            section_label=reporting._course_label(session, week.section),
+            course_week=week.course_week,
+            on_behalf_open=week.open_on_behalf(now),
+        )
+        for week in _week_clocks(session, sections=sections, settings=settings)
+        if week.owed(now)
+    ]
+    return sorted(owed, key=lambda w: (w.section_label, w.course_week, str(w.section_id)))
+
+
+# -- on behalf (ruling 9) ---------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _OnBehalfDoor:
+    """A section-week a reader may act on behalf in, and the role they answer for its course under."""
+
+    section: Section
+    week: "reporting._SectionWeek"
+    reader: UUID
+    role: ResponseRole
+
+
+def _on_behalf_door(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    settings: Settings,
+    to_edit: bool,
+) -> _OnBehalfDoor:
+    """The one gate every on-behalf door passes, or `OnBehalfUnavailableError`.
+
+    **In this order, and every refusal is the same exception** (decision 6):
+
+      1. the section is in a course `lead_review_courses` gives the reader — one
+         read that answers a sibling lead's section and a key nothing holds
+         alike, before anything about the week is read;
+      2. it is not a section the reader teaches or has taught (ADR 0190's rule,
+         a grant the roster ended included);
+      3. the course week's report has opened;
+      4. to act: the week is open on behalf now (required, unanswered, 96 hours
+         past its opening). To edit: the reader first published its response.
+
+    So a refusal for a course outside the reader's own never reads the week, and
+    cannot vary with it. Nothing here calls a model or writes.
+    """
+    if person_id is None:
+        raise OnBehalfUnavailableError
+    answered_for = lead_review_courses(session, person_id=person_id)
+    section = session.scalars(
+        select(Section).where(Section.id == section_id, Section.course_id.in_(list(answered_for)))
+    ).one_or_none()
+    if section is None:
+        raise OnBehalfUnavailableError
+    if section.id in taught_or_once_taught_section_ids(session, person_id=person_id):
+        raise OnBehalfUnavailableError
+    week = next(
+        (
+            published
+            for published in reporting._published_weeks(session, section=section, settings=settings)
+            if published.course_week == course_week
+        ),
+        None,
+    )
+    if week is None:
+        raise OnBehalfUnavailableError
+    if to_edit:
+        first = first_response(session, section_id=section.id, week_id=week.week_id)
+        if first is None or first.author_person_id != person_id:
+            raise OnBehalfUnavailableError
+    else:
+        clock_ = _clock_of(
+            session, section_id=section.id, course_week=course_week, settings=settings
+        )
+        if clock_ is None or not clock_.open_on_behalf(clock.now(session, settings=settings)):
+            raise OnBehalfUnavailableError
+    return _OnBehalfDoor(
+        section=section,
+        week=week,
+        reader=person_id,
+        role=ResponseRole(answered_for[section.course_id].value),
+    )
+
+
+def on_behalf_week(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    settings: Settings,
+) -> OnBehalfWeek:
+    """The section-week's stored summaries and ratings, as the on-behalf reader reads them.
+
+    No comment text, at any threshold, and no summary written before the week's
+    latest removal (`reporting.on_behalf_streams`).
+    """
+    door = _on_behalf_door(
+        session,
+        person_id=person_id,
+        section_id=section_id,
+        course_week=course_week,
+        settings=settings,
+        to_edit=False,
+    )
+    return OnBehalfWeek(
+        section_label=reporting._course_label(session, door.section),
+        course_week=door.week.course_week,
+        streams=reporting.on_behalf_streams(
+            session, section_id=door.section.id, week_id=door.week.week_id
+        ),
+    )
+
+
+def on_behalf_draft(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    settings: Settings,
+) -> str:
+    """04's draft over the on-behalf gather, once the gate has passed (no model call before it)."""
+    door = _on_behalf_door(
+        session,
+        person_id=person_id,
+        section_id=section_id,
+        course_week=course_week,
+        settings=settings,
+        to_edit=False,
+    )
+    return reporting.week_response_draft(
+        session, section_id=door.section.id, week_id=door.week.week_id, for_on_behalf=True
+    )
+
+
+def on_behalf_check(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    draft: str,
+    settings: Settings,
+) -> tuple[CheckTheme, ...]:
+    """04's check over the on-behalf gather, once the gate has passed."""
+    door = _on_behalf_door(
+        session,
+        person_id=person_id,
+        section_id=section_id,
+        course_week=course_week,
+        settings=settings,
+        to_edit=False,
+    )
+    return reporting.week_draft_check(
+        session,
+        section_id=door.section.id,
+        week_id=door.week.week_id,
+        draft=draft,
+        for_on_behalf=True,
+    )
+
+
+def publish_on_behalf(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    write: ResponseWrite,
+    settings: Settings,
+) -> WeekResponseView:
+    """Publish the week's response under the reader's own name and role for its course.
+
+    Once a response exists the week is answered and this door is closed:
+    editing is `edit_on_behalf`, for the first publisher only.
+    """
+    door = _on_behalf_door(
+        session,
+        person_id=person_id,
+        section_id=section_id,
+        course_week=course_week,
+        settings=settings,
+        to_edit=False,
+    )
+    return _write_and_view(
+        session,
+        section=door.section,
+        week=door.week,
+        author=door.reader,
+        role=door.role,
+        write=write,
+        settings=settings,
+    )
+
+
+def edit_on_behalf(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    write: ResponseWrite,
+    settings: Settings,
+) -> WeekResponseView:
+    """Append an edit to an on-behalf response, by its first publisher, while they answer for the course."""
+    door = _on_behalf_door(
+        session,
+        person_id=person_id,
+        section_id=section_id,
+        course_week=course_week,
+        settings=settings,
+        to_edit=True,
+    )
+    return _write_and_view(
+        session,
+        section=door.section,
+        week=door.week,
+        author=door.reader,
+        role=door.role,
+        write=write,
+        settings=settings,
+    )

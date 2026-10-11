@@ -141,6 +141,7 @@ __all__ = [
     "guard_write",
     "holds_care",
     "holds_leadership",
+    "chaired_courses_with_a_lead",
     "lead_review_courses",
     "leadership_grant_covers",
     "own_grant",
@@ -833,6 +834,35 @@ def lead_review_courses(session: Session, *, person_id: UUID) -> Mapping[UUID, A
         for course_id in chaired - led_by_somebody:
             covered[course_id] = AssignmentRole.CHAIR
     return covered
+
+
+def chaired_courses_with_a_lead(session: Session, *, person_id: UUID) -> frozenset[UUID]:
+    """The courses of a department this person chairs that have a lead: theirs to read, not set.
+
+    E7's ruling 5: a chair sets the response policy for the department's
+    courses that have no lead (`lead_review_courses` answers those as `CHAIR`),
+    and for a course that has a lead "the chair reads the policy and cannot
+    change it". This is that second set, and it grants nothing but the read of
+    the setting. Disjoint from `lead_review_courses`' `CHAIR` courses by
+    construction, and it may overlap its `LEAD_FACULTY` courses for a person who
+    leads a course of the department they chair; the caller treats a course it
+    can set as settable.
+
+    The department walk is `lead_review_courses`' own, over the same
+    `CHAIR` assignments, kept beside it so the two cannot disagree about which
+    departments a person chairs.
+    """
+    assignments = [
+        _Assignment.of(row)
+        for row in session.execute(_ASSIGNMENTS_OF_PERSON, {"person_id": person_id}).mappings()
+    ]
+    chaired: set[UUID] = set()
+    for held in assignments:
+        if held.role is AssignmentRole.CHAIR and held.department_id is not None:
+            chaired |= _nodes_beneath(session, "department", held.department_id)["course"]
+    if not chaired:
+        return frozenset()
+    return frozenset(session.execute(_COURSES_WITH_A_LEAD, {"course_ids": list(chaired)}).scalars())
 
 
 def transitive_purview(session: Session | None, *, assignment_id: UUID) -> Purview:

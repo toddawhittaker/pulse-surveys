@@ -11,8 +11,14 @@ set is defined out of, and the three writes; plus the preview, which is how a
 definer sees what a set reaches before anything renders a figure over it. E5-09
 consumes all seven.
 
-**Three moderation review routes** (E6-05), at the end of this file: the
+**Three moderation review routes** (E6-05), after the sets: the
 reader's review queue, a decision on one queued comment, and the exclusion log.
+
+**The response loop's routes** (E7-03, ADR 0194), at the end of this file: the
+response policy (read and switch), the responses owed, and the five on-behalf
+doors. Like the review routes, each is scoped to the reader's own leadership
+grant, in `app.services.response_loop`; the section at the foot of this file
+says what each refuses.
 Unlike the sets, these are scoped to the reader's own leadership grant
 (`app.services.authz.lead_review_courses`), and the module docstring of
 `app.services.moderation` says what each answers; the section at the foot of
@@ -90,8 +96,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
+from app.ai.gateway import AIGatewayError
 from app.api.deps import csrf_verified_leadership, person_of, require_leadership
 from app.config import Settings
+from app.copy.instructor_report import ASSISTANT_UNUSABLE
 from app.copy.leadership_moderation import (
     NO_REVIEW_GRANT,
     NOT_IN_QUEUE,
@@ -99,6 +107,7 @@ from app.copy.leadership_moderation import (
     REASON_TOO_LONG,
 )
 from app.copy.leadership_sets import NOT_THE_SETS_DEFINER, SET_UNAVAILABLE
+from app.copy.response_loop import NO_POLICY_TO_SET, ON_BEHALF_UNAVAILABLE
 from app.db import get_session
 from app.schemas.comparison_sets import (
     SetDetail,
@@ -108,6 +117,15 @@ from app.schemas.comparison_sets import (
     SetWrite,
 )
 from app.schemas.moderation import ExclusionLog, LeadDecision, LogRow, QueueItem, ReviewQueue
+from app.schemas.report import DraftCheckRequest, DraftCheckView, ResponseDraftView
+from app.schemas.response_loop import (
+    OnBehalfWeek,
+    OwedWeek,
+    PolicyOverview,
+    PolicyWrite,
+    ResponseWrite,
+    WeekResponseView,
+)
 from app.services.comparison_sets import (
     NotTheSetsDefinerError,
     SetUnavailableError,
@@ -130,6 +148,19 @@ from app.services.moderation import (
     decide_as_leader,
     exclusion_log,
     review_queue,
+)
+from app.services.reporting import UnusableAnswerError
+from app.services.response_loop import (
+    NoPolicyToSetError,
+    OnBehalfUnavailableError,
+    edit_on_behalf,
+    on_behalf_check,
+    on_behalf_draft,
+    on_behalf_week,
+    policy_overview,
+    publish_on_behalf,
+    responses_owed,
+    set_policy,
 )
 from app.services.session import SessionClaims
 
@@ -453,3 +484,223 @@ def read_exclusion_log(
 def _no_review_grant() -> HTTPException:
     """The 403 for a leader whose own grant puts no course under review."""
     return HTTPException(status_code=NO_REVIEW_GRANT_STATUS, detail=NO_REVIEW_GRANT.text)
+
+
+# ---------------------------------------------------------------------------
+# The response loop (E7-03, SPEC §5.3, ADR 0194).
+#
+# Every route reads the reader's own grant (`lead_review_courses`) and nothing
+# wider. The policy switch refuses a prefix where the reader sets no course with
+# one 404 (`NO_POLICY_TO_SET`), the same for a prefix that does not exist. Every
+# on-behalf door refuses with one 404 (`ON_BEHALF_UNAVAILABLE`), the same bytes
+# for a sibling lead's section in every state of its week, a section the reader
+# teaches or taught, a week not open on behalf, an answered week and a key
+# nothing holds. The draft and the check answer the instructor's one 502 for any
+# answer they may not hand on.
+# ---------------------------------------------------------------------------
+
+POLICY_PATH = "/leadership/response-policy"
+POLICY_PREFIX_PATH = f"{POLICY_PATH}/{{prefix_id}}"
+OWED_PATH = "/leadership/responses-owed"
+ON_BEHALF_PATH = "/leadership/sections/{section_id}/weeks/{course_week}/on-behalf"
+ON_BEHALF_DRAFT_PATH = f"{ON_BEHALF_PATH}/response-draft"
+ON_BEHALF_CHECK_PATH = f"{ON_BEHALF_PATH}/draft-check"
+ON_BEHALF_RESPONSE_PATH = f"{ON_BEHALF_PATH}/response"
+
+NO_POLICY_TO_SET_STATUS = 404
+ON_BEHALF_UNAVAILABLE_STATUS = 404
+ASSISTANT_UNUSABLE_STATUS = 502
+
+
+@router.get(POLICY_PATH, summary="The response policy of every course I set or read it for")
+def read_response_policy(
+    response: Response,
+    claims: SessionClaims = Depends(require_leadership),
+    session: Session = Depends(get_session),
+) -> PolicyOverview:
+    """The courses the reader sets the policy for, and a chair's led courses, which they read."""
+    response.headers["Cache-Control"] = NO_STORE
+    return policy_overview(session, person_id=person_of(claims))
+
+
+@router.put(POLICY_PREFIX_PATH, summary="Switch the response policy for my courses in one prefix")
+def switch_response_policy(
+    prefix_id: UUID,
+    write: PolicyWrite,
+    response: Response,
+    claims: SessionClaims = Depends(csrf_verified_leadership),
+    session: Session = Depends(get_session),
+) -> PolicyOverview:
+    """One row per course of the prefix the reader sets the policy for; answered with the new read."""
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return set_policy(
+            session, person_id=person_of(claims), prefix_id=prefix_id, mode=write.mode
+        )
+    except NoPolicyToSetError:
+        raise HTTPException(
+            status_code=NO_POLICY_TO_SET_STATUS, detail=NO_POLICY_TO_SET.text
+        ) from None
+
+
+@router.get(OWED_PATH, summary="The weeks of my courses that are owed a response now")
+def read_responses_owed(
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(require_leadership),
+    session: Session = Depends(get_session),
+) -> list[OwedWeek]:
+    """Section and course week, and whether on behalf is open: no name, no time."""
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    return responses_owed(session, person_id=person_of(claims), settings=settings)
+
+
+@router.get(ON_BEHALF_PATH, summary="One owed week's summaries and ratings, before I respond")
+def read_on_behalf(
+    section_id: UUID,
+    course_week: int,
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(require_leadership),
+    session: Session = Depends(get_session),
+) -> OnBehalfWeek:
+    """Stored summaries, response count and rating distributions; never a comment."""
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return on_behalf_week(
+            session,
+            person_id=person_of(claims),
+            section_id=section_id,
+            course_week=course_week,
+            settings=settings,
+        )
+    except OnBehalfUnavailableError:
+        raise _on_behalf_unavailable() from None
+
+
+@router.post(ON_BEHALF_DRAFT_PATH, summary="An AI draft of a response on the instructor's behalf")
+def draft_on_behalf(
+    section_id: UUID,
+    course_week: int,
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(csrf_verified_leadership),
+    session: Session = Depends(get_session),
+) -> ResponseDraftView:
+    """The instructor's draft task over the on-behalf gather; the gate before any model call."""
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        text = on_behalf_draft(
+            session,
+            person_id=person_of(claims),
+            section_id=section_id,
+            course_week=course_week,
+            settings=settings,
+        )
+    except OnBehalfUnavailableError:
+        raise _on_behalf_unavailable() from None
+    except (UnusableAnswerError, AIGatewayError):
+        raise _assistant_unusable() from None
+    return ResponseDraftView(text=text)
+
+
+@router.post(ON_BEHALF_CHECK_PATH, summary="The week's themes an on-behalf draft does not address")
+def check_on_behalf(
+    section_id: UUID,
+    course_week: int,
+    check: DraftCheckRequest,
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(csrf_verified_leadership),
+    session: Session = Depends(get_session),
+) -> DraftCheckView:
+    """The instructor's check task over the on-behalf gather; the gate before any model call."""
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        themes = on_behalf_check(
+            session,
+            person_id=person_of(claims),
+            section_id=section_id,
+            course_week=course_week,
+            draft=check.draft,
+            settings=settings,
+        )
+    except OnBehalfUnavailableError:
+        raise _on_behalf_unavailable() from None
+    except (UnusableAnswerError, AIGatewayError):
+        raise _assistant_unusable() from None
+    return DraftCheckView(unaddressed=themes)
+
+
+@router.post(
+    ON_BEHALF_RESPONSE_PATH,
+    status_code=CREATED,
+    summary="Publish a response on the instructor's behalf",
+)
+def publish_on_behalf_response(
+    section_id: UUID,
+    course_week: int,
+    write: ResponseWrite,
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(csrf_verified_leadership),
+    session: Session = Depends(get_session),
+) -> WeekResponseView:
+    """Under the reader's own name and the role they answer for the course under."""
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return publish_on_behalf(
+            session,
+            person_id=person_of(claims),
+            section_id=section_id,
+            course_week=course_week,
+            write=write,
+            settings=settings,
+        )
+    except OnBehalfUnavailableError:
+        raise _on_behalf_unavailable() from None
+
+
+@router.put(
+    ON_BEHALF_RESPONSE_PATH, summary="Edit a response I published on the instructor's behalf"
+)
+def edit_on_behalf_response(
+    section_id: UUID,
+    course_week: int,
+    write: ResponseWrite,
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(csrf_verified_leadership),
+    session: Session = Depends(get_session),
+) -> WeekResponseView:
+    """By the person who first published it, while they still answer for the course."""
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return edit_on_behalf(
+            session,
+            person_id=person_of(claims),
+            section_id=section_id,
+            course_week=course_week,
+            write=write,
+            settings=settings,
+        )
+    except OnBehalfUnavailableError:
+        raise _on_behalf_unavailable() from None
+
+
+def _on_behalf_unavailable() -> HTTPException:
+    """The one 404 every on-behalf door answers, whatever the cause, naming nothing."""
+    return HTTPException(
+        status_code=ON_BEHALF_UNAVAILABLE_STATUS, detail=ON_BEHALF_UNAVAILABLE.text
+    )
+
+
+def _assistant_unusable() -> HTTPException:
+    """The instructor's one 502, for any model answer the draft or the check may not hand on."""
+    return HTTPException(status_code=ASSISTANT_UNUSABLE_STATUS, detail=ASSISTANT_UNUSABLE.text)
