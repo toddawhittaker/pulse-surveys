@@ -145,7 +145,8 @@ class Component extends DCLogic {
       return Object.assign(base, {
         courseLine: 'BIOL 2150 — Principles of Ecology · R1WW',
         responseBody: 'Thanks to everyone who has responded so far. The reading load note is heard \u2014 I\u2019m posting a priority guide for the midterm chapters this week.',
-        trendI: [3.7, 4.0, 3.3, 3.7, 4.0, 3.7, 3.7], trendC: [3.3, 3.7, 3.0, 3.3, 3.7, 3.3, 4.0],
+        // A held week has no mean in either stream (SPEC §5.4), so the trend stops at the week before.
+        trendI: [3.7, 4.0, 3.3, 3.7, 4.0, 3.7], trendC: [3.3, 3.7, 3.0, 3.3, 3.7, 3.3],
         q1Counts: [], q2Counts: [],
         medianH: '',
         instrComments: [], courseComments: [],

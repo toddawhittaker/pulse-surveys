@@ -122,7 +122,10 @@ test("the survey names the instructor in the section's heading and links to the 
 }) => {
   const block = await landOnTheSurvey(page, placement, MATHEMATICS.code);
   await expect(block.getByText(`with ${INSTRUCTOR_NAME}`, { exact: true })).toBeVisible();
-  await expect(block.getByRole("link", { name: LINK })).toBeVisible();
+  // The link to the results page is the reply link, or the results lead's when a
+  // released week leads the card (the card then carries only the lead's).
+  const toTheResults = block.locator('a[href^="/app/student/sections/"][href$="/results"]');
+  await expect(toTheResults.first()).toBeVisible();
   await expectNoAxeViolations(page);
 });
 

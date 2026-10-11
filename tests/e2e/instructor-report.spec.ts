@@ -75,6 +75,7 @@ import {
   placementInto,
   sessionToken,
 } from './support/doors';
+import { expectNoAxeViolations } from './support/axe';
 import { expectTheTablesMatchTheLines } from './support/reportTables';
 import {
   databaseStatement,
@@ -451,6 +452,7 @@ test('an instructor launches, chooses a section, and reads its week', async ({ p
   // this test means.
   await expect(menu.getByRole('link', { name: /BIOL 215 R3WW/ })).toBeVisible();
   await expect(menu.getByRole('link', { name: /MATH 140 E1FF/ })).toBeVisible();
+  await expectNoAxeViolations(page, 'The instructor’s section menu');
 
   await menu.getByRole('link', { name: /BIOL 215 R3WW/ }).click();
 
@@ -543,6 +545,7 @@ test('an instructor launches, chooses a section, and reads its week', async ({ p
     await expect(cell).toContainText('The set behind this figure is too small to report on.');
     await expect(cell).not.toContainText(/\d/);
   }
+  await expectNoAxeViolations(page, 'The instructor report');
 });
 
 test('week navigation carries the week in the address and lands focus on the heading', async ({
@@ -573,6 +576,7 @@ test('week navigation carries the week in the address and lands focus on the hea
 
   // And focus is on the heading, which is what names the thing that changed.
   await expect(page.locator('h1')).toBeFocused();
+  await expectNoAxeViolations(page, 'The instructor report, one week back');
 });
 
 test('a deep link opens the week it names, and refuses a week that is not published', async ({
@@ -599,6 +603,7 @@ test('a deep link opens the week it names, and refuses a week that is not publis
   await expect(page.getByTestId(REPORT)).toHaveCount(0);
   await expect(page.getByRole('table')).toHaveCount(0);
   await expect(page.getByText(BIOL_DISTINCTIVE_COMMENT)).toHaveCount(0);
+  await expectNoAxeViolations(page, 'The refusal of an unpublished week');
 });
 
 test('a small-N week hides its comments in the payload and not only on the page', async ({
@@ -624,6 +629,7 @@ test('a small-N week hides its comments in the payload and not only on the page'
       `${String(MATH_STUDENTS.length)}.`,
   ).toHaveCount(0);
   await expect(report.getByText(MATH_DISTINCTIVE_COMMENT)).toHaveCount(0);
+  await expectNoAxeViolations(page, 'The instructor report of a small-N week');
 
   // The wire half. The section key comes off the menu route rather than out of
   // the address bar, so this asks the API the same question the page asked.
@@ -771,11 +777,13 @@ test('an instructor excludes a flagged comment and undoes it', async ({ page }) 
 
   await held.getByRole('button', { name: 'Review comment' }).click();
   await expect(held.getByText(BIOL_FLAGGED_COMMENT)).toBeVisible();
+  await expectNoAxeViolations(page, 'The report with a flagged comment open for review');
   await held.getByRole('button', { name: 'Exclude from student view' }).click();
 
   const excluded = report.getByRole('article').filter({ hasText: BIOL_FLAGGED_COMMENT });
   await expect(excluded.getByText(/^Excluded — students will not see this comment/)).toBeVisible();
   await expect(excluded.getByText(BIOL_FLAGGED_COMMENT)).toHaveClass(/--muted/);
+  await expectNoAxeViolations(page, 'The report with an excluded comment');
 
   await excluded.getByRole('button', { name: 'Undo' }).click();
   await expect(held).toHaveCount(1);

@@ -483,7 +483,9 @@ test("the results page carries no benchmark trace", async ({ page }) => {
 
   const instructor = await theInstructorsBenchmarkPages(page);
   const block = await landOnTheSurvey(page, learnerPlacement, ALONE.code);
-  const link = block.getByRole("link", { name: /reply/i });
+  // The reply link, or the results lead's link when a released week leads the
+  // card: either opens the section's results page.
+  const link = block.locator('a[href^="/app/student/sections/"][href$="/results"]').first();
   await expect(
     link,
     `The learner's ${ALONE.label} block carries no link to its results page, so there is no ` +
@@ -491,12 +493,12 @@ test("the results page carries no benchmark trace", async ({ page }) => {
   ).toBeVisible();
   const href = (await link.getAttribute("href")) ?? "";
   expect(
-    /\/student\/sections\/[0-9a-f-]+\/results/.test(href),
+    /\/student\/sections\/[0-9a-f-]+(\/weeks\/\d+)?\/results$/.test(href),
     `The reply link points at ${JSON.stringify(href)}, not at a section's results page.`,
   ).toBe(true);
 
   const sectionId =
-    /\/student\/sections\/([0-9a-f-]+)\/results/.exec(href)?.[1] ?? "";
+    /\/student\/sections\/([0-9a-f-]+)(?:\/weeks\/\d+)?\/results$/.exec(href)?.[1] ?? "";
   await expectAPublishedWeekToShow(page, sectionId);
   await page.goto(href);
   await expect(
