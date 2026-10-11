@@ -10,7 +10,9 @@
 <helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
 <div role="img" aria-label="{{ ariaLabel }}" style="font-family:var(--font-body)">
   <div style="font-size:var(--text-1);font-weight:500;color:var(--spruce);margin:0 0 var(--space-1)">{{ title }}</div>
+  <sc-if value="{{ showMean }}" hint-placeholder-val="{{ true }}">
   <div style="font-family:var(--font-mono);font-size:var(--text-1);color:var(--spruce-60);margin:0 0 var(--space-3)">mean <span style="color:var(--spruce)">{{ mean }}</span><sc-if value="{{ showBench }}" hint-placeholder-val="{{ true }}"><span> · comparable {{ benchLabel }}</span></sc-if></div>
+  </sc-if>
   <div style="display:flex;gap:var(--space-2);align-items:flex-end;height:96px" aria-hidden="true">
     <sc-for list="{{ bars }}" as="b" hint-placeholder-count="5">
       <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:var(--space-1);height:100%">
@@ -32,14 +34,17 @@ class Component extends DCLogic {
     const n = counts.reduce((a, b) => a + b, 0);
     const mean = n ? counts.reduce((a, c, i) => a + c * (i + 1), 0) / n : 0;
     const max = Math.max(...counts, 1);
-    const showBench = this.props.showBenchmark ?? true;
+    // `percent` is the student's view: shares summing to 100, never counts, with no total and no mean.
+    const percent = this.props.unit === 'percent';
+    const showBench = percent ? false : (this.props.showBenchmark ?? true);
     return {
       showBench,
+      showMean: !percent,
       title: this.props.title ?? 'Instructor support',
       mean: mean.toFixed(1),
       benchLabel: bench.toFixed(1),
-      bars: counts.map((c, i) => ({ label: String(i + 1), count: String(c), h: Math.max(Math.round(c / max * 72), c > 0 ? 3 : 2) + 'px' })),
-      ariaLabel: (this.props.title ?? 'Rating') + ' distribution, ' + n + ' responses, mean ' + mean.toFixed(1) + (showBench ? ' versus comparable-courses benchmark ' + bench.toFixed(1) : '') + '. Responses by rating 1 to 5: ' + counts.join(', ') + '.'
+      bars: counts.map((c, i) => ({ label: String(i + 1), count: percent ? String(c) + '%' : String(c), h: Math.max(Math.round(c / max * 72), c > 0 ? 3 : 2) + 'px' })),
+      ariaLabel: percent ? (this.props.title ?? 'Rating') + ', ratings this week as percentages for ratings 1 to 5: ' + counts.join(', ') + '.' : (this.props.title ?? 'Rating') + ' distribution, ' + n + ' responses, mean ' + mean.toFixed(1) + (showBench ? ' versus comparable-courses benchmark ' + bench.toFixed(1) : '') + '. Responses by rating 1 to 5: ' + counts.join(', ') + '.'
     };
   }
 }

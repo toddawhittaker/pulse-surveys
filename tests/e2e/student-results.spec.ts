@@ -4,8 +4,10 @@
 //
 //   - the survey names who teaches the section, in the heading area;
 //   - a course whose policy requires a response shows a closed door for a week
-//     that has none yet, and nothing else about the week;
-//   - once the instructor's response is in, the card shows it, by name.
+//     that has none yet: the course's name and nothing about the week;
+//   - once the instructor's response is in, the page for that week shows it by
+//     name, under the course's name, with both comment groups and the page's one
+//     confidentiality line, and no comparison of any kind.
 //
 // The two seeded facts the stack does not hold are set in the database as its
 // superuser: the instructor's name (the mock platform sends none, ADR 0050) and
@@ -17,18 +19,23 @@
 // straight after, so no other spec's launch lands somewhere new.
 //
 // **No date is pinned.** The reading day is the section's start day (the seeded
-// calendar, via `sectionStartClock`) plus seven days, which is the Monday the
-// first course week's report opens (SPEC §3.1). The policy is recorded at the
-// epoch, which is before any week's report opens whatever the calendar says.
+// calendar, via `sectionStartClock`) plus fourteen days, the Monday the second
+// course week's report opens (SPEC §3.1), so weeks 1 and 2 are both published.
+// The policy is recorded at the epoch, which is before any week's report opens
+// whatever the calendar says.
 //
-// **The response table is append-only**, so this spec cannot reset the stack
-// between runs; the block is serial and its last test is the one that publishes.
-// The scheduler is stopped for the reason `stopTheScheduler` gives.
+// **The response table is append-only, so the run is built to be repeated on one
+// stack.** Week 2 is never answered: it is the held week every run reads first.
+// Week 1 is the answered one, and every write is guarded by a check for its own
+// row, so a second run inserts nothing the first left behind and the stack is in
+// the same state after each. The block is serial. The scheduler is stopped for
+// the reason `stopTheScheduler` gives.
 //
 // This spec cannot be run without a seeded, running Compose stack; its green is
 // the stack-up run and CI.
 
-import { test, expect } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+import { test, expect, type Page } from "@playwright/test";
 
 import { clearTheClock, setTheClockTo } from "./support/clock";
 import { databaseStatement, stopTheScheduler } from "./support/stack";
@@ -41,6 +48,15 @@ import {
 } from "./support/survey";
 import { launchAs } from "./support/doors";
 
+/** An accessibility scan of the page as it stands; any violation fails the test. */
+async function expectNoAxeViolations(page: Page): Promise<void> {
+  const scan = await new AxeBuilder({ page }).analyze();
+  expect(
+    scan.violations.map((violation) => `${violation.id}: ${violation.help}`),
+    "The results page has accessibility violations.",
+  ).toEqual([]);
+}
+
 const MATHEMATICS: SectionUnderTest = { label: "MATH-140-E1FF", code: "E1FF" };
 
 // The name this spec gives the section's instructor, and the reply it publishes.
@@ -49,15 +65,16 @@ const REPLY = "Thank you for the honest notes. We will slow the pace next week."
 
 const AWAITING = "There is no reply to show for this week yet.";
 const LINK = "See your instructor’s reply";
+const CONFIDENTIALITY_LINE = "Comments are shown without the names of the students who wrote them.";
 
 test.describe.configure({ mode: "serial" });
 
 let placement = "";
 
-/** The section start day plus seven days: the Monday course week 1's report opens. */
+/** The section start day plus fourteen days: the Monday course week 2's report opens. */
 function readingClock(): string {
   const start = new Date(`${sectionStartClock(MATHEMATICS.code).slice(0, 10)}T12:00:00Z`);
-  start.setUTCDate(start.getUTCDate() + 7);
+  start.setUTCDate(start.getUTCDate() + 14);
   return `${start.toISOString().slice(0, 10)}T12:00`;
 }
 
@@ -106,18 +123,26 @@ test("the survey names the instructor in the section's heading and links to the 
   const block = await landOnTheSurvey(page, placement, MATHEMATICS.code);
   await expect(block.getByText(`with ${INSTRUCTOR_NAME}`, { exact: true })).toBeVisible();
   await expect(block.getByRole("link", { name: LINK })).toBeVisible();
+  await expectNoAxeViolations(page);
 });
 
-test("a required-mode week with no reply shows the closed door and nothing about the week", async ({
+test("a required-mode week with no reply shows the course and the closed door, and nothing about the week", async ({
   page,
 }) => {
   // The instructor is made the course's lead, the way the guard checks it: a
-  // LEAD_FACULTY assignment and the course's lead mapping.
+  // LEAD_FACULTY assignment and the course's lead mapping. Each row is written
+  // only if it is not already there, and the grant is taken away again after.
+  // The policy row is always appended: an earlier spec leaves this course set back to
+  // encouraged, and the policy of record is the latest row, so a guard that skipped
+  // the insert would read that row and leave the week unanswered, not held. A history
+  // table takes another row on a rerun without a conflict.
   databaseStatement(
     "insert into role_assignment (person_id, role, course_id)\n" +
-      `select ${INSTRUCTOR}, 'LEAD_FACULTY', s.course_id from section s where s.id = ${SECTION};\n` +
+      `select ${INSTRUCTOR}, 'LEAD_FACULTY', s.course_id from section s where s.id = ${SECTION}\n` +
+      `and not exists (select 1 from role_assignment ra where ra.person_id = ${INSTRUCTOR} and ra.role = 'LEAD_FACULTY' and ra.course_id = s.course_id);\n` +
       "insert into lead_faculty_mapping (person_id, course_id)\n" +
-      `select ${INSTRUCTOR}, s.course_id from section s where s.id = ${SECTION};\n` +
+      `select ${INSTRUCTOR}, s.course_id from section s where s.id = ${SECTION}\n` +
+      `and not exists (select 1 from lead_faculty_mapping m where m.person_id = ${INSTRUCTOR} and m.course_id = s.course_id);\n` +
       "insert into response_policy (course_id, prefix_id, set_by_person_id, role, mode, set_at)\n" +
       `select s.course_id, c.prefix_id, ${INSTRUCTOR}, 'LEAD_FACULTY', 'REQUIRED', '1970-01-01T00:00Z'\n` +
       `from section s join course c on c.id = s.course_id where s.id = ${SECTION};\n` +
@@ -131,28 +156,70 @@ test("a required-mode week with no reply shows the closed door and nothing about
   const block = await landOnTheSurvey(page, placement, MATHEMATICS.code);
   await block.getByRole("link", { name: LINK }).click();
 
+  // The latest published week is the second, and nobody has answered it.
   const results = page.getByTestId("pulse-student-results");
   await expect(results.getByText(AWAITING)).toBeVisible();
+  await expect(results.getByTestId("pulse-results-course")).toContainText("MATH");
   const text = (await results.textContent()) ?? "";
-  expect(text, "A held week shows no number, date, countdown or name.").not.toMatch(/\d/);
+  expect(text, "A held week shows no week number.").not.toMatch(/Week\s*\d/);
   expect(text).not.toContain(INSTRUCTOR_NAME);
+  expect(text, "A held week shows no confidentiality promise: it shows no comments.").not.toContain(
+    CONFIDENTIALITY_LINE,
+  );
+  for (const testId of ["pulse-trend-duo"]) {
+    await expect(results.getByTestId(testId)).toHaveCount(0);
+  }
+  await expect(results.locator(".pulse-stat-histogram")).toHaveCount(0);
+  await expect(results.locator(".pulse-comment-group")).toHaveCount(0);
+  await expect(results.locator(".pulse-small-n-notice")).toHaveCount(0);
+  await expectNoAxeViolations(page);
 });
 
-test("after the instructor publishes, the card shows the reply under the instructor's name", async ({
+test("after the instructor publishes, the week's page shows the reply, both groups and the one confidentiality line", async ({
   page,
 }) => {
   databaseStatement(
     "insert into instructor_response (section_id, term_id, week_id, author_person_id, role, ai_seeded, body, published_at)\n" +
       `select s.id, s.term_id, ${FIRST_WEEK}, ${INSTRUCTOR}, 'INSTRUCTOR', false, '${REPLY}', now()\n` +
-      `from section s where s.id = ${SECTION};`,
+      `from section s where s.id = ${SECTION}\n` +
+      `and not exists (select 1 from instructor_response r where r.section_id = s.id and r.week_id = ${FIRST_WEEK});`,
   );
 
   await launchAs(page, LEARNER_SUBJECT, placement);
   const block = page.getByTestId(`survey-section-${MATHEMATICS.code}`);
   await block.getByRole("link", { name: LINK }).click();
 
+  // The latest week is still held; the answered one is a step back.
   const results = page.getByTestId("pulse-student-results");
+  await expect(results.getByText(AWAITING)).toBeVisible();
+  await results.getByRole("button", { name: "Previous week" }).click();
+
   await expect(results.getByText(REPLY)).toBeVisible();
   await expect(results.getByText(INSTRUCTOR_NAME, { exact: true })).toBeVisible();
   await expect(results.getByText(AWAITING)).toHaveCount(0);
+  await expect(results.getByTestId("pulse-results-course")).toContainText("MATH");
+
+  // The figures and both comment groups, and the line, once.
+  await expect(results.getByTestId("pulse-trend-duo")).toBeVisible();
+  // The seeded section has far fewer raters than the threshold, so ruling 8
+  // withholds both streams' ratings: each shows the notice that names it and no
+  // histogram is drawn.
+  await expect(results.locator(".pulse-stat-histogram")).toHaveCount(0);
+  await expect(
+    results.getByText("Ratings about the instructor are not shown this week"),
+  ).toBeVisible();
+  await expect(results.getByText("Ratings about the course are not shown this week")).toBeVisible();
+  await expect(results.getByRole("heading", { name: "About the instructor" })).toBeVisible();
+  await expect(results.getByRole("heading", { name: "About the course" })).toBeVisible();
+  const text = (await results.textContent()) ?? "";
+  expect(text.split(CONFIDENTIALITY_LINE).length - 1).toBe(1);
+
+  // Nothing compares this section with anything, in text or in a label.
+  const labels = await results.locator("[aria-label]").evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute("aria-label") ?? "").join(" "),
+  );
+  expect(`${text} ${labels}`).not.toMatch(/compar|universit|benchmark|average|other sections/i);
+  // At most one line per stream: a stream with no mean to draw draws no line.
+  expect(await results.locator("path.pulse-trend-line").count()).toBeLessThanOrEqual(2);
+  await expectNoAxeViolations(page);
 });

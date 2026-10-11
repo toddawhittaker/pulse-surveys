@@ -39,8 +39,7 @@ function results(
   role: 'INSTRUCTOR' | 'LEAD_FACULTY' | 'CHAIR' | null,
   weeks = [1, 2, 3],
 ): StudentWeekResults {
-  // The figures, comments and release group are E8-02's page to render; these
-  // tests read only the state and the response, so they serve none of them.
+  // The state tests below serve no figures; the data tests use `withFigures`.
   return {
     course_label: 'MATH 140',
     state,
@@ -122,7 +121,8 @@ describe('the four states', () => {
     serving({ [LATEST]: () => json(200, results('awaiting', 'INSTRUCTOR')), [SURVEY]: survey });
     mountAt(`/app${LATEST}`);
     await screen.findByText(AWAITING);
-    const text = page().textContent ?? '';
+    // The course's name is the one thing a held week shows, and it carries digits.
+    const text = (page().textContent ?? '').replace('MATH 140', '');
     expect(text).not.toMatch(/\d/);
     expect(text).not.toContain(AUTHOR);
     expect(text).not.toContain(REPLY);
@@ -224,4 +224,260 @@ describe('the student’s own posted score', () => {
       expect(page().querySelector('.pulse-results-participation')).toBeNull();
     },
   );
+});
+
+const INSTRUCTOR_COMMENT = 'Explains the proofs clearly.';
+const COURSE_COMMENT = 'The reading load is heavy.';
+const RELEASED_COMMENT = 'Office hours helped a lot.';
+
+function stream(
+  which: 'instructor' | 'course',
+  options: { small?: boolean; comments?: string[] } = {},
+): NonNullable<StudentWeekResults['streams']>[number] {
+  const small = options.small ?? false;
+  return {
+    stream: which,
+    trend: [
+      { course_week: 1, mean: 3.5 },
+      { course_week: 2, mean: null },
+      { course_week: 3, mean: 4.2 },
+    ],
+    shares: small ? null : { '1': 0, '2': 10, '3': 20, '4': 40, '5': 30 },
+    small_n: small,
+    comments: small ? [] : (options.comments ?? []).map((text) => ({ text })),
+  };
+}
+
+function withFigures(
+  state: StudentWeekResults['state'],
+  overrides: Partial<StudentWeekResults> = {},
+): StudentWeekResults {
+  return {
+    ...results(state, state === 'unanswered' ? null : 'INSTRUCTOR'),
+    streams: [
+      stream('instructor', { comments: [INSTRUCTOR_COMMENT] }),
+      stream('course', { comments: [COURSE_COMMENT] }),
+    ],
+    workload_median: 4.5,
+    released: [{ text: RELEASED_COMMENT, stream: 'course' }],
+    participation: { score_text: '61.50', ledger_text: 'Week 1: 3 of 3 items' },
+    ...overrides,
+  };
+}
+
+const CONFIDENTIALITY = 'Comments are shown without the names of the students who wrote them.';
+
+async function mountWith(body: StudentWeekResults): Promise<void> {
+  serving({ [LATEST]: () => json(200, body), [SURVEY]: survey });
+  mountAt(`/app${LATEST}`);
+  await screen.findByText('MATH 140');
+}
+
+describe('the released page', () => {
+  it.each(['published', 'on-behalf', 'unanswered'] as const)(
+    '%s: the page reads in order, from the course to the confidentiality line',
+    async (state) => {
+      await mountWith(withFigures(state));
+      await screen.findByText(CONFIDENTIALITY);
+      const html = page().innerHTML;
+      const at = (marker: string): number => {
+        const found = html.indexOf(marker);
+        expect(found, `${marker} is on the page`).toBeGreaterThan(-1);
+        return found;
+      };
+      const order = [
+        at('pulse-results-course'),
+        at(state === 'unanswered' ? UNANSWERED : REPLY),
+        at('pulse-results-participation'),
+        at('pulse-trend-duo'),
+        at('pulse-stat-histogram"'),
+        at('Class median: 4.5 h on this course'),
+        at(INSTRUCTOR_COMMENT),
+        at(COURSE_COMMENT),
+        at('Comments from earlier weeks'),
+        at(CONFIDENTIALITY),
+      ];
+      expect(order).toEqual([...order].sort((left, right) => left - right));
+    },
+  );
+
+  it('shows the confidentiality line once, with no shield or lock', async () => {
+    await mountWith(withFigures('published'));
+    await screen.findByText(CONFIDENTIALITY);
+    expect(page().textContent?.split(CONFIDENTIALITY).length).toBe(2);
+    expect(page().textContent).not.toMatch(/[\u{1F510}-\u{1F513}\u{1F6E1}]/u);
+  });
+
+  it('draws one line per stream and no comparison, in its chart, text or labels', async () => {
+    await mountWith(withFigures('published'));
+    await screen.findByText(CONFIDENTIALITY);
+    const duo = screen.getByTestId('pulse-trend-duo');
+    expect(duo.querySelectorAll('path.pulse-trend-line')).toHaveLength(2);
+    expect(duo.querySelector('[data-testid^="trend-"]')).toBeNull();
+    const labels = Array.from(page().querySelectorAll('[aria-label]'))
+      .map((node) => node.getAttribute('aria-label'))
+      .join(' ');
+    const everything = `${page().textContent ?? ''} ${labels} ${page().innerHTML}`;
+    expect(everything).not.toMatch(/compar|universit|benchmark|average|percentile|other sections/i);
+  });
+
+  it('gives the numbers behind the trend as a table, with no term-week column', async () => {
+    await mountWith(withFigures('published'));
+    await screen.findByText(CONFIDENTIALITY);
+    const tables = screen.getByTestId('pulse-trend-duo').querySelectorAll('table');
+    expect(tables).toHaveLength(2);
+    const headers = Array.from(tables[0]?.querySelectorAll('th[scope="col"]') ?? []).map(
+      (node) => node.textContent,
+    );
+    expect(headers).toEqual(['Course week', 'Mean rating']);
+  });
+
+  it('holds only the small stream: its notice with no number, the other stream’s comments', async () => {
+    await mountWith(
+      withFigures('published', {
+        streams: [
+          stream('instructor', { small: true }),
+          stream('course', { comments: [COURSE_COMMENT] }),
+        ],
+      }),
+    );
+    await screen.findByText(COURSE_COMMENT);
+    const groups = page().querySelectorAll('.pulse-comment-group');
+    expect(groups).toHaveLength(2);
+    const [first, second] = Array.from(groups);
+    expect(first?.querySelector('.pulse-small-n-notice')).not.toBeNull();
+    expect(first?.textContent).not.toMatch(/\d/);
+    expect(first?.textContent).toContain('Comments in this group stay private this week');
+    expect(second?.querySelector('.pulse-small-n-notice')).toBeNull();
+    expect(second?.textContent).toContain(COURSE_COMMENT);
+  });
+
+  it('draws no comment from a stream the payload marks small, whatever its array holds', async () => {
+    const hostile = { ...stream('instructor', { small: true }), comments: [{ text: 'LEAK' }] };
+    await mountWith(
+      withFigures('published', { streams: [hostile, stream('course', { comments: [] })] }),
+    );
+    await screen.findByText(CONFIDENTIALITY);
+    expect(page().textContent).not.toContain('LEAK');
+  });
+
+  it('shows a stream with no comments as one line and not as a hold', async () => {
+    await mountWith(
+      withFigures('published', { streams: [stream('instructor'), stream('course')] }),
+    );
+    await screen.findByText(CONFIDENTIALITY);
+    expect(page().querySelector('.pulse-small-n-notice')).toBeNull();
+    expect(screen.getAllByText('No comments this week.')).toHaveLength(2);
+  });
+
+  it('shows comments with no time and no status, and earlier-week comments with no week', async () => {
+    await mountWith(withFigures('published'));
+    await screen.findByText(RELEASED_COMMENT);
+    const cards = page().querySelectorAll('.pulse-comment-card');
+    expect(cards).toHaveLength(3);
+    expect(Array.from(cards).map((card) => card.textContent?.trim())).toEqual([
+      INSTRUCTOR_COMMENT,
+      COURSE_COMMENT,
+      // An earlier-week comment carries its stream's chip and nothing else.
+      `Course${RELEASED_COMMENT}`,
+    ]);
+    const released = page().querySelector('.pulse-results-released');
+    expect(released?.textContent).not.toMatch(/week \d|\d/i);
+  });
+
+  it('draws nothing for members the payload sends as null', async () => {
+    await mountWith(
+      withFigures('published', { streams: null, workload_median: null, released: null }),
+    );
+    await screen.findByText(REPLY);
+    expect(page().querySelector('[data-testid="pulse-trend-duo"]')).toBeNull();
+    expect(page().querySelector('.pulse-stat-histogram')).toBeNull();
+    expect(page().querySelector('.pulse-comment-group')).toBeNull();
+    expect(page().querySelector('.pulse-results-released')).toBeNull();
+    expect(page().textContent).not.toContain('Class median');
+    expect(page().textContent).not.toContain(CONFIDENTIALITY);
+  });
+});
+
+describe('the closed door', () => {
+  it('shows the course, the door and the participation block, and teases nothing', async () => {
+    // A hostile payload: every member filled, as a server that forgot the hold would send.
+    await mountWith(withFigures('awaiting'));
+    await screen.findByText(AWAITING);
+    expect(screen.getByTestId('pulse-results-course').textContent).toBe('MATH 140');
+    expect(page().querySelector('.pulse-results-participation')).not.toBeNull();
+    for (const selector of [
+      '[data-testid="pulse-trend-duo"]',
+      '.pulse-stat-histogram',
+      '.pulse-comment-group',
+      '.pulse-comment-card',
+      '.pulse-small-n-notice',
+      '.pulse-results-released',
+      '.pulse-results-workload',
+      '.pulse-response-card',
+    ]) {
+      expect(page().querySelector(selector), selector).toBeNull();
+    }
+    const text = page().textContent ?? '';
+    for (const leaked of [INSTRUCTOR_COMMENT, COURSE_COMMENT, RELEASED_COMMENT, 'Class median']) {
+      expect(text).not.toContain(leaked);
+    }
+    expect(text).not.toContain(CONFIDENTIALITY);
+  });
+});
+
+describe('ratings as shares', () => {
+  it('draws percentages and no count, total or mean', async () => {
+    await mountWith(withFigures('published'));
+    await screen.findByText(CONFIDENTIALITY);
+    const histograms = page().querySelectorAll('.pulse-stat-histogram');
+    expect(histograms).toHaveLength(2);
+    const first = histograms[0];
+    expect(first?.textContent).toContain('40%');
+    expect(first?.getAttribute('aria-label')).toContain('0%, 10%, 20%, 40%, 30%');
+    expect(first?.getAttribute('aria-label')).not.toMatch(/responses|mean/);
+    expect(first?.querySelector('.pulse-stat-histogram-summary')).toBeNull();
+  });
+
+  it('puts the student notice in place of a stream’s chart when shares are null', async () => {
+    await mountWith(
+      withFigures('published', {
+        streams: [stream('instructor', { small: true }), stream('course', { comments: [] })],
+      }),
+    );
+    await screen.findByText(CONFIDENTIALITY);
+    expect(page().querySelectorAll('.pulse-stat-histogram')).toHaveLength(1);
+    const held = page().querySelector('.pulse-results-held-chart');
+    expect(held?.querySelector('.pulse-small-n-notice')).not.toBeNull();
+    expect(held?.textContent).not.toMatch(/\d|too few/);
+    expect(held?.textContent).toContain('Ratings about the instructor are not shown this week');
+    expect(held?.textContent).not.toMatch(/comment/i);
+  });
+
+  it('tells the held ratings slot from the held comments slot, and one never speaks for the other', async () => {
+    // Ratings held, comments shown: nothing says comments are hidden.
+    const ratingsOnly = {
+      ...stream('instructor', { comments: [INSTRUCTOR_COMMENT] }),
+      shares: null,
+    };
+    await mountWith(withFigures('published', { streams: [ratingsOnly, stream('course', { comments: [] })] }));
+    await screen.findByText(INSTRUCTOR_COMMENT);
+    expect(page().textContent).toContain('Ratings about the instructor are not shown this week');
+    expect(page().textContent).not.toContain('Comments in this group stay private');
+    cleanup();
+    // Comments held, ratings shown: nothing says ratings are hidden.
+    const commentsOnly = { ...stream('instructor', { small: true }), shares: { '1': 0, '2': 10, '3': 20, '4': 40, '5': 30 } };
+    await mountWith(withFigures('published', { streams: [commentsOnly, stream('course', { comments: [] })] }));
+    await screen.findByText(CONFIDENTIALITY);
+    expect(page().textContent).toContain('Comments in this group stay private');
+    expect(page().textContent).not.toContain('Ratings about');
+  });
+
+  it('says a week with no mean has no figure, with no number or reason', async () => {
+    await mountWith(withFigures('published'));
+    await screen.findByText(CONFIDENTIALITY);
+    const cells = Array.from(page().querySelectorAll('tbody td')).map((cell) => cell.textContent);
+    expect(cells).toContain('No figure for this week');
+    expect(page().textContent).not.toMatch(/no responses|too few/i);
+  });
 });

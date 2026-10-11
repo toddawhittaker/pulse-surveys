@@ -218,6 +218,15 @@ export async function submitWeeklySurvey(
 /** One week of results for one of this reader's sections (SPEC §5.4). */
 export type StudentWeekResults = Schemas['StudentWeekResults'];
 
+/** One of the page's two streams: its trend, its distribution and its comments. */
+export type StudentStream = Schemas['StudentStream'];
+
+/** One week's mean in a stream's trend; a week nobody rated has no mean. */
+export type StudentTrendPoint = Schemas['StudentTrendPoint'];
+
+/** A comment released from an earlier week, with the stream it was about and no week. */
+export type StudentReleasedComment = Schemas['StudentReleasedComment'];
+
 /** The published response a student reads, and who wrote it. */
 export type StudentResponse = Schemas['StudentResponse'];
 

@@ -2,12 +2,15 @@ import type { JSX } from 'react';
 
 import './instructorReportComments.css';
 import { copy, fillCopy } from '../copy/instructorReportCommentCopy';
+import { copy as studentCopy } from '../copy/studentResults';
 
 /**
  * Why one comment group's raw comments are not on the page — SPEC §7.6's
- * `SmallNNotice`, in its **instructor** audience. The student audience is E8's,
- * and its words are a different sentence to a different person, so it is not
- * stubbed here.
+ * `SmallNNotice`, in two audiences whose words are different sentences to
+ * different people. The **student** audience frames the hold as protecting the
+ * student, says comments appear once enough classmates comment, and states no
+ * number at all: not the threshold, which would tell a student how many
+ * classmates must write before theirs shows, and not a count of anyone.
  *
  * SPEC §4 hides a stream's raw comments when fewer than the threshold of
  * distinct students commented in that stream that week; the design brief asks
@@ -21,7 +24,7 @@ import { copy, fillCopy } from '../copy/instructorReportCommentCopy';
  * written into a component is a second, wrong copy of a configured value the
  * day anybody changes it.
  *
- * **Nothing here counts anybody** (E5.1-01). §5.2 forbids a count below the
+ * **Nothing here counts anybody**. §5.2 forbids a count below the
  * threshold, and the notice now sits inside one group, where any count reads as
  * that group's: in a stream of one commenter, a count of commenters is the
  * whole disclosure, and a count of the week's respondents beside it is a
@@ -39,22 +42,42 @@ import { copy, fillCopy } from '../copy/instructorReportCommentCopy';
  * with the same title, and WCAG 2.2 asks landmarks of one type to be told apart;
  * the group's own labelled section and heading already say which stream this is.
  */
-export function SmallNNotice({
-  threshold,
-}: {
-  /** The configured number of distinct commenters a stream's raw comments are held until. */
-  readonly threshold: number;
-}): JSX.Element {
+export function SmallNNotice(
+  props:
+    | {
+        readonly audience?: 'instructor';
+        /** The configured number of distinct commenters a stream's raw comments are held until. */
+        readonly threshold: number;
+      }
+    | {
+        readonly audience: 'student';
+        /** Set for a stream whose ratings are held: the notice then speaks of ratings, not comments. */
+        readonly ratingsAbout?: 'instructor' | 'course';
+      },
+): JSX.Element {
+  const student = props.audience === 'student';
   return (
     <div className="pulse-small-n-notice">
       <FlatPulseLine />
       <p className="pulse-small-n-notice__title">
-        {copy('instructor_report_comments.small_n.title')}
+        {props.audience === 'student' && props.ratingsAbout !== undefined
+          ? studentCopy(
+              props.ratingsAbout === 'instructor'
+                ? 'student_results.ratings_held_instructor'
+                : 'student_results.ratings_held_course',
+            )
+          : student
+          ? studentCopy('student_results.small_n_title')
+          : copy('instructor_report_comments.small_n.title')}
       </p>
       <p className="pulse-small-n-notice__body">
-        {fillCopy('instructor_report_comments.small_n.body', {
-          threshold: String(threshold),
-        })}
+        {'threshold' in props
+          ? fillCopy('instructor_report_comments.small_n.body', {
+              threshold: String(props.threshold),
+            })
+          : props.ratingsAbout !== undefined
+            ? studentCopy('student_results.ratings_held_body')
+            : studentCopy('student_results.small_n_body')}
       </p>
     </div>
   );
