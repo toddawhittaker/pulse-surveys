@@ -83,6 +83,14 @@ breakdown's pull request writes rulings 1 to 4 and 6 into SPEC §3.3, §3.4 and
    01 takes only the policy-of-record simplification; 04 re-carries the other
    simplifications.
 
+8. **Ratings as shares, hidden when small** (the owner's, 2026-10-11, on
+   E8-01's privacy review). Students see each stream's distribution as
+   whole-number percentages summing to 100, never counts. Below the n-threshold
+   of distinct raters in a stream-week, the student gets no distribution and no
+   trend mean for that stream-week, only the small-N notice; the workload
+   median follows the same rule on workload answers. SPEC §5.4 says so. E8-01
+   builds it in its fix round; E8-02 renders it.
+
 **Facts checked in the code at 22a81a41, which the tickets build on:**
 
 - The Alembic head is `7f679faf4b8d`, and it is the only head.
