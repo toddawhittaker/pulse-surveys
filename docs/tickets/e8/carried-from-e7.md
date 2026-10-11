@@ -352,4 +352,59 @@ Every source entry, in its source's order, with what happened to it.
 
 ### The E7 boundary (`../e7/boundary-review.md`)
 
-Added by the change that records the boundary reviews.
+Everything the boundary reviews found and E7-10 and E7-11 did not fix. The
+other findings are recorded there with their fixes. The summary walk's
+transaction-start race, the 500 on a publish race, the purview-wide reads, the
+draft evals' floor and the shared-stack residue were already entries above, and
+are not repeated.
+
+| Finding | Disposition |
+|---|---|
+| `code-reviewer` simplifications 1 to 5 | Carried: "Five simplifications the boundary review proposed" |
+| `data-model` LOW: `role_assignment.section_id` has no index | Carried: "The role-assignment table has no index on its section" |
+| `prompt-eval` LOW: the draft eval set is not typed through its contracts | Carried: "The draft eval set bypasses the output contracts" |
+| `spec-conformance` LOW: on-behalf and unanswered not driven on the stack | Carried: "Two response paths no drive reaches" |
+| `response_gather`'s `for_on_behalf` keyword | Carried: "`response_gather` has a keyword that changes nothing" |
+| Every other finding | Fixed in E7-10 (#318) or E7-11 (#316), or covered by process pull request #305 |
+
+### Five simplifications the boundary review proposed
+
+From `code-reviewer`, accepted as not worth the risk inside the epic: the
+lead-and-chair rule is written three times in SQL; the chair's walk to courses
+with a lead appears twice; the policy-of-record rule is written in two forms;
+`record_policy` recomputes what its caller already knows; and `publish_response`
+converts a course week to a week itself. **Owner:** the next ticket that touches
+each file. **Done when:** each rule is written once, or a record argues the
+extra copy, and `publish_response` takes the week its caller already resolved.
+
+### The role-assignment table has no index on its section
+
+From `data-model`. E7 adds reads keyed by section on the student path (the
+staff-name definer and the teaching-instructor lookup). **Owner:** E8, which
+adds more student-path reads. **Done when:** `EXPLAIN` at a realistic size
+(about twenty thousand rows) is recorded in ADR 0191 and shows the reads are
+fine, or a partial index on `section_id` where the role is instructor exists.
+
+### The draft eval set bypasses the output contracts
+
+From `prompt-eval`. The cases in `tests/evals/response_draft/` are not typed
+through `ResponseDraftOutput` or the gathered stream, so a change to either
+contract would not fail them. **Owner:** E10's floors pull request, with the
+entry "The draft and check evals have no floor". **Done when:** every case
+builds its input and checks its output through those types.
+
+### Two response paths no drive reaches
+
+From `spec-conformance`. The exit drive reads an on-behalf response, but no
+drive on the running stack publishes on behalf of a course, and none reads an
+unanswered week past the deadline as the lead sees it. **Owner:** E8's
+end-to-end work, or the first ticket that touches the on-behalf page.
+**Done when:** one drive publishes on behalf and one reads an unanswered week
+as the lead, each on a fresh stack and leaving no rows a rerun trips over.
+
+### `response_gather` has a keyword that changes nothing
+
+E7-10 made every draft gather use the on-behalf summary filter, so the
+`for_on_behalf` keyword no longer changes what is read. **Owner:** the next
+ticket that touches `response_gather`. **Done when:** the keyword is removed
+from the function and its callers.
