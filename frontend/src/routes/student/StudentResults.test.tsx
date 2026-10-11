@@ -171,3 +171,51 @@ describe('paging', () => {
     );
   });
 });
+
+describe('the student’s own posted score', () => {
+  const SCORE = { score_text: '61.50', ledger_text: 'Week 1: 3 of 3 items; Week 2: 1 of 3 items' };
+  const NOTE =
+    'A comment counted when you submitted it can be re-checked later, so a week’s count can go down.';
+
+  function withScore(state: StudentWeekResults['state'], role: 'INSTRUCTOR' | null) {
+    return { ...results(state, role), participation: SCORE };
+  }
+
+  it.each([
+    ['published', 'INSTRUCTOR'],
+    ['on-behalf', 'INSTRUCTOR'],
+    ['unanswered', null],
+    ['awaiting', null],
+  ] as const)('%s: shows the score and ledger as posted, with the sentence', async (state, role) => {
+    serving({ [LATEST]: () => json(200, withScore(state, role)), [SURVEY]: survey });
+    mountAt(`/app${LATEST}`);
+    await screen.findByText('Score posted to your gradebook: 61.50');
+    expect(page().textContent).toContain(SCORE.ledger_text);
+    expect(page().textContent).toContain(NOTE);
+  });
+
+  it('awaiting still shows no reply, author or week number beside the score', async () => {
+    serving({
+      [LATEST]: () => json(200, { ...results('awaiting', 'INSTRUCTOR'), participation: SCORE }),
+      [SURVEY]: survey,
+    });
+    mountAt(`/app${LATEST}`);
+    await screen.findByText(AWAITING);
+    await screen.findByText(NOTE);
+    expect(page().textContent).not.toContain(REPLY);
+    expect(page().textContent).not.toContain(AUTHOR);
+    expect(page().textContent).not.toContain('Week 3');
+  });
+
+  it.each([['absent', results('published', 'INSTRUCTOR')], ['null', { ...results('published', 'INSTRUCTOR'), participation: null }]])(
+    'shows nothing for a score that is %s: no zero, no placeholder, no sentence',
+    async (_name, body) => {
+      serving({ [LATEST]: () => json(200, body), [SURVEY]: survey });
+      mountAt(`/app${LATEST}`);
+      await screen.findByText(REPLY);
+      expect(page().textContent).not.toContain('Score posted');
+      expect(page().textContent).not.toContain(NOTE);
+      expect(page().querySelector('.pulse-results-participation')).toBeNull();
+    },
+  );
+});

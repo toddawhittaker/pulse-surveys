@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type JSX } from 'react';
 
 import {
+  readStudentResults,
   readStudentSurvey,
   resultsAddress,
   submitWeeklySurvey,
@@ -255,6 +256,7 @@ function SectionSurvey({
           })}
         </p>
       )}
+      {survey === null ? <ResultsLead section={section} /> : null}
       <p className="pulse-section-reply-link">
         <a
           href={resultsAddress(section.section_id)}
@@ -280,6 +282,44 @@ function SectionSurvey({
         />
       )}
     </section>
+  );
+}
+
+/**
+ * With no survey open, the newest released week's results lead the card (SPEC
+ * §5.4). It reads the same latest-results call the results page does and keeps
+ * no record of what the student has seen. A held (`awaiting`) week, a section
+ * with no published week and any failed read give no lead: "results are in" over
+ * a closed door would tease what the hold keeps back.
+ */
+function ResultsLead({ section }: { readonly section: EnrolledSection }): JSX.Element | null {
+  const [week, setWeek] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    void readStudentResults(section.section_id).then((answer) => {
+      if (!live || answer.kind !== 'results' || answer.results.state === 'awaiting') return;
+      setWeek(answer.results.published_weeks.at(-1) ?? null);
+    });
+    return () => {
+      live = false;
+    };
+  }, [section.section_id]);
+
+  if (week === null) return null;
+  const values = { week: String(week) };
+  return (
+    <p className="pulse-section-results-lead" data-testid="pulse-results-lead">
+      <strong>{fillResultsCopy('student_results.results_lead', values)}</strong>{' '}
+      <a
+        href={resultsAddress(section.section_id, week)}
+        aria-label={fillResultsCopy('student_results.results_lead_link_named', {
+          ...values,
+          course: section.course_label,
+        })}
+      >
+        {fillResultsCopy('student_results.results_lead_link', values)}
+      </a>
+    </p>
   );
 }
 
