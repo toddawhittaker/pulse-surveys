@@ -69,7 +69,9 @@ role gates and `_session_in_role`; `frontend/src/api/leadership.ts`.
 2. **Every other refusal is still one 401.** Absent, malformed, expired and
    wrongly signed tokens each get the same 401 with the same body and headers,
    so none can be told from another. An expired but correctly signed student
-   token, and a student session ended on the server, each get 401, not 403.
+   token gets 401, not 403. (Sessions are signed tokens with no server-side
+   record, ADR 0089, so no session can be ended on the server; the review's
+   wording for that case was dropped when the tests were written.)
 3. **A leader is still admitted**, beside each refusal above, in one world.
 4. **The two-hat case.** A person with an instructor and a leadership
    assignment gets 403 under the instructor session and is admitted under the

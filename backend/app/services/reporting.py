@@ -54,8 +54,9 @@ section and the classes of what was raised, and nothing else.
 """
 
 import logging
+import re
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from datetime import time as time_of_day
@@ -67,9 +68,23 @@ from pydantic import BaseModel, ConfigDict, PrivateAttr
 from sqlalchemy import column, func, or_, select, table
 from sqlalchemy.orm import Session
 
-from app.ai.contracts import CommentStream, WeeklySummaryRecord
+from app.ai.contracts import (
+    CheckTheme,
+    CommentStream,
+    CommentTheme,
+    DraftCheckOutput,
+    WeeklySummaryRecord,
+)
 from app.ai.gateway import AIGateway, AIGatewayError
-from app.ai.tasks import SUMMARY_PROMPT_VERSION, summarize_stream
+from app.ai.tasks import (
+    SUMMARY_PROMPT_VERSION,
+    GatheredStream,
+    GatheredTheme,
+    ResponseGather,
+    check_draft,
+    draft_response,
+    summarize_stream,
+)
 from app.config import Settings
 from app.models.identity import Enrollment
 from app.models.org import Course, Prefix, Section
@@ -1026,14 +1041,13 @@ def instructor_report(
     """
     if person_id is None:
         raise SectionUnavailableError
-    section = _readable_section(session, person_id=person_id, section_id=section_id)
-    published = _published_weeks(session, section=section, settings=settings)
-
-    asked = next((week for week in published if week.course_week == course_week), None)
-    if asked is None:
-        raise CourseWeekUnavailableError(
-            "This section has no published report for that course week."
-        )
+    section, asked, published = _published_section_week(
+        session,
+        person_id=person_id,
+        section_id=section_id,
+        course_week=course_week,
+        settings=settings,
+    )
     return _payload(
         session,
         section=section,
@@ -1042,6 +1056,37 @@ def instructor_report(
         reader=person_id,
         settings=settings,
     )
+
+
+def _published_section_week(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    settings: Settings,
+) -> tuple[Section, _SectionWeek, list[_SectionWeek]]:
+    """One of this person's own sections, one of its published weeks, and every published week.
+
+    The gate every reader of one section-week passes before anything else is read:
+    the teaching grant through `_readable_section`, then the asked week selected
+    out of the published set (ADR 0184). `instructor_report` and the response
+    draft and check below call it, so the report and the two tasks built on it
+    refuse the same requests with the same exceptions.
+
+    Raises `SectionUnavailableError` and `CourseWeekUnavailableError`.
+    """
+    if person_id is None:
+        raise SectionUnavailableError
+    section = _readable_section(session, person_id=person_id, section_id=section_id)
+    published = _published_weeks(session, section=section, settings=settings)
+
+    asked = next((week for week in published if week.course_week == course_week), None)
+    if asked is None:
+        raise CourseWeekUnavailableError(
+            "This section has no published report for that course week."
+        )
+    return section, asked, published
 
 
 def comment_on_instructor_report(
@@ -1560,11 +1605,7 @@ def _payload(
     # follow. E4-07's security round found exactly that, and
     # `app.services.report_comments.n_threshold` carries the argument.
     threshold = n_threshold()
-    # A section-week not yet fully moderated shows no comment in either stream
-    # (`visible_comments`), so the notice says "held" for it too. Without this a
-    # week above the threshold waiting on one verdict would report itself
-    # unsuppressed and empty, which reads as "nobody commented" (E6-09).
-    moderated = section_week_moderated(session, section_id=section.id, week_id=week.week_id)
+    held = _held_streams(session, section_id=section.id, week_id=week.week_id)
     question_texts = _served_question_texts(session, section_id=section.id, week_id=week.week_id)
     benchmarks_by_stream, workload_benchmark = _benchmark_members(
         session,
@@ -1597,16 +1638,9 @@ def _payload(
             question_text=question_texts[token],
             benchmark=benchmarks_by_stream[token],
             # SPEC §4's suppression is per stream (ADR 0182), so the notice is too:
-            # the comment service's own answer for this stream, or the week still
-            # waiting on a verdict, and the threshold it compared with. No count of
-            # anybody — §5.2's "no count".
-            small_n=schema.SmallNView(
-                suppressed=not moderated
-                or stream_is_suppressed(
-                    session, section_id=section.id, week_id=week.week_id, stream=token
-                ),
-                threshold=threshold,
-            ),
+            # `_held_streams`' answer for this stream, and the threshold it compared
+            # with. No count of anybody — §5.2's "no count".
+            small_n=schema.SmallNView(suppressed=held[token], threshold=threshold),
         )
         for token in REPORT_STREAMS
     }
@@ -1651,6 +1685,28 @@ def _payload(
         released_from_earlier_weeks=_comment_views(released, reader=reader),
         institution_timezone=settings.institution_timezone,
     )
+
+
+def _held_streams(session: Session, *, section_id: UUID, week_id: UUID) -> dict[str, bool]:
+    """Which of this section-week's streams are held, by stream token, as the report shows it.
+
+    A stream is held when the comment service suppresses it (SPEC §4, per stream
+    since ADR 0182) **or** when the section-week is not yet fully moderated: such a
+    week shows no comment in either stream (`visible_comments`), so the notice says
+    "held" for it too. Without the second leg a week above the threshold waiting on
+    one verdict would report itself unsuppressed and empty, which reads as "nobody
+    commented" (E6-09).
+
+    One function, so that the report's notice and every reader that has to agree
+    with it (the response draft and check below) ask the same question the same
+    way.
+    """
+    moderated = section_week_moderated(session, section_id=section_id, week_id=week_id)
+    return {
+        token: not moderated
+        or stream_is_suppressed(session, section_id=section_id, week_id=week_id, stream=token)
+        for token in REPORT_STREAMS
+    }
 
 
 def _comment_views(cards: Sequence[CommentCard], *, reader: UUID) -> list["CommentView"]:
@@ -1806,22 +1862,39 @@ def _stored_summaries(
     """
     from app.schemas.report import SummaryView
 
+    return {
+        row.stream: SummaryView(text=row.summary_text, response_count=row.response_count)
+        for row in _served_summary_rows(session, section_id=section_id, week_id=week_id)
+    }
+
+
+def _served_summary_rows(session: Session, *, section_id: UUID, week_id: UUID) -> list[Any]:
+    """This section-week's stored summary rows, less the ones no reader is served.
+
+    The one place the filter `_stored_summaries` describes is written: a row
+    written under `SUMMARY_PROMPT_VERSION` for a stream that is now held is left
+    out. Every reader of a stored summary or its themes goes through here, so a
+    second read of `weekly_summary` cannot forget the filter.
+    """
     stored = session.execute(
         select(
             WeeklySummary.stream,
             WeeklySummary.summary_text,
             WeeklySummary.response_count,
+            WeeklySummary.themes,
             WeeklySummary.prompt_version,
         ).where(WeeklySummary.section_id == section_id, WeeklySummary.week_id == week_id)
     ).all()
-    return {
-        stream: SummaryView(text=summary_text, response_count=response_count)
-        for stream, summary_text, response_count, prompt_version in stored
+    return [
+        row
+        for row in stored
         if not (
-            prompt_version == SUMMARY_PROMPT_VERSION
-            and stream_is_suppressed(session, section_id=section_id, week_id=week_id, stream=stream)
+            row.prompt_version == SUMMARY_PROMPT_VERSION
+            and stream_is_suppressed(
+                session, section_id=section_id, week_id=week_id, stream=row.stream
+            )
         )
-    }
+    ]
 
 
 def _enrolled_students(
@@ -1913,3 +1986,314 @@ def _course_label(session: Session, section: Section) -> str:
         section_code=section.lms_section_code,
         term_name=term.name,
     )
+
+
+# ---------------------------------------------------------------------------
+# The response draft and the draft check (SPEC §5.3, §7.4; E7-04, ADR 0195).
+# ---------------------------------------------------------------------------
+
+
+class UnusableAnswerError(Exception):
+    """A model answer the draft or the check may not hand on, refused after it arrived.
+
+    One class for every structural refusal of either task, and it carries nothing:
+    no comment, no draft, no theme. The router answers every instance with one
+    fixed sentence (the E7-04 work order's decision 2), so a refusal cannot say
+    *which* hidden comment a draft matched. A refusal that differed by comment
+    would be an oracle for "is this phrase in a comment I am not shown", run one
+    edit at a time against a held stream.
+    """
+
+
+# The count rule for a week with a held stream (E7-04's fix round, G1; ADR 0195).
+# **A token rule, not a phrase list.** The first version matched a number beside
+# a list of nouns for people ("students", "of you"), and review found phrasings
+# it missed in minutes: "two of your classmates", "2 learners said", "the 7 who
+# responded", "Both students", "Half the class". A list of ways to say "how
+# many" never closes, so in such a week a draft states no number of anything,
+# except a number naming a course structure ("week 3", "chapter five").
+_CARDINALS = frozenset(
+    (
+        "zero one two three four five six seven eight nine ten eleven twelve thirteen "
+        "fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty "
+        "sixty seventy eighty ninety"
+    ).split()
+)
+_QUANTITY_WORDS = frozenset(
+    "hundred both half couple several few dozen pair handful majority minority".split()
+)
+# The words that may stand immediately before a count token and make it the name
+# of a course structure rather than a count. Only the word immediately before, so
+# "Weeks 3 and 4" still counts at "4".
+_STRUCTURE_WORDS = frozenset(
+    (
+        "week weeks chapter lab unit module section page pages question assignment quiz exam "
+        "day days hour hours minute minutes part step problem version"
+    ).split()
+)
+# A digit run, or a word with its hyphenated compound kept whole ("twenty-one"),
+# so that "chapter twenty-one" is one licensed token rather than two.
+_TOKEN = re.compile(r"\d+|[A-Za-z]+(?:-[A-Za-z]+)*")
+
+
+def _is_count_token(token: str) -> bool:
+    """A digit run, a cardinal word (compounds included), or a quantity word. Not an ordinal."""
+    word = token.lower()
+    if word.isdigit() or word in _QUANTITY_WORDS:
+        return True
+    return all(part in _CARDINALS for part in word.split("-"))
+
+
+def states_a_count_of_people(text: str) -> bool:
+    """Whether `text` carries a count token that no course-structure word licenses.
+
+    A count token is a digit run; a cardinal word from zero to ninety-nine,
+    hyphenated compounds included, or "hundred"; or one of both, half, couple,
+    several, few, dozen, pair, handful, majority and minority. It is allowed only
+    when the word immediately before it, in any case, is one of
+    `_STRUCTURE_WORDS`. Ordinals ("first", "second") are not count tokens.
+
+    The rule is about any number, not only numbers of people, because nothing
+    short of that closes (see the comment above). The name says what it protects.
+    It is applied only in a week with a held stream
+    (`refuse_a_draft_students_should_not_read`); the eval grader calls this same
+    function, so there is one copy of the rule.
+    """
+    previous = ""
+    for match in _TOKEN.finditer(text):
+        token = match.group(0)
+        if _is_count_token(token) and previous.lower() not in _STRUCTURE_WORDS:
+            return True
+        previous = token
+    return False
+
+
+def response_gather(
+    session: Session, *, section_id: UUID, week_id: UUID, for_on_behalf: bool
+) -> ResponseGather:
+    """What the response draft and the draft check are fed for one section-week.
+
+    **No comment, ever** (E7-04 done-when 1). The week's response count, and per
+    stream: the stored summary, its stored themes, and the rating distribution.
+    `ResponseGather` has no field a comment could be put in.
+
+    **The summaries and the themes come from one filtered read,
+    `_served_summary_rows`**, the read the report's `_stored_summaries` makes, so
+    an old ordinary-mode (`summary.v1`) row of a stream that is now held gives
+    neither a summary nor a theme, here exactly as on the report.
+
+    **A held stream's themes carry no count** (the E7 breakdown's decision 12).
+    Held is `_held_streams`' answer, which is the report's own (the work order's
+    decision 4). A theme's count is a count of comments, not of people
+    (`docs/MISTAKES.md` entry 50), and nothing here compares it with the
+    threshold: it is dropped because the stream is held, never the other way
+    round. A shown stream's themes keep their stored counts.
+
+    **The instructor's gather keeps a summary written before an exclusion**
+    (ADR 0195): the instructor already reads that summary on the report and is
+    the author of whatever is published, and the draft's run refusal blocks
+    quoting the excluded comment. The on-behalf gather leaves such a summary out
+    (the E7 breakdown's ruling 9); E7-03 builds it, and until then
+    `for_on_behalf=True` is refused rather than answered with the instructor's
+    gather.
+
+    Authorization is the caller's: this answers any section-week it is asked
+    about, and every caller reaches it through `_published_section_week` or its
+    on-behalf equivalent.
+    """
+    if for_on_behalf:
+        raise NotImplementedError(
+            "The on-behalf gather leaves out a summary written before the week's latest "
+            "exclusion (E7 ruling 9). E7-03 builds it; it is not the instructor's gather."
+        )
+    held = _held_streams(session, section_id=section_id, week_id=week_id)
+    rows = {
+        row.stream: row
+        for row in _served_summary_rows(session, section_id=section_id, week_id=week_id)
+    }
+    ratings = _rating_counts(session, section_id=section_id, week_ids=[week_id])
+    responses, _ = _response_counts(session, section_id=section_id, week_id=week_id)
+    return ResponseGather(
+        responses=responses,
+        streams=tuple(
+            GatheredStream(
+                stream=STREAM_ASKED_ABOUT[token],
+                held=held[token],
+                summary=None if token not in rows else str(rows[token].summary_text),
+                themes=_gathered_themes(rows.get(token), held=held[token]),
+                ratings={
+                    value: ratings.get((week_id, token), {}).get(value, 0)
+                    for value in LIKERT_VALUES
+                },
+            )
+            for token in REPORT_STREAMS
+        ),
+    )
+
+
+def _gathered_themes(row: Any, *, held: bool) -> tuple[GatheredTheme, ...]:
+    """One stored row's themes, each read through the summary's own contract.
+
+    Read through `CommentTheme` so a stored theme that is not the summary's shape
+    fails loudly here rather than reaching a prompt. A held stream's theme keeps
+    its label and loses its count.
+    """
+    if row is None or not row.themes:
+        return ()
+    themes = [CommentTheme.model_validate(item) for item in row.themes]
+    return tuple(
+        GatheredTheme(label=theme.label, comment_count=None if held else theme.comment_count)
+        for theme in themes
+    )
+
+
+def instructor_response_draft(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    settings: Settings,
+    gateway: AIGateway | None = None,
+) -> str:
+    """The AI draft of a response, for one of this person's own published weeks (SPEC §5.3).
+
+    The report's own gate first (`_published_section_week`), so a section the
+    reader does not teach, one that does not exist, and a week not yet published
+    are refused with the report's exceptions **before any model call**. Then the
+    gather, one call, and two refusals of the answer:
+
+    - **A run of a comment students will not see** (E7-04 done-when 4): the
+      comparison is `_reused_run` against the section-week's excluded,
+      still-flagged and held-stream comments, as
+      `refuse_a_summary_reusing_a_comment` does for a small-N summary.
+    - **A number beside a held stream** (residue A, fix-round G1): in a week
+      with a held stream, a draft carrying any number except one naming a
+      course structure is refused (`states_a_count_of_people`), because the
+      summary's *prose* can carry the count decision 12 keeps out of the themes.
+
+    Raises `SectionUnavailableError`, `CourseWeekUnavailableError`,
+    `UnusableAnswerError`, or the gateway's own `AIGatewayError` classes. Logs
+    nothing that the draft, a summary or a comment is in.
+    """
+    _, week, _ = _published_section_week(
+        session,
+        person_id=person_id,
+        section_id=section_id,
+        course_week=course_week,
+        settings=settings,
+    )
+    gather = response_gather(
+        session, section_id=section_id, week_id=week.week_id, for_on_behalf=False
+    )
+    draft = draft_response(gather, gateway).draft
+    refuse_a_draft_students_should_not_read(
+        session, draft=draft, section_id=section_id, week_id=week.week_id, gather=gather
+    )
+    return draft
+
+
+def instructor_draft_check(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    draft: str,
+    settings: Settings,
+    gateway: AIGateway | None = None,
+) -> tuple[CheckTheme, ...]:
+    """The week's themes this draft does not address, for one of this person's published weeks.
+
+    The same gate, the same gather, one call, and one refusal of the answer:
+    `refuse_a_check_naming_an_unstored_theme`. What comes back is exactly what
+    the model named, once it has passed.
+
+    Raises as `instructor_response_draft` does.
+    """
+    _, week, _ = _published_section_week(
+        session,
+        person_id=person_id,
+        section_id=section_id,
+        course_week=course_week,
+        settings=settings,
+    )
+    gather = response_gather(
+        session, section_id=section_id, week_id=week.week_id, for_on_behalf=False
+    )
+    answer = check_draft(gather, draft, gateway)
+    refuse_a_check_naming_an_unstored_theme(answer, gather=gather)
+    return answer.unaddressed_themes
+
+
+def refuse_a_check_naming_an_unstored_theme(
+    answer: DraftCheckOutput, *, gather: ResponseGather
+) -> None:
+    """Refuse a check naming anything but a stored theme, as the stream may show it.
+
+    Every theme named must be one of the gathered themes: a shown stream's with
+    its stored count exactly, a held stream's with no count. So an invented
+    theme, a shown count off by any amount, a shown theme with no count, and a
+    held theme with a count (even the true one) are each refused whole
+    (E7-04 done-when 2 and 3, residue B). The comparison is by exact pair, so a
+    label that two streams share is accepted in either stream's form.
+
+    An empty answer is a legitimate one and passes. Raises `UnusableAnswerError`.
+    """
+    allowed = {
+        (theme.label, theme.comment_count) for stream in gather.streams for theme in stream.themes
+    }
+    if any(
+        (theme.label, theme.comment_count) not in allowed for theme in answer.unaddressed_themes
+    ):
+        raise UnusableAnswerError
+
+
+def refuse_a_draft_students_should_not_read(
+    session: Session,
+    *,
+    draft: str,
+    section_id: UUID,
+    week_id: UUID,
+    gather: ResponseGather,
+) -> None:
+    """Refuse a draft that reuses a hidden comment's words, or counts people beside a held stream.
+
+    **The hidden comments are read here, for this comparison only**, through
+    `report_comment` v004 (`COMMENT_VIEW`), and never returned, logged or sent.
+    Hidden means what students will not see: a comment whose latest state is
+    `FLAGGED_COLLAPSED` or `EXCLUDED`, and every comment of a held stream
+    (`_held_streams`). A published or kept comment of a shown stream is not
+    hidden, and a draft answering it in its own words is what SPEC §5.3 asks for.
+
+    Raises `UnusableAnswerError`, which carries nothing of either text.
+    """
+    if gather.has_a_held_stream and states_a_count_of_people(draft):
+        raise UnusableAnswerError
+    hidden = _comments_students_do_not_see(session, section_id=section_id, week_id=week_id)
+    if hidden and _reused_run(draft, hidden):
+        raise UnusableAnswerError
+
+
+def _comments_students_do_not_see(
+    session: Session, *, section_id: UUID, week_id: UUID
+) -> list[str]:
+    """This section-week's comments that are excluded, still flagged, or in a held stream.
+
+    Read through `report_comment` v004, the one view every comment reader uses
+    (ADR 0187), with the moderation state from the one resolution of it
+    (`reported_status_of`). A Care-class comment is not in the view at all, and
+    the instructor never reads one either.
+    """
+    held: Mapping[str, bool] = _held_streams(session, section_id=section_id, week_id=week_id)
+    status = reported_status_of(COMMENT_VIEW.c.answer_id)
+    return [
+        str(text)
+        for text, stream, state in session.execute(
+            select(COMMENT_VIEW.c.comment_text, COMMENT_VIEW.c.stream, status).where(
+                COMMENT_VIEW.c.section_id == section_id,
+                COMMENT_VIEW.c.week_id == week_id,
+            )
+        )
+        if held[stream] or state in HELD_MODERATION_STATES
+    ]

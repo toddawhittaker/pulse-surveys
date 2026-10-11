@@ -1,4 +1,4 @@
-"""The eight sentences the named-set API refuses with — E5-06 (SPEC §5.1).
+"""The sentences the named-set API refuses with — E5-06 (SPEC §5.1) — and the gate's 403.
 
 `app.api.leadership` serves the surface leadership defines comparison sets on,
 and it refuses eight ways: a session that is not a leadership session, a set id
@@ -23,7 +23,12 @@ leaves the enumeration where it is held. A length is no longer a closed set at
 all: since E5-14 the table holds a set's length to at least one week, and the
 sentence says exactly that.
 
-**All eight are registry entries on the comparison-set surface, and `COPY` is
+**The leadership gate's second refusal is here too (E7-08, ADR 0196).** A real,
+verified session in another role is answered 403 with `NOT_YOUR_ROLE`, beside
+`NOT_LEADERSHIP`, the 401 every other refusal still gets, because the gate
+answers both for every leadership route and not for this surface alone.
+
+**All nine are registry entries on the comparison-set surface, and `COPY` is
 filled from them — E5-13, ADR 0176.** They are published under the
 `leadership_comparison_sets.` prefix, which is the same prefix
 `frontend/src/copy/leadershipComparisonSetCopy.ts` publishes the screen's own
@@ -60,21 +65,34 @@ __all__ = [
     "NAME_ALREADY_USED",
     "NOT_LEADERSHIP",
     "NOT_THE_SETS_DEFINER",
+    "NOT_YOUR_ROLE",
     "SET_UNAVAILABLE",
 ]
 
-# The 401 every route answers a session that is not a leadership session — none
-# at all, a student's, an instructor's, and the instructor session of somebody
-# who also holds a leadership assignment. One sentence for all of them, because
-# the difference between "not signed in" and "signed in as somebody else" is a
-# fact about who holds the token.
+# The 401 every leadership route answers a request that carries no session it
+# can verify: none at all, a malformed token, an expired one, or one signed with
+# another key. One sentence for all four, so a caller trying tokens cannot tell a
+# real one from a forgery by the answer.
 #
-# It is the one refusal here a student can be served, so it names no comparison
-# set: SPEC §4.1 item 1 forbids that vocabulary in anything a student reads, and
-# the sentence does its job without it (ADR 0177).
+# It is one of the two refusals here a student can be served, so it names no
+# comparison set: SPEC §4.1 item 1 forbids that vocabulary in anything a student
+# reads, and the sentence does its job without it (ADR 0177).
 _NOT_LEADERSHIP = CopyEntry(
     key="leadership_comparison_sets.not_leadership",
     text="This request does not carry a leadership session.",
+)
+
+# The 403 every leadership route answers a real, verified session in another
+# role: a student's, an instructor's, and the instructor session of somebody who
+# also holds a leadership assignment (E7-08, ADR 0196). One sentence for every
+# role and every route. It names no route, no section, no person and not the
+# role the session is in: a refusal may describe only itself.
+#
+# The other refusal a student can be served, so it names no comparison set
+# either.
+_NOT_YOUR_ROLE = CopyEntry(
+    key="leadership_comparison_sets.not_your_role",
+    text="This request carries a signed-in session whose role does not include leadership.",
 )
 
 # The 404 for a set id nothing defined — on the read, the preview, the edit and
@@ -147,6 +165,7 @@ _MEMBER_NOT_A_COURSE = CopyEntry(
 # refusal is one edit above and nothing here can fall out of step with the
 # inventory.
 NOT_LEADERSHIP = _NOT_LEADERSHIP.text
+NOT_YOUR_ROLE = _NOT_YOUR_ROLE.text
 SET_UNAVAILABLE = _SET_UNAVAILABLE.text
 NOT_THE_SETS_DEFINER = _NOT_THE_SETS_DEFINER.text
 NAME_ALREADY_USED = _NAME_ALREADY_USED.text
@@ -160,6 +179,7 @@ COPY: Mapping[str, CopyEntry] = {
     entry.key: entry
     for entry in (
         _NOT_LEADERSHIP,
+        _NOT_YOUR_ROLE,
         _SET_UNAVAILABLE,
         _NOT_THE_SETS_DEFINER,
         _NAME_ALREADY_USED,
