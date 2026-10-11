@@ -42,7 +42,7 @@ the change that would refuse it or destroy it.
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 
 from app.views_sql import read_sql
 
@@ -66,10 +66,16 @@ DROP_BOTH_TRIGGERS = (
 )
 
 
-def _policy_rows() -> int:
-    """How many `response_policy` rows there are, with writes to it blocked until commit."""
+def _policy_rows() -> int | None:
+    """How many `response_policy` rows there are, with writes to it blocked until commit.
+
+    `None` in offline mode (`alembic upgrade --sql`), where there is no database to
+    count: the lock is emitted into the script and the caller decides.
+    """
+    op.execute(f"LOCK TABLE public.{RESPONSE_POLICY} IN SHARE MODE")
+    if context.is_offline_mode():
+        return None
     connection = op.get_bind()
-    connection.execute(sa.text(f"LOCK TABLE public.{RESPONSE_POLICY} IN SHARE MODE"))
     return int(
         connection.execute(sa.text(f"SELECT count(*) FROM public.{RESPONSE_POLICY}")).scalar_one()  # noqa: S608
     )
@@ -81,6 +87,8 @@ def upgrade() -> None:
     Raises `RuntimeError`, having changed nothing, when `response_policy` holds a
     row: such a row does not say which course it covered.
     """
+    # Offline there is nothing to count; the generated script still fails loudly
+    # over a row, on the `NOT NULL` column, when someone runs it.
     held = _policy_rows()
     if held:
         raise RuntimeError(
@@ -114,6 +122,12 @@ def downgrade() -> None:
     row: going down would lose which course each policy change covered.
     """
     held = _policy_rows()
+    if held is None:
+        raise RuntimeError(
+            "This revision's downgrade cannot be generated offline: it must count the rows in "
+            f"`public.{RESPONSE_POLICY}` first, and dropping `course_id` over a row would destroy "
+            "the record of which course it covered. Run it against the database instead."
+        )
     if held:
         raise RuntimeError(
             f"This database holds {held} rows in `public.{RESPONSE_POLICY}`. Going below this "
