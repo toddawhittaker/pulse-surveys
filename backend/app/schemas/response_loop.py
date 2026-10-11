@@ -46,8 +46,8 @@ __all__ = [
     "StudentResponse",
     "StudentStream",
     "StudentStreamName",
+    "StudentTrendPoint",
     "StudentWeekResults",
-    "TrendPoint",
     "WeekResponseView",
     "WeekState",
 ]
@@ -94,7 +94,7 @@ class StudentParticipation(BaseModel):
 StudentStreamName = Literal["instructor", "course"]
 
 
-class TrendPoint(BaseModel):
+class StudentTrendPoint(BaseModel):
     """One week's rating mean in one stream, for a week a student may read (SPEC §5.4's trend).
 
     A week nobody rated has a point with no mean. A held week has no point at all
@@ -139,7 +139,7 @@ class StudentStream(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     stream: StudentStreamName
-    trend: list[TrendPoint] = Field(
+    trend: list[StudentTrendPoint] = Field(
         description="One point per readable week up to this one; a held week has none."
     )
     distribution: dict[str, int] = Field(

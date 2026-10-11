@@ -1998,7 +1998,7 @@ def student_streams(
     student comment reads (ADR 0197). Nothing here reads a comment, a count of
     anybody or a benchmark.
     """
-    from app.schemas.response_loop import StudentComment, StudentStream, TrendPoint
+    from app.schemas.response_loop import StudentComment, StudentStream, StudentTrendPoint
 
     ratings = _rating_counts(
         session,
@@ -2012,7 +2012,7 @@ def student_streams(
             # lower-cased. `StudentStream` refuses any other spelling.
             stream=token.lower(),
             trend=[
-                TrendPoint(
+                StudentTrendPoint(
                     course_week=course_week,
                     mean=_mean_of(ratings.get((trend_week_id, token), {})),
                 )

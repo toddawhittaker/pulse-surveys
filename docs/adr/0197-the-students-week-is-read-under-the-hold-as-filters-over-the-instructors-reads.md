@@ -87,7 +87,6 @@ encouraged. `policy_of_record` now reads the course's rows and applies it, and
   distinct-commenter count and the whole-week moderation check); the text comes
   from `report_comment` only. Dispute E8-01-02 asks whether done-when 4's "no
   student read queries `answer` itself" was meant to forbid the gates.
-- The student `TrendPoint` and the instructor report's share a class name, so
-  the OpenAPI document names both components by module
-  (`app__schemas__report__TrendPoint`), and `frontend/src/api/instructor.ts`
-  follows it.
+- The student trend point is `StudentTrendPoint`, not `TrendPoint`: two schema
+  classes with one name make FastAPI name both OpenAPI components by module,
+  which would rename the instructor report's `TrendPoint` under its frontend.
