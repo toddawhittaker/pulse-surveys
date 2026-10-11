@@ -190,9 +190,7 @@ def generate_missing_summaries(
     section-weeks whose provider call refused, which is what §6.1's console reads.
     """
     started = time.monotonic()
-    awaiting = _section_weeks_awaiting_a_summary(
-        session, now=clock.now(session, settings=settings)
-    )
+    awaiting = _section_weeks_awaiting_a_summary(session, now=clock.now(session, settings=settings))
     logger.info(
         "the summary walk found %d closed section-week(s) with no summary yet", len(awaiting)
     )
