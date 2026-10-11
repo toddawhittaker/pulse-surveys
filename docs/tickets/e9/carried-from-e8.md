@@ -282,7 +282,7 @@ Every source entry, in its source's order, with what happened to it.
 | #323: the comment sweep left to E8-01 | Done by E8-01 in the files it shares |
 | #322 (process: `@axe-core/playwright`) | Nothing deferred; the scans landed in E8-02 and E8-04 |
 | #325 (main into the epic) | Nothing deferred |
-| #324 (E8-01): shares at the threshold can reveal bucket counts | Carried: "Shares at or just above the threshold can reveal bucket counts" |
+| #324 (E8-01): shares at the threshold can reveal bucket counts | Carried: "Shares at small n can still pin the rater count" |
 | #324: ticket names left in three files | Re-carried with "Comments that tell ticket history" |
 | #326 (E8-02): the trend axis ends at the latest published week | Carried: "The student trend's axis ends at the latest published week" |
 | #326: the axe scan cannot reach the small-N notices or the earlier-weeks group | The small-N notices (ratings and comments): scanned by E8-04's drive. The earlier-weeks group: carried with "A release batch's `cut_at`" |
