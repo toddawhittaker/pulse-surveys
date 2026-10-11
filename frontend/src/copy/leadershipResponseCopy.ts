@@ -90,7 +90,7 @@ export const LEADERSHIP_RESPONSE_COPY = {
   // The composer in its on-behalf mode.
   'leadership_response.composer.heading': 'Your response on behalf of the section',
   'leadership_response.composer.intro':
-    'Tell the students what the section said and what will change. They read it with this week’s results, under your name and role.',
+    'Tell the students what the section said and what will change. They read it with this week’s results, signed with your own name and role.',
 } as const satisfies Record<string, string>;
 
 /** Every key this surface publishes. */
