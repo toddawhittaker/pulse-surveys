@@ -448,6 +448,7 @@ pulse-surveys/
 │       │   ├── report.py           # the instructor's Monday report
 │       │   ├── report_benchmark.py # the report's comparison and university figures
 │       │   ├── comparison_sets.py  # the named-set management API
+│       │   ├── response_loop.py    # a student's week state and the response published to it
 │       │   └── moderation.py       # the Lead Faculty review queue, a leader's decision, the exclusion log
 │       │
 │       ├── copy/                   # every sentence the backend shows a person, keyed (§4.1)
@@ -457,6 +458,7 @@ pulse-surveys/
 │       │   ├── instructor_report.py # the instructor report's refusals
 │       │   ├── leadership_sets.py  # the named-set API's refusals
 │       │   ├── leadership_moderation.py # the review queue's and the exclusion log's refusals
+│       │   ├── response_loop.py    # the student results route's refusal
 │       │   └── gradebook.py        # the strings written into a platform's gradebook
 │       │
 │       ├── api/                    # HTTP routers, thin — delegate to services
@@ -492,7 +494,7 @@ pulse-surveys/
 │       │   ├── comparison_sets.py  # defining, editing and deleting a named comparison set
 │       │   ├── safety.py           # the Care queue, and the only connection that can reach identity (§6.2)
 │       │   ├── moderation.py       # moderation verdict routing, the hourly sweep, decisions, the review queue and log (§5.2)
-│       │   ├── response_loop.py    # a section's staff names for a reader of it; draft/coach/publish and required-response holds (§5.3) are E7
+│       │   ├── response_loop.py    # a section's staff names for a reader of it; the hold: policy of record, week state, the writers (§5.3); the draft, the coach and the publish routes follow in E7
 │       │   └── retention.py        # configurable purge jobs (§4) — not built yet: E13
 │       │
 │       ├── lti/                    # pylti1p3 integration
