@@ -7,12 +7,14 @@ this session may read, which weeks are published, how a rate divides, what a
 comment may say — is in `app.services.reporting`, and the payload's shape is
 `app.schemas.report`.
 
-**Three reads and one write.** The report for one section and one course week,
+**Three reads and three posts.** The report for one section and one course week,
 the list of course weeks a reader may page to, and the list of sections they
 teach; E4-11 consumes all three and E4-15 drives them against the running stack.
 Since E6-03, a decision on one comment of that report: exclude, keep, or undo
-(SPEC §5.2). The write carries `csrf_verified_instructor`, the reads
-`require_instructor`; the decision itself is `app.services.moderation`'s.
+(SPEC §5.2). Since E7-04, the AI draft of a response to one week, and the AI
+check of a draft (SPEC §5.3). The posts carry `csrf_verified_instructor`, the
+reads `require_instructor`; the decision is `app.services.moderation`'s and the
+draft and check are `app.services.reporting`'s.
 
 **The third one is what makes the other two askable** (E4-18, ADR 0156). Both of
 them take a section key in the path, and until it shipped nothing a client holds
@@ -22,8 +24,9 @@ the other two are what a reader opens from it, which is the shape
 `app.api.student` already holds — a parameterless read of the reader's own scope,
 and then the pages behind it.
 
-**All three carry `app.api.deps.require_instructor` rather than a check of their
-own.** That is what makes them findable: a sweep asking the running application
+**Every route carries `app.api.deps.require_instructor` rather than a check of
+its own** — the posts through `csrf_verified_instructor`, which declares it.
+That is what makes them findable: a sweep asking the running application
 which routes carry that dependency gets this module's whole surface, and a route
 that resolved a session for itself would be an instructor route outside it — the
 shape `app.api.student` already holds for the student side.

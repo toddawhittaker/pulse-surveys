@@ -31,9 +31,11 @@ ticket adds a themes read that applies the same filter: an old-format
 (`summary.v1`) row of a held stream gives no themes, as it gives no summary.
 
 **No per-theme count below the threshold (decision 12).** For a stream held
-below the threshold, the themes carry no count anywhere: not in either task's
-prompt, not in the check's payload, and so not on any path to published text.
-The check names such a theme without a count. A count of comments in a small
+below the threshold, no per-theme count field reaches either task's prompt or
+the check's payload. The check names such a theme without a count. A summary's
+prose is not a count field and can still carry a number, so in a week with a
+held stream a draft stating a number of comments or students is refused
+(residue A of the breakdown review). A count of comments in a small
 week is the count §5.2 rules out as a participation trace. A shown stream's
 themes keep their stored counts. That is what keeps the
 no-quoting rule (§5.1) and the threshold (§4) intact for a draft students will
@@ -107,9 +109,13 @@ through `report_comment` v004).
    different count, is refused; an answer naming stored themes with their stored counts is
    accepted. An empty list is accepted.
 3. **No per-theme count below the threshold.** For a stream held below the
-   threshold, neither task's prompt nor the check's payload carries a
-   per-theme count. The check names the theme without a count, and the
-   published-text path gets no count to repeat. Themes are read through the
+   threshold, no per-theme count field reaches the prompt or the check
+   payload. The check names the theme without a count. A summary's prose is
+   not a count field and may still state a number, so in a week with a held
+   stream a draft stating a number of comments or students (digits or number
+   words next to comment, student, response, classmate or "of you") is
+   refused as an invalid answer; the same draft in a week where every stream
+   is shown is accepted (residue A of the breakdown review). Themes are read through the
    same filter as `_stored_summaries`: an old-format (`summary.v1`) row of a
    held stream gives no themes. Each case is tested beside a shown stream that
    does carry its counts. Marked `invariant`.

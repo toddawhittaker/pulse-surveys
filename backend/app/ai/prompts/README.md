@@ -9,8 +9,10 @@ One file per AI task and version, under SPEC §7.4's task inventory. The gateway
 <task>.v<N>.md
 ```
 
-- `<task>` is the task's word from §7.4's table, lowercase, one word:
-  `validity`, `moderation`, `summary`, `draft`, `draftcheck`.
+- `<task>` is the task's name, lowercase: `validity`, `moderation`, `summary`,
+  `response_draft`, `draft_check`. The last two are the contracts' names
+  (`ResponseDraftOutput`, `DraftCheckOutput`) rather than one word each, as E7-04
+  settled them; the stem still names exactly one file.
 - `<N>` is a whole number starting at 1, counting up per task. Versions are per
   task, not global, so `validity.v3.md` and `moderation.v1.md` sit side by side
   quite normally.
@@ -67,6 +69,8 @@ The reasoning, and the alternative that was rejected, are in
 | `summary.v2.md` | Weekly summary, small-N stream | Themes only, no reused words | E4-15 | no — superseded by v3 |
 | `summary.v3.md` | Weekly summary, small-N stream | Themes only, no reused words; speaks of the stream, not the week | E6-02 | yes |
 | `moderation.v1.md` | Moderation | clear / harmful / privacy / nonsense / threat / self_harm | E6-02 | yes |
+| `response_draft.v1.md` | Response draft | A draft response from the week's stored summaries, themes and ratings | E7-04 | yes |
+| `draft_check.v1.md` | Draft check | The week's stored themes a draft does not address, each with its count or none | E7-04 | yes |
 
 **Two files for one task is what the rule above looks like when it is used**, and
 the last column is the only place that says which one the tool sends. That is
@@ -83,9 +87,16 @@ removed — a title, spec citations, a note about the draft, and a paragraph
 forbidding keys that the gateway's structured-output schema already makes
 impossible to return. ADR 0120 records the trim and its reason.
 
-The other three tasks — moderation, response draft, draft check — have contracts
-in `app/ai/contracts.py` and no prompt yet. Each adds its `v1` here under the
-scheme above, from the epic that owns it.
+Every task in `app/ai/contracts.py` now has a prompt here.
+
+**The response draft and the draft check carry no student text**, and their
+input is shaped differently from every other prompt's for that reason. Each is
+fed one week as a JSON document of stored summaries, themes and ratings,
+rendered by `app.ai.tasks.render_response_week` with every string escaped, so
+no value in it can stand on a line of its own and pose as a marker line. The
+check carries a second input after it, the instructor's draft, behind its own
+marker line and running to the end of the message — so the rule below holds
+for the one free-text input that prompt has.
 
 **The summary prompt has two placeholders where every other prompt has one**, and
 the second is not student text: `[[COMMENT_STREAM]]` names which of §5.1's two

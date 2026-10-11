@@ -1,10 +1,11 @@
 """The §7.4 tasks, one function each (SPEC §7.4, §3.3, §8).
 
 SPEC §13 gives this module "validity / moderation / summary / draft / draft-check
-calls". E0-13 implements the first of them end to end and E4-05 the third; the
-other three have contracts in `contracts.py` and prompts that belong to their own
-epics. The two that are here differ in more than their prompts, and the
-differences are the interesting part of this module: the validity task judges one
+calls". E0-13 implemented the first of them end to end, E4-05 the third, E6-02
+moderation, and E7-04 the response draft and the draft check, which are fed a
+week's stored summaries and never a comment. The first two differ in more than
+their prompts, and the differences are the interesting part of this module: the
+validity task judges one
 comment for a student who is waiting, under a four-second budget, with SPEC
 §3.3's floor underneath it; the summary task reads a week of them for a report
 job nobody is waiting on, under a minute, with no floor at all.

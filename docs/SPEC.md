@@ -461,7 +461,7 @@ pulse-surveys/
 │       │   ├── auth.py             # the web door: OIDC login and callback
 │       │   ├── dev.py              # the development-only test console
 │       │   ├── student.py          # survey fetch/submit
-│       │   ├── instructor.py       # the Monday report reads
+│       │   ├── instructor.py       # the Monday report reads, comment decisions, the response draft and check
 │       │   ├── leadership.py       # named comparison sets; the review queue and exclusion log
 │       │   ├── care.py             # threat queue, audited re-identify — not built yet: E10
 │       │   └── admin.py            # observability, config, hierarchy, roles — not built yet: E11
@@ -481,13 +481,13 @@ pulse-surveys/
 │       │   ├── submissions.py      # storing one student's weekly answers, and every reason not to
 │       │   ├── validity.py         # synchronous comment gating (§3.3)
 │       │   ├── grading.py          # participation formula + AGS passback (§3.4)
-│       │   ├── reporting.py        # distributions, trend lines, benchmark assembly (§5.1)
+│       │   ├── reporting.py        # distributions, trend lines, benchmark assembly (§5.1); the response draft and check (§5.3)
 │       │   ├── report_comments.py  # §4's small-N comment rules
 │       │   ├── benchmarks.py       # comparison-set resolution, length/level matching, min-N
 │       │   ├── comparison_sets.py  # defining, editing and deleting a named comparison set
 │       │   ├── safety.py           # the Care queue, and the only connection that can reach identity (§6.2)
 │       │   ├── moderation.py       # moderation verdict routing, the hourly sweep, decisions, the review queue and log (§5.2)
-│       │   ├── response_loop.py    # draft/coach/publish, required-response holds (§5.3) — not built yet: E7
+│       │   ├── response_loop.py    # publish, required-response holds (§5.3) — not built yet: E7
 │       │   └── retention.py        # configurable purge jobs (§4) — not built yet: E13
 │       │
 │       ├── lti/                    # pylti1p3 integration
