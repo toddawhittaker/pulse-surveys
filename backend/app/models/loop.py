@@ -27,6 +27,14 @@ a person who both leads courses and chairs the department is keyed (ADR 0192).
 reader only through the staff-name definer (`views_sql/section_staff_names_v001.sql`,
 ADR 0191), whose reader check decides who may read it.
 
+**Who may write a row is checked when it is written** (E7-01's fix round,
+`views_sql/response_loop_guard_v001.sql`). A `BEFORE INSERT` trigger on each
+table refuses a row unless its author or setter holds the stated role there at
+that moment, and the response trigger also refuses a second author for one
+section-week, under an advisory lock so two writers cannot race past it. The
+staff-name definer answers a response's author, so without the first check the
+connection every screen runs on could make it answer any person's name.
+
 Written in the `models/report.py` style: text plus a `CHECK` for each closed
 set, `RESTRICT` foreign keys, and `UuidPrimaryKey`.
 """
@@ -35,7 +43,17 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, ForeignKey, Identity, Index, Text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Identity,
+    Index,
+    Text,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import AwareDateTime, Base, UuidPrimaryKey
@@ -97,23 +115,36 @@ class InstructorResponse(UuidPrimaryKey, Base):
             f"length(body) <= {RESPONSE_TEXT_MAX} AND body {NOT_ONLY_WHITESPACE}",
             name="body_is_stated_and_bounded",
         ),
+        # The week belongs to the section's term: two composite keys through
+        # `term_id`, the pattern `response` uses (ADR 0018), in place of plain keys
+        # on the two columns.
+        ForeignKeyConstraint(
+            ["section_id", "term_id"],
+            ["section.id", "section.term_id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["week_id", "term_id"],
+            ["week.id", "week.term_id"],
+            ondelete="RESTRICT",
+        ),
         # The read every later ticket makes: this section-week's responses, latest
         # first. It also serves the staff-name definer's "who has published to this
-        # section", which leads on the same column.
+        # section" and the write trigger's one-author check, which lead on the
+        # same columns.
         Index("ix_instructor_response_section_id_week_id", "section_id", "week_id"),
     )
 
-    section_id: Mapped[UUID] = mapped_column(
-        ForeignKey("section.id", ondelete="RESTRICT"), nullable=False
-    )
+    section_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     # The course week, as the report keys a week (`weekly_summary.week_id`).
-    week_id: Mapped[UUID] = mapped_column(
-        ForeignKey("week.id", ondelete="RESTRICT"), nullable=False
-    )
+    week_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    # The term the section and the week must agree on. `NOT NULL`, because a
+    # composite key is skipped under `MATCH SIMPLE` when any column is null.
+    term_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     # `RESTRICT`, as `moderation_state.decided_by_person_id` is: deleting a member
     # of staff may not erase, or orphan, what they published to students.
     author_person_id: Mapped[UUID] = mapped_column(
-        ForeignKey("person.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("person.id", ondelete="RESTRICT"), nullable=False
     )
     role: Mapped[str] = mapped_column(Text, nullable=False)
     # Whether the text began as the AI draft (SPEC §5.3). `NOT NULL`: "was it
@@ -140,13 +171,22 @@ class ResponsePolicy(UuidPrimaryKey, Base):
     __table_args__ = (
         CheckConstraint(_in_the_vocabulary("role", POLICY_ROLES), name="role_is_a_policy_role"),
         CheckConstraint(_in_the_vocabulary("mode", POLICY_MODES), name="mode_is_a_policy_mode"),
+        # The one read the policy is made for: the latest row for a prefix, person
+        # and role.
+        Index(
+            "ix_response_policy_prefix_id_set_by_person_id_role_sequence",
+            "prefix_id",
+            "set_by_person_id",
+            "role",
+            "sequence",
+        ),
     )
 
     prefix_id: Mapped[UUID] = mapped_column(
-        ForeignKey("prefix.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("prefix.id", ondelete="RESTRICT"), nullable=False
     )
     set_by_person_id: Mapped[UUID] = mapped_column(
-        ForeignKey("person.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("person.id", ondelete="RESTRICT"), nullable=False
     )
     role: Mapped[str] = mapped_column(Text, nullable=False)
     mode: Mapped[str] = mapped_column(Text, nullable=False)

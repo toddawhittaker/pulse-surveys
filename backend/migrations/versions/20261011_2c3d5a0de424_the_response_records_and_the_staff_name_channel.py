@@ -7,17 +7,23 @@ Create Date: 2026-10-11 12:00:00.000000
 E7-01, ADR 0191 and ADR 0192. Two append-only records and one read:
 
   - `instructor_response`: one published response to a section's course week,
-    its author as a `person` key (`RESTRICT`), the role the author wrote under,
-    whether the text was seeded from an AI draft, the text, the time, and the
-    database's `sequence`. `CHECK`s: the role is one of three; the text holds a
-    character `str.strip()` would keep and is at most 4000 characters;
+    with the term both belong to (composite keys into `section (id, term_id)`
+    and `week (id, term_id)`, as `response` has), its author as a `person` key
+    (`RESTRICT`), the role the author wrote under, whether the text was seeded
+    from an AI draft, the text, the time, and the database's `sequence`.
+    `CHECK`s: the role is one of three; the text holds a character `str.strip()`
+    would keep and is at most 4000 characters;
   - `response_policy`: one change to a prefix's policy, the person who set it
     (`RESTRICT`), the role they set it under, the mode, the time, and `sequence`.
     `CHECK`s: the role is one of two and the mode is one of two;
   - `response_loop_grants_v001.sql`: `pulse_app`'s `SELECT` on both, and its
     `INSERT` at column grain, without `id` or `sequence`; no `UPDATE` or `DELETE`;
   - `section_staff_names_v001.sql`: the staff-name definer, its NOLOGIN owner
-    `pulse_staff_name_definer` and that owner's column reads.
+    `pulse_staff_name_definer` and that owner's column reads;
+  - `response_loop_guard_v001.sql` (the fix round): a `BEFORE INSERT` trigger on
+    each table, owned by the NOLOGIN `pulse_response_guard_definer`, refusing a
+    row whose author or setter does not hold the stated role there, and a second
+    author for one section-week.
 
 **The constraint text is spelled out rather than read from `app.models.loop`**:
 a migration records what was applied on the day it ran (E6-01's reasoning).
@@ -25,8 +31,8 @@ a migration records what was applied on the day it ran (E6-01's reasoning).
 **The downgrade refuses while either table holds a row.** Going down drops both
 tables, which are the record of every response and every policy change (the
 owner's ruling 7 for E7), so it raises `RuntimeError` before touching anything,
-as `20261009_f14324ab936c` does. Over empty tables it drops the function,
-empties its owner (the role itself stays, inert, as every earlier definer owner
+as `20261009_f14324ab936c` does. Over empty tables it drops the triggers and the
+three functions, empties their owners (the role itself stays, inert, as every earlier definer owner
 does: `DROP ROLE` fails against any object elsewhere in the cluster), and drops
 both tables, which takes `pulse_app`'s grants on them with them.
 """
@@ -53,7 +59,32 @@ NOT_ONLY_WHITESPACE = (
     "\\u2028\\u2029\\u202f\\u205f\\u3000]'"
 )
 
+DROP_THE_GUARDS = (
+    "DROP TRIGGER instructor_response_is_written_by_its_role ON public.instructor_response",
+    "DROP FUNCTION public.instructor_response_is_written_by_its_role()",
+    "DROP TRIGGER response_policy_is_set_by_its_role ON public.response_policy",
+    "DROP FUNCTION public.response_policy_is_set_by_its_role()",
+)
 DROP_THE_DEFINER = "DROP FUNCTION public.section_staff_names(uuid, uuid, uuid)"
+
+# The guard owner's reads of `instructor_response` go with the table.
+EMPTY_THE_GUARD_ROLE = """
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'pulse_response_guard_definer'
+    ) THEN
+        REVOKE SELECT (person_id, role, section_id, department_id)
+            ON public.role_assignment FROM pulse_response_guard_definer;
+        REVOKE SELECT (person_id, course_id)
+            ON public.lead_faculty_mapping FROM pulse_response_guard_definer;
+        REVOKE SELECT (id, course_id) ON public.section FROM pulse_response_guard_definer;
+        REVOKE SELECT (id, prefix_id) ON public.course FROM pulse_response_guard_definer;
+        REVOKE SELECT (id, department_id) ON public.prefix FROM pulse_response_guard_definer;
+    END IF;
+END
+$$;
+"""
 
 EMPTY_THE_DEFINER_ROLE = """
 DO $$
@@ -81,6 +112,7 @@ def upgrade() -> None:
         INSTRUCTOR_RESPONSE,
         sa.Column("section_id", sa.Uuid(), nullable=False),
         sa.Column("week_id", sa.Uuid(), nullable=False),
+        sa.Column("term_id", sa.Uuid(), nullable=False),
         sa.Column("author_person_id", sa.Uuid(), nullable=False),
         sa.Column("role", sa.Text(), nullable=False),
         sa.Column("ai_seeded", sa.Boolean(), nullable=False),
@@ -103,24 +135,18 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["section_id"],
-            ["section.id"],
-            name=op.f("fk_instructor_response_section_id_section"),
+            ["section_id", "term_id"],
+            ["section.id", "section.term_id"],
+            name=op.f("fk_instructor_response_section_id_term_id_section"),
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["week_id"],
-            ["week.id"],
-            name=op.f("fk_instructor_response_week_id_week"),
+            ["week_id", "term_id"],
+            ["week.id", "week.term_id"],
+            name=op.f("fk_instructor_response_week_id_term_id_week"),
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_instructor_response")),
-    )
-    op.create_index(
-        op.f("ix_instructor_response_author_person_id"),
-        INSTRUCTOR_RESPONSE,
-        ["author_person_id"],
-        unique=False,
     )
     op.create_index(
         "ix_instructor_response_section_id_week_id",
@@ -161,17 +187,15 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_response_policy")),
     )
     op.create_index(
-        op.f("ix_response_policy_prefix_id"), RESPONSE_POLICY, ["prefix_id"], unique=False
-    )
-    op.create_index(
-        op.f("ix_response_policy_set_by_person_id"),
+        "ix_response_policy_prefix_id_set_by_person_id_role_sequence",
         RESPONSE_POLICY,
-        ["set_by_person_id"],
+        ["prefix_id", "set_by_person_id", "role", "sequence"],
         unique=False,
     )
 
     op.execute(read_sql("response_loop_grants_v001"))
     op.execute(read_sql("section_staff_names_v001"))
+    op.execute(read_sql("response_loop_guard_v001"))
 
 
 def downgrade() -> None:
@@ -194,12 +218,15 @@ def downgrade() -> None:
             "so it would destroy them. Nothing was changed. Keep the database at this revision, "
             "or export those rows and remove them deliberately first."
         )
+    for statement in DROP_THE_GUARDS:
+        op.execute(statement)
+    op.execute(EMPTY_THE_GUARD_ROLE)
     op.execute(DROP_THE_DEFINER)
     op.execute(EMPTY_THE_DEFINER_ROLE)
 
-    op.drop_index(op.f("ix_response_policy_set_by_person_id"), table_name=RESPONSE_POLICY)
-    op.drop_index(op.f("ix_response_policy_prefix_id"), table_name=RESPONSE_POLICY)
+    op.drop_index(
+        "ix_response_policy_prefix_id_set_by_person_id_role_sequence", table_name=RESPONSE_POLICY
+    )
     op.drop_table(RESPONSE_POLICY)
     op.drop_index("ix_instructor_response_section_id_week_id", table_name=INSTRUCTOR_RESPONSE)
-    op.drop_index(op.f("ix_instructor_response_author_person_id"), table_name=INSTRUCTOR_RESPONSE)
     op.drop_table(INSTRUCTOR_RESPONSE)

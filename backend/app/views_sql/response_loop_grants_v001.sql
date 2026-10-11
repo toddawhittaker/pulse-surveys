@@ -19,9 +19,12 @@
 -- The two time columns are the application's to write, from `services/clock.now`,
 -- so that the development clock stays coherent (the ruling on B2 appended to
 -- E7-01's work order). Order is never read from them.
+--
+-- A grant cannot say who a row may name, so who may write each row is checked by a
+-- trigger when it is written (`response_loop_guard_v001.sql`).
 
 GRANT SELECT ON public.instructor_response TO pulse_app;
-GRANT INSERT (section_id, week_id, author_person_id, role, ai_seeded, body, published_at)
+GRANT INSERT (section_id, week_id, term_id, author_person_id, role, ai_seeded, body, published_at)
     ON public.instructor_response TO pulse_app;
 
 GRANT SELECT ON public.response_policy TO pulse_app;
