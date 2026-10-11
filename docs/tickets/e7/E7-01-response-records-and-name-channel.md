@@ -108,7 +108,11 @@ Read first: SPEC §4, §4.1, §5.3, §8 and §13; ADRs 0043, 0187 and 0189;
    of another section, a student whose enrollment has ended, an instructor of a
    sibling section, a lead of a sibling course, and a chair of another
    department. Each test sits beside its passing twin in one world (entry 3).
-   These tests are marked `invariant`.
+   Each refused-reader case also calls the database function directly as
+   `pulse_app`. If the staff check sits in Python, the function itself still
+   answers nothing for a reader neither enrolled in nor teaching the section,
+   including a two-hat person who is a student in section A and an instructor
+   in section B, asking for section C. These tests are marked `invariant`.
 4. **No refusal carries a name.** A refused read, at the service and over HTTP,
    carries no staff name in its body, its headers or its log line. The test
    plants a distinctive name and searches every refusal for it.
