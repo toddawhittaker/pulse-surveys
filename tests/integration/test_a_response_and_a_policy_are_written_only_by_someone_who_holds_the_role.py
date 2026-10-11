@@ -66,12 +66,13 @@ from fixtures.staff_names import (
     TEACHER_NAME,
     WEEK_COLUMN,
     StaffNameWorld,
+    id_references,
     require_the_application_role,
     require_the_definer,
     require_the_tables,
     sqlstate,
 )
-from fixtures.supervision import foreign_key_columns, require_table, single_primary_key
+from fixtures.supervision import require_table, single_primary_key
 
 pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 
@@ -612,7 +613,7 @@ def test_a_response_keyed_to_a_week_of_another_term_is_refused(staff_names: Staf
     world.rows.commit()
     week_table = require_table(world.tables, "week")
     foreign_week_id = foreign_week[single_primary_key(week_table)]
-    week_term_columns = foreign_key_columns(week_table, "term")
+    week_term_columns = id_references(week_table, "term")
     assert len(week_term_columns) == 1, f"`week` references `term` by {week_term_columns}."
     foreign_term = foreign_week[week_term_columns[0]]
     assert str(foreign_term) != str(

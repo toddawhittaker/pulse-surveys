@@ -676,7 +676,7 @@ class StaffNameWorld:
     def a_week_of(self, section_id: Any, index: int = 0) -> Any:
         """The `index`-th `week` of the section's own term, by week number."""
         week_table = require_table(self.tables, "week")
-        week_terms = foreign_key_columns(week_table, "term")
+        week_terms = id_references(week_table, "term")
         if len(week_terms) != 1:
             pytest.fail(f"`week` has {len(week_terms)} references to `term` ({week_terms}).")
         term = self.term_of(section_id)
@@ -690,9 +690,28 @@ class StaffNameWorld:
         return found[index][single_primary_key(week_table)]
 
 
+def id_references(table: Any, target: str) -> list[str]:
+    """The columns of `table` whose foreign key refers to `target.id`, sorted.
+
+    Narrower than `foreign_key_columns`, which counts every column of every key
+    pointing at `target`: a composite key such as `week (term_id,
+    term_length_weeks) → term (id, length_weeks)`, or F4's `instructor_response
+    (section_id, term_id) → section (id, term_id)`, is one reference whose other
+    columns refer to something other than the target's `id`
+    (`docs/disputes/E7-01-01.md`).
+    """
+    return sorted(
+        {
+            key.parent.name
+            for key in table.foreign_keys
+            if key.column.table.name == target and key.column.name == "id"
+        }
+    )
+
+
 def only_reference(table: Any, target: str) -> str:
-    """The one column of `table` referencing `target`, or a failure naming both."""
-    columns = foreign_key_columns(table, target)
+    """The one column of `table` referring to `target.id`, or a failure naming both."""
+    columns = id_references(table, target)
     if len(columns) != 1:
         pytest.fail(
             f"`{table.name}` has {len(columns)} references to `{target}` ({columns}); the ticket "
