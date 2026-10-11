@@ -21,8 +21,8 @@ answers both readers of "the newest row": the weekly recompute's comparison
 `score_text` and `ledger_text` of the last post Pulse knows the platform took,
 for the session's own user and the section already found among their live
 enrollments, or null before any such row. `score_text` is Pulse's canonical
-percentage before AGS scales it to the column's maximum, so it can differ in
-form from the characters the gradebook shows. The ordering is ADR 0124's.
+percentage before AGS scales it to the column's maximum, so the gradebook's
+figure can differ from it in scale and value. The ordering is ADR 0124's.
 
 ## Alternatives rejected
 
