@@ -83,6 +83,6 @@ def test_a_week_above_the_threshold_with_one_unverdicted_comment_is_served_suppr
         "an empty list tells the instructor the week had no comments, which is false. E6-09 "
         "done-when 4: the stream is suppressed until the section-week is moderated."
     )
-    assert not [value for value in strings_in(body) if WAITING_TEXT[:40] in value], (
-        "The waiting comment's text is in the served report."
-    )
+    assert not [
+        value for value in strings_in(body) if WAITING_TEXT[:40] in value
+    ], "The waiting comment's text is in the served report."

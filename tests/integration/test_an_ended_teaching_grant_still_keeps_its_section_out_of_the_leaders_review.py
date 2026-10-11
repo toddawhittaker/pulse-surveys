@@ -170,9 +170,22 @@ def read_the_queue(review: LeadReviewWorld, reader: Reader) -> tuple[set[str], l
     return {str(item.get("answer_id")) for item in items}, strings_in(body)
 
 
-def assert_the_queue_leaves_out_the_ended_section(
+class QueueRead(NamedTuple):
+    """One queue read beside an ended section and its canary."""
+
+    in_ended: Any
+    queued: set[str]
+    leaked: list[str]
+
+
+def read_the_queue_beside_an_ended_section(
     review: LeadReviewWorld, reader: Reader, *, ended: str, canary: str
-) -> None:
+) -> QueueRead:
+    """Plant a held comment in each section and read the queue once; the canary is required.
+
+    The absence is left to the test body, so each invariant test asserts its own
+    subject (`scripts/ci/check_invariant_assertions.py`).
+    """
     ended_text = f"E6-09 held harmful in section {ended}, which {reader.label} taught until now"
     in_ended = a_held_harmful(review, ended_text, ended)
     in_canary = a_held_harmful(review, f"E6-09 held harmful in sibling section {canary}", canary)
@@ -183,14 +196,15 @@ def assert_the_queue_leaves_out_the_ended_section(
         f"{review.code_of(canary)}, which they review and never taught. Either the queue answered "
         "nothing or the rule left out the whole course rather than the section."
     )
-    assert str(in_ended) not in queued, (
-        f"{reader.label}'s queue carries the held comment from section {review.code_of(ended)}, "
-        "whose teaching grant the roster ended. E6-09 done-when 5: a section the reader has taught "
-        "stays out of their review — the instructor door refused them that held text yesterday."
-    )
-    assert not [value for value in strings if ended_text[:FRAGMENT] in value], (
-        f"The held text from the section {reader.label} taught is in their queue's body."
-    )
+    leaked = [value for value in strings if ended_text[:FRAGMENT] in value]
+    return QueueRead(in_ended=in_ended, queued=queued, leaked=leaked)
+
+
+ENDED_SECTION_IN_THE_QUEUE = (
+    "The queue carries the held comment from a section whose teaching grant the roster ended, "
+    "or its text. E6-09 done-when 5: a section the reader has taught stays out of their review — "
+    "the instructor door refused them that held text while they taught it."
+)
 
 
 def test_a_lead_whose_teaching_grant_ended_still_finds_none_of_that_sections_held_comments(
@@ -205,9 +219,10 @@ def test_a_lead_whose_teaching_grant_ended_still_finds_none_of_that_sections_hel
     review = lead_review
     reader = review.lead
     taught_then_ended(review, reader, LEADS_ENDED_COHORT, application_session)
-    assert_the_queue_leaves_out_the_ended_section(
+    read = read_the_queue_beside_an_ended_section(
         review, reader, ended=LEADS_ENDED_COHORT, canary=LEADS_CANARY_COHORT
     )
+    assert str(read.in_ended) not in read.queued and not read.leaked, ENDED_SECTION_IN_THE_QUEUE
 
 
 def test_a_chair_whose_teaching_grant_ended_still_finds_none_of_that_sections_held_comments(
@@ -223,9 +238,10 @@ def test_a_chair_whose_teaching_grant_ended_still_finds_none_of_that_sections_he
     review.a_second_section_of_the_unmapped_course()
     reader = review.chair
     taught_then_ended(review, reader, CHAIRS_ENDED_COHORT, application_session)
-    assert_the_queue_leaves_out_the_ended_section(
+    read = read_the_queue_beside_an_ended_section(
         review, reader, ended=CHAIRS_ENDED_COHORT, canary=CHAIRS_CANARY_COHORT
     )
+    assert str(read.in_ended) not in read.queued and not read.leaked, ENDED_SECTION_IN_THE_QUEUE
 
 
 def test_a_lead_whose_teaching_grant_ended_finds_none_of_that_sections_rows_in_the_log(
@@ -276,12 +292,12 @@ def test_a_lead_whose_teaching_grant_ended_finds_none_of_that_sections_rows_in_t
         "roster ended. E6-09 done-when 5: a row from a section the reader has taught is removed, "
         "because it names the section, the date and a paraphrase of a held comment."
     )
-    assert not [row for row in rows if ended_code in str(row.get(LOG_SECTION_LABEL))], (
-        f"The lead's log carries rows of section {ended_code}, which they taught."
-    )
-    assert not [value for value in strings_in(body) if ended_text[:FRAGMENT] in value], (
-        "The held text from the section the lead taught is in their log."
-    )
+    assert not [
+        row for row in rows if ended_code in str(row.get(LOG_SECTION_LABEL))
+    ], f"The lead's log carries rows of section {ended_code}, which they taught."
+    assert not [
+        value for value in strings_in(body) if ended_text[:FRAGMENT] in value
+    ], "The held text from the section the lead taught is in their log."
 
 
 def test_a_lead_deciding_on_a_comment_from_a_section_they_taught_gets_the_governed_404(

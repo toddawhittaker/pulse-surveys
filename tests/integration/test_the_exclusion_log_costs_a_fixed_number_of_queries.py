@@ -34,8 +34,6 @@ section, week and stream, so the second count is larger: the equality fails nami
 both counts.
 """
 
-from typing import Any
-
 import pytest
 from fixtures.instructor_decisions import STORED_EXCLUDED
 from fixtures.lead_review import AS_LEAD_FACULTY, LOG_REASON, LeadReviewWorld
@@ -111,9 +109,9 @@ def test_a_log_over_four_section_weeks_in_two_sections_costs_what_one_section_we
         "The recorder saw no reads while the log was served, so it is not listening where the "
         "application's statements pass, and every count here would be zero for that reason."
     )
-    assert set(first_reasons) <= set(answered_before), (
-        f"The first read answered {answered_before}, without the planted {first_reasons}."
-    )
+    assert set(first_reasons) <= set(
+        answered_before
+    ), f"The first read answered {answered_before}, without the planted {first_reasons}."
 
     more_reasons = plant(review, THREE_MORE_SECTION_WEEKS)
     after, answered_after = measured_read(review)

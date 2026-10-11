@@ -249,9 +249,9 @@ def test_the_routing_revision_refuses_to_drop_a_threat_case(
         f"`alembic downgrade` below {ROUTING_REVISION} completed over a `threat_case` row, which "
         "drops the row a Care case opens with. E6-09 done-when 1: the downgrade raises instead."
     )
-    assert is_a_runtime_error(failure), (
-        f"The downgrade failed with {failure!r}, not the precedent's `RuntimeError`."
-    )
+    assert is_a_runtime_error(
+        failure
+    ), f"The downgrade failed with {failure!r}, not the precedent's `RuntimeError`."
     assert threat_cases(empty_database) == 1, "After the refusal the `threat_case` row is gone."
 
 
@@ -293,9 +293,9 @@ def test_the_routing_revision_refuses_to_drop_a_router_flag(
         f"`alembic downgrade` below {ROUTING_REVISION} completed over a `moderation_state` row, "
         "dropping its `sequence`. E6-09 done-when 1: the downgrade raises instead."
     )
-    assert is_a_runtime_error(failure), (
-        f"The downgrade failed with {failure!r}, not the precedent's `RuntimeError`."
-    )
+    assert is_a_runtime_error(
+        failure
+    ), f"The downgrade failed with {failure!r}, not the precedent's `RuntimeError`."
     assert SEQUENCE_COLUMN in columns_the_database_reports(empty_database, MODERATION_STATE), (
         f"After the refusal `{MODERATION_STATE}` has no `{SEQUENCE_COLUMN}`: the guard raised after "
         "the column was dropped."
@@ -321,11 +321,11 @@ def test_both_revisions_still_round_trip_over_a_database_holding_none_of_their_r
 
     below = the_revision_below(config, ROUTING_REVISION)
     migrate(config, "downgrade", below, f"walking an empty database below {ROUTING_REVISION}")
-    assert not columns_the_database_reports(empty_database, THREAT_CASE), (
-        f"Below {ROUTING_REVISION} `threat_case` is still there, so the downgrade did not run."
-    )
+    assert not columns_the_database_reports(
+        empty_database, THREAT_CASE
+    ), f"Below {ROUTING_REVISION} `threat_case` is still there, so the downgrade did not run."
 
     migrate(config, "upgrade", MODEL_SCHEMA, "re-applying both revisions")
-    assert DECIDER_COLUMN in columns_the_database_reports(empty_database, MODERATION_STATE), (
-        "After the round trip the decision columns are not back."
-    )
+    assert DECIDER_COLUMN in columns_the_database_reports(
+        empty_database, MODERATION_STATE
+    ), "After the round trip the decision columns are not back."

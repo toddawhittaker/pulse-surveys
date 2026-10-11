@@ -197,9 +197,7 @@ def imports_of(source: str, path: str = "<sample>") -> set[str]:
 
 def reaches(source: str, module: str, path: str = "<sample>") -> bool:
     """Whether a source imports `module` (or anything under it), by either statement form."""
-    return any(
-        name == module or name.startswith(f"{module}.") for name in imports_of(source, path)
-    )
+    return any(name == module or name.startswith(f"{module}.") for name in imports_of(source, path))
 
 
 def reaches_the_comment_service(source: str, path: str = "<sample>") -> bool:
@@ -301,9 +299,7 @@ def test_no_student_facing_module_imports_the_report_comment_service() -> None:
     )
 
 
-def test_the_import_reader_catches_a_planted_moderation_import_and_spares_its_near_misses() -> (
-    None
-):
+def test_the_import_reader_catches_a_planted_moderation_import_and_spares_its_near_misses() -> None:
     """E6-09 done-when 10's instrument, both directions, before the tree is judged with it.
 
     The planted imports are the four spellings a student module could use to reach

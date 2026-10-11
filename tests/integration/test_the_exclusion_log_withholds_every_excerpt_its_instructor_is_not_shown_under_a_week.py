@@ -25,6 +25,13 @@ control that the week would otherwise show it — and once after one comment wit
 verdict is added to that week. The only difference between the two reads is the
 waiting comment.
 
+**The released comment sits in a stream that is shown** (the fix round on dispute
+E6-09-01): after the cut, its week's instructor stream reaches the threshold on new,
+unreleased commenters and is shown, and the released comment is still kept out of
+that week by the release batch alone. A released comment in a stream that stayed
+thin is withheld by the held-stream rule too, so a log that ignored release batches
+passed the first version of this test.
+
 **Which failure a red is.** The rule exists in the log today, so this may be green
 on arrival; it is the §4.1 assertion the boundary review found missing. The
 mutations below are what show each case can go red.
@@ -44,12 +51,17 @@ from fixtures.lead_review import (
 from fixtures.moderation import CLEAR, HARMFUL
 from fixtures.report_api import (
     COMMENT_TEXT_FIELD,
+    COMMENTS_FIELD,
     FIRST_HELD_WEEK,
     FULL_WEEK,
     HELD_COMMENTS,
     IN_DENOMINATOR_WEEK,
+    PAYLOAD_STREAM_KEY,
     RELEASED_MEMBER,
     SILENT_WEEK,
+    SMALL_N_MEMBER,
+    STREAMS_MEMBER,
+    SUPPRESSED_FIELD,
     TAUGHT_COHORT,
     strings_in,
 )
@@ -127,6 +139,34 @@ def test_the_log_withholds_the_excerpt_of_a_held_a_pending_and_a_released_commen
     assert RELEASED_TEXT in {card.get(COMMENT_TEXT_FIELD) for card in released_list}, (
         f"The instructor's released list in course week {SILENT_WEEK} does not carry "
         f"{RELEASED_TEXT!r}, so it is not a comment shown only by a release batch."
+    )
+    # The released comment's stream then reaches the threshold on new commenters, so it
+    # is shown under its week — and the released comment is still not, only because it
+    # was released (ADR 0152's anti-join). Without this, the held-stream rule alone would
+    # withhold its excerpt and a log that ignored release batches would pass.
+    late_texts = [
+        f"E6-09 a clear comment arriving in course week {FIRST_HELD_WEEK} after its release, {i}"
+        for i in range(OTHER_COMMENTERS)
+    ]
+    for late_text in late_texts:
+        review.plant(
+            course_week=FIRST_HELD_WEEK,
+            stream=INSTRUCTOR_STREAM,
+            text=late_text,
+            verdict=CLEAR,
+            cohort=TAUGHT_COHORT,
+        )
+    week = door.payload(FIRST_HELD_WEEK)[STREAMS_MEMBER][PAYLOAD_STREAM_KEY[INSTRUCTOR_STREAM]]
+    shown_under_the_week = {card.get(COMMENT_TEXT_FIELD) for card in week[COMMENTS_FIELD]}
+    is_shown = week[SMALL_N_MEMBER][SUPPRESSED_FIELD] is False
+    assert is_shown and set(late_texts) <= shown_under_the_week, (
+        f"Course week {FIRST_HELD_WEEK}'s instructor stream is {week[SMALL_N_MEMBER]!r} and shows "
+        f"{sorted(shown_under_the_week)}; with {OTHER_COMMENTERS} new unreleased commenters it is "
+        "at the threshold and shown, which is the premise of the release-batch case."
+    )
+    assert RELEASED_TEXT not in shown_under_the_week, (
+        f"The released comment {RELEASED_TEXT!r} is shown under course week {FIRST_HELD_WEEK}; a "
+        "released comment never is (ADR 0153), so this world is not the case it names."
     )
     excluded_by_the_lead(review, door.answer_id_of(RELEASED_TEXT), RELEASED_REASON)
 

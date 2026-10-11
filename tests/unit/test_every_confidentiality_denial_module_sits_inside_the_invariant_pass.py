@@ -344,9 +344,7 @@ PLANTED_MODULES = {
     # Not demanded, and the near miss for `leaves_no_trace`: a module asserting a
     # decision *leaves* a trace is the opposite claim (the exclusion log exists to
     # leave one), and a matcher reading for a bare "trace" would take it.
-    "test_a_planted_decision_leaves_a_trace_in_the_log.py": (
-        f"import pytest\n\n\n{A_DENIAL_TEST}"
-    ),
+    "test_a_planted_decision_leaves_a_trace_in_the_log.py": (f"import pytest\n\n\n{A_DENIAL_TEST}"),
 }
 
 PLANTED_DEMANDED = {

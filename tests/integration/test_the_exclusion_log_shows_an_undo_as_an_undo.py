@@ -114,9 +114,9 @@ def test_an_exclusion_then_its_undo_are_two_rows_and_only_the_undo_is_marked(
         "reversal is."
     )
     exclusion = next(row for row in rows if row[LOG_IS_UNDO] is False)
-    assert exclusion.get(LOG_DECISION) == STORED_EXCLUDED, (
-        f"The unmarked row is {exclusion!r}; it is the exclusion, `{STORED_EXCLUDED}`."
-    )
+    assert (
+        exclusion.get(LOG_DECISION) == STORED_EXCLUDED
+    ), f"The unmarked row is {exclusion!r}; it is the exclusion, `{STORED_EXCLUDED}`."
 
 
 def test_an_undone_keep_reads_as_a_reversal_and_not_as_a_second_exclusion(
@@ -140,9 +140,9 @@ def test_an_undone_keep_reads_as_a_reversal_and_not_as_a_second_exclusion(
     decided(review, comment, UNDO)
 
     rows = rows_for(review, text)
-    assert len(rows) == 3, (
-        f"The lead's log carries {len(rows)} rows for a comment excluded, kept and un-kept: {rows}."
-    )
+    assert (
+        len(rows) == 3
+    ), f"The lead's log carries {len(rows)} rows for a comment excluded, kept and un-kept: {rows}."
     described = sorted((str(row.get(LOG_DECISION)), marker_of(row)) for row in rows)
     expected = sorted([(STORED_EXCLUDED, False), (STORED_KEPT, False), (STORED_EXCLUDED, True)])
     assert described == expected, (

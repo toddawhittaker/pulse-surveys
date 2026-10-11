@@ -119,9 +119,9 @@ def test_a_lead_who_also_chairs_never_sees_a_sibling_leads_comment_in_the_queue(
         "§4.1 item 2: a lead's grant never reaches a sibling lead's course, and a chair's reaches "
         "only the department's courses with no lead."
     )
-    assert not [value for value in strings_in(body) if sibling_text[:FRAGMENT] in value], (
-        "The sibling course's held comment text is in the lead-and-chair's queue."
-    )
+    assert not [
+        value for value in strings_in(body) if sibling_text[:FRAGMENT] in value
+    ], "The sibling course's held comment text is in the lead-and-chair's queue."
 
 
 def test_a_lead_who_also_chairs_never_sees_a_sibling_leads_row_in_the_log(
