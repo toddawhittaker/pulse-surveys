@@ -13,7 +13,7 @@ feature decisions, system behavior, rationale, status, or history.
 Before adding a line, ask whether it would still be true if the process
 changed; if yes, it belongs elsewhere. Under 150 lines.
 
-**Active epic:** E6 — Moderation & exclusions. Tickets: `docs/tickets/e6/README.md` (on `epic/e6-moderation-exclusions`).
+**Active epic:** E7 — Response loop. Tickets: `docs/tickets/e7/README.md` (on `epic/e7-response-loop`).
 
 ## Read before you start
 
