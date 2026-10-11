@@ -26,8 +26,9 @@ every later reader calls, and never copies:
 - **The policy of record for a section-week (ruling 6).** The latest
   `response_policy` row for the course's prefix and its responsible person that
   was recorded at or before the week's report opened (`report_opens_at`,
-  ADR 0184). With no such row, the week is encouraged. ADR 0193 states what
-  happens when the course's responsible person changes after the report opens.
+  ADR 0184). With no such row, the week is encouraged. If the course's
+  responsible person changes after the report opens, a held week stays held;
+  ADR 0193 records how the gate knows it, since lead mappings keep no history.
 - **The latest response.** The `instructor_response` row with the highest
   `sequence` for the section-week.
 - **The student's state.** `awaiting` when the policy of record is required and
@@ -86,7 +87,9 @@ Read first: SPEC §4.1, §5.3, §5.4 and §8; ADRs 0184, 0187 and 0191;
 4. **The policy of record is the policy in force at report open.** A switch to
    required recorded after the week's report opened does not hold that week; a
    switch to encouraged recorded after it opened does not release a held week.
-   Both cases are tested at one second either side of the opening.
+   Both cases are tested at one second either side of the opening. If the
+   course's responsible person changes after the report opens, a held week
+   stays held; this too is tested one second either side of the opening.
 5. **An edit never re-holds.** A second row for a released week changes the
    text the student reads and leaves the week released, including when the
    policy changed in between. The latest row by `sequence` is the one read,
