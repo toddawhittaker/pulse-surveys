@@ -2005,22 +2005,67 @@ class UnusableAnswerError(Exception):
     """
 
 
-# A number of people, comments or responses, as residue A of the E7 breakdown
-# review states the rule: digits or a number word next to "comment", "student",
-# "response", "classmate" or "of you". Respondents, people and persons are the
-# same count in other words, so they are here too. "Two of the students" and
-# "three different students" are caught by the one optional word between; "3
-# worked examples" is not, because nothing counted follows it.
-_NUMBER = (
-    r"(?:\d+%?|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
-    r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|"
-    r"fifty|sixty|seventy|eighty|ninety|hundred|dozen|both|couple|handful|several|few|half)"
+# The count rule for a week with a held stream (E7-04's fix round, G1; ADR 0195).
+# **A token rule, not a phrase list.** The first version matched a number beside
+# a list of nouns for people ("students", "of you"), and review found phrasings
+# it missed in minutes: "two of your classmates", "2 learners said", "the 7 who
+# responded", "Both students", "Half the class". A list of ways to say "how
+# many" never closes, so in such a week a draft states no number of anything,
+# except a number naming a course structure ("week 3", "chapter five").
+_CARDINALS = frozenset(
+    (
+        "zero one two three four five six seven eight nine ten eleven twelve thirteen "
+        "fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty "
+        "sixty seventy eighty ninety"
+    ).split()
 )
-_COUNTED = r"(?:comments?|students?|responses?|respondents?|classmates?|people|persons?)"
-STATES_A_COUNT = re.compile(
-    rf"\b{_NUMBER}\s+(?:of\s+you\b|(?:of\s+(?:the|my|our)\s+)?(?:[a-z-]+\s+)?{_COUNTED}\b)",
-    re.IGNORECASE,
+_QUANTITY_WORDS = frozenset(
+    "hundred both half couple several few dozen pair handful majority minority".split()
 )
+# The words that may stand immediately before a count token and make it the name
+# of a course structure rather than a count. Only the word immediately before, so
+# "Weeks 3 and 4" still counts at "4".
+_STRUCTURE_WORDS = frozenset(
+    (
+        "week weeks chapter lab unit module section page pages question assignment quiz exam "
+        "day days hour hours minute minutes part step problem version"
+    ).split()
+)
+# A digit run, or a word with its hyphenated compound kept whole ("twenty-one"),
+# so that "chapter twenty-one" is one licensed token rather than two.
+_TOKEN = re.compile(r"\d+|[A-Za-z]+(?:-[A-Za-z]+)*")
+
+
+def _is_count_token(token: str) -> bool:
+    """A digit run, a cardinal word (compounds included), or a quantity word. Not an ordinal."""
+    word = token.lower()
+    if word.isdigit() or word in _QUANTITY_WORDS:
+        return True
+    return all(part in _CARDINALS for part in word.split("-"))
+
+
+def states_a_count_of_people(text: str) -> bool:
+    """Whether `text` carries a count token that no course-structure word licenses.
+
+    A count token is a digit run; a cardinal word from zero to ninety-nine,
+    hyphenated compounds included, or "hundred"; or one of both, half, couple,
+    several, few, dozen, pair, handful, majority and minority. It is allowed only
+    when the word immediately before it, in any case, is one of
+    `_STRUCTURE_WORDS`. Ordinals ("first", "second") are not count tokens.
+
+    The rule is about any number, not only numbers of people, because nothing
+    short of that closes (see the comment above). The name says what it protects.
+    It is applied only in a week with a held stream
+    (`refuse_a_draft_students_should_not_read`); the eval grader calls this same
+    function, so there is one copy of the rule.
+    """
+    previous = ""
+    for match in _TOKEN.finditer(text):
+        token = match.group(0)
+        if _is_count_token(token) and previous.lower() not in _STRUCTURE_WORDS:
+            return True
+        previous = token
+    return False
 
 
 def response_gather(
@@ -2122,10 +2167,10 @@ def instructor_response_draft(
       comparison is `_reused_run` against the section-week's excluded,
       still-flagged and held-stream comments, as
       `refuse_a_summary_reusing_a_comment` does for a small-N summary.
-    - **A count of people beside a held stream** (residue A): in a week with a
-      held stream, a draft stating a number of students, comments or responses is
-      refused, because the summary's *prose* can carry the count decision 12
-      keeps out of the themes.
+    - **A number beside a held stream** (residue A, fix-round G1): in a week
+      with a held stream, a draft carrying any number except one naming a
+      course structure is refused (`states_a_count_of_people`), because the
+      summary's *prose* can carry the count decision 12 keeps out of the themes.
 
     Raises `SectionUnavailableError`, `CourseWeekUnavailableError`,
     `UnusableAnswerError`, or the gateway's own `AIGatewayError` classes. Logs
@@ -2223,7 +2268,7 @@ def refuse_a_draft_students_should_not_read(
 
     Raises `UnusableAnswerError`, which carries nothing of either text.
     """
-    if gather.has_a_held_stream and STATES_A_COUNT.search(draft):
+    if gather.has_a_held_stream and states_a_count_of_people(draft):
         raise UnusableAnswerError
     hidden = _comments_students_do_not_see(session, section_id=section_id, week_id=week_id)
     if hidden and _reused_run(draft, hidden):
