@@ -308,7 +308,7 @@ The Claude Design prototype is the visual and interaction contract; the frontend
 
 ## 8. Data model (core tables)
 
-`institution, college, department, prefix, course, section, term, week, start_letter_map, lti_platform, lti_deployment, nrps_call, ags_call, user, user_identity, person, role_assignment, lead_faculty_mapping, enrollment, question_set, question, survey_window, response, answer, classification, moderation_attempt, weekly_summary, moderation_state, release_batch, release_batch_member, instructor_response, comparison_set, grade_sync, threat_case, audit_log, notification`
+`institution, college, department, prefix, course, section, term, week, start_letter_map, lti_platform, lti_deployment, nrps_call, ags_call, user, user_identity, person, role_assignment, lead_faculty_mapping, enrollment, question_set, question, survey_window, response, answer, classification, moderation_attempt, weekly_summary, moderation_state, release_batch, release_batch_member, instructor_response, response_policy, comparison_set, grade_sync, threat_case, audit_log, notification`
 
 Selected constraints:
 
@@ -336,8 +336,10 @@ Selected constraints:
 - `weekly_summary` holds one AI summary per section, course week and stream (§5.1), with the prompt version and model ID §7.4 requires of every model output; a summary states the response count it drew from, and zero is a count it may state.
 - The cumulative release §4 describes is stored, not recomputed: `release_batch` records the section, the term the threshold is counted over, and the time the batch was cut, and `release_batch_member` records which comments went out in it. The batch's cut time is the only release time in the schema — a comment carries none of its own, so that timing cannot identify an author.
 - `comparison_set` holds named leadership-defined sets; the default per section (same lead's courses, matched length+level, past-referencing) is computed, not stored.
-- `instructor_response` records the author and whether it was Lead-Faculty-on-behalf (§5.3), and whether it was AI-seeded.
-- `audit_log` is append-only and includes all re-identifications, policy changes, response-on-behalf actions, imports (with their dry-run diffs), and admin config edits. It holds no exclusion or keep: those are `moderation_state` rows, which name their decider.
+- `instructor_response` is append-only: one row per published response and per edit, naming the section and course week, the author (a `person` key that cannot be deleted from under it), the role the author wrote under (instructor, Lead Faculty, or the chair acting as lead for a course with no lead; a response on behalf is that role, not a separate flag), whether it was AI-seeded, the text (non-blank, at most 4000 characters) and the time. The week belongs to the section's term. A row is refused when it is written unless its author holds the role it states for the section at that moment, and a section-week takes rows from one author only. The latest row for a section-week is the response students see, and "latest" is a database-assigned sequence column, as on `moderation_state`.
+- `response_policy` is append-only too: one row per policy change, naming the prefix, the person who set it, the role they set it under (Lead Faculty, or the chair for the courses with no lead), the mode (encouraged or required), the time, and the same sequence column. A row is refused unless its setter holds the role it states in the prefix. The latest row for a prefix, person and role is the policy in force for the courses that role gives that person in the prefix.
+- A member of staff's name reaches a reader only through one database function, which answers one section's live teaching instructors and the authors of its published responses, and answers only a reader of that section: a student with a live enrollment in it, its teaching instructor, or the lead or chair responsible for its course.
+- `audit_log` is append-only and includes all re-identifications, imports (with their dry-run diffs), and admin config edits. It holds no exclusion or keep: those are `moderation_state` rows, which name their decider. It holds no policy change and no response, on behalf or not: those are `response_policy` and `instructor_response` rows, which name the person and the role.
 - Identity separation: instructor/leadership read paths go through views that structurally cannot join to `user` identity columns — enforced in the database, not just the application. Only the Care role's queue path can reach identity, and only via the audited reveal action. The §4.1 invariants are asserted against these views in CI.
 
 ## 9. Testing
@@ -426,7 +428,7 @@ pulse-surveys/
 │       │   ├── survey.py           # question_set, question, response, answer
 │       │   ├── ai.py               # classification, moderation_attempt
 │       │   ├── report.py           # weekly_summary, moderation_state, release_batch, release_batch_member
-│       │   ├── loop.py             # instructor_response — not built yet: E7
+│       │   ├── loop.py             # instructor_response, response_policy
 │       │   ├── benchmark.py        # comparison_set, comparison_set_member
 │       │   ├── grades.py           # grade_sync
 │       │   ├── safety.py           # threat_case (its opening row; E10 adds the case lifecycle)
@@ -434,6 +436,9 @@ pulse-surveys/
 │       │   └── clock.py            # the development clock override
 │       │
 │       ├── views_sql/              # identity-separated read views (§8) as migrations + query helpers
+│       │   ├── response_loop_grants_v001.sql # what the application may write to the response records
+│       │   ├── response_loop_guard_v001.sql  # who may write a response or a policy, checked at insert
+│       │   ├── section_staff_names_v001.sql  # the one channel a staff name reaches a reader through
 │       │   └── queries.py          # typed ways into the read views
 │       │
 │       ├── schemas/                # Pydantic request/response contracts (also feeds OpenAPI)
@@ -487,7 +492,7 @@ pulse-surveys/
 │       │   ├── comparison_sets.py  # defining, editing and deleting a named comparison set
 │       │   ├── safety.py           # the Care queue, and the only connection that can reach identity (§6.2)
 │       │   ├── moderation.py       # moderation verdict routing, the hourly sweep, decisions, the review queue and log (§5.2)
-│       │   ├── response_loop.py    # publish, required-response holds (§5.3) — not built yet: E7
+│       │   ├── response_loop.py    # a section's staff names for a reader of it; publish and required-response holds (§5.3) — not built yet: E7
 │       │   └── retention.py        # configurable purge jobs (§4) — not built yet: E13
 │       │
 │       ├── lti/                    # pylti1p3 integration

@@ -3060,6 +3060,49 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
         "the author beyond the two hops every comment table has, and nothing about the model's "
         "answer — a failed call has none.",
     ),
+    # E7-01's two, written before the tables exist as E6-01's were, and for the same
+    # reason: `author_person_id` and `set_by_person_id` put each one hop from
+    # `person`, so the fixed-point walk reaches them the moment M1 runs, and no
+    # column carries a name any identity vocabulary knows (`docs/MISTAKES.md`
+    # entry 22). Column names are the ruling on B2 appended to E7-01's work order.
+    #
+    # **The standing `PERSON_TABLES` question, asked of both** — E7-09 re-asks it at
+    # the epic's exit. The person on each row is a member of staff, as a key, the
+    # actor convention `moderation_state.decided_by_person_id` already uses; the
+    # name behind it is `person.identity_name`, which `pulse_app` reads only through
+    # `section_staff_names`, whose reader check and result columns are pinned in
+    # `test_the_staff_name_definer_answers_names_and_never_other_people.py`. No
+    # student is on either row. `instructor_response.body` is the one free-text
+    # column: staff-written, published to the section's students by design (SPEC
+    # §5.3), and nothing structural stops a person typing a name into it — the same
+    # is true of `moderation_state.reason`, so it is named here for the next reader.
+    "instructor_response": CarriesNothing(
+        (
+            "ai_seeded",
+            "author_person_id",
+            "body",
+            "id",
+            "published_at",
+            "role",
+            "section_id",
+            "sequence",
+            "term_id",
+            "week_id",
+        ),
+        "One published response, append-only (E7-01, ruling 3: every edit is a new row): the "
+        "section-week and the term they share as keys (the fix round's F4), the author as a `person` key and the role they wrote under, "
+        "whether it was seeded from an AI draft, the text, when, and the database's insertion "
+        "order. The author is a member of staff and their name is published with the response by "
+        "design (SPEC §5.3), through the staff-name definer rather than through this row. No "
+        "student is reachable from it.",
+    ),
+    "response_policy": CarriesNothing(
+        ("id", "mode", "prefix_id", "role", "sequence", "set_at", "set_by_person_id"),
+        "One policy change, append-only (E7-01, ruling 7: the table is the record): the prefix, "
+        "the person who set it as a key and the role they set it under, the mode, when, and the "
+        "database's insertion order. Nothing about the setter beyond the key, the argument "
+        "`moderation_state`'s decider makes, and no student at all.",
+    ),
 }
 
 

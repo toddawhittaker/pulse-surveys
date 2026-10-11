@@ -1142,6 +1142,14 @@
               }
             ],
             "description": "The open survey, or null when none is open."
+          },
+          "instructors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Instructors",
+            "description": "The names of the people who teach the reader's own enrollment, sorted; empty when nobody is assigned to teach it."
           }
         },
         "additionalProperties": false,
@@ -1152,10 +1160,11 @@
           "course_label",
           "survey_is_open",
           "next_window_opens_at",
-          "open_survey"
+          "open_survey",
+          "instructors"
         ],
         "title": "EnrolledSection",
-        "description": "One section this reader is enrolled in today, and its survey state.\n\n**`course_label` is the reader's own enrollment metadata and nobody else's**\n(E2-17 item 5, respelled by FIX-01 item 2). It is composed from the section's\nown row, the course row above it, the prefix row above that course and the\nterm the section belongs to \u2014 every one of them reached by following the\nsection's own foreign keys upward, so the only course any answer can name is\none the reader is enrolled in. \u00a74.1 item 1 is what that has to hold against,\nand\n`tests/integration/test_the_course_label_names_nothing_outside_the_students_enrollment.py`\nis where it is measured, inside the isolated invariant pass.\n\n**`next_window_opens_at` is this section's own next window and no other's**\n(FIX-01 item 4). It is the opening instant of the first materialized\n`survey_window` for *this* section that has not opened yet, and it is null\nboth while a survey is open and when nothing is ahead. The same scoping\nargument covers it: a \"when does the next one open\" lookup that stopped\nnaming the section would put another section's calendar on this page."
+        "description": "One section this reader is enrolled in today, and its survey state.\n\n**`course_label` is the reader's own enrollment metadata and nobody else's**\n(E2-17 item 5, respelled by FIX-01 item 2). It is composed from the section's\nown row, the course row above it, the prefix row above that course and the\nterm the section belongs to \u2014 every one of them reached by following the\nsection's own foreign keys upward, so the only course any answer can name is\none the reader is enrolled in. \u00a74.1 item 1 is what that has to hold against,\nand\n`tests/integration/test_the_course_label_names_nothing_outside_the_students_enrollment.py`\nis where it is measured, inside the isolated invariant pass.\n\n**`next_window_opens_at` is this section's own next window and no other's**\n(FIX-01 item 4). It is the opening instant of the first materialized\n`survey_window` for *this* section that has not opened yet, and it is null\nboth while a survey is open and when nothing is ahead. The same scoping\nargument covers it: a \"when does the next one open\" lookup that stopped\nnaming the section would put another section's calendar on this page.\n\n**`instructors` names this section's own live teaching instructors and\nnobody else** (E7-01, ADR 0191). The names come through the one staff-name\nchannel, which answers only a reader of the section, and the read keeps only\nthe teaching instructors of what it answers: a response author who does not\nteach the section is not listed as its instructor."
       },
       "ExclusionLog": {
         "properties": {
