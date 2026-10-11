@@ -688,8 +688,12 @@ def summarize_stream(
 # §7.4's response draft and draft check (E7-04)
 # ---------------------------------------------------------------------------
 
-# The two prompts, named as every version above is (ADR 0031, ADR 0032).
-RESPONSE_DRAFT_PROMPT_VERSION = "response_draft.v1"
+# The two prompts, named as every version above is (ADR 0031, ADR 0032). The
+# draft is on v2 since E7-04's fix round: v1 asked only for no count beside a
+# word for people, and v2 asks a week with a held stream for no number at all
+# except one naming a course structure, the rule the service enforces
+# (`app.services.reporting.states_a_count_of_people`). v1 stays on disk.
+RESPONSE_DRAFT_PROMPT_VERSION = "response_draft.v2"
 DRAFT_CHECK_PROMPT_VERSION = "draft_check.v1"
 
 # Where the week goes in both prompts, and where the instructor's draft goes in

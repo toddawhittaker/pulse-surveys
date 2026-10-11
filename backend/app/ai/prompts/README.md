@@ -69,7 +69,8 @@ The reasoning, and the alternative that was rejected, are in
 | `summary.v2.md` | Weekly summary, small-N stream | Themes only, no reused words | E4-15 | no — superseded by v3 |
 | `summary.v3.md` | Weekly summary, small-N stream | Themes only, no reused words; speaks of the stream, not the week | E6-02 | yes |
 | `moderation.v1.md` | Moderation | clear / harmful / privacy / nonsense / threat / self_harm | E6-02 | yes |
-| `response_draft.v1.md` | Response draft | A draft response from the week's stored summaries, themes and ratings | E7-04 | yes |
+| `response_draft.v1.md` | Response draft | A draft response from the week's stored summaries, themes and ratings | E7-04 | no — superseded by v2 |
+| `response_draft.v2.md` | Response draft | The same; a week with a held stream uses no number but a course structure's | E7-04's fix round | yes |
 | `draft_check.v1.md` | Draft check | The week's stored themes a draft does not address, each with its count or none | E7-04 | yes |
 
 **Two files for one task is what the rule above looks like when it is used**, and
