@@ -19,6 +19,10 @@ The boundary reviews run after this file is written (`../e7/boundary-review.md`)
 Whatever they find and do not fix is added here, under its own heading, by the
 change that records the finding.
 
+**At the E8 exit,** each entry an E8 ticket closed says so below, naming the
+pull request and the merge commit, and every entry still open is carried on in
+`../e9/carried-from-e8.md`, whose ledger names this file's entries in order.
+
 ## How the sources were dispositioned
 
 **Closed inside E7,** each closure recorded in its source file with the pull
@@ -66,7 +70,7 @@ repeat it. E7 adds no reader of `threat_case`. **Owner:** E10. **Done when:**
 the Care queue reads `threat_case`, and only then may a deployment reach real
 students.
 
-## The accessibility scan is not run on any moderation or response page
+## The accessibility scan is not run on any moderation or response page — closed in E8
 
 **Lands in:** a `process/` pull request that adds the package, then [E8-02](E8-02-the-results-page.md) (the student-results drive) and [E8-04](E8-04-e8-exit.md) (the other drives). Without the package, [E8-04](E8-04-e8-exit.md) passes it on to E9.
 
@@ -78,6 +82,15 @@ three leadership pages joined the moderation pages without a scan. **Owner:** a
 **Done when:** the instructor-report, leadership-moderation, student-results,
 instructor-response and leadership-response drives each run an axe scan on
 every page they reach and fail on a violation.
+
+**Closed in E8.** Process pull request #322 (merged as 14bcb93d) added
+`@axe-core/playwright` 4.13.0. E8-02 (#326, MERGE_326) scans every page
+`student-results.spec.ts` reaches. E8-04 (this pull request) adds the scan to
+every page `instructor-report.spec.ts`, `leadership-moderation.spec.ts`,
+`instructor-response.spec.ts` and `leadership-response.spec.ts` reach, through
+`tests/e2e/support/axe.ts`, and to every page its own exit drive reaches. The
+from-earlier-weeks group is reached by no drive on the stack; that gap is
+carried to E9 in `../e9/carried-from-e8.md`.
 
 ## Comments that tell ticket history
 
@@ -92,6 +105,11 @@ each file. **Done when:** `rg "E[0-9]+(\.[0-9]+)?-[0-9]{2}" backend/app
 frontend/src` finds no comment naming a ticket, and each such comment cites an
 ADR or a SPEC section for the why and says what the code does now.
 
+**Still open at the E8 exit.** E8-01 and E8-03 cleaned the files they edited;
+the comments in `services/reporting.py` (58 lines), `services/report_comments.py`
+(39) and `frontend/src/api/instructor.ts` (8) that E8-01 left are carried to E9
+with the rest in `../e9/carried-from-e8.md`.
+
 ## A stored summary can carry a comment excluded after it was written
 
 **Lands in:** no E8 ticket. E8 shows students no summary (SPEC §5.4), so the rule has no E8 reader; [E8-04](E8-04-e8-exit.md) re-carries it to E9.
@@ -103,6 +121,9 @@ strictly later than the week's latest exclusion or undo of a keep, through the
 on-behalf filter's own function rather than a copy, with a test that excludes a
 summarized comment and reads the summary as that reader.
 
+**Not triggered in E8, and carried to E9.** E8 shows students no summary
+(SPEC §5.4).
+
 ## The exit drives read pinned dates in Fall 2026
 
 Unchanged from the source entry: the report and moderation drives move the
@@ -111,11 +132,16 @@ every instant from the seeded calendar or the section's own window rows.
 **Owner:** a `process/` pull request, which must land before 2026-11-23.
 **Done when:** unchanged from the source entry.
 
+**Still open at the E8 exit, and carried to E9.** No `process/` pull request
+has reworked the older drives; E8's drives pin no date.
+
 ## The forged summary block boundaries, passed on unchanged
 
 E7-04's draft and check send the model no comment (ADR 0195), so the entry did
 not trigger in E7. **Owner:** the next ticket that renders comments into a
 prompt. **Done when:** unchanged from the source entry.
+
+**Not triggered in E8, and passed on to E9.**
 
 ## The four standing questions, re-asked at the E7 exit
 
@@ -133,9 +159,12 @@ The answers are in `../e7/boundary-review.md`.
   invariant-marked modules, every one collected. **Owner:** a candidate process
   ticket. **Done when:** unchanged.
 
+**Re-asked at the E8 exit**; the answers are in `boundary-review.md` in this
+folder, and each is carried to E9.
+
 ## New from E7
 
-### For E8: the student results route answers the state and the response only
+### For E8: the student results route answers the state and the response only — closed by E8-01 and E8-02
 
 **Lands in:** [E8-01](E8-01-the-students-week-under-the-hold.md) (the read under the hold, and the test that a held week serves nothing) and [E8-02](E8-02-the-results-page.md) (the page).
 
@@ -148,7 +177,12 @@ that page under the same hold, reading the hold through
 copy; and a test shows a required, unanswered week serves no aggregate and no
 comment.
 
-### For E8: release batches carry no week
+**Closed by E8-01** (#324, merged as 295cc9fd), which adds the figures, the
+comments and the small-N state under the hold through `student_week_results`,
+with `test_a_held_week_serves_nothing_about_the_week_and_reaches_no_other_page.py`;
+and **E8-02** (#326, MERGE_326), the page.
+
+### For E8: release batches carry no week — closed by E8-01 and E8-02
 
 **Lands in:** [E8-01](E8-01-the-students-week-under-the-hold.md), under ruling 1 of the [E8 breakdown](README.md) and ADR 0197; [E8-02](E8-02-the-results-page.md) renders the group.
 
@@ -158,7 +192,11 @@ batch's comments therefore have no week to be held with. **Owner:** E8.
 the student page (shown, held until the week it was cut in is released, or
 something else), and the page follows it with a test.
 
-### For E8: the results page names no course
+**Closed by E8-01** (#324, merged as 295cc9fd) under ruling 1 and ADR 0197,
+with `test_the_release_group_shows_on_the_latest_week_only_and_only_what_was_cut_before_it_opened.py`;
+and **E8-02** (#326, MERGE_326), which renders the group.
+
+### For E8: the results page names no course — closed by E8-01 and E8-02
 
 **Lands in:** [E8-01](E8-01-the-students-week-under-the-hold.md) (the course label on the payload in every state, ruling 2) and [E8-02](E8-02-the-results-page.md) (the heading).
 
@@ -167,7 +205,10 @@ number and a held week may show none. **Owner:** E8. **Done when:** the page
 names the course where it can do so without a figure in a held week, or a
 record says why it does not.
 
-### For E8: the results page owes a confidentiality line once it shows student data
+**Closed by E8-01** (#324, merged as 295cc9fd), `course_label` in every state
+(ruling 2); and **E8-02** (#326, MERGE_326), the heading.
+
+### For E8: the results page owes a confidentiality line once it shows student data — closed by E8-01 and E8-02
 
 **Lands in:** [E8-01](E8-01-the-students-week-under-the-hold.md) (the surface map and the key) and [E8-02](E8-02-the-results-page.md) (the line on the page).
 
@@ -177,6 +218,11 @@ page shows only staff-written text today. **Owner:** E8. **Done when:** the
 change that first puts anything derived from students on that page (aggregates,
 comments, or a small-N state) removes `student_results` from
 `SURFACES_WITH_NO_CONFIDENTIALITY_LINE`, and the page shows the line with a test.
+
+**Closed by E8-01** (#324, merged as 295cc9fd), which removes `student_results`
+from `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` and adds
+`student_results.confidentiality`; and **E8-02** (#326, MERGE_326), the line on
+the page once, with a test.
 
 ### For E9: the attention list, staff names, and three leadership roles
 
@@ -227,7 +273,7 @@ the next ticket that touches the publish doors. **Done when:** the guard's
 refusal is answered with the same 409 as a second publish, with a test that
 forces the race.
 
-### Two near-duplicates proposed by E7-03
+### Two near-duplicates proposed by E7-03 — half closed by E8-01
 
 **Lands in:** [E8-01](E8-01-the-students-week-under-the-hold.md) for the policy-of-record pair. The chair's department walk stays carried; [E8-04](E8-04-e8-exit.md) re-carries it.
 
@@ -236,6 +282,10 @@ in two forms, and the chair's department walk appears twice in
 `services/authz.py` (`lead_review_courses`, `chaired_courses_with_a_lead`).
 **Owner:** the next ticket that touches either file. **Done when:** each rule is
 written once, or a record argues the second copy.
+
+**Half closed by E8-01** (#324, merged as 295cc9fd): the policy-of-record rule
+is written once, as `_mode_in_force` in `services/response_loop.py`. The
+chair's department walk is carried to E9.
 
 ### The draft and check evals have no floor
 
@@ -267,7 +317,7 @@ definer reads the real date. **Owner:** the next ticket that touches
 `section_staff_names`. **Done when:** the definer takes the reader's date as a
 parameter from the application clock, or a record argues the edge.
 
-### The e2e suite's shared-stack residue
+### The e2e suite's shared-stack residue — one spec closed by E8-02
 
 **Lands in:** [E8-02](E8-02-the-results-page.md) for `student-results.spec.ts`. The rest stays carried; [E8-04](E8-04-e8-exit.md) re-carries it unless it touches those specs.
 
@@ -290,6 +340,9 @@ builds a fresh stack each time, so none reds CI today:
 **Owner:** a `process/` pull request on the e2e world, or the next ticket that
 touches each spec. **Done when:** each spec runs green twice in a row on one
 stack, and the hold banner is driven once.
+
+**One spec closed by E8-02** (#326, MERGE_326): `student-results.spec.ts` guards
+every insert, so a second run adds nothing. The rest is carried to E9.
 
 ## The ledger
 
@@ -392,7 +445,7 @@ are not repeated.
 | `response_gather`'s `for_on_behalf` keyword | Carried: "`response_gather` has a keyword that changes nothing" |
 | Every other finding | Fixed in E7-10 (#318) or E7-11 (#316), or covered by process pull request #305 |
 
-### Five simplifications the boundary review proposed
+### Five simplifications the boundary review proposed — one closed by E8-01
 
 **Lands in:** [E8-01](E8-01-the-students-week-under-the-hold.md) for the policy-of-record rule. [E8-04](E8-04-e8-exit.md) re-carries the other four.
 
@@ -404,7 +457,10 @@ converts a course week to a week itself. **Owner:** the next ticket that touches
 each file. **Done when:** each rule is written once, or a record argues the
 extra copy, and `publish_response` takes the week its caller already resolved.
 
-### The role-assignment table has no index on its section
+**One closed by E8-01** (#324, merged as 295cc9fd): the policy-of-record rule.
+The other four are carried to E9.
+
+### The role-assignment table has no index on its section — closed by E8-01
 
 **Lands in:** [E8-01](E8-01-the-students-week-under-the-hold.md).
 
@@ -414,6 +470,9 @@ adds more student-path reads. **Done when:** `EXPLAIN` at a realistic size
 (about twenty thousand rows) is recorded in ADR 0191 and shows the reads are
 fine, or a partial index on `section_id` where the role is instructor exists.
 
+**Closed by E8-01** (#324, merged as 295cc9fd): `EXPLAIN` over 20,000 rows is a
+1.1 ms sequential scan, recorded in ADR 0191, so no index was added.
+
 ### The draft eval set bypasses the output contracts
 
 From `prompt-eval`. The cases in `tests/evals/response_draft/` are not typed
@@ -422,7 +481,7 @@ contract would not fail them. **Owner:** E10's floors pull request, with the
 entry "The draft and check evals have no floor". **Done when:** every case
 builds its input and checks its output through those types.
 
-### Two response paths no drive reaches
+### Two response paths no drive reaches — closed by E8-04
 
 **Lands in:** [E8-04](E8-04-e8-exit.md).
 
@@ -432,6 +491,13 @@ unanswered week past the deadline as the lead sees it. **Owner:** E8's
 end-to-end work, or the first ticket that touches the on-behalf page.
 **Done when:** one drive publishes on behalf and one reads an unanswered week
 as the lead, each on a fresh stack and leaving no rows a rerun trips over.
+
+**Closed by E8-04** (this pull request): `tests/e2e/exit-student-loop.spec.ts`
+reads a required, unanswered week as the lead at 48 hours (owed, no on-behalf
+door) and at 96 hours on the on-behalf page, then publishes on behalf, and the
+student reads the lead's name and role. Each run takes the first unanswered
+week of `NURS-8100-Q2FF`, so a second run on one stack meets none of the
+first's rows.
 
 ### `response_gather` has a keyword that changes nothing
 
