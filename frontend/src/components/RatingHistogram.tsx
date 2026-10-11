@@ -146,8 +146,11 @@ export function RatingHistogram({
         });
 
   return (
-    <div className="pulse-stat-histogram" role="img" aria-label={reading}>
+    <div className="pulse-stat-histogram">
       <p className="pulse-stat-histogram-title">{heading}</p>
+      {/* Only the drawing is the image: children of role=img are presentational,
+          so the toggle and the table must sit outside it to be reachable. */}
+      <div role="img" aria-label={reading}>
       {percent ? null : <p className="pulse-stat-histogram-summary">
         {mean === null ? (
           copy('instructor_report_stats.no_responses')
@@ -185,6 +188,7 @@ export function RatingHistogram({
           </li>
         ))}
       </ul>
+      </div>
       {percent ? (
         <>
           <button

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { RatingHistogram } from './RatingHistogram';
 import { TrendDuo } from './TrendDuo';
@@ -77,6 +77,32 @@ describe('the duo and the percent histogram, as a student reads them', () => {
     ]);
     expect(container.querySelector('table')?.className).toBe('sr-only');
     expect(container.querySelector('button.pulse-trend-numbers-toggle')).not.toBeNull();
+  });
+});
+
+describe('the percent histogram’s numbers', () => {
+  it('puts the toggle and the table outside the image, so both can be reached', () => {
+    const { container } = render(
+      <RatingHistogram
+        stream="course"
+        distribution={{ '1': 0, '2': 10, '3': 20, '4': 40, '5': 30 }}
+        unit="percent"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Show the numbers/ }));
+    expect(screen.getByRole('table')).toBeTruthy();
+    for (const button of Array.from(container.querySelectorAll('button'))) {
+      expect(button.closest('[role="img"]')).toBeNull();
+    }
+    expect(container.querySelector('table')?.closest('[role="img"]')).toBeNull();
+  });
+
+  it('keeps the trend’s buttons and tables outside any image too', () => {
+    const { container } = render(<TrendDuo instructor={INSTRUCTOR} course={COURSE} lengthWeeks={2} />);
+
+    expect(container.querySelector('[role="img"]')).toBeNull();
+    expect(screen.getAllByRole('table', { hidden: true })).toHaveLength(2);
   });
 });
 

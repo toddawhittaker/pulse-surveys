@@ -439,8 +439,9 @@ describe('ratings as shares', () => {
     expect(histograms).toHaveLength(2);
     const first = histograms[0];
     expect(first?.textContent).toContain('40%');
-    expect(first?.getAttribute('aria-label')).toContain('0%, 10%, 20%, 40%, 30%');
-    expect(first?.getAttribute('aria-label')).not.toMatch(/responses|mean/);
+    const label = first?.querySelector('[role="img"]')?.getAttribute('aria-label');
+    expect(label).toContain('0%, 10%, 20%, 40%, 30%');
+    expect(label).not.toMatch(/responses|mean/);
     expect(first?.querySelector('.pulse-stat-histogram-summary')).toBeNull();
   });
 
