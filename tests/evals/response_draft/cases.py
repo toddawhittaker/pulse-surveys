@@ -292,7 +292,7 @@ A_WEEK_WITH_A_STREAM_WITH_NO_SUMMARY = (
 
 # E7-10 done-when 4: a week with no themes. Both streams have a summary and
 # neither names a theme; the course stream is held.
-A_WEEK_WITH_NO_THEMES = (
+A_WEEK_WITHOUT_THEMES = (
     StoredSummary(
         stream=INSTRUCTOR_STREAM,
         held=False,
@@ -402,7 +402,7 @@ CASES: tuple[DraftCase, ...] = (
     DraftCase(
         case_id="rd-nt-001",
         family=A_WEEK_WITH_NO_THEMES,
-        summaries=A_WEEK_WITH_NO_THEMES,
+        summaries=A_WEEK_WITHOUT_THEMES,
         ratings=RATINGS,
         must_address=(),
         exemplar=(

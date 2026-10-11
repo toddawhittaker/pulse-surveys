@@ -31,7 +31,7 @@ from tests.evals.response_draft.cases import (
     A_SHOWN_WEEK,
     A_WEEK_WITH_A_HELD_STREAM,
     A_WEEK_WITH_A_STREAM_WITH_NO_SUMMARY,
-    A_WEEK_WITH_NO_THEMES,
+    A_WEEK_WITHOUT_THEMES,
     StoredSummary,
 )
 
@@ -139,7 +139,7 @@ CASES: tuple[CheckCase, ...] = (
     CheckCase(
         case_id="dc-nt-001",
         family=A_WEEK_WITH_NO_THEMES_FAMILY,
-        summaries=A_WEEK_WITH_NO_THEMES,
+        summaries=A_WEEK_WITHOUT_THEMES,
         draft="Thank you all for completing the survey this week. See you on Tuesday.",
         unaddressed=(),
     ),
