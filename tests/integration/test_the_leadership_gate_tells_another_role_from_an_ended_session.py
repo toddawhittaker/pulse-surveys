@@ -345,7 +345,12 @@ def test_a_student_session_gets_the_403_from_every_leadership_route(
     for method, path in swept(review):
         route = f"{method} {path}"
         refused = ask(review, method, path, student)
-        gate.add(not_your_role_sentence(refused, f"{route}, asked by a student session"))
+        sentence = not_your_role_sentence(refused, f"{route}, asked by a student session")
+        assert (refused.status_code, detail_of(refused)) == (NOT_YOUR_ROLE_STATUS, sentence), (
+            f"{route} answered a live student session {refused.status_code} with "
+            f"{detail_of(refused)!r}; the gate refuses it {NOT_YOUR_ROLE_STATUS} with {sentence!r}."
+        )
+        gate.add(sentence)
         the_whole_body_is_the_sentence(refused, f"{route}'s refusal of a student")
         assert_past_the_gate(ask(review, method, path, review.lead.token), route, "the lead", gate)
 
@@ -370,7 +375,12 @@ def test_the_instructors_launched_session_gets_the_403_from_every_leadership_rou
     for method, path in swept(review):
         route = f"{method} {path}"
         refused = ask(review, method, path, review.instructor_token)
-        gate.add(not_your_role_sentence(refused, f"{route}, asked by the instructor's session"))
+        sentence = not_your_role_sentence(refused, f"{route}, asked by the instructor's session")
+        assert (refused.status_code, detail_of(refused)) == (NOT_YOUR_ROLE_STATUS, sentence), (
+            f"{route} answered the instructor's launched session {refused.status_code} with "
+            f"{detail_of(refused)!r}; the gate refuses it {NOT_YOUR_ROLE_STATUS} with {sentence!r}."
+        )
+        gate.add(sentence)
         the_whole_body_is_the_sentence(refused, f"{route}'s refusal of the instructor")
         assert_past_the_gate(ask(review, method, path, review.lead.token), route, "the lead", gate)
 

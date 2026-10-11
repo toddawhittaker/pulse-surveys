@@ -57,8 +57,8 @@ never errors in setup (`docs/MISTAKES.md` entry 44).
 from typing import Any
 
 import pytest
-from fixtures.leadership_gate import not_your_role_sentence
-from fixtures.named_sets import NamedSetDoor
+from fixtures.leadership_gate import NOT_YOUR_ROLE_STATUS, not_your_role_sentence
+from fixtures.named_sets import NamedSetDoor, detail_of
 
 pytestmark = pytest.mark.integration
 
@@ -294,7 +294,13 @@ def test_a_session_in_another_role_gets_the_gates_403_from_every_named_set_route
     """
     answered = ask(named_sets, route, token=token_for(named_sets, session))
 
-    not_your_role_sentence(answered, f"The `{route}` route, asked by the {session} session")
+    sentence = not_your_role_sentence(
+        answered, f"The `{route}` route, asked by the {session} session"
+    )
+    assert (answered.status_code, detail_of(answered)) == (NOT_YOUR_ROLE_STATUS, sentence), (
+        f"The `{route}` route answered the {session} session {answered.status_code} with "
+        f"{detail_of(answered)!r}; the gate refuses it {NOT_YOUR_ROLE_STATUS} with {sentence!r}."
+    )
 
 
 @pytest.mark.invariant
