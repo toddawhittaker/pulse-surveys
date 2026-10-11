@@ -12,8 +12,8 @@ the list of course weeks a reader may page to, and the list of sections they
 teach; E4-11 consumes all three and E4-15 drives them against the running stack.
 Since E6-03, a decision on one comment of that report: exclude, keep, or undo
 (SPEC §5.2). Since E7-04, the AI draft of a response to one week, and the AI
-check of a draft (SPEC §5.3). Since E7-03, the week's response itself: publish
-and edit (SPEC §5.3), which are `app.services.response_loop`'s. The
+check of a draft (SPEC §5.3). Since E7-03, the week's response itself: read,
+publish and edit (SPEC §5.3), which are `app.services.response_loop`'s. The
 writes carry `csrf_verified_instructor`, the reads `require_instructor`; the
 decision is `app.services.moderation`'s and the draft and check are
 `app.services.reporting`'s.
@@ -131,6 +131,7 @@ from app.services.response_loop import (
     NotYoursToEditError,
     ResponseAlreadyPublishedError,
     edit_as_instructor,
+    instructor_week_response,
     publish_as_instructor,
 )
 from app.services.session import SessionClaims
@@ -436,6 +437,32 @@ def check_a_draft(
     except (UnusableAnswerError, AIGatewayError):
         raise _assistant_unusable() from None
     return DraftCheckView(unaddressed=themes)
+
+
+@router.get(RESPONSE_PATH, summary="The response to one week of my report, as students read it")
+def read_week_response(
+    section_id: UUID,
+    course_week: int,
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(require_instructor),
+    session: Session = Depends(get_session),
+) -> WeekResponseView:
+    """The week's state and response, behind the report's own gate and its own 404s."""
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return instructor_week_response(
+            session,
+            person_id=person_of(claims),
+            section_id=section_id,
+            course_week=course_week,
+            settings=settings,
+        )
+    except SectionUnavailableError:
+        raise _unavailable(SECTION_UNAVAILABLE) from None
+    except CourseWeekUnavailableError:
+        raise _unavailable(COURSE_WEEK_UNAVAILABLE) from None
 
 
 @router.post(

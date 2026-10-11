@@ -15,7 +15,7 @@ spec leaves open.
 
 ## Decision
 
-**The instructor's publish and edit sit behind the report's own gate**
+**The instructor's read, publish and edit sit behind the report's own gate**
 (`reporting._published_section_week`), so they refuse exactly what the report
 refuses, with its 404s. A publish when the week has a response, whoever wrote
 it, is one 409; an edit with no response yet and an edit by anyone but the first
@@ -74,7 +74,6 @@ comment, and each stream's `response_count` is the week's response count.
   edit.
 - An exclusion later undone still withholds a summary written before it, from
   the on-behalf reader only.
-- The instructor's GET of the week's response (decision 1) waits on dispute
-  `E7-03-02`; the service behind it is built. The two leadership refusals are
-  filed under a new `leadership_response.` copy prefix, whose row in the copy
-  governance map is dispute `E7-03-03`.
+- The two leadership refusals are filed under their own `leadership_response.`
+  copy prefix, a surface of its own in the copy governance map (ruling on
+  `E7-03-03`), not under the moderation screen's.

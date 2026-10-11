@@ -14,8 +14,8 @@ wherever they are written. E7-06 places the page's own strings.
 **E7-03's keys sit with the screens that show them.** The instructor's two 409s
 are under `instructor_report.`, because the composer is on the report page
 (E7-05). The policy switch's and the on-behalf doors' 404s are under
-`leadership_response.`, the leadership response screens E7-07 builds; that
-prefix's row in the copy governance map is dispute `E7-03-03`.
+`leadership_response.`, the leadership response screens E7-07 builds, a surface
+of its own in the copy governance map.
 """
 
 from collections.abc import Mapping
