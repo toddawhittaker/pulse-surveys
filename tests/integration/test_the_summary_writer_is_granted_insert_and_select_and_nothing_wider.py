@@ -118,6 +118,22 @@ GRANTED_ON_THE_SUMMARY = ("SELECT", "INSERT")
 # suite already transcribes it, rather than being written a second time here.
 GRANTED_ON_THE_MODERATION_RECORD = ("SELECT",)
 
+# **And what E6-03 adds beside it, at column grain only.** The instructor's decision
+# door appends a row naming exactly these six columns, and E6-03's grants file gives
+# `pulse_app` `INSERT` on them and on nothing else of the table (its M2, its work
+# order's decision 3; the argued entry is `RUNTIME_COLUMN_PRIVILEGES` in
+# `test_identity_grants.py`). Still no table-wide write, and still no `UPDATE` or
+# `DELETE` anywhere — the summary job's connection is the instructor's connection,
+# and what this module guards is that the *job* spends only its read.
+DECISION_INSERT_COLUMNS = (
+    "answer_id",
+    "state",
+    "decided_by_person_id",
+    "decided_as",
+    "reason",
+    "is_undo",
+)
+
 # The two tables E4-02 created that this ticket neither reads nor writes. **Their
 # entry was nothing until E4-04 merged, and it is that ticket's two verbs now.**
 # The rule is unchanged — a privilege lands in the change that spends it — and the
@@ -312,7 +328,10 @@ def test_the_application_role_may_read_a_moderation_state_and_never_write_one(
 
     **One verb, and the withheld ones are the assertion.** E4 writes zero
     moderation rows by design and every writer is E6's, so `INSERT`, `UPDATE` and
-    `DELETE` are all refused. That is not tidiness: §5.2's exclusion log is the
+    `DELETE` are all refused table-wide. **E6-03 is the writer that came**, and it
+    spends `INSERT` on six columns at column grain for the instructor's decision
+    door — `DECISION_INSERT_COLUMNS` above — which the column-grain equality below
+    admits by name and nothing more. That is not tidiness: §5.2's exclusion log is the
     anti-cherry-picking mechanism, and a connection able to append a `KEPT` row
     could publish a comment an instructor excluded — from the summary job, which
     has no business deciding anything about moderation at all.
@@ -365,12 +384,13 @@ def test_the_application_role_may_read_a_moderation_state_and_never_write_one(
         (APPLICATION_ROLE, column, privilege)
         for column in columns
         for privilege in GRANTED_ON_THE_MODERATION_RECORD
-    }, (
+    } | {(APPLICATION_ROLE, column, "INSERT") for column in DECISION_INSERT_COLUMNS}, (
         f"at column grain `{MODERATION_STATE_TABLE}` is held as {sorted(at_columns)}. A table-wide "
-        "`SELECT` covers every column and nothing more; an entry outside that set is a "
-        "column-scoped grant, which `has_table_privilege` does not report at all — and an "
-        "`UPDATE` on `state` alone is the narrowest way to give this connection the power §5.2 "
-        "reserves for an instructor."
+        "`SELECT` covers every column, and E6-03's decision door adds `INSERT` on exactly "
+        f"{list(DECISION_INSERT_COLUMNS)}; an entry outside that set is a column-scoped grant, "
+        "which `has_table_privilege` does not report at all — and an `UPDATE` on `state` alone is "
+        "the narrowest way to give this connection the power §5.2 reserves for an instructor's "
+        "appended decision."
     )
 
 

@@ -38,7 +38,11 @@ audit row indistinguishable from a legitimate access. The parameter that
 accepted it is deleted rather than validated: `reveal_identity` names one
 comment, and the student is derived from it inside the Care session. ADR 0144
 records the shape, why the derivation is a third `SECURITY DEFINER` function
-rather than a grant, and what it deliberately leaves to E6 and E10.
+rather than a grant, and what it deliberately leaves to E6 and E10. E6-01 closed
+E6's half: the door now answers only for a comment holding a threat or
+self-harm moderation verdict, and answers NULL for any other, which arrives here
+as `UnknownRevealSubjectError` before any record is written
+(`reveal_subject_for_answer_v002.sql`, ADR 0187).
 
 **The actor is checked three times, in three places, and that is the design.**
 `reveal_identity` verifies the actor holds a live `CARE` assignment before it
@@ -177,7 +181,12 @@ class NotCareStaffError(Exception):
 
 
 class UnknownRevealSubjectError(Exception):
-    """The comment named here belongs to nobody this system knows, so nothing was revealed.
+    """The comment named here is not one Care may act on, so nothing was revealed.
+
+    Since E6-01 that covers two cases the door does not tell apart: an id that
+    names no comment, and a comment that holds no threat or self-harm moderation
+    verdict (`reveal_subject_for_answer_v002.sql`). Telling them apart would
+    answer, to anyone holding the Care role, whether an id names a real comment.
 
     E4-01's refusal, and it is deliberately **not** a subclass of
     `NotCareStaffError` and has none of its own. The two mean different things —
@@ -349,9 +358,10 @@ def reveal_identity(
         author = session.execute(_DERIVE_THE_SUBJECT, {"answer_id": answer_id}).scalar_one()
         if author is None:
             raise UnknownRevealSubjectError(
-                f"{answer_id} names no comment, so there is no author to identify and nothing "
-                "was revealed. The Care queue acts on a record and the student is derived from "
-                "it; an identifier that matches no record is not a student (SPEC 4, 6.2)."
+                f"{answer_id} names no comment routed to Care, so there is no author to identify "
+                "and nothing was revealed. The Care queue acts on a comment holding a threat or "
+                "self-harm verdict and the student is derived from it; any other identifier is "
+                "not a student Care may name (SPEC 4, 6.2)."
             )
 
         reveal_id = session.execute(

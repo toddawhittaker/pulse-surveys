@@ -13,6 +13,8 @@
   --spruce-60: #5B7269;     /* Secondary ink: labels, helpers, meta, mono eyebrows, axis text,
                                benchmark/university comparison lines (dashed/dotted). */
   --hairline: #DCE4DD;      /* Borders, dividers, table rules, chart gridlines. Never for text. */
+  --input-edge: #7A8C86;    /* A text input's boundary. 3.55:1 on paper and 3.32:1 on chalk, over
+                               WCAG 2.2 SC 1.4.11's 3:1; the hairline is 1.30:1 and reads as no edge. */
   --marigold: #DFA320;      /* The hero accent: current-section trend line + terminal dot,
                                selected/active states, validity coaching (never an error red). */
   --marigold-deep: #8F6A10; /* Marigold at text-contrast: links, marigold-toned text on paper/chalk,

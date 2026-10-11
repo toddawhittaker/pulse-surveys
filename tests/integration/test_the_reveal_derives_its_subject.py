@@ -47,13 +47,15 @@ control proving the same reader finds the row a successful reveal does write
 (entry 2, "prefer asserting the forbidden state", and entry 3 for the control).
 
 **What this module deliberately does not assert** (`docs/MISTAKES.md` entry 14):
-that the answer's latest classification is in the threat or self-harm set. The
-moderation task is E6's, `ClassificationTask` has one member today, and the work
-order defers the predicate to E6 in ADR 0144 rather than silently — so the guard
-under test is subject-from-record, and a test demanding a verdict vocabulary
-would be asserting a design this ticket does not build. Nor does it touch the
-`record_identity_reveal` definer's own contract, which the ADR keeps for E10 with
-the case model.
+that the answer holds a threat or self-harm verdict. E4-01 deferred that
+predicate to E6 in ADR 0144, and E6-01 built it — `reveal_subject_for_answer`
+v002 refuses an answer with no Care-class moderation verdict — so it is asserted
+in `tests/integration/test_a_care_class_comment_reaches_no_reader.py`, both sides,
+with planted verdicts. The guard under test here is still subject-from-record,
+and every comment this module plants holds a `threat` verdict
+(`tests/fixtures/care_subject.py`) so that the verdict rule is never the reason a
+reveal here is refused. Nor does it touch the `record_identity_reveal` definer's
+own contract, which the ADR keeps for E10 with the case model.
 
 **One thing that must be read before a red here is believed.** `pulse_care` holds
 `SELECT` on `role_assignment` and on nothing else — no view, no other base table

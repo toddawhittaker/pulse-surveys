@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-import { SECTIONS_PATH, publishedWeeksPath, reportPath } from '../../api/instructor';
+import { SECTIONS_PATH, decisionsPath, publishedWeeksPath, reportPath } from '../../api/instructor';
 import { InstructorMondayReport } from './InstructorMondayReport';
 import {
   A_PUBLISHED_WEEK,
@@ -736,6 +736,103 @@ describe('a comment a moderator is holding', () => {
     // than a dropped comment — the near miss a bare absence assertion passes.
     fireEvent.click(disclosure);
     await screen.findByText(HELD_COMMENT);
+  });
+});
+
+describe('a decision on a comment (SPEC §5.2)', () => {
+  const HELD_ID = '0f6b3c1e-2d4a-4e8b-9c7d-1a2b3c4d5e05';
+  const PUBLISHED_ID = '0f6b3c1e-2d4a-4e8b-9c7d-1a2b3c4d5e01';
+
+  /**
+   * The week's reads, plus the decision route answering each POST with the
+   * next card given, recording what each one sent.
+   */
+  function servingDecisions(...cards: unknown[]): { url: string; body: unknown }[] {
+    const sent: { url: string; body: unknown }[] = [];
+    const queue = [...cards];
+    const reads: Record<string, unknown> = {
+      [publishedWeeksPath(SECTION_ID)]: { published_weeks: PUBLISHED_WEEKS },
+      [reportPath(SECTION_ID, 4)]: A_WEEK_WITH_A_HELD_COMMENT,
+    };
+    vi.stubGlobal('fetch', (input: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        sent.push({ url: input, body: JSON.parse(init.body as string) });
+        const next = queue.shift();
+        if (next === undefined) return Promise.reject(new Error('No decision answer left.'));
+        const status = typeof next === 'number' ? next : 200;
+        const body =
+          typeof next === 'number'
+            ? { detail: 'A stated reason has to contain some words.' }
+            : next;
+        return Promise.resolve(json(status, body));
+      }
+      const answer = reads[input];
+      if (answer === undefined) return Promise.reject(new Error(`No answer for ${input}.`));
+      return Promise.resolve(json(200, answer));
+    });
+    return sent;
+  }
+
+  const heldCard = (status: string, decidedByYou: boolean) => ({
+    text: HELD_COMMENT,
+    status,
+    stream: 'INSTRUCTOR',
+    answer_id: HELD_ID,
+    flag: 'harmful',
+    decided_by_you: decidedByYou,
+  });
+
+  it('excludes a flagged comment and undoes it, showing the card the server answered', async () => {
+    const sent = servingDecisions(heldCard('excluded', true), heldCard('flagged_collapsed', false));
+    open(4);
+
+    // The chip names the payload's flag class.
+    const held = (await screen.findByText('Flagged: harmful')).closest('article') as HTMLElement;
+    fireEvent.click(within(held).getByRole('button', { name: 'Review comment' }));
+    fireEvent.click(within(held).getByRole('button', { name: 'Exclude from student view' }));
+
+    await within(held).findByText(/^Excluded — students will not see this comment/);
+    const text = within(held).getByText(HELD_COMMENT);
+    expect(text.className).toContain('--muted');
+    expect(sent).toEqual([
+      {
+        url: decisionsPath(HELD_ID),
+        body: { action: 'exclude', reason: null },
+      },
+    ]);
+
+    fireEvent.click(within(held).getByRole('button', { name: 'Undo' }));
+
+    expect(await within(held).findByText('Flagged: harmful')).toBeTruthy();
+    expect(screen.queryByText(HELD_COMMENT)).toBeNull();
+    expect(sent[1]).toEqual({
+      url: decisionsPath(HELD_ID),
+      body: { action: 'undo', reason: null },
+    });
+  });
+
+  it('shows the server’s sentence under the reason field and leaves the comment published', async () => {
+    const sent = servingDecisions(422);
+    open(4);
+
+    const published = await screen.findByText(INSTRUCTOR_COMMENT);
+    const card = published.closest('article') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Exclude from student view' }));
+    fireEvent.change(within(card).getByRole('textbox'), {
+      target: { value: 'Off topic.' },
+    });
+    fireEvent.click(within(card).getByRole('button', { name: 'Exclude with this reason' }));
+
+    expect((await within(card).findByRole('alert')).textContent).toBe(
+      'A stated reason has to contain some words.',
+    );
+    expect(sent).toEqual([
+      {
+        url: decisionsPath(PUBLISHED_ID),
+        body: { action: 'exclude', reason: 'Off topic.' },
+      },
+    ]);
+    expect(published.className).not.toContain('--muted');
   });
 });
 

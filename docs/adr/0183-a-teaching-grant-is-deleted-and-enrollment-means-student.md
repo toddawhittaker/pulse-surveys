@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-10-03
 **Ticket:** [E5.1-02](../tickets/e5.1/E5.1-02-roster-grants-and-respondents.md)
-**Amended:** 2026-10-03 by [E5.1-11](../tickets/e5.1/E5.1-11-roster-roles-and-term-end.md); see the section at the end
+**Amended:** 2026-10-03 by [E5.1-11](../tickets/e5.1/E5.1-11-roster-roles-and-term-end.md); see the section at the end. Decision 2 amended 2026-10-11 by E6-09 (below)
 
 ## Context
 
@@ -34,6 +34,12 @@ SPEC §14.3 gives end-dating assignments to E9.
    `role_assignment`, `SELECT (id, section_id, response_code)` on `nrps_call` and
    `INSERT` on `ended_teaching_grant`, and nothing else. `pulse_app` holds nothing
    on the new table and still no `DELETE` on `role_assignment`.
+   *Amended 2026-10-11 by E6-09 (the ruling on dispute E6-09-01):* `pulse_app`
+   may read two columns, `SELECT (person_id, section_id)`, for
+   [0190](0190-a-lead-reviews-flagged-text-at-any-threshold-and-the-log-withholds-held-text.md)'s
+   taught-section rule, which counts a section whose grant the roster ended.
+   It still holds no `INSERT`, `UPDATE` or `DELETE` there; every ending is
+   written only through `public.end_teaching_instructor`.
 3. **One new reader in `authz.py`**, `teaching_instructor_grants`, answering
    `{assignment id: person id}`, because `assignment_scope` is read only there
    (E0-41) and the sync needs ids to end. No existing predicate changed.

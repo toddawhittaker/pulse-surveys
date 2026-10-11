@@ -1,5 +1,14 @@
 # 0145 — The report schema has its own module, and a comment's moderation state begins as an absence
 
+> **Amended 2026-10-09 by [0187](0187-moderation-verdicts-govern-the-read-path.md) (E6-01).** Two things below have moved.
+> A comment with no `moderation_state` row is published only once it holds a
+> moderation verdict: `report_comment` v004 leaves out every comment with none,
+> and every comment that has ever held a threat or self-harm verdict. And "the
+> latest row" is now the latest by `moderation_state.sequence`, an identity
+> column, because `decided_at` is the transaction's timestamp and two decisions
+> in one transaction tie on it. The routing definer writes the first
+> `FLAGGED_COLLAPSED` rows; E6-03 adds the decision writers.
+
 ## Context
 
 E4-02 adds four tables and one column before anything writes any of them, and
@@ -68,6 +77,9 @@ queries against the real table and writes nothing into it, and every writer is
 E6's. The vocabulary the `CHECK` enumerates is §5.2's four —
 `PUBLISHED`, `FLAGGED_COLLAPSED`, `EXCLUDED`, `KEPT` — so that E6 meets a
 lifecycle it can walk rather than a constraint two states short.
+*Amended by [0187](0187-moderation-verdicts-govern-the-read-path.md): a comment with no row is published only once it holds a
+moderation verdict, and "the latest row" is the latest by
+`moderation_state.sequence`.*
 
 **Three: `weekly_summary` takes a plain `week_id`, and the residual risk is
 named rather than hidden.** A summary whose section and week belong to different

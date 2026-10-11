@@ -18,12 +18,17 @@ one term, that student's response, and one comment answer on it — and commits,
 because `app.services.safety` opens its own `pulse_care` connection and sees
 nothing written inside another transaction (ADR 0001).
 
-**No classification row is planted, and that is deliberate rather than an
-omission.** The work order settles that the threat-set predicate waits for E6:
-the guard this ticket builds is subject-from-record, not subject-from-verdict, so
-a fixture that planted a verdict would be encoding a decision the ticket
-explicitly defers — and the day E6 lands, a fixture holding a made-up verdict
-vocabulary is the thing nobody updates.
+**A threat verdict is planted by default, since E6-01, and that ticket is why.**
+E4-01 planted no classification row at all, deliberately: its guard was
+subject-from-record, and the threat-set predicate waited for E6. E6-01 is that
+wait ending — `reveal_subject_for_answer` v002 refuses an answer that holds no
+threat or self-harm moderation verdict — so a comment with no verdict is now a
+comment the door refuses, and every reveal test built on this helper would be
+asserting a refusal it did not ask about. So the helper routes one verdict through
+`app.services.moderation.route_verdict` (the definer, under the seed provenance;
+see `tests/fixtures/moderation.py`), `threat` unless the caller names another, and
+`verdict=None` plants none. The vocabulary is ADR 0030's stored tokens, not one
+made up here.
 
 **Nothing here asserts a deliverable.** `require_the_reveal_interface` is a plain
 helper a test calls as its **first statement**, never a fixture, because a guard
@@ -47,10 +52,13 @@ seed differently or to read on another connection to make a test pass.
 """
 
 import inspect
+from datetime import UTC, datetime
 from typing import Any, NamedTuple
 from uuid import uuid4
 
 import pytest
+
+from fixtures.moderation import THREAT, plant_verdicts
 
 # SPEC §13 gives `services/safety.py` the Care queue and every ticket since E0-10
 # has named it again; these four names are the module's public surface after
@@ -222,8 +230,65 @@ def key_of(committed_rows: Any, table_name: str, row: Any) -> Any:
     return row[next(iter(table.primary_key.columns)).name]
 
 
-def plant_a_comment_answer(committed_rows: Any, *, with_identity: bool = True) -> PlantedAnswer:
+# A survey window that opened and closed in 2020, so it has closed under any clock
+# — the same instants `tests/fixtures/report_comments.py` gives a closed week.
+A_CLOSED_WINDOW_OPENS = datetime(2020, 1, 3, 23, 0, 0, tzinfo=UTC)
+A_CLOSED_WINDOW_CLOSES = datetime(2020, 1, 6, 4, 59, 59, tzinfo=UTC)
+
+
+def a_closed_window_for(
+    committed_rows: Any, *, section_id: Any, week_id: Any, term_id: Any
+) -> None:
+    """Make the planted comment's section-week a window that has closed, before a verdict is routed.
+
+    E6-01's fix round: `route_verdict` refuses an answer whose survey window has
+    not closed by the app clock, because an answer is revised in place on
+    resubmission (ADR 0115) and a verdict written while the window is open would
+    vouch for text the student can still replace. This helper's comment is seeded
+    through the walker, which may or may not have invented a window for its week;
+    so the window is made closed whichever is true — an existing one's instants are
+    moved into 2020, and a missing one is written there.
+    """
+    from sqlalchemy import text
+
+    parameters = {
+        "section": str(section_id),
+        "week": str(week_id),
+        "term": str(term_id),
+        "opens": A_CLOSED_WINDOW_OPENS,
+        "closes": A_CLOSED_WINDOW_CLOSES,
+    }
+    moved = committed_rows.session.execute(
+        text(
+            "UPDATE public.survey_window SET opens_at = :opens, closes_at = :closes "
+            "WHERE section_id = CAST(:section AS uuid) AND week_id = CAST(:week AS uuid)"
+        ),
+        parameters,
+    ).rowcount
+    if not moved:
+        committed_rows.session.execute(
+            text(
+                "INSERT INTO public.survey_window "
+                "(section_id, week_id, term_id, opens_at, closes_at) VALUES "
+                "(CAST(:section AS uuid), CAST(:week AS uuid), CAST(:term AS uuid), "
+                ":opens, :closes)"
+            ),
+            parameters,
+        )
+
+
+def plant_a_comment_answer(
+    committed_rows: Any,
+    *,
+    with_identity: bool = True,
+    verdict: str | tuple[str, ...] | None = THREAT,
+) -> PlantedAnswer:
     """A student, their response in one term's section and week, and one comment on it.
+
+    **`verdict` is the moderation verdict routed for the comment before the commit**
+    — `threat` by default, because since E6-01 the Care door answers only for a
+    comment holding a threat or self-harm verdict. A tuple routes several in order;
+    `None` routes none.
 
     Committed, because the reveal reads on a connection of its own and would
     otherwise be asked about a comment that, from where it is standing, does not
@@ -290,6 +355,14 @@ def plant_a_comment_answer(committed_rows: Any, *, with_identity: bool = True) -
         response_id=key_of(committed_rows, "response", response),
         comment_text=comment,
     )
+    if verdict is not None:
+        a_closed_window_for(
+            committed_rows,
+            section_id=key_of(committed_rows, "section", section),
+            week_id=key_of(committed_rows, "week", week),
+            term_id=key_of(committed_rows, "term", chain["term"]),
+        )
+    plant_verdicts(committed_rows.session, key_of(committed_rows, "answer", answer), verdict)
     committed_rows.commit()
 
     assert response["user_id"] == author, (

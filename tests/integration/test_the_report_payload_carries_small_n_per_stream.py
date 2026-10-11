@@ -154,6 +154,13 @@ def test_each_streams_flag_is_the_comment_services_own_answer(
     agreeing with the service only where the world happens to make them agree.
     Asserted for both streams of the full week, whose answers differ, so a
     constant cannot agree with both.
+
+    **Over a moderated week only, since E6-09** (done-when 4): the payload's flag
+    is `stream_is_suppressed`'s answer *or* "the section-week is not yet
+    moderated", so in a week waiting on a verdict the two may differ by design.
+    This world's week is fully moderated, so here they must agree;
+    `test_a_week_waiting_on_a_verdict_is_reported_held_not_empty.py` is the
+    other case.
     """
     contract = report_api_contract
     report_door.refresh()

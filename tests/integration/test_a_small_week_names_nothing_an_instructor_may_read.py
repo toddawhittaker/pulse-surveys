@@ -229,8 +229,8 @@ def test_a_flagged_comment_below_the_threshold_is_absent_from_everything(
 
     **The mutation it kills:** the moderation join left out of the below-threshold
     branch, so a flagged comment falls through as published; and a "1 response
-    held for review" count computed before the threshold test, which is the trace
-    §5.2 permits only as a neutral participation line and never as a flag hint.
+    held for review" count computed before the threshold test, which §5.2 does
+    not permit at all: below the threshold there is no count of any kind.
     """
     contract = comment_contract
     world = comment_world
@@ -319,8 +319,8 @@ def test_a_suppressed_week_and_a_week_nobody_commented_in_return_the_same_thing(
 ) -> None:
     """Criteria 1 and 2: the count of what was withheld is not derivable from the response.
 
-    SPEC §5.2 permits "an optional neutral participation trace" and forbids it
-    revealing category; §4 gives the instructor a distribution and a summary and
+    SPEC §5.2 permits no count and no participation trace below the threshold;
+    §4 gives the instructor a distribution and a summary and
     no raw comments. What neither permits is a *shape* that differs — a returned
     value that is longer, or of a different type, or carrying a placeholder, when
     something was withheld than when there was nothing to withhold.
@@ -401,8 +401,8 @@ def test_a_suppressed_week_and_a_week_nobody_commented_in_return_the_same_thing(
     assert suppressed == silent, (
         f"A week holding {threshold - 1} withheld comments answered {suppressed!r} and a week "
         f"holding none answered {silent!r}.\n\n"
-        "SPEC §5.2 lets a neutral participation trace exist and forbids it revealing category; "
-        "what it does not allow is the suppressed count being readable off the response itself. In "
+        "SPEC §5.2 permits no count below the threshold, and that includes the suppressed count "
+        "being readable off the response itself. In "
         f"a week of {threshold - 1} responses, 'four comments were withheld' and 'none were' are "
         "different facts about four identifiable students, and any difference between these two "
         "values carries it."

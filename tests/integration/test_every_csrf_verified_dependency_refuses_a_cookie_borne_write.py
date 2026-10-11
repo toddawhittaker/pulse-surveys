@@ -53,7 +53,11 @@ worlds per run and one.
 from typing import Any, NamedTuple
 
 import pytest
+from fixtures.instructor_decisions import EXCLUDE, DecisionDoor, require_decision_columns
+from fixtures.moderation import HARMFUL
 from fixtures.named_sets import MINTED, NAME_FIELD, NamedSetDoor
+from fixtures.report_api import FULL_WEEK
+from fixtures.report_views import INSTRUCTOR_STREAM
 from fixtures.submit import (
     COOKIE_SESSION,
     CSRF_DEPENDENCY_PREFIX,
@@ -75,7 +79,12 @@ pytestmark = pytest.mark.integration
 # it — which is what the route sweep proves it does.
 STUDENT = "csrf_verified_student"
 LEADERSHIP = "csrf_verified_leadership"
-DRIVERS = (STUDENT, LEADERSHIP)
+# E6-03's: the instructor's decision route (`POST …/comments/{answer_id}/decisions`),
+# the first write path a person drives on a comment. Its fourth criterion is this
+# module's three requests, over HTTP against the built application (`docs/MISTAKES.md`
+# entry 47): no token and another session's token refused, the bound token admitted.
+INSTRUCTOR = "csrf_verified_instructor"
+DRIVERS = (STUDENT, LEADERSHIP, INSTRUCTOR)
 
 
 class CookieBorneWrite(NamedTuple):
@@ -150,7 +159,47 @@ def a_leader_defining_a_set(request: pytest.FixtureRequest) -> CookieBorneWrite:
     )
 
 
-DRIVE = {STUDENT: a_student_submitting, LEADERSHIP: a_leader_defining_a_set}
+def an_instructor_excluding_a_comment(request: pytest.FixtureRequest) -> CookieBorneWrite:
+    """E6-03's decision route, driven by the teaching instructor whose session rides the cookie.
+
+    The comment is a `harmful` one in their shown stream, so an exclusion needs no
+    reason and the only thing that can refuse it is the gate: the visibility rule
+    admits it, the transition table admits it, and the reason rule does not apply.
+    What is counted is the comment's `moderation_state` rows — one, the router's
+    flag, before; two after an admitted exclusion.
+
+    **"From another origin"** (criterion 4) is driven as what a page on another
+    origin can make a browser send: the session cookie, with no token or with a
+    genuine token bound to some other session. A cross-site page cannot read this
+    session's token, so those are the two shapes its request can take.
+    """
+    door: DecisionDoor = request.getfixturevalue("decision_door")
+    require_decision_columns(door.world.tables)
+    door.template()
+    comment = door.plant_a_comment(
+        course_week=FULL_WEEK,
+        stream=INSTRUCTOR_STREAM,
+        text="E6-03 a flagged comment excluded through the cookie carrier",
+        verdict=HARMFUL,
+    )
+    forged = door.another_sessions_csrf_token()
+
+    return CookieBorneWrite(
+        what="an instructor's exclusion",
+        without_a_token=lambda: door.decide_as_a_browser(comment, EXCLUDE, csrf_token=None),
+        with_another_sessions_token=lambda: door.decide_as_a_browser(
+            comment, EXCLUDE, csrf_token=forged
+        ),
+        with_the_bound_token=lambda: door.decide_as_a_browser(comment, EXCLUDE),
+        writes=lambda: len(door.rows(comment)),
+    )
+
+
+DRIVE = {
+    STUDENT: a_student_submitting,
+    LEADERSHIP: a_leader_defining_a_set,
+    INSTRUCTOR: an_instructor_excluding_a_comment,
+}
 
 
 def test_the_family_is_exactly_the_members_this_module_drives() -> None:

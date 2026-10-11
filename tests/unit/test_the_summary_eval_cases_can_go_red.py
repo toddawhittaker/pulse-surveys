@@ -551,3 +551,61 @@ def test_the_summary_sets_pinned_prompt_version_is_the_one_the_application_rende
         f"{path} holds {len(lines)} non-blank lines, which is not a prompt. A file read as "
         "empty would make every comparison against it meaningless."
     )
+
+
+# The constant `app.ai.tasks` selects the small-N prompt by (ADR 0162, E4-15's
+# record), and the three families that are below the threshold by construction.
+SMALL_N_SUMMARY_PROMPT_VERSION = "SMALL_N_SUMMARY_PROMPT_VERSION"
+SMALL_N_FAMILIES = ("small_n", "small_n_themes_only", "thin_stream_in_a_full_week")
+
+
+def test_the_small_n_cases_are_pinned_to_the_small_n_prompt_the_application_renders(
+    summary_api: SummaryApi,
+) -> None:
+    """E6-09 done-when 14: every small-N case names the prompt a thin stream is sent.
+
+    The test above pins the ordinary cases to `SUMMARY_PROMPT_VERSION`; nothing
+    pinned the small-N cases to anything, and two of the three still carried the
+    ordinary prompt's version — a measurement of a prompt no thin stream is ever
+    summarized under. So: the set's small-N pin equals the application's
+    `SMALL_N_SUMMARY_PROMPT_VERSION`, that version names a prompt file, and every
+    case of the three small-N families carries it. The families are written out
+    here rather than read from `cases.py`, so a family renamed there is a red here
+    rather than a case that silently stopped being checked.
+
+    **The mutations this kills:** a small-N case left on `summary.v1` (the state
+    two of them were in); the small-N prompt bumped with the set's pin left
+    behind; the set's pin imported from the application rather than written
+    (`docs/MISTAKES.md` entry 19). **The near miss it spares:** the ordinary cases,
+    which stay on `PROMPT_VERSION`.
+    """
+    cases = eval_module("tests.evals.summary.cases")
+    version = summary_api.constant(SMALL_N_SUMMARY_PROMPT_VERSION)
+    pinned = getattr(cases, "SMALL_N_PROMPT_VERSION", None)
+    assert pinned == version, (
+        f"`tests/evals/summary/cases.py` pins its small-N cases to {pinned!r} and the application "
+        f"summarizes a thin stream under {version!r}. Re-measure the small-N cases against the "
+        "new prompt and move the pin in that pull request."
+    )
+    path = PROMPTS_DIR / f"{version}.md"
+    assert path.is_file(), f"`SMALL_N_SUMMARY_PROMPT_VERSION` is {version!r} and {path} is absent."
+
+    small_n = [case for case in cases.CASES if case.family in SMALL_N_FAMILIES]
+    assert {case.family for case in small_n} == set(SMALL_N_FAMILIES), (
+        f"The set holds small-N cases of the families {sorted({c.family for c in small_n})}; "
+        f"this test reads {list(SMALL_N_FAMILIES)}. A family renamed or dropped is a case this pin "
+        "no longer reaches."
+    )
+    off_pin = sorted(
+        (case.case_id, case.prompt_version) for case in small_n if case.prompt_version != version
+    )
+    assert not off_pin, (
+        f"These small-N cases are pinned to another prompt: {off_pin}. A stream below the "
+        f"threshold is summarized under {version!r}, so a case measured under any other version "
+        "measures a prompt the product never sends it."
+    )
+    ordinary = [case for case in cases.CASES if case.family not in SMALL_N_FAMILIES]
+    assert ordinary and all(case.prompt_version == cases.PROMPT_VERSION for case in ordinary), (
+        f"The ordinary cases carry {sorted({c.prompt_version for c in ordinary})}; they stay on "
+        f"{cases.PROMPT_VERSION!r}."
+    )

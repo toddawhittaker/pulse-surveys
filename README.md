@@ -36,9 +36,8 @@ tables, and role assignments with the supervision graph. What sits on top of it
 does not exist yet: no read views, no authorization, and no HTTP routes beyond
 `/healthz`. The frontend exists and is deliberately empty: React, TypeScript and
 Vite, served by the application at `/app`, with one blank landing view per role
-area and nothing behind any of them. The job runtime is wired but does no work — the
-beat schedule is empty, and the only task is a `ping` that proves the round
-trip. The AI side has its typed contracts and versioned prompt directory but no
+area and nothing behind any of them. The job runtime runs the beat schedule described under
+"Background jobs" below. The AI side has its typed contracts and versioned prompt directory but no
 gateway to call a provider with.
 
 ## Run it locally
@@ -51,6 +50,10 @@ make up             # docker compose up -d
 make logs           # follow the logs
 make down           # docker compose down -v — discards the database too
 ```
+
+If your `.env` was copied before the benchmark minimum changed, set
+`BENCHMARK_MIN_RESPONDENTS_DEFAULT=10` in it, the value `.env.example` now
+carries; an older `.env` may still hold 15.
 
 `GET http://localhost:8000/healthz` answers with the service name, the version,
 and the environment it was configured with. The interactive API documentation is
@@ -122,10 +125,19 @@ That needs `REDIS_URL` pointed at `localhost` in your own `.env`, for the same
 reason the section below gives about `DATABASE_URL`.
 
 The beat schedule ([`backend/app/jobs/schedules.py`](backend/app/jobs/schedules.py))
-is deliberately empty: every scheduled job — window open and close, the Monday
-report, roster sync, retention — belongs to a later epic. Beat keeps its
-schedule file on a named volume, so the last-run times survive a restart and a
-job that has already fired is not fired again when one of those entries lands.
+is the list of what runs on its own; that file says why each entry runs when it
+does. Two of its entries decide when an instructor sees students' comments:
+
+- **The moderation sweep**, hourly at minute 10 (`moderate_closed_windows`),
+  asks a model for a verdict on every comment whose survey window has closed.
+- **The summary walk**, hourly at minute 50 (`generate_weekly_summaries`),
+  summarizes each section-week once every comment in it holds a verdict.
+
+So a week's comments appear in the report only after the first sweep that
+follows its window's close has given every one of them a verdict, never while
+the window is open. Beat keeps its schedule file on a named volume, so the
+last-run times survive a restart and a job that has already fired is not fired
+again.
 
 ## The AI provider
 

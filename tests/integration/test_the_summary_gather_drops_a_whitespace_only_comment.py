@@ -1,11 +1,15 @@
-"""A comment of nothing but whitespace never reaches the summary model — E5.1-12, dispute E5.1-12-01.
+"""A comment of nothing but whitespace never reaches the summary model — E5.1-12 and E6-01.
 
-The dispute's ruling sends the blank-text fix to two places: the `report_comment`
-view, which decides SPEC §4's threshold, and the summary job's own gather in
-`app.services.reporting`, which collects a stream's comments for the provider.
-`tests/integration/test_a_whitespace_only_comment_is_not_a_commenter.py` covers
-the view. This module covers the gather, through the job, the way every other
-summary-job test reaches it.
+Dispute E5.1-12-01's ruling sent the blank-text fix to two places: the
+`report_comment` view, which decides SPEC §4's threshold, and the summary job's
+own gather in `app.services.reporting`. **E6-01 makes them one place**: the gather
+reads the view, and its own copy of the blank-comment class is deleted (E6-01
+criterion 9). `tests/integration/test_a_whitespace_only_comment_is_not_a_commenter.py`
+covers the view. This module covers the gather, through the job, the way every
+other summary-job test reaches it — and its second test is the one only a single
+blank class can pass: a whitespace-only answer the view does not show holds no
+verdict, and its week is summarized anyway, because the wait (E6-01 criterion 8)
+counts the comments the view would show.
 
 **Why it matters.** A comment that is only whitespace is not something a student
 said. Sent to the model, it is one more numbered "comment" in the week, and every
@@ -22,6 +26,7 @@ one-argument `btrim` removes.
 from typing import Any
 
 import pytest
+from fixtures.moderation import UNMODERATED
 from fixtures.summary_job import (
     A_CLOSED_TERM_WEEK,
     INSTRUCTOR_COMMENT_POSITION,
@@ -135,3 +140,76 @@ def test_the_summary_prompt_carries_the_real_comments_and_not_the_whitespace_onl
         "to the model as a comment, which Python's `str.strip()` treats as blank and the write "
         "path would never have stored."
     )
+
+
+def test_an_unverdicted_whitespace_only_answer_does_not_hold_its_week_back(
+    summary_world: SummaryWorld,
+    summary_job_contract: Any,
+    summary_contracts: Any,
+) -> None:
+    """E6-01 criteria 8 and 9 together: the wait counts what the view shows, and nothing else.
+
+    The same week as the test above, with one difference: the whitespace-only
+    answer holds **no moderation verdict**. The two real comments hold `clear`.
+
+    E6-01's work order (decision 5): a section-week is moderated when every comment
+    of it that the view would otherwise show — non-blank — holds a verdict. The
+    view does not show a whitespace-only answer, so this week is moderated and the
+    walk summarizes it, carrying the two real comments.
+
+    **Why this is the test of criterion 9 rather than a variation of the one
+    above.** The test above passes against a gather with its own blank copy, as
+    long as the copy is right. This one does not, if the wait and the gather
+    disagree about what a comment is: a wait that counted raw comment answers would
+    find one with no verdict and hold the week back for ever — no moderator will
+    ever classify six spaces — and the instructor's thin week would never get the
+    summary §5.1 promises it.
+
+    **The mutations this kills:** the wait written over `answer` rather than over
+    the view (the week is never summarized), and a gather that reads `answer`
+    directly with a blank copy that drifted from the view's.
+    """
+    summary_job_contract.require_table(summary_world.world.tables)
+    summary_world.build(summary_job_contract.a_cohort)
+    plain = comment_text(INSTRUCTOR_STREAM, PLAIN_NONCE)
+    carrier = comment_text(INSTRUCTOR_STREAM, CARRIER_NONCE)
+    for subject, body in (("plain-subject", plain), ("carrier-subject", carrier)):
+        summary_world.respond(
+            subject,
+            cohort=summary_job_contract.a_cohort,
+            term_week=A_CLOSED_TERM_WEEK,
+            instructor_comment=body,
+        )
+    blank_written = summary_world.respond(
+        "blank-subject",
+        cohort=summary_job_contract.a_cohort,
+        term_week=A_CLOSED_TERM_WEEK,
+        instructor_comment=ONLY_UNICODE_SPACES,
+        instructor_moderation=UNMODERATED,
+    )
+    assert INSTRUCTOR_COMMENT_POSITION in blank_written, (
+        "The whitespace-only answer was not written to `answer`, so there is nothing for the wait "
+        "to count wrongly and this test would pass on an absent row."
+    )
+    summary_world.clock_after(A_CLOSED_TERM_WEEK)
+    summary_world.commit()
+
+    gateway = StreamAwareGateway(summary_contracts)
+    summary_job_contract.run(gateway=gateway)
+
+    stored = summary_world.summaries(
+        section_id=summary_world.section_id(summary_job_contract.a_cohort)
+    )
+    assert stored, (
+        "The walk wrote no summary for a closed week whose two real comments hold verdicts. The "
+        "third answer is six spaces with no verdict; the view does not show it, so it is not a "
+        "comment the week waits for. A wait counting raw answers holds this week back for ever."
+    )
+    sent = "\n".join(gateway.prompts)
+    assert plain in sent and carrier in sent, (
+        f"The week was summarized and its two real comments are not both in the call (plain: "
+        f"{plain in sent}, carrier: {carrier in sent})."
+    )
+    assert (
+        sent.count(ONLY_UNICODE_SPACES) == 1
+    ), "The six-space run reached the model outside the real comment that carries it."

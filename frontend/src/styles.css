@@ -362,7 +362,7 @@
     line-height: 1.55;
     color: var(--spruce);
     background: var(--paper);
-    border: 1px solid var(--hairline);
+    border: 1px solid var(--input-edge);
     border-radius: var(--radius-input);
     resize: vertical;
     transition: border-color 180ms ease;
@@ -370,10 +370,11 @@
 
   /* Marigold for both the invitation and the coaching — never madder, and never
    * a red. The bounce is the same warm border as the required state, because it
-   * is the same request made twice. */
+   * is the same request made twice. The deep value, because the bare accent is
+   * 2.2:1 on paper and an input's boundary needs SC 1.4.11's 3:1. */
   .pulse-comment[data-state='required'] textarea,
   .pulse-comment[data-state='bounce'] textarea {
-    border-color: var(--marigold);
+    border-color: var(--marigold-deep);
   }
 
   .pulse-comment-help {

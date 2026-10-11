@@ -276,6 +276,119 @@ def test_the_held_note_is_absent_by_default_and_carries_a_type_when_it_is_presen
     )
 
 
+# ---------------------------------------------------------------------------
+# E6-03, criterion 6: the held-note type is closed.
+# ---------------------------------------------------------------------------
+
+# Where the closed type lives, and its name: the ticket's "Owns" puts `HeldNoteType`
+# in `backend/app/ai/contracts.py`; the work order (decision 7) settles a closed
+# `StrEnum` with `HARMFUL` and `PRIVACY` only.
+CONTRACTS_MODULE = "app.ai.contracts"
+HELD_NOTE_TYPE = "HeldNoteType"
+HELD_NOTE_MEMBERS = frozenset({"HARMFUL", "PRIVACY"})
+SCHEMA_MODULE = "app.schemas.report"
+SUMMARY_VIEW = "SummaryView"
+
+# Every way a threat or self-harm value might be spelled at the boundary: ADR 0030's
+# stored tokens (`tests/fixtures/moderation.py`), the member names, and the hyphen
+# SPEC §5.2's prose uses. Written out rather than read off `ModerationVerdict`
+# (`docs/MISTAKES.md` entry 19).
+CARE_CLASS_SPELLINGS = ("threat", "self_harm", "THREAT", "SELF_HARM", "self-harm")
+
+
+def held_note_type() -> Any:
+    """`app.ai.contracts.HeldNoteType`, or a failure naming it."""
+    from enum import StrEnum
+    from importlib import import_module
+
+    found = getattr(import_module(CONTRACTS_MODULE), HELD_NOTE_TYPE, None)
+    if not (isinstance(found, type) and issubclass(found, StrEnum)):
+        pytest.fail(
+            f"`{CONTRACTS_MODULE}` exposes no `StrEnum` called `{HELD_NOTE_TYPE}` (it holds "
+            f"{found!r}). E6-03 makes the held-note type a closed set — harmful and privacy — that "
+            "cannot express threat or self-harm (`docs/tickets/e4/deferred.md`)."
+        )
+    return found
+
+
+def test_the_held_note_type_is_exactly_harmful_and_privacy() -> None:
+    """Criterion 6: two members, and neither of the Care classes among them.
+
+    **The mutations this kill:** `HeldNoteType` built as `ModerationVerdict` or a
+    copy of its six members (a summary could then say "one comment is held for
+    review: self-harm" to an instructor — SPEC §6.2 forbids any trace); and a third
+    member added beside the two.
+    """
+    kind = held_note_type()
+    members = {member.name for member in kind}
+    assert members == HELD_NOTE_MEMBERS, (
+        f"`{HELD_NOTE_TYPE}` has the members {sorted(members)}; the work order settles exactly "
+        f"{sorted(HELD_NOTE_MEMBERS)}."
+    )
+
+
+@pytest.mark.parametrize("spelling", CARE_CLASS_SPELLINGS)
+def test_the_held_note_type_cannot_be_built_with_a_threat_or_self_harm_value(
+    spelling: str,
+) -> None:
+    """Criterion 6's runtime half: "the type check refuses it, and a test proves the runtime does too".
+
+    **The mutation this kills:** a `_missing_` hook, or a lookup that maps any token
+    it does not know to a member — the type checker passes it and the runtime
+    accepts `threat`.
+    """
+    kind = held_note_type()
+    with pytest.raises(ValueError):
+        kind(spelling)
+
+
+@pytest.mark.parametrize("spelling", CARE_CLASS_SPELLINGS)
+def test_the_summary_record_refuses_a_care_class_held_note_and_takes_a_member(
+    spelling: str, summary_api: SummaryApi
+) -> None:
+    """`WeeklySummaryRecord.held_note_type` takes the closed type (the ticket's "Owns").
+
+    Refused: each Care-class spelling. **The control**: the same record built with
+    `HeldNoteType.HARMFUL`, kept as given — so the refusal is the type's and not a
+    field that refuses everything.
+
+    **The mutation this kills:** the record's field left a free string, which is the
+    gap `docs/tickets/e4/deferred.md` records and E6-03 closes.
+    """
+    kind = held_note_type()
+    record_model = summary_api.contract(WEEKLY_SUMMARY_RECORD)
+    with pytest.raises(ValidationError):
+        record_model(summary=output_for(summary_api), response_count=5, held_note_type=spelling)
+    kept = record_model(
+        summary=output_for(summary_api), response_count=5, held_note_type=kind.HARMFUL
+    )
+    assert kept.held_note_type == kind.HARMFUL
+
+
+@pytest.mark.parametrize("spelling", CARE_CLASS_SPELLINGS)
+def test_the_summary_views_held_note_refuses_a_care_class_value_and_takes_a_member(
+    spelling: str,
+) -> None:
+    """`SummaryView.held_note` takes the closed type too — the payload end of the same channel.
+
+    **The mutation this kills:** the view's member left `str | None` while the
+    record's is closed, so a value that reaches the view another way is served.
+    """
+    from importlib import import_module
+
+    from pydantic import TypeAdapter
+
+    kind = held_note_type()
+    view = getattr(import_module(SCHEMA_MODULE), SUMMARY_VIEW, None)
+    fields = getattr(view, "model_fields", {}) or {}
+    if "held_note" not in fields:
+        pytest.fail(f"`{SCHEMA_MODULE}.{SUMMARY_VIEW}` declares no `held_note`: {sorted(fields)}")
+    adapter = TypeAdapter(fields["held_note"].annotation)
+    with pytest.raises(ValidationError):
+        adapter.validate_python(spelling)
+    assert adapter.validate_python(kind.PRIVACY) == kind.PRIVACY
+
+
 def test_the_prompt_version_and_model_id_reach_a_caller_through_the_record(
     summary_api: SummaryApi,
 ) -> None:

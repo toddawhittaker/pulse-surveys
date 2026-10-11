@@ -1,0 +1,38 @@
+/* The review queue and the exclusion log (SPEC §5.2).
+ *
+ * Both pages wear the comparison-set screen's page card, title, intro, status
+ * and link rules (`leadershipComparisonSets.css`), which they import; this file
+ * holds only what those rules do not cover: the two lists. Tokens only, as SPEC
+ * §7.6 requires, and nothing animates.
+ */
+
+.pulse-moderation-list {
+  margin: var(--space-5) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pulse-moderation-item {
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.pulse-moderation-item:last-child {
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* The section a queued comment was written in, as a mono eyebrow above its card:
+   `design/Usage Rules.md` §5's data face for section codes. */
+.pulse-moderation-section {
+  margin: 0 0 var(--space-2);
+  color: var(--spruce-60);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+}
+
+.pulse-moderation-log {
+  margin: var(--space-5) 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--hairline);
+}

@@ -91,6 +91,28 @@ class ModerationVerdict(enum.Enum):
     SELF_HARM = "self_harm"
 
 
+class HeldNoteType(enum.StrEnum):
+    """The class of a comment held for review, as an instructor may be told it (E6-03).
+
+    SPEC §5.1 lets a summary note "one comment is held for review" with type
+    only, and §6.2 keeps threat and self-harm out of every instructor view. So
+    this is the two flagging classes of `ModerationVerdict` and nothing else: a
+    type that cannot express `threat` or `self_harm` cannot carry either onto a
+    page, whatever a caller passes. The type checker refuses a third member, and
+    the runtime refuses an unknown token because the enum has no `_missing_`
+    hook — `HeldNoteType("threat")` raises `ValueError`.
+
+    A `StrEnum` rather than `enum.Enum`, so the stored and served token is the
+    value itself (ADR 0030) and a JSON payload carries `"harmful"`, not a member
+    name. Each value is the matching `ModerationVerdict` member's value, written
+    out because an enum cannot be built from a filtered copy of another one and
+    stay a closed set the type checker can read.
+    """
+
+    HARMFUL = ModerationVerdict.HARMFUL.value
+    PRIVACY = ModerationVerdict.PRIVACY.value
+
+
 class CommentStream(enum.Enum):
     """The two streams every comment surface in the product is grouped by.
 
@@ -361,19 +383,15 @@ class WeeklySummaryRecord(ContractModel):
             "rather than a hidden heading."
         ),
     )
-    held_note_type: str | None = Field(
+    held_note_type: HeldNoteType | None = Field(
         default=None,
         description=(
             "The type of a comment held for review, when §5.1 permits the summary to note "
             'one: \'above small-N they may note "one comment is held for review" with type '
-            "only'. Absent by default and absent throughout E4 — E6 writes the moderation "
-            "states that populate it, and a default of anything else would render a note "
-            "with no moderation behind it. §5.2's threat and self-harm verdicts never appear "
-            "here: they route to the Care queue (§6.2), suppressed from every instructor and "
-            "leadership view, and a summary is an instructor view. That exclusion is not "
-            "enforced by this type today — a free string cannot enforce it — and making the "
-            "type a closed set that excludes both is E6's, recorded in "
-            "`docs/tickets/e4/deferred.md`."
+            "only'. Absent by default; a default of anything else would render a note with "
+            "no moderation behind it. A closed set of two since E6-03, harmful and privacy: "
+            "§5.2's threat and self-harm verdicts route to the Care queue (§6.2), suppressed "
+            "from every instructor and leadership view, and this type cannot express either."
         ),
     )
 

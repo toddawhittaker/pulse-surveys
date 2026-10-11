@@ -95,6 +95,7 @@ __all__ = [
     "REFUSED",
     "cancelled",
     "cancelled_page",
+    "csrf_verified_instructor",
     "csrf_verified_leadership",
     "csrf_verified_student",
     "landing_with_session",
@@ -936,6 +937,29 @@ def csrf_verified_leadership(
     can drift. What a set definition costs if it is forged is the cohort every
     instructor in the institution is measured against, changed from a page on the
     internet by a browser that was already signed in.
+    """
+    return _double_submit_verified(request, claims)
+
+
+def csrf_verified_instructor(
+    request: Request, claims: SessionClaims = Depends(require_instructor)
+) -> SessionClaims:
+    """`require_instructor`, plus the same double-submit check every other write carries.
+
+    E6-03's decision route (exclude, keep or undo one comment) carries this
+    where the instructor's three reads carry `require_instructor`, for the
+    reason `csrf_verified_student` gives: forgery is a defence for writes, and a
+    route says which it means by which dependency it declares.
+
+    **`require_instructor` is *declared* as a dependency rather than called**, so
+    the route stays visible to every sweep that walks a route's `Dependant` graph
+    for it, and a 401 from the role gate is raised before this body runs.
+
+    **The check is `_double_submit_verified`, shared with the other two**, so the
+    Bearer exemption and the HMAC binding to this session's `jti` are one
+    implementation. What a forged decision costs is a student's comment excluded
+    from a class's view, or a flagged one published, by a page on the internet
+    using an instructor's signed-in browser.
     """
     return _double_submit_verified(request, claims)
 

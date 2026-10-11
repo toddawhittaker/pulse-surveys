@@ -78,9 +78,15 @@ first moderation view, because a reviewer decision displayed beside a
 released comment is a new instance of the same channel.
 **Done when:** unchanged from the source entry, for E6's surfaces.
 
+**Closed by E6-03 (#294, merged as f55774c2) and E6-05 (#296, merged as
+233d3739).** ADR 0189 carries the statement for the instructor's views and ADR
+0190 for the leadership views, each read against ADRs 0153, 0162, 0178 and 0179.
+
 ## The held-note type is a free string (`../e4/deferred.md`)
 
 Unchanged; owner E6, in the ticket that writes the moderation states.
+
+**Closed by E6-03 (#294, merged as f55774c2)**, in the source file.
 
 ## A comment can forge block boundaries in the summary prompt (`../e4/deferred.md`)
 
@@ -94,10 +100,14 @@ change must land in both or say why not.
 Re-affirmed accurate by the boundary's data-model review, standing.
 **Owner:** E6, before the first writer, not after.
 
+**Closed by E6-01 (#292, merged as fd08ef75)**, in the source file.
+
 ## SPEC §6.2's threat class is suppressed nowhere yet (`../e4/deferred.md`)
 
 Unchanged in substance; the boundary marked its tripwire test into the §4.1
 isolated pass, so retiring the alarm now reds a guarded gate. **Owner:** E6.
+
+**Closed by E6-01 (#292, merged as fd08ef75)**, in the source file.
 
 ## The course label is composed in two modules (`../e4/deferred.md`)
 
@@ -136,6 +146,11 @@ the function's prose. Not a live exposure (the CARE gate and the committed
 audit row still stand between the door and a name). **Owner:** E6, with the
 verdict vocabulary. **Done when:** the door's predicate refuses an answer
 whose classification is not in §6.2's set, proven by a planted verdict.
+
+**Closed by E6-01 (#292, merged as fd08ef75).** `reveal_subject_for_answer`
+v002 answers only for a comment holding a `MODERATION` verdict of threat or
+self-harm, and `tests/integration/test_a_care_class_comment_reaches_no_reader.py`
+asserts both sides with planted verdicts.
 
 ## Aggregate ordering has no code-level gate (§4.1 item 4's second half)
 

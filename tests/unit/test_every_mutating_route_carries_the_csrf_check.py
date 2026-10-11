@@ -1119,6 +1119,221 @@ def test_every_named_set_write_route_is_found_carrying_the_leadership_csrf_depen
     )
 
 
+def test_the_instructor_decision_route_is_found_carrying_the_instructor_csrf_dependency(
+    configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Currency 1's canary for the family's third member — E6-03's decision route.
+
+    E6-03 adds `csrf_verified_instructor` "following `csrf_verified_leadership`",
+    and one writing route behind it: `POST …/comments/{answer_id}/decisions` in
+    `app.api.instructor`. The sweep above admits a mutating route that holds *any*
+    member of the family, so a decision route composed from another role's member —
+    or from `require_instructor`, which checks no token — is found here by name
+    rather than by a reader diagnosing a ledger failure.
+
+    **The mutations this kills:** the route composed from `require_instructor` (the
+    one-import mistake the carried E2 entry names); composed from
+    `csrf_verified_leadership` (a dependency whose role gate refuses every
+    instructor, so the route answers nobody); and a `csrf_verified_instructor`
+    that exists and is wired to no route.
+
+    **What it does not kill, and what does:** a `csrf_verified_instructor` that
+    checks nothing. This reads the route table; the cookie-carrier drive in
+    `tests/integration/test_every_csrf_verified_dependency_refuses_a_cookie_borne_write.py`
+    is what executes the check (`docs/MISTAKES.md` entry 47).
+
+    **Found by its module as well as its path (the ruling on
+    `docs/disputes/E6-05-04.md`).** E6-05 adds a second route of the same shape in
+    `app.api.leadership`, which carries the leadership member, so "a mutating
+    route ending `/comments/{id}/decisions`" no longer names the instructor's
+    route alone. Narrowing by module weakens nothing: the general sweep above
+    still holds every mutating route to some member of the family,
+    `test_the_lead_decision_route_is_found_carrying_the_leadership_csrf_dependency`
+    holds the leadership one to its member, and
+    `test_every_comment_decision_route_sits_behind_a_door_with_a_csrf_member_of_its_own`
+    refuses a decision route in any third module.
+
+    **Expected red before E6-03 lands:** a FAILED naming `csrf_verified_instructor`
+    as a symbol `app.api.deps` does not expose.
+    """
+    member = DECISION_DOOR_MEMBERS[INSTRUCTOR_API_MODULE]
+    family = csrf_verified_dependencies()
+    if member not in family:
+        pytest.fail(
+            f"`{DEPS_MODULE}` exposes no `{member}`; the `{CSRF_DEPENDENCY_PREFIX}` family it "
+            f"exposes is {sorted(family)}. E6-03 adds it beside `require_instructor`, following "
+            "`csrf_verified_leadership`, for the instructor's decision route."
+        )
+    application = application_in(DEVELOPMENT, monkeypatch)
+
+    decision_routes = [
+        route
+        for route in comment_decision_routes(application)
+        if module_of(route) == INSTRUCTOR_API_MODULE
+    ]
+    assert decision_routes, (
+        f"No mutating route in `{INSTRUCTOR_API_MODULE}` ends in `/comments/{{answer_id}}/"
+        "decisions`; the comment decision routes this application serves are "
+        f"{described_decision_routes(application)}. E6-03's work order (decision 1) puts the "
+        "instructor's decision route there."
+    )
+    assert_each_carries_its_doors_member(decision_routes, INSTRUCTOR_API_MODULE, family)
+
+
+def test_the_lead_decision_route_is_found_carrying_the_leadership_csrf_dependency(
+    configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Currency 1's canary for E6-05's decision route: the leadership member, by name.
+
+    E6-05's work order (decision 1) puts `POST …/moderation/comments/{answer_id}/
+    decisions` in `app.api.leadership`, behind `require_leadership` and
+    `csrf_verified_leadership`. It has the instructor route's shape, so it gets
+    a canary of its own (the ruling on `docs/disputes/E6-05-04.md`): the general
+    sweep would admit it holding any member, and the instructor's member here is
+    a route that answers nobody, since `csrf_verified_instructor` rests on
+    `require_instructor`, which refuses every leadership session.
+
+    **The mutations this kills:** the route composed from `require_leadership`
+    alone (a write with no double-submit check, ADR 0089); composed from
+    `csrf_verified_instructor` (the instructor's door on leadership's write);
+    composed from both members at once.
+
+    **What it does not kill, and what does:** a `csrf_verified_leadership` that
+    checks nothing; the cookie-carrier drive in
+    `tests/integration/test_every_csrf_verified_dependency_refuses_a_cookie_borne_write.py`
+    executes the check (`docs/MISTAKES.md` entry 47).
+
+    **Expected red before E6-05 lands:** an assertion that no mutating route in
+    `app.api.leadership` ends in `/comments/{answer_id}/decisions`.
+    """
+    family = csrf_verified_dependencies()
+    missing = sorted(set(DECISION_DOOR_MEMBERS.values()) - set(family))
+    if missing:
+        pytest.fail(
+            f"`{DEPS_MODULE}` exposes no {missing}; the `{CSRF_DEPENDENCY_PREFIX}` family it "
+            f"exposes is {sorted(family)}."
+        )
+    application = application_in(DEVELOPMENT, monkeypatch)
+
+    decision_routes = [
+        route
+        for route in comment_decision_routes(application)
+        if module_of(route) == LEADERSHIP_API_MODULE
+    ]
+    assert decision_routes, (
+        f"No mutating route in `{LEADERSHIP_API_MODULE}` ends in `/comments/{{answer_id}}/"
+        "decisions`; the comment decision routes this application serves are "
+        f"{described_decision_routes(application)}. E6-05's work order (decision 1) puts the "
+        "Lead Faculty decision route there."
+    )
+    assert_each_carries_its_doors_member(decision_routes, LEADERSHIP_API_MODULE, family)
+
+
+def test_every_comment_decision_route_sits_behind_a_door_with_a_csrf_member_of_its_own(
+    configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every comment decision route belongs to a door this sweep knows the member of.
+
+    The two canaries above find their routes by module, so a third decision
+    route in some other module would be found by neither and held only to "some
+    member of the family" by the general sweep. The ruling on
+    `docs/disputes/E6-05-04.md` asks for every comment decision route to carry
+    the member matching its door; a route whose door this module does not name
+    has no matching member to be held to, so it is refused here until a row for
+    its door is added to `DECISION_DOOR_MEMBERS`.
+
+    **The mutation this kills:** a decision route moved to, or added in, a module
+    neither canary reads (an `app.api.moderation`, say), where it would escape
+    both doors' checks. **The near miss:** the two known routes, which this
+    passes.
+
+    **Expected red before E6-03 lands:** an assertion that no comment decision
+    route is served at all.
+    """
+    application = application_in(DEVELOPMENT, monkeypatch)
+    routes = comment_decision_routes(application)
+    assert routes, (
+        "No mutating route ends in `/comments/{answer_id}/decisions`, so this rule read nothing; "
+        f"every mutating route this application serves is "
+        f"{sorted(paths_of(mutating_routes(application)))}."
+    )
+    strays = sorted(
+        f"{path_of(route)} in {module_of(route)}"
+        for route in routes
+        if module_of(route) not in DECISION_DOOR_MEMBERS
+    )
+    assert not strays, (
+        f"These comment decision routes sit in no module this sweep knows the door of: {strays}. "
+        f"The doors it knows, and the CSRF member each requires: {DECISION_DOOR_MEMBERS}."
+    )
+
+
+# The comment decision routes' doors, by the module each route's endpoint lives
+# in, and the one member of the CSRF family each door requires (E6-03's work
+# order for the instructor, E6-05's for leadership; the ruling on
+# `docs/disputes/E6-05-04.md`).
+INSTRUCTOR_API_MODULE = "app.api.instructor"
+LEADERSHIP_API_MODULE = "app.api.leadership"
+DECISION_DOOR_MEMBERS = {
+    INSTRUCTOR_API_MODULE: "csrf_verified_instructor",
+    LEADERSHIP_API_MODULE: "csrf_verified_leadership",
+}
+
+
+def module_of(route: Any) -> str | None:
+    return getattr(getattr(route, "endpoint", None), "__module__", None)
+
+
+def comment_decision_routes(application: Any) -> list[Any]:
+    """Every mutating route whose path ends `/decisions` under a `/comments/` segment."""
+    return [
+        route
+        for route in mutating_routes(application)
+        if path_of(route).rstrip("/").endswith("/decisions") and "/comments/" in path_of(route)
+    ]
+
+
+def described_decision_routes(application: Any) -> list[str]:
+    return sorted(
+        f"{path_of(route)} in {module_of(route)}" for route in comment_decision_routes(application)
+    )
+
+
+def assert_each_carries_its_doors_member(
+    routes: list[Any], door: str, family: dict[str, Any]
+) -> None:
+    """Each route holds its door's member and no other door's.
+
+    Holding the other door's member as well would put a second role gate on the
+    route, one its own door's sessions cannot pass, so the route would answer
+    nobody.
+    """
+    member = DECISION_DOOR_MEMBERS[door]
+    others = sorted(name for name in set(DECISION_DOOR_MEMBERS.values()) if name != member)
+    unguarded = [
+        path_of(route)
+        for route in routes
+        if BY_DEPENDENCY
+        not in currencies_of(route, dependency=family[member], route_class=NoRouteIsThis)
+    ]
+    assert not unguarded, (
+        f"These decision routes in `{door}` carry no `{member}`: {unguarded}. Each comment "
+        "decision route carries the member of the CSRF family that matches its door."
+    )
+    crossed = [
+        f"{path_of(route)} carries `{other}`"
+        for route in routes
+        for other in others
+        if other in family
+        and BY_DEPENDENCY
+        in currencies_of(route, dependency=family[other], route_class=NoRouteIsThis)
+    ]
+    assert not crossed, (
+        f"These decision routes in `{door}` carry another door's CSRF member: {crossed}. That "
+        "member's role gate refuses this door's sessions, so the route answers nobody."
+    )
+
+
 def test_the_appended_clock_pair_is_in_the_mutating_inventory(
     configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

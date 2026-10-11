@@ -1,0 +1,83 @@
+/* One exclusion-log row — `design/ExclusionLogRow.dc.html`, in tokens only.
+ *
+ * The mockup's four columns: the date in the data face, the decider (a role
+ * here, never a name), the excerpt, and the status with the reason under it.
+ * The status is marigold-deep when no AI flag stands behind the decision, as the
+ * mockup draws it, because that is the row a reader of the log looks for. The
+ * excerpt is a student's words, so it takes the body face (the ruling recorded
+ * beside `--font-display` in `design/tokens.css`). Below a phone's width the
+ * columns stack.
+ */
+
+.pulse-log-row {
+  display: grid;
+  grid-template-columns: 96px 120px 1fr 200px;
+  gap: var(--space-4);
+  align-items: start;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--hairline);
+  color: var(--spruce);
+  font-family: var(--font-body);
+  font-size: var(--text-1);
+}
+
+.pulse-log-row__date {
+  padding-top: 2px;
+  color: var(--spruce-60);
+  font-family: var(--font-mono);
+}
+
+.pulse-log-row__role {
+  font-weight: 500;
+}
+
+.pulse-log-row__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.pulse-log-row__section {
+  color: var(--spruce-60);
+  font-family: var(--font-mono);
+}
+
+.pulse-log-row__excerpt {
+  color: var(--spruce-60);
+  font-style: italic;
+  line-height: 1.5;
+}
+
+.pulse-log-row__no-excerpt {
+  color: var(--spruce-60);
+  line-height: 1.5;
+}
+
+.pulse-log-row__outcome {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.pulse-log-row__status {
+  color: var(--spruce-60);
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pulse-log-row__status[data-flagged='false'] {
+  color: var(--marigold-deep);
+}
+
+.pulse-log-row__reason {
+  color: var(--spruce-60);
+  line-height: 1.4;
+}
+
+@media (max-width: 640px) {
+  .pulse-log-row {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+}

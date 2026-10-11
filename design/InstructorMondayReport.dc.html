@@ -48,7 +48,12 @@
 
   <div style="font-family:var(--font-mono);font-size:var(--text-1);letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin:var(--space-4) 0 var(--space-3)">About the instructor</div>
   <dc-import name="AiPanel" heading="AI summary — instructor comments" text="{{ instrSummary }}" meta="{{ summaryMeta }}" hint-size="100%,130px"></dc-import>
-  <sc-if value="{{ showComments }}" hint-placeholder-val="{{ true }}">
+  <sc-if value="{{ instrHeld }}" hint-placeholder-val="{{ false }}">
+    <div style="margin-top:var(--space-4)">
+      <dc-import name="SmallNNotice" threshold="5" hint-size="100%,140px"></dc-import>
+    </div>
+  </sc-if>
+  <sc-if value="{{ showInstrComments }}" hint-placeholder-val="{{ true }}">
     <div style="display:flex;flex-direction:column;gap:var(--space-3);margin-top:var(--space-3)">
       <sc-for list="{{ instrComments }}" as="c" hint-placeholder-count="2">
         <dc-import name="CommentCard" text="{{ c.text }}" flag="{{ c.flag }}" hint-size="100%,90px"></dc-import>
@@ -58,17 +63,16 @@
 
   <div style="font-family:var(--font-mono);font-size:var(--text-1);letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin:var(--space-6) 0 var(--space-3)">About the course</div>
   <dc-import name="AiPanel" heading="AI summary — course comments" text="{{ courseSummary }}" meta="{{ summaryMeta }}" hint-size="100%,130px"></dc-import>
-  <sc-if value="{{ showComments }}" hint-placeholder-val="{{ true }}">
+  <sc-if value="{{ courseHeld }}" hint-placeholder-val="{{ false }}">
+    <div style="margin-top:var(--space-4)">
+      <dc-import name="SmallNNotice" threshold="5" hint-size="100%,140px"></dc-import>
+    </div>
+  </sc-if>
+  <sc-if value="{{ showCourseComments }}" hint-placeholder-val="{{ true }}">
     <div style="display:flex;flex-direction:column;gap:var(--space-3);margin-top:var(--space-3)">
       <sc-for list="{{ courseComments }}" as="c" hint-placeholder-count="2">
         <dc-import name="CommentCard" text="{{ c.text }}" flag="{{ c.flag }}" hint-size="100%,90px"></dc-import>
       </sc-for>
-    </div>
-  </sc-if>
-
-  <sc-if value="{{ smallN }}" hint-placeholder-val="{{ false }}">
-    <div style="margin-top:var(--space-4)">
-      <dc-import name="SmallNNotice" responded="{{ responded }}" total="{{ enrolled }}" hint-size="100%,140px"></dc-import>
     </div>
   </sc-if>
 
@@ -77,7 +81,7 @@
 </article>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;smallN&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Report state&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;smallN&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Report state&quot;},&quot;courseHeld&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Report state&quot;}}">
 class Component extends DCLogic {
   state = { viewWeek: null };
   WEEKS = [
@@ -216,6 +220,11 @@ class Component extends DCLogic {
   UNI_C = [3.7, 3.7, 3.6, 3.7, 3.7, 3.6, 3.7];
   renderVals() {
     const smallN = this.props.smallN ?? false;
+    // The threshold counts distinct commenters per stream, so each group is
+    // held on its own: a thin week holds both, and courseHeld holds only the
+    // course group while the instructor group is shown.
+    const instrHeld = smallN;
+    const courseHeld = smallN || (this.props.courseHeld ?? false);
     const enrolled = smallN ? 9 : 24;
     const current = 7;
     const week = smallN ? 7 : (this.state.viewWeek ?? current);
@@ -225,7 +234,9 @@ class Component extends DCLogic {
       articleMax: (this.props.embedded ?? false) ? 'none' : '760px',
       courseTitle: 'BIOL 2150 — Principles of Ecology',
       eyebrowNote: 'responses closed Sun 11:59 PM',
-      smallN, showComments: !smallN,
+      smallN, instrHeld, courseHeld,
+      showComments: !(instrHeld && courseHeld),
+      showInstrComments: !instrHeld, showCourseComments: !courseHeld,
       prevDisabled: smallN || week <= 1,
       nextDisabled: smallN || week >= current,
       prevOpacity: (smallN || week <= 1) ? 0.35 : 1,

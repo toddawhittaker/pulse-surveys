@@ -4,16 +4,10 @@
 > E3-06-02 settled how the inventory grows), and the entry follows
 > `publish_once`.
 
-The ticket settles the slot in its "Decisions this ticket settles": **Monday
-02:50**, entered in `BEAT_SCHEDULE` as `"generate-weekly-summaries"`, running
-`app.jobs.tasks.generate_weekly_summaries`. Monday because SPEC §3.1 closes every
-window on Sunday at 23:59:59 in the institution's timezone and makes reports
-available "Monday morning", so Monday is the first day the week that just ended
-can be summarized at all and the last day it can be summarized before an
-instructor opens the report. 02:50 because E3-06's participation sweep has 02:20
-and is provider-free: this job is provider-bound, walks the same sections, and
-two jobs that each walk every section in the institution are better apart than on
-one tick.
+The slot is **every hour at minute 50**, entered in `BEAT_SCHEDULE` as
+`"generate-weekly-summaries"`, running `app.jobs.tasks.generate_weekly_summaries`.
+It was Monday 02:50; ADR 0188 made it hourly, because a section-week now waits
+for its last moderation verdict and that can land at any hour.
 
 **Why these are unit tests.** Nothing here needs a database, a provider or a
 clock: the schedule is a declaration and the task is a registration. Each is a
@@ -193,40 +187,27 @@ def test_two_crontabs_this_module_could_confuse_compare_unequal(summary_job_cont
 # ---------------------------------------------------------------------------
 
 
-def test_the_beat_schedule_runs_the_summary_generation_job_weekly_on_monday_morning(
+def test_the_beat_schedule_runs_the_summary_generation_job_hourly_at_minute_fifty(
     summary_job_contract: Any,
 ) -> None:
-    """The ticket's settled slot, asserted as the entry a worker would actually run.
+    """The settled slot, asserted as the entry a worker would actually run.
 
-    One entry, under this ticket's own name, naming
-    `app.jobs.tasks.generate_weekly_summaries` and carrying
-    `crontab(day_of_week="mon", hour="2", minute="50")`.
+    One entry, under its own name, naming `app.jobs.tasks.generate_weekly_summaries`
+    and carrying `crontab(minute="50")`: every hour (ADR 0188).
 
-    **Why the day is load-bearing and not a preference.** SPEC §3.1 closes every
-    window on Sunday at 23:59:59 institution time and makes the report available
-    Monday morning. A job on any other day either summarizes a week that has not
-    finished or leaves the week that has finished unsummarized until after the
-    instructor has read the report it leads — and generation is once-and-done
-    (breakdown decision 2), so a summary that arrives late never arrives at all
-    for that week's reader.
+    **Why hourly.** A section-week is summarized only once every comment in it
+    holds a moderation verdict (ADR 0187), and the hourly moderation sweep can
+    land the last one at any hour. A weekly walk that met one missing verdict
+    would leave the week unsummarized for a week. An ordinary week, closed Sunday
+    at 23:59:59, is moderated at 00:10 and summarized at 00:50, before the report
+    opens at 06:00 on Monday (ADR 0184).
 
-    **Why the minute is.** 02:20 belongs to E3-06's participation sweep, which
-    walks every section in the institution without touching a provider; this one
-    walks the same sections and makes up to two model calls per section-week. Two
-    such walks on one tick contend for the same rows and the same worker pool for
-    no reason, and thirty minutes is the gap the ticket settles.
+    **The mutations this kills**: the entry declared and never wired; the entry
+    pointing at a different task; and the schedule replaced by a `timedelta`,
+    which drifts with every restart.
 
-    **The mutations this kills**: the entry declared and never wired, which the
-    name lookup catches; the entry pointing at a different task, which is a slot
-    that runs something else on Monday morning and looks scheduled; and the
-    schedule replaced by a `timedelta`, which drifts with every restart so that
-    which hour a week's summaries are generated in depends on when beat last came
-    up — and this is the one job whose output an instructor is waiting on at a
-    fixed hour.
-
-    **What this does not assert** is that the entry is the only one, or where in
-    the mapping it sits. `tests/unit/test_celery_app.py` holds the whole-inventory
-    equality; the schedule grows with the project.
+    **What this does not assert** is that the entry is the only one.
+    `tests/unit/test_celery_app.py` holds the whole-inventory equality.
     """
     from celery.schedules import crontab
 
@@ -254,9 +235,8 @@ def test_the_beat_schedule_runs_the_summary_generation_job_weekly_on_monday_morn
         f"The entry runs on {schedule_of(entry)!r} and this ticket settles "
         f"`crontab(day_of_week={summary_job_contract.beat_day_of_week!r}, "
         f"hour={summary_job_contract.beat_hour!r}, minute={summary_job_contract.beat_minute!r})`. "
-        "Monday because §3.1 closes every window on Sunday at 23:59:59 institution time and puts "
-        "the report on Monday morning; 02:50 because 02:20 is E3-06's provider-free sweep over the "
-        "same sections."
+        "Hourly, because a section-week waits for its last moderation verdict, which can land at "
+        "any hour (ADR 0188)."
     )
 
 

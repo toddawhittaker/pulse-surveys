@@ -1,5 +1,14 @@
 # 0144 — The reveal derives its subject from the record Care is acting on
 
+> **Amended 2026-10-09 by [0187](0187-moderation-verdicts-govern-the-read-path.md) (E6-01).** The threat and self-harm
+> predicate this record deferred to E6 has landed. `reveal_subject_for_answer`
+> v002 answers only for a comment holding a `MODERATION` classification whose
+> verdict is `threat` or `self_harm` (any such verdict, ever), and NULL for any
+> other comment, which the service raises as `UnknownRevealSubjectError` before
+> any audit row is written. The owner gains `SELECT (answer_id, task, verdict)`
+> on `classification`. The consequence below that "a Care officer with a comment
+> id can reveal its author" no longer holds for a comment Care has no case for.
+
 ## Context
 
 `docs/tickets/e1/carried-from-e0.md` records a finding as three facts that are
@@ -151,7 +160,8 @@ than a rule.
   has business with — that is the E6 predicate above, and until it lands a Care
   officer with a comment id can reveal its author. What the guard removes is the
   reporting-scope route: a `user_id` is not an `answer_id`, and the ids a
-  roster hands out match no comment.
+  roster hands out match no comment. *Amended by [0187](0187-moderation-verdicts-govern-the-read-path.md): the E6 predicate
+  landed, so a comment that holds no threat or self-harm verdict is refused.*
 - **A downgrade past this revision is a downgrade past the application.**
   `app.services.safety` names the function, so a database walked back to
   `c4a8e51db9f3` has E0-26's two-function door and a service that cannot complete

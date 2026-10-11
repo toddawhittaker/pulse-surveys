@@ -89,6 +89,23 @@ MIXED_WEEK = "mixed_week"
 # measured, which neither of those can say.
 SMALL_N_THEMES_ONLY = "small_n_themes_only"
 
+# A thin stream in a full week: many students answered the survey, few of them
+# commented in this stream, so the stream is below the threshold while the week is
+# not (ADR 0182). The small-N prompt has to speak of the stream; a prompt that told
+# the model "few students answered this week" would be false here. Pinned to the
+# prompt version that says so, and held to the same no-quotation rule.
+THIN_STREAM = "thin_stream_in_a_full_week"
+
+# The prompt a stream below the threshold is summarized under (ADR 0162, bumped
+# by ADR 0188), written down for the same reason `PROMPT_VERSION` is. **Every
+# small-N case is pinned to it, not only the thin stream's** (E6-09 done-when 14):
+# `SMALL_N` and `SMALL_N_THEMES_ONLY` are below the threshold too, so the product
+# summarizes them under this prompt, and a case measured under `summary.v1` was
+# measuring a prompt no thin stream is ever sent.
+# `test_the_small_n_cases_are_pinned_to_the_small_n_prompt_the_application_renders`
+# holds it against `app.ai.tasks.SMALL_N_SUMMARY_PROMPT_VERSION`.
+SMALL_N_PROMPT_VERSION = "summary.v3"
+
 # How long a shared run of characters has to be before it is a quotation rather
 # than a coincidence — the same bound D9 gives the store-time guard, written out
 # here rather than imported from it so the eval is not agreeing with the guard
@@ -235,6 +252,7 @@ SMALL_N_CASE = SummaryCase(
         ),
     ),
     family=SMALL_N,
+    prompt_version=SMALL_N_PROMPT_VERSION,
 )
 
 EMPTY_WEEK_CASE = SummaryCase(
@@ -342,6 +360,34 @@ SMALL_N_THEMES_ONLY_CASE = SummaryCase(
         ),
     ),
     family=SMALL_N_THEMES_ONLY,
+    prompt_version=SMALL_N_PROMPT_VERSION,
+)
+
+THIN_STREAM_CASE = SummaryCase(
+    case_id="sm-ts-001",
+    stream=INSTRUCTOR_STREAM,
+    comments=(
+        "Feedback on the second assignment came back three weeks after the deadline.",
+        "Emails to the instructor about the extension request went unanswered all week.",
+    ),
+    signals=(
+        Signal(
+            kind=CRITICISM,
+            name="assignment feedback was returned late",
+            topic=("feedback", "assignment", "marking", "grades"),
+            judgement=("late", "slow", "delayed", "weeks after", "too long", "overdue"),
+            carried_by=1,
+        ),
+        Signal(
+            kind=CRITICISM,
+            name="emails went unanswered",
+            topic=("email", "emails", "messages", "contact", "replies"),
+            judgement=("unanswered", "no reply", "no response", "not answered", "ignored"),
+            carried_by=1,
+        ),
+    ),
+    family=THIN_STREAM,
+    prompt_version=SMALL_N_PROMPT_VERSION,
 )
 
 CASES: tuple[SummaryCase, ...] = (
@@ -350,6 +396,7 @@ CASES: tuple[SummaryCase, ...] = (
     EMPTY_WEEK_CASE,
     MIXED_WEEK_CASE,
     SMALL_N_THEMES_ONLY_CASE,
+    THIN_STREAM_CASE,
 )
 
 
@@ -541,7 +588,7 @@ def quoted_a_commenters_words(case: SummaryCase, output: WeeklySummaryOutput) ->
     `tests/integration/test_a_small_n_summary_never_reuses_a_commenters_words.py`,
     where an exact comparison is possible.
     """
-    if case.family != SMALL_N_THEMES_ONLY:
+    if case.family not in (SMALL_N_THEMES_ONLY, THIN_STREAM):
         return ()
     text = getattr(output, "summary", "") or ""
     if not text.strip():
@@ -687,8 +734,16 @@ def faithful_answers(contracts: Any) -> dict[str, Any]:
         EMPTY_WEEK_CASE.case_id: build_answer(
             contracts,
             EMPTY_WEEK_CASE,
-            "No comments were submitted this week.",
+            "There are no comments to show for this week.",
             (),
+        ),
+        # Paraphrased: neither sentence shares twenty characters with a comment.
+        THIN_STREAM_CASE.case_id: build_answer(
+            contracts,
+            THIN_STREAM_CASE,
+            "Two students commented on the teaching. One says the marking of an "
+            "assignment was returned late. The other says messages asking for more time got no reply.",
+            (("assignment marking returned late", 1), ("messages got no reply", 1)),
         ),
         MIXED_WEEK_CASE.case_id: build_answer(
             contracts,

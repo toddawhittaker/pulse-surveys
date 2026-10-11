@@ -28,6 +28,15 @@ texts the payload carries are compared with what `visible_comments` and
 what it shows is red even where the widening is a comment E4-04 would also have
 returned under different arguments.
 
+**E6-03 widens the card by exactly three members, and only by those.** The work
+order's decision 6 adds `answer_id` (the handle the decision route names), `flag`
+(the class of the comment's moderation verdict) and `decided_by_you`. They are not
+the comment service's fields — they are the payload's, by a ticket's deliberate
+act — so the ceiling's permitted set (`COMMENT_FIELDS_PERMITTED` in
+`tests/fixtures/report_api.py`) names them, and
+`test_every_comment_object_carries_its_handle_its_flag_class_and_decided_by_you`
+requires them. Everything else here is unchanged: no instant, no week, no author.
+
 **Marked `invariant` at the module level**, which puts it in the isolated §4.1
 pass and satisfies
 `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`.
@@ -43,9 +52,11 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from fixtures.instructor_decisions import DecisionDoor
 from fixtures.report_api import (
     FIRST_HELD_WEEK,
     FULL_WEEK,
+    FULL_WEEK_COMMENTS,
     RESPONSES_IN_WEEK,
     SILENT_WEEK,
     TERM_WEEK_OF_COURSE_WEEK,
@@ -215,6 +226,58 @@ def test_no_comment_object_carries_a_field_the_comment_service_does_not(
         f"{sorted(report_api_contract.comment_fields_permitted)}. Criterion 4: the service adds no "
         "field, no count and no ordering information beyond what E4-04 returns."
     )
+
+
+def test_every_comment_object_carries_its_handle_its_flag_class_and_decided_by_you(
+    report_door: ReportDoor, report_api_contract: Any
+) -> None:
+    """E6-03, criterion 5: the three members the ceiling above was widened by, present and true.
+
+    The ceiling says what a card *may* carry; this says the three E6-03 adds are
+    there and say what they should, on course week 1's five planted comments — all
+    `clear`, none decided:
+
+      - `answer_id` is each comment's own `answer` key, the set of them exactly the
+        five this world planted (read from the database, not from the payload);
+      - `flag` is null on every one, because none holds a harmful or privacy verdict;
+      - `decided_by_you` is `false` on every one, because nobody has decided anything.
+
+    **The mutations this kills:** a member missing from the card; a handle that is
+    some other key — a response's, which the scan below forbids as well, or a
+    random one minted per read, which no decision could name; a flag carried on a
+    comment the AI did not flag; and a `decided_by_you` that defaults true.
+    """
+    door = DecisionDoor(report_door)
+    planted = {str(door.answer_id_of(text)) for text in FULL_WEEK_COMMENTS}
+    assert len(planted) == RESPONSES_IN_WEEK[FULL_WEEK], (
+        "Course week 1's five comments did not resolve to five answers, so the comparison below "
+        "is about a world this test did not plant."
+    )
+
+    body, answered = report_door.payload(course_week=FULL_WEEK)
+    cards = report_api_contract.stream_member(
+        body,
+        report_api_contract.instructor_stream,
+        report_api_contract.comments_field,
+        answered=answered,
+    )
+    assert cards, "Course week 1's instructor stream carries no comment objects."
+    lacking = [sorted(report_api_contract.e6_03_comment_fields - set(card)) for card in cards]
+    assert not any(lacking), (
+        f"Comment objects lack E6-03's members: {lacking}. Work order decision 6: every card "
+        f"carries {sorted(report_api_contract.e6_03_comment_fields)}."
+    )
+    handles = {str(card[report_api_contract.answer_id_field]) for card in cards}
+    assert handles == planted, (
+        f"The cards' handles are {sorted(handles)} and the planted comments' answer keys are "
+        f"{sorted(planted)}. The handle is the answer id (the ticket's context), and nothing else."
+    )
+    flagged = [card for card in cards if card[report_api_contract.flag_field] is not None]
+    assert not flagged, f"Cards for comments the AI did not flag carry a flag: {flagged}."
+    decided = [
+        card for card in cards if card[report_api_contract.decided_by_you_field] is not False
+    ]
+    assert not decided, f"Cards nobody decided on say `decided_by_you`: {decided}."
 
 
 def test_no_comment_in_the_payload_carries_a_timestamp_a_week_or_an_author(

@@ -14,22 +14,23 @@
   <p style="margin:0;font-size:var(--text-1);line-height:1.55;color:var(--spruce-60);text-wrap:pretty">{{ body }}</p>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:672,&quot;height&quot;:160},&quot;responded&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:3,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:0,&quot;max&quot;:500},&quot;total&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:9,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:0,&quot;max&quot;:500},&quot;threshold&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:5,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:1,&quot;max&quot;:20},&quot;audience&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;instructor&quot;,&quot;options&quot;:[&quot;instructor&quot;,&quot;student&quot;],&quot;tsType&quot;:&quot;'instructor' | 'student'&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:672,&quot;height&quot;:160},&quot;threshold&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:5,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:1,&quot;max&quot;:20},&quot;audience&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;instructor&quot;,&quot;options&quot;:[&quot;instructor&quot;,&quot;student&quot;],&quot;tsType&quot;:&quot;'instructor' | 'student'&quot;}}">
 class Component extends DCLogic {
+  // One notice per held comment group, and no count of anybody: the threshold
+  // counts distinct commenters in one stream in one week (SPEC §4), and a count
+  // below it would be the disclosure the notice exists to prevent.
   renderVals() {
-    const responded = this.props.responded ?? 3;
-    const total = this.props.total ?? 9;
     const threshold = this.props.threshold ?? 5;
     const audience = this.props.audience ?? 'instructor';
     if (audience === 'student') {
       return {
-        title: 'Comments stay private this week',
-        body: 'With only ' + responded + ' of ' + total + ' classmates responding, comments stay private so no one can be identified \u2014 including you. They\u2019ll appear here once more of your classmates have responded over the term.'
+        title: 'Comments in this group stay private this week',
+        body: 'Fewer than ' + threshold + ' classmates commented here this week, so comments stay private so no one can be identified \u2014 including you. They may appear later among comments from earlier weeks.'
       };
     }
     return {
-      title: 'Comments are hidden this week',
-      body: 'Only ' + responded + ' of ' + total + ' students have responded. To keep individual voices unidentifiable, raw comments stay hidden until at least ' + threshold + ' responses arrive. The AI summary above draws on everything received so far.'
+      title: 'No raw comments are shown here this week',
+      body: 'To keep individual voices unidentifiable, raw comments in this group are shown only when at least ' + threshold + ' students comment in it in the same week. Comments held back may appear later among comments from earlier weeks, with no week named. The AI summary above draws on everything received so far.'
     };
   }
 }

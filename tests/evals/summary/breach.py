@@ -52,6 +52,7 @@ from tests.evals.summary.cases import (
     MIXED_WEEK_CASE,
     SMALL_N_CASE,
     SMALL_N_THEMES_ONLY_CASE,
+    THIN_STREAM_CASE,
     build_answer,
 )
 
@@ -131,6 +132,13 @@ def sanded_answers(contracts: Any) -> dict[str, Any]:
             "comment, and so did the acoustics of the lecture theatre. Both are engaged with "
             "the course.",
             (("the week's two comments", 2),),
+        ),
+        THIN_STREAM_CASE.case_id: build_answer(
+            contracts,
+            THIN_STREAM_CASE,
+            "Two students wrote about the teaching this week, mentioning assignment feedback "
+            "and email. Both are engaged with the course.",
+            (("the stream's two comments", 2),),
         ),
         EMPTY_WEEK_CASE.case_id: build_answer(
             contracts,

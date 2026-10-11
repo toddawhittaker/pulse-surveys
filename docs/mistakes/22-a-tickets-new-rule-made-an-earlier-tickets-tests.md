@@ -1,10 +1,10 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 26**
+**Caught: 27**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*29 instances recorded; the 3 most recent are below (E5.1-04, E5.1-01, E5.1-11),
+*33 instances recorded; the 3 most recent are below (E5.1-01, E5.1-11, E6),
 each after the "What happened" section. The E4-06 paragraph sits with them and
 is not counted among the three: like the E0-18 note below, it carries a rule
 sentence of its own — that a closed set written earlier in the same branch is
@@ -12,7 +12,8 @@ as much on the other side of the test wall as one written in E0 — rather than
 only an instance. The trim the previous header owed was taken on 2026-09-08
 with the E4-17 bump, removing the E3-04, E4-01, E4-05 and E4-04 paragraphs,
 again on 2026-09-14 with the E5-13 bump, removing the E4-18 paragraph, and
-again on 2026-10-03 with the E5.1 bumps, removing the E4-17, E5-06 and E5-13 paragraphs;
+again on 2026-10-03 with the E5.1 bumps, removing the E4-17, E5-06 and E5-13 paragraphs,
+and again on 2026-10-10 with the E6 bump, removing the E5.1-04 paragraph;
 they are in this file's git history and in the pull requests they cite. The E0-18 PR 2 paragraph stays where it sits, beside
 the consequence it illustrates: it carries a rule sentence of its own — that
 any instruction to remove or rename a thing is a claim nothing asserts on it —
@@ -148,16 +149,6 @@ is about who may edit a test, not about how old the test is, and a set written
 earlier in the same branch is as much on the other side of the wall as one written
 in E0.
 
-**Instance, 2026-10-03 (E5.1-04, PR #261, caught at planning).** The new rule
-refuses the example session secret outside development, and every older test
-that builds deployment `Settings` with that placeholder would have failed inside
-its own setup. The ticket named the trap, and the pull request found and fixed
-those tests' setup in the same change: a new `deployed_session_secret` fixture,
-requested by `deployed_ai_provider`, gives them a fake accepted secret and
-updates the `configured_env` mapping their sessions are signed from. What would
-have shipped without the entry: a correct validator and a red wall in suites the
-ticket did not name.
-
 **Instance, 2026-10-03 (E5.1-01, PR #263, caught while building).** Counting
 commenters per stream instead of responses changes what every seeded world must
 hold before its comments show. The pull request moved the worlds with the rule:
@@ -170,3 +161,16 @@ rule that no teaching grant is ended after a section's end date made E5.1-02's
 door test walk the roster on the day after its section ended, where the grant
 now stays. The repair was in the test, which now walks inside the term as the
 ruling requires; the code was not bent to keep the old test green.
+
+**Instance, 2026-10-10 (E6, one catch and three occurrences).** E6-03's new
+comment-card members reached the payload ceiling, which the suite holds in two
+places. The test author amended the pytest copy (`COMMENT_FIELDS_PERMITTED`) in
+the red commit, because the ticket's trap named the fixtures: that is the catch,
+and what it saved was a red wall in modules the ticket did not name. The
+Playwright copy of the same ceiling, in the E4 exit drive, was missed and became
+dispute E6-03-01. E6-05's new copy prefix and new routes then reached two more
+inventories, the copy registry (dispute E6-05-02) and the named-set route list
+with its CSRF test (dispute E6-05-04). Neither was named before the red commit,
+so the builder's run found each. A ceiling held in two copies is only half
+amended when one copy is found, so the sweep for what a new member reaches covers
+the Playwright specs as well as the pytest suite.

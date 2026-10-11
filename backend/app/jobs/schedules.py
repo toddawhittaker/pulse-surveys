@@ -2,15 +2,15 @@
 
 Wired to the application in `app.jobs.celery_app`. E0-03 gave it a runtime that
 already works while every scheduled job still belonged to a later ticket — the
-Monday report is E4, retention is E13. Seven entries have landed: E1-08's daily
+Monday report is E4, retention is E13. Eight entries have landed: E1-08's daily
 purge of the launch replay ledger, which replaces the native TTL a Redis nonce
 store would have had (ADR 0089), E1-11's hourly roster pull (SPEC §7.3), E2-06's
 hourly survey-window reconciler, which derives the windows a section's calendar
 implies (SPEC §3.1, ADR 0111), E2-08's hourly sweep of the comments §3.3's
 fail-open floor stood in for, E3-06's weekly recompute of §3.4's participation
 score, E4-04's weekly cut of the release batches §4's cumulative rule produces,
-and E4-06's Monday generation of §5.1's AI summaries — the two halves of the
-Monday report that reach this file. Note that the window reconciler is
+E6-02's hourly moderation sweep (ADR 0188), and the hourly generation of §5.1's
+AI summaries. Note that the window reconciler is
 scheduled on real time like every entry
 here: beat's own firing is outside the development clock override (ADR 0109),
 which is exactly why E2-06 materializes its rows in advance rather than at the
@@ -151,46 +151,41 @@ BEAT_SCHEDULE: dict[str, dict[str, Any]] = {
     # writes nothing either, because a single week satisfies neither the
     # respondent leg nor the two-week leg.
     #
-    # **Provider-free**, unlike the summary job at 02:50: nothing here calls a
+    # A section-week whose comments are not all moderated by now is skipped
+    # whole and joins a later cut (ADR 0187, ADR 0188).
+    #
+    # **Provider-free**, unlike the summary walk: nothing here calls a
     # model, so a provider outage can never delay a release SPEC §4 has promised.
     "cut-release-batches-weekly": {
         "task": "app.jobs.tasks.cut_release_batches",
         "schedule": crontab(day_of_week="mon", hour="2", minute="40"),
     },
-    # E4-06's Monday generation of SPEC §5.1's AI summaries: for every section and
-    # course week whose survey window has closed and which carries no summary yet,
-    # two model calls — one per comment stream (ADR 0148) — and two stored rows.
+    # The moderation sweep (SPEC §7.4, ADR 0188): every comment in a closed
+    # window that holds no moderation verdict is asked of a model, and the verdict
+    # is routed. Hourly, because a comment is shown to nobody until it holds one,
+    # and a failed call is retried by the next pass. **Minute 10**, after every
+    # Sunday window has closed at 23:59:59 and well before the summary walk at
+    # minute 50 reads what it wrote; 0, 15, 20, 30, 40 and 45 are taken.
+    "moderate-closed-windows-hourly": {
+        "task": "app.jobs.tasks.moderate_closed_windows",
+        "schedule": crontab(minute="10"),
+    },
+    # SPEC §5.1's AI summaries: for every section and course week whose window
+    # has closed, whose comments are all moderated, and which carries no summary
+    # yet, two model calls (one per stream, ADR 0148) and two stored rows.
     #
-    # **Monday** for the reason the participation sweep is on a Monday, arriving at
-    # it from the other side. §3.1 closes every window on Sunday at 23:59:59 in the
-    # institution's timezone and opens the instructor's report at 06:00 on the
-    # Monday after (ADR 0184), so Monday is both the first day the week that just
-    # ended can be summarized at all and the last day it can be summarized before
-    # its reader opens the report it leads. A slot on any other day either summarizes a week
-    # students are still answering or leaves the finished one unsummarized until
-    # after it has been read — and nothing regenerates a summary (the E4
-    # breakdown's decision 2), so a summary that arrives late never arrives for
-    # that week's reader at all.
+    # **Hourly** (ADR 0188). A section-week waits for its last
+    # moderation verdict (ADR 0187), which can land at any hour, so a weekly walk
+    # that met one missing verdict would leave the week unsummarized for a week.
+    # An ordinary week is moderated by the 00:10 sweep and summarized at 00:50,
+    # well before the report opens at 06:00 on Monday (ADR 0184). The walk selects
+    # on "has no summary rows", so a week already summarized is never summarized
+    # again and a pass with nothing to do calls no provider.
     #
-    # **02:50**, half an hour behind the participation sweep and ten minutes behind
-    # the release cut above it. That sweep walks
-    # every section in the institution without touching a provider; this one walks
-    # the same sections and makes up to two model calls per closed section-week,
-    # so the two contend for the same rows and the same worker pool for no reason
-    # if they share a tick. The release cut is provider-free and says so in its own
-    # comment, so it is the one entry here a provider outage cannot delay, and it
-    # goes first. The reclassification entry above has already had its
-    # 00:45 and 01:45 passes by then, which matters here for the reason it matters
-    # to the sweep: the comments §3.3's floor stood in for have had two chances at
-    # a real verdict before the week they belong to is summarized, and a summary is
-    # never regenerated when a later one lands.
-    #
-    # There is no cap on the model calls one run may make, and ADR 0154 records
-    # why: the per-section-week transaction already bounds what a failure costs,
-    # and a cap would leave some section's week unsummarized for the term with
-    # nothing choosing which.
+    # **Minute 50**, forty minutes behind the moderation sweep. There is no cap on the model calls one run may
+    # make, and ADR 0154 records why.
     "generate-weekly-summaries": {
         "task": "app.jobs.tasks.generate_weekly_summaries",
-        "schedule": crontab(day_of_week="mon", hour="2", minute="50"),
+        "schedule": crontab(minute="50"),
     },
 }

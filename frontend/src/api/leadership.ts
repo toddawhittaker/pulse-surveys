@@ -1,6 +1,7 @@
 /**
- * The seven calls the comparison-set management screen makes — SPEC §13's
- * `frontend/src/api/`, ticket E5-09.
+ * The calls the leadership pages make — SPEC §13's `frontend/src/api/`: seven
+ * for the comparison-set management screen (SPEC §5.1), and three for the
+ * moderation review queue and exclusion log (SPEC §5.2), at the foot of the file.
  *
  * `api/leadership.py` (E5-06) serves SPEC §5.1's named sets: a list, a create, a
  * read, an edit, a delete, the closed choice lists the form is built from, and
@@ -10,7 +11,7 @@
  * student's survey, and neither has anything to say about a leadership surface.
  *
  * **The calls are written by hand and not wrapped in a query cache** (ADR
- * 0117): seven calls with no shared cache key between them. **The wire types
+ * 0117): ten calls with no shared cache key between them. **The wire types
  * are generated** from the backend's OpenAPI document (ADR 0185).
  *
  * **The session rides as a Bearer header** (ADR 0089, `../lib/session.ts`), and
@@ -20,8 +21,8 @@
  * `lib/session.ts` rather than being copied here (`docs/MISTAKES.md` entry 13).
  *
  * **What checks that echo is `csrf_verified_leadership`** (`api/deps.py`,
- * E5-06), which the three writing routes below declare and the four reading
- * routes do not.
+ * E5-06), which every writing route below declares and no reading route
+ * does.
  *
  * **Every type below is the wire's own**, snake case included, aliased from
  * `wire.gen.ts`, which describes E5-06's Pydantic schemas.
@@ -311,4 +312,122 @@ export async function deleteComparisonSet(setId: string): Promise<ComparisonSetD
   if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
   if (response.ok) return { kind: 'deleted' };
   return { kind: 'refused', detail: refusalSentence(await jsonBody(response)) };
+}
+
+// ---------------------------------------------------------------------------
+// Moderation review: the queue, a leader's decision, and the exclusion log
+// (SPEC §5.2, ADR 0190).
+//
+// The same three-part shape as the sets above: a read answers its payload, a
+// 401 is a session that ended, and any other refusal carries the server's own
+// sentence. `api/leadership.py` answers a reader whose grant puts no course under
+// review with a 403 and one sentence; the pages show that sentence rather than an
+// empty queue, because "nothing to review" is a claim about the reader that a
+// refusal does not entitle a page to make.
+// ---------------------------------------------------------------------------
+
+/** `app.api.leadership.QUEUE_PATH` — the comments awaiting this reader's review. */
+export const REVIEW_QUEUE_PATH = '/leadership/moderation/queue';
+
+/** `app.api.leadership.LOG_PATH` — every exclusion and keep inside this reader's grant. */
+export const EXCLUSION_LOG_PATH = '/leadership/moderation/log';
+
+/** `app.api.leadership.DECISIONS_PATH` — one decision on one queued comment. */
+export function queuedCommentDecisionPath(answerId: string): string {
+  return `/leadership/moderation/comments/${encodeURIComponent(answerId)}/decisions`;
+}
+
+/** One queued comment: its key, its words and its section, and nothing else. */
+export type QueueItemView = Schemas['QueueItem'];
+
+/** What a lead or chair sends: exclude or keep, with an optional reason. */
+export type LeadDecisionWrite = Schemas['LeadDecision'];
+
+/** One decision in the log. */
+export type LogRowView = Schemas['LogRow'];
+
+/** What a read of the review queue answered. */
+export type ReviewQueueRead =
+  | { readonly kind: 'queue'; readonly items: readonly QueueItemView[] }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'unavailable'; readonly detail: string | null };
+
+/** What a read of the exclusion log answered. */
+export type ExclusionLogRead =
+  | { readonly kind: 'log'; readonly rows: readonly LogRowView[] }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'unavailable'; readonly detail: string | null };
+
+/**
+ * What a decision answered.
+ *
+ * A 204 is `decided`, with nothing to carry back: the comment has left the
+ * queue. Every refusal — the 404 for a comment no longer in this queue, the 422
+ * for a reason out of bounds, the 403 — is `refused` with its sentence.
+ */
+export type LeadDecisionOutcome =
+  | { readonly kind: 'decided' }
+  | { readonly kind: 'refused'; readonly detail: string | null }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'unavailable' };
+
+/** The comments awaiting this reader's review, in the order the server drew. */
+export async function readReviewQueue(): Promise<ReviewQueueRead> {
+  let response: Response;
+  try {
+    response = await fetch(REVIEW_QUEUE_PATH, { headers: readHeaders() });
+  } catch {
+    return { kind: 'unavailable', detail: null };
+  }
+
+  if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  const body = await jsonBody(response);
+  if (!response.ok) return { kind: 'unavailable', detail: refusalSentence(body) };
+
+  if (typeof body !== 'object' || body === null) return { kind: 'unavailable', detail: null };
+  if (!Array.isArray((body as Record<string, unknown>).items)) {
+    return { kind: 'unavailable', detail: null };
+  }
+  return { kind: 'queue', items: (body as { items: readonly QueueItemView[] }).items };
+}
+
+/** Exclude or keep one queued comment. */
+export async function decideOnQueuedComment(
+  answerId: string,
+  decision: LeadDecisionWrite,
+): Promise<LeadDecisionOutcome> {
+  let response: Response;
+  try {
+    response = await fetch(queuedCommentDecisionPath(answerId), {
+      method: 'POST',
+      headers: writeHeaders(),
+      body: JSON.stringify(decision),
+    });
+  } catch {
+    return { kind: 'unavailable' };
+  }
+
+  if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (response.ok) return { kind: 'decided' };
+  return { kind: 'refused', detail: refusalSentence(await jsonBody(response)) };
+}
+
+/** The exclusion log inside this reader's own grant, newest decision first. */
+export async function readExclusionLog(): Promise<ExclusionLogRead> {
+  let response: Response;
+  try {
+    response = await fetch(EXCLUSION_LOG_PATH, { headers: readHeaders() });
+  } catch {
+    return { kind: 'unavailable', detail: null };
+  }
+
+  if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  const body = await jsonBody(response);
+  if (!response.ok) return { kind: 'unavailable', detail: refusalSentence(body) };
+
+  if (typeof body !== 'object' || body === null) return { kind: 'unavailable', detail: null };
+  if (!Array.isArray((body as Record<string, unknown>).rows)) {
+    return { kind: 'unavailable', detail: null };
+  }
+  return { kind: 'log', rows: (body as { rows: readonly LogRowView[] }).rows };
 }

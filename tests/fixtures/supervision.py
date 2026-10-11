@@ -598,6 +598,52 @@ def fill_dependent_columns(table: Any, values: dict[str, Any]) -> None:
     )
 
 
+# The second such rule, and it is E6-03's: `moderation_state`'s decision columns.
+# E6-03's migration (M2) adds `decided_by_person_id`, `decided_as`, `reason` and
+# `is_undo`, under `CHECK`s that tie them to the state — a row with no decider is
+# the routing definer's and is `FLAGGED_COLLAPSED`; a decider names a role and a
+# role names a decider — and a `BEFORE INSERT` trigger that refuses a decider-less
+# row unless `current_user` is `pulse_moderation_definer` (the coordinator's ruling
+# of 2026-10-10, E6-01's `classification` trigger pattern). This helper writes as
+# the bootstrap identity, which is not the definer, so **every** row it writes —
+# E4's schema tests, `CommentWorld.moderate`, the summary job's `decide`, flags
+# included — names a decider from the day M2 lands, or it is refused inside
+# whichever fixture seeded it (`docs/MISTAKES.md` entry 22, and entry 13's closing
+# sentence). A flag with a decider is a legal row (an undone keep is one), and it
+# reads as `flagged_collapsed` exactly as the router's does. A test whose subject is
+# a router-shaped row writes it as the definer, never through this helper.
+#
+# **One place, for every caller**, the way `question.stream` is filled above: the
+# decider is a fresh `person` from the chain and the role is the instructor's,
+# which is the only role E6-03 writes. **An override always wins**, including an
+# override of `None` — a test whose subject is the `CHECK` names both columns on
+# every insert it makes, so nothing filled here is a value a test then reads back
+# (`docs/MISTAKES.md` entry 30). On a database before M2 the columns are not
+# declared and this is a no-op.
+MODERATION_STATE_TABLE_NAME = "moderation_state"
+DECIDER_COLUMN = "decided_by_person_id"
+DECIDED_AS_COLUMN = "decided_as"
+FILLED_DECIDER_ROLE = "INSTRUCTOR"
+PERSON_TABLE_NAME = "person"
+
+
+def fill_a_decider(
+    session: Any, tables: dict[str, Any], table: Any, values: dict[str, Any], chain: dict[str, Any]
+) -> None:
+    """Name a decider on every `moderation_state` row the bootstrap identity writes. See above."""
+    if table.name != MODERATION_STATE_TABLE_NAME:
+        return
+    if DECIDER_COLUMN not in table.c or DECIDED_AS_COLUMN not in table.c:
+        return
+    if DECIDER_COLUMN in values or DECIDED_AS_COLUMN in values:
+        return
+    if PERSON_TABLE_NAME not in chain:
+        chain[PERSON_TABLE_NAME] = chain_row(session, tables, PERSON_TABLE_NAME, chain)
+    person_table = require_table(tables, PERSON_TABLE_NAME)
+    values[DECIDER_COLUMN] = chain[PERSON_TABLE_NAME][single_primary_key(person_table)]
+    values[DECIDED_AS_COLUMN] = FILLED_DECIDER_ROLE
+
+
 def seed_row(
     session: Any,
     tables: dict[str, Any],
@@ -677,6 +723,7 @@ def seed_row(
         values[column.name] = invented_value(table, column)
 
     fill_dependent_columns(table, values)
+    fill_a_decider(session, tables, table, values, chain)
 
     statement = table.insert().values(**values).returning(*table.columns)
     try:

@@ -1,4 +1,4 @@
-"""The three refusals the instructor report answers with — E4-12 and E5.1-03.
+"""The refusals the instructor report answers with — E4-12, E5.1-03 and E6-03.
 
 `app.api.instructor` serves SPEC §5.1's report, and it refuses two ways: a
 section outside the session's teaching set or absent altogether gets one
@@ -37,6 +37,14 @@ and a week the section never runs with one wording for the same no-oracle
 reason. The router's own header argues both at length; what is here is the
 words.
 
+**E6-03 adds the decision route's five.** One 404 for every comment the
+reader's report does not return (held, another section's, not a comment,
+Care-class, or nothing at all), so the answer cannot tell an instructor which of
+those an id was; one 409 for an action the comment's state or its latest
+decision does not allow; and three 422s for the stated reason. None names the
+comment, the section or what was asked: each says what did not happen and, where
+the reader can act on it, what to do instead.
+
 **`COPY` beside the entries, because that is the shape the package settles.**
 Each copy module publishes `COPY: Mapping[str, CopyEntry]` keyed by dotted keys,
 which is what `app.copy.copy_modules()`'s readers walk.
@@ -46,7 +54,17 @@ from collections.abc import Mapping
 
 from app.copy import CopyEntry
 
-__all__ = ["COPY", "NOT_AN_INSTRUCTOR", "SECTION_UNAVAILABLE", "WEEK_UNAVAILABLE"]
+__all__ = [
+    "COMMENT_UNAVAILABLE",
+    "COPY",
+    "DECISION_NOT_ALLOWED",
+    "NOT_AN_INSTRUCTOR",
+    "REASON_BLANK",
+    "REASON_REQUIRED",
+    "REASON_TOO_LONG",
+    "SECTION_UNAVAILABLE",
+    "WEEK_UNAVAILABLE",
+]
 
 # The 404 both halves of the refusal pair get: a section this instructor does not
 # teach, and a section that is not there at all.
@@ -75,6 +93,50 @@ NOT_AN_INSTRUCTOR = CopyEntry(
     ),
 )
 
+# The 404 the decision route answers for an answer the reader's report does not
+# return. One sentence for every such case, interpolating nothing, so the refusal
+# says nothing about what the id was (E6-03, its work order's decision 1).
+COMMENT_UNAVAILABLE = CopyEntry(
+    key="instructor_report.comment_unavailable",
+    text="There is no comment here for you to decide on.",
+)
+
+# The 409 for an action the comment's state does not allow: keeping a comment that
+# is not waiting for review or excluded, asking for the state it already holds, or
+# an Undo of something that is not your own latest decision.
+DECISION_NOT_ALLOWED = CopyEntry(
+    key="instructor_report.decision_not_allowed",
+    text="That decision does not apply to this comment as it stands, so nothing was changed.",
+)
+
+# The three 422s for the stated reason (SPEC §5.2: excluding a comment the AI did
+# not flag requires one). Checked as sent, before any trimming.
+REASON_REQUIRED = CopyEntry(
+    key="instructor_report.reason_required",
+    text=(
+        "Excluding a comment that was not flagged for review needs a stated reason. "
+        "Nothing was changed."
+    ),
+)
+REASON_BLANK = CopyEntry(
+    key="instructor_report.reason_blank",
+    text="A stated reason has to contain some words. Nothing was changed.",
+)
+REASON_TOO_LONG = CopyEntry(
+    key="instructor_report.reason_too_long",
+    text="A stated reason can be at most 500 characters long. Nothing was changed.",
+)
+
 COPY: Mapping[str, CopyEntry] = {
-    entry.key: entry for entry in (SECTION_UNAVAILABLE, WEEK_UNAVAILABLE, NOT_AN_INSTRUCTOR)
+    entry.key: entry
+    for entry in (
+        SECTION_UNAVAILABLE,
+        WEEK_UNAVAILABLE,
+        NOT_AN_INSTRUCTOR,
+        COMMENT_UNAVAILABLE,
+        DECISION_NOT_ALLOWED,
+        REASON_REQUIRED,
+        REASON_BLANK,
+        REASON_TOO_LONG,
+    )
 }

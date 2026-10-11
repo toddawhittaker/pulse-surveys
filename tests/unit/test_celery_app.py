@@ -479,6 +479,12 @@ CUT_RELEASE_BATCHES_TASK_NAME = f"{TASKS_MODULE}.cut_release_batches"
 # of the key and the slot here would be one fact asserted in two files.
 GENERATE_WEEKLY_SUMMARIES_TASK_NAME = f"{TASKS_MODULE}.generate_weekly_summaries"
 
+# The hourly moderation sweep (SPEC §7.4, ADR 0188): every comment in a closed
+# window with no moderation verdict is asked of a model and routed. Its key and
+# crontab are pinned in
+# `tests/unit/test_the_moderation_sweep_and_the_summary_walk_run_hourly.py`.
+MODERATE_CLOSED_WINDOWS_TASK_NAME = f"{TASKS_MODULE}.moderate_closed_windows"
+
 
 def test_the_beat_schedule_holds_exactly_the_entries_that_have_landed(
     configured_env: dict[str, str],
@@ -628,6 +634,7 @@ def test_the_beat_schedule_holds_exactly_the_entries_that_have_landed(
             POST_PARTICIPATION_SCORES_TASK_NAME,
             CUT_RELEASE_BATCHES_TASK_NAME,
             GENERATE_WEEKLY_SUMMARIES_TASK_NAME,
+            MODERATE_CLOSED_WINDOWS_TASK_NAME,
         }
     )
     assert tasks == expected_tasks, (
@@ -638,9 +645,9 @@ def test_the_beat_schedule_holds_exactly_the_entries_that_have_landed(
         "floored classifications that is SPEC §3.3's 'then classified async', E3-06 the weekly "
         "participation sweep that posts a score to a platform's gradebook when a recomputation "
         "changes it (SPEC §3.4), E4-04 the weekly release cutter that stores SPEC §4's "
-        "cumulative crossing as a batch, and E4-06 the Monday summary generation job that sends a "
+        "cumulative crossing as a batch, E4-06 the summary generation job that sends a "
         "closed week's comments to the AI provider per stream and stores what comes back "
-        "(SPEC §5.1). No other ticket has landed one: retention is E13. "
+        "(SPEC §5.1), and E6-02 the hourly moderation sweep (ADR 0188). No other ticket has landed one: retention is E13. "
         "If one of those has now landed too, this test is again the record that has to change with "
         "it — say which ticket owns the new entry and assert what it is, rather than widening this "
         "equality to a superset check."

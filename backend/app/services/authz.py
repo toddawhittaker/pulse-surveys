@@ -141,6 +141,7 @@ __all__ = [
     "guard_write",
     "holds_care",
     "holds_leadership",
+    "lead_review_courses",
     "leadership_grant_covers",
     "own_grant",
     "raw_comments_permitted",
@@ -148,6 +149,7 @@ __all__ = [
     "resolve_scope",
     "sanction_for",
     "scoped_reader",
+    "taught_or_once_taught_section_ids",
     "taught_section_ids",
     "teaching_instructor_assigned",
     "teaching_instructor_grants",
@@ -464,6 +466,14 @@ _TEACHING_INSTRUCTOR_SECTIONS = text(
     " AND granted.section_id IS NOT NULL"
 )
 
+# The sections a roster walk ended this person's teaching grant on (ADR 0183's
+# record). `pulse_app` reads these two columns of it and nothing else (E6-09).
+_ONCE_TAUGHT_SECTIONS = text(
+    "SELECT DISTINCT ended.section_id"
+    " FROM public.ended_teaching_grant AS ended"
+    " WHERE ended.person_id = :person_id"
+)
+
 # Everybody holding the teaching-instructor grant over one section — the people
 # column of `_HOLDS_THE_TEACHING_INSTRUCTOR_GRANT`'s three conditions, with the
 # person left open. E5-14's round-4 sealing asks it: each of them can read this
@@ -512,6 +522,14 @@ _SECTION_SCOPED_ASSIGNEES = text(
 # and a `LEAD_FACULTY` row on a course whose mapping names somebody else, so the
 # assignment's own `course_id` is not an answer to "which courses do they lead".
 _LED_COURSES = text("SELECT course_id FROM public.lead_faculty_course WHERE person_id = :person_id")
+
+# Which of a set of courses anybody leads — the other question the same mapping
+# answers. A chair reviews only the courses of their department that nobody
+# leads (`lead_review_courses`, SPEC §2.1: "a course with no mapping falls to its
+# department chair").
+_COURSES_WITH_A_LEAD = text(
+    "SELECT DISTINCT course_id FROM public.lead_faculty_course WHERE course_id = ANY(:course_ids)"
+)
 
 # Every node beneath one node, at every level. Built from one template over
 # `CONTAINMENT_LEVELS` so the projection is written once; nothing a caller
@@ -769,6 +787,54 @@ def own_grant(session: Session, *, assignment_id: UUID) -> Purview:
     return _own_grant_of(session, _Assignment.of(row))
 
 
+def lead_review_courses(session: Session, *, person_id: UUID) -> Mapping[UUID, AssignmentRole]:
+    """The courses this person's own leadership grants put under moderation review, and the role.
+
+    SPEC §5.2 routes a harmful comment to "the course's Lead Faculty review
+    queue", and §2.1 sends a course with no mapping to its department chair. So
+    the answer is, for each course, the one role whose grant covers it here
+    (E6-05, decision 3):
+
+      - `LEAD_FACULTY` for every course this person leads, from the mapping and
+        never from the assignment's own course (`_lead_faculty_grant`), and only
+        when they hold a `LEAD_FACULTY` assignment at all;
+      - `CHAIR` for every course in a department they chair **that has no lead**.
+        A chair's own grant is the whole department subtree (`_own_grant_of`),
+        and this is narrower on purpose: a mapped course's comments are its
+        lead's to review, and a chair given them too would be a second reviewer
+        the spec does not name.
+
+    The two sets cannot overlap: a course is led or it is not. A person who both
+    leads a course and chairs its department is answered `LEAD_FACULTY` for it.
+
+    **Leadership grants only, and only these two roles.** `resolve_scope` unions
+    an instructor's sections in, so a lead who also teaches a sibling section
+    would reach that sibling course through it (SPEC §4.1 item 2); every other
+    role is ignored here. An assistant dean's own grant is empty until E9's
+    supervision walk (ADR 0108), and a dean or vice president is not a reviewer
+    §5.2 names, so each answers an empty mapping, which the caller refuses.
+    """
+    assignments = [
+        _Assignment.of(row)
+        for row in session.execute(_ASSIGNMENTS_OF_PERSON, {"person_id": person_id}).mappings()
+    ]
+    covered: dict[UUID, AssignmentRole] = {}
+    if any(held.role is AssignmentRole.LEAD_FACULTY for held in assignments):
+        for course_id in _lead_faculty_grant(session, person_id).course_ids:
+            covered[course_id] = AssignmentRole.LEAD_FACULTY
+    chaired: set[UUID] = set()
+    for held in assignments:
+        if held.role is AssignmentRole.CHAIR and held.department_id is not None:
+            chaired |= _nodes_beneath(session, "department", held.department_id)["course"]
+    if chaired:
+        led_by_somebody = set(
+            session.execute(_COURSES_WITH_A_LEAD, {"course_ids": list(chaired)}).scalars()
+        )
+        for course_id in chaired - led_by_somebody:
+            covered[course_id] = AssignmentRole.CHAIR
+    return covered
+
+
 def transitive_purview(session: Session | None, *, assignment_id: UUID) -> Purview:
     """SPEC §2.1's full purview. **Not implemented: E9 lands it, and this raises.**
 
@@ -977,6 +1043,27 @@ def teaching_instructor_assigned(session: Session, *, person_id: UUID, section_i
         },
     ).scalar_one()
     return bool(answer)
+
+
+def taught_or_once_taught_section_ids(session: Session, *, person_id: UUID) -> set[UUID]:
+    """Which sections does this person teach now, or did they teach before the roster ended it?
+
+    `taught_section_ids` (the live grants) united with every section whose
+    teaching grant a roster walk ended, from `ended_teaching_grant` (ADR 0183).
+    ADR 0190's rule keeps a leader's own taught sections out of their review
+    queue, their leader door and their exclusion log, because the instructor
+    door refused them that held text; a grant the roster ended last week does not
+    make them a stranger to the section, so it stays out too (E6-09, done-when 5).
+
+    **An authorization decision, and it only narrows.** A false *yes* hides a
+    section from one leader's review, which another reviewer of the course still
+    sees; a false *no* would show a former instructor the held text of their own
+    section. The reverse case, a leader who starts teaching a section after
+    reviewing it, is ADR 0190's accepted residual.
+    """
+    return taught_section_ids(session, person_id=person_id) | set(
+        session.execute(_ONCE_TAUGHT_SECTIONS, {"person_id": person_id}).scalars()
+    )
 
 
 def taught_section_ids(session: Session, *, person_id: UUID) -> set[UUID]:

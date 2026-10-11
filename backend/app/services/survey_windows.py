@@ -461,9 +461,23 @@ def _open_at(instant: datetime) -> tuple[ColumnElement[bool], ColumnElement[bool
 
     One expression, used by both readers. `<=` on each end is E2-06's settled rule
     and the difference between it and `<` is exactly two instants in a week — the
-    opening second and the closing second — which is why it is written once.
+    opening second and the closing second — which is why it is written once. The
+    close end is `closed_by`'s negation, so "open" and "closed" cannot disagree
+    about the closing instant itself.
     """
-    return (SurveyWindow.opens_at <= instant, SurveyWindow.closes_at >= instant)
+    return (SurveyWindow.opens_at <= instant, ~closed_by(instant))
+
+
+def closed_by(instant: datetime) -> ColumnElement[bool]:
+    """Whether a window has closed at `instant`: its close is strictly behind it.
+
+    The one definition of "closed". `_open_at` above is its negation at the close
+    end, so the window is still open at `closes_at` itself and closed from the
+    next instant. `app.services.moderation.route_verdict` asks this before it
+    writes a verdict (E6-03, decision 8): a verdict written at the closing instant
+    would vouch for text the student can still resubmit.
+    """
+    return SurveyWindow.closes_at < instant
 
 
 def _reading_instant(session: Session, at: datetime | None, *, settings: Settings) -> datetime:

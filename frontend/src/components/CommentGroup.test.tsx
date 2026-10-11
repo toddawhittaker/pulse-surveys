@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { CommentGroup } from './CommentGroup';
 import {
@@ -345,5 +345,51 @@ describe('CommentGroup', () => {
       expect(screen.getAllByRole('article')).toHaveLength(COURSE_COMMENTS.length);
       expect(screen.queryByText(SMALL_N_TITLE)).toBeNull();
     });
+  });
+});
+
+describe('decisions on a group’s comments (SPEC §5.2)', () => {
+  const HANDLE = '9a1e2b3c-4d5e-4f60-8a7b-0c1d2e3f4a5b';
+
+  it('binds each card’s decision to that comment’s handle, and offers none without one', () => {
+    const decide = vi.fn(() => new Promise<never>(() => undefined));
+    render(
+      <CommentGroup
+        stream="course"
+        summary={COURSE_SUMMARY}
+        comments={[{ ...COURSE_COMMENTS[0]!, answerId: HANDLE }, COURSE_COMMENTS[1]!]}
+        suppressed={false}
+        threshold={SMALL_N_THRESHOLD}
+        decide={decide}
+      />,
+    );
+
+    // Both cards rendered; only the one with a handle offers a decision.
+    expect(screen.getAllByRole('article')).toHaveLength(2);
+    const offered = screen.getAllByRole('button', { name: 'Exclude from student view' });
+    expect(offered).toHaveLength(1);
+
+    fireEvent.click(offered[0]!);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Off topic.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Exclude with this reason' }));
+    expect(decide).toHaveBeenCalledWith(HANDLE, { action: 'exclude', reason: 'Off topic.' });
+  });
+
+  it('offers no decision in a suppressed group, because it renders no card', () => {
+    render(
+      <CommentGroup
+        stream="course"
+        summary={COURSE_SUMMARY}
+        comments={[{ ...COURSE_COMMENTS[0]!, answerId: HANDLE }]}
+        suppressed
+        threshold={SMALL_N_THRESHOLD}
+        decide={vi.fn()}
+      />,
+    );
+
+    // The notice is the control: the group rendered, in its suppressed state.
+    expect(screen.getByText('No raw comments are shown here this week')).toBeTruthy();
+    expect(screen.queryAllByRole('article')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Exclude from student view' })).toBeNull();
   });
 });

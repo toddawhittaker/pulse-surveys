@@ -113,6 +113,13 @@ the same statement for its moderation views**, which put comments beside a roste
 with reviewer decisions attached, and this entry stays open against that epic
 alone.
 
+**E6's half is done, and with it the entry: closed by E6-03 (#294, merged as
+f55774c2) and E6-05 (#296, merged as 233d3739).** ADR 0189 is the statement for
+the instructor's views and ADR 0190 for the leadership views, which it reads
+against the gradebook's per-week completion ledger. ADR 0189 states the limit
+that remains: the gradebook can show that a student completed the survey with a
+comment the report never showed, though never the comment or why.
+
 2026-09-08: E4-12's credit-rule note stated the completion-to-content link a
 first time too plainly, and ADR 0153's own "what would change the answer"
 clause fired — the record carries the dated re-read, the note was reworded,
