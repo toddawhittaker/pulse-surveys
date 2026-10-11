@@ -130,6 +130,10 @@ RECORDED_SHA256: dict[str, str] = {
     "moderation.v1.md": "a66c03bf5393173aecc9df4b3d688919d00ddf86060212fa626b68b2e53ee9af",
     "validity.v1.md": "206efdc537c84da2896776c8806a419e83f42e24afe2a13c2a9ede8a6c695989",
     "validity.v2.md": "f642eb02afb09803e1230e9fcf907acc18780cbc949a33320701ce27d22f451e",
+    # E7-04's two new prompts: the response draft and the draft check.
+    "draft_check.v1.md": "6289f2d21996f4f0db888362ad41d566c778d055df6510292c2b901125a03eda",
+    "response_draft.v1.md": "6d8539faa86c175dd18bc2df959fff96634967f0cf6acebc517aab0847289c72",
+    "response_draft.v2.md": "7f07b4a7cff762afbcd100486b8fde58a5f42c57b21f4423f9d2c035d27d4739",
 }
 
 

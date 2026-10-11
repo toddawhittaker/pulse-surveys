@@ -284,6 +284,7 @@ pytest_plugins = (
     "fixtures.named_sets",
     "fixtures.instructor_decisions",
     "fixtures.lead_review",
+    "fixtures.response_draft",
 )
 
 
