@@ -40,12 +40,13 @@ from fixtures.student_week import (
     COURSE_LABEL,
     COURSE_NAME,
     CUT_BEFORE_OPENING,
-    DISTRIBUTION,
     FORBIDDEN_WHILE_HELD,
     INSTRUCTOR_NAME,
     KEYS_ONLY_A_FIGURE_CARRIES,
     RELEASED,
+    SHARES,
     SMALL_N,
+    WHOLE,
     WORKLOAD_MEDIAN,
     a_batch,
     a_reply_to,
@@ -55,6 +56,7 @@ from fixtures.student_week import (
     instructor_statuses,
     instructor_suppressed,
     keys_in,
+    means_by_week,
     numbers_outside_the_own_record,
     publish_now,
     read,
@@ -87,8 +89,10 @@ def test_a_held_week_serves_no_figure_comment_or_batch_and_after_its_publish_ser
     outside the week list and the student's own record, and none of the week's
     five comment texts anywhere in what was served. The second read, after the
     teacher publishes through E7-02's writer, is the twin: the same week carries
-    a trend point, a distribution, the five comments, the course stream's small-N
-    state, a workload median and a release group.
+    a trend point, the course stream's shares and mean (its five raters are at
+    the threshold; ruling 8 withholds the instructor stream's, at four), the five
+    comments, the course stream's small-N state, a workload median and a release
+    group.
 
     **The premise is read through the instructor's report** (`docs/MISTAKES.md`
     entry 58): the instructor stream shows the five comments and the course stream
@@ -150,9 +154,15 @@ def test_a_held_week_serves_no_figure_comment_or_batch_and_after_its_publish_ser
             f"{trend_weeks(streams[name])}; the twin carries course week 1's."
         )
     instructor = streams[INSTRUCTOR_NAME]
+    # The course stream's shares: its five raters are at the threshold, where the
+    # instructor stream's four are not (ruling 8 withholds those).
+    course_shares = streams[COURSE_NAME][SHARES]
     assert (
-        sum(instructor[DISTRIBUTION].values()) > 0
-    ), f"After the publish the instructor distribution is {instructor[DISTRIBUTION]}."
+        isinstance(course_shares, dict) and sum(course_shares.values()) == WHOLE
+    ), f"After the publish the course stream's shares are {course_shares!r}."
+    assert (
+        means_by_week(streams[COURSE_NAME]).get(FIRST_WEEK) is not None
+    ), f"After the publish the course stream's week-1 point is {streams[COURSE_NAME]['trend']}."
     assert set(comment_texts(instructor)) == set(
         FULL_WEEK_COMMENTS
     ), f"After the publish the instructor stream carries {comment_texts(instructor)}."

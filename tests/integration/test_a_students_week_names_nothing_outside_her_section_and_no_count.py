@@ -13,10 +13,9 @@ a_benchmark.py`. This module is the runtime half over the new figures.
 **The sibling section is the discriminator.** `Q1WW` shares the taught
 section's course, term and week numbers — exactly what a figure keyed on the
 course and week rather than the section would also match. It is given five
-instructor-stream commenters of its own in course week 1, each rating the
-instructor 4, so a distribution or comment list that took them in is visibly
-different, and its own student reading them is the control that they are
-readable at all.
+course-stream commenters of its own in course week 1, each rating the course 4,
+so shares, a mean or a comment list that took them in is visibly different, and
+its own student reading them is the control that they are readable at all.
 
 **The count walk names stems, not today's spellings** (`docs/MISTAKES.md` entry
 53), and is run on a planted payload first, both ways.
@@ -29,14 +28,16 @@ from typing import Any
 
 import pytest
 from fixtures.report_api import FULL_WEEK_COMMENTS, UNTAUGHT_COHORT
-from fixtures.report_views import INSTRUCTOR_STREAM
+from fixtures.report_views import COURSE_STREAM
 from fixtures.student_week import (
-    DISTRIBUTION,
+    COURSE_NAME,
     INSTRUCTOR_NAME,
+    SHARES,
     TREND,
     WORKLOAD_MEDIAN,
     comment_texts,
     keys_in,
+    means_by_week,
     plant_comment,
     read,
     streams_of,
@@ -51,10 +52,14 @@ SIBLING_TEXTS = tuple(
     for index in range(5)
 )
 
-# Course week 1's instructor ratings in the canonical world are 5, 4, 4 and 3
-# (`FULL_WEEK_INSTRUCTOR_RATINGS`, its fifth respondent leaving the question
-# unanswered); written out as the non-zero entries a distribution of them has.
-OWN_INSTRUCTOR_DISTRIBUTION = {"3": 1, "4": 2, "5": 1}
+# Course week 1's course ratings in the canonical world are 4, 4, 3, 3 and 1
+# (`FULL_WEEK_COURSE_RATINGS`): five raters, at the default threshold, so ruling 8
+# shows them as shares — 20, 40 and 40 — and a mean of 3.0. The sibling's five 4s,
+# taken in, would make 10, 20 and 70 and a mean of 3.5. The course stream is the
+# discriminator since ruling 8, because the instructor stream's four raters are
+# below the threshold and show no figure at all.
+OWN_COURSE_SHARES = {"1": 20, "3": 40, "4": 40}
+OWN_COURSE_MEAN = 3.0
 
 # The stems a count, a rate or a mean of the workload would be spelled with.
 COUNT_STEMS = ("count", "classmate", "respondent", "responses", "rate", "enrol")
@@ -122,21 +127,22 @@ def test_a_students_week_carries_her_own_sections_figures_and_comments_and_not_t
 ) -> None:
     """`F1WW`'s student reads course week 1 beside `Q1WW`'s five comments, and `Q1WW`'s too.
 
-    The taught section's instructor distribution is its own four ratings, its
+    The sibling's five comment about the course, each rating it 4. The taught
+    section's course shares and mean are its own five ratings', its instructor
     comments its own five, and no sibling text is anywhere in the body. The
     sibling section's student reads the sibling's five — the control that they
     are there to be leaked.
 
     **The mutations this kills:** the figures or comments read by course and
-    week rather than by section (the sibling's 4s join the distribution, its
-    texts join the comments); the section taken from somewhere other than the
-    route's own, scoped section. **The near miss:** the sibling student's read
-    of the sibling's own comments.
+    week rather than by section (the sibling's 4s join the shares and the mean,
+    its texts join the comments); the section taken from somewhere other than
+    the route's own, scoped section. **The near miss:** the sibling student's
+    read of the sibling's own comments.
     """
     world = hold
     for text in SIBLING_TEXTS:
         plant_comment(
-            world, course_week=WEEK, stream=INSTRUCTOR_STREAM, text=text, cohort=UNTAUGHT_COHORT
+            world, course_week=WEEK, stream=COURSE_STREAM, text=text, cohort=UNTAUGHT_COHORT
         )
     sibling = world.section_id(UNTAUGHT_COHORT)
     assert str(sibling) != str(world.taught), "The sibling section is the taught one."
@@ -148,17 +154,21 @@ def test_a_students_week_carries_her_own_sections_figures_and_comments_and_not_t
     sibling_body, _ = read(world, theirs, WEEK)
 
     sibling_streams = streams_of(sibling_body, "The sibling section's course week 1")
-    sibling_texts = comment_texts(sibling_streams[INSTRUCTOR_NAME])
+    sibling_texts = comment_texts(sibling_streams[COURSE_NAME])
     assert sorted(sibling_texts) == sorted(SIBLING_TEXTS), (
         f"The sibling section's own student reads {sibling_texts}; this world planted five shown "
         "comments there. A broken world, not a red."
     )
     streams = streams_of(body, "The taught section's course week 1")
     instructor = streams[INSTRUCTOR_NAME]
-    assert non_zero(instructor[DISTRIBUTION]) == OWN_INSTRUCTOR_DISTRIBUTION, (
-        f"The taught section's instructor distribution is {instructor[DISTRIBUTION]}; its own "
-        f"ratings make {OWN_INSTRUCTOR_DISTRIBUTION}, and the sibling's five 4s are not hers."
+    course = streams[COURSE_NAME]
+    assert non_zero(course[SHARES] or {}) == OWN_COURSE_SHARES, (
+        f"The taught section's course shares are {course[SHARES]!r}; its own ratings make "
+        f"{OWN_COURSE_SHARES}, and the sibling's five 4s are not hers."
     )
+    assert (
+        means_by_week(course).get(WEEK) == OWN_COURSE_MEAN
+    ), f"The taught section's course trend is {course[TREND]}; its mean is {OWN_COURSE_MEAN}."
     assert sorted(comment_texts(instructor)) == sorted(
         FULL_WEEK_COMMENTS
     ), f"The taught section's instructor stream carries {comment_texts(instructor)}."

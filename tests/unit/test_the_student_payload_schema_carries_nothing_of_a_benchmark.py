@@ -41,7 +41,7 @@ service change away from being served. The near miss it must spare is a schema
 that still constructs from its own declared members, asserted beside it.
 
 **Since E8-01 it reaches the results payload too** (its done-when 7). The
-student's week — the trend, the distributions, the workload median, the
+student's week — the trend, the rating shares, the workload median, the
 comments and the release group — is `StudentWeekResults` in
 `app.schemas.response_loop`, a module this sweep did not read: the enclosure one
 level out (`docs/MISTAKES.md` entry 53). The models swept there are **every
@@ -534,3 +534,53 @@ def test_no_model_the_results_payload_reaches_declares_a_count_or_a_workload_mea
         f"These results-payload models declare {declared}. Ruling 6 and §5.4: no response count, "
         "no classmate count, no response rate and no workload mean."
     )
+
+
+# Ruling 8: students see ratings as shares, never counts. The first draft's
+# `distribution` was a count histogram, whose sum is the classmate count.
+COUNT_HISTOGRAM_MEMBER = "distribution"
+SHARES_MEMBER = "shares"
+A_COUNT_HISTOGRAM = {"1": 1, "2": 0, "3": 2, "4": 2, "5": 0}
+
+
+def test_no_model_the_results_payload_reaches_declares_or_admits_a_count_histogram() -> None:
+    """Ruling 8, structurally: no student model declares `distribution`, and each refuses one.
+
+    The stream carries `shares` instead, which is the control that the walk
+    reaches the model a histogram would sit on.
+
+    **The mutations this kills:** the count `distribution` kept beside `shares`
+    ("the page can choose"), or left admitted as an extra on any model the
+    payload reaches. **The near miss:** `StudentStream.shares`, declared.
+    """
+    reached = models_reachable_from(the_results_root())
+    stream = reached.get("StudentStream")
+    assert stream is not None and SHARES_MEMBER in stream.model_fields, (
+        f"The walk reaches {sorted(reached)}, and no `StudentStream` declaring `{SHARES_MEMBER}` "
+        "(ruling 8)."
+    )
+    declared = sorted(
+        name for name, model in reached.items() if COUNT_HISTOGRAM_MEMBER in model.model_fields
+    )
+    assert declared == [], f"These student models declare `{COUNT_HISTOGRAM_MEMBER}`: {declared}."
+    admitted = sorted(
+        name
+        for name, model in reached.items()
+        if not [
+            complaint
+            for complaint in _complaints_with(model, COUNT_HISTOGRAM_MEMBER, A_COUNT_HISTOGRAM)
+            if tuple(complaint.get("loc", ())) == (COUNT_HISTOGRAM_MEMBER,)
+        ]
+    )
+    assert admitted == [], (
+        f"These student models accept a planted `{COUNT_HISTOGRAM_MEMBER}` without complaint: "
+        f"{admitted}. Ruling 8: ratings as shares, never counts."
+    )
+
+
+def _complaints_with(model: type[BaseModel], key: str, value: Any) -> list[dict[str, Any]]:
+    try:
+        model(**{key: value})
+    except ValidationError as refused:
+        return list(refused.errors())
+    return []

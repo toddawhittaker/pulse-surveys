@@ -16,10 +16,20 @@ identifiers" and "Settled decisions"):
     `workload_median: float | None` (`None` while `awaiting`) and
     `released: list[StudentReleasedComment] | None` (`None` unless ruling 1 lets
     the group show);
-  - `StudentStream {stream, trend, distribution, small_n, comments}`, with
-    `stream` one of `instructor` and `course`, `trend` a list of
-    `StudentTrendPoint {course_week, mean}`, `distribution` keyed "1" to "5", and
-    `comments` a list of `StudentComment {text}`, empty when `small_n`;
+  - `StudentStream {stream, trend, shares, small_n, comments}`, with `stream`
+    one of `instructor` and `course`, `trend` a list of
+    `StudentTrendPoint {course_week, mean}`, and `comments` a list of
+    `StudentComment {text}`, empty when `small_n` (the comment rule);
+  - **ruling 8** (the owner's, on E8-01's privacy review; SPEC §5.4): `shares`
+    replaces the first draft's `distribution`. It is keyed "1" to "5", holds
+    whole-number percentages by largest-remainder rounding that sum to exactly
+    100, and is `None` when the stream-week's **raters** (distinct students with
+    a rating answer in that stream that week, not commenters) are fewer than
+    `n_threshold`. A trend point's `mean` is `None` under the same rule (the point
+    stays), and `workload_median` is `None` when the week's distinct workload
+    answerers are fewer than `n_threshold`. A count histogram summed to the
+    classmate count, and a small week's mean or median, less the reader's own
+    answer, gave classmates' answers back;
   - `StudentReleasedComment {text, stream}`;
   - decision 1: one trend point per published, non-`awaiting` week up to and
     including the page's week; a held week has no point;
@@ -71,11 +81,17 @@ expectation is written in the test that makes it (entries 19 and 30).
 
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import distinct, func, select
 
+from fixtures.grading import (
+    RESPONSE_SECTION_COLUMN,
+    RESPONSE_USER_COLUMN,
+    RESPONSE_WEEK_COLUMN,
+)
 from fixtures.instructor_decisions import OK, a_reason
 from fixtures.moderation import CLEAR
 from fixtures.report_api import (
@@ -84,14 +100,17 @@ from fixtures.report_api import (
     COMMENTS_FIELD,
     DISTRIBUTION_FIELD,
     PAYLOAD_STREAM_KEY,
+    RATING_POSITION,
     RELEASED_MEMBER,
     SMALL_N_MEMBER,
     STREAMS_MEMBER,
     SUPPRESSED_FIELD,
     TAUGHT_COHORT,
+    TERM_WEEK_OF_COURSE_WEEK,
+    WORKLOAD_POSITION,
 )
 from fixtures.report_comments import comment_service
-from fixtures.report_views import COURSE_STREAM, INSTRUCTOR_STREAM
+from fixtures.report_views import COURSE_STREAM, FIRST_VERSION, INSTRUCTOR_STREAM
 from fixtures.student_read import (
     COURSE_NUMBER_COLUMN,
     COURSE_TABLE,
@@ -101,6 +120,13 @@ from fixtures.student_read import (
     TERM_NAME_COLUMN,
     course_label,
     scalars_in,
+)
+from fixtures.submit import (
+    ANSWER_TABLE,
+    QUESTION_TABLE,
+    RATING_COLUMN,
+    RESPONSE_TABLE,
+    WORKLOAD_HOURS_COLUMN,
 )
 from fixtures.supervision import (
     foreign_key_columns,
@@ -137,10 +163,13 @@ PARTICIPATION = "participation"
 # `StudentStream`'s members, and the two stream names in the order they arrive.
 STREAM = "stream"
 TREND = "trend"
+SHARES = "shares"
+# The first draft's member, which ruling 8 replaced: a count histogram. Named so
+# tests can require its absence.
 DISTRIBUTION = "distribution"
 SMALL_N = "small_n"
 COMMENTS = "comments"
-STREAM_MEMBERS = frozenset({STREAM, TREND, DISTRIBUTION, SMALL_N, COMMENTS})
+STREAM_MEMBERS = frozenset({STREAM, TREND, SHARES, SMALL_N, COMMENTS})
 INSTRUCTOR_NAME = "instructor"
 COURSE_NAME = "course"
 STREAM_ORDER = (INSTRUCTOR_NAME, COURSE_NAME)
@@ -154,8 +183,9 @@ TEXT = "text"
 COMMENT_MEMBERS = frozenset({TEXT})
 RELEASED_MEMBERS = frozenset({TEXT, STREAM})
 
-# "keys "1".."5", same shape as the instructor report's rating distribution".
+# Ruling 8: `shares` is keyed "1" to "5" and sums to exactly 100.
 RATING_KEYS = ("1", "2", "3", "4", "5")
+WHOLE = 100
 
 # What a held week may not carry (done-when 1), as members. Each is `None` while
 # `awaiting`, and each is something on a released week.
@@ -164,7 +194,15 @@ FORBIDDEN_WHILE_HELD = (STREAMS, WORKLOAD_MEDIAN, RELEASED)
 # The keys that exist only inside a figure, a comment or a batch. None of them
 # may appear anywhere in a held week's body, under any parent: a figure moved
 # to a member nobody listed is still a figure.
-KEYS_ONLY_A_FIGURE_CARRIES = (TREND, DISTRIBUTION, SMALL_N, COMMENTS, MEAN, COURSE_WEEK)
+KEYS_ONLY_A_FIGURE_CARRIES = (
+    TREND,
+    SHARES,
+    DISTRIBUTION,
+    SMALL_N,
+    COMMENTS,
+    MEAN,
+    COURSE_WEEK,
+)
 
 # ---------------------------------------------------------------------------
 # The two student reads in `app.services.report_comments`.
@@ -379,6 +417,81 @@ def plant_comment(
     """
     return world.review.plant(
         course_week=course_week, stream=stream, text=text, verdict=verdict, cohort=cohort
+    )
+
+
+def plant_ratings(
+    world: HoldWorld, *, course_week: int, stream: str, ratings: Iterable[int]
+) -> None:
+    """One new respondent per rating, answering only that stream's rating question; committed.
+
+    No comment, so no verdict is owed and the week's window need only exist.
+    """
+    for rating in ratings:
+        world.door.world.submit(
+            term_week=TERM_WEEK_OF_COURSE_WEEK[course_week],
+            ratings={RATING_POSITION[stream]: rating},
+            cohort=TAUGHT_COHORT,
+        )
+    world.door.commit()
+
+
+def plant_workloads(world: HoldWorld, *, course_week: int, hours: Iterable[Decimal]) -> None:
+    """One new respondent per figure, answering only the workload question; committed."""
+    for figure in hours:
+        world.door.world.submit(
+            term_week=TERM_WEEK_OF_COURSE_WEEK[course_week],
+            ratings={WORKLOAD_POSITION: figure},
+            cohort=TAUGHT_COHORT,
+        )
+    world.door.commit()
+
+
+def answerers_in(world: HoldWorld, *, course_week: int, position: int, column: str) -> int:
+    """Distinct students holding a non-null `column` answer at `position` in one taught week.
+
+    Read from the rows in the unit ruling 8 counts — distinct `response.user_id`,
+    never responses or answers (`docs/MISTAKES.md` entry 50) — so a test states
+    which side of the threshold its world is on from the database, not from its
+    own planting loop.
+    """
+    comments = world.door.world
+    answers = require_table(comments.tables, ANSWER_TABLE)
+    responses = require_table(comments.tables, RESPONSE_TABLE)
+    answer_response = comments.link(ANSWER_TABLE, RESPONSE_TABLE)
+    answer_question = comments.link(ANSWER_TABLE, QUESTION_TABLE)
+    question_id = comments.questions[FIRST_VERSION][position][comments.key_of(QUESTION_TABLE)]
+    world.door.refresh()
+    statement = (
+        select(func.count(distinct(responses.c[RESPONSE_USER_COLUMN])))
+        .select_from(
+            answers.join(
+                responses, answers.c[answer_response] == responses.c[single_primary_key(responses)]
+            )
+        )
+        .where(
+            responses.c[RESPONSE_SECTION_COLUMN] == world.taught,
+            responses.c[RESPONSE_WEEK_COLUMN] == world.week_id(course_week),
+            answers.c[answer_question] == question_id,
+            answers.c[column].is_not(None),
+        )
+    )
+    found = int(comments.session.execute(statement).scalar_one())
+    world.door.refresh()
+    return found
+
+
+def raters_in(world: HoldWorld, course_week: int, stream: str) -> int:
+    """Ruling 8's raters: distinct students with a rating answer in one stream of one week."""
+    return answerers_in(
+        world, course_week=course_week, position=RATING_POSITION[stream], column=RATING_COLUMN
+    )
+
+
+def workload_answerers_in(world: HoldWorld, course_week: int) -> int:
+    """Distinct students with a workload answer in one week."""
+    return answerers_in(
+        world, course_week=course_week, position=WORKLOAD_POSITION, column=WORKLOAD_HOURS_COLUMN
     )
 
 

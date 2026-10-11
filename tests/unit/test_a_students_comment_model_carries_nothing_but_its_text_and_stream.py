@@ -6,8 +6,9 @@
 The work order settles the models whole: `StudentComment {text}`,
 `StudentReleasedComment {text, stream}` with `stream` one of `instructor` and
 `course`, `StudentTrendPoint {course_week, mean}` (renamed from the work order's
-`TrendPoint`, which collides with the report's class in OpenAPI), and `StudentStream {stream, trend,
-distribution, small_n, comments}`, every one `extra="forbid"`. So the assertion
+`TrendPoint`, which collides with the report's class in OpenAPI), and
+`StudentStream {stream, trend, shares, small_n, comments}` (ruling 8 replaced the
+count `distribution` with `shares`), every one `extra="forbid"`. So the assertion
 is an **equality over each model's declared fields** — not a search for
 `answer_id`, which a `handle`, a `week` or a `submitted_at` walks past — and a
 refusal, by name, of each identifying member planted on a comment model.
@@ -38,7 +39,8 @@ FIELDS = {
     "StudentComment": {"text"},
     "StudentReleasedComment": {"text", "stream"},
     "StudentTrendPoint": {"course_week", "mean"},
-    "StudentStream": {"stream", "trend", "distribution", "small_n", "comments"},
+    # Ruling 8: `shares` replaced the first draft's count `distribution`.
+    "StudentStream": {"stream", "trend", "shares", "small_n", "comments"},
 }
 
 # What would identify a comment or place it in a week, planted on each model that
@@ -79,7 +81,7 @@ def whole(name: str) -> dict[str, Any]:
     return {
         "stream": "course",
         "trend": [{"course_week": 1, "mean": None}],
-        "distribution": {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0},
+        "shares": None,
         "small_n": True,
         "comments": [],
     }
