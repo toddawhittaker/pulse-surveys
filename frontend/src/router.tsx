@@ -13,6 +13,9 @@ import { InstructorReportRoute } from './routes/instructor/InstructorMondayRepor
 import { LeadershipLanding } from './routes/leadership';
 import { ComparisonSetsRoute } from './routes/leadership/ComparisonSets';
 import { EXCLUSION_LOG_ROUTE, ExclusionLogRoute } from './routes/leadership/ExclusionLog';
+import { OnBehalfRoute } from './routes/leadership/OnBehalf';
+import { RESPONSE_POLICY_ROUTE, ResponsePolicyRoute } from './routes/leadership/ResponsePolicy';
+import { ON_BEHALF_ROUTE, RESPONSES_OWED_ROUTE, ResponsesOwedRoute } from './routes/leadership/ResponsesOwed';
 import { REVIEW_QUEUE_ROUTE, ReviewQueueRoute } from './routes/leadership/ReviewQueue';
 import {
   COMPARISON_SETS_ROUTE,
@@ -188,6 +191,26 @@ const leadershipExclusionLogRoute = createRoute({
   component: ExclusionLogRoute,
 });
 
+// SPEC §5.3's response policy, the responses owed and responding on behalf,
+// flat off the root for the reason the comparison sets are.
+const leadershipResponsePolicyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: RESPONSE_POLICY_ROUTE,
+  component: ResponsePolicyRoute,
+});
+
+const leadershipResponsesOwedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: RESPONSES_OWED_ROUTE,
+  component: ResponsesOwedRoute,
+});
+
+const leadershipOnBehalfRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ON_BEHALF_ROUTE,
+  component: OnBehalfRoute,
+});
+
 const careRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/care',
@@ -221,6 +244,9 @@ export const routeTree = rootRoute.addChildren([
   leadershipComparisonSetRoute,
   leadershipReviewQueueRoute,
   leadershipExclusionLogRoute,
+  leadershipResponsePolicyRoute,
+  leadershipResponsesOwedRoute,
+  leadershipOnBehalfRoute,
   careRoute,
   adminRoute,
 ]);

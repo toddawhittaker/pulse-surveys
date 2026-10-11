@@ -1,0 +1,62 @@
+/* The leadership response pages: the policy, the responses owed and responding
+ * on behalf. They wear the set screen's page card (`leadershipComparisonSets.css`)
+ * and add only the lists below. Tokens only; nothing animates.
+ */
+
+.pulse-policy-prefix {
+  margin: var(--space-5) 0;
+}
+
+.pulse-policy-prefix-title {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-2);
+  font-weight: 500;
+}
+
+.pulse-policy-courses,
+.pulse-owed-list {
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pulse-policy-course,
+.pulse-owed-item {
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.pulse-policy-course:last-child,
+.pulse-owed-item:last-child {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.pulse-policy-course-label,
+.pulse-owed-section {
+  margin: 0;
+  font-weight: 500;
+}
+
+.pulse-policy-course-mode,
+.pulse-policy-course-note,
+.pulse-owed-week {
+  margin: var(--space-1) 0 0;
+  color: var(--spruce-60);
+  font-size: var(--text-1);
+}
+
+.pulse-owed-week {
+  font-family: var(--font-mono);
+}
+
+.pulse-on-behalf-stream {
+  margin: var(--space-5) 0;
+}
+
+.pulse-on-behalf-count {
+  margin: var(--space-2) 0;
+  color: var(--spruce-60);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+}
