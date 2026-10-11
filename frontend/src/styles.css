@@ -665,12 +665,16 @@
   .pulse-response-card {
     margin-top: var(--space-5);
     padding: var(--space-5);
-    border: 1px solid var(--mist);
+    border: 1px solid var(--hairline);
     border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
   }
 
   .pulse-response-text {
     margin: 0;
+    font-family: var(--font-display);
+    font-size: var(--text-3);
+    line-height: 1.55;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }

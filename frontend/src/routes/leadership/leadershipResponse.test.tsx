@@ -352,7 +352,7 @@ describe('responding on behalf', () => {
     });
     mountAt(`/leadership/sections/${SECTION_ID}/weeks/4/on-behalf`);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Use draft' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Draft with AI' }));
     await waitFor(() => {
       expect(screen.getByRole('textbox')).toHaveProperty('value', 'A draft.');
     });

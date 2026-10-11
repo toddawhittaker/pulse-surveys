@@ -42,7 +42,9 @@
   height: 24px;
   padding: 2px;
   background: var(--chalk);
-  border: 1px solid var(--hairline);
+  /* Deviation from the prototype's hairline: an off switch's edge is the control's
+     only boundary, so it takes the input edge (3:1 on paper, WCAG 1.4.11). */
+  border: 1px solid var(--input-edge);
   border-radius: 12px;
   cursor: pointer;
 }
@@ -53,7 +55,7 @@
   border-color: var(--spruce);
 }
 
-.pulse-policy-toggle__track:disabled {
+.pulse-policy-toggle__track[aria-disabled='true'] {
   cursor: default;
   opacity: 0.55;
 }
