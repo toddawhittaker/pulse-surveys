@@ -844,8 +844,16 @@ THE_CARE_DOOR = (RECORD_FUNCTION, REVEAL_FUNCTION, SUBJECT_RESOLVER_FUNCTION)
 # `tests/integration/test_the_staff_name_definer_answers_names_and_never_other_people.py`.
 # It is a new role because it is the first owner that reads `person.identity_name`,
 # and an owner holding a name must hold nothing else a caller could reach.
+#
+# **E7-01's fix round adds an eighth, `pulse_response_guard_definer`**, the owner of
+# the two `BEFORE INSERT` trigger functions on `instructor_response` and
+# `response_policy` (F1 to F3): it reads the grants and mappings that say whether
+# a writer holds the role they state, and writes nothing. `pulse_app` holds no
+# `EXECUTE` on either function — a trigger fires without it — so neither is in
+# `SANCTIONED_APPLICATION_EXECUTE`, and a grant of one would be red there.
 MODERATION_DEFINER_ROLE = "pulse_moderation_definer"
 STAFF_NAME_DEFINER_ROLE = "pulse_staff_name_definer"
+RESPONSE_GUARD_DEFINER_ROLE = "pulse_response_guard_definer"
 IDENTITY_DEFINER_ROLES = (
     RESOLVE_DEFINER_ROLE,
     "pulse_roster_definer",
@@ -854,6 +862,7 @@ IDENTITY_DEFINER_ROLES = (
     "pulse_grant_end_definer",
     MODERATION_DEFINER_ROLE,
     STAFF_NAME_DEFINER_ROLE,
+    RESPONSE_GUARD_DEFINER_ROLE,
 )
 
 # How the two halves are called. The record's third argument is a null case id:
@@ -4618,11 +4627,13 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
 # two-column read leaves all three refused. The server's half is
 # `test_the_teaching_grant_ends_only_through_its_definer.py`.
 #
-# **E7-01 spends twelve, all `INSERT`, on its two new records** (the ruling on B2
-# appended to its work order). A response and a policy change are each one
-# appended row, and these are the columns that row names:
+# **E7-01 spends thirteen, all `INSERT`, on its two new records** (the ruling on B2
+# appended to its work order, and the fix round's F4). A response and a policy
+# change are each one appended row, and these are the columns that row names:
 #
-#   - `instructor_response(section_id)`, `(week_id)` — which section-week;
+#   - `instructor_response(section_id)`, `(week_id)`, `(term_id)` — which
+#     section-week, and the term both belong to (F4: composite keys into
+#     `section (id, term_id)` and `week (id, term_id)`, the pattern `response` uses);
 #   - `instructor_response(author_person_id)`, `(role)` — who wrote it and under
 #     which role (an on-behalf response is the role, not a second flag);
 #   - `instructor_response(ai_seeded)`, `(body)`, `(published_at)` — whether it
@@ -4662,6 +4673,7 @@ RUNTIME_COLUMN_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "ended_teaching_grant", "section_id", "SELECT"),
         (APPLICATION_ROLE, "instructor_response", "section_id", "INSERT"),
         (APPLICATION_ROLE, "instructor_response", "week_id", "INSERT"),
+        (APPLICATION_ROLE, "instructor_response", "term_id", "INSERT"),
         (APPLICATION_ROLE, "instructor_response", "author_person_id", "INSERT"),
         (APPLICATION_ROLE, "instructor_response", "role", "INSERT"),
         (APPLICATION_ROLE, "instructor_response", "ai_seeded", "INSERT"),

@@ -37,6 +37,7 @@ from fixtures.staff_names import (
     RESPONSE_AUTHOR_COLUMN,
     RESPONSE_BODY_COLUMN,
     RESPONSE_SECTION_COLUMN,
+    RESPONSE_TERM_COLUMN,
     RESPONSE_TIME_COLUMN,
     ROLE_COLUMN,
     WEEK_COLUMN,
@@ -148,7 +149,15 @@ def test_a_response_author_who_does_not_teach_the_section_is_not_listed_as_an_in
     door = student_read_door
     world = door.world
     a_teacher(door, web_identity, world.enrolled_section_id, ENROLLED_TEACHER)
+    # The author is the course's Lead Faculty — a `LEAD_FACULTY` assignment and the
+    # mapping row — because the fix round's F1 trigger refuses a `LEAD_FACULTY` row
+    # from anyone else, on any connection.
     author = web_identity.person(**{IDENTITY_NAME_COLUMN: ON_BEHALF_AUTHOR})
+    course = world.parent_row("section", "course", world.enrolled_section)
+    course_id = course[single_primary_key(require_table(metadata_tables, "course"))]
+    world.rows.graph.assign("LEAD_FACULTY", scope=course_id, person=author)
+    world.rows.graph.lead_mapping(person=author, course=course_id)
+    world.rows.commit()
     if INSTRUCTOR_RESPONSE not in metadata_tables:
         pytest.fail(f"`Base.metadata` declares no `{INSTRUCTOR_RESPONSE}`; E7-01's M1 adds it.")
     world.rows.seed(
@@ -156,6 +165,9 @@ def test_a_response_author_who_does_not_teach_the_section_is_not_listed_as_an_in
         {},
         **{
             RESPONSE_SECTION_COLUMN: world.enrolled_section_id,
+            RESPONSE_TERM_COLUMN: world.term[
+                single_primary_key(require_table(metadata_tables, "term"))
+            ],
             WEEK_COLUMN: world.week[single_primary_key(require_table(metadata_tables, "week"))],
             RESPONSE_AUTHOR_COLUMN: author,
             ROLE_COLUMN: "LEAD_FACULTY",

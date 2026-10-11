@@ -108,11 +108,21 @@ def is_a_runtime_error(failure: BaseException | None) -> bool:
 
 
 def plant(database: Any, tables: dict[str, Any], name: str) -> None:
-    """One row of `name` at head, every spelled column named and every reference followed."""
+    """One row of `name` at head, every spelled column named and every reference followed.
+
+    The writer is the chain's course's Lead Faculty — the assignment and the
+    mapping — because the fix round's F1 and F3 triggers refuse a `LEAD_FACULTY`
+    row from anybody else, on every connection.
+    """
+    from fixtures.supervision import SupervisionGraph
+
     with session_on(database) as session:
         chain: dict[str, Any] = {}
         seed_row(session, tables, SECTION_TABLE, chain)
         chain[PERSON_TABLE] = seed_row(session, tables, PERSON_TABLE, {})
+        graph = SupervisionGraph(session, tables)
+        graph.assign("LEAD_FACULTY", scope=chain["course"]["id"], person=chain[PERSON_TABLE]["id"])
+        graph.lead_mapping(person=chain[PERSON_TABLE]["id"], course=chain["course"]["id"])
         table = tables[name]
         values: dict[str, Any] = {ROLE_COLUMN: "LEAD_FACULTY"}
         values[only_reference(table, PERSON_TABLE)] = chain[PERSON_TABLE]["id"]

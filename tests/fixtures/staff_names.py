@@ -131,6 +131,8 @@ RESPONSE_ROLES = ("INSTRUCTOR", "LEAD_FACULTY", "CHAIR")
 POLICY_ROLES = ("LEAD_FACULTY", "CHAIR")
 POLICY_MODES = ("ENCOURAGED", "REQUIRED")
 # The ruling on B2: every column of both tables, and the ones `pulse_app` inserts.
+# The fix round's F4 adds `term_id`, held by composite keys into `section (id,
+# term_id)` and `week (id, term_id)`, the pattern `response` uses.
 RESPONSE_COLUMNS = (
     "ai_seeded",
     "author_person_id",
@@ -140,10 +142,12 @@ RESPONSE_COLUMNS = (
     "role",
     "section_id",
     "sequence",
+    "term_id",
     "week_id",
 )
 RESPONSE_INSERTED = (
     "section_id",
+    "term_id",
     "week_id",
     "author_person_id",
     "role",
@@ -154,6 +158,9 @@ RESPONSE_INSERTED = (
 POLICY_COLUMNS = ("id", "mode", "prefix_id", "role", "sequence", "set_at", "set_by_person_id")
 POLICY_INSERTED = ("prefix_id", "set_by_person_id", "role", "mode", "set_at")
 RESPONSE_SECTION_COLUMN = "section_id"
+RESPONSE_TERM_COLUMN = "term_id"
+# The fix round's F1 to F3: the two `BEFORE INSERT` triggers' owner.
+RESPONSE_GUARD_ROLE = "pulse_response_guard_definer"
 RESPONSE_AUTHOR_COLUMN = "author_person_id"
 RESPONSE_BODY_COLUMN = "body"
 RESPONSE_TIME_COLUMN = "published_at"
@@ -625,12 +632,18 @@ class StaffNameWorld:
     def a_response(self, section_id: Any, *, author: Any, role: str) -> Any:
         """One `instructor_response` row for `section_id`, written by `author` under `role`.
 
-        Every column the ruling on B2 settles is named; the week is one of the
-        section's own term's weeks.
+        Every column the ruling on B2 and the fix round's F4 settle is named; the
+        week is one of the section's own term's weeks. **The author must hold
+        `role` for the section** — the fix round's F1 trigger refuses anyone else
+        even on the seeding connection — so every caller passes a person this
+        world gave that grant (the section's teacher as `INSTRUCTOR`, the course's
+        lead as `LEAD_FACULTY`). One author per section-week (F2) holds too: no
+        caller writes two authors into one section's week.
         """
         require_the_tables(self.tables)
         values = {
             RESPONSE_SECTION_COLUMN: section_id,
+            RESPONSE_TERM_COLUMN: self.term_of(section_id),
             RESPONSE_AUTHOR_COLUMN: author,
             ROLE_COLUMN: role,
             AI_SEEDED_COLUMN: False,
@@ -642,17 +655,8 @@ class StaffNameWorld:
         self.rows.commit()
         return row
 
-    def a_week_of(self, section_id: Any) -> Any:
-        """A row of whatever `week_id` names, of the section's own term where it has one."""
-        table = self.tables[INSTRUCTOR_RESPONSE]
-        targets = {key.column.table.name for key in table.c[WEEK_COLUMN].foreign_keys}
-        if len(targets) != 1:
-            pytest.fail(
-                f"`{INSTRUCTOR_RESPONSE}.{WEEK_COLUMN}` references {sorted(targets)}; the work "
-                "order keys a response to one course week row."
-            )
-        (target,) = targets
-        week_table = require_table(self.tables, target)
+    def term_of(self, section_id: Any) -> Any:
+        """The `term` key the section's own row names."""
         section_table = require_table(self.tables, SECTION_TABLE)
         self.rows.session.rollback()
         section = (
@@ -664,15 +668,26 @@ class StaffNameWorld:
             .mappings()
             .one()
         )
-        statement = week_table.select()
+        terms = foreign_key_columns(section_table, "term")
+        if len(terms) != 1:
+            pytest.fail(f"`section` has {len(terms)} references to `term` ({terms}).")
+        return section[terms[0]]
+
+    def a_week_of(self, section_id: Any, index: int = 0) -> Any:
+        """The `index`-th `week` of the section's own term, by week number."""
+        week_table = require_table(self.tables, "week")
         week_terms = foreign_key_columns(week_table, "term")
-        section_terms = foreign_key_columns(section_table, "term")
-        if len(week_terms) == 1 and len(section_terms) == 1:
-            statement = statement.where(week_table.c[week_terms[0]] == section[section_terms[0]])
-        found = self.rows.session.execute(statement.limit(1)).mappings().one_or_none()
-        if found is None:
-            pytest.fail(f"No `{target}` row exists for the section's term to key a response to.")
-        return found[single_primary_key(week_table)]
+        if len(week_terms) != 1:
+            pytest.fail(f"`week` has {len(week_terms)} references to `term` ({week_terms}).")
+        term = self.term_of(section_id)
+        statement = week_table.select().where(week_table.c[week_terms[0]] == term)
+        if "number" in week_table.c:
+            statement = statement.order_by(week_table.c["number"])
+        found = self.rows.session.execute(statement).mappings().all()
+        self.rows.session.rollback()
+        if len(found) <= index:
+            pytest.fail(f"The section's term has {len(found)} weeks; week {index} was asked for.")
+        return found[index][single_primary_key(week_table)]
 
 
 def only_reference(table: Any, target: str) -> str:

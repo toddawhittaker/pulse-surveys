@@ -3086,10 +3086,11 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
             "role",
             "section_id",
             "sequence",
+            "term_id",
             "week_id",
         ),
         "One published response, append-only (E7-01, ruling 3: every edit is a new row): the "
-        "section-week as keys, the author as a `person` key and the role they wrote under, "
+        "section-week and the term they share as keys (the fix round's F4), the author as a `person` key and the role they wrote under, "
         "whether it was seeded from an AI draft, the text, when, and the database's insertion "
         "order. The author is a member of staff and their name is published with the response by "
         "design (SPEC §5.3), through the staff-name definer rather than through this row. No "

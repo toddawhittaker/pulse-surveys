@@ -51,7 +51,7 @@ from fixtures.staff_names import (
     sqlstate,
     the_text_bound,
 )
-from fixtures.supervision import foreign_key_columns, seed_row, stored_type
+from fixtures.supervision import SupervisionGraph, foreign_key_columns, seed_row, stored_type
 from sqlalchemy import Boolean, Date, DateTime, Integer, String, text
 
 pytestmark = pytest.mark.integration
@@ -146,11 +146,43 @@ def a_whole_row(session: Any, tables: dict[str, Any], table: Any, chain: dict[st
     return values
 
 
-def parents(committed_rows: Any, tables: dict[str, Any]) -> dict[str, Any]:
-    """A section with its whole chain and a person, committed — what a row references."""
+def qualify(graph: Any, tables: dict[str, Any], chain: dict[str, Any], role: str) -> None:
+    """Give the chain's person the grant that lets them write a row under `role`.
+
+    The fix round's F1 and F3 triggers refuse a row whose author or setter does
+    not hold the stated role at write time, on every connection, so a test whose
+    subject is a grant or a column has to write as somebody legitimate:
+    `INSTRUCTOR` teaches the chain's section; `LEAD_FACULTY` holds the assignment
+    and the mapping for the chain's course (a course of the chain's prefix);
+    `CHAIR` chairs the chain's department, whose course here has no lead.
+    """
+    from fixtures.supervision import require_table, single_primary_key
+
+    def key(table_name: str) -> Any:
+        return chain[table_name][single_primary_key(require_table(tables, table_name))]
+
+    person = key(PERSON_TABLE)
+    if role == "INSTRUCTOR":
+        graph.assign("INSTRUCTOR", scope=key("section"), person=person)
+    elif role == "LEAD_FACULTY":
+        graph.assign("LEAD_FACULTY", scope=key("course"), person=person)
+        graph.lead_mapping(person=person, course=key("course"))
+    elif role == "CHAIR":
+        graph.assign("CHAIR", scope=key("department"), person=person)
+    else:  # pragma: no cover - a role the vocabulary does not hold
+        pytest.fail(f"No grant qualifies a writer under {role!r}.")
+
+
+def parents(committed_rows: Any, tables: dict[str, Any], name: str) -> dict[str, Any]:
+    """A section with its whole chain and a person qualified to write `name`, committed.
+
+    The person is qualified for the first token of the table's role vocabulary,
+    which is the role `a_whole_row` writes.
+    """
     chain: dict[str, Any] = {}
     committed_rows.seed("section", chain)
     chain[PERSON_TABLE] = committed_rows.seed(PERSON_TABLE, {})
+    qualify(committed_rows.graph, tables, chain, VOCABULARY[name][ROLE_COLUMN][0])
     committed_rows.commit()
     return chain
 
@@ -175,7 +207,7 @@ def attempted(session: Any, statement: Any, parameters: dict | None = None) -> A
 def a_committed_row(committed_rows: Any, tables: dict[str, Any], name: str) -> dict[str, Any]:
     """One whole row of `name`, written by the superuser and committed."""
     table = tables[name]
-    chain = parents(committed_rows, tables)
+    chain = parents(committed_rows, tables, name)
     values = a_whole_row(committed_rows.session, tables, table, chain)
     row = (
         committed_rows.session.execute(table.insert().values(**values).returning(*table.columns))
@@ -204,7 +236,7 @@ def test_the_application_connection_inserts_every_listed_column_and_reads_the_ro
     require_the_tables(metadata_tables)
     require_the_application_role(application_session)
     table = metadata_tables[name]
-    chain = parents(committed_rows, metadata_tables)
+    chain = parents(committed_rows, metadata_tables, name)
     values = a_whole_row(committed_rows.session, metadata_tables, table, chain)
     committed_rows.commit()
 
@@ -338,7 +370,7 @@ def test_the_application_connection_cannot_choose_a_rows_sequence(
     require_the_application_role(application_session)
     table = metadata_tables[name]
     assert SEQUENCE_COLUMN in table.c, f"`{name}` has no `{SEQUENCE_COLUMN}` column."
-    chain = parents(committed_rows, metadata_tables)
+    chain = parents(committed_rows, metadata_tables, name)
     values = a_whole_row(committed_rows.session, metadata_tables, table, chain)
     committed_rows.commit()
 
@@ -371,7 +403,7 @@ def test_a_later_insert_carries_a_larger_sequence(
     require_the_tables(metadata_tables)
     require_the_application_role(application_session)
     table = metadata_tables[name]
-    chain = parents(committed_rows, metadata_tables)
+    chain = parents(committed_rows, metadata_tables, name)
     values = a_whole_row(committed_rows.session, metadata_tables, table, chain)
     committed_rows.commit()
     person_column = foreign_key_columns(table, PERSON_TABLE)[0]
@@ -411,14 +443,38 @@ def test_a_later_insert_carries_a_larger_sequence(
 # ---------------------------------------------------------------------------
 
 
-def a_row_in(db_session: Any, tables: dict[str, Any], name: str, **overrides: Any) -> Any:
-    """Insert one row of `name` with `overrides`; the error it raised, or `None`."""
+def a_row_in(
+    db_session: Any,
+    tables: dict[str, Any],
+    name: str,
+    *,
+    without_the_write_guard: bool = False,
+    **overrides: Any,
+) -> Any:
+    """Insert one row of `name` with `overrides`; the error it raised, or `None`.
+
+    The writer is qualified for the role the row states (the fix round's F1 and F3
+    triggers refuse anybody else), so a refusal here is the column rule under test
+    and never the author check.
+
+    `without_the_write_guard` is for a role token **outside** the vocabulary:
+    there is no grant that qualifies a writer as `DEAN`, and a `BEFORE INSERT`
+    trigger runs before any `CHECK` is evaluated, so with the trigger on, the
+    trigger's refusal would hide whether the `CHECK` exists. So those rows are
+    written with `session_replication_role = replica` for this transaction, which
+    switches ordinary triggers off and leaves `CHECK` and `NOT NULL` evaluated —
+    the table's own rule, measured alone.
+    """
     table = tables[name]
     chain: dict[str, Any] = {}
     seed_row(db_session, tables, "section", chain)
     chain[PERSON_TABLE] = seed_row(db_session, tables, PERSON_TABLE, {})
     values = a_whole_row(db_session, tables, table, chain)
     values.update(overrides)
+    if without_the_write_guard:
+        db_session.execute(text("SET LOCAL session_replication_role = replica"))
+    else:
+        qualify(SupervisionGraph(db_session, tables), tables, chain, values[ROLE_COLUMN])
     return attempted(db_session, table.insert().values(**values))
 
 
@@ -458,7 +514,9 @@ def test_a_token_outside_a_vocabulary_is_refused_by_a_check(
     instructor sets no policy (SPEC §5.3).
     """
     require_the_tables(metadata_tables)
-    failure = a_row_in(db_session, metadata_tables, name, **{column: token})
+    failure = a_row_in(
+        db_session, metadata_tables, name, without_the_write_guard=True, **{column: token}
+    )
     assert failure is not None and sqlstate(failure) == CHECK_VIOLATION, (
         f"A `{name}` row with `{column}` = {token!r} was answered "
         f"{'nothing — accepted' if failure is None else sqlstate(failure)}, not 23514."
@@ -569,8 +627,15 @@ def test_a_person_who_wrote_a_response_cannot_be_deleted(
     seed_row(db_session, metadata_tables, "section", chain)
     chain[PERSON_TABLE] = seed_row(db_session, metadata_tables, PERSON_TABLE, {})
     author = chain[PERSON_TABLE][person_key]
+    qualify(SupervisionGraph(db_session, metadata_tables), metadata_tables, chain, "INSTRUCTOR")
     row = a_whole_row(db_session, metadata_tables, table, chain)
     db_session.execute(table.insert().values(**row))
+    # The teaching grant that qualified the author is removed once the row is
+    # written, so the only thing left referencing the person is the response — a
+    # refusal below is then the response's key and not the grant's.
+    graph = SupervisionGraph(db_session, metadata_tables)
+    assignments = graph.assignments
+    db_session.execute(assignments.delete().where(assignments.c[graph.person_column] == author))
     stranger = seed_row(db_session, metadata_tables, PERSON_TABLE, {})[person_key]
 
     near_miss = attempted(db_session, person.delete().where(person.c[person_key] == stranger))
