@@ -851,7 +851,10 @@ def exclusion_log(
     labels = _section_labels(session, {decision.section_id for decision in decisions})
     # Once for every decision, in a fixed number of statements, so a log over a
     # term costs what a log over one week costs (E6-09).
-    shown = shown_under_their_week(session, {decision.answer_id for decision in decisions})
+    shown = shown_under_their_week(
+        session,
+        {(decision.answer_id, decision.section_id, decision.week_id) for decision in decisions},
+    )
     zone = ZoneInfo(settings.institution_timezone)
     return [
         ExclusionLogRow(

@@ -889,7 +889,9 @@ def logged_decisions(
     )
 
 
-def shown_under_their_week(session: Session, answer_ids: Collection[UUID]) -> set[UUID]:
+def shown_under_their_week(
+    session: Session, decided: Collection[tuple[UUID, UUID, UUID]]
+) -> set[UUID]:
     """Which of these comments their own instructor's report shows under their week.
 
     `visible_cards`'s rule, asked about many comments at once for the exclusion
@@ -900,9 +902,18 @@ def shown_under_their_week(session: Session, answer_ids: Collection[UUID]) -> se
     moderated (the set `section_week_moderated` reads). Those are the helpers
     `visible_cards` asks one section-week at a time, so the two answer alike
     about one comment, and the log's excerpt invariant test holds every case.
+
+    `decided` is each comment's `(answer_id, section_id, week_id)`. The sections
+    and weeks narrow the grouped commenter count before it is grouped, so a read
+    costs what its own section-weeks cost rather than every section-week ever
+    written (E6-09's review round); a pair outside them is never joined to, so
+    the answer is the same.
     """
-    if not answer_ids:
+    if not decided:
         return set()
+    answer_ids = sorted({answer_id for answer_id, _, _ in decided})
+    section_ids = sorted({section_id for _, section_id, _ in decided})
+    week_ids = sorted({week_id for _, _, week_id in decided})
     commenters = _commenters_by_stream_week()
     candidates = session.execute(
         select(COMMENT_VIEW.c.answer_id, COMMENT_VIEW.c.section_id, COMMENT_VIEW.c.week_id)
@@ -913,7 +924,9 @@ def shown_under_their_week(session: Session, answer_ids: Collection[UUID]) -> se
             & (commenters.c.stream == COMMENT_VIEW.c.stream),
         )
         .where(
-            COMMENT_VIEW.c.answer_id.in_(list(answer_ids)),
+            COMMENT_VIEW.c.answer_id.in_(answer_ids),
+            commenters.c.section_id.in_(section_ids),
+            commenters.c.week_id.in_(week_ids),
             commenters.c.commenters >= n_threshold(),
             _in_no_release_batch(COMMENT_VIEW.c.answer_id),
         )
