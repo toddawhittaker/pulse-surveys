@@ -53,6 +53,10 @@ model did not answer usably at all. One sentence for all of them, because a
 refusal that said which would tell the instructor something about comments they
 are not shown, one edit of the draft at a time.
 
+**E7-10 adds the assistant's 429**: a person asking for a second draft or check
+while one of theirs is still waiting on the model is refused before anything is
+read, with one sentence that says to ask again.
+
 **`COPY` beside the entries, because that is the shape the package settles.**
 Each copy module publishes `COPY: Mapping[str, CopyEntry]` keyed by dotted keys,
 which is what `app.copy.copy_modules()`'s readers walk.
@@ -63,6 +67,7 @@ from collections.abc import Mapping
 from app.copy import CopyEntry
 
 __all__ = [
+    "ASSISTANT_BUSY",
     "ASSISTANT_UNUSABLE",
     "COMMENT_UNAVAILABLE",
     "COPY",
@@ -144,6 +149,13 @@ ASSISTANT_UNUSABLE = CopyEntry(
     text="The writing assistant could not produce a usable answer this time. You can ask again.",
 )
 
+# The 429 a draft or a check answers when the same person already has one
+# waiting on the model (E7-10 done-when 3). It names nothing of either request.
+ASSISTANT_BUSY = CopyEntry(
+    key="instructor_report.assistant_busy",
+    text="The writing assistant is still working on your last request. You can ask again once it has answered.",
+)
+
 COPY: Mapping[str, CopyEntry] = {
     entry.key: entry
     for entry in (
@@ -156,5 +168,6 @@ COPY: Mapping[str, CopyEntry] = {
         REASON_BLANK,
         REASON_TOO_LONG,
         ASSISTANT_UNUSABLE,
+        ASSISTANT_BUSY,
     )
 }

@@ -191,7 +191,7 @@ SMALL_N_MARKER = "below the reporting threshold, so name themes"
 MODERATION_MARKER_LINE = "The comment to moderate follows this line."
 
 # The response draft's and the draft check's task lines (E7-04): each is a whole
-# line of `backend/app/ai/prompts/response_draft.v1.md` or `draft_check.v1.md`, a
+# line of `backend/app/ai/prompts/response_draft.v3.md` or `draft_check.v1.md`, a
 # second copy guarded as the lines above are. The week each prompt ends with (or,
 # for the check, holds before the draft) is one ASCII-escaped JSON document, so
 # no summary inside it can stand on a line of its own and pose as one of these.
@@ -761,10 +761,13 @@ def draft_for(week_text: str) -> Answer:
         if stream.get(SUMMARY_KEY)
     ]
     about = " and ".join(topics) if topics else "this week"
+    # Promises nothing in the first person, so it reads truly whichever author
+    # `response_draft.v3`'s role slot names (E7-10): an instructor's draft, or a
+    # lead's or a chair's on the instructor's behalf.
     draft = (
         f"Thank you for this week's feedback. I have read the summaries of what you wrote about "
-        f"{about}, and I will respond to each theme in class this week. This draft comes from the "
-        "mock provider rather than a model, so it names nothing specific."
+        f"{about}, and the course will answer each theme in class this week. This draft comes "
+        "from the mock provider rather than a model, so it names nothing specific."
     )
     if QUOTES_THE_WEEK_MARKER in week_text:
         quoted = [
