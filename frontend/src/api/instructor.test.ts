@@ -3,11 +3,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   SECTIONS_PATH,
   decideOnComment,
+  draftCheckPath,
   publishedWeeksPath,
   readInstructorReport,
   readPublishedWeeks,
   readTaughtSections,
+  readWeekResponse,
   reportPath,
+  requestDraftCheck,
+  requestResponseDraft,
+  responseDraftPath,
+  weekResponsePath,
+  writeWeekResponse,
 } from './instructor';
 
 /**
@@ -264,5 +271,103 @@ describe('decideOnComment', () => {
       kind: 'unavailable',
       detail: null,
     });
+  });
+});
+
+describe('the response loop’s calls', () => {
+  const A_PUBLISHED = {
+    state: 'published',
+    response: {
+      text: 'We heard you.',
+      author_name: 'Dr. Ada Marsh',
+      author_role: 'INSTRUCTOR',
+      published_at: '2026-10-12T14:00:00Z',
+    },
+  };
+  const SENTENCE = 'The assistant could not help with this just now.';
+
+  it('are the three `app.api.instructor` registers, with the keys filled in', () => {
+    expect(weekResponsePath(SECTION_ID, 4)).toBe(`/instructor/sections/${SECTION_ID}/weeks/4/response`);
+    expect(responseDraftPath(SECTION_ID, 4)).toBe(
+      `/instructor/sections/${SECTION_ID}/weeks/4/response-draft`,
+    );
+    expect(draftCheckPath(SECTION_ID, 4)).toBe(`/instructor/sections/${SECTION_ID}/weeks/4/draft-check`);
+  });
+
+  it('reads the week’s state with a GET', async () => {
+    const { asked } = answering(json(200, A_PUBLISHED));
+    expect(await readWeekResponse(SECTION_ID, 4)).toEqual({ kind: 'read', view: A_PUBLISHED });
+    expect(asked).toEqual([weekResponsePath(SECTION_ID, 4)]);
+  });
+
+  it('publishes with a POST and edits with a PUT, each carrying the write', async () => {
+    const methods: (string | undefined)[] = [];
+    const bodies: unknown[] = [];
+    vi.stubGlobal('fetch', (_input: string, init?: RequestInit) => {
+      methods.push(init?.method);
+      bodies.push(JSON.parse(init?.body as string));
+      return Promise.resolve(json(init?.method === 'POST' ? 201 : 200, A_PUBLISHED));
+    });
+    const write = { text: 'We heard you.', ai_seeded: true };
+
+    expect(await writeWeekResponse('POST', SECTION_ID, 4, write)).toEqual({
+      kind: 'saved',
+      view: A_PUBLISHED,
+    });
+    expect(await writeWeekResponse('PUT', SECTION_ID, 4, write)).toEqual({
+      kind: 'saved',
+      view: A_PUBLISHED,
+    });
+    expect(methods).toEqual(['POST', 'PUT']);
+    expect(bodies).toEqual([write, write]);
+  });
+
+  it('carries the server’s sentence for a 409 and for the model’s 502', async () => {
+    answering(json(409, { detail: SENTENCE }));
+    expect(await writeWeekResponse('POST', SECTION_ID, 4, { text: 'x', ai_seeded: false })).toEqual({
+      kind: 'refused',
+      detail: SENTENCE,
+    });
+    answering(json(502, { detail: SENTENCE }));
+    expect(await requestResponseDraft(SECTION_ID, 4)).toEqual({
+      kind: 'unavailable',
+      detail: SENTENCE,
+    });
+    answering(json(502, { detail: SENTENCE }));
+    expect(await requestDraftCheck(SECTION_ID, 4, 'x')).toEqual({
+      kind: 'unavailable',
+      detail: SENTENCE,
+    });
+  });
+
+  it('asks for a draft with a POST and sends the draft to the check in its body', async () => {
+    const inits: (RequestInit | undefined)[] = [];
+    vi.stubGlobal('fetch', (input: string, init?: RequestInit) => {
+      inits.push(init);
+      return Promise.resolve(
+        input.endsWith('response-draft')
+          ? json(200, { text: 'A draft.' })
+          : json(200, { unaddressed: [{ label: 'Pacing', comment_count: null }] }),
+      );
+    });
+
+    expect(await requestResponseDraft(SECTION_ID, 4)).toEqual({ kind: 'draft', text: 'A draft.' });
+    expect(await requestDraftCheck(SECTION_ID, 4, 'My text')).toEqual({
+      kind: 'checked',
+      unaddressed: [{ label: 'Pacing', comment_count: null }],
+    });
+    expect(inits.map((init) => init?.method)).toEqual(['POST', 'POST']);
+    expect(JSON.parse(inits[1]?.body as string)).toEqual({ draft: 'My text' });
+  });
+
+  it('answers session-ended for a 401 and unavailable for no answer or a body that is no answer', async () => {
+    answering(json(401, { detail: 'Not authenticated' }));
+    expect(await readWeekResponse(SECTION_ID, 4)).toEqual({ kind: 'session-ended' });
+    answering(new Error('offline'));
+    expect(await readWeekResponse(SECTION_ID, 4)).toEqual({ kind: 'unavailable', detail: null });
+    answering(json(200, { not: 'a week' }));
+    expect(await readWeekResponse(SECTION_ID, 4)).toEqual({ kind: 'unavailable', detail: null });
+    answering(json(200, { not: 'a draft' }));
+    expect(await requestResponseDraft(SECTION_ID, 4)).toEqual({ kind: 'unavailable', detail: null });
   });
 });

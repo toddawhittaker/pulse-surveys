@@ -848,6 +848,48 @@ describe('a decision on a comment (SPEC §5.2)', () => {
   });
 });
 
+describe('a decision on a released comment (SPEC §5.2, ADR 0189)', () => {
+  const RELEASED_ID = '0f6b3c1e-2d4a-4e8b-9c7d-1a2b3c4d5e03';
+
+  it('excludes a released comment and undoes it, sending that comment’s own handle', async () => {
+    const sent: { url: string; body: unknown }[] = [];
+    const cards = [
+      { text: RELEASED_COMMENT, status: 'excluded', stream: 'COURSE', answer_id: RELEASED_ID, flag: null, decided_by_you: true },
+      { text: RELEASED_COMMENT, status: 'published', stream: 'COURSE', answer_id: RELEASED_ID, flag: null, decided_by_you: false },
+    ];
+    const reads: Record<string, unknown> = {
+      [publishedWeeksPath(SECTION_ID)]: { published_weeks: PUBLISHED_WEEKS },
+      [reportPath(SECTION_ID, 4)]: A_WEEK_WITH_A_RELEASE,
+    };
+    vi.stubGlobal('fetch', (input: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        sent.push({ url: input, body: JSON.parse(init.body as string) });
+        return Promise.resolve(json(200, cards.shift()));
+      }
+      const answer = reads[input];
+      if (answer === undefined) return Promise.reject(new Error(`No answer for ${input}.`));
+      return Promise.resolve(json(200, answer));
+    });
+    open(4);
+
+    const card = (await screen.findByText(RELEASED_COMMENT)).closest('article') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Exclude from student view' }));
+    fireEvent.change(within(card).getByRole('textbox'), { target: { value: 'Off topic.' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Exclude with this reason' }));
+
+    await within(card).findByText(/^Excluded — students will not see this comment/);
+    fireEvent.click(within(card).getByRole('button', { name: 'Undo' }));
+    await waitFor(() => {
+      expect(within(card).queryByText(/^Excluded/)).toBeNull();
+    });
+
+    expect(sent).toEqual([
+      { url: decisionsPath(RELEASED_ID), body: { action: 'exclude', reason: 'Off topic.' } },
+      { url: decisionsPath(RELEASED_ID), body: { action: 'undo', reason: null } },
+    ]);
+  });
+});
+
 describe('a section before its first Monday', () => {
   it('says so calmly, and still names the section', async () => {
     // The empty list is a state and not a failure, and it is most instructors'
