@@ -195,6 +195,14 @@ boundary: `metadata_tables` is asked for by both.
     test calls from its own body so an unbuilt E5-05 is a FAILED naming the
     missing member.
 
+  - `fixtures/staff_names.py` — E7-01: the staff-name definer, the one Python door
+    to it and the two response records, every name that ticket's work order
+    settles spelled once and every column it does not spell found by the table
+    its key points at; and E6-05's lead-review world with each staff member given
+    a distinctive name, three more teachers, a second department's chair, and the
+    students, former teacher, two-hat person and response a test plants for
+    itself.
+
 Five modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
 `seed_row` already is. They are listed here because this docstring is the index
@@ -284,6 +292,7 @@ pytest_plugins = (
     "fixtures.named_sets",
     "fixtures.instructor_decisions",
     "fixtures.lead_review",
+    "fixtures.staff_names",
 )
 
 

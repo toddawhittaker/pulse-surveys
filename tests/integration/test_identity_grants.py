@@ -487,12 +487,32 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 #     argument can carry a person and no answer names one. Its owner is a NOLOGIN
 #     role of its own, `pulse_moderation_definer` (ADR 0043's pattern, ADR 0187).
 #     The count moves from nine to ten.
+#   - `section_staff_names(p_section_id, p_reader_user_id, p_reader_person_id) ->
+#     TABLE (person_id, display_name)` — E7-01's, and **the first entry that
+#     returns a name**, which
+#     is why its sentence is longer than the others. SPEC §5.3 posts an
+#     instructor's response "non-anonymously under the instructor's name" and an
+#     on-behalf one "attributed honestly to the Lead Faculty", so a student has to
+#     be able to read a member of staff's `person.identity_name`, and `pulse_app`
+#     holds no privilege on `person`. A column grant is the wrong shape: `person`
+#     holds students too, and a grant cannot filter rows. So the read is one
+#     function whose body answers, for one section and one reader, the section's
+#     live teaching instructors and anyone who published a response to it — and
+#     answers nothing unless the reader is enrolled in that section (asked by user
+#     key — a student has no `person`), teaches it, or is responsible for its course
+#     (both asked by person key); exactly one key, or nothing (ADR 0191; work order
+#     decision 1 and its ruling on B1). What it
+#     never answers is a student, an address, or any column but the name:
+#     `user_identity` stays unreachable from this role by every mechanism, and the
+#     owner, `pulse_staff_name_definer`, holds nothing on it
+#     (`test_the_staff_name_definer_answers_names_and_never_other_people.py`).
+#     The count moves from ten to eleven.
 #
 # What is *not* here is the point of the list: the functions of the Care door.
-# `pulse_app` is refused those by name in an `invariant`-marked test below, and an
-# **eleventh** entry appearing here is a new door into identity that some later
+# `pulse_app` is refused those by name in an `invariant`-marked test below, and a
+# **twelfth** entry appearing here is a new door into identity that some later
 # ticket opened without arguing for it. The number moves only in a change that
-# writes the sentence admitting the entry, as each of the ten above did; an
+# writes the sentence admitting the entry, as each of the eleven above did; an
 # entry arriving without one is the thing this inventory exists to make
 # impossible.
 #
@@ -511,6 +531,7 @@ SANCTIONED_APPLICATION_EXECUTE = (
     "benchmark_set_rating_week",
     "end_teaching_instructor",
     "route_moderation_verdict",
+    "section_staff_names",
 )
 
 # What the resolve definer may reach at table grain, and the whole of it.
@@ -704,9 +725,11 @@ RESOLVE_BOTH = text("SELECT to_regclass(:bare)::oid, to_regclass(:qualified)::oi
 # **One rule stopped being spellable as emptiness, and E1-12 and E1-11 are why.**
 # "`pulse_app` may execute nothing" needed no name at all while the answer was
 # zero; the answer is now the functions `SANCTIONED_APPLICATION_EXECUTE` names,
-# every one of which returns no identity (ADR 0094, E1-11's D7, the security
-# round's F2, E3-06's outbound subject and E5-03's two benchmark set functions),
-# so the rule is an
+# every one of which returns no student's identity (ADR 0094, E1-11's D7, the
+# security round's F2, E3-06's outbound subject and E5-03's two benchmark set
+# functions return none at all; E7-01's staff-name channel returns a member of
+# staff's name to a reader of that staff member's section, and nothing else, ADR
+# 0191), so the rule is an
 # equality over
 # `SANCTIONED_APPLICATION_EXECUTE` at
 # the head of this file. The **door** it may not open is still spelled without a
@@ -813,7 +836,16 @@ THE_CARE_DOOR = (RECORD_FUNCTION, REVEAL_FUNCTION, SUBJECT_RESOLVER_FUNCTION)
 # reads of those three at most, and nothing on any person table. It is a new role
 # because the reach is disjoint from every other owner's — none of them writes
 # `classification`, `moderation_state` or `threat_case`.
+#
+# **E7-01 adds a seventh, `pulse_staff_name_definer`**, the owner of
+# `section_staff_names` (ADR 0191). It holds `SELECT` on what that body reads and
+# nothing else: no write anywhere and no privilege of any kind on
+# `user_identity`, both pinned in
+# `tests/integration/test_the_staff_name_definer_answers_names_and_never_other_people.py`.
+# It is a new role because it is the first owner that reads `person.identity_name`,
+# and an owner holding a name must hold nothing else a caller could reach.
 MODERATION_DEFINER_ROLE = "pulse_moderation_definer"
+STAFF_NAME_DEFINER_ROLE = "pulse_staff_name_definer"
 IDENTITY_DEFINER_ROLES = (
     RESOLVE_DEFINER_ROLE,
     "pulse_roster_definer",
@@ -821,6 +853,7 @@ IDENTITY_DEFINER_ROLES = (
     "pulse_benchmark_definer",
     "pulse_grant_end_definer",
     MODERATION_DEFINER_ROLE,
+    STAFF_NAME_DEFINER_ROLE,
 )
 
 # How the two halves are called. The record's third argument is a null case id:
@@ -4326,6 +4359,23 @@ MEMBER_OF_ROLES = """
 #     `tests/integration/test_identity_column_marker.py` records both tables.
 #     Decided in E6-01; spent by E6-02.
 
+#   - `pulse_app` **reads** `instructor_response` and `response_policy`, and holds
+#     no other verb on either at table grain; it **inserts** them at column grain
+#     only (`RUNTIME_COLUMN_PRIVILEGES` below). E7-01 creates both (ruling 7: "these
+#     tables are the record"): every response and every on-behalf response with its
+#     author, and every policy change with who set it and under which role.
+#     **What is withheld is the assertion**, as on `moderation_state`: no `UPDATE`,
+#     no `DELETE`, no `TRUNCATE`. An edit is a new row and the latest is what
+#     students see (ruling 3), so a connection able to rewrite a row could change a
+#     published response under the students who read it, or re-date the policy
+#     that held a week. The server's half is
+#     `test_the_response_records_are_append_only_as_production_runs_them.py`.
+#     **What these tables carry, for §4.1.** A section, a course week, a prefix, a
+#     staff member as a `person` key, a role token, a mode, a flag, an instant and
+#     staff-written text; no student. Decided in E7-01, which grants with the
+#     tables because no later E7 ticket adds a migration (`docs/tickets/e7/README.md`,
+#     "Counters"); spent by E7-02 and E7-03.
+
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -4386,6 +4436,8 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "comparison_set_member", "DELETE"),
         (APPLICATION_ROLE, "moderation_attempt", "SELECT"),
         (APPLICATION_ROLE, "moderation_attempt", "INSERT"),
+        (APPLICATION_ROLE, "instructor_response", "SELECT"),
+        (APPLICATION_ROLE, "response_policy", "SELECT"),
     }
 )
 
@@ -4565,6 +4617,25 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
 # protection is that the application cannot forge, re-date or erase an ending, and a
 # two-column read leaves all three refused. The server's half is
 # `test_the_teaching_grant_ends_only_through_its_definer.py`.
+#
+# **E7-01 spends twelve, all `INSERT`, on its two new records** (the ruling on B2
+# appended to its work order). A response and a policy change are each one
+# appended row, and these are the columns that row names:
+#
+#   - `instructor_response(section_id)`, `(week_id)` — which section-week;
+#   - `instructor_response(author_person_id)`, `(role)` — who wrote it and under
+#     which role (an on-behalf response is the role, not a second flag);
+#   - `instructor_response(ai_seeded)`, `(body)`, `(published_at)` — whether it
+#     was seeded from an AI draft, the text, and when (written from
+#     `services/clock.now`, so the development clock stays coherent);
+#   - `response_policy(prefix_id)`, `(set_by_person_id)`, `(role)`, `(mode)`,
+#     `(set_at)` — the prefix, who set it, under which role, the mode, and when.
+#
+# **What is withheld is the assertion**, as on `moderation_state`: each row's `id`
+# and `sequence` are the database's — `sequence` is the order "latest" is read by
+# (ADR 0187), so a connection that could write it could put a row before another
+# — and there is no `UPDATE` or `DELETE` on either table at all. The server's half
+# is `test_the_response_records_are_append_only_as_production_runs_them.py`.
 RUNTIME_COLUMN_PRIVILEGES = frozenset(
     {
         (APPLICATION_ROLE, "course", "lms_title", "UPDATE"),
@@ -4589,6 +4660,18 @@ RUNTIME_COLUMN_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "moderation_state", "is_undo", "INSERT"),
         (APPLICATION_ROLE, "ended_teaching_grant", "person_id", "SELECT"),
         (APPLICATION_ROLE, "ended_teaching_grant", "section_id", "SELECT"),
+        (APPLICATION_ROLE, "instructor_response", "section_id", "INSERT"),
+        (APPLICATION_ROLE, "instructor_response", "week_id", "INSERT"),
+        (APPLICATION_ROLE, "instructor_response", "author_person_id", "INSERT"),
+        (APPLICATION_ROLE, "instructor_response", "role", "INSERT"),
+        (APPLICATION_ROLE, "instructor_response", "ai_seeded", "INSERT"),
+        (APPLICATION_ROLE, "instructor_response", "body", "INSERT"),
+        (APPLICATION_ROLE, "instructor_response", "published_at", "INSERT"),
+        (APPLICATION_ROLE, "response_policy", "prefix_id", "INSERT"),
+        (APPLICATION_ROLE, "response_policy", "set_by_person_id", "INSERT"),
+        (APPLICATION_ROLE, "response_policy", "role", "INSERT"),
+        (APPLICATION_ROLE, "response_policy", "mode", "INSERT"),
+        (APPLICATION_ROLE, "response_policy", "set_at", "INSERT"),
     }
 )
 
