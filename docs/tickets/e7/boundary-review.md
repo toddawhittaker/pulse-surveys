@@ -125,13 +125,11 @@ help text attached; and the owed-list copy no longer says "section-weeks".
 (`adr-docs-completeness`, MED). Process pull request #305 changes it, and it
 waits for the owner. `lti-oidc` found nothing.
 
-**For the owner:** the carry-over rule is a judgement call that the spec did not
-settle. When a course's lead changes, the old lead's REQUIRED policy still holds
-the course for its new lead, and the overview shows the new lead no setter
-until they set it. The fix writes carry-over into SPEC §8 and §5.3 as the rule.
-The alternative, resetting a course to its default when the lead changes,
-would release held weeks without anyone deciding to. Decide at the epic's pull
-request into `main`.
+**The carry-over rule.** The spec did not settle what happens to a course's
+policy when its lead changes. E7-10 writes the rule into SPEC §5.3 and §8: the
+old setting still holds the course for its new lead, and the overview shows the
+new lead no setter until they set one. Resetting the course to its default was
+rejected, because it would release held weeks without anyone deciding to.
 
 **Carried to E8, each with an owner and a done-when in
 `../e8/carried-from-e7.md`:** simplifications 1 to 5 from `code-reviewer`; the
