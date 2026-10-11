@@ -252,7 +252,7 @@ test('the instructor drafts, checks and publishes; the student reads it by name,
   const composer = page.getByRole('region', { name: 'Your response to this week' });
   const editor = composer.getByRole('textbox', { name: 'Your response' });
 
-  await composer.getByRole('button', { name: 'Use draft' }).click();
+  await composer.getByRole('button', { name: 'Draft with AI', exact: true }).click();
   await expect(editor).not.toHaveValue('');
   await composer.getByRole('button', { name: 'Check draft with AI' }).click();
   await expect(composer.getByRole('region', { name: 'Themes your draft has not addressed' })).toBeVisible();
