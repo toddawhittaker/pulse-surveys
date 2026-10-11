@@ -8,8 +8,8 @@ commit.
 The battery ran on the epic head 7b5f0c94, after E7-01 to E7-08 merged, against
 `main` at c76b1724. Its findings became two fix tickets: E7-10 (#318, heavy)
 for the backend, test and record findings, and E7-11 (#316, light) for the
-accessibility findings. CI on the exit commit is filled in when the epic head
-is final. The standing questions were answered by E7-09, below.
+accessibility findings. `epic-exit` ran last, on the epic head after both
+merged. The standing questions were answered by E7-09, below.
 
 ## The reviews
 
@@ -29,7 +29,7 @@ context, over the epic's cumulative diff against `main`.
 | `a11y-copy` | 7b5f0c94 | 7 MED, 4 LOW |
 | `lti-oidc` | 7b5f0c94 | Nothing found |
 | `threat-model` | not run | SPEC §14.3 does not mark E7 ⚠ |
-| `epic-exit` | | Runs on the final epic head; recorded below. |
+| `epic-exit` | 4cf2620d | Both halves of the exit clause met; 1 LOW |
 
 ## The findings, and where each went
 
@@ -244,5 +244,18 @@ all on the E7-09 branch). Each module and its collected count:
 
 ## CI on the exit commit
 
-To be recorded: the completed run, its id and its head SHA, on the exit commit
-(`docs/MISTAKES.md` entry 42).
+**`epic-exit`'s verdict on 4cf2620d** (the epic head after E7-10 merged).
+Both halves are met. In the Playwright job, `exit-response-loop.spec.ts` shows
+a student in a required week reading the closed door with no response and no
+name, then reading the instructor's response under the instructor's name once
+it is published, and later reading the lead's on-behalf response under the
+lead's own name and role. The reviewer also ran 43 integration tests behind the
+clause itself, including
+`test_a_required_week_shows_students_nothing_until_a_named_person_publishes.py`.
+Its one LOW was the stale build-order table on the epic branch, which this
+change fixes.
+
+**CI.** Run 38139635475 completed with success on 2714b5fe, the head of #318.
+`git diff 2714b5fe 4cf2620d` is empty, so the exit commit has the same tree.
+This change adds only documents; the epic pull request records the run on the
+final epic head by its id (`docs/MISTAKES.md` entry 42).
