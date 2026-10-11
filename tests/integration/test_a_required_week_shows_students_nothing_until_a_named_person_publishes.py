@@ -76,16 +76,16 @@ def test_a_required_week_is_closed_until_the_teacher_publishes_and_then_the_lead
 
     hold.stand_before_the_opening(ON_BEHALF_WEEK)
     switched = world.policy_set(world.lead, REQUIRED)
-    assert switched.status_code == OK, (
-        f"The lead's switch answered {switched.status_code}. Body {switched.text[:400]!r}."
-    )
+    assert (
+        switched.status_code == OK
+    ), f"The lead's switch answered {switched.status_code}. Body {switched.text[:400]!r}."
     policies = [
         (str(row[POLICY_COURSE_COLUMN]), str(row[POLICY_SETTER_COLUMN]), row[MODE_COLUMN])
         for row in hold.rows_of(RESPONSE_POLICY, POLICY_SETTER_COLUMN, world.lead.person_id)
     ]
-    assert policies == [(str(hold.own_course), lead, REQUIRED)], (
-        f"The lead's switch stored {policies}; expected one required row for the course they lead."
-    )
+    assert policies == [
+        (str(hold.own_course), lead, REQUIRED)
+    ], f"The lead's switch stored {policies}; expected one required row for the course they lead."
 
     student = hold.a_student("exit", section)
     hold.stand_after_the_opening(INSTRUCTORS_WEEK)
@@ -98,14 +98,14 @@ def test_a_required_week_is_closed_until_the_teacher_publishes_and_then_the_lead
     assert world.responses_of(section) == [], "Nothing is published yet, so no row exists."
 
     published = world.instructor("POST", text=FIRST, course_week=INSTRUCTORS_WEEK)
-    assert published.status_code == CREATED, (
-        f"The teacher's publish answered {published.status_code}. Body {published.text[:400]!r}."
-    )
+    assert (
+        published.status_code == CREATED
+    ), f"The teacher's publish answered {published.status_code}. Body {published.text[:400]!r}."
     after_publish = hold.payload(student, course_week=INSTRUCTORS_WEEK)
     edited = world.instructor("PUT", text=EDITED, course_week=INSTRUCTORS_WEEK)
-    assert edited.status_code == OK, (
-        f"The teacher's edit answered {edited.status_code}. Body {edited.text[:400]!r}."
-    )
+    assert (
+        edited.status_code == OK
+    ), f"The teacher's edit answered {edited.status_code}. Body {edited.text[:400]!r}."
     after_edit = hold.payload(student, course_week=INSTRUCTORS_WEEK)
     still_closed = hold.payload(student, course_week=ON_BEHALF_WEEK)
 
@@ -119,9 +119,11 @@ def test_a_required_week_is_closed_until_the_teacher_publishes_and_then_the_lead
         after_edit[STATE],
         after_edit[RESPONSE][TEXT],
         after_edit[RESPONSE][AUTHOR_NAME],
-    ) == (PUBLISHED, EDITED, TEACHER_NAME), (
-        f"After the edit the student read {after_edit!r}: the new text, still released."
-    )
+    ) == (
+        PUBLISHED,
+        EDITED,
+        TEACHER_NAME,
+    ), f"After the edit the student read {after_edit!r}: the new text, still released."
     assert still_closed[STATE] == AWAITING, (
         f"The teacher's publish of week {INSTRUCTORS_WEEK} released week {ON_BEHALF_WEEK} too: "
         f"{still_closed!r}."
