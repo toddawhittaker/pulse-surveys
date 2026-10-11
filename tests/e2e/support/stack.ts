@@ -457,6 +457,22 @@ export function seedTheResponseLoopExitStory(): string {
   return pipeTheSeeder(RESPONSE_LOOP_EXIT_STORY_SEEDER);
 }
 
+/** Where the student-loop exit story for `MATH-140-E1FF` lives (SPEC §14.3). */
+export const STUDENT_LOOP_EXIT_STORY_SEEDER = 'scripts/seed_student_loop_exit_story.py';
+
+/**
+ * Write the student-loop exit story — classmates' answers to the exit week of
+ * `MATH-140-E1FF` and the week before it — and answer what the seeder printed,
+ * which names the exit week it chose.
+ *
+ * It writes answers and validity verdicts only: no moderation verdict, no
+ * policy and no response from staff. It needs the section launched, its roster
+ * synced and its windows derived, and refuses loudly when any is missing.
+ */
+export function seedTheStudentLoopExitStory(): string {
+  return pipeTheSeeder(STUDENT_LOOP_EXIT_STORY_SEEDER);
+}
+
 /**
  * Run one statement against the stack's database and answer its rows, unaligned.
  *
