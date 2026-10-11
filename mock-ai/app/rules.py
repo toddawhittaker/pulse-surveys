@@ -74,6 +74,22 @@ for — the student's comment, or the week's.
    (`mock-ai:threat`, `mock-ai:self-harm`, `mock-ai:harmful`,
    `mock-ai:privacy`, `mock-ai:nonsense`, `mock-ai:clear`); otherwise `clear`.
 
+7. **The response draft and the draft check** (E7-04), the fourth and fifth
+   tasks. A prompt whose first task line is `RESPONSE_DRAFT_MARKER_LINE` asks
+   for a draft of an instructor's response; one whose first task line is
+   `DRAFT_CHECK_WEEK_MARKER_LINE` asks for a check of a draft. Neither prompt
+   carries a comment: the week is one JSON document of stored summaries and
+   themes, and the check's draft follows `DRAFT_CHECK_DRAFT_MARKER_LINE`. The
+   wrong-answer markers apply first, as for every task. Then the draft is a
+   fixed thank-you naming which streams have a summary and stating no number,
+   and the check names every theme of the week whose label the draft does not
+   contain, with the count exactly as the week gives it. Two markers drive the
+   tool's refusals end to end: `mock-ai:draft-quotes-the-week` anywhere in the
+   week makes the draft repeat every summary and theme label verbatim (so a
+   summary carrying a hidden comment's words, or a held stream's prose count,
+   reaches the draft), and `mock-ai:check-invents-a-theme` in the draft makes
+   the check name a theme the week does not hold.
+
 **`nonsense` is reachable only by its marker.** Rule 3 has two outcomes and not
 three. Deciding that a comment is keyboard mashing is a judgement about content
 and this service makes none; a heuristic invented here would make every
@@ -87,6 +103,7 @@ down here because two orders that differ only in cases nobody writes are the sam
 mock.
 """
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -173,6 +190,21 @@ SMALL_N_MARKER = "below the reporting threshold, so name themes"
 # and needs this service to find the line to answer a verdict at all.
 MODERATION_MARKER_LINE = "The comment to moderate follows this line."
 
+# The response draft's and the draft check's task lines (E7-04): each is a whole
+# line of `backend/app/ai/prompts/response_draft.v1.md` or `draft_check.v1.md`, a
+# second copy guarded as the lines above are. The week each prompt ends with (or,
+# for the check, holds before the draft) is one ASCII-escaped JSON document, so
+# no summary inside it can stand on a line of its own and pose as one of these.
+RESPONSE_DRAFT_MARKER_LINE = (
+    "The week this response answers follows this line, as one JSON document."
+)
+DRAFT_CHECK_WEEK_MARKER_LINE = (
+    "The week the draft is checked against follows this line, as one JSON document."
+)
+DRAFT_CHECK_DRAFT_MARKER_LINE = (
+    "The draft to check follows this line, and runs to the end of the message."
+)
+
 # How the summary prompt names the stream it is asking about, and how this
 # service reads it back. The prompt substitutes the stream token after this
 # prefix, in its instructions — which is *before* the marker line above, so the
@@ -256,6 +288,26 @@ HARMFUL_MARKER = "mock-ai:harmful"
 PRIVACY_MARKER = "mock-ai:privacy"
 THREAT_MARKER = "mock-ai:threat"
 SELF_HARM_MARKER = "mock-ai:self-harm"
+
+# The two markers that drive the response tasks' refusals (rule 7). Published
+# under their own member of `/mock/rules`, apart from `MARKERS`, because they
+# select nothing for the three tasks `MARKERS` serves.
+QUOTES_THE_WEEK_MARKER = "mock-ai:draft-quotes-the-week"
+INVENTS_A_THEME_MARKER = "mock-ai:check-invents-a-theme"
+RESPONSE_MARKERS: dict[str, str] = {
+    "draft_quotes_the_week": QUOTES_THE_WEEK_MARKER,
+    "check_invents_a_theme": INVENTS_A_THEME_MARKER,
+}
+
+# The two payloads' members: each contract minus the audit pair.
+DRAFT_KEY = "draft"
+UNADDRESSED_KEY = "unaddressed_themes"
+
+# The theme `mock-ai:check-invents-a-theme` adds, which no stored summary holds.
+INVENTED_THEME_LABEL = "a theme the mock provider invented"
+
+# How the week document names the two streams, for the draft's one derived line.
+STREAM_TOPICS = {INSTRUCTOR_STREAM: "the teaching", COURSE_STREAM: "the course materials"}
 
 # Every marker, keyed by what it selects. This mapping is what `/mock/rules`
 # publishes and what a caller picks a behaviour out of.
@@ -639,6 +691,152 @@ def summarize(stream: str, comments: tuple[str, ...], *, themes_only: bool = Fal
     )
 
 
+# ---------------------------------------------------------------------------
+# The response draft and the draft check (E7-04)
+# ---------------------------------------------------------------------------
+
+
+def whole_line_at(prompt: str, line: str) -> int:
+    """Where `line` first stands on a line of its own in `prompt`, or -1."""
+    for match_at in _occurrences(prompt, line):
+        before = match_at == 0 or prompt[match_at - 1] == "\n"
+        end = match_at + len(line)
+        after = end == len(prompt) or prompt[end] == "\n"
+        if before and after:
+            return match_at
+    return -1
+
+
+def _occurrences(text: str, needle: str) -> list[int]:
+    found: list[int] = []
+    start = text.find(needle)
+    while start >= 0:
+        found.append(start)
+        start = text.find(needle, start + 1)
+    return found
+
+
+def week_document(text: str) -> dict[str, Any]:
+    """The week JSON document a response prompt carries, or an extraction failure."""
+    try:
+        week = json.loads(text)
+    except ValueError:
+        week = None
+    if not isinstance(week, dict) or not isinstance(week.get("streams"), list):
+        raise ExtractionError(
+            "This response prompt's week is not the JSON document `app.ai.tasks` renders, so "
+            "there is nothing here to draft or check against."
+        )
+    return week
+
+
+def week_themes(week: dict[str, Any]) -> list[tuple[str, Any]]:
+    """Every theme in the week document, as (label, count) in the order given."""
+    themes: list[tuple[str, Any]] = []
+    for stream in week["streams"]:
+        for theme in stream.get("themes") or []:
+            if isinstance(theme, dict) and isinstance(theme.get(THEME_LABEL_KEY), str):
+                themes.append((theme[THEME_LABEL_KEY], theme.get(THEME_COUNT_KEY)))
+    return themes
+
+
+def draft_for(week_text: str) -> Answer:
+    """Rule 7's draft: a fixed thank-you, derived only in which streams it names.
+
+    **It states no number and quotes nothing by default**, so a development stack
+    gets a draft the tool accepts in any week, a held stream's included. With
+    `QUOTES_THE_WEEK_MARKER` in the week it repeats every summary and label
+    verbatim, which is how a stack drives the tool's two draft refusals.
+    """
+    failing = failing_answer(week_text)
+    if failing is not None:
+        return failing
+    week = week_document(week_text)
+    topics = [
+        STREAM_TOPICS.get(str(stream.get(STREAM_KEY)), "the week")
+        for stream in week["streams"]
+        if stream.get(SUMMARY_KEY)
+    ]
+    about = " and ".join(topics) if topics else "this week"
+    draft = (
+        f"Thank you for this week's feedback. I have read the summaries of what you wrote about "
+        f"{about}, and I will respond to each theme in class this week. This draft comes from the "
+        "mock provider rather than a model, so it names nothing specific."
+    )
+    if QUOTES_THE_WEEK_MARKER in week_text:
+        quoted = [
+            str(stream.get(SUMMARY_KEY))
+            for stream in week["streams"]
+            if isinstance(stream.get(SUMMARY_KEY), str)
+        ]
+        quoted += [label for label, _ in week_themes(week)]
+        draft += " What I read: " + " / ".join(quoted)
+    return Answer(
+        status=200,
+        payload={DRAFT_KEY: draft},
+        stall_seconds=STALL_SECONDS if STALL_MARKER in week_text else 0.0,
+    )
+
+
+def check_for(week_text: str, draft: str) -> Answer:
+    """Rule 7's check: every theme whose label the draft does not contain, as the week gives it.
+
+    The count is copied exactly, `null` included, so the tool accepts the answer;
+    `INVENTS_A_THEME_MARKER` in the draft adds one theme the week does not hold,
+    which the tool refuses.
+    """
+    failing = failing_answer(week_text + "\n" + draft)
+    if failing is not None:
+        return failing
+    week = week_document(week_text)
+    folded = draft.casefold()
+    unaddressed: list[dict[str, Any]] = []
+    for label, count in week_themes(week):
+        named = {THEME_LABEL_KEY: label, THEME_COUNT_KEY: count}
+        if label.casefold() not in folded and named not in unaddressed:
+            unaddressed.append(named)
+    if INVENTS_A_THEME_MARKER in draft:
+        unaddressed.append({THEME_LABEL_KEY: INVENTED_THEME_LABEL, THEME_COUNT_KEY: 1})
+    stalled = STALL_MARKER in week_text or STALL_MARKER in draft
+    return Answer(
+        status=200,
+        payload={UNADDRESSED_KEY: unaddressed},
+        stall_seconds=STALL_SECONDS if stalled else 0.0,
+    )
+
+
+def response_answer(prompt: str) -> Answer | None:
+    """Rule 7's dispatch: the draft or the check, when the prompt's first task line is theirs.
+
+    `None` for any other prompt. "First" is what keeps a copy of a response task
+    line inside a summary's comments, or a validity comment, from capturing that
+    prompt: the template's own task line always precedes the input it introduces.
+    """
+    draft_at = whole_line_at(prompt, RESPONSE_DRAFT_MARKER_LINE)
+    check_at = whole_line_at(prompt, DRAFT_CHECK_WEEK_MARKER_LINE)
+    candidates = [at for at in (draft_at, check_at) if at >= 0]
+    if not candidates:
+        return None
+    first = min(candidates)
+    others = [
+        prompt.find(line) for line in (SUMMARY_MARKER_LINE, MODERATION_MARKER_LINE, MARKER_LINE)
+    ]
+    if any(0 <= other < first for other in others):
+        return None
+    if first == draft_at:
+        return draft_for(prompt[draft_at + len(RESPONSE_DRAFT_MARKER_LINE) :].strip())
+    body = prompt[check_at + len(DRAFT_CHECK_WEEK_MARKER_LINE) :]
+    split = whole_line_at(body, DRAFT_CHECK_DRAFT_MARKER_LINE)
+    if split < 0:
+        raise ExtractionError(
+            "This draft-check prompt carries no line the draft follows, so there is no draft to "
+            f"check. The line is: {DRAFT_CHECK_DRAFT_MARKER_LINE!r}."
+        )
+    return check_for(
+        body[:split].strip(), body[split + len(DRAFT_CHECK_DRAFT_MARKER_LINE) :].strip()
+    )
+
+
 def answer_for(prompt: str) -> Answer:
     """What this service answers to one whole rendered prompt.
 
@@ -657,9 +855,16 @@ def answer_for(prompt: str) -> Answer:
     the tool reports as a shape violation in the prompt rather than as a mock
     that cannot tell two tasks apart.
 
+    The response draft and the draft check (rule 7) are asked first, and answer
+    only a prompt whose first task line is theirs (`response_answer`), so every
+    prompt this service answered before E7-04 is answered exactly as before.
+
     Raises `ExtractionError` for a prompt this service cannot read, which the
     handler answers as a 500 naming what it looked for.
     """
+    response = response_answer(prompt)
+    if response is not None:
+        return response
     if SUMMARY_MARKER_LINE in prompt:
         # **The first copy of the marker, not the last**, which is where this
         # differs from the validity path above and is not a style difference.
@@ -709,6 +914,21 @@ def served_rules() -> dict[str, Any]:
         "summary_stream_line_prefix": STREAM_LINE_PREFIX,
         "moderation_marker_line": MODERATION_MARKER_LINE,
         "moderation_verdicts": list(MODERATION_VERDICTS),
+        "response_draft_marker_line": RESPONSE_DRAFT_MARKER_LINE,
+        "draft_check_week_marker_line": DRAFT_CHECK_WEEK_MARKER_LINE,
+        "draft_check_draft_marker_line": DRAFT_CHECK_DRAFT_MARKER_LINE,
+        "response_markers": dict(RESPONSE_MARKERS),
+        "response_tasks": (
+            f"response draft and draft check — a prompt whose first task line is "
+            f"{RESPONSE_DRAFT_MARKER_LINE!r} or {DRAFT_CHECK_WEEK_MARKER_LINE!r}. The week is the "
+            "JSON document after it (for the check, up to the line "
+            f"{DRAFT_CHECK_DRAFT_MARKER_LINE!r}, and the draft is everything after that). After "
+            "the wrong-answer markers, the draft is a fixed thank-you that states no number, and "
+            "the check names every theme whose label the draft does not contain, with its count "
+            f"as the week gives it. {QUOTES_THE_WEEK_MARKER} in the week makes the draft repeat "
+            f"every summary and theme label verbatim; {INVENTS_A_THEME_MARKER} in the draft makes "
+            f"the check name {INVENTED_THEME_LABEL!r}, which no week holds."
+        ),
         "verdicts": [SUBSTANTIVE, INSUFFICIENT, NONSENSE],
         "streams": list(SUMMARY_STREAMS),
         "tasks": [
