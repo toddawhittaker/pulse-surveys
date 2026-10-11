@@ -7,9 +7,11 @@ submit, into which week, whether the values hold, what a comment's verdict means
 is in `app.services.survey_read` and `app.services.submissions`, and every
 sentence a student reads is in `app.copy`.
 
-**Two routes and no others.** `GET /student/survey` (E2-09) answers the form's
+**Three routes and no others.** `GET /student/survey` (E2-09) answers the form's
 whole question, and `POST /student/submissions` (E2-08) is the weekly submission.
-The form itself is E2-10's.
+The form itself is E2-10's. `GET /student/sections/{section_id}/weeks/{course_week}/results`
+(E7-02) answers one week's state and the response published to it; see its
+handler for why it takes the parameters the survey read refuses to.
 
 **Both carry `app.api.deps.require_student` rather than a check of their own**,
 which is what puts every route this module serves inside SPEC §4.1 item 1's sweep
@@ -83,11 +85,14 @@ from app.api.deps import (
     require_student,
 )
 from app.config import Settings
+from app.copy.response_loop import RESULTS_UNAVAILABLE
 from app.copy.student_read import NOT_A_STUDENT
 from app.copy.submit import COPY
 from app.db import get_session
+from app.schemas.response_loop import StudentWeekResults
 from app.schemas.student import StudentSurveyView
 from app.schemas.survey import SubmissionAccepted, SubmissionRequest
+from app.services.response_loop import ResultsUnavailableError, student_week_results
 from app.services.session import SessionClaims
 from app.services.submissions import (
     RefusalReason,
@@ -107,6 +112,11 @@ router = APIRouter(tags=["student"])
 # what a route is registered at is what this file says it is.
 SURVEY_PATH = "/student/survey"
 SUBMIT_PATH = "/student/submissions"
+RESULTS_PATH = "/student/sections/{section_id}/weeks/{course_week}/results"
+
+# Every refused results read: not enrolled, an ended enrollment, an unopened week, a
+# week or a section that does not exist (E7-02, decision 5).
+RESULTS_UNAVAILABLE_STATUS = 404
 
 # SPEC §3.3's bounce: a client error, because the submission is well formed and
 # does not satisfy the gate. 422 rather than 400 for the same reason every other
@@ -257,6 +267,52 @@ def submit_weekly_survey(
         first_submitted_at=stored.first_submitted_at,
         last_submitted_at=stored.last_submitted_at,
     )
+
+
+@router.get(RESULTS_PATH, summary="One week's results for one of my sections")
+def student_week_results_read(
+    section_id: UUID,
+    course_week: int,
+    response: Response,
+    request: Request,
+    claims: SessionClaims = Depends(require_student),
+    session: Session = Depends(get_session),
+) -> StudentWeekResults:
+    """The week's state and the response published to it, for one of this student's sections.
+
+    **This route takes a section and a week, which the survey read refuses to,
+    and the check is what makes that safe.** The student's results page is one
+    week of one course, so it has to be named. The section is then looked for
+    among the session's own live enrollments, never read by its key, so a
+    section the student is not in is not found, exactly as one that does not
+    exist is not (`app.services.response_loop.student_week_results`).
+
+    **Every refusal is one 404 with one sentence**, byte-identical: not enrolled,
+    an ended enrollment, a week whose report has not opened, and a week or a
+    section that does not exist. A session with no `user`, or a `user_id` claim
+    that is not a uuid, is answered the same way, as the submission route does,
+    so this route says nothing about which door a session came through.
+
+    `Cache-Control: no-store`, as the survey read: the answer is about this
+    reader, and an edit changes it.
+    """
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = "no-store"
+    refused = HTTPException(status_code=RESULTS_UNAVAILABLE_STATUS, detail=RESULTS_UNAVAILABLE.text)
+    try:
+        user_id = UUID(claims.user_id or "")
+    except ValueError:
+        raise refused from None
+    try:
+        return student_week_results(
+            session,
+            user_id=user_id,
+            section_id=section_id,
+            course_week=course_week,
+            settings=settings,
+        )
+    except ResultsUnavailableError:
+        raise refused from None
 
 
 def _refusal(reason: RefusalReason) -> HTTPException:
