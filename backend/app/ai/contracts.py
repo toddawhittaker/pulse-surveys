@@ -177,7 +177,7 @@ class AiTaskOutput(ContractModel):
 
     Every task contract below inherits this. Nothing else should, and there are
     two kinds of "nothing else": a model that is a *part* of a contract
-    (`CommentTheme`) and a model that composes one (`WeeklySummaryRecord`). Both
+    (`CommentTheme`, `CheckTheme`) and a model that composes one (`WeeklySummaryRecord`). Both
     inherit `ContractModel` instead, because the audit pair belongs to a call and
     a call produces one object — a part would carry four copies of one fact, and
     a composition would carry a second copy that is free to disagree with the
@@ -206,15 +206,18 @@ class AiTaskOutput(ContractModel):
 class CommentTheme(ContractModel):
     """A theme drawn from one week's comments, with how many comments carry it.
 
-    Shared by the weekly summary and the draft check because both name themes
-    and both count the comments behind them — §7.4 gives the draft check the
-    output "Names themes the draft hasn't addressed, **with comment counts**",
-    and §5.1 has a summary preserve the week's themes rather than sand them off,
-    which a theme with no count cannot be read against. Composing one part into
-    two contracts is what E0-12 means by "compose rather than copy"; two
-    near-identical theme models would be the copy. E4-05 settled that the summary
-    carries the counts now rather than leaving E7's draft check to re-derive them
-    from the same text with a second model call (ADR 0148).
+    The weekly summary's theme. §5.1 has a summary preserve the week's themes
+    rather than sand them off, which a theme with no count cannot be read
+    against. E4-05 settled that the summary carries the counts now rather than
+    leaving E7's draft check to re-derive them from the same text with a second
+    model call (ADR 0148).
+
+    **The draft check names themes with `CheckTheme` below, not with this**, and
+    that split is E7-04's (ADR 0195). Until E7-04 this one part was composed into
+    both contracts. The check has to name a held stream's theme with no count
+    (SPEC §5.3), and making this count optional to allow that would also let a
+    summary store a theme with no count — a loosening of the summary's contract
+    that nothing asked for.
 
     **This count is not §5.1's response count**, and the two are easy to read as
     one. This is how many *comments* carry one theme, and a model produces it
@@ -396,6 +399,36 @@ class WeeklySummaryRecord(ContractModel):
     )
 
 
+class CheckTheme(ContractModel):
+    """A theme the draft check names, with its comment count where one may be shown.
+
+    SPEC §5.3: the check "quietly names any theme not yet addressed (with its
+    comment count). For a stream held below the n-threshold, the check names the
+    theme without a count, because a per-week count of a small stream's comments
+    is the participation trace §5.2 rules out." So the count is optional here, and
+    only here: `CommentTheme` keeps its required count for the weekly summary
+    (ADR 0195).
+
+    **The optional type is not the rule** (`docs/MISTAKES.md` entry 23). Which
+    themes may carry a count is decided after the model answers, in
+    `app.services.reporting`: a shown stream's theme must carry its stored count
+    and a held stream's theme must carry none. This type only makes the held case
+    expressible.
+    """
+
+    label: str = Field(
+        min_length=1,
+        description="The theme's label, exactly as the stored summary holds it.",
+    )
+    comment_count: int | None = Field(
+        ge=1,
+        description=(
+            "How many comments carry the theme, exactly as the stored summary holds it; null "
+            "for a theme of a stream held below the reporting threshold."
+        ),
+    )
+
+
 class ResponseDraftOutput(AiTaskOutput):
     """§7.4, "Response draft" — a draft class response from the week's themes and ratings.
 
@@ -435,9 +468,10 @@ class DraftCheckOutput(AiTaskOutput):
     did not happen.
     """
 
-    unaddressed_themes: tuple[CommentTheme, ...] = Field(
+    unaddressed_themes: tuple[CheckTheme, ...] = Field(
         description=(
             "The week's themes the draft does not yet address, each with the number of "
-            "comments behind it. Empty when the draft addresses all of them."
+            "comments behind it, or none for a held stream's theme. Empty when the draft "
+            "addresses all of them."
         ),
     )
