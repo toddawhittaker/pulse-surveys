@@ -21,6 +21,7 @@ const HEADING_ID = 'pulse-exclusion-log-heading';
 type Load =
   | { readonly kind: 'loading' }
   | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
   | { readonly kind: 'error'; readonly detail: string | null }
   | { readonly kind: 'log'; readonly rows: readonly LogRowView[] };
 
@@ -68,6 +69,12 @@ export function ExclusionLogRoute(): JSX.Element {
           title={copy('leadership_moderation.session_ended_title')}
           body={copy('leadership_moderation.session_ended_body')}
         />
+      ) : load.kind === 'not-your-role' ? (
+        <StateNotice
+          variant="flat"
+          title={copy('leadership_moderation.not_your_role_title')}
+          body={copy('leadership_moderation.not_your_role_body')}
+        />
       ) : load.kind === 'error' ? (
         <StateNotice
           variant="flat"
@@ -99,6 +106,7 @@ export function ExclusionLogRoute(): JSX.Element {
 /** What a read of the log means for the page. A refusal is never the empty state. */
 function loadFrom(read: ExclusionLogRead): Load {
   if (read.kind === 'session-ended') return { kind: 'session-ended' };
+  if (read.kind === 'not-your-role') return { kind: 'not-your-role' };
   if (read.kind === 'unavailable') return { kind: 'error', detail: read.detail };
   return { kind: 'log', rows: read.rows };
 }

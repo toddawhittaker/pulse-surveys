@@ -56,10 +56,19 @@ export const LEADERSHIP_COMPARISON_SET_COPY = {
 
   // What a 401 says, in the register the instructor report's pair set: this page
   // cannot say anything about sets, having just been refused the answer, so it
-  // says which door leads to a page that can.
+  // says which door leads to a page that can. Its first sentence is the
+  // moderation pages' own, word for word, so every leadership page says an
+  // ended session the same way (E7-08).
   'leadership_comparison_sets.session_ended_title': 'This page is not signed in',
   'leadership_comparison_sets.session_ended_body':
-    'The session this page was opened with has ended, so it cannot show any sets. Open Pulse Surveys again, and the sets you can read will be here.',
+    'The session this page was opened with has ended. Open Pulse Surveys again, and the sets you can read will be here.',
+
+  // What the leadership gate's 403 says (E7-08, ADR 0196): the reader is signed
+  // in, in another role. The moderation pages' words, because it is the same
+  // gate's answer; it names no set, since the reader here is often a student.
+  'leadership_comparison_sets.not_your_role_title': 'This page is not part of your role',
+  'leadership_comparison_sets.not_your_role_body':
+    'You are signed in, in a role this page is not for. Open Pulse Surveys again the way you usually do, and it opens the pages your role has.',
 
   // Nobody has defined one yet. It states what a set is for and asks for
   // nothing — `docs/DESIGN_BRIEF.md`'s tone rules apply to an empty list as
