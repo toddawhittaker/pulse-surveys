@@ -54,6 +54,7 @@ const AN_ANSWERED_WEEK: StudentSurveyView = {
       course_label: 'MATH 140 E1FF — College Algebra, Fall 2026',
       survey_is_open: true,
       next_window_opens_at: null,
+      instructors: [],
       open_survey: {
         window_id: '5e0c1d2a-6b7f-4c3e-9a1d-0b2c3d4e5f63',
         course_week: 3,

@@ -2849,6 +2849,14 @@ SWEEPS_THAT_NEED_NO_PROTECTION = {
     "tests/unit/test_the_api_edge_keeps_one_copy_of_each_helper.py": (
         "sweeps *.py under backend/app, and a .py change is never inert"
     ),
+    # E7-01's one-door sweep for the staff-name definer: the E0-35 device again. Its
+    # walker takes `root` and is called with `APP_ROOT` (`backend/app`) and with
+    # pytest's `tmp_path` for its own planted controls, and it reads `*.py` only —
+    # the definer's `.sql` file is deliberately not read. If it is ever taught to
+    # read anything else, it belongs in the unconditional job instead.
+    "tests/unit/test_only_the_response_loop_service_names_the_staff_name_definer.py": (
+        "sweeps *.py under backend/app, and a .py change is never inert"
+    ),
 }
 
 UNCONDITIONAL_SWEEP_JOB = "lint-python"
