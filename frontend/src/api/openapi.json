@@ -249,6 +249,50 @@
         }
       }
     },
+    "/student/sections/{section_id}/results": {
+      "get": {
+        "tags": [
+          "student"
+        ],
+        "summary": "The latest published week's results for one of my sections",
+        "description": "The week route's answer for the section's latest published week, where the page opens.\n\nThe same read and the same single 404, which a section with no published week\ngets too.",
+        "operationId": "student_latest_results_read_student_sections__section_id__results_get",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentWeekResults"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/instructor/sections/{section_id}/report/{course_week}": {
       "get": {
         "tags": [
@@ -1916,16 +1960,25 @@
               }
             ],
             "description": "The published response; absent while awaiting and when unanswered."
+          },
+          "published_weeks": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Published Weeks",
+            "description": "The section's course weeks whose report has opened, ascending: the weeks the page may page through."
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "state",
-          "response"
+          "response",
+          "published_weeks"
         ],
         "title": "StudentWeekResults",
-        "description": "One week's state for one of the student's own sections, and its response if any."
+        "description": "One week's state for one of the student's own sections, its response if any, and the\ncourse weeks a student may page through (SPEC \u00a75.4: published weeks only)."
       },
       "SubmissionAccepted": {
         "properties": {

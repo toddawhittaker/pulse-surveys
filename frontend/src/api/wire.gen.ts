@@ -365,6 +365,29 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/student/sections/{section_id}/results": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The latest published week's results for one of my sections
+         * @description The week route's answer for the section's latest published week, where the page opens.
+         *
+         *     The same read and the same single 404, which a section with no published week
+         *     gets too.
+         */
+        readonly get: operations["student_latest_results_read_student_sections__section_id__results_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/instructor/sections/{section_id}/report/{course_week}": {
         readonly parameters: {
             readonly query?: never;
@@ -1504,7 +1527,8 @@ export interface components {
         };
         /**
          * StudentWeekResults
-         * @description One week's state for one of the student's own sections, and its response if any.
+         * @description One week's state for one of the student's own sections, its response if any, and the
+         *     course weeks a student may page through (SPEC §5.4: published weeks only).
          */
         readonly StudentWeekResults: {
             /**
@@ -1515,6 +1539,11 @@ export interface components {
             readonly state: "awaiting" | "published" | "on-behalf" | "unanswered";
             /** @description The published response; absent while awaiting and when unanswered. */
             readonly response: components["schemas"]["StudentResponse"] | null;
+            /**
+             * Published Weeks
+             * @description The section's course weeks whose report has opened, ascending: the weeks the page may page through.
+             */
+            readonly published_weeks: readonly number[];
         };
         /**
          * SubmissionAccepted
@@ -2027,6 +2056,37 @@ export interface operations {
             readonly path: {
                 readonly section_id: string;
                 readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["StudentWeekResults"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly student_latest_results_read_student_sections__section_id__results_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
             };
             readonly cookie?: never;
         };
