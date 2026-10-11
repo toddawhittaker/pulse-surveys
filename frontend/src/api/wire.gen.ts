@@ -1913,7 +1913,7 @@ export interface components {
          */
         readonly StreamReport: {
             /** Trend */
-            readonly trend: readonly components["schemas"]["app__schemas__report__TrendPoint"][];
+            readonly trend: readonly components["schemas"]["TrendPoint"][];
             /** Distribution */
             readonly distribution: {
                 readonly [key: string]: number;
@@ -1944,6 +1944,26 @@ export interface components {
         readonly StudentComment: {
             /** Text */
             readonly text: string;
+        };
+        /**
+         * StudentParticipation
+         * @description The student's own latest accepted participation score, exactly as it was posted.
+         *
+         *     Both strings are the characters sent to the platform (SPEC §3.4, ADR 0125);
+         *     nothing here is recomputed. It is the student's own record and not an
+         *     aggregate of the week, so it does not follow the week's hold.
+         */
+        readonly StudentParticipation: {
+            /**
+             * Score Text
+             * @description The score as it was sent to the gradebook.
+             */
+            readonly score_text: string;
+            /**
+             * Ledger Text
+             * @description The per-week ledger sent beside the score.
+             */
+            readonly ledger_text: string;
         };
         /**
          * StudentReleasedComment
@@ -2005,7 +2025,7 @@ export interface components {
              * Trend
              * @description One point per readable week up to this one; a held week has none.
              */
-            readonly trend: readonly components["schemas"]["app__schemas__response_loop__TrendPoint"][];
+            readonly trend: readonly components["schemas"]["StudentTrendPoint"][];
             /**
              * Distribution
              * @description How many responses gave each rating, keyed 1 to 5.
@@ -2055,6 +2075,22 @@ export interface components {
             readonly institution_timezone: string;
         };
         /**
+         * StudentTrendPoint
+         * @description One week's rating mean in one stream, for a week a student may read (SPEC §5.4's trend).
+         *
+         *     A week nobody rated has a point with no mean. A held week has no point at all
+         *     (ADR 0197).
+         */
+        readonly StudentTrendPoint: {
+            /** Course Week */
+            readonly course_week: number;
+            /**
+             * Mean
+             * @description The mean of the week's ratings; null if nobody rated.
+             */
+            readonly mean: number | null;
+        };
+        /**
          * StudentWeekResults
          * @description One week of one of the student's own sections, under the hold (SPEC §5.3, §5.4).
          *
@@ -2098,6 +2134,8 @@ export interface components {
              * @description Comments released from earlier weeks, with no week named. Present on the latest published week only, and only while no published week is awaiting.
              */
             readonly released: readonly components["schemas"]["StudentReleasedComment"][] | null;
+            /** @description The student's latest accepted participation score; absent before any score has been posted. Shown in every state. */
+            readonly participation?: components["schemas"]["StudentParticipation"] | null;
         };
         /**
          * SubmissionAccepted
@@ -2318,6 +2356,37 @@ export interface components {
             /** Sections */
             readonly sections: readonly components["schemas"]["TaughtSection"][];
         };
+        /**
+         * TrendPoint
+         * @description One week of one stream's trend line.
+         *
+         *     `mean` is `None` for a week nobody rated. Zero is a rating nobody can give —
+         *     SPEC §3.2's scale runs 1 to 5 — so a zero here would draw a line to the floor
+         *     of the chart for a week that has no line at all (ADR 0147's zero-filling: a
+         *     stored zero and a missing week never arrive looking the same).
+         *
+         *     `term_week` is the term week of the window row this point was built from —
+         *     §2.2's second axis, stated here rather than left for the client to derive
+         *     (breakdown decision 12, ADR 0157). Today the gap between the two axes is a
+         *     per-section constant (`_section_weeks`' `first_term_week`), so a client
+         *     could compute this member from the report week's own `course_week` /
+         *     `term_week` pair. It is on the wire anyway because `week_of_the_term` is
+         *     this codebase's one reading of the axis mapping (§2.2), and a client that
+         *     derived the pair would freeze today's arithmetic into a second copy of
+         *     that reading — one that would disagree silently the day the mapping
+         *     stops being affine, which is exactly the section-pausing-over-a-break
+         *     case E4-08's copy file anticipates. Stating the number here widens
+         *     nothing: it is what every reader of this payload could already compute
+         *     from `week` alone.
+         */
+        readonly TrendPoint: {
+            /** Course Week */
+            readonly course_week: number;
+            /** Term Week */
+            readonly term_week: number;
+            /** Mean */
+            readonly mean: number | null;
+        };
         /** ValidationError */
         readonly ValidationError: {
             /** Location */
@@ -2413,53 +2482,6 @@ export interface components {
             readonly mean: number | null;
             /** Median */
             readonly median: number | null;
-        };
-        /**
-         * TrendPoint
-         * @description One week of one stream's trend line.
-         *
-         *     `mean` is `None` for a week nobody rated. Zero is a rating nobody can give —
-         *     SPEC §3.2's scale runs 1 to 5 — so a zero here would draw a line to the floor
-         *     of the chart for a week that has no line at all (ADR 0147's zero-filling: a
-         *     stored zero and a missing week never arrive looking the same).
-         *
-         *     `term_week` is the term week of the window row this point was built from —
-         *     §2.2's second axis, stated here rather than left for the client to derive
-         *     (breakdown decision 12, ADR 0157). Today the gap between the two axes is a
-         *     per-section constant (`_section_weeks`' `first_term_week`), so a client
-         *     could compute this member from the report week's own `course_week` /
-         *     `term_week` pair. It is on the wire anyway because `week_of_the_term` is
-         *     this codebase's one reading of the axis mapping (§2.2), and a client that
-         *     derived the pair would freeze today's arithmetic into a second copy of
-         *     that reading — one that would disagree silently the day the mapping
-         *     stops being affine, which is exactly the section-pausing-over-a-break
-         *     case E4-08's copy file anticipates. Stating the number here widens
-         *     nothing: it is what every reader of this payload could already compute
-         *     from `week` alone.
-         */
-        readonly app__schemas__report__TrendPoint: {
-            /** Course Week */
-            readonly course_week: number;
-            /** Term Week */
-            readonly term_week: number;
-            /** Mean */
-            readonly mean: number | null;
-        };
-        /**
-         * TrendPoint
-         * @description One week's rating mean in one stream, for a week a student may read (SPEC §5.4's trend).
-         *
-         *     A week nobody rated has a point with no mean. A held week has no point at all
-         *     (ADR 0197).
-         */
-        readonly app__schemas__response_loop__TrendPoint: {
-            /** Course Week */
-            readonly course_week: number;
-            /**
-             * Mean
-             * @description The mean of the week's ratings; null if nobody rated.
-             */
-            readonly mean: number | null;
         };
     };
     responses: never;
