@@ -75,8 +75,14 @@ MUST_SPARE = (
 # counted in distinct people, which reaches `response.user_id` through `answer`
 # because v004 carries no person. Each is matched by its distinctive shape.
 GATE_SHAPES = {
-    # `NOT EXISTS`, or SQLAlchemy's `~exists()` rendering, `NOT (EXISTS (…))`.
-    "the moderation gate": re.compile(r"\bNOT\s*\(?\s*EXISTS\b", re.IGNORECASE),
+    # `NOT EXISTS (SELECT classification…`, or SQLAlchemy's `~exists()` rendering,
+    # `NOT (EXISTS (SELECT classification…`. Anchored to the classification it
+    # checks, because the commenter count carries a `NOT (EXISTS (SELECT
+    # release_batch_member…` of its own (ADR 0182; the ruling on dispute E8-01-03).
+    "the moderation gate": re.compile(
+        r'\bNOT\s*\(?\s*EXISTS\s*\(\s*SELECT\s+(?:"?public"?\s*\.\s*)?"?classification\b',
+        re.IGNORECASE,
+    ),
     "the commenter count": re.compile(
         r'\bcount\s*\(\s*DISTINCT\s+(?:"?\w+"?\s*\.\s*)?"?user_id"?', re.IGNORECASE
     ),
@@ -85,11 +91,16 @@ GATE_SHAPES = {
 GATE_SAMPLES = {
     "the moderation gate": (
         "SELECT response.section_id, answer.comment_text FROM answer JOIN response ON "
-        "response.id = answer.response_id WHERE NOT (EXISTS (SELECT 1 FROM classification))"
+        "response.id = answer.response_id WHERE NOT (EXISTS (SELECT classification.answer_id "
+        "FROM classification WHERE classification.answer_id = answer.id))"
     ),
+    # The shape the code sends, release-batch exclusion included (dispute E8-01-03).
     "the commenter count": (
-        "SELECT commenters FROM (SELECT count(DISTINCT response.user_id) AS commenters FROM "
-        "public.report_comment JOIN answer ON answer.id = report_comment.answer_id) AS counted"
+        "SELECT anon_1.commenters FROM (SELECT count(DISTINCT response.user_id) AS commenters "
+        "FROM public.report_comment JOIN answer ON answer.id = public.report_comment.answer_id "
+        "JOIN response ON response.id = answer.response_id WHERE NOT (EXISTS (SELECT "
+        "release_batch_member.answer_id FROM release_batch_member WHERE "
+        "release_batch_member.answer_id = public.report_comment.answer_id))) AS anon_1"
     ),
 }
 NOT_A_GATE = "SELECT answer.comment_text FROM answer JOIN response ON response.id = 1"
@@ -125,6 +136,10 @@ def test_the_matchers_catch_a_read_of_the_table_and_spare_the_view_and_the_colum
     for name, sample in GATE_SAMPLES.items():
         assert READS_THE_ANSWER_TABLE.search(sample), f"{name}'s sample does not name `answer`."
         assert gate_of(sample) == name, f"The gate shapes read {sample!r} as {gate_of(sample)!r}."
+    assert not GATE_SHAPES["the moderation gate"].search(
+        GATE_SAMPLES["the commenter count"]
+    ), "The moderation shape took the commenter count's release-batch exclusion (E8-01-03)."
+    assert not GATE_SHAPES["the commenter count"].search(GATE_SAMPLES["the moderation gate"])
     assert gate_of(NOT_A_GATE) is None, "The gate shapes took a plain text read of `answer`."
     assert all(gate_of(sample) is None for sample in MUST_CATCH), "A gate shape took a text read."
 
