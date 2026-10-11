@@ -1,6 +1,7 @@
 # E7 — Response loop: build order
 
-Nine tickets that decompose SPEC §14.3's E7 entry. Each is sized for one
+Nine tickets decompose SPEC §14.3's E7 entry. The epic boundary review added a
+tenth and an eleventh. Each is sized for one
 focused session and leaves the repository working: CI green, the Compose stack
 healthy, nothing half-wired.
 
@@ -35,7 +36,9 @@ the repository's precedent marks that kind of test `invariant`
 (`tests/integration/test_a_small_n_summary_never_reuses_a_commenters_words.py`).
 08 edits `backend/app/api/deps.py`. SPEC marks no ⚠ on E7, so no ticket carries
 ⚠ and no ticket has a verifier step. The pages are split out into 05, 06 and 07
-so that they ride the light lane, and 09 is light. A light ticket whose change
+so that they ride the light lane, and 09 is light. The two tickets the boundary
+review added are 10 (heavy, because it edits invariant tests and the draft
+routes) and 11 (light, frontend only). A light ticket whose change
 reaches a path in `.claude/heavy-lane-paths.md`, or reds an invariant-marked
 test, stops and re-lanes in its pull request.
 
@@ -130,15 +133,17 @@ day, on the privacy review of this breakdown. No ticket reopens them.
 
 | # | Ticket | Branch | Lane | Depends on | Summary | Merged |
 |---|---|---|---|---|---|---|
-| 01 | [The response records and the name channel](E7-01-response-records-and-name-channel.md) | `e7/response-records-and-name-channel` | heavy | none | M1: the append-only `instructor_response` and `response_policy` tables and their grants; the staff-name definer; `models/loop.py`; `services/response_loop.py` with the name read; the survey payload carries the instructor's name; SPEC §8 and §13; ADRs 0191 and 0192. || #308 as e26b5274, 2026-10-11 |
-| 02 | [The hold](E7-02-the-hold.md) | `e7/the-hold` | heavy | 01 | The policy of record for a week; the latest response; the student's week state; the one publish writer; the student results route; the student-route sweep extended; ADR 0193. || #310 as 756b4d35, 2026-10-11 |
-| 03 | [Publish, policy and on-behalf](E7-03-publish-policy-on-behalf.md) | `e7/publish-policy-on-behalf` | heavy | 02, 04 | The instructor's publish and edit routes; the lead's policy routes; the 48h and 96h predicates; the responses-owed read; the on-behalf read, draft, check and publish; ADR 0194. || #312 as e7a928c7, 2026-10-11 |
-| 04 | [The AI draft and the draft check](E7-04-ai-draft-and-check.md) | `e7/ai-draft-and-check` | heavy | none | Two prompts and their tasks; a gather from stored themes and ratings; the structural refusals; the instructor's draft and check routes; mock-ai answers; typed eval cases with no floor; ADR 0195. || #309 as fdc4dd78, 2026-10-11 |
-| 05 | [The instructor's composer](E7-05-instructor-composer.md) | `e7/instructor-composer` | light | 03, 04, 06 | The composer on the report page: draft, check, publish, the as-students-see-it card with Edit, the hold banner; decisions on released comments; the reason bound checked once. || #313 as b0a6794b, 2026-10-11 |
-| 06 | [The student's heading and results page](E7-06-student-heading-and-results-shell.md) | `e7/student-heading-and-results-shell` | light | 02 | The survey heading names the instructor; the results page shows the closed door or the response card with its attribution; the `ResponseCard` component. || #311 as dee0cec8, 2026-10-11 |
-| 07 | [The leadership response pages](E7-07-leadership-response-pages.md) | `e7/leadership-response-pages` | light | 03, 05 | The policy page, the responses-owed list, and the on-behalf composer reusing 05's. || #314 as 7b5f0c94, 2026-10-11 |
-| 08 | [Leadership pages say "not part of your role"](E7-08-leadership-not-your-role.md) | `e7/leadership-not-your-role` | heavy | none | `require_leadership` answers 403 to a signed-in reader in another role; the pages say so; an ended session still reads the ended sentence; the two LOWs on the leadership drive; ADR 0196. || #307 as 09c48a19, 2026-10-11 |
-| 09 | [E7 exit](E7-09-e7-exit.md) | `e7/e7-exit` | light | all | The exit driven on the running stack with dates from the seeded calendar; the carried files closed and `../e8/carried-from-e7.md` written; SPEC §14.3; the standing questions re-asked. | |
+| 01 | [The response records and the name channel](E7-01-response-records-and-name-channel.md) | `e7/response-records-and-name-channel` | heavy | none | M1: the append-only `instructor_response` and `response_policy` tables and their grants; the staff-name definer; `models/loop.py`; `services/response_loop.py` with the name read; the survey payload carries the instructor's name; SPEC §8 and §13; ADRs 0191 and 0192. | #308 as e26b5274, 2026-10-11 |
+| 02 | [The hold](E7-02-the-hold.md) | `e7/the-hold` | heavy | 01 | The policy of record for a week; the latest response; the student's week state; the one publish writer; the student results route; the student-route sweep extended; ADR 0193. | #310 as 756b4d35, 2026-10-11 |
+| 03 | [Publish, policy and on-behalf](E7-03-publish-policy-on-behalf.md) | `e7/publish-policy-on-behalf` | heavy | 02, 04 | The instructor's publish and edit routes; the lead's policy routes; the 48h and 96h predicates; the responses-owed read; the on-behalf read, draft, check and publish; ADR 0194. | #312 as e7a928c7, 2026-10-11 |
+| 04 | [The AI draft and the draft check](E7-04-ai-draft-and-check.md) | `e7/ai-draft-and-check` | heavy | none | Two prompts and their tasks; a gather from stored themes and ratings; the structural refusals; the instructor's draft and check routes; mock-ai answers; typed eval cases with no floor; ADR 0195. | #309 as fdc4dd78, 2026-10-11 |
+| 05 | [The instructor's composer](E7-05-instructor-composer.md) | `e7/instructor-composer` | light | 03, 04, 06 | The composer on the report page: draft, check, publish, the as-students-see-it card with Edit, the hold banner; decisions on released comments; the reason bound checked once. | #313 as b0a6794b, 2026-10-11 |
+| 06 | [The student's heading and results page](E7-06-student-heading-and-results-shell.md) | `e7/student-heading-and-results-shell` | light | 02 | The survey heading names the instructor; the results page shows the closed door or the response card with its attribution; the `ResponseCard` component. | #311 as dee0cec8, 2026-10-11 |
+| 07 | [The leadership response pages](E7-07-leadership-response-pages.md) | `e7/leadership-response-pages` | light | 03, 05 | The policy page, the responses-owed list, and the on-behalf composer reusing 05's. | #314 as 7b5f0c94, 2026-10-11 |
+| 08 | [Leadership pages say "not part of your role"](E7-08-leadership-not-your-role.md) | `e7/leadership-not-your-role` | heavy | none | `require_leadership` answers 403 to a signed-in reader in another role; the pages say so; an ended session still reads the ended sentence; the two LOWs on the leadership drive; ADR 0196. | #307 as 09c48a19, 2026-10-11 |
+| 09 | [E7 exit](E7-09-e7-exit.md) | `e7/e7-exit` | light | all | The exit driven on the running stack with dates from the seeded calendar; the carried files closed and `../e8/carried-from-e7.md` written; SPEC §14.3; the standing questions re-asked. | #315 as 4e3fb9e1, 2026-10-11 |
+| 10 | [The boundary review's fixes](E7-10-boundary-fixes.md) | `e7/boundary-fixes` | heavy | 01 to 08 | The boundary review's findings outside accessibility: draft and check hold no database connection during the model call and run one at a time per person; one v3 draft prompt written in its author's role; the instructor draft uses the on-behalf summary filter; the on-behalf first publisher can return to edit; the missing invariant tests; SPEC §8, §13 and the ADR corrections. | #318 as 4cf2620d, 2026-10-11 |
+| 11 | [The response loop's accessibility fixes](E7-11-response-loop-accessibility.md) | `e7/response-loop-accessibility` | light | 05, 06, 07 | The boundary review's accessibility findings: the replace-draft question announced, a live region that is always rendered, focus kept while a control is busy, focus after a week change, distinct link names, the policy toggle's off-state contrast, and the response card matching its prototype. | #316 as 5f7779c9, 2026-10-11 |
 
 ## Waves
 
@@ -150,6 +155,7 @@ day, on the privacy review of this breakdown. No ticket reopens them.
 | 4 | 05 | Calls 03's and 04's routes, and reuses 06's `ResponseCard`. |
 | 5 | 07 | Reuses 05's composer and calls 03's leadership routes. |
 | 6 | 09 | Waits for everything. |
+| 7 | 10, 11 | Added after the boundary review, which ran on the epic head once 01 to 08 had merged, while 09 was still building. 10 fixes the backend and test findings; 11 fixes the accessibility findings. They share no files. |
 
 ## Counters, allotted now
 
