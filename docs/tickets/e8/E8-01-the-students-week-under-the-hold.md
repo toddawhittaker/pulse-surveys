@@ -54,8 +54,10 @@ the 06:00 opening).
 `student_released_comments`, filter `visible_cards` and `released_cards`
 (which read `report_comment` v004) to the `published` and `kept` statuses. They
 return text and stream only, with no `answer_id`, no status and no time. They
-take a section, a week or term, and a stream, and no parameter that could name
-a person. This is the carried "note for E8" in `../e7/carried-from-e6.md`.
+take a section, a week or term, a stream and, for the released read, an
+as-of instant (the latest week's report opening), so that only batches cut
+before it are returned (ruling 1). They take no parameter that could name a
+person, and the signature sweep (done-when 8) allows the instant by name. This is the carried "note for E8" in `../e7/carried-from-e6.md`.
 
 **The import sweep.** The four student-facing modules still import neither
 `report_comments` nor `moderation`. `services/response_loop.py` becomes the one

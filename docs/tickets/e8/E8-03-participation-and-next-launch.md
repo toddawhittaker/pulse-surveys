@@ -77,7 +77,10 @@ landing rather than copied.
 5. **The landing leads with the newest results.** With no survey open and a
    published week, the section card leads with "Week N results are in" and a
    link to that week. With a survey open, it leads with the survey. With no
-   published week, it shows no results lead.
+   published week, it shows no results lead. When the newest week is
+   `awaiting` (required and unanswered), the card shows no results lead either:
+   "results are in" over a closed door is the teased data SPEC §5.4 rules out.
+   A test pins each of the four cases.
 6. **Words and basics.** Every new string is in the copy inventory and passes
    the student-copy rules; the sentence uses no shame language. Keyboard and
    screen reader basics hold.
