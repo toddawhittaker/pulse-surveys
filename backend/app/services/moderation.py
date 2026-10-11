@@ -114,7 +114,7 @@ from app.models.report import REASON_BOUND, DeciderRole, ModerationState
 from app.models.survey import Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow, Term
 from app.services import clock
-from app.services.authz import lead_review_courses, taught_section_ids
+from app.services.authz import lead_review_courses, taught_or_once_taught_section_ids
 from app.services.section_codes import course_label
 from app.services.survey_windows import closed_by
 
@@ -831,8 +831,9 @@ def exclusion_log(
     names the section, the date, the role, the flag and another reviewer's
     reason, so it would tell a reader who teaches that section that it held a
     flagged comment, and roughly when, which their own report hides. The row is
-    removed, not redacted; the filter is `authz.taught_section_ids`, the same
-    one `_queue_select` applies.
+    removed, not redacted; the filter is `authz.taught_or_once_taught_section_ids`,
+    the same one `_queue_select` applies, so a section whose teaching grant the
+    roster ended stays out too (E6-09).
 
     Raises `NoReviewGrantError` for a reader whose own grant covers nothing.
     """
@@ -841,7 +842,7 @@ def exclusion_log(
     if person_id is None:
         raise NoReviewGrantError
     courses = _review_courses(session, person_id)
-    taught = taught_section_ids(session, person_id=person_id)
+    taught = taught_or_once_taught_section_ids(session, person_id=person_id)
     decisions = [
         decision
         for decision in logged_decisions(session, course_ids=courses.keys())
@@ -895,12 +896,14 @@ def _queue_select(
     otherwise read that section's held text here, which the instructor door
     refuses them: one person, two doors, and the wider one would win. The rule
     is by section, so the course's other sections stay in the queue. Their
-    taught sections come from `authz.taught_section_ids`, the instructor
-    door's own source.
+    taught sections are `authz.taught_or_once_taught_section_ids`: the
+    instructor door's own source, plus every section whose teaching grant the
+    roster has since ended (E6-09). The leader door reads this select, so it
+    refuses those sections too.
     """
     from app.services.report_comments import COMMENT_VIEW, reported_status_of
 
-    taught = taught_section_ids(session, person_id=reader)
+    taught = taught_or_once_taught_section_ids(session, person_id=reader)
     answer_id = COMMENT_VIEW.c.answer_id
     harmful = (
         select(Classification.id)
